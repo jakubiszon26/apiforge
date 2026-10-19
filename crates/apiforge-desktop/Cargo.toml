@@ -7,9 +7,15 @@ publish.workspace = true
 
 [dependencies]
 apiforge-core.workspace = true
+apiforge-storage.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
 eframe.workspace = true
 rfd.workspace = true
 image.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

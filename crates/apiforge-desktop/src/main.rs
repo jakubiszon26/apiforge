@@ -1,12 +1,26 @@
-//! Native document entry point. No network request is executed by opening a project.
-mod capture;
-mod document_io;
-mod graph_view;
-mod inspector;
-mod theme;
-mod viewer;
+//! API Forge desktop application.
+//!
+//! Opening a document never executes a request.
 
-use apiforge_core::ImportLimits;
+// Shared helpers for the inspector and dialogs land before their users while the
+// editor is being ported; remove once every panel is wired up.
+#![allow(dead_code)]
+
+mod app;
+mod canvas;
+mod capture;
+mod dialogs;
+mod dnd;
+mod editor;
+mod files;
+mod inspector;
+mod labels;
+mod library;
+mod persistence;
+mod theme;
+mod widgets;
+
+use apiforge_storage::WorkspaceStore;
 use std::{
     env,
     ffi::OsString,
@@ -20,33 +34,52 @@ use std::{
 
 #[derive(Debug, PartialEq)]
 enum Arguments {
-    Window(Option<PathBuf>, bool),
+    /// The user's workspace, or a document opened for this session only.
+    Window(Option<PathBuf>),
     Check(PathBuf),
-    Screenshot { output: PathBuf, project: PathBuf },
+    SmokeTest(PathBuf),
+    /// Captures the window; without a project the demo workspace is shown.
+    Screenshot {
+        output: PathBuf,
+        project: Option<PathBuf>,
+        select: Option<String>,
+    },
     Help,
 }
+
 fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'static str> {
     let mut values = values.into_iter();
     let first = values.next();
-    let result = match first.as_ref().and_then(|value| value.to_str()) {
-        None if first.is_none() => Arguments::Window(None, false),
-        Some("--help" | "-h") => Arguments::Help,
-        Some("--project") => Arguments::Window(
-            Some(values.next().ok_or("Missing file path")?.into()),
-            false,
-        ),
-        Some("--smoke-test") => {
-            Arguments::Window(Some(values.next().ok_or("Missing file path")?.into()), true)
-        }
-        Some("--screenshot") => {
-            let output = values.next().ok_or("Missing screenshot PNG path")?.into();
-            if values.next().as_deref() != Some(std::ffi::OsStr::new("--project")) {
-                return Err("Screenshot requires --project FILE");
+    let mut path = |message| values.next().map(PathBuf::from).ok_or(message);
+    let result = match first.as_ref().map(|value| value.to_str()) {
+        None => Arguments::Window(None),
+        Some(Some("--help" | "-h")) => Arguments::Help,
+        Some(Some("--project")) => Arguments::Window(Some(path("Missing file path")?)),
+        Some(Some("--smoke-test")) => Arguments::SmokeTest(path("Missing file path")?),
+        Some(Some("--check")) => Arguments::Check(path("Missing file path")?),
+        Some(Some("--screenshot")) => {
+            let output = path("Missing screenshot PNG path")?;
+            let (mut project, mut select) = (None, None);
+            while let Some(flag) = values.next() {
+                let value = values
+                    .next()
+                    .ok_or("Missing value after a screenshot option")?;
+                match flag.to_str() {
+                    Some("--project") => project = Some(PathBuf::from(value)),
+                    Some("--select") => select = Some(value.to_string_lossy().into_owned()),
+                    _ => {
+                        return Err(
+                            "Unknown screenshot option; use --project FILE or --select NODE",
+                        );
+                    }
+                }
             }
-            let project = values.next().ok_or("Missing project file")?.into();
-            Arguments::Screenshot { output, project }
+            Arguments::Screenshot {
+                output,
+                project,
+                select,
+            }
         }
-        Some("--check") => Arguments::Check(values.next().ok_or("Missing file path")?.into()),
         _ => return Err("Unknown argument; use --help"),
     };
     if values.next().is_some() {
@@ -54,6 +87,17 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
     }
     Ok(result)
 }
+
+const HELP: &str = "API Forge
+
+  apiforge-desktop                      open your workspace (saved automatically)
+  apiforge-desktop --project FILE       open a project or workspace for this session only
+  apiforge-desktop --check FILE         validate a document without opening a window
+  apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
+  apiforge-desktop --screenshot OUT.png [--project FILE] [--select NODE]
+
+Opening a document never executes requests.";
+
 fn main() -> ExitCode {
     let arguments = match arguments(env::args_os().skip(1)) {
         Ok(arguments) => arguments,
@@ -64,13 +108,10 @@ fn main() -> ExitCode {
     };
     match arguments {
         Arguments::Help => {
-            println!(
-                "API Forge\n\n  apiforge-desktop [--project FILE]\n  apiforge-desktop --check FILE\n  apiforge-desktop --smoke-test FILE\n  apiforge-desktop --screenshot OUTPUT.png --project FILE\n\nImports project/workspace JSON v1 without executing requests."
-            );
+            println!("{HELP}");
             ExitCode::SUCCESS
         }
-        Arguments::Check(path) => match document_io::read_document(&path, &ImportLimits::default())
-        {
+        Arguments::Check(path) => match files::read_document(&path) {
             Ok(document) => {
                 println!(
                     "Valid v1 document: {} project(s)",
@@ -83,43 +124,131 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Arguments::Window(path, smoke_test) => run_window(path, smoke_test, None),
-        Arguments::Screenshot { output, project } => run_window(Some(project), false, Some(output)),
+        Arguments::Window(None) => match WorkspaceStore::default_location() {
+            Ok(store) => run_window(app::Source::Storage(store), Probe::None),
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
+        Arguments::Window(Some(path)) => session(&path, Probe::None),
+        Arguments::SmokeTest(path) => session(&path, Probe::Smoke),
+        Arguments::Screenshot {
+            output,
+            project,
+            select,
+        } => {
+            let workspace = match project {
+                Some(project) => match files::read_document(&project) {
+                    Ok(document) => document.into_workspace(),
+                    Err(message) => {
+                        eprintln!("{message}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => app::default_workspace(),
+            };
+            run_window(
+                app::Source::Session(workspace),
+                Probe::Screenshot(output, select),
+            )
+        }
     }
 }
-fn run_window(path: Option<PathBuf>, smoke_test: bool, screenshot: Option<PathBuf>) -> ExitCode {
-    let completed = (smoke_test || screenshot.is_some()).then(|| Arc::new(AtomicBool::new(false)));
-    let observed = completed.clone();
+
+fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
+    match files::read_document(path) {
+        Ok(document) => run_window(app::Source::Session(document.into_workspace()), probe),
+        Err(message) => {
+            eprintln!("{message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Automated checks that close the window by themselves.
+enum Probe {
+    None,
+    Smoke,
+    /// Capture the window, optionally with a node (by id or name) selected.
+    Screenshot(PathBuf, Option<String>),
+}
+
+struct Window {
+    app: app::App,
+    capture: Option<capture::Capture>,
+    smoke: bool,
+    frames: u8,
+    completed: Arc<AtomicBool>,
+}
+
+impl eframe::App for Window {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        self.app.ui(ui);
+        if let Some(capture) = &mut self.capture {
+            if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
+                if let Err(message) = &result {
+                    eprintln!("{message}");
+                }
+                self.completed.store(result.is_ok(), Ordering::Release);
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+            }
+        } else if self.smoke {
+            self.frames += 1;
+            if self.frames >= 3 {
+                self.completed.store(true, Ordering::Release);
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+            } else {
+                ui.ctx().request_repaint();
+            }
+        }
+    }
+}
+
+fn run_window(source: app::Source, probe: Probe) -> ExitCode {
+    let automated = !matches!(probe, Probe::None);
+    let completed = Arc::new(AtomicBool::new(!automated));
+    let observed = Arc::clone(&completed);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("API Forge")
+            .with_app_id("apiforge")
             .with_inner_size([1600.0, 1000.0])
-            .with_min_inner_size([960.0, 640.0]),
+            .with_min_inner_size([1100.0, 680.0]),
         ..Default::default()
     };
-    match eframe::run_native(
+    let started = eframe::run_native(
         "API Forge",
         options,
         Box::new(move |context| {
-            Ok(Box::new(viewer::Desktop::new(
-                context.egui_ctx.clone(),
-                path,
+            let (capture, smoke, select) = match probe {
+                Probe::None => (None, false, None),
+                Probe::Smoke => (None, true, None),
+                Probe::Screenshot(path, select) => {
+                    (Some(capture::Capture::new(path)), false, select)
+                }
+            };
+            let mut app = app::App::new(&context.egui_ctx, source);
+            if let Some(node) = select {
+                app.select_node(&node);
+            }
+            Ok(Box::new(Window {
+                app,
+                capture,
+                smoke,
+                frames: 0,
                 completed,
-                screenshot,
-            )))
+            }))
         }),
-    ) {
-        Ok(())
-            if observed
-                .as_ref()
-                .is_none_or(|status| status.load(Ordering::Acquire)) =>
-        {
-            ExitCode::SUCCESS
-        }
+    );
+    match started {
+        Ok(()) if observed.load(Ordering::Acquire) => ExitCode::SUCCESS,
         Ok(()) => ExitCode::FAILURE,
         Err(_) => {
             eprintln!(
-                "Cannot initialize the native window. Check GPU drivers and the display session."
+                "Cannot initialise the native window. Check GPU drivers and the display session."
             );
             ExitCode::FAILURE
         }
@@ -129,12 +258,14 @@ fn run_window(path: Option<PathBuf>, smoke_test: bool, screenshot: Option<PathBu
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn parse(args: &[&str]) -> Result<Arguments, &'static str> {
         arguments(args.iter().map(OsString::from))
     }
+
     #[test]
     fn arguments_are_explicit_and_reject_ambiguous_input() {
-        assert_eq!(parse(&[]), Ok(Arguments::Window(None, false)));
+        assert_eq!(parse(&[]), Ok(Arguments::Window(None)));
         assert_eq!(
             parse(&["--check", "a b.json"]),
             Ok(Arguments::Check("a b.json".into()))

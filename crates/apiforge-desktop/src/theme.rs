@@ -1,4 +1,4 @@
-//! Shared visual tokens keep native panels and graph cards aligned with the web editor.
+//! Visual tokens shared by panels and the board, and the egui style built from them.
 use apiforge_core::model::NodeKind;
 use eframe::egui::{self, Color32, FontId, Stroke, TextStyle};
 
@@ -9,6 +9,20 @@ pub const MUTED: Color32 = Color32::from_rgb(143, 137, 126);
 pub const BORDER: Color32 = Color32::from_rgb(232, 228, 220);
 pub const ACCENT: Color32 = Color32::from_rgb(216, 91, 44);
 pub const LINK: Color32 = Color32::from_rgb(96, 129, 163);
+pub const FIELD: Color32 = Color32::from_rgb(249, 248, 245);
+pub const GRID: Color32 = Color32::from_rgb(214, 210, 203);
+pub const SOCKET: Color32 = Color32::from_rgb(172, 165, 154);
+pub const MINIMAP: Color32 = Color32::from_rgb(224, 219, 211);
+pub const SUCCESS: Color32 = Color32::from_rgb(61, 140, 92);
+pub const DANGER: Color32 = Color32::from_rgb(196, 64, 48);
+pub const WARNING: Color32 = Color32::from_rgb(196, 134, 32);
+pub const DATA_WIRE: Color32 = Color32::from_rgb(184, 179, 171);
+pub const CONTROL_WIRE: Color32 = Color32::from_rgb(140, 160, 170);
+pub const BRANCH_YES: Color32 = Color32::from_rgb(77, 138, 97);
+pub const BRANCH_NO: Color32 = Color32::from_rgb(181, 112, 76);
+pub const OPERATOR: Color32 = Color32::from_rgb(58, 138, 96);
+pub const VARIABLE: Color32 = Color32::from_rgb(188, 105, 59);
+pub const ACCENT_SOFT: Color32 = Color32::from_rgb(251, 233, 221);
 
 pub fn bold_family() -> egui::FontFamily {
     egui::FontFamily::Name("api-forge-bold".into())

@@ -202,9 +202,13 @@ name = "apiforge-desktop"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-storage",
  "eframe",
  "image",
+ "indexmap",
  "rfd",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
