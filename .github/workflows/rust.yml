@@ -1,0 +1,89 @@
+name: Rust CI
+
+on:
+  push:
+  pull_request:
+
+# Minimal read-only permissions for repository contents
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compatibility-fixtures:
+    name: Check TypeScript compatibility corpus
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node --import tsx scripts/export-compatibility-fixtures.ts --check
+
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            binary_path: target/release/apiforge-desktop
+          - os: windows-2022
+            binary_path: target/release/apiforge-desktop.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install native system libraries required by eframe (X11, Wayland, wgpu/EGL, input) on Linux
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libudev-dev \
+            libegl1-mesa-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev
+
+      # Pin Rust toolchain to match rust-toolchain.toml with formatting and linting components
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy lints
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run workspace unit and integration tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build release desktop binary
+        run: cargo build --release --package apiforge-desktop --locked
+
+      - name: Validate workspace using the native release binary
+        shell: bash
+        run: ./${{ matrix.binary_path }} --check fixtures/compatibility/workspace-v1.json
+
+      # These binaries are build artifacts, not signed production installers.
+      # Upload only the compiled release binary per OS; fail if binary is missing
+      - name: Upload release binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apiforge-desktop-${{ matrix.os }}
+          path: ${{ matrix.binary_path }}
+          if-no-files-found: error

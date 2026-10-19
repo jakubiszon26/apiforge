@@ -1,0 +1,560 @@
+{
+  "version": 1,
+  "id": "shop",
+  "name": "Sklep demonstracyjny",
+  "contracts": [
+    {
+      "id": "Product",
+      "name": "Produkt",
+      "sample": {
+        "id": 123,
+        "name": "Kawa ziarnista",
+        "price": 100,
+        "promotion": {
+          "type": "fixed_price",
+          "active": true,
+          "price": 80,
+          "inna_nazwa": "Oferta jesienna"
+        }
+      }
+    },
+    {
+      "id": "Cart",
+      "name": "Koszyk",
+      "sample": {
+        "id": "cart-1",
+        "total": 80
+      }
+    }
+  ],
+  "components": [
+    {
+      "id": "get-product",
+      "revision": 1,
+      "name": "Produkt",
+      "description": "Pobierz produkt po ID wraz z promocją.",
+      "inputs": [
+        {
+          "name": "id",
+          "label": "ID produktu",
+          "type": "number",
+          "defaultValue": 123,
+          "required": true,
+          "exposed": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "product",
+          "label": "Produkt",
+          "type": "object",
+          "contractId": "Product",
+          "binding": {
+            "kind": "reference",
+            "nodeId": "fetch",
+            "port": "body",
+            "path": ""
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "id": "fetch",
+            "kind": "request",
+            "name": "Pobierz produkt",
+            "position": {
+              "x": 80,
+              "y": 80
+            },
+            "inputs": {
+              "id": {
+                "kind": "parameter",
+                "name": "id"
+              }
+            },
+            "config": {
+              "method": "GET",
+              "url": "/products/:id",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000,
+              "inputPorts": [
+                {
+                  "name": "id",
+                  "type": "any",
+                  "exposed": true,
+                  "required": true
+                }
+              ],
+              "sampleResponse": {
+                "id": 123,
+                "name": "Kawa ziarnista",
+                "price": 100,
+                "promotion": {
+                  "type": "fixed_price",
+                  "active": true,
+                  "price": 80,
+                  "inna_nazwa": "Oferta jesienna"
+                }
+              }
+            }
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "active-promotion",
+      "revision": 1,
+      "name": "Aktywna promocja",
+      "description": "Sprawdź, czy produkt ma aktywną promocję.",
+      "inputs": [
+        {
+          "name": "product",
+          "label": "Produkt",
+          "type": "object",
+          "contractId": "Product",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "product",
+          "type": "object",
+          "contractId": "Product",
+          "binding": {
+            "kind": "parameter",
+            "name": "product"
+          }
+        }
+      ],
+      "action": {
+        "input": "product",
+        "type": "object",
+        "contractId": "Product"
+      },
+      "graph": {
+        "nodes": [
+          {
+            "id": "active",
+            "kind": "select",
+            "name": "Aktywność promocji",
+            "position": {
+              "x": 80,
+              "y": 80
+            },
+            "inputs": {
+              "value": {
+                "kind": "parameter",
+                "name": "product"
+              }
+            },
+            "config": {
+              "path": "promotion.active"
+            }
+          },
+          {
+            "id": "check",
+            "kind": "condition",
+            "name": "Promocja musi być aktywna",
+            "position": {
+              "x": 400,
+              "y": 80
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "active",
+                "port": "value",
+                "path": ""
+              },
+              "expected": {
+                "kind": "literal",
+                "value": true
+              }
+            },
+            "config": {
+              "predicate": "equals"
+            }
+          }
+        ],
+        "edges": []
+      }
+    },
+    {
+      "id": "product-cart",
+      "revision": 1,
+      "name": "Dodaj do koszyka",
+      "description": "Utwórz koszyk z produktem i pobierz jego wyliczoną cenę.",
+      "inputs": [
+        {
+          "name": "product",
+          "type": "object",
+          "contractId": "Product",
+          "required": true
+        },
+        {
+          "name": "quantity",
+          "label": "Ilość",
+          "type": "number",
+          "defaultValue": 1,
+          "exposed": true,
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cart",
+          "label": "Koszyk",
+          "type": "object",
+          "contractId": "Cart",
+          "binding": {
+            "kind": "reference",
+            "nodeId": "read",
+            "port": "body",
+            "path": ""
+          }
+        }
+      ],
+      "action": {
+        "input": "product",
+        "type": "object",
+        "contractId": "Product"
+      },
+      "graph": {
+        "nodes": [
+          {
+            "id": "id",
+            "kind": "select",
+            "name": "ID produktu",
+            "position": {
+              "x": 50,
+              "y": 90
+            },
+            "inputs": {
+              "value": {
+                "kind": "parameter",
+                "name": "product"
+              }
+            },
+            "config": {
+              "path": "id"
+            }
+          },
+          {
+            "id": "body",
+            "kind": "build",
+            "name": "Pozycja koszyka",
+            "position": {
+              "x": 350,
+              "y": 90
+            },
+            "inputs": {
+              "productId": {
+                "kind": "reference",
+                "nodeId": "id",
+                "port": "value",
+                "path": ""
+              },
+              "quantity": {
+                "kind": "parameter",
+                "name": "quantity"
+              }
+            },
+            "config": {
+              "buildType": "object"
+            }
+          },
+          {
+            "id": "create",
+            "kind": "request",
+            "name": "Utwórz koszyk",
+            "position": {
+              "x": 650,
+              "y": 90
+            },
+            "inputs": {
+              "body": {
+                "kind": "reference",
+                "nodeId": "body",
+                "port": "value",
+                "path": ""
+              }
+            },
+            "config": {
+              "method": "POST",
+              "url": "/carts",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000,
+              "inputPorts": [],
+              "sampleResponse": {
+                "id": "sample-cart",
+                "productId": 123,
+                "quantity": 1,
+                "total": 80
+              }
+            }
+          },
+          {
+            "id": "read",
+            "kind": "request",
+            "name": "Pobierz koszyk",
+            "position": {
+              "x": 950,
+              "y": 90
+            },
+            "inputs": {
+              "id": {
+                "kind": "reference",
+                "nodeId": "create",
+                "port": "body",
+                "path": "id"
+              }
+            },
+            "config": {
+              "method": "GET",
+              "url": "/carts/:id",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000,
+              "inputPorts": [
+                {
+                  "name": "id",
+                  "type": "any",
+                  "exposed": true,
+                  "required": true
+                }
+              ],
+              "sampleResponse": {
+                "id": "sample-cart",
+                "productId": 123,
+                "quantity": 1,
+                "total": 80
+              }
+            }
+          }
+        ],
+        "edges": []
+      }
+    }
+  ],
+  "environment": {
+    "baseUrl": "http://127.0.0.1:4318/demo/shop",
+    "variables": {},
+    "secretNames": []
+  },
+  "scenarios": [
+    {
+      "id": "promotion",
+      "name": "Promocja i cena w koszyku",
+      "description": "Sprawdź promocję, cenę końcową i dodatkowe pole. Dane demonstracyjne można uruchomić na lokalnym API.",
+      "graph": {
+        "nodes": [
+          {
+            "id": "product",
+            "kind": "component",
+            "name": "Produkt",
+            "position": {
+              "x": 40,
+              "y": 160
+            },
+            "inputs": {
+              "id": {
+                "kind": "literal",
+                "value": 123
+              }
+            },
+            "config": {
+              "componentId": "get-product",
+              "revision": 1
+            }
+          },
+          {
+            "id": "active",
+            "kind": "component",
+            "name": "Aktywna promocja",
+            "position": {
+              "x": 360,
+              "y": 30
+            },
+            "inputs": {
+              "product": {
+                "kind": "reference",
+                "nodeId": "product",
+                "port": "product",
+                "path": ""
+              }
+            },
+            "config": {
+              "componentId": "active-promotion",
+              "revision": 1
+            }
+          },
+          {
+            "id": "expected",
+            "kind": "formula",
+            "name": "Oczekiwana cena",
+            "position": {
+              "x": 360,
+              "y": 290
+            },
+            "inputs": {
+              "left": {
+                "kind": "literal",
+                "value": 80
+              },
+              "right": {
+                "kind": "literal",
+                "value": 1
+              }
+            },
+            "config": {
+              "operation": "multiply"
+            }
+          },
+          {
+            "id": "cart",
+            "kind": "component",
+            "name": "Dodaj do koszyka",
+            "position": {
+              "x": 680,
+              "y": 30
+            },
+            "inputs": {
+              "product": {
+                "kind": "reference",
+                "nodeId": "active",
+                "port": "product",
+                "path": ""
+              },
+              "quantity": {
+                "kind": "literal",
+                "value": 1
+              }
+            },
+            "config": {
+              "componentId": "product-cart",
+              "revision": 1
+            }
+          },
+          {
+            "id": "price",
+            "kind": "assert",
+            "name": "Cena po promocji",
+            "position": {
+              "x": 1000,
+              "y": 160
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "cart",
+                "port": "cart",
+                "path": "total"
+              },
+              "expected": {
+                "kind": "reference",
+                "nodeId": "expected",
+                "port": "value",
+                "path": ""
+              }
+            },
+            "config": {
+              "predicate": "approximately",
+              "tolerance": 0.005
+            }
+          },
+          {
+            "id": "field",
+            "kind": "assert",
+            "name": "Pole inna_nazwa",
+            "position": {
+              "x": 680,
+              "y": 290
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "product",
+                "port": "product",
+                "path": "promotion.inna_nazwa"
+              }
+            },
+            "config": {
+              "predicate": "notEmpty"
+            }
+          }
+        ],
+        "edges": []
+      },
+      "cleanup": {
+        "nodes": [
+          {
+            "id": "delete-cart",
+            "kind": "request",
+            "name": "Usuń koszyk",
+            "position": {
+              "x": 80,
+              "y": 80
+            },
+            "inputs": {
+              "id": {
+                "kind": "reference",
+                "nodeId": "cart",
+                "port": "cart",
+                "path": "id"
+              }
+            },
+            "config": {
+              "method": "DELETE",
+              "url": "/carts/:id",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000,
+              "inputPorts": [
+                {
+                  "name": "id",
+                  "type": "any",
+                  "exposed": true,
+                  "required": true
+                }
+              ],
+              "sampleResponse": {
+                "deleted": true
+              }
+            }
+          },
+          {
+            "id": "verify-cleanup",
+            "kind": "assert",
+            "name": "Koszyk został usunięty",
+            "position": {
+              "x": 400,
+              "y": 80
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "delete-cart",
+                "port": "status",
+                "path": ""
+              },
+              "expected": {
+                "kind": "literal",
+                "value": 200
+              }
+            },
+            "config": {
+              "predicate": "equals"
+            }
+          }
+        ],
+        "edges": []
+      },
+      "parameters": {},
+      "errorPolicy": "continue"
+    }
+  ]
+}

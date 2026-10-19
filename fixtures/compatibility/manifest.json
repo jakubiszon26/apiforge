@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "projectFormatVersion": 1,
+  "files": [
+    {
+      "path": "projects/blocks.json",
+      "sha256": "f369b0c876a7dfbcbf2170f256fd89a52456499edc3edd1dadcc4a8bb4b3cca9"
+    },
+    {
+      "path": "projects/shop.json",
+      "sha256": "3c16303bba120e90c5d0bd6ccd0eb048cd4194058fe8076f944d2f7245ad93c3"
+    },
+    {
+      "path": "projects/tickets.json",
+      "sha256": "74ace9cdab8e59f89f87131be7f4a90fb99d4c96c71fe84feb8574dd29d8cc13"
+    },
+    {
+      "path": "projects/workflow.json",
+      "sha256": "f6de3e6fbde8194e9ff83f087b03e531d723b83906d454841cdca8d21eba5168"
+    },
+    {
+      "path": "workspace-v1.json",
+      "sha256": "d9a8e3ba3fb5b4c1c17e7d8ac8256a58301360ccd1a8d42b57b7dc01948b74e7"
+    }
+  ]
+}
