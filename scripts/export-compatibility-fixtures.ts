@@ -10,6 +10,7 @@ import {
 } from '../shared/demos';
 import { validateProject } from '../shared/graph';
 import type { Project } from '../shared/model';
+import { buildRunFixtures } from './run-fixtures';
 import { buildSemanticFixtures } from './semantic-fixtures';
 
 const ID_PATTERN = /^(node|order|scenario|project)-[0-9a-f]{8}$/;
@@ -128,7 +129,7 @@ function sha256Hex(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-function buildFixtureFiles(): Map<string, string> {
+async function buildFixtureFiles(): Promise<Map<string, string>> {
   const files = new Map<string, string>();
   const projects: Project[] = [];
 
@@ -146,6 +147,8 @@ function buildFixtureFiles(): Map<string, string> {
   };
   files.set('workspace-v1.json', toJsonText(workspace));
   for (const [relativePath, content] of buildSemanticFixtures()) files.set(relativePath, content);
+  for (const [relativePath, content] of await buildRunFixtures(normalizeProject, toJsonText))
+    files.set(relativePath, content);
 
   const manifestEntries = Array.from(files.entries())
     .sort(([pathA], [pathB]) => (pathA < pathB ? -1 : pathA > pathB ? 1 : 0))
@@ -208,7 +211,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const files = buildFixtureFiles();
+  const files = await buildFixtureFiles();
 
   if (checkMode) {
     const ok = await checkFixtures(files);

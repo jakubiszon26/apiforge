@@ -1,0 +1,322 @@
+{
+  "description": "An error on an active alternative is not hidden by another one.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "merge-error",
+      "name": "merge-error",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "start",
+                "kind": "trigger",
+                "name": "start",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "broken",
+                "kind": "request",
+                "name": "broken",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "http://[",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "never": true
+                  }
+                }
+              },
+              {
+                "id": "good",
+                "kind": "request",
+                "name": "good",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/good",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "join",
+                "kind": "request",
+                "name": "join",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/join",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "decide",
+                "kind": "if",
+                "name": "decide",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "skipped-alternative",
+                "kind": "request",
+                "name": "skipped-alternative",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/skipped",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "after-alternatives",
+                "kind": "request",
+                "name": "after-alternatives",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/after",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "start->broken",
+                "source": "start",
+                "target": "broken"
+              },
+              {
+                "id": "start->good",
+                "source": "start",
+                "target": "good"
+              },
+              {
+                "id": "broken->join",
+                "source": "broken",
+                "target": "join"
+              },
+              {
+                "id": "good->join",
+                "source": "good",
+                "target": "join"
+              },
+              {
+                "id": "start->decide",
+                "source": "start",
+                "target": "decide"
+              },
+              {
+                "id": "decide->skipped-alternative",
+                "source": "decide",
+                "target": "skipped-alternative",
+                "branch": "true"
+              },
+              {
+                "id": "skipped-alternative->after-alternatives",
+                "source": "skipped-alternative",
+                "target": "after-alternatives"
+              },
+              {
+                "id": "good->after-alternatives",
+                "source": "good",
+                "target": "after-alternatives"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "start",
+        "name": "start",
+        "kind": "trigger",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "broken",
+        "name": "broken",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "good",
+        "name": "good",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/good",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "join",
+        "name": "join",
+        "kind": "request",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "decide",
+        "name": "decide",
+        "kind": "if",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": 1,
+          "expected": 2
+        },
+        "outputs": {
+          "value": 1,
+          "passed": false
+        },
+        "actual": 1,
+        "expected": 2
+      },
+      {
+        "nodeId": "skipped-alternative",
+        "name": "skipped-alternative",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "after-alternatives",
+        "name": "after-alternatives",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/after",
+          "headers": {}
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,764 @@
+{
+  "description": "Conditions block descendants; predicate lists with all/any and tolerance.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "conditions",
+      "name": "conditions",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {
+            "field": "kind"
+          },
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "read",
+                "kind": "request",
+                "name": "read",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/read",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "price": 100,
+                    "meta": {
+                      "kind": "book"
+                    },
+                    "tags": [
+                      "a"
+                    ],
+                    "empty": null
+                  }
+                }
+              },
+              {
+                "id": "gate",
+                "kind": "condition",
+                "name": "gate",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "price"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                "config": {
+                  "predicate": "less"
+                }
+              },
+              {
+                "id": "blocked",
+                "kind": "build",
+                "name": "blocked",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "field": {
+                    "kind": "reference",
+                    "nodeId": "gate",
+                    "port": "passed",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "buildType": "object"
+                }
+              },
+              {
+                "id": "independent",
+                "kind": "select",
+                "name": "independent",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "path": "meta.kind"
+                }
+              },
+              {
+                "id": "listed",
+                "kind": "condition",
+                "name": "listed",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  },
+                  "price": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "price"
+                  },
+                  "target": {
+                    "kind": "literal",
+                    "value": 99.95
+                  },
+                  "kind": {
+                    "kind": "literal",
+                    "value": "book"
+                  },
+                  "field": {
+                    "kind": "parameter",
+                    "name": "field"
+                  }
+                },
+                "config": {
+                  "predicate": "equals",
+                  "tolerance": 0.1,
+                  "match": "all",
+                  "predicates": [
+                    {
+                      "input": "price",
+                      "expected": "target",
+                      "predicate": "approximately"
+                    },
+                    {
+                      "input": "actual",
+                      "path": "meta.{{field}}",
+                      "expected": "kind",
+                      "predicate": "equals"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "any-of",
+                "kind": "condition",
+                "name": "any-of",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  },
+                  "wrong": {
+                    "kind": "literal",
+                    "value": "x"
+                  }
+                },
+                "config": {
+                  "predicate": "equals",
+                  "match": "any",
+                  "predicates": [
+                    {
+                      "input": "actual",
+                      "path": "meta.kind",
+                      "expected": "wrong",
+                      "predicate": "equals"
+                    },
+                    {
+                      "input": "actual",
+                      "path": "tags",
+                      "expected": "wrong",
+                      "predicate": "notEmpty"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "broken-list",
+                "kind": "condition",
+                "name": "broken-list",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  },
+                  "limit": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                "config": {
+                  "predicate": "equals",
+                  "predicates": [
+                    {
+                      "input": "actual",
+                      "path": "missing",
+                      "expected": "limit",
+                      "predicate": "greater"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "after-list",
+                "kind": "formula",
+                "name": "after-list",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "reference",
+                    "nodeId": "listed",
+                    "port": "value",
+                    "path": "price"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              },
+              {
+                "id": "exists-null",
+                "kind": "assert",
+                "name": "exists-null",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "empty"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  }
+                },
+                "config": {
+                  "predicate": "exists"
+                }
+              },
+              {
+                "id": "missing",
+                "kind": "assert",
+                "name": "missing",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "absent"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  }
+                },
+                "config": {
+                  "predicate": "exists"
+                }
+              },
+              {
+                "id": "not-empty",
+                "kind": "assert",
+                "name": "not-empty",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "tags"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": null
+                  }
+                },
+                "config": {
+                  "predicate": "notEmpty"
+                }
+              },
+              {
+                "id": "type",
+                "kind": "assert",
+                "name": "type",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "tags"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "array"
+                  }
+                },
+                "config": {
+                  "predicate": "type"
+                }
+              },
+              {
+                "id": "contains",
+                "kind": "assert",
+                "name": "contains",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "tags"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "a"
+                  }
+                },
+                "config": {
+                  "predicate": "contains"
+                }
+              },
+              {
+                "id": "not-a-number",
+                "kind": "assert",
+                "name": "not-a-number",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "meta"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                "config": {
+                  "predicate": "greater"
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "read",
+        "name": "read",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/read",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "gate",
+        "name": "gate",
+        "kind": "condition",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {
+          "actual": 100,
+          "expected": 0
+        },
+        "outputs": {
+          "value": 100,
+          "passed": false
+        },
+        "actual": 100,
+        "expected": 0
+      },
+      {
+        "nodeId": "blocked",
+        "name": "blocked",
+        "kind": "build",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "independent",
+        "name": "independent",
+        "kind": "select",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          }
+        },
+        "outputs": {
+          "value": "book"
+        }
+      },
+      {
+        "nodeId": "listed",
+        "name": "listed",
+        "kind": "condition",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "expected": null,
+          "price": 100,
+          "target": 99.95,
+          "kind": "book",
+          "field": "kind"
+        },
+        "outputs": {
+          "value": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "passed": true
+        },
+        "actual": {
+          "price": 100,
+          "meta": {
+            "kind": "book"
+          },
+          "tags": [
+            "a"
+          ],
+          "empty": null
+        },
+        "expected": null
+      },
+      {
+        "nodeId": "any-of",
+        "name": "any-of",
+        "kind": "condition",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "expected": null,
+          "wrong": "x"
+        },
+        "outputs": {
+          "value": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "passed": true
+        },
+        "actual": {
+          "price": 100,
+          "meta": {
+            "kind": "book"
+          },
+          "tags": [
+            "a"
+          ],
+          "empty": null
+        },
+        "expected": null
+      },
+      {
+        "nodeId": "broken-list",
+        "name": "broken-list",
+        "kind": "condition",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "actual": {
+            "price": 100,
+            "meta": {
+              "kind": "book"
+            },
+            "tags": [
+              "a"
+            ],
+            "empty": null
+          },
+          "expected": null,
+          "limit": 1
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "after-list",
+        "name": "after-list",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 100,
+          "right": 2
+        },
+        "outputs": {
+          "value": 200
+        }
+      },
+      {
+        "nodeId": "exists-null",
+        "name": "exists-null",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": null,
+          "expected": null
+        },
+        "outputs": {
+          "value": null,
+          "passed": true
+        },
+        "actual": null,
+        "expected": null
+      },
+      {
+        "nodeId": "missing",
+        "name": "missing",
+        "kind": "assert",
+        "status": "failed",
+        "phase": "main",
+        "inputs": {
+          "expected": null
+        },
+        "outputs": {
+          "passed": false
+        },
+        "expected": null
+      },
+      {
+        "nodeId": "not-empty",
+        "name": "not-empty",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": [
+            "a"
+          ],
+          "expected": null
+        },
+        "outputs": {
+          "value": [
+            "a"
+          ],
+          "passed": true
+        },
+        "actual": [
+          "a"
+        ],
+        "expected": null
+      },
+      {
+        "nodeId": "type",
+        "name": "type",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": [
+            "a"
+          ],
+          "expected": "array"
+        },
+        "outputs": {
+          "value": [
+            "a"
+          ],
+          "passed": true
+        },
+        "actual": [
+          "a"
+        ],
+        "expected": "array"
+      },
+      {
+        "nodeId": "contains",
+        "name": "contains",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": [
+            "a"
+          ],
+          "expected": "a"
+        },
+        "outputs": {
+          "value": [
+            "a"
+          ],
+          "passed": true
+        },
+        "actual": [
+          "a"
+        ],
+        "expected": "a"
+      },
+      {
+        "nodeId": "not-a-number",
+        "name": "not-a-number",
+        "kind": "assert",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "actual": {
+            "kind": "book"
+          },
+          "expected": 1
+        },
+        "outputs": {}
+      }
+    ]
+  }
+}

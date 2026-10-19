@@ -1,0 +1,230 @@
+{
+  "description": "A single step outside the Start path bypasses its own gate.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "diagnostics",
+      "name": "diagnostics",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "start",
+                "kind": "trigger",
+                "name": "start",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "first",
+                "kind": "request",
+                "name": "first",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/first",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "id": "item",
+                    "price": 100
+                  }
+                }
+              },
+              {
+                "id": "verify",
+                "kind": "assert",
+                "name": "verify",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "first",
+                    "port": "body",
+                    "path": "price"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 100
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "unrelated",
+                "kind": "request",
+                "name": "unrelated",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/unrelated",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "disconnected",
+                "kind": "request",
+                "name": "disconnected",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/disconnected/{{region}}",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "price-variable",
+                "kind": "variable",
+                "name": "price-variable",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "first",
+                    "port": "body",
+                    "path": "price"
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "via-variable",
+                "kind": "assert",
+                "name": "via-variable",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "price-variable",
+                    "port": "value",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 100
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "start->first",
+                "source": "start",
+                "target": "first"
+              },
+              {
+                "id": "first->verify",
+                "source": "first",
+                "target": "verify"
+              },
+              {
+                "id": "start->unrelated",
+                "source": "start",
+                "target": "unrelated"
+              },
+              {
+                "id": "first->via-variable",
+                "source": "first",
+                "target": "via-variable"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation",
+    "singleNodeId": "disconnected"
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": true,
+    "steps": [
+      {
+        "nodeId": "disconnected",
+        "name": "disconnected",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/disconnected/eu",
+          "headers": {}
+        }
+      }
+    ]
+  }
+}

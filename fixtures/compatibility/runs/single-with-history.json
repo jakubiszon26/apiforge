@@ -1,0 +1,461 @@
+{
+  "description": "A single step reads its inputs from an earlier run.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "diagnostics",
+      "name": "diagnostics",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "start",
+                "kind": "trigger",
+                "name": "start",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "first",
+                "kind": "request",
+                "name": "first",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/first",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "id": "item",
+                    "price": 100
+                  }
+                }
+              },
+              {
+                "id": "verify",
+                "kind": "assert",
+                "name": "verify",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "first",
+                    "port": "body",
+                    "path": "price"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 100
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "unrelated",
+                "kind": "request",
+                "name": "unrelated",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/unrelated",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "disconnected",
+                "kind": "request",
+                "name": "disconnected",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/disconnected/{{region}}",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "price-variable",
+                "kind": "variable",
+                "name": "price-variable",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "first",
+                    "port": "body",
+                    "path": "price"
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "via-variable",
+                "kind": "assert",
+                "name": "via-variable",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "price-variable",
+                    "port": "value",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 100
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "start->first",
+                "source": "start",
+                "target": "first"
+              },
+              {
+                "id": "first->verify",
+                "source": "first",
+                "target": "verify"
+              },
+              {
+                "id": "start->unrelated",
+                "source": "start",
+                "target": "unrelated"
+              },
+              {
+                "id": "first->via-variable",
+                "source": "first",
+                "target": "via-variable"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation",
+    "singleNodeId": "verify",
+    "previousRun": {
+      "id": "run-00000001",
+      "scenarioId": "main",
+      "mode": "simulation",
+      "startedAt": "2026-01-01T00:00:00.000Z",
+      "status": "passed",
+      "steps": [
+        {
+          "nodeId": "start",
+          "name": "start",
+          "kind": "trigger",
+          "status": "passed",
+          "phase": "main",
+          "inputs": {},
+          "outputs": {},
+          "durationMs": 0
+        },
+        {
+          "nodeId": "first",
+          "name": "first",
+          "kind": "request",
+          "status": "passed",
+          "phase": "main",
+          "inputs": {},
+          "outputs": {
+            "body": {
+              "id": "item",
+              "price": 100
+            },
+            "status": 200,
+            "headers": {},
+            "duration": 0
+          },
+          "durationMs": 0,
+          "request": {
+            "method": "GET",
+            "url": "https://api.example.test/v1/first",
+            "headers": {}
+          }
+        },
+        {
+          "nodeId": "verify",
+          "name": "verify",
+          "kind": "assert",
+          "status": "passed",
+          "phase": "main",
+          "inputs": {
+            "actual": 100,
+            "expected": 100
+          },
+          "outputs": {
+            "value": 100,
+            "passed": true
+          },
+          "durationMs": 0,
+          "actual": 100,
+          "expected": 100
+        }
+      ],
+      "diagnostic": true,
+      "snapshot": {
+        "graph": {
+          "nodes": [
+            {
+              "id": "start",
+              "kind": "trigger",
+              "name": "start",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {},
+              "config": {}
+            },
+            {
+              "id": "first",
+              "kind": "request",
+              "name": "first",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {},
+              "config": {
+                "method": "GET",
+                "url": "/first",
+                "headers": {},
+                "query": {},
+                "timeoutMs": 10000,
+                "inputPorts": [],
+                "sampleResponse": {
+                  "id": "item",
+                  "price": 100
+                }
+              }
+            },
+            {
+              "id": "verify",
+              "kind": "assert",
+              "name": "verify",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {
+                "actual": {
+                  "kind": "reference",
+                  "nodeId": "first",
+                  "port": "body",
+                  "path": "price"
+                },
+                "expected": {
+                  "kind": "literal",
+                  "value": 100
+                }
+              },
+              "config": {
+                "predicate": "equals"
+              }
+            },
+            {
+              "id": "unrelated",
+              "kind": "request",
+              "name": "unrelated",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {},
+              "config": {
+                "method": "GET",
+                "url": "/unrelated",
+                "headers": {},
+                "query": {},
+                "timeoutMs": 10000,
+                "inputPorts": [],
+                "sampleResponse": {
+                  "ok": true
+                }
+              }
+            },
+            {
+              "id": "disconnected",
+              "kind": "request",
+              "name": "disconnected",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {},
+              "config": {
+                "method": "GET",
+                "url": "/disconnected/{{region}}",
+                "headers": {},
+                "query": {},
+                "timeoutMs": 10000,
+                "inputPorts": [],
+                "sampleResponse": {
+                  "ok": true
+                }
+              }
+            },
+            {
+              "id": "price-variable",
+              "kind": "variable",
+              "name": "price-variable",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {
+                "value": {
+                  "kind": "reference",
+                  "nodeId": "first",
+                  "port": "body",
+                  "path": "price"
+                }
+              },
+              "config": {}
+            },
+            {
+              "id": "via-variable",
+              "kind": "assert",
+              "name": "via-variable",
+              "position": {
+                "x": 0,
+                "y": 0
+              },
+              "inputs": {
+                "actual": {
+                  "kind": "reference",
+                  "nodeId": "price-variable",
+                  "port": "value",
+                  "path": ""
+                },
+                "expected": {
+                  "kind": "literal",
+                  "value": 100
+                }
+              },
+              "config": {
+                "predicate": "equals"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "start->first",
+              "source": "start",
+              "target": "first"
+            },
+            {
+              "id": "first->verify",
+              "source": "first",
+              "target": "verify"
+            },
+            {
+              "id": "start->unrelated",
+              "source": "start",
+              "target": "unrelated"
+            },
+            {
+              "id": "first->via-variable",
+              "source": "first",
+              "target": "via-variable"
+            }
+          ]
+        },
+        "cleanup": {
+          "nodes": [],
+          "edges": []
+        }
+      },
+      "finishedAt": "2026-01-01T00:00:00.000Z"
+    }
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": true,
+    "steps": [
+      {
+        "nodeId": "verify",
+        "name": "verify",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": 100,
+          "expected": 100
+        },
+        "outputs": {
+          "value": 100,
+          "passed": true
+        },
+        "actual": 100,
+        "expected": 100
+      }
+    ]
+  }
+}

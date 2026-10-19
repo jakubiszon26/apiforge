@@ -64,9 +64,15 @@ impl Redactor {
             .flat_map(|secret| {
                 let form: String =
                     url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
-                [secret.clone(), encode_uri_component(secret), form]
+                // A secret inserted raw into a query string is decoded as form data
+                // and re-serialised when another parameter is set, so `a+b c` is
+                // published as `a+b+c`. The reference implementation leaks this form.
+                let reparsed: String =
+                    url::form_urlencoded::byte_serialize(&decode_form(secret)).collect();
+                [secret.clone(), encode_uri_component(secret), form, reparsed]
             })
             .collect();
+        self.forms.dedup();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -357,6 +363,37 @@ impl Redactor {
     }
 }
 
+/// The byte of a `%XX` escape starting at `index`, if there is a valid one.
+fn percent_escape(bytes: &[u8], index: usize) -> Option<u8> {
+    let hex = bytes.get(index + 1..index + 3)?;
+    if bytes.get(index) != Some(&b'%') || !hex.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()
+}
+
+/// Bytes of an `application/x-www-form-urlencoded` value: `+` is a space and valid
+/// percent escapes are decoded; anything else is kept as it is.
+fn decode_form(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if let Some(byte) = percent_escape(bytes, index) {
+            output.push(byte);
+            index += 3;
+        } else {
+            output.push(if bytes[index] == b'+' {
+                b' '
+            } else {
+                bytes[index]
+            });
+            index += 1;
+        }
+    }
+    output
+}
+
 /// JavaScript `decodeURIComponent`, or `None` where it would throw.
 pub(crate) fn decode_uri_component(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
@@ -364,9 +401,7 @@ pub(crate) fn decode_uri_component(text: &str) -> Option<String> {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' {
-            let hex = bytes.get(index + 1..index + 3)?;
-            let hex = std::str::from_utf8(hex).ok()?;
-            output.push(u8::from_str_radix(hex, 16).ok()?);
+            output.push(percent_escape(bytes, index)?);
             index += 3;
         } else {
             output.push(bytes[index]);
@@ -414,6 +449,11 @@ mod tests {
             "a=[REDACTED]&b=[REDACTED]&c=[REDACTED]"
         );
         assert_eq!(redactor.redact_str("my own"), "[REDACTED] own");
+        // Inserted raw into a query string and re-serialised as a form.
+        assert_eq!(
+            redactor.redact_str("?key=my+session+secret"),
+            "?key=[REDACTED]"
+        );
     }
 
     #[test]
@@ -453,5 +493,7 @@ mod tests {
         assert_eq!(decode_uri_component("%zz"), None);
         assert_eq!(decode_uri_component("%C5"), None);
         assert_eq!(decode_uri_component("%2"), None);
+        assert_eq!(decode_uri_component("%+1"), None);
+        assert_eq!(decode_form("a+b%20c%zz%+1"), b"a b c%zz% 1");
     }
 }

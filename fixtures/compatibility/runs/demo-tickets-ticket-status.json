@@ -1,0 +1,386 @@
+{
+  "description": "Demo project tickets, scenario ticket-status.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "tickets",
+      "name": "System zgłoszeń",
+      "environment": {
+        "baseUrl": "http://127.0.0.1:4318/demo/support",
+        "variables": {},
+        "secretNames": []
+      },
+      "contracts": [
+        {
+          "id": "Ticket",
+          "name": "Zgłoszenie",
+          "sample": {
+            "id": 7,
+            "title": "Problem z logowaniem",
+            "status": "open",
+            "priority": "high"
+          }
+        }
+      ],
+      "components": [
+        {
+          "id": "get-ticket",
+          "revision": 1,
+          "name": "Zgłoszenie",
+          "description": "Odczytaj zgłoszenie po identyfikatorze.",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "number",
+              "defaultValue": 7,
+              "exposed": true,
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "ticket",
+              "type": "object",
+              "contractId": "Ticket",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "fetch",
+                "port": "body",
+                "path": ""
+              }
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {
+                "id": "fetch",
+                "kind": "request",
+                "name": "Pobierz zgłoszenie",
+                "position": {
+                  "x": 80,
+                  "y": 80
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "parameter",
+                    "name": "id"
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/tickets/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [
+                    {
+                      "name": "id",
+                      "type": "any",
+                      "exposed": true,
+                      "required": true
+                    }
+                  ],
+                  "sampleResponse": {
+                    "id": 7,
+                    "title": "Problem z logowaniem",
+                    "status": "open",
+                    "priority": "high"
+                  }
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "ticket-open",
+          "revision": 1,
+          "name": "Sprawdź otwarte zgłoszenie",
+          "description": "Sprawdź status zgłoszenia.",
+          "inputs": [
+            {
+              "name": "ticket",
+              "type": "object",
+              "contractId": "Ticket",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "passed",
+              "type": "boolean",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "check",
+                "port": "passed",
+                "path": ""
+              }
+            }
+          ],
+          "action": {
+            "input": "ticket",
+            "type": "object",
+            "contractId": "Ticket"
+          },
+          "graph": {
+            "nodes": [
+              {
+                "id": "status",
+                "kind": "select",
+                "name": "Odczytaj status",
+                "inputs": {
+                  "value": {
+                    "kind": "parameter",
+                    "name": "ticket"
+                  }
+                },
+                "position": {
+                  "x": 60,
+                  "y": 60
+                },
+                "config": {
+                  "path": "status"
+                }
+              },
+              {
+                "id": "check",
+                "kind": "assert",
+                "name": "Status otwarty",
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "status",
+                    "port": "value",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "open"
+                  }
+                },
+                "position": {
+                  "x": 380,
+                  "y": 60
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": []
+          }
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "ticket-status",
+          "name": "Status i priorytet zgłoszenia",
+          "description": "Drugi projekt: te same operacje, inne endpointy i własne akcje.",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          },
+          "graph": {
+            "nodes": [
+              {
+                "id": "ticket",
+                "kind": "component",
+                "name": "Zgłoszenie",
+                "position": {
+                  "x": 60,
+                  "y": 160
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "literal",
+                    "value": 7
+                  }
+                },
+                "config": {
+                  "componentId": "get-ticket",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "open",
+                "kind": "component",
+                "name": "Sprawdź otwarte zgłoszenie",
+                "position": {
+                  "x": 410,
+                  "y": 60
+                },
+                "inputs": {
+                  "ticket": {
+                    "kind": "reference",
+                    "nodeId": "ticket",
+                    "port": "ticket",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "componentId": "ticket-open",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "priority",
+                "kind": "assert",
+                "name": "Priorytet wysoki",
+                "position": {
+                  "x": 410,
+                  "y": 310
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "ticket",
+                    "port": "ticket",
+                    "path": "priority"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "high"
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "ticket-status",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "ticket",
+        "name": "Zgłoszenie",
+        "kind": "component",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "id": 7
+        },
+        "outputs": {
+          "ticket": {
+            "id": 7,
+            "title": "Problem z logowaniem",
+            "status": "open",
+            "priority": "high"
+          }
+        },
+        "children": [
+          {
+            "nodeId": "fetch",
+            "name": "Pobierz zgłoszenie",
+            "kind": "request",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "id": 7
+            },
+            "outputs": {
+              "body": {
+                "id": 7,
+                "title": "Problem z logowaniem",
+                "status": "open",
+                "priority": "high"
+              },
+              "status": 200,
+              "headers": {},
+              "duration": 0
+            },
+            "request": {
+              "method": "GET",
+              "url": "http://127.0.0.1:4318/demo/support/tickets/7",
+              "headers": {}
+            }
+          }
+        ]
+      },
+      {
+        "nodeId": "open",
+        "name": "Sprawdź otwarte zgłoszenie",
+        "kind": "component",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "ticket": {
+            "id": 7,
+            "title": "Problem z logowaniem",
+            "status": "open",
+            "priority": "high"
+          }
+        },
+        "outputs": {
+          "passed": true
+        },
+        "children": [
+          {
+            "nodeId": "status",
+            "name": "Odczytaj status",
+            "kind": "select",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "value": {
+                "id": 7,
+                "title": "Problem z logowaniem",
+                "status": "open",
+                "priority": "high"
+              }
+            },
+            "outputs": {
+              "value": "open"
+            }
+          },
+          {
+            "nodeId": "check",
+            "name": "Status otwarty",
+            "kind": "assert",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "actual": "open",
+              "expected": "open"
+            },
+            "outputs": {
+              "value": "open",
+              "passed": true
+            },
+            "actual": "open",
+            "expected": "open"
+          }
+        ]
+      },
+      {
+        "nodeId": "priority",
+        "name": "Priorytet wysoki",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "high",
+          "expected": "high"
+        },
+        "outputs": {
+          "value": "high",
+          "passed": true
+        },
+        "actual": "high",
+        "expected": "high"
+      }
+    ]
+  }
+}
