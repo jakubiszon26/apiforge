@@ -9,6 +9,7 @@ mod clipboard;
 mod component;
 mod connect;
 mod fold;
+mod inspect;
 mod nodes;
 mod variables;
 
@@ -18,6 +19,10 @@ pub use component::{
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use inspect::{
+    RESPONSE_FIELD_DEPTH, RESPONSE_FIELD_LIMIT, ResponseField, collect_response_fields,
+    sample_paths,
+};
 pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
 };
