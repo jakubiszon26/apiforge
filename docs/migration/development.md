@@ -28,6 +28,26 @@ Check mode returns 0 for a valid import, 1 for a document/read error and 2 for i
 arguments. Field and secret values are never printed in parser diagnostics. Import is
 limited to 16 MiB and performs no HTTP requests.
 
+## Demo API
+
+The built-in demo projects (`apiforge_core::demos`) send their requests to a small local
+API on `http://127.0.0.1:4318/demo`. Start it in a separate terminal:
+
+```bash
+cargo run -p apiforge-demo-api --locked
+cargo run -p apiforge-demo-api --locked -- --port 4400
+```
+
+It serves `GET /demo/shop/products/{id}` (products 123 and 124), `POST /demo/shop/carts`,
+`POST /demo/shop/carts/{id}/items`, `GET`/`DELETE /demo/shop/carts/{id}` and
+`GET /demo/support/tickets/{id}` (ticket 7). State is kept in memory only: at most 1000
+carts, each expiring after an hour and holding at most 100 item lines. The server only
+listens on loopback and rejects requests for other hosts or from foreign web origins.
+Changing the port means editing the base URL in the demo project's environment.
+
+Tests and the desktop application can run it in-process with
+`apiforge_demo_api::spawn(addr)`; dropping the returned handle stops the server.
+
 ## Verification
 
 ```bash

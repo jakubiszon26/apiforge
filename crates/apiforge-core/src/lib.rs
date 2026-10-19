@@ -3,6 +3,7 @@
 //! Parsing never runs requests. A document becomes available to callers only after
 //! structural and graph validation; the v1 DTO stays intact for lossless round trips.
 pub mod binding;
+pub mod demos;
 pub mod format;
 pub mod graph;
 pub mod ids;
