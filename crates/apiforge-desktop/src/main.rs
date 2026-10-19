@@ -2,10 +2,6 @@
 //!
 //! Opening a document never executes a request.
 
-// Shared helpers for the inspector and dialogs land before their users while the
-// editor is being ported; remove once every panel is wired up.
-#![allow(dead_code)]
-
 mod app;
 mod canvas;
 mod capture;
@@ -17,6 +13,7 @@ mod inspector;
 mod labels;
 mod library;
 mod persistence;
+mod report;
 mod theme;
 mod widgets;
 

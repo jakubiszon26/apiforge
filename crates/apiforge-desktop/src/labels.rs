@@ -74,23 +74,6 @@ pub fn truncate(text: &str, limit: usize) -> String {
     }
 }
 
-/// Names that conventionally carry credentials; their values are masked in views.
-pub fn is_sensitive_name(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    [
-        "authorization",
-        "cookie",
-        "password",
-        "secret",
-        "token",
-        "api-key",
-        "api_key",
-        "apikey",
-    ]
-    .iter()
-    .any(|pattern| name.contains(pattern))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +84,5 @@ mod tests {
         assert_eq!(literal_summary(&json!({"a": 1})), "{ 1 fields }");
         assert_eq!(literal_summary(&json!(null)), "null");
         assert_eq!(truncate("abcdef", 3), "abc…");
-        assert!(is_sensitive_name("X-Api-Key"));
-        assert!(!is_sensitive_name("productId"));
     }
 }

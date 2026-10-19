@@ -202,6 +202,7 @@ name = "apiforge-desktop"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-runner",
  "apiforge-storage",
  "eframe",
  "image",

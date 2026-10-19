@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 apiforge-core.workspace = true
+apiforge-runner.workspace = true
 apiforge-storage.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true

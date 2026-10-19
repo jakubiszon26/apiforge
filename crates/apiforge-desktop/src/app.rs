@@ -8,18 +8,20 @@ use crate::{
     inspector::{self, Inspector},
     library::{self, Library},
     persistence::{SaveStatus, Saver},
+    report::{self, ReportPanel},
     theme, widgets,
 };
 use apiforge_core::{
     edit,
-    format::{Binding, Graph, Position, Workspace},
+    format::{Binding, Graph, Position, Project, Workspace},
     graph::{create_operator_node, delete_nodes, position_after},
     model::NodeKind,
-    run::{Phase, RunMode},
+    run::{Phase, RunMode, RunResult, RunStatus, StepResult},
 };
+use apiforge_runner::{RunHandle, RunRequest, RunnerService};
 use apiforge_storage::WorkspaceStore;
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
-use std::{collections::HashSet, time::Instant};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 /// Where the workspace comes from and whether edits are saved.
 pub enum Source {
@@ -38,6 +40,13 @@ enum Dialog {
     Component(Box<dialogs::ComponentDialog>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RunKind {
+    Full,
+    UntilSelected,
+    SingleSelected,
+}
+
 pub struct App {
     editor: Editor,
     saver: Option<Saver>,
@@ -45,13 +54,16 @@ pub struct App {
     canvas: Canvas,
     library: Library,
     inspector: Inspector,
+    report: ReportPanel,
+    runner: Option<RunnerService>,
+    run_handle: Option<RunHandle>,
+    run: Option<RunResult>,
+    run_fingerprint: Option<Project>,
     notice: Option<String>,
     mode: RunMode,
     secrets: dialogs::SessionSecrets,
     dialog: Option<Dialog>,
     files: files::Files,
-    report_open: bool,
-    report_height: f32,
 }
 
 impl App {
@@ -81,6 +93,14 @@ impl App {
                 (workspace, saver)
             }
         };
+        let repaint = context.clone();
+        let runner = RunnerService::new(Arc::new(move || repaint.request_repaint()))
+            .map_err(|error| {
+                if notice.is_none() {
+                    notice = Some(format!("Cannot start the runner: {error}"));
+                }
+            })
+            .ok();
         Self {
             editor: Editor::new(workspace),
             saver,
@@ -88,13 +108,16 @@ impl App {
             canvas: Canvas::default(),
             library: Library::default(),
             inspector: Inspector::default(),
+            report: ReportPanel::default(),
+            runner,
+            run_handle: None,
+            run: None,
+            run_fingerprint: None,
             notice,
             mode: RunMode::Simulation,
             secrets: dialogs::SessionSecrets::new(),
             dialog: None,
             files: files::Files::default(),
-            report_open: true,
-            report_height: 240.0,
         }
     }
 
@@ -115,6 +138,108 @@ impl App {
         !self.files.busy()
     }
 
+    fn is_running(&self) -> bool {
+        self.run_handle.is_some()
+            || self
+                .run
+                .as_ref()
+                .is_some_and(|run| run.status == RunStatus::Running)
+    }
+
+    fn is_run_stale(&self) -> bool {
+        self.run.is_some()
+            && self.run_fingerprint.as_ref()
+                != Some(&apiforge_storage::public_project(self.editor.project()))
+    }
+
+    fn clear_run(&mut self) {
+        if let Some(handle) = self.run_handle.take() {
+            handle.cancel();
+        }
+        self.run = None;
+        self.run_fingerprint = None;
+    }
+
+    fn poll_run(&mut self) {
+        let Some(handle) = &self.run_handle else {
+            return;
+        };
+        if let Some(latest) = handle.latest() {
+            self.run = Some(latest);
+        }
+        if handle.is_finished() {
+            if let Some(latest) = handle.latest() {
+                self.run = Some(latest);
+            }
+            self.run_handle = None;
+        }
+    }
+
+    fn start_run(&mut self, kind: RunKind) {
+        if self.is_running() || self.editor.draft().is_some() {
+            return;
+        }
+        let selected = (self.editor.phase() == Phase::Main)
+            .then(|| self.editor.selected_node().map(|node| node.id.clone()))
+            .flatten();
+        if kind != RunKind::Full && selected.is_none() {
+            return;
+        }
+        if kind == RunKind::SingleSelected
+            && let Some(previous) = &self.run
+            && (previous.mode != self.mode
+                || self.is_run_stale()
+                || previous.scenario_id != self.editor.scenario().id)
+        {
+            self.notice = Some(
+                "Previous data comes from another mode or an earlier configuration. Run up to the selected block to fetch fresh inputs.".into(),
+            );
+            return;
+        }
+        let (target_node_id, single_node_id, previous_run) = match kind {
+            RunKind::Full => (None, None, None),
+            RunKind::UntilSelected => (selected, None, None),
+            RunKind::SingleSelected => (None, selected, self.run.clone()),
+        };
+        let fingerprint = apiforge_storage::public_project(self.editor.project());
+        let request = RunRequest {
+            project: self.editor.project().clone(),
+            scenario_id: self.editor.scenario().id.clone(),
+            mode: self.mode,
+            target_node_id,
+            single_node_id,
+            previous_run,
+            secrets: self.secrets.clone(),
+        };
+        let Some(runner) = &self.runner else {
+            self.notice = Some("The runner service is not available.".into());
+            return;
+        };
+        match runner.start(request) {
+            Ok(handle) => {
+                self.notice = None;
+                self.report.open = true;
+                self.run_fingerprint = Some(fingerprint);
+                self.run = handle.latest();
+                self.run_handle = Some(handle);
+                self.poll_run();
+            }
+            Err(error) => {
+                self.notice = Some(error.to_string());
+            }
+        }
+    }
+
+    fn cancel_run(&mut self) {
+        if let Some(handle) = &self.run_handle {
+            handle.cancel();
+            self.notice = Some(
+                "Cancellation requested. Waiting for the current step and cleanup to finish."
+                    .into(),
+            );
+        }
+    }
+
     fn save_if_changed(&mut self) {
         if self.editor.revision() != self.saved_revision {
             self.saved_revision = self.editor.revision();
@@ -131,6 +256,7 @@ impl App {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.poll_run();
         if let Some(result) = self.files.poll() {
             self.file_result(result);
         }
@@ -193,6 +319,7 @@ impl App {
     // ----- Panels ----------------------------------------------------------------
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
+        let running = self.is_running();
         let project = self.editor.project();
         let graph = self.editor.reference_graph();
         let context = library::Context {
@@ -213,7 +340,7 @@ impl App {
                 .collect(),
             parameters: self.editor.parameter_names(),
             editing_component: self.editor.draft().is_some(),
-            running: false,
+            running,
         };
         let actions = self.library.show(ui, &context);
         drop(graph);
@@ -263,12 +390,31 @@ impl App {
     fn library_action(&mut self, action: library::Action) {
         match action {
             library::Action::SwitchProject(id) => {
+                if self.is_running() {
+                    return;
+                }
                 self.editor.switch_project(&id);
                 self.secrets.clear();
+                self.clear_run();
+                self.notice = None;
             }
-            library::Action::NewProject => self.dialog = Some(Dialog::NewProject(String::new())),
-            library::Action::SwitchScenario(id) => self.editor.switch_scenario(&id),
-            library::Action::NewScenario => self.dialog = Some(Dialog::NewScenario(String::new())),
+            library::Action::NewProject => {
+                if !self.is_running() {
+                    self.dialog = Some(Dialog::NewProject(String::new()));
+                }
+            }
+            library::Action::SwitchScenario(id) => {
+                if self.is_running() {
+                    return;
+                }
+                self.editor.switch_scenario(&id);
+                self.clear_run();
+            }
+            library::Action::NewScenario => {
+                if !self.is_running() {
+                    self.dialog = Some(Dialog::NewScenario(String::new()));
+                }
+            }
             library::Action::AddNode { kind, component } => {
                 let position = position_after(self.editor.graph(), 100.0);
                 self.add_node(kind, component, position, None);
@@ -287,6 +433,9 @@ impl App {
     }
 
     fn open_example(&mut self, example: library::Example) {
+        if self.is_running() {
+            return;
+        }
         let (id, build, notice) = match example {
             library::Example::Workflow => (
                 "workflow-poc",
@@ -308,14 +457,17 @@ impl App {
         {
             self.editor.switch_project(id);
             self.secrets.clear();
+            self.clear_run();
             return;
         }
         self.editor.add_project(build());
         self.secrets.clear();
+        self.clear_run();
         self.notice = Some(notice.into());
     }
 
     fn topbar(&mut self, ui: &mut egui::Ui) {
+        let running = self.is_running();
         ui.horizontal_centered(|ui| {
             let project = &self.editor.project().name;
             let location = if self.editor.draft().is_some() {
@@ -350,7 +502,7 @@ impl App {
                     self.files.export(project);
                 }
                 if ui
-                    .add_enabled(!self.files.busy(), egui::Button::new("Import"))
+                    .add_enabled(!self.files.busy() && !running, egui::Button::new("Import"))
                     .on_hover_text("Import a project or workspace JSON file")
                     .clicked()
                 {
@@ -363,8 +515,9 @@ impl App {
     fn scenario_header(&mut self, ui: &mut egui::Ui) {
         let draft = self.editor.draft().cloned();
         let scenario = self.editor.scenario().clone();
+        let running = self.is_running();
         ui.horizontal(|ui| {
-            let width = (ui.available_width() - 330.0).max(200.0);
+            let width = (ui.available_width() - 360.0).max(200.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(width, 70.0),
                 egui::Layout::top_down(egui::Align::Min),
@@ -428,18 +581,64 @@ impl App {
                     }
                     return;
                 }
-                if ui
-                    .add(widgets::primary_button("▶  Run test"))
-                    .on_hover_text("Run the whole scenario")
-                    .clicked()
-                {
-                    self.notice = Some("The runner is not connected yet.".into());
+                if running {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("■  Cancel").color(theme::DANGER).strong(),
+                            )
+                            .min_size(egui::vec2(0.0, 34.0)),
+                        )
+                        .on_hover_text("Stop the main phase; cleanup still runs")
+                        .clicked()
+                    {
+                        self.cancel_run();
+                    }
+                } else {
+                    let can_run = !scenario.graph.nodes.is_empty();
+                    let can_partial =
+                        self.editor.phase() == Phase::Main && self.editor.selected_node().is_some();
+                    ui.menu_button("▾", |ui| {
+                        ui.set_min_width(220.0);
+                        if ui
+                            .add_enabled(can_partial, egui::Button::new("Run up to selected block"))
+                            .on_hover_text("Fresh data from preceding steps")
+                            .clicked()
+                        {
+                            self.start_run(RunKind::UntilSelected);
+                            ui.close();
+                        }
+                        let single_hint = if self.run.is_some() {
+                            "Use available inputs from the last run"
+                        } else {
+                            "Current literals and arguments; no run history"
+                        };
+                        if ui
+                            .add_enabled(can_partial, egui::Button::new("Run only selected step"))
+                            .on_hover_text(single_hint)
+                            .clicked()
+                        {
+                            self.start_run(RunKind::SingleSelected);
+                            ui.close();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Run options");
+                    if ui
+                        .add_enabled(can_run, widgets::primary_button("▶  Run test"))
+                        .on_hover_text("Run the whole scenario")
+                        .clicked()
+                    {
+                        self.start_run(RunKind::Full);
+                    }
                 }
                 ui.add_space(6.0);
-                ui.selectable_value(&mut self.mode, RunMode::Live, "API")
-                    .on_hover_text("Send real requests to the configured API");
-                ui.selectable_value(&mut self.mode, RunMode::Simulation, "Simulation")
-                    .on_hover_text("Use saved sample responses; no requests are sent");
+                ui.add_enabled_ui(!running, |ui| {
+                    ui.selectable_value(&mut self.mode, RunMode::Live, "API")
+                        .on_hover_text("Send real requests to the configured API");
+                    ui.selectable_value(&mut self.mode, RunMode::Simulation, "Simulation")
+                        .on_hover_text("Use saved sample responses; no requests are sent");
+                });
             });
         });
         if let Some(notice) = self.notice.clone() {
@@ -530,54 +729,104 @@ impl App {
     }
 
     fn report(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("report")
-            .resizable(self.report_open)
-            .default_size(if self.report_open {
-                self.report_height
-            } else {
-                40.0
-            })
-            .size_range(if self.report_open {
-                120.0..=620.0
-            } else {
-                40.0..=40.0
-            })
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(24, 8)),
-            )
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let arrow = if self.report_open { "▾" } else { "▸" };
-                    if ui
-                        .add(
-                            egui::Button::new(format!(
-                                "{arrow}  {} run",
-                                if self.report_open { "Hide" } else { "Show" }
-                            ))
-                            .frame(false),
-                        )
-                        .clicked()
-                    {
-                        self.report_open = !self.report_open;
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        widgets::hint(ui, "Results and data of every step");
-                    });
-                });
-                if self.report_open {
-                    self.report_height = ui.available_height() + 40.0;
-                    ui.separator();
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(16.0);
-                        ui.label(
-                            RichText::new("Results appear after you run the scenario.")
-                                .color(theme::MUTED),
-                        );
-                    });
+        let actions = {
+            let selected_id = self.editor.selection.first().map(String::as_str);
+            let context = report::Context {
+                run: self.run.as_ref(),
+                selected_node_id: selected_id,
+                error_policy: self.editor.scenario().error_policy,
+                running: self.is_running(),
+                stale: self.is_run_stale(),
+                files_busy: self.files.busy(),
+            };
+            self.report.show(ui, &context)
+        };
+        for action in actions {
+            self.report_action(action);
+        }
+    }
+
+    fn report_action(&mut self, action: report::Action) {
+        match action {
+            report::Action::SelectNode(id) => {
+                let Some(phase) = self
+                    .run
+                    .as_ref()
+                    .and_then(|run| run.steps.iter().find(|step| step.node_id == id))
+                    .map(|step| step.phase)
+                else {
+                    return;
+                };
+                self.editor.set_phase(phase);
+                self.editor.selection = vec![id];
+            }
+            report::Action::AssertField {
+                node_id,
+                port,
+                path,
+                value,
+            } => {
+                if self.is_run_stale() {
+                    self.notice = Some(
+                        "The graph changed after this run. Run the test again to add a comparison from current data.".into(),
+                    );
+                    return;
                 }
-            });
+                let target_phase = if self
+                    .editor
+                    .scenario()
+                    .graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == node_id)
+                {
+                    Phase::Main
+                } else {
+                    Phase::Cleanup
+                };
+                self.editor.set_phase(target_phase);
+                self.add_field_assertion(&node_id, &port, &path, &value);
+            }
+            report::Action::AssignField {
+                node_id,
+                port,
+                path,
+            } => {
+                let scenario = self.editor.scenario();
+                let target_phase = if scenario.graph.nodes.iter().any(|node| node.id == node_id) {
+                    Phase::Main
+                } else if scenario.cleanup.nodes.iter().any(|node| node.id == node_id) {
+                    Phase::Cleanup
+                } else {
+                    self.notice = Some("The source block is no longer available.".into());
+                    return;
+                };
+                self.editor.set_phase(target_phase);
+                self.dialog = Some(Dialog::AssignVariable(dialogs::AssignVariableDialog::new(
+                    self.editor.graph(),
+                    &node_id,
+                    &port,
+                    &path,
+                )));
+            }
+            report::Action::SetErrorPolicy(policy) => {
+                let scenario_id = self.editor.scenario().id.clone();
+                self.editor.change_project(|project| {
+                    if let Some(scenario) = project
+                        .scenarios
+                        .iter_mut()
+                        .find(|scenario| scenario.id == scenario_id)
+                    {
+                        scenario.error_policy = policy;
+                    }
+                });
+            }
+            report::Action::ExportReport => {
+                if let Some(run) = self.run.clone() {
+                    self.files.export_report(run);
+                }
+            }
+        }
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
@@ -595,15 +844,28 @@ impl App {
         });
         let reference = self.editor.reference_graph().into_owned();
         let parameters = self.editor.parameter_names();
+        let in_scenario = self.editor.draft().is_none();
+        let stale = self.is_run_stale();
+        let phase = self.editor.phase();
         let actions = {
+            let run = in_scenario.then_some(self.run.as_ref()).flatten();
+            let step = (in_scenario && !stale)
+                .then(|| {
+                    self.run.as_ref().and_then(|run| {
+                        run.steps
+                            .iter()
+                            .find(|step| step.phase == phase && step.node_id == node.id)
+                    })
+                })
+                .flatten();
             let context = inspector::Context {
                 node: &node,
                 graph: &reference,
                 board: self.editor.graph(),
                 project: self.editor.project(),
                 parameters: &parameters,
-                run: None,
-                step: None,
+                run,
+                step,
             };
             self.inspector.show(ui, &context)
         };
@@ -666,13 +928,26 @@ impl App {
     fn board(&mut self, ui: &mut egui::Ui) {
         let context = self.editor.context_key();
         let reference = self.editor.reference_graph().into_owned();
+        let phase = self.editor.phase();
+        let steps: Option<Vec<StepResult>> = (self.editor.draft().is_none()
+            && !self.is_run_stale())
+        .then(|| {
+            self.run.as_ref().map(|run| {
+                run.steps
+                    .iter()
+                    .filter(|step| step.phase == phase)
+                    .cloned()
+                    .collect()
+            })
+        })
+        .flatten();
         let commands = {
             let input = canvas::Input {
                 graph: self.editor.graph(),
                 reference_graph: &reference,
                 project: self.editor.project(),
                 selection: &self.editor.selection,
-                steps: None,
+                steps: steps.as_deref(),
                 can_paste: self
                     .editor
                     .clipboard
@@ -1107,10 +1382,12 @@ impl App {
                     project.name = name.trim().to_owned();
                     self.editor.add_project(project);
                     self.secrets.clear();
+                    self.clear_run();
                 }
                 Some(Dialog::NewScenario(name)) => {
                     self.editor
                         .add_scenario(apiforge_core::demos::empty_scenario(name.trim()));
+                    self.clear_run();
                 }
                 _ => {}
             }
@@ -1142,6 +1419,7 @@ impl App {
                 if let Some(first) = first {
                     self.editor.switch_project(&first);
                     self.secrets.clear();
+                    self.clear_run();
                 }
                 self.notice = Some(format!("Imported {count} project(s)."));
             }
@@ -1165,5 +1443,100 @@ pub fn default_workspace() -> Workspace {
         version: 1,
         active_id: projects[0].id.clone(),
         projects,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apiforge_core::model::ErrorPolicy;
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn wait_until_finished(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.is_running() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            app.poll_run();
+        }
+        app.poll_run();
+    }
+
+    #[test]
+    fn simulation_run_completes_and_detects_staleness_on_edit() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Source::Session(default_workspace()));
+        app.start_run(RunKind::Full);
+        wait_until_finished(&mut app);
+
+        let run = app.run.as_ref().expect("run report should be present");
+        assert_eq!(run.status, RunStatus::Passed);
+        assert!(!app.is_run_stale());
+
+        // Single-step run with compatible previous_run succeeds.
+        let target_id = app.editor.scenario().graph.nodes[1].id.clone();
+        app.editor.selection = vec![target_id.clone()];
+        app.start_run(RunKind::SingleSelected);
+        wait_until_finished(&mut app);
+        let single_run = app.run.as_ref().expect("single step report");
+        assert!(single_run.diagnostic);
+        let main_steps: Vec<_> = single_run
+            .steps
+            .iter()
+            .filter(|step| step.phase == Phase::Main)
+            .collect();
+        assert_eq!(main_steps.len(), 1);
+        assert_eq!(main_steps[0].node_id, target_id);
+
+        // Editing the graph marks the report as stale and blocks stale assertions/single-step reuse.
+        let mut graph = app.editor.graph().clone();
+        graph.nodes[0].name = "Edited name".into();
+        app.apply_graph(graph);
+        assert!(app.is_run_stale());
+
+        let count_before = app.editor.graph().nodes.len();
+        app.report_action(report::Action::AssertField {
+            node_id: target_id.clone(),
+            port: "body".into(),
+            path: "status".into(),
+            value: json!(200),
+        });
+        assert_eq!(app.editor.graph().nodes.len(), count_before);
+        assert!(
+            app.notice
+                .as_deref()
+                .unwrap_or_default()
+                .contains("changed after this run")
+        );
+    }
+
+    #[test]
+    fn report_actions_switch_phase_and_add_assertions() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Source::Session(default_workspace()));
+        app.start_run(RunKind::Full);
+        wait_until_finished(&mut app);
+
+        let cleanup_id = app.editor.scenario().cleanup.nodes[0].id.clone();
+        app.report_action(report::Action::SelectNode(cleanup_id.clone()));
+        assert_eq!(app.editor.phase(), Phase::Cleanup);
+        assert_eq!(app.editor.selection, vec![cleanup_id.clone()]);
+
+        let cleanup_before = app.editor.scenario().cleanup.nodes.len();
+        app.editor.set_phase(Phase::Main);
+        app.report_action(report::Action::AssertField {
+            node_id: cleanup_id,
+            port: "status".into(),
+            path: String::new(),
+            value: json!(200),
+        });
+        assert_eq!(app.editor.phase(), Phase::Cleanup);
+        assert_eq!(
+            app.editor.scenario().cleanup.nodes.len(),
+            cleanup_before + 1
+        );
+
+        app.report_action(report::Action::SetErrorPolicy(ErrorPolicy::Stop));
+        assert_eq!(app.editor.scenario().error_policy, ErrorPolicy::Stop);
     }
 }

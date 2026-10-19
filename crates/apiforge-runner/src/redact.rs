@@ -411,6 +411,16 @@ pub(crate) fn decode_uri_component(text: &str) -> Option<String> {
     String::from_utf8(output).ok()
 }
 
+/// Defense-in-depth redaction before exporting a report: learns credentials from
+/// sensitive keys, Bearer headers and URLs in `run` and returns a masked copy.
+pub fn redact_report(run: &RunResult) -> RunResult {
+    let mut redactor = Redactor::new();
+    if let Ok(value) = serde_json::to_value(run) {
+        redactor.collect(&value);
+    }
+    redactor.redact_run(run)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

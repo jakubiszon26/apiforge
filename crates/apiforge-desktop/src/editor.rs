@@ -417,18 +417,6 @@ impl Editor {
         self.switch_project(&id);
     }
 
-    /// Removes the active project, unless it is the last one.
-    pub fn remove_active_project(&mut self) -> bool {
-        if self.workspace.projects.len() < 2 {
-            return false;
-        }
-        let id = self.workspace.active_id.clone();
-        self.workspace.projects.retain(|project| project.id != id);
-        let next = self.workspace.projects[0].id.clone();
-        self.switch_project(&next);
-        true
-    }
-
     pub fn add_scenario(&mut self, scenario: Scenario) {
         let id = scenario.id.clone();
         self.change_project(|project| project.scenarios.push(scenario));

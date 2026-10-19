@@ -4,7 +4,10 @@
 //! document is validated before the editor sees it, so a failed import never
 //! changes the open workspace.
 
-use apiforge_core::{ImportLimits, ValidatedDocument, format::Project, import_document};
+use apiforge_core::{
+    ImportLimits, ValidatedDocument, format::Project, import_document, run::RunResult,
+};
+use apiforge_runner::redact::redact_report;
 use std::{
     fs::File,
     io::Read,
@@ -62,17 +65,7 @@ impl Files {
     /// Exports a project that must already have its secret values removed.
     pub fn export(&mut self, project: Project) {
         self.spawn(move || {
-            let name: String = project
-                .name
-                .chars()
-                .map(|character| {
-                    if character.is_alphanumeric() || character == '-' {
-                        character
-                    } else {
-                        '-'
-                    }
-                })
-                .collect();
+            let name = sanitize_filename(&project.name);
             let Some(path) = rfd::FileDialog::new()
                 .set_title("Export the project")
                 .set_file_name(format!("{name}.json"))
@@ -81,15 +74,24 @@ impl Files {
             else {
                 return Outcome::Cancelled;
             };
-            let result = serde_json::to_vec_pretty(&project)
-                .map_err(|error| error.to_string())
-                .and_then(|bytes| {
-                    apiforge_storage::write_atomic(&path, &bytes).map_err(|error| error.to_string())
-                });
-            match result {
-                Ok(()) => Outcome::Exported(path),
-                Err(message) => Outcome::Failed(format!("Export failed: {message}")),
-            }
+            write_json_bytes(&path, serde_json::to_vec_pretty(&project))
+        });
+    }
+
+    /// Exports a redacted run report as pretty-printed JSON.
+    pub fn export_report(&mut self, run: RunResult) {
+        self.spawn(move || {
+            let redacted = redact_report(&run);
+            let id = sanitize_filename(&redacted.id);
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Export the run report")
+                .set_file_name(format!("api-forge-run-{id}.json"))
+                .add_filter("JSON report", &["json"])
+                .save_file()
+            else {
+                return Outcome::Cancelled;
+            };
+            write_json_bytes(&path, serde_json::to_vec_pretty(&redacted))
         });
     }
 
@@ -126,4 +128,28 @@ pub fn read_document(path: &Path) -> Result<ValidatedDocument, String> {
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read the file ({error})"))?;
     import_document(&bytes, &limits).map_err(|error| error.to_string())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_alphanumeric() || character == '-' {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn write_json_bytes(path: &Path, serialized: serde_json::Result<Vec<u8>>) -> Outcome {
+    let result = serialized
+        .map_err(|error| error.to_string())
+        .and_then(|bytes| {
+            apiforge_storage::write_atomic(path, &bytes).map_err(|error| error.to_string())
+        });
+    match result {
+        Ok(()) => Outcome::Exported(path.to_path_buf()),
+        Err(message) => Outcome::Failed(format!("Export failed: {message}")),
+    }
 }
