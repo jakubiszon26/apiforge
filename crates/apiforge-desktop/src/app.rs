@@ -2,6 +2,7 @@
 
 use crate::{
     canvas::{self, Canvas, Command},
+    dialogs::{self, Outcome},
     editor::{BlockClipboard, Editor},
     files,
     inspector::{self, Inspector},
@@ -28,10 +29,13 @@ pub enum Source {
     Session(Workspace),
 }
 
-#[derive(Clone, Debug, PartialEq)]
 enum Dialog {
     NewProject(String),
     NewScenario(String),
+    Environment(dialogs::EnvironmentDialog),
+    Settings(dialogs::SettingsDialog),
+    AssignVariable(dialogs::AssignVariableDialog),
+    Component(Box<dialogs::ComponentDialog>),
 }
 
 pub struct App {
@@ -43,6 +47,7 @@ pub struct App {
     inspector: Inspector,
     notice: Option<String>,
     mode: RunMode,
+    secrets: dialogs::SessionSecrets,
     dialog: Option<Dialog>,
     files: files::Files,
     report_open: bool,
@@ -85,6 +90,7 @@ impl App {
             inspector: Inspector::default(),
             notice,
             mode: RunMode::Simulation,
+            secrets: dialogs::SessionSecrets::new(),
             dialog: None,
             files: files::Files::default(),
             report_open: true,
@@ -242,7 +248,10 @@ impl App {
                 .on_hover_text("Base URL, variables and session secrets")
                 .clicked()
             {
-                self.notice = Some("The environment editor is not available yet.".into());
+                self.dialog = Some(Dialog::Environment(dialogs::EnvironmentDialog::new(
+                    &self.editor.project().environment,
+                    &self.secrets,
+                )));
             }
         });
 
@@ -253,7 +262,10 @@ impl App {
 
     fn library_action(&mut self, action: library::Action) {
         match action {
-            library::Action::SwitchProject(id) => self.editor.switch_project(&id),
+            library::Action::SwitchProject(id) => {
+                self.editor.switch_project(&id);
+                self.secrets.clear();
+            }
             library::Action::NewProject => self.dialog = Some(Dialog::NewProject(String::new())),
             library::Action::SwitchScenario(id) => self.editor.switch_scenario(&id),
             library::Action::NewScenario => self.dialog = Some(Dialog::NewScenario(String::new())),
@@ -270,10 +282,37 @@ impl App {
                 self.add_node(NodeKind::Variable, None, position, None);
             }
             library::Action::SelectNode(id) => self.editor.selection = vec![id],
-            library::Action::OpenExample(_) => {
-                self.notice = Some("Examples are not available yet.".into());
-            }
+            library::Action::OpenExample(example) => self.open_example(example),
         }
+    }
+
+    fn open_example(&mut self, example: library::Example) {
+        let (id, build, notice) = match example {
+            library::Example::Workflow => (
+                "workflow-poc",
+                apiforge_core::demos::workflow_project as fn() -> apiforge_core::format::Project,
+                "Start → prices → IF → cart → add products. Choose API and run the test; the No branch does not create a cart.",
+            ),
+            library::Example::OperatorBlocks => (
+                "blocks-poc",
+                apiforge_core::demos::blocks_project as fn() -> apiforge_core::format::Project,
+                "Example: open a Comparison and edit the nested blocks in its arguments. You can run a simulation or the local API.",
+            ),
+        };
+        if self
+            .editor
+            .workspace()
+            .projects
+            .iter()
+            .any(|project| project.id == id)
+        {
+            self.editor.switch_project(id);
+            self.secrets.clear();
+            return;
+        }
+        self.editor.add_project(build());
+        self.secrets.clear();
+        self.notice = Some(notice.into());
     }
 
     fn topbar(&mut self, ui: &mut egui::Ui) {
@@ -296,7 +335,10 @@ impl App {
                     .on_hover_text("Project and scenario settings")
                     .clicked()
                 {
-                    self.notice = Some("Project settings are not available yet.".into());
+                    self.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
+                        self.editor.project(),
+                        &self.editor.scenario().id,
+                    )));
                 }
                 ui.separator();
                 if ui
@@ -361,14 +403,25 @@ impl App {
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if draft.is_some() {
+                if let Some(draft) = &draft {
                     if ui
                         .add(widgets::primary_button("Save revision"))
                         .on_hover_text("Save the inner graph as a new revision")
                         .clicked()
                     {
-                        self.notice =
-                            Some("Saving component revisions is not available yet.".into());
+                        let selected: Vec<String> = draft
+                            .graph
+                            .nodes
+                            .iter()
+                            .map(|node| node.id.clone())
+                            .collect();
+                        self.dialog =
+                            Some(Dialog::Component(Box::new(dialogs::ComponentDialog::new(
+                                &draft.graph,
+                                &selected,
+                                self.editor.project(),
+                                Some(&draft.definition),
+                            ))));
                     }
                     if ui.button("← Back without saving").clicked() {
                         self.editor.leave_component();
@@ -563,7 +616,7 @@ impl App {
                         .iter_mut()
                         .find(|candidate| candidate.id == updated.id)
                     {
-                        *slot = updated;
+                        *slot = *updated;
                         self.apply_graph(graph);
                     }
                 }
@@ -572,9 +625,13 @@ impl App {
                 inspector::Action::AssertField { port, path, value } => {
                     self.add_field_assertion(&node.id, &port, &path, &value)
                 }
-                inspector::Action::AssignField { .. } => {
-                    self.notice =
-                        Some("Assigning response fields to variables is not available yet.".into());
+                inspector::Action::AssignField { port, path } => {
+                    self.dialog = Some(Dialog::AssignVariable(dialogs::AssignVariableDialog::new(
+                        self.editor.graph(),
+                        &node.id,
+                        &port,
+                        &path,
+                    )));
                 }
                 inspector::Action::Error(message) => self.canvas.set_error(message),
             }
@@ -703,7 +760,14 @@ impl App {
                 }
             }
             Command::SaveSelectionAsComponent => {
-                self.notice = Some("Saving components is not available yet.".into());
+                if !self.editor.selection.is_empty() {
+                    self.dialog = Some(Dialog::Component(Box::new(dialogs::ComponentDialog::new(
+                        self.editor.graph(),
+                        &self.editor.selection,
+                        self.editor.project(),
+                        None,
+                    ))));
+                }
             }
         }
     }
@@ -877,6 +941,109 @@ impl App {
     }
 
     fn dialogs(&mut self, context: &egui::Context) {
+        match &mut self.dialog {
+            None => {}
+            Some(Dialog::NewProject(_) | Dialog::NewScenario(_)) => self.new_item_dialog(context),
+            Some(Dialog::Environment(dialog)) => match dialog.show(context) {
+                Outcome::Open => {}
+                Outcome::Cancelled => self.dialog = None,
+                Outcome::Applied((environment, secrets)) => {
+                    self.editor
+                        .change_project(|project| project.environment = environment);
+                    self.secrets = secrets;
+                    self.dialog = None;
+                }
+            },
+            Some(Dialog::Settings(dialog)) => match dialog.show(context) {
+                Outcome::Open => {}
+                Outcome::Cancelled => self.dialog = None,
+                Outcome::Applied(change) => {
+                    self.editor.change_project(|project| {
+                        project.name = change.project_name;
+                        project.contracts = change.contracts;
+                        if let Some(scenario) = project
+                            .scenarios
+                            .iter_mut()
+                            .find(|scenario| scenario.id == change.scenario_id)
+                        {
+                            scenario.name = change.scenario_name;
+                            scenario.description = change.description;
+                            scenario.error_policy = change.error_policy;
+                            scenario.parameters = change.parameters;
+                        }
+                    });
+                    self.dialog = None;
+                }
+            },
+            Some(Dialog::AssignVariable(dialog)) => match dialog.show(context) {
+                Outcome::Open => {}
+                Outcome::Cancelled => self.dialog = None,
+                Outcome::Applied(assignment) => {
+                    let source_id = dialog.source_id.clone();
+                    let port = dialog.port.clone();
+                    let path = dialog.path.clone();
+                    match edit::assign_response_variable(
+                        self.editor.graph(),
+                        self.editor.project(),
+                        &source_id,
+                        &port,
+                        &path,
+                        &assignment.name,
+                        assignment.target_id.as_deref(),
+                    ) {
+                        Ok(assigned) => {
+                            let label = if path.is_empty() { &port } else { &path };
+                            self.apply_graph(assigned.graph);
+                            self.editor.selection = vec![assigned.variable_id];
+                            self.notice = Some(format!(
+                                "Variable “{}” reads {label} from the response on every run.",
+                                assignment.name
+                            ));
+                            self.dialog = None;
+                        }
+                        Err(error) => {
+                            if let Some(Dialog::AssignVariable(dialog)) = &mut self.dialog {
+                                dialog.set_error(error.to_string());
+                            }
+                        }
+                    }
+                }
+            },
+            Some(Dialog::Component(dialog)) => {
+                let project = self.editor.project().clone();
+                match dialog.show(context, &project) {
+                    Outcome::Open => {}
+                    Outcome::Cancelled => self.dialog = None,
+                    Outcome::Applied(saved) => match edit::add_component(
+                        &project,
+                        &saved.component,
+                        saved.revision_of.as_deref(),
+                    ) {
+                        Ok(next) => {
+                            let added = next.components.last().cloned().unwrap_or(saved.component);
+                            let revising = saved.revision_of.is_some();
+                            self.editor.change_project(|project| *project = next);
+                            if revising {
+                                self.editor.leave_component();
+                            }
+                            self.dialog = None;
+                            self.notice = Some(format!(
+                                "Saved “{}”, revision {}. Existing instances keep their revisions.",
+                                added.name, added.revision
+                            ));
+                        }
+                        Err(error) => {
+                            if let Some(Dialog::Component(dialog)) = &mut self.dialog {
+                                dialog.set_error(error.to_string());
+                            }
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    fn new_item_dialog(&mut self, context: &egui::Context) {
         let Some(dialog) = &mut self.dialog else {
             return;
         };
@@ -893,6 +1060,7 @@ impl App {
                 "Start from an empty board and blocks from the project library.",
                 name,
             ),
+            _ => return,
         };
         let mut close = false;
         let mut create = false;
@@ -938,12 +1106,13 @@ impl App {
                     let mut project = apiforge_core::demos::empty_project();
                     project.name = name.trim().to_owned();
                     self.editor.add_project(project);
+                    self.secrets.clear();
                 }
                 Some(Dialog::NewScenario(name)) => {
                     self.editor
                         .add_scenario(apiforge_core::demos::empty_scenario(name.trim()));
                 }
-                None => {}
+                _ => {}
             }
         } else if close {
             self.dialog = None;
@@ -972,6 +1141,7 @@ impl App {
                 }
                 if let Some(first) = first {
                     self.editor.switch_project(&first);
+                    self.secrets.clear();
                 }
                 self.notice = Some(format!("Imported {count} project(s)."));
             }

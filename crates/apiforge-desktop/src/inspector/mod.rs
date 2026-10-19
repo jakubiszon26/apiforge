@@ -7,6 +7,8 @@ mod binding;
 mod fields;
 mod response;
 
+pub use response::sample_output;
+
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     edit::{self, bind_variable_text, prune_template_inputs},
@@ -23,7 +25,7 @@ use eframe::egui::{self, Id, RichText, Ui};
 use std::collections::HashSet;
 
 pub enum Action {
-    UpdateNode(Node),
+    UpdateNode(Box<Node>),
     /// A change to ordering edges of the board.
     UpdateGraph(Graph),
     EditComponent,
@@ -115,7 +117,7 @@ impl Inspector {
         self.response_choice(ui.ctx(), context, &mut node);
 
         if node != *context.node {
-            actions.push(Action::UpdateNode(prune_template_inputs(&node)));
+            actions.push(Action::UpdateNode(Box::new(prune_template_inputs(&node))));
         }
         actions
     }

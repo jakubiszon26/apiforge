@@ -9,6 +9,7 @@
 mod app;
 mod canvas;
 mod capture;
+mod dialogs;
 mod dnd;
 mod editor;
 mod files;

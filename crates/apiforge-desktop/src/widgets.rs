@@ -178,3 +178,54 @@ pub fn primary_button(text: &str) -> egui::Button<'static> {
         .stroke(Stroke::NONE)
         .min_size(vec2(0.0, 34.0))
 }
+
+/// A validation message shown directly below the field it describes.
+pub fn field_error(ui: &mut Ui, text: impl Into<String>) {
+    ui.add(egui::Label::new(RichText::new(text.into()).size(11.0).color(theme::DANGER)).wrap());
+}
+
+/// Draws `add_contents` with a red outline on its fields when `invalid`.
+pub fn validated<R>(ui: &mut Ui, invalid: bool, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        if invalid {
+            let stroke = Stroke::new(1.0, theme::DANGER);
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.inactive.bg_stroke = stroke;
+            widgets.hovered.bg_stroke = stroke;
+            ui.visuals_mut().selection.stroke = stroke;
+        }
+        add_contents(ui)
+    })
+    .inner
+}
+
+/// A tinted block listing the problems that prevent saving.
+pub fn error_box(ui: &mut Ui, messages: &[String]) {
+    if messages.is_empty() {
+        return;
+    }
+    egui::Frame::new()
+        .fill(theme::DANGER.gamma_multiply(0.08))
+        .stroke(Stroke::new(1.0, theme::DANGER.gamma_multiply(0.3)))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            for message in messages {
+                ui.add(
+                    egui::Label::new(RichText::new(message).size(11.5).color(theme::DANGER)).wrap(),
+                );
+            }
+        });
+}
+
+/// A small frameless button for row actions such as removing an entry.
+pub fn icon_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(
+        RichText::new(text.to_owned())
+            .size(12.0)
+            .color(theme::MUTED),
+    )
+    .frame(false)
+    .min_size(vec2(24.0, 24.0))
+}

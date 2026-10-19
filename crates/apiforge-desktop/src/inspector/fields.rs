@@ -201,6 +201,8 @@ pub fn selection(text: &str, start: usize, end: usize) -> TextSelection<'_> {
     }
 }
 
+pub type DroppedVariable = (String, VariableBlock, usize, usize);
+
 /// Edits a string map (query parameters, headers). Returns the new map when it
 /// changed, and a variable dropped into one of its values.
 pub fn string_map(
@@ -208,10 +210,7 @@ pub fn string_map(
     id: Id,
     label: &str,
     map: &IndexMap<String, String>,
-) -> (
-    Option<IndexMap<String, String>>,
-    Option<(String, VariableBlock, usize, usize)>,
-) {
+) -> (Option<IndexMap<String, String>>, Option<DroppedVariable>) {
     let mut next = map.clone();
     let mut changed = false;
     let mut dropped = None;
