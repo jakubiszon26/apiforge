@@ -1,13 +1,12 @@
 //! Explicit domain vocabulary shared by import, the future runner and native UI.
+//!
+//! A value that may be absent is an `Option<Value>`: `None` is a missing field and
+//! `Some(Value::Null)` is a present JSON null. Never use `Value` indexing, which
+//! turns a missing field into null.
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::fmt;
 
-/// An absent field is not JSON null. Never use Value's indexing fallback here.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ResolvedValue {
-    Missing,
-    Present(Value),
-}
+pub use crate::operator::Operator;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +49,27 @@ pub enum ValueType {
     Object,
     Array,
 }
+
+impl ValueType {
+    /// Name used in documents, equal to the corresponding JSON type name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::String => "string",
+            Self::Number => "number",
+            Self::Boolean => "boolean",
+            Self::Object => "object",
+            Self::Array => "array",
+        }
+    }
+}
+
+impl fmt::Display for ValueType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Predicate {
@@ -63,72 +83,6 @@ pub enum Predicate {
     Contains,
     Type,
     Approximately,
-}
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum Operator {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Modulo,
-    Random,
-    Round,
-    Equals,
-    NotEquals,
-    Greater,
-    Less,
-    AtLeast,
-    AtMost,
-    And,
-    Or,
-    Not,
-    Concat,
-    Letter,
-    Length,
-    Contains,
-    Abs,
-    Floor,
-    Ceiling,
-    Sqrt,
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Ln,
-    Log,
-    Exp,
-    Power10,
-    TypeOf,
-    Exists,
-    Field,
-}
-impl Operator {
-    pub fn input_names(self) -> &'static [&'static str] {
-        match self {
-            Self::Not
-            | Self::Length
-            | Self::Abs
-            | Self::Floor
-            | Self::Ceiling
-            | Self::Sqrt
-            | Self::Sin
-            | Self::Cos
-            | Self::Tan
-            | Self::Asin
-            | Self::Acos
-            | Self::Atan
-            | Self::Ln
-            | Self::Log
-            | Self::Exp
-            | Self::Power10
-            | Self::TypeOf
-            | Self::Exists => &["left"],
-            _ => &["left", "right"],
-        }
-    }
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]

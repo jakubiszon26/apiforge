@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 indexmap.workspace = true
 thiserror.workspace = true
+libm.workspace = true
 
 [lints]
 workspace = true

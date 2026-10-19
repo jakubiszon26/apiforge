@@ -321,7 +321,7 @@ fn binding(
             require(
                 inputs
                     .keys()
-                    .all(|key| operator.input_names().contains(&key.as_str())),
+                    .all(|key| operator.spec().operand(key).is_some()),
                 path,
                 "Unknown operator argument",
             )?;
