@@ -1,134 +1,303 @@
-# Audyt rdzenia przed migracją do Rust
+# Engine audit before the Rust migration
 
-Stan źródeł: 19 października 2026. Pierwsze wydanie obejmuje równorzędnie Linux i Windows. Audyt odczytuje implementację i istniejące testy; nie stanowi potwierdzenia uruchomienia tych testów. Punkty wymagające doprecyzowania są oddzielone od zachowania, które użytkownik już wykorzystuje.
+Source state: 19 October 2026. The first release covers Linux and Windows equally. The
+audit reads the implementation and existing tests; it does not confirm that those tests
+were run. Points needing clarification are kept apart from behaviour users already rely
+on.
 
-## Źródła prawdy i granica zgodności
+## Sources of truth and the compatibility boundary
 
-Format projektu opisuje `shared/model.ts`, wiązania i zależności `shared/bindings.ts` oraz `shared/graph.ts`, operatory `shared/operators.ts`. Faktyczne wykonanie znajduje się w `api/runner/index.ts` i `api/runner/control.ts`. Import z przeglądarki obsługuje `app/features/workspace/storage.ts`. `shared/CONTRACT.md` pomaga w orientacji, ale sam nie wystarcza jako specyfikacja produkcyjna.
+The project format is described by `shared/model.ts`, bindings and dependencies by
+`shared/bindings.ts` and `shared/graph.ts`, operators by `shared/operators.ts`. Actual
+execution lives in `api/runner/index.ts` and `api/runner/control.ts`. Browser import is
+handled by `app/features/workspace/storage.ts`.
+[implementation-contract.md](../poc/implementation-contract.md) helps with orientation but
+is not sufficient as a production specification.
 
-Należy zachować istniejące projekty, konfiguracje komponentów i sens wyników. Nie należy kopiować błędów, przypadkowej kolejności słowników JS ani ograniczeń przeglądarkowego zapisu jako architektury aplikacji natywnej. Każda świadoma zmiana semantyki musi mieć decyzję, migrację i test porównawczy.
+Keep existing projects, component configurations and the meaning of results. Do not copy
+bugs, accidental JS dictionary ordering or the limits of browser storage as native
+architecture. Every deliberate semantic change needs a decision, a migration and a
+comparison test.
 
-## Macierz funkcji i zgodności
+## Feature and compatibility matrix
 
-| Obszar               | Działające zachowanie do przeniesienia                                                                   | Kryterium odbioru w Rust                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Dokument             | `Project.version = 1`; scenariusze, komponenty, kontrakty, środowisko; pozycje węzłów                    | Import rzeczywistych plików v1 bez utraty konfiguracji; ponowny eksport zachowuje sens dokumentu |
-| Węzły                | `trigger`, `if`, `request`, `select`, `build`, `formula`, `assert`, `condition`, `component`, `variable` | Każdy wariant ma jawny typ konfiguracji, walidator, porty i wykonawcę                            |
-| Argumenty            | Literał JSON, referencja węzeł/port/ścieżka, parametr, środowisko, zagnieżdżone wyrażenie                | Argument może być dowolnym JSON; brak specjalnego uprzywilejowania ID                            |
-| Połączenia danych    | Wyliczane z wszystkich liści referencji, także wewnątrz wyrażeń                                          | Jeden zapis źródłowy: wiązania; brak drugiej rozjeżdżającej się listy krawędzi danych            |
-| Połączenia sterujące | `Graph.edges`: źródło, cel, opcjonalna gałąź `true`/`false`                                              | Cykl wykrywany łącznie dla zależności sterowania i danych                                        |
-| Start                | Ręczny wyzwalacz; maksymalnie jeden na graf, bez wejść                                                   | Wykonanie wyłącznie aktywnej ścieżki; odłączony request nie wysyła HTTP                          |
-| IF                   | Te same podstawowe predykaty co porównanie; wynik `false` nadal `passed`                                 | Wykonuje się tylko wybrana gałąź; pozostałe kroki dostają `skipped`                              |
-| Porównanie           | Jeden blok `assert`, predykat typu w tym samym bloku                                                     | Obsługa typu, wartości, tolerancji i brakujących pól bez osobnego bloku typu                     |
-| Warunek historyczny  | `condition` zwraca `blocked` przy niespełnieniu; dodatkowo lista predykatów `all`/`any`                  | Zgodność importu; UI odróżnia warunek blokujący od IF                                            |
-| Request              | HTTP/HTTPS; argumenty URL, query, headers, JSON body; symulacja i wykonanie rzeczywiste                  | Testy lokalnego serwera potwierdzają metodę, kodowanie, treść, kolejność i brak ponowień         |
-| Odpowiedź            | Porty `body`, `status`, `headers`, `duration`; tekst jeśli odpowiedź nie jest JSON                       | 4xx/5xx pozostają danymi do IF/asercji, błąd transportu jest `error`                             |
-| Zmienna              | `inputs.value` → `outputs.value`, z zachowaniem typu; przypisanie pola odpowiedzi to referencja          | Kolejny przebieg pobiera świeże pole, a nie zapamiętaną wartość z edytora                        |
-| Wybór pola           | Ścieżki obiektów/tablic, klucze cytowane, Unicode, pusta ścieżka = cały dokument                         | Testy `null`, `false`, `0`, pustego tekstu, pustych kluczy i kluczy z kropką                     |
-| Budowanie danych     | Nazwane wejścia tworzą obiekt lub tablicę                                                                | Kolejność elementów tablicy jest jawnie określona, nie zależy od mapy Rust                       |
-| Operatory            | Jeden katalog steruje portami, formularzem, walidacją i interpreterem                                    | Wszystkie 37 operatorów mają tabele przypadków i błędów                                          |
-| Komponenty           | Definicje przypięte do `(id, revision)`; własne parametry i lokalne wyjścia                              | Zmiana rewizji nie zmienia istniejących instancji; odrzucana rekurencja                          |
-| Granica komponentu   | Typowane porty, domyślne wartości, binding wyjścia także literal/parametr/env/wyrażenie                  | Ekstrakcja zachowuje każde zagnieżdżone wiązanie i sterowanie IF                                 |
-| Cleanup              | Osobny graf po głównym przebiegu, także po błędzie/anulowaniu                                            | Usuwa utworzony zasób również po późniejszym błędzie; nie usuwa zasobu bez ID                    |
-| Diagnostyka          | Całość, do wybranego kroku, pojedynczy krok z historycznymi wyjściami                                    | Wynik diagnostyczny jawnie oznacza historyczne dane i nie udaje pełnego przebiegu                |
-| Raport               | Statusy kroku, faza, wejścia/wyjścia, request, actual/expected, zagnieżdżone wyniki                      | Zdarzenia i końcowy wynik dają zgodny status, dane są zredagowane przed publikacją               |
-| Edycja               | Kopia konfiguracji, wielokrotne wklejenie, remap referencji wewnętrznych, zachowanie zewnętrznych        | Kopie są niezależne; gałęzie IF zachowane; nie powstają dwa Starty                               |
-| Schematy danych      | Kontrakt jest obecnie ID + przykładowy JSON, a nie pełny JSON Schema                                     | Import nie obiecuje walidacji schematu, której stary silnik nie wykonywał                        |
+| Area                | Working behaviour to port                                                                                | Rust acceptance criterion                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Document            | `Project.version = 1`; scenarios, components, contracts, environment; node positions                     | Real v1 files import without losing configuration; re-export keeps the document's meaning   |
+| Nodes               | `trigger`, `if`, `request`, `select`, `build`, `formula`, `assert`, `condition`, `component`, `variable` | Every variant has an explicit configuration type, validator, ports and executor             |
+| Arguments           | JSON literal, node/port/path reference, parameter, environment, nested expression                        | An argument can be any JSON; IDs get no special privileges                                  |
+| Data connections    | Derived from all reference leaves, including inside expressions                                          | One source of truth: bindings; no second, diverging list of data edges                      |
+| Control connections | `Graph.edges`: source, target, optional `true`/`false` branch                                            | Cycles detected across control and data dependencies together                               |
+| Start               | Manual trigger; at most one per graph, no inputs                                                         | Only the active path executes; a disconnected request sends no HTTP                         |
+| IF                  | The same basic predicates as Comparison; a `false` result is still `passed`                              | Only the chosen branch executes; other steps get `skipped`                                  |
+| Comparison          | One `assert` block, with the type predicate in the same block                                            | Type, value, tolerance and missing fields handled without a separate type block             |
+| Legacy condition    | `condition` returns `blocked` when not met; also a predicate list with `all`/`any`                       | Import compatible; the UI distinguishes a blocking condition from IF                        |
+| Request             | HTTP/HTTPS; URL, query, header and JSON body arguments; simulation and real execution                    | Local server tests confirm method, encoding, body, ordering and no retries                  |
+| Response            | Ports `body`, `status`, `headers`, `duration`; text if the response is not JSON                          | 4xx/5xx stay data for IF/assertions; a transport failure is `error`                         |
+| Variable            | `inputs.value` → `outputs.value`, type preserved; assigning a response field is a reference              | The next run reads a fresh field, never a value remembered by the editor                    |
+| Field selection     | Object/array paths, quoted keys, Unicode, empty path = whole document                                    | Tests for `null`, `false`, `0`, empty text, empty keys and keys with dots                   |
+| Build data          | Named inputs form an object or array                                                                     | Array element order is explicitly defined and does not depend on a Rust map                 |
+| Operators           | One catalogue drives ports, form, validation and interpreter                                             | All 37 operators have case and error tables                                                 |
+| Components          | Definitions pinned to `(id, revision)`; own parameters and local outputs                                 | Changing a revision does not change existing instances; recursion rejected                  |
+| Component boundary  | Typed ports, defaults, output bindings also literal/parameter/env/expression                             | Extraction keeps every nested binding and IF control                                        |
+| Cleanup             | A separate graph after the main run, also after error/cancellation                                       | Deletes a created resource even after a later error; never deletes a resource without an ID |
+| Diagnostics         | Full run, up to a chosen step, single step with historical outputs                                       | A diagnostic result marks historical data explicitly and does not pose as a full run        |
+| Report              | Step statuses, phase, inputs/outputs, request, actual/expected, nested results                           | Events and the final result agree on status; data is redacted before publication            |
+| Editing             | Copying configuration, repeated paste, remapping internal references, keeping external ones              | Copies are independent; IF branches kept; no second Start is created                        |
+| Data schemas        | A contract is currently an ID + sample JSON, not a full JSON Schema                                      | Import does not promise schema validation the old engine never performed                    |
 
-Katalog operatorów: `add`, `subtract`, `multiply`, `divide`, `modulo`, `random`, `round`, `equals`, `notEquals`, `greater`, `less`, `atLeast`, `atMost`, `and`, `or`, `not`, `concat`, `letter`, `length`, `contains`, `abs`, `floor`, `ceiling`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `ln`, `log`, `exp`, `power10`, `typeOf`, `exists`, `field`.
+Operator catalogue: `add`, `subtract`, `multiply`, `divide`, `modulo`, `random`, `round`,
+`equals`, `notEquals`, `greater`, `less`, `atLeast`, `atMost`, `and`, `or`, `not`, `concat`,
+`letter`, `length`, `contains`, `abs`, `floor`, `ceiling`, `sqrt`, `sin`, `cos`, `tan`,
+`asin`, `acos`, `atan`, `ln`, `log`, `exp`, `power10`, `typeOf`, `exists`, `field`.
 
-## Dokładna semantyka wykonania
+## Exact execution semantics
 
-### Wartości i wyrażenia
+### Values and expressions
 
-Brak pola jest obecnie reprezentowany przez JS `undefined`, a JSON `null` jest rzeczywistą wartością. Rust musi użyć osobnego typu, np. `ResolvedValue::{Missing, Present(Value)}`; `Option<Value>` też może poprawnie odróżnić `None` od `Some(Value::Null)`. Indeksowanie `serde_json::Value` zwracające zastępcze `Null` nie może być mechanizmem rozwiązywania ścieżek.
+A missing field is represented by JS `undefined`, while JSON `null` is a real value. Rust
+must use a distinct representation; `Option<Value>` correctly distinguishes `None` from
+`Some(Value::Null)`. `serde_json::Value` indexing, which returns a substitute `Null`, must
+never be used to resolve paths.
 
-`exists` jest prawdziwe dla `null`, `false`, `0` i `""`; fałszywe tylko dla Missing. `notEmpty` odrzuca Missing, null, pusty tekst i pusty obiekt/tablicę; dopuszcza `false` i `0`. Porównania wartości są głębokie i bez konwersji typów. Typ rozróżnia null, tablicę i obiekt. Operatory liczbowe oraz logiczne nie konwertują tekstów, null ani bool. Wynik nieskończony jest błędem. Domyślne wartości portu zastępują Missing, nigdy null.
+`exists` is true for `null`, `false`, `0` and `""`, false only for Missing. `notEmpty`
+rejects Missing, null, empty text and empty object/array; it accepts `false` and `0`.
+Value comparisons are deep and without type conversion. Type distinguishes null, array
+and object. Numeric and logic operators never convert text, null or bool. An infinite
+result is an error. Port defaults replace Missing, never null.
 
-Wyrażenia są obliczane zachłannie; `and` i `or` obliczają obie strony. Referencja ukryta w zagnieżdżeniu nadal tworzy zależność grafu. `field` może zwrócić Missing. `letter` jest numerowane od 1, indeks tablicy w ścieżce od 0; tekstowe `length` i `letter` liczą punkty kodowe Unicode, nie bajty UTF-8 ani grafemy.
+Expressions are evaluated eagerly; `and` and `or` evaluate both sides. A reference hidden
+in nesting still creates a graph dependency. `field` can return Missing. `letter` is
+1-based, path array indices are 0-based; text `length` and `letter` count Unicode code
+points, not UTF-8 bytes or graphemes.
 
-### Kolejność i gałęzie
+### Ordering and branches
 
-Operacje są obecnie wykonywane szeregowo, każda jest `await`owana. Węzeł musi zaczekać na zakończenie wszystkich zależności danych oraz sterowania; przy kilku gotowych wybierana jest kolejność `graph.nodes`. To nie jest równoległy scheduler. Cztery równoczesne przebiegi dopuszczone przez API to osobna sprawa.
+Operations execute serially and each is awaited. A node waits for all its data and
+control dependencies to finish; when several are ready, `graph.nodes` order decides. This
+is not a parallel scheduler. The four concurrent runs allowed by the API are a separate
+matter.
 
-Graf ze Startem oblicza osiągalność po zależnościach, dopuszczając czyste argumenty `variable/select/build/formula` jako poprzedników. Odłączone requesty i komponenty nie powinny uruchamiać się tylko dlatego, że aktywna ścieżka chce ich danych. Graf bez Startu zachowuje legacy: wykonuje wszystkie korzenie.
+A graph with Start computes reachability along dependencies, admitting pure
+`variable/select/build/formula` arguments as predecessors. Disconnected requests and
+components must not run just because the active path wants their data. A graph without
+Start keeps the legacy behaviour: all roots run.
 
-IF wytwarza `passed: boolean` i zawsze ma status `passed`, chyba że samo obliczenie warunku zgłosi błąd. Krawędź wychodząca z IF wymaga `branch: "true" | "false"`; inne źródła nie mogą mieć tej właściwości. Niewybrana ścieżka propaguje `skipped`, nie błąd.
+IF produces `passed: boolean` and always has status `passed`, unless evaluating the
+condition itself raises an error. An edge leaving IF needs `branch: "true" | "false"`;
+other sources must not have that property. The unchosen path propagates `skipped`, not an
+error.
 
-Scalenie alternatywnych krawędzi sterowania działa jak OR aktywacji, ale scheduler czeka na wszystkich poprzedników. Pominięta alternatywa nie blokuje aktywnej. Błąd aktywnego poprzednika nie zostaje ukryty przez powodzenie innego. Referencja danych do pominiętego węzła nadal jest niedostępną zależnością; OR dotyczy wyłącznie sterowania.
+Merging alternative control edges acts as an OR of activation, but the scheduler waits
+for all predecessors. A skipped alternative does not block the active one. An error of an
+active predecessor is not hidden by another one succeeding. A data reference to a skipped
+node is still an unavailable dependency; OR applies to control only.
 
-`assert` z wynikiem fałszywym daje `failed`, ale zachowuje wyjścia i może być poprzednikiem dalszych operacji przy `continue`. `condition` daje `blocked` i blokuje potomków. `error/blocked/skipped/cancelled` poprzednika zwykle blokują głównych potomków. `errorPolicy=stop` pomija pozostałą część głównego grafu po failed/error/blocked, bez pomijania cleanup.
+A false `assert` gives `failed` but keeps its outputs and may precede later operations
+under `continue`. `condition` gives `blocked` and blocks its descendants.
+`error/blocked/skipped/cancelled` of a predecessor normally blocks main-phase descendants.
+`errorPolicy=stop` skips the rest of the main graph after failed/error/blocked, without
+skipping cleanup.
 
-### Komponenty, cleanup i diagnostyka
+### Components, cleanup and diagnostics
 
-Komponent ma osobną mapę wyjść i argumenty zamiast parametrów scenariusza. Środowisko pozostaje wspólne. Status agreguje dzieci z priorytetem cancelled → error → blocked → failed. Nawet komponent zakończony błędem może wyeksportować już utworzone ID.
+A component has its own output map and arguments instead of scenario parameters. The
+environment stays shared. Status aggregates children with priority cancelled → error →
+blocked → failed. Even a component that ended with an error can export IDs it already
+created.
 
-Cleanup startuje zawsze w `finally`, dostaje własny budżet 10 s, niezależny od anulowania głównego przebiegu, i korzysta z wyników głównej fazy. Brak referowanego pola zasobu pomija cleanup. Dostępny eksportowany zasób komponentu może być użyty mimo jego późniejszego błędu. Krawędź porządkowa w cleanup oznacza zasadniczo „po zakończeniu”, a nie „tylko po sukcesie”. IF i osiągalność Startu w cleanup wymagają osobnych testów, ponieważ ogólna aktywacja i wyjątki cleanup nakładają się.
+Cleanup always starts in `finally`, gets its own 10 s budget independent of main-run
+cancellation, and uses main-phase results. A missing referenced resource field skips the
+cleanup step. An available exported component resource may be used despite a later
+error. An ordering edge in cleanup essentially means "after completion", not "only after
+success". IF and Start reachability in cleanup need separate tests, because general
+activation and cleanup exceptions overlap.
 
-„Do kroku” wybiera domknięcie wszystkich przodków zależności. „Tylko krok” ładuje wyniki główne wcześniejszego raportu i omija własną bramkę aktywacji; nie omija bramek zagnieżdżonego komponentu. Oba tryby nadal uruchamiają cleanup. Historia jest już zredagowana, więc nie gwarantuje odtworzenia tajnych argumentów; nie wolno traktować jej jako cache poprawnych danych wykonania.
+"Up to step" selects the closure of all dependency ancestors. "Only step" loads main
+results of an earlier report and bypasses its own activation gate; it does not bypass
+gates of a nested component. Both modes still run cleanup. History is already redacted,
+so it cannot guarantee reproducing secret arguments; it must never be treated as a cache
+of correct execution data.
 
-Anulowanie użytkownika daje końcowe `cancelled`. Przekroczenie budżetu głównego 120 s daje błąd przebiegu. Nieudana asercja/błąd cleanup powoduje końcowe `failed`. Sam `skipped` nie oznacza niepowodzenia. Pojedyncza diagnostyka przechowuje opis użycia historii w polu `run.error`, ale nie uznaje samego tego opisu za błąd — w Rust potrzebne oddzielne pole ostrzeżenia/proweniencji.
+User cancellation gives a final `cancelled`. Exceeding the 120 s main budget is a run
+error. A failed assertion or cleanup error results in a final `failed`. `skipped` alone is
+not a failure. A single-step diagnostic stores the description of history use in
+`run.error`, without treating that description as an error — Rust needs a separate
+warning/provenance field.
 
-### HTTP i ochrona danych
+### HTTP and data protection
 
-Base URL jest prefiksem obejmującym ścieżkę. Request `:argument` koduje segment; `{{argument}}` obsługuje tekst i fallback do środowiska. Cały token w JSON body zachowuje typ JSON; token osadzony w tekście produkuje tekst. Query jest kodowane przez API URL. Przekierowania są odrzucane, dane logowania w URL zabronione, brak automatycznych retry. GET/HEAD z body to błąd. Rust nie może niejawnie wprowadzić retry dla POST tworzącego koszyk.
+The base URL is a prefix including its path. A request `:argument` encodes a segment;
+`{{argument}}` handles text and falls back to the environment. A whole token in a JSON
+body keeps its JSON type; a token embedded in text produces text. Query is encoded by the
+URL API. Redirects are rejected, credentials in the URL are forbidden, there are no
+automatic retries. GET/HEAD with a body is an error. Rust must never implicitly retry a
+POST that creates a cart.
 
-Obecne limity: request domyślnie 10 s, maksymalnie 60 s; odpowiedź 2 MiB także strumieniowo, JSON odpowiedzi maksymalnie 100 poziomów; główny przebieg 120 s, cleanup 10 s, 1000 wykonanych kroków łącznie z dziećmi, raport 16 MiB. Są to punkty wyjścia konfiguracji produktu, a nie uzasadnione SLA. Obecny limit raportu liczy zagnieżdżone dane wielokrotnie; nowy licznik powinien mieć jedną precyzyjną definicję.
+Current limits: request 10 s by default, 60 s maximum; response 2 MiB including
+streaming, response JSON at most 100 levels deep; main run 120 s, cleanup 10 s, 1000
+executed steps including children, report 16 MiB. These are starting points for product
+configuration, not a justified SLA. The current report limit counts nested data several
+times; the new counter needs one precise definition.
 
-Silnik zachowuje surowe wartości wewnątrz, publikuje zredagowane kopie. Redakcja zna sekrety sesyjne, zadeklarowane nazwy oraz wykrywa konwencjonalne klucze (`authorization/cookie/password/secret/token/api-key`), credentiale URL, query tokeny i wartości Bearer. Maskuje też kodowanie URL/form. Obejmuje snapshot, wejścia, wyjścia, błędy i callbacki.
+The engine keeps raw values internally and publishes redacted copies. Redaction knows
+session secrets and declared names, and detects conventional keys
+(`authorization/cookie/password/secret/token/api-key`), URL credentials, query tokens and
+Bearer values. It also masks URL/form encodings. It covers the snapshot, inputs, outputs,
+errors and callbacks.
 
-Wykrywanie sekretu dopiero w późniejszej odpowiedzi nie może cofnąć wycieku we wcześniejszym callbacku. Heurystyki nazw nie gwarantują ochrony dowolnego sekretu. Produkcyjna redakcja wymaga jawnej klasyfikacji sekretów przed publikacją, ograniczenia surowych logów oraz testów negatywnych wszystkich kanałów, w tym `tracing`, crashów i zapisu na dysku.
+Detecting a secret only in a later response cannot undo a leak in an earlier callback.
+Name heuristics do not protect an arbitrary secret. Production redaction needs explicit
+secret classification before publication, limited raw logs and negative tests of every
+channel, including `tracing`, crashes and disk writes.
 
-## Import v1 i trwałość
+## v1 import and persistence
 
-1. Obsłużyć plik pojedynczego projektu oraz wrapper workspace `{version:1, activeId, projects}`. Workspace wymaga niepustej listy, unikalnych ID projektów i istniejącego `activeId`.
-2. Czytać istniejące camelCase i tagi bindingów dokładnie; zachować rewizje, kolejność węzłów, pozycje, `templateInputs`, zagnieżdżone referencje, gałęzie i dowolne literały JSON.
-3. Rozdzielić DTO v1 od zwalidowanego modelu domenowego. Nowa konfiguracja typu enum nie powinna narzucać zmiany starego wire format.
-4. Przeprowadzić walidację strukturalną i semantyczną przed podmianą otwartego dokumentu. Odrzucenie importu nie zmienia bieżącego projektu ani autosave. Błędy powinny zawierać ścieżkę JSON i ID węzła.
-5. Zachować brak Startu jako jawny tryb zgodności. Nie wstawiać automatycznie Startu, który zmieni liczbę requestów. Konwersja na nowy przepływ musi być osobną edycją z undo.
-6. Aktualny importer przenosi wyłącznie historyczne demo `localhost/127.0.0.1:3000/demo/(shop|support)` na port 4318. W aplikacji natywnej endpoint demo może nie istnieć; zastosować dedykowaną migrację demonstracji, a nie przepisywać adresy własnych API.
-7. `publicProject` usuwa wartości wyłącznie nazw z `environment.secretNames`; zwykły projekt może nadal zawierać literały z credentialami. Zdefiniować produkcyjny eksport publiczny osobno od lokalnego zapisu. Sekrety sesyjne nie trafiają do schowka ani pliku projektu.
-8. Przeglądarkowego `localStorage` aplikacja natywna sama nie odczyta. Dostarczyć eksport ze starej aplikacji i import w nowej; oryginalny plik pozostawić nietknięty, zapisać kopię przed migracją wersji.
+1. Handle a single-project file and the workspace wrapper `{version:1, activeId,
+projects}`. A workspace needs a non-empty list, unique project IDs and an existing
+   `activeId`.
+2. Read existing camelCase and binding tags exactly; keep revisions, node order,
+   positions, `templateInputs`, nested references, branches and arbitrary JSON literals.
+3. Separate the v1 DTO from the validated domain model. A new enum configuration must not
+   force a change of the old wire format.
+4. Run structural and semantic validation before replacing the open document. A rejected
+   import changes neither the current project nor autosave. Errors include the JSON path
+   and node ID.
+5. Keep the absence of Start as an explicit compatibility mode. Do not insert a Start
+   automatically, which would change the number of requests. Converting to the new flow
+   is a separate edit with undo.
+6. The current importer only moves the historical demo
+   `localhost/127.0.0.1:3000/demo/(shop|support)` to port 4318. In the native application
+   the demo endpoint may not exist; use a dedicated demo migration rather than rewriting
+   addresses of users' own APIs.
+7. `publicProject` removes values only for names in `environment.secretNames`; an ordinary
+   project may still contain literals with credentials. Define the production public
+   export separately from local storage. Session secrets never reach the clipboard or a
+   project file.
+8. The native application cannot read the browser's `localStorage`. Provide export from
+   the old application and import in the new one; leave the original file untouched and
+   keep a copy before a version migration.
 
-Obecne limity importu: do 100 scenariuszy, 200 definicji komponentów, 200 kontraktów, 200 węzłów i 1000 krawędzi na graf, 100 wejść/portów, do 12 poziomów i 200 elementów jednego bindingu, tekst do 100000 jednostek JS. Dwie istniejące walidacje mają różne reguły głębokości JSON; zunifikować je w jeden walidator limitów. `serde` nie może po cichu odrzucać nieznanych pól konfiguracji importu i eksportować niepełnego dokumentu; albo zachować rozszerzenia, albo zgłosić ostrzeżenie/odmowę z pełną ścieżką.
+Current import limits: up to 100 scenarios, 200 component definitions, 200 contracts, 200
+nodes and 1000 edges per graph, 100 inputs/ports, up to 12 levels and 200 elements per
+binding, text up to 100000 JS units. The two existing validations have different JSON
+depth rules; unify them into one limit validator. `serde` must not silently drop unknown
+configuration fields and export an incomplete document; either keep extensions or report a
+warning/refusal with the full path.
 
-## Proponowane granice crate'ów
+## Proposed crate boundaries
 
-| Crate / moduł          | Odpowiedzialność                                                                                                                                               | Nie powinien zależeć od             |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| `apiforge-core`        | Domena: ID, bindingi, typowane konfiguracje, porty, statusy, błędy, ścieżki JSON, czyste operatory; DTO v1, migracje i walidacja w wydzielonym module `format` | egui, Tokio, HTTP, pliki            |
-| `apiforge-runner`      | Kompilacja DAG, aktywacja IF, wykonanie, komponenty, cleanup, limity, zdarzenia, anulowanie; adapter HTTP jako wydzielony moduł                                | egui i globalny stan interfejsu     |
-| `apiforge-storage`     | Atomowy zapis dokumentu, kopie, historia, adapter magazynu sekretów                                                                                            | egui jako format domeny             |
-| `apiforge-application` | Komendy edytora i undo/redo; sesja, koordynacja runnera i storage, publiczny stan dla UI                                                                       | egui i szczegóły renderera          |
-| `apiforge-desktop`     | egui, graf, formularze, schowek, raport i integracja okien Linux/Windows                                                                                       | wewnętrzne szczegóły sieci/sekretów |
+| Crate / module         | Responsibility                                                                                                                                           | Must not depend on              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `apiforge-core`        | Domain: IDs, bindings, typed configurations, ports, statuses, errors, JSON paths, pure operators; v1 DTO, migrations and validation in a `format` module | egui, Tokio, HTTP, files        |
+| `apiforge-runner`      | DAG compilation, IF activation, execution, components, cleanup, limits, events, cancellation; HTTP adapter as a separate module                          | egui and global UI state        |
+| `apiforge-storage`     | Atomic document saves, backups, history, secret store adapter                                                                                            | egui as a domain format         |
+| `apiforge-application` | Editor commands and undo/redo; session, runner and storage coordination, public state for the UI                                                         | egui and renderer details       |
+| `apiforge-desktop`     | egui, graph, forms, clipboard, report and Linux/Windows window integration                                                                               | internal network/secret details |
 
-CLI/headless może być osobnym binarnym frontendem korzystającym z tych samych application/runner, gdy zostanie uwzględniony w zakresie wydania. Nie potrzeba portować lokalnego serwera Express: natywny frontend komunikuje się z asynchronicznym runnerem Tokio i transportem reqwest przez kanały wewnętrzne.
-Można początkowo połączyć małe adaptery w moduły, zachowując kierunek zależności i publiczne kontrakty. Produkcyjność nie wynika z liczby crate'ów. Silnik powinien przyjmować zwalidowany snapshot planu oraz `RunContext` z wstrzykniętym transportem, zegarem i RNG; emitować typowane zdarzenia przez ograniczony kanał. UI nie może wykonywać blokującego I/O w klatce egui.
+A CLI/headless runner may be a separate binary frontend using the same
+application/runner, once it is in release scope. The Express local server need not be
+ported: the native frontend talks to the async Tokio runner and reqwest transport over
+internal channels. Small adapters may start as modules while keeping the dependency
+direction and public contracts. Production readiness does not come from the number of
+crates. The engine should take a validated plan snapshot and a `RunContext` with injected
+transport, clock and RNG, and emit typed events through a bounded channel. The UI must not
+perform blocking I/O in an egui frame.
 
-## Kolejność implementacji i konkretne testy odbioru
+## Implementation order and concrete acceptance tests
 
-1. **Zamrożenie kontraktu.** Wyeksportować fixtures istniejących projektów: sklep, zgłoszenia, operatory, workflow koszyka, komponenty z rewizjami i kopie. Dodać expected trace z ID, statusem, aktywną gałęzią i wynikami; pominąć losowe ID i czasy. Node pozostaje referencją porównawczą do chwili migracji.
-2. **Domena i import.** Implementować DTO, walidację, ścieżki oraz operatory. Wspólny korpus uruchamia TS i Rust. Sprawdzić Missing/null/false/0/puste klucze, liczby graniczne, Unicode, zagnieżdżone bindingi, brakującą rewizję, cykle mieszane i rekurencję. Fuzzing parsera/importera musi kończyć się kontrolowanym wynikiem, bez paniki i nieograniczonej alokacji.
-3. **Planner i sterowanie.** Odwrócona kolejność zapisu węzłów nadal daje ceny → koszyk → dodanie, maksymalnie jeden request w locie. IF true/false wysyła wyłącznie żądania aktywnej gałęzi. Testować złączenia, błąd jednej aktywnej alternatywy, nieaktywną referencję oraz odłączony HTTP współdzielący czysty argument. Zachować graf legacy bez Startu.
-4. **HTTP i cleanup.** Lokalny fixture sprawdza typed body i URL, 4xx jako dane, odpowiedź tekstową, timeout, anulowanie podczas czytania, zawyżony/zaniżony/brak content-length, limit streamu i przekierowanie. Scenariusz koszyka musi utworzyć, dodać po zakończeniu utworzenia, porównać sumę i faktycznie usunąć zasób także po błędzie asercji.
-5. **Komponenty i diagnostyka.** Testować pinned rewizje, wyjście ID po późniejszym błędzie dziecka, limit głębokości, częściowe wykonanie i pochodzenie historycznych wartości. Zagnieżdżony IF działa również przy pojedynczym uruchomieniu rodzica.
-6. **Granica bezpieczeństwa.** Kanoniczne i zakodowane sekrety nie występują w zdarzeniach, raportach, `tracing`, eksporcie ani plikach crash. Debug danych wrażliwych ma domyślnie ukryty tekst. Zredagowany raport nigdy nie jest źródłem prawdziwych sekretów kolejnego przebiegu.
-7. **Komendy edytora.** Operacje kopiuj/wklej/duplikuj/usuń/połącz/ekstrakcja komponentu jako atomowe komendy. Testy niezależności wielokrotnej kopii, remapowania wyłącznie wewnętrznych liści, zachowania rewizji/gałęzi oraz undo/redo przy zmianie dokumentu.
-8. **Trwałość i release.** W planie nadrzędnym wybrano SQLite: transakcje, migracje schematu i spójny backup obejmujący aktywny WAL. Eksport plikowy korzysta z pliku tymczasowego i bezpiecznej podmiany. Testować przerwanie zapisu, uszkodzone dane i odzyskanie kopii. Test integracyjny uruchamia ten sam projekt przez GUI i bezpośrednio przez headless runner. CI i odbiór obejmują Linux oraz Windows od pierwszego wydania: zapis/odzyskiwanie, sekrety sesyjne (keyring tylko jeśli dojdzie jako osobna funkcja), schowek, TLS/proxy, anulowanie oraz natywne paczki instalacyjne. Testować semantykę atomowej podmiany na obu systemach, a nie zakładać przenośności operacji plikowych Unix. Pipeline wymaga formatowania, clippy, testów, skanowania zależności i podpisanych/reprodukowalnych artefaktów zgodnie z ustaloną platformą docelową.
+1. **Freeze the contract.** Export fixtures of existing projects: shop, tickets,
+   operators, cart workflow, components with revisions and copies. Add expected traces
+   with ID, status, active branch and results; omit random IDs and times. Node stays the
+   comparison reference until the migration is done.
+2. **Domain and import.** Implement DTOs, validation, paths and operators. A shared corpus
+   runs TS and Rust. Check Missing/null/false/0/empty keys, boundary numbers, Unicode,
+   nested bindings, a missing revision, mixed cycles and recursion. Fuzzing the
+   parser/importer must end in a controlled result, without panics or unbounded
+   allocation.
+3. **Planner and control.** Reversed node order still gives prices → cart → add, with at
+   most one request in flight. IF true/false sends only the active branch's requests.
+   Test joins, an error in one active alternative, an inactive reference and a
+   disconnected HTTP sharing a pure argument. Keep the legacy graph without Start.
+4. **HTTP and cleanup.** A local fixture checks typed body and URL, 4xx as data, a text
+   response, timeout, cancellation while reading, overstated/understated/missing
+   content-length, the stream limit and redirects. The cart scenario must create, add
+   after creation finished, compare the total and actually delete the resource even after
+   an assertion error.
+5. **Components and diagnostics.** Test pinned revisions, an ID output after a later child
+   error, the depth limit, partial execution and the provenance of historical values. A
+   nested IF also works when the parent runs as a single step.
+6. **Security boundary.** Canonical and encoded secrets never appear in events, reports,
+   `tracing`, exports or crash files. Debug output of sensitive data hides text by
+   default. A redacted report is never a source of real secrets for the next run.
+7. **Editor commands.** Copy/paste/duplicate/delete/connect/extract component as atomic
+   commands. Test independence of repeated copies, remapping only internal leaves,
+   keeping revisions/branches and undo/redo when the document changes.
+8. **Persistence and release.** The overall plan chose SQLite: transactions, schema
+   migrations and a consistent backup covering an active WAL. File export uses a temporary
+   file and a safe replace. Test interrupted saves, corrupted data and backup recovery. An
+   integration test runs the same project through the GUI and directly through a headless
+   runner. CI and acceptance cover Linux and Windows from the first release: save/recovery,
+   session secrets (keyring only if added as a separate feature), clipboard, TLS/proxy,
+   cancellation and native installers. Test atomic replace semantics on both systems
+   rather than assuming Unix file operations are portable. The pipeline requires
+   formatting, clippy, tests, dependency scanning and signed/reproducible artefacts for the
+   chosen target platform.
 
-Istniejące zestawy do odwzorowania: `tests/runner.test.ts`, `tests/workflow.test.ts`, `tests/operators.test.ts`, `tests/variables.test.ts`, `tests/project.test.ts`, `tests/runner-api.test.ts` oraz testy operacji grafu, ekstrakcji komponentów, ścieżek JSON i redakcji pod `app/features/`. Nie wystarczy przepisać nazw testów: krytyczne są zaobserwowane żądania fixture i brak niedozwolonych efektów ubocznych.
+Existing suites to reproduce: `tests/runner.test.ts`, `tests/workflow.test.ts`,
+`tests/operators.test.ts`, `tests/variables.test.ts`, `tests/project.test.ts`,
+`tests/runner-api.test.ts` and the graph operation, component extraction, JSON path and
+redaction tests under `app/features/`. Rewriting test names is not enough: the observed
+fixture requests and the absence of forbidden side effects are what matters.
 
-## Decyzje i słabości wymagające zamknięcia przed wydaniem
+## Decisions and weaknesses to close before release
 
-- **Osiągalność po danych.** Obecny planner chodzi po następcach zależności danych i sterowania, a czyste argumenty dołącza wstecz. Współdzielony czysty producent może więc rozszerzyć osiągalność także na inny jego konsument HTTP. W produkcyjnym modelu jawnie oddzielić aktywację sterującą od potrzeby danych; dodać test, zanim uzna się regułę „odłączony request nigdy nie rusza” za spełnioną.
-- **Złączenia i porządek.** OR aktywacji nie oznacza „pierwszy zakończony wygrywa”; teraz czekamy na wszystkich. Ustalić jawnie złączenie alternatywne oraz ewentualny przyszły join AND. Zachować seryjność jako domyślne zachowanie; równoległość wymaga osobnego jawnego bloku/ustawienia i testów efektów ubocznych.
-- **Wartości liczbowe.** JS używa IEEE-754; Rust/serde może rozróżniać integer i float inaczej niż stare equality. Ustalić zgodność `1`/`1.0`, bezpieczny zakres integer, zaokrąglanie liczb ujemnych, `-0`, modulo i zapis wykładniczy. Ceny pieniężne potrzebują jawnej decyzji decimal/minor units, bez niejawnej zmiany starych formuł.
-- **Stringi i tablice.** `concat` używa JS `String` także dla obiektów/tablic, a `build` tablicy używa JS porządku kluczy. Rust potrzebuje kompatybilnego formatowania lub migracji. Limit 100000 „znaków” JS liczy UTF-16, nie bajty UTF-8; nazwać jednostkę limitów.
-- **Niespójne domyślne argumenty.** Formula węzła uzupełnia porty domyślne przed wykonaniem; bezpośrednie wyrażenie z brakującym argumentem błędnieje. `typeOf` ma wymagany argument, więc mimo pomocniczego `jsonType(Missing)` nie pozwala obecnie obserwować Missing. Ustalić świadome reguły i diagnostykę, zamiast przypadkiem zmienić je podczas portu.
-- **RNG i powtarzalność.** `random` używa `Math.random`; testy i replay powinny przyjmować RNG/seed, a raport zapisywać seed. Nie wprowadzać niejawnej deterministyczności do importu bez zdefiniowania oczekiwań.
-- **Historia i autoryzacja diagnostyki.** Poprzedni raport jest walidowany głównie przez scenariusz/tryb, bez fingerprintu projektu. Edycja URL albo rewizji może połączyć dane ze starego planu z nowym. Wymaga snapshot hash i jawnej proweniencji. Cleanup po diagnostyce może skasować historyczny zasób — potrzebna celowa polityka odróżniająca zasoby utworzone w bieżącym wykonaniu od odziedziczonych.
-- **Redakcja nie jest walidacją danych.** Nie zamieniać sekretów na tekst w modelu roboczym, bo zmieni to działanie requestów i typy. Osobno zabezpieczyć zapis, debug oraz eksport; nazwy kluczy nie stanowią kompletnego systemu klasyfikacji.
-- **Sieć desktopowa.** Aplikacja do testowania API musi obsługiwać także localhost i sieci prywatne. Nie kopiować globalnego zakazu tych adresów jako ochrony SSRF. Jednocześnie ustalić politykę importowanego niezaufanego projektu, proxy, TLS/custom CA, uwierzytelnienia, cookies i transferu credentiali. Obecnie brak jawnego cookie jar i retry; dodanie ich zmienia testy.
-- **Historia i przerwanie procesu.** API przechowuje wyłącznie sesyjny raport (do 100/32 MiB), bez trwałości i recovery. Cleanup nie może wykonać się po SIGKILL/awarii OS. Produkcja potrzebuje trwałego dziennika utworzonych zasobów i kontrolowanego wznowienia sprzątania; obietnica „zawsze sprząta” byłaby nieprawdziwa.
-- **Spójność walidacji.** Obecne walidatory runnera i projektu częściowo dublują reguły. Błędy są stringami, `NodeConfig` ma luźny worek opcji i możliwe pola nieużywane dla danego rodzaju. Rust powinien walidować raz do typowanego modelu i zwracać stabilne kody błędów z kontekstem, bez `unwrap` na niezaufanych dokumentach.
-- **Skala i responsywność.** Limity 200 węzłów/graf i 1000 kroków nie zastępują pomiarów. Ustalić budżet klatki, pamięci i czas otwierania dużego dokumentu; kolejka zdarzeń musi mieć backpressure, a wirtualizacja raportu nie może trzymać wielu pełnych kopii odpowiedzi na każdą klatkę.
+- **Reachability through data.** The current planner walks successors of data and control
+  dependencies and adds pure arguments backwards. A shared pure producer can therefore
+  extend reachability to another HTTP consumer. The production model must separate
+  control activation from data needs explicitly; add a test before treating "a
+  disconnected request never runs" as satisfied.
+- **Joins and ordering.** Activation OR does not mean "first finished wins"; today we wait
+  for all. Define the alternative join and a possible future AND join explicitly. Keep
+  serial execution as the default; parallelism needs a separate explicit block/setting and
+  side-effect tests.
+- **Numeric values.** JS uses IEEE-754; Rust/serde may distinguish integer and float
+  differently from the old equality. Decide `1`/`1.0` compatibility, the safe integer
+  range, rounding of negative numbers, `-0`, modulo and exponent notation. Monetary prices
+  need an explicit decimal/minor-units decision, without silently changing old formulas.
+  (Decided in [ADR 0001](../decisions/0001-numeric-semantics.md).)
+- **Strings and arrays.** `concat` uses JS `String` also for objects/arrays, and an array
+  `build` uses JS key order. Rust needs compatible formatting or a migration. The 100000
+  "character" limit counts UTF-16 in JS, not UTF-8 bytes; name the unit of limits.
+- **Inconsistent default arguments.** A formula node fills default ports before execution;
+  a direct expression with a missing argument fails. `typeOf` has a required argument, so
+  despite the `jsonType(Missing)` helper Missing cannot currently be observed. Define
+  deliberate rules and diagnostics instead of changing them accidentally during the port.
+- **RNG and repeatability.** `random` uses `Math.random`; tests and replay should take an
+  RNG/seed and the report should record the seed. Do not introduce implicit determinism
+  into import without defining expectations.
+- **History and diagnostic authorisation.** The previous report is validated mostly by
+  scenario/mode, without a project fingerprint. Editing a URL or revision can mix data
+  from an old plan with a new one. This needs a snapshot hash and explicit provenance.
+  Cleanup after a diagnostic run may delete a historical resource — a deliberate policy
+  must distinguish resources created in the current run from inherited ones.
+- **Redaction is not data validation.** Do not replace secrets with text in the working
+  model, because that changes request behaviour and types. Secure storage, debug output
+  and export separately; key names are not a complete classification system.
+- **Desktop networking.** An API testing application must support localhost and private
+  networks. Do not copy a global ban on those addresses as SSRF protection. At the same
+  time define a policy for imported untrusted projects, proxy, TLS/custom CA,
+  authentication, cookies and credential transfer. There is currently no explicit cookie
+  jar and no retry; adding them changes tests.
+- **History and process interruption.** The API keeps only a session report (up to 100 /
+  32 MiB), with no persistence or recovery. Cleanup cannot run after SIGKILL or an OS
+  crash. Production needs a durable journal of created resources and a controlled cleanup
+  resume; promising "always cleans up" would be untrue.
+- **Validation consistency.** The runner and project validators partly duplicate rules.
+  Errors are strings, `NodeConfig` is a loose bag of options with fields possibly unused
+  by a given kind. Rust should validate once into a typed model and return stable error
+  codes with context, without `unwrap` on untrusted documents.
+- **Scale and responsiveness.** The 200 nodes/graph and 1000 step limits do not replace
+  measurement. Define the frame budget, memory and time to open a large document; the
+  event queue needs backpressure, and report virtualisation must not keep many full copies
+  of responses per frame.

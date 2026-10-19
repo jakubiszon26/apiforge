@@ -1,63 +1,73 @@
-# Praca nad wersją Rust
+# Working on the Rust version
 
-Pierwszy przyrost obejmuje importer v1 i natywny podgląd dokumentów, z połączeniami danych oraz kolejności. Edytowanie, utrwalanie zmian i wykonywanie scenariuszy są dalszymi etapami [planu migracji](../../RUST_MIGRATION.md). Dotychczasową aplikację uruchamia się nadal przez `npm run dev`.
+The native application lives in the Cargo workspace under `crates/`. Its scope and the
+order of work are described in the [migration plan](../../RUST_MIGRATION.md). The
+TypeScript prototype is still started with `npm run dev`.
 
-## Zależności i uruchomienie
+## Requirements and running
 
-Rust 1.99.0 z rustfmt i clippy; wersję określa `rust-toolchain.toml`, zależności `Cargo.lock`. Workspace tworzą na razie dwa rzeczywiste moduły: `apiforge-core` i `apiforge-desktop`. Kolejne crate'y dochodzą wraz z implementacją ich odpowiedzialności, bez pustych atrap.
+Rust 1.99.0 with rustfmt and clippy; the version is set by `rust-toolchain.toml` and
+dependencies by `Cargo.lock`.
 
-Na Linuksie potrzebna jest działająca sesja X11 albo Wayland, sterownik zgodny z backendem WGPU, biblioteki systemowe do kompilacji oraz portal plików dla dialogu Open. Lista pakietów Ubuntu znajduje się w [workflow CI](../../.github/workflows/rust.yml). Wymagania minimalnych wersji dystrybucji i Windows oraz pakowanie nadal wymagają odbioru.
+On Linux a working X11 or Wayland session is needed, a driver compatible with the WGPU
+backend, the system libraries for building and a file portal for the Open dialog. The
+Ubuntu package list is in the [CI workflow](../../.github/workflows/rust.yml). Minimum
+distribution and Windows versions and packaging still need acceptance.
 
 ```bash
 cargo run -p apiforge-desktop --locked -- --project fixtures/compatibility/workspace-v1.json
 ```
 
-Przycisk **Otwórz projekt / workspace…** importuje istniejący plik JSON. Import i dialog działają poza wątkiem renderowania. Błąd albo anulowanie wyboru nie zastępuje otwartego dokumentu. Obecny podgląd nie nadpisuje plików wejściowych.
-
-Bez środowiska graficznego można sprawdzić plik:
+Without a graphical environment a file can be checked:
 
 ```bash
 cargo run -p apiforge-desktop --locked -- --check fixtures/compatibility/workspace-v1.json
 ```
 
-Tryb sprawdzenia zwraca 0 przy poprawnym imporcie, 1 przy błędzie dokumentu/odczytu, 2 przy błędnych argumentach. Wartości pól i sekretów nie są wypisywane w diagnostyce parsera. Import ma limit 16 MiB i nie wykonuje połączeń HTTP.
+Check mode returns 0 for a valid import, 1 for a document/read error and 2 for invalid
+arguments. Field and secret values are never printed in parser diagnostics. Import is
+limited to 16 MiB and performs no HTTP requests.
 
-## Weryfikacja
+## Verification
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo build --release -p apiforge-desktop --locked
+node --import tsx scripts/export-compatibility-fixtures.ts --check
 ```
 
-Testy obejmują round-trip projektów i workspace, brak/null, Unicode i kolejność argumentów, duplikaty kluczy, nieznane pola, limity, referencje, Start/IF, cykle, rewizje/rekurencję oraz zachowanie otwartego dokumentu po nieudanym imporcie. Testy egui wykonują layout wszystkich projektów i obu faz bez GPU; nie są testami całego natywnego backendu.
+The egui tests lay out every project and both phases without a GPU; they are not tests of
+the whole native backend.
 
-Dodatkowy test startu rzeczywistego okna otwiera dokument, rysuje co najmniej trzy klatki i zamyka aplikację. Wymaga sesji graficznej:
+A real window start-up test opens a document, draws at least three frames and closes the
+application. It needs a graphical session:
 
 ```bash
 cargo run -p apiforge-desktop --locked -- --smoke-test fixtures/compatibility/workspace-v1.json
 ```
 
-Test nie potwierdza obsługi schowka, IME, dostępności, dialogu wyboru pliku ani kompletności edycji. Windows musi zostać zweryfikowany na natywnym runnerze; lokalne testy Linux tego nie zastępują.
+A screenshot of a document can be captured for visual review:
 
-Korpus porównawczy jest generowany ze źródeł TypeScript:
+```bash
+cargo run -p apiforge-desktop --locked -- --screenshot out.png --project fixtures/compatibility/workspace-v1.json
+```
+
+## Compatibility corpus
+
+The comparison corpus is generated from the TypeScript sources:
 
 ```bash
 node --import tsx scripts/export-compatibility-fixtures.ts
 node --import tsx scripts/export-compatibility-fixtures.ts --check
 ```
 
-Nie formatuj ręcznie wygenerowanych JSON-ów: ich bajty i SHA256 muszą zgadzać się z generatorem. Testy zgodności porównują wartości liczbowe JS (np. `100` i `100.0` mają ten sam sens), obecność pól, kolejność kolekcji istotnych dla argumentów i całe konfiguracje. Identyfikatory demonstracji są ustabilizowane, bez maskowania różnic w konfiguracji.
+Never format the generated JSON by hand: its bytes and SHA-256 must match the generator.
+See [fixtures/compatibility/README.md](../../fixtures/compatibility/README.md).
 
-## Delegacja i granice bieżącej implementacji
+## Version control
 
-Argon przez `agy` przygotował workflow i skrypt korpusu; zostały przejrzane i poprawione przez koordynatora. Nie otrzymał odpowiedzialności za semantykę silnika, migrację dokumentu ani ochronę sekretów.
-
-Przed wydaniem pozostają: pełny typowany model wykonania i nowe typy ID, evaluator, formalna aktywacja gałęzi, runner async, polityka sekretów i diagnostyki historycznej, SQLite/recovery, komendy edycji/undo, komplet interakcji egui, testy natywne obu OS, podpisywanie i instalatory. Obecny podgląd nie jest zamiennikiem działającego edytora TypeScript.
-
-## Ostatnia weryfikacja lokalna
-
-19.10.2026, Linux x86_64: 14 testów Rust przeszło; `cargo clippy` z `-D warnings`, sprawdzanie formatowania i build release również. Binarka release zaimportowała czteroprojektowy workspace przez `--check` oraz uruchomiła rzeczywiste okno i zakończyła `--smoke-test` kodem 0. Generator przeszedł `--check`, a TypeScript `npm run typecheck`.
-
-Workflow Linux/Windows został dodany, lecz nie uruchomiony z tego środowiska na GitHub Actions. Testy Windows, czytników ekranu i instalatorów pozostają niepotwierdzone. R0 i R1 są rozpoczęte, nie zamknięte; runtime i pozostałe funkcje wymagają dalszych etapów.
+Work happens on short-lived `feat/…`, `fix/…` or `docs/…` branches with small
+[Conventional Commits](https://www.conventionalcommits.org/), merged into `main` after the
+verification commands above pass.

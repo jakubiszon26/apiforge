@@ -1,137 +1,258 @@
-# API Forge: migracja do Rust + egui
+# API Forge: migration to Rust + egui
 
-Status: rozpoczęta implementacja R0/R1, 19.10.2026. Powstały `apiforge-core` (import v1, DTO, walidacja) i `apiforge-desktop` (natywny podgląd grafu), deterministyczny korpus eksportów oraz CI Linux/Windows. Edycja, runner i SQLite pozostają do przeniesienia. Wydanie produkcyjne nie jest jeszcze gotowe. Ten dokument zastępuje założenia technologiczne wcześniejszych planów PoC; aplikacja TypeScript pozostaje wersją referencyjną.
+Status (19 October 2026): R0/R1 are under way and R2 has started. `apiforge-core` imports
+and validates v1 documents and implements expression semantics (JSON paths, the 37
+operators) verified against a corpus generated from the TypeScript reference.
+`apiforge-desktop` is a native graph viewer. Editing, the runner and persistence remain to
+be ported. There is no production release yet. This document supersedes the technology
+assumptions of the earlier PoC plans; the TypeScript application remains the reference
+implementation.
 
-## Cel i ustalenia
+**Current priority:** feature parity with the TypeScript prototype first, refinement and
+release hardening afterwards. Everything in the native application — code, documentation
+and the user interface — is in English.
 
-Użytkownik wybrał **Linux i Windows od pierwszego wydania**. Przenosimy cały obecny sposób pracy: budowanie testów blokami, Start, IF / ELSE, kolejność requestów, zmienne z odpowiedzi, zagnieżdżone operatory, własne komponenty i ich rewizje, kopiowanie konfiguracji, raport i sprzątanie. Silnik pozostaje niezależny od domeny; argumenty nie mają specjalnego traktowania nazw `id` ani nazw endpointów.
+## Goal and agreements
 
-Wydanie oznacza sprawdzony pakiet desktopowy na obu platformach, import dotychczasowych projektów, trwały zapis z odzyskiwaniem oraz udokumentowane zachowanie błędów. Samo uruchomienie okna i kilka klocków nie zamyka żadnego etapu migracji funkcjonalnej.
+The user chose **Linux and Windows from the first release**. We port the whole current
+workflow: building tests from blocks, Start, IF / ELSE, request ordering, variables from
+responses, nested operators, custom components and their revisions, copying
+configuration, the report and cleanup. The engine stays domain-agnostic; arguments give no
+special treatment to `id` names or endpoint names.
 
-Zakładamy x86_64. Dokładne minimalne wydania Windows i dystrybucje Linuksa zostaną zapisane w R0 po sprawdzeniu wymagań bibliotek i pakowania; nie deklarujemy obsługi systemu na podstawie samego cross-compilation. macOS, ARM, synchronizacja chmurowa, pluginy, pętle, harmonogramy i automatyczna aktualizacja nie należą do pierwszego wydania. Instalacja nowszej wersji musi jednak zachować dane i umożliwiać odzyskanie kopii bazy.
+A release means a verified desktop package on both platforms, import of existing
+projects, durable storage with recovery and documented error behaviour. Opening a window
+and a few blocks does not close any functional migration stage.
 
-## Zespół i odpowiedzialność
+We assume x86_64. Exact minimum Windows releases and Linux distributions will be recorded
+in R0 after checking library and packaging requirements; we do not claim OS support based
+on cross-compilation alone. macOS, ARM, cloud sync, plugins, loops, schedules and
+auto-update are not part of the first release. Installing a newer version must still keep
+data and allow restoring a database copy.
 
-| Rola                | Własność                                                                | Wynik obecnego zlecenia                                 |
-| ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
-| Koordynator         | decyzje, granice modułów, kontrakty, zależności, integracja, CI, odbiór | ten plan i kolejność prac                               |
-| Agent silnika       | zachowanie modelu, importu, operatorów i wykonania                      | [audyt core](docs/migration/core-audit.md)              |
-| Agent interfejsu    | interakcje egui, edytor, operacje użytkownika i raport                  | [audyt UI](docs/migration/ui-audit.md)                  |
-| Agent niezawodności | zapis, sekrety, transport, testy wydania i dystrybucja                  | [audyt produkcyjny](docs/migration/production-audit.md) |
+## Team and responsibilities
 
-Subagenci zostali uruchomieni równolegle. Implementacja po ustaleniu wspólnych kontraktów również przebiega równolegle, w rozłącznych katalogach. Jeden właściciel każdego pliku; pliki Cargo, lockfile i kontrakty wspólne zmienia koordynator. Zmiana zachowania wymaga testu i aktualizacji specyfikacji. Nie tworzymy osobnych modeli projektu dla UI i runnera.
+| Role        | Ownership                                                                          | Output                                                 |
+| ----------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Coordinator | decisions, module boundaries, contracts, dependencies, integration, CI, acceptance | this plan and the order of work                        |
+| Engine      | model, import, operator and execution behaviour                                    | [core audit](docs/migration/core-audit.md)             |
+| Interface   | egui interactions, editor, user operations and report                              | [UI audit](docs/migration/ui-audit.md)                 |
+| Reliability | storage, secrets, transport, release tests and distribution                        | [production audit](docs/migration/production-audit.md) |
 
-## Architektura docelowa
+Each file has one owner; Cargo files, the lockfile and shared contracts are changed by the
+coordinator. A behaviour change needs a test and a specification update. We do not create
+separate project models for the UI and the runner.
 
-Jedna aplikacja natywna. egui obsługuje UI, a asynchroniczny runner działa poza wątkiem rysowania. Express, przeglądarka, lokalny serwer sterujący i Node nie są zależnościami uruchomieniowymi nowego wydania. Narzędzia TypeScript pozostają czasowo wyłącznie do porównań zgodności.
+## Target architecture
+
+One native application. egui handles the UI, and an asynchronous runner works outside the
+paint thread. Express, a browser, a local control server and Node are not runtime
+dependencies of the new release. The TypeScript tooling stays temporarily, only for
+compatibility comparisons.
 
 ```text
 crates/
-  apiforge-core/          model domeny, walidacja, graf, operatory, format v1
-  apiforge-runner/        harmonogram, HTTP, symulacja, anulowanie, cleanup
-  apiforge-storage/       SQLite, migracje, kopie, import/eksport
-  apiforge-application/   komendy edycji, historia, stan sesji, koordynacja usług
-  apiforge-desktop/       eframe/egui, canvas, inspector, dialogi, raport
-fixtures/compatibility/   projekty v1 i oczekiwane wyniki semantyczne
+  apiforge-core/          domain model, validation, graph, operators, v1 format
+  apiforge-runner/        scheduling, HTTP, simulation, cancellation, cleanup
+  apiforge-storage/       durable workspace storage, backups, import/export
+  apiforge-desktop/       eframe/egui, canvas, inspector, dialogs, report
+fixtures/compatibility/   v1 projects and expected semantic results
 ```
 
-Core nie importuje egui, reqwest, SQLite ani logiki okna. Runner i storage zależą od core, ale nie od siebie. Application zależy od core i ustalonych interfejsów usług; desktop jest miejscem ich połączenia. Współdzielony model raportu i zdarzeń należy do core. Konkretna organizacja traitów wynika z potrzeb testowania; nie tworzymy warstw dla samej abstrakcji.
+Core does not import egui, reqwest, a database or window logic. Runner and storage depend
+on core but not on each other. Editing commands and history may start as a module of the
+desktop crate and move into an `apiforge-application` crate once their interface is
+stable; the desktop crate is where services are wired together. The shared report and
+event model belongs to core. Trait organisation follows testing needs; we do not create
+layers for abstraction's sake.
 
-Model pliku jest oddzielony od zwalidowanego modelu wykonania. `NodeConfig` nie będzie jednym workiem opcji dla każdego rodzaju klocka: typowane warianty `Node`, `Binding`, `Predicate`, `Operator`, `StepStatus`, nowe typy identyfikatorów i osobny wynik walidacji. DTO formatu v1 zachowuje istniejące nazwy i zapis; konwersja do modelu typowanego zwraca diagnostykę z lokalizacją błędu.
+The file model is separate from the validated execution model. `NodeConfig` will not be a
+single bag of options for every block kind: typed `Node`, `Binding`, `Predicate`,
+`Operator`, `StepStatus` variants, newtype identifiers and a separate validation result.
+The v1 DTO keeps existing names and layout; conversion to the typed model returns
+diagnostics with the error location.
 
-Stan trwały, stan edytora i stan wykonania są oddzielne. Każda komenda edycji przechodzi przez application; rysowanie nie mutuje projektu bokiem. Cofanie i ponawianie obejmują atomowe operacje: wklejenie grupy, zmianę połączeń i zapis rewizji. Wklejenie używa zamrożonego fragmentu, nowych ID i przepina wewnętrzne referencje także w drzewach operatorów.
+Durable state, editor state and run state are separate. Every editing command goes
+through one dispatcher; drawing never mutates the project on the side. Undo and redo
+cover atomic operations: pasting a group, changing connections and saving a revision.
+Paste uses a frozen fragment, new IDs and remaps internal references, including inside
+operator trees.
 
-UI wysyła komendy Start/Cancel do usługi runnera. Zdarzenia mają RunId, numer sekwencji i pełną ścieżkę instancji kroku wewnątrz komponentów. Kanały są ograniczone; nie wolno bez końca klonować raportów co klatkę ani zgubić końcowego statusu przy przeciążeniu. Wywołanie HTTP, zapis bazy, parsowanie dużych danych i migracja nie blokują rysowania. Zamknięcie okna podczas testu ma jawny przebieg anulowania i sprzątania.
+The UI sends Start/Cancel commands to the runner service. Events carry a RunId, a sequence
+number and the full step instance path inside components. Channels are bounded; reports
+are not cloned every frame and the final status is never lost under load. HTTP calls,
+storage writes, parsing large data and migrations never block drawing. Closing the window
+during a test has an explicit cancellation and cleanup path.
 
-## Biblioteki i wybór wersji
+## Libraries and version choice
 
-Docelowe składniki: egui/eframe, Tokio, reqwest, serde/serde_json, rusqlite/SQLite, typowane błędy i tracing bez sekretów. Format kolekcji musi zachowywać wymaganą kolejność; nie zamieniamy bez analizy map JS na sortujące `BTreeMap` ani losowo iterowane `HashMap`.
+Target components: egui/eframe, Tokio, reqwest, serde/serde_json, typed errors and tracing
+without secrets. The collection format must keep its required ordering; we do not swap JS
+maps for sorting `BTreeMap` or randomly ordered `HashMap` without analysis.
 
-Sprawdzona dokumentacja pokazuje egui/eframe **0.37.0** i zmianę interfejsu `App`: wymagane jest `ui`, obok `logic`. Lokalne rustc to **1.99.0**, natomiast cache ma m.in. eframe/egui 0.36.2. To informacja o środowisku, nie decyzja wyboru starszej wersji. [egui](https://docs.rs/egui/latest/egui/), [eframe App](https://docs.rs/eframe/latest/eframe/trait.App.html).
+The checked documentation shows egui/eframe **0.37.0** and a change to the `App`
+interface (`ui` is required, next to `logic`). The local rustc is **1.99.0**. See the log
+below for the chosen, mutually compatible set.
 
-W R0 koordynator ustala jeden zgodny zestaw egui, eframe, renderera, biblioteki grafu i testów. Kandydatem dla grafu jest [egui-snarl](https://docs.rs/egui-snarl/latest/egui_snarl/); decyzja wymaga weryfikacji kompatybilności i obsługi portów danych/sterowania, zagnieżdżonych pól, historii oraz dostępności. Graf biblioteki jest adapterem widoku, nigdy źródłem prawdy domeny. Jeśli biblioteka nie spełnia kryteriów, własny canvas dostaje osobne zadania interakcji, hit-testów i dostępności; nie ukrywamy kosztu pod hasłem „egui obsługuje grafy”.
+We use a pinned toolchain, Cargo.lock and limited dependency features. Dependencies and
+licences are checked in CI.
 
-Używamy przypiętego toolchainu, Cargo.lock i ograniczonych funkcji zależności. Rustdoc `latest` służy rozeznaniu; implementacja i CI korzystają z wybranego zestawu. Zależności i licencje podlegają kontroli w CI.
+## Compatibility contract
 
-## Kontrakt zgodności
+1. Import `Project.version = 1` and workspace exports from the current application; keep
+   IDs, parameters, references, components/revisions, samples and IF connections. Source
+   files stay untouched. The desktop application does not read browser localStorage: the
+   existing interface must export the whole workspace and the desktop imports it.
+2. Import without running requests. Secrets are not part of migration or a normal export.
+   An invalid or newer format gives a message and never overwrites existing data. A format
+   change has an explicit version number, a migration, a test and a copy taken before the
+   change.
+3. `Missing` is a different value from JSON `null`. Paths with fields, arrays and keys
+   containing dots, brackets or Unicode must keep working.
+4. Every current block kind and the 37 operators have ported tests. JS numbers, rounding,
+   modulo, Unicode and field order need boundary tests; Rust's default behaviour is not
+   automatically compatible. A contract change needs a deliberate migration, not a hidden
+   "fix". (See [ADR 0001](docs/decisions/0001-numeric-semantics.md).)
+5. Each request is awaited before the next. Start, reachability, IF false as a valid
+   result, skipping the inactive path, required data at a join and the error policy each
+   have compatibility cases. An older graph without Start keeps an explicitly described
+   legacy mode. This is not a direct copy of n8n rules.
+6. Immutable run input snapshots; changing the project does not change a running test.
+   Full run, run up to a block and a single diagnostic step each have a defined data
+   provenance. Redacted report data never replaces original values in runner
+   calculations.
+7. Cleanup has its own budget and uses results already obtained, also after a component
+   error. A process crash cannot guarantee cleanup; after a restart the run is marked
+   interrupted, without automatically repeating business operations. Manual cleanup needs
+   available data and an explicit user request.
+8. HTTP 4xx/5xx remain responses to check, not transport errors. No implicit redirects,
+   retries or type conversion. Proxy/TLS configuration is explicit and tested on both
+   platforms.
 
-1. Import `Project.version = 1` i eksportów workspace z obecnej aplikacji; zachowanie ID, parametrów, referencji, komponentów/revisions, próbek i połączeń IF. Źródłowe pliki pozostają nietknięte. Aplikacja desktopowa nie odczyta automatycznie localStorage przeglądarki: dotychczasowy interfejs musi umożliwić eksport całego obszaru, a desktop jego import.
-2. Import bez uruchamiania requestów. Sekrety nie są częścią migracji ani zwykłego eksportu. Błędny lub nowszy format daje komunikat i nie nadpisuje istniejących danych. Zmiana formatu ma jawny numer wersji, migrację, test i kopię sprzed zmiany.
-3. `Missing` jest inną wartością niż JSON `null`. Ścieżki pól, tablic i kluczy zawierających kropki, nawiasy czy Unicode muszą działać po migracji.
-4. Wszystkie obecne rodzaje bloków i 37 operatorów mają przeniesione testy. Liczby JS, zaokrąglenie, modulo, Unicode i kolejność pól wymagają testów granicznych; przejście na domyślne zachowanie Rusta nie jest automatycznie zgodne. Zmiana kontraktu wymaga świadomej migracji, nie ukrytej „poprawki”.
-5. Każdy request jest oczekiwany przed następnym. Start, osiągalność, IF false jako poprawny wynik, pomijanie nieaktywnej ścieżki, wymagane dane przy scaleniu i polityka błędów mają osobne przypadki zgodności. Starszy graf bez Startu zachowuje jawnie opisany tryb legacy. To nie jest bezpośrednia kopia reguł n8n.
-6. Niezmienne migawki wejść uruchomienia; zmiana projektu nie zmienia trwającego testu. Pełny przebieg, wykonanie do klocka i pojedyncza diagnostyka mają określone pochodzenie danych. Dane raportu po redakcji nie zastępują oryginalnych wartości w obliczeniach runnera.
-7. Cleanup ma niezależny budżet i korzysta z już uzyskanych wyników także po błędzie komponentu. Awaria procesu nie daje gwarancji cleanup; po restarcie przebieg jest oznaczony jako przerwany, bez automatycznego ponawiania operacji biznesowych. Ręczne sprzątanie wymaga dostępnych danych i jawnego zlecenia użytkownika.
-8. HTTP 4xx/5xx pozostaje odpowiedzią do sprawdzenia, nie błędem transportu. Bez niejawnych przekierowań, ponowień czy konwersji typów. Konfiguracja proxy/TLS jest jawna i testowana na obu platformach.
+Existing tests are a base of cases, not proof that every historical implementation detail
+is correct. The audits list discrepancies; for each we record a decision: compatibility, a
+bug fix with a regression test, or a version change. Comparison snapshots normalise only
+non-deterministic metadata (time, RunId); statuses, request order or values are never
+removed to make tests pass.
 
-Istniejące testy są bazą przypadków, a nie dowodem poprawności każdej historycznej implementacji. Audyty wskazują rozbieżności; dla każdej zapisujemy decyzję: zgodność, naprawa błędu z regresją albo zmiana wersji. Zrzuty porównawcze normalizują tylko metadane niedeterministyczne (czas, RunId); nie wolno usuwać statusów, kolejności requestów ani wartości, żeby testy przeszły.
+## Corrections required during the migration
 
-## Poprawki wymagane przy migracji
+The audit does not treat the current engine as a flawless reference. Before implementing
+the runner we close the following decisions in contract tests:
 
-Audyt nie traktuje obecnego silnika jako bezbłędnego wzorca. Przed implementacją runnera zamykamy następujące decyzje w testach kontraktowych:
+- Path activation and argument retrieval are distinct. Attaching a pure data producer
+  must not by itself allow HTTP for its other consumers. Legitimate dependencies of
+  existing projects need a defined migration mapping, without silently widening or
+  narrowing requests.
+- A single diagnostic step must not automatically clean up resources inherited from
+  history. Each resource output has provenance; standard cleanup applies to the current
+  run. Cleaning up a historical resource is a separate, deliberate action.
+- History used for diagnostics is pinned to a fingerprint of the project, environment and
+  component revisions. Redacted text never becomes a real token of the next request.
+- Operator default arguments, observing Missing, formatting objects as text and numbers
+  have one specification and one test set. We do not duplicate the inconsistency of the
+  two current validators.
 
-- Aktywacja ścieżki i pobieranie argumentów są odrębne. Dołączenie czystego producenta danych nie może samo zezwolić na HTTP u pozostałych jego konsumentów. Legitymne zależności istniejących projektów muszą mieć zdefiniowane odwzorowanie migracji, bez cichego poszerzenia ani zawężenia requestów.
-- Pojedyncza diagnostyka nie może automatycznie sprzątać zasobów odziedziczonych z historii. Każde wyjście zasobu ma pochodzenie; standardowy cleanup dotyczy bieżącego wykonania. Sprzątanie historycznego zasobu jest osobną świadomą akcją.
-- Historia używana do diagnostyki jest przypięta do fingerprintu projektu, środowiska i rewizji komponentów. Zredagowany tekst nie staje się prawdziwym tokenem następnego requestu.
-- Domyślne argumenty operatora, obserwacja Missing, formatowanie obiektów do tekstu i liczby mają jedną specyfikację oraz zestaw testów. Nie powielamy niespójności dwóch dzisiejszych walidatorów.
+These corrections are R1/R2/R4 obligations, with concrete regressions described in the
+core audit. They are not a claim that the bugs are fixed in the current version.
 
-Te korekty są obowiązkami R1/R2/R4, z konkretnymi regresjami opisanymi w audycie core. Nie są deklaracją, że błędy w aktualnej wersji zostały już naprawione.
+## Execution plan and dependencies
 
-## Plan wykonania i zależności
+| ID  | Owner                     | Scope and dependencies                                                                                    | Acceptance condition                                                                                                                   |
+| --- | ------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| R0  | coordinator + UI          | library set, OS support, ADRs, Cargo workspace, fmt/clippy/test/build CI; before further implementation   | the chosen stack builds and a window test runs on Linux/Windows; canvas choice closed; module boundaries documented                    |
+| R1  | engine + coordinator      | v1 DTO, domain model, validator, export fixtures; after R0                                                | all current demo projects and negative imports; lossless round-trip; boundary sizes and depths                                         |
+| R2  | engine                    | evaluator, paths, graph plan compilation, components; after R1                                            | type/operator/IF/dependency tests, determinism, Missing/null and JS–Rust cases                                                         |
+| R3  | reliability               | storage, schema, atomic import, backup/recovery; after R1                                                 | no loss of a confirmed save on kill/restart, full disk and failed migration; no secrets in storage/export                              |
+| R4  | engine                    | async runner, HTTP, simulation, cancellation, cleanup, events; after R2                                   | HTTP fixture: prices → cart → products, both branches, errors and timeouts, no parallel requests in one path; bounded resources        |
+| R5  | coordinator + UI          | editing commands, undo/redo, document/session, storage integration; after R1, R3 integration              | validated atomic edits, configuration copies without aliasing, dirty/saved/error, transaction rollback                                 |
+| R6  | UI                        | egui shell, library, canvas, ports, focus control, keyboard; after R0/R1/R5                               | full support for adding, connecting, selecting, moving, deleting, copy/paste and undo on both OSes                                     |
+| R7  | UI                        | inspector, nested arguments, dragging variables, response picker, components; after R2/R5/R6              | today's flows reproduced without writing code; type configuration through Comparison; explicit value sources                           |
+| R8  | UI + engine               | report, resize, internal errors, cancellation, history/export; after R3/R4/R6                             | report pinned to the right snapshot, responsive UI during HTTP, correct cleanup and diagnostics, redaction before storage/presentation |
+| R9  | reliability + coordinator | native tests, performance, TLS/proxy, import hardening, packaging; prepared from R0, accepted after R3–R8 | all release gates below and CI artefacts on both OSes                                                                                  |
+| R10 | coordinator               | user data migration, install/upgrade/recovery trial, acceptance of the whole product                      | Linux and Windows meet the same scope; migration and rollback instructions; only then is Rust the default version                      |
 
-| ID  | Właściciel                 | Zakres i zależności                                                                                          | Warunek odbioru                                                                                                                         |
-| --- | -------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| R0  | koordynator + UI           | zestaw bibliotek, wsparcie OS, ADR, Cargo workspace, fmt/clippy/test/build CI; przed dalszą implementacją    | kompilacja wybranego stosu i test okna na Linux/Windows; zamknięty wybór canvas; udokumentowane granice modułów                         |
-| R1  | silnik + koordynator       | DTO v1, model domeny, walidator, fixture eksportu; po R0                                                     | wszystkie obecne projekty demonstracyjne i negatywne importy; round-trip bez utraty danych; graniczne rozmiary i głębokości             |
-| R2  | silnik                     | evaluator, ścieżki, kompilacja planu grafu, komponenty; po R1                                                | testy typów/operatorów/IF/zależności, deterministyczność, Missing/null i przypadki JS–Rust                                              |
-| R3  | niezawodność               | magazyn, schemat DB, import atomowy, backup/recovery; po R1                                                  | brak utraty potwierdzonego zapisu przy kill/restart, pełnym dysku i nieudanej migracji; brak sekretów w DB/eksporcie                    |
-| R4  | silnik                     | runner async, HTTP, symulacja, anulowanie, cleanup, zdarzenia; po R2                                         | fixture HTTP: ceny → koszyk → produkty, obie gałęzie, błędy i timeouty, brak równoległych requestów w jednej ścieżce; bounded resources |
-| R5  | koordynator + UI           | komendy edycji, undo/redo, dokument/sesja, powiązanie ze storage; po R1, integracja R3                       | walidowane atomowe edycje, kopie konfiguracji bez aliasowania, dirty/saved/error, rollback transakcji                                   |
-| R6  | UI                         | shell egui, biblioteka, canvas, porty, kontrola fokusu, keyboard; po R0/R1/R5                                | pełna obsługa dodawania, łączenia, zaznaczania, przesuwania, usuwania, kopiuj/wklej i undo na obu OS                                    |
-| R7  | UI                         | inspector, zagnieżdżone argumenty, przeciąganie zmiennych, selektor response, komponenty; po R2/R5/R6        | odtworzenie dzisiejszych przepływów bez pisania kodu; konfiguracja typu przez Porównanie; jawne źródła wartości                         |
-| R8  | UI + silnik                | raport, resize, błędy wewnętrzne, anulowanie, historia/eksport; po R3/R4/R6                                  | raport przypięty do właściwej migawki, płynny UI podczas HTTP, poprawne cleanup i diagnostyka, redakcja przed zapisem/prezentacją       |
-| R9  | niezawodność + koordynator | testy natywne, wydajność, TLS/proxy, zabezpieczenia importu, pakowanie; przygotowanie od R0, odbiór po R3–R8 | wszystkie bramki wydania poniżej i artefakty z CI na obu OS                                                                             |
-| R10 | koordynator                | migracja danych użytkownika, próba instalacji/upgrade/recovery, odbiór całego produktu                       | Linux i Windows spełniają ten sam zakres; instrukcja migracji i powrotu; dopiero wtedy Rust jest wersją domyślną                        |
+Wave 1: R0 and freezing contracts and fixtures. Wave 2: after R1, engine R2/R4, storage R3
+and UI/commands R5/R6 in parallel. Wave 3: R7/R8 and integration. Wave 4: R9/R10. Earlier
+stages may produce internal working increments, but they are not a production release
+that skips the remaining gates.
 
-Fala 1: R0 oraz zamrożenie kontraktów i fixtures. Fala 2: po R1 równolegle silnik R2/R4, magazyn R3 i UI/komendy R5/R6. Fala 3: R7/R8 i integracja. Fala 4: R9/R10. Wcześniejsze etapy mogą dawać wewnętrzne przyrosty robocze, lecz nie są wydaniem produkcyjnym z pominięciem pozostałych bramek.
+Each task ends with code, tests adequate to the behaviour, a short decision record and a
+list of remaining problems. A module compiling is never a reason to mark the whole
+migration done.
 
-Każde zadanie kończy się kodem, testami adekwatnymi do zachowania, krótką dokumentacją decyzji i listą pozostałych problemów. Agent nie oznacza całej migracji jako gotowej na podstawie kompilacji swojego modułu. Koordynator rozstrzyga konflikty semantyki, integruje zmiany i sprawdza cały przepływ użytkownika.
+## Production release gates
 
-## Bramki wydania produkcyjnego
+| Area                 | Required evidence                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Feature parity       | audit matrix closed; all current user flows ported; every deliberate divergence described                                                                                                                                                                                                                                |
+| Engine               | tests of local HTTP, ordering, IF/joins, cancellation during connect/read/component, stop/continue, cleanup, diagnostics and stable step identity                                                                                                                                                                        |
+| Data                 | round-trip tests of v1 and workspace, corrupted/new format, crash recovery, backup/restore, failed import/migration and package upgrade                                                                                                                                                                                  |
+| Security             | parsing limits before expensive allocation, no code execution from projects, correct TLS verification, dependency/licence checks, test secrets never reach reports/logs/snapshots/storage                                                                                                                                |
+| UI                   | egui_kittest for commands and interactions plus native window tests; focus, text vs block clipboard, keyboard, IME/Unicode, drag-and-drop, DPI and resize on Linux/Windows                                                                                                                                               |
+| Accessibility        | control names and focus, a keyboard alternative for wires, screen reader evaluation on both OSes; a custom canvas is not automatically accessible thanks to egui                                                                                                                                                         |
+| Performance          | measurements on recorded hardware with a release build: proposed 200 blocks/1000 wires p95 <= 16.7 ms and a synthetic 500/1000 profile p95 <= 33 ms while editing (the 500 profile does not change the v1 import limit); no UI stalls from HTTP and bounded report memory growth; thresholds fixed after the R0 baseline |
+| Distribution         | native Linux/Windows CI: fmt, clippy with warnings as errors, tests, release build; install, start, upgrade and uninstall keeping data; checksums and a version/dependency manifest; artefact provenance verification                                                                                                    |
+| Operations & support | rotated diagnostic logs, readable failure messages without sensitive data, backup/restore and migration instructions; no automatic replay after restart                                                                                                                                                                  |
 
-| Obszar             | Wymagany dowód                                                                                                                                                                                                                                                                                                                    |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Zgodność funkcji   | macierz audytów zamknięta; wszystkie obecne przepływy użytkowe przeniesione; każda świadoma rozbieżność opisana                                                                                                                                                                                                                   |
-| Silnik             | testy lokalnego HTTP, kolejności, IF/scalenia, anulowania podczas connect/read/komponentu, stop/continue, cleanup, diagnostyki i stabilnej tożsamości kroków                                                                                                                                                                      |
-| Dane               | testy round-trip v1 i workspace, uszkodzonego/nowego formatu, crash recovery, backup/restore, nieudanego importu/migracji i aktualizacji pakietu                                                                                                                                                                                  |
-| Bezpieczeństwo     | limity parsowania przed kosztowną alokacją, brak wykonywania kodu z projektu, poprawna weryfikacja TLS, kontrola zależności/licencji, testowe sekrety nie trafiają do raportów/logów/snapshotów/DB                                                                                                                                |
-| UI                 | egui_kittest dla komend i interakcji oraz natywne testy okna; fokus, schowek tekstowy vs blokowy, klawiatura, IME/Unicode, drag-and-drop, DPI i resize na Linux/Windows                                                                                                                                                           |
-| Dostępność         | nazwy i fokus kontrolek, alternatywa klawiaturowa dla przewodów, ocena czytników ekranu na obu OS; custom canvas nie jest automatycznie dostępny dzięki egui                                                                                                                                                                      |
-| Wydajność          | pomiary na zapisanej konfiguracji sprzętu i release buildzie: propozycja 200 klocków/1000 przewodów p95 <= 16,7 ms i syntetyczny profil 500/1000 p95 <= 33 ms podczas edycji (profil 500 nie zmienia limitu importu v1); brak blokady UI przez HTTP i ograniczony wzrost pamięci raportów; progi utrwalone po pomiarze bazowym R0 |
-| Dystrybucja        | natywny CI Linux/Windows: fmt, clippy z warnings jako błędy, testy, release build; instalacja, start, upgrade i deinstalacja zachowująca dane; sumy kontrolne i manifest wersji/zależności; weryfikacja pochodzenia artefaktów                                                                                                    |
-| Operacje i obsługa | logi diagnostyczne z rotacją, czytelne komunikaty awarii bez danych wrażliwych, instrukcja backup/restore i migracji; bez samoczynnego replay po restarcie                                                                                                                                                                        |
+Storage writes transactionally and confirms "saved" only after the write is durable.
+Application shutdown, rollback and a full disk have tests.
 
-SQLite pracuje w transakcjach z wersjonowaniem schematu i jednym właścicielem połączenia zapisu poza UI; backup korzysta z bezpiecznego mechanizmu bazy, nie kopii samego pliku przy aktywnym WAL. Potwierdzenie „zapisano” następuje po zatwierdzeniu. Wygaszenie aplikacji, rollback oraz brak miejsca mają testy. [Transakcje rusqlite](https://docs.rs/rusqlite/latest/rusqlite/struct.Transaction.html).
+Secrets are session-only by default, as today. Saving them in the OS credential manager
+may come as a separate, tested feature; we never replace it with plaintext. A fully
+encrypted store, cloud and automatic updates are not conditions of this migration.
+Installer signing and release verification are part of R9; a publisher certificate is an
+external dependency that no code change or CI alone can replace.
 
-Sekrety domyślnie są sesyjne, jak obecnie. Zapis w menedżerze poświadczeń OS może dojść jako osobna, testowana funkcja; nie zastępujemy go plaintextem. Pełna szyfrowana baza, cloud i automatyczne aktualizacje nie są warunkiem tej migracji. Podpisywanie instalatorów i weryfikacja wydania są częścią R9; ewentualny certyfikat/tożsamość wydawcy to zależność zewnętrzna, której nie zastąpi zmiana kodu ani samo CI.
+reqwest needs deliberate client configuration: whole-response and per-stage timeouts,
+stream limits, proxy, TLS, redirect and retry policy. We do not rely on library defaults
+in tests that create resources.
+[ClientBuilder](https://docs.rs/reqwest/latest/reqwest/struct.ClientBuilder.html).
+Cancellation is signalled by a token, but the policy for finishing a request and starting
+cleanup belongs to our runner.
+[CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html).
 
-reqwest wymaga świadomej konfiguracji klienta: timeout całego response i poszczególnych etapów, limity streamu, polityka proxy, TLS, redirect i retry. Dokumentacja wskazuje domyślne ponowienia niektórych NACK i brak domyślnego całkowitego timeoutu; nie polegamy na tych ustawieniach przy testach tworzących zasoby. [ClientBuilder](https://docs.rs/reqwest/latest/reqwest/struct.ClientBuilder.html). Anulowanie sygnalizuje token, ale polityka kończenia requestu i uruchomienia cleanup należy do naszego runnera. [CancellationToken](https://docs.rs/tokio-util/latest/tokio_util/sync/struct.CancellationToken.html).
+Widget tests may use [egui_kittest](https://docs.rs/egui_kittest/latest/egui_kittest/),
+which provides interaction tools and checks of accessible names. They do not replace
+integration tests with a real window, clipboard and system dialogs. Graphic snapshots
+complement semantic checks; they are never the only criterion.
 
-Testy widgetów mogą korzystać z [egui_kittest](https://docs.rs/egui_kittest/latest/egui_kittest/), który daje narzędzia interakcji i kontroli dostępnych nazw. Nie zastępują testów integracji z rzeczywistym oknem, schowkiem i dialogami systemowymi. Snapshoty grafiki są uzupełnieniem sprawdzeń semantycznych, nie jedynym kryterium.
+## Work log
 
-## Najbliższe konkretne zlecenie implementacyjne
+### First increment (R0/R1)
 
-Pierwszy przyrost R0/R1 jest opisany poniżej. Następna praca domyka model domenowy i kontrakt wykonania (nowe typy ID, reguły operatorów i aktywacji), sprawdza natywny frontend na Windows oraz rozszerza testy interakcji adaptera grafu. Potem odblokowuje równoległe prace nad runnerem, SQLite i komendami edycji. Obecne źródła TypeScript pozostają referencją; termin ich usunięcia wyznacza R10.
+- Cargo workspace, toolchain 1.99.0, Cargo.lock, core without GUI dependencies and a
+  native eframe frontend.
+- Chosen compatible set: **eframe/egui 0.36.2**. A graph library (egui-snarl 0.12.0,
+  which needs egui 0.36) was evaluated; the viewer uses a custom canvas over egui `Painter`
+  instead. Moving to 0.37 is a separate, deliberate upgrade; we never mix two egui
+  versions in public interfaces.
+- Project and workspace v1 import is limited to 16 MiB. The DTO keeps map order,
+  `OptionalJson` distinguishes absent from null, unknown fields and duplicate keys are
+  rejected instead of lost. The current format keeps the 200 blocks / 1000 edges per graph
+  limits.
+- The validator checks bindings (including nested ones), parameters, ports, data/control
+  cycles, IF, Start and component revisions/recursion.
+- The egui viewer shows blocks, data/control wires and both phases. Positions changed in
+  the viewer are view state and are not saved. No request is executed during import. Import
+  is transactional from the UI's perspective: a failed file keeps the current document.
+- Corpus: four projects and a workspace, a SHA-256 manifest and a TypeScript generator
+  with `--check`. Node is only used to regenerate the comparison corpus, not to start the
+  Rust binary.
+- Google Antigravity (`agy`, model `gemini-4-argon-medium`) got two bounded tasks: CI and
+  the fixture generator. The coordinator fixed a wrong type import and the manifest
+  sorting and ran the verification.
+- CI defines build/test/clippy and artefacts for Linux and Windows; adding the YAML does
+  not mean the jobs ran on remote runners.
 
-## Dziennik pierwszego przyrostu
+### Expression semantics (R2)
 
-- Workspace Cargo, toolchain 1.99.0, Cargo.lock, core bez zależności GUI i natywny frontend eframe.
-- Wybrano zgodny zestaw **eframe/egui 0.36.2 + egui-snarl 0.12.0**: manifest snarl wymaga egui 0.36. Przejście na 0.37 wymaga zgodnego adaptera lub aktualizacji snarl; nie łączymy dwóch wersji egui w publicznych interfejsach. To decyzja zgodności, a nie deklaracja najnowszej wersji.
-- Import projektu i workspace v1 jest ograniczony do 16 MiB. DTO zachowuje kolejność map, OptionalJson odróżnia brak i null, nieznane pola i duplikaty kluczy są odrzucane zamiast gubione. Wersja obecnego formatu zachowuje limity 200 klocków / 1000 krawędzi na graf.
-- Walidator sprawdza powiązania (także zagnieżdżone), parametry, porty, cykle danych/sterowania, IF, Start i rewizje/rekurencję komponentów. Nie jest jeszcze interpreterem ani pełnym kompilatorem wykonania.
-- Podgląd egui pokazuje klocki, przewody danych/sterowania i osobne fazy. Pozycje zmienione w podglądzie są stanem widoku; nie są zapisywane do projektu. Żaden request nie jest wykonywany podczas importu. Import jest transakcyjny z punktu widzenia UI: nieudany plik pozostawia bieżący dokument.
-- Korpus: cztery projekty i workspace, manifest SHA256 oraz generator TypeScript z `--check`. Node służy tylko do regeneracji porównawczej, a nie do startu binarki Rust.
-- Google Antigravity przez `agy`, model `gemini-4-argon-medium`, otrzymał dwa ograniczone zadania: CI i generator fixture. CI powstało poprawnie w zakresie zlecenia. Pierwsze podejście generatora zatrzymało się na ograniczeniu uprawnień headless; drugie wykonało zapis bez komend. Koordynator poprawił błędny import typu oraz deterministyczne sortowanie manifestu i sam uruchomił weryfikację. Dalszy kod migracji napisał koordynator.
-- CI definiuje build/test/clippy i artefakty dla Linux oraz Windows; samo dodanie YAML nie oznacza, że te joby wykonały się na zdalnych runnerach. Podpisane pakiety, kompletne GUI Windows i cała macierz wydania pozostają wymaganiami R9/R10.
+- `apiforge-core::js`, `path` and `operator`: JavaScript-compatible equality, `String()`
+  conversion and number formatting, v1 field paths and the 37 operators with typed errors
+  and an injected RNG.
+- A differential corpus of ~21k cases generated from the TypeScript sources
+  (`fixtures/compatibility/semantics/`) caught a one-ULP number parsing defect
+  (`serde_json` without `float_roundtrip`) and 17-digit formatting differences. Accepted
+  divergences are recorded in [ADR 0001](docs/decisions/0001-numeric-semantics.md).
 
-Instrukcje uruchomienia aktualnego kodu: [docs/migration/development.md](docs/migration/development.md).
+Instructions for running the current code: [docs/migration/development.md](docs/migration/development.md).

@@ -1,111 +1,163 @@
 # API Forge
 
-Rozpoczęta migracja: [Rust + egui — migracja produkcyjna](RUST_MIGRATION.md). Docelowo Linux i Windows od pierwszego wydania; obecny kod poniżej pozostaje wersją referencyjną na czas migracji.
+A desktop tool for visual REST API regression tests. A team defines its own requests,
+components, data contracts and business actions on a graph; the engine assumes no domain
+and no endpoint names.
 
-Lokalny prototyp wizualnych testów regresji REST API. Zespół definiuje własne requesty, komponenty, kontrakty danych i akcje biznesowe; silnik nie zakłada żadnej domeny ani nazw endpointów.
+The repository contains two implementations:
 
-Natywny podgląd Rust i komendy sprawdzania opisuje [instrukcja developerska](docs/migration/development.md). Obsługuje import projektu/workspace v1; pełny edytor i runner są w trakcie migracji.
+- **Native application (Rust + egui)** in `crates/` — the production version, being
+  ported to feature parity. Linux and Windows are first-release targets. See the
+  [migration plan](RUST_MIGRATION.md) and the
+  [developer guide](docs/migration/development.md).
+- **TypeScript prototype (React + Express)** in `app/`, `api/` and `shared/` — the
+  behavioural reference for the port. It stays until the native application replaces it.
 
-## Uruchomienie
+## Native application
+
+```bash
+cargo run -p apiforge-desktop --locked
+```
+
+Verification:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+node --import tsx scripts/export-compatibility-fixtures.ts --check
+```
+
+Design decisions are recorded in [docs/decisions](docs/decisions).
+
+## TypeScript prototype
 
 ```bash
 npm install
 npm run dev
 ```
 
-Otwórz **http://127.0.0.1:5173**. Frontend działa na porcie 5173, a lokalny runner na 4318. Projekt zawiera lokalną zależność Node 22 zgodną z wymaganiami React Router; polecenia `npm run` korzystają z niej automatycznie. Serwery nasłuchują wyłącznie lokalnie.
+Open **http://127.0.0.1:5173**. The frontend runs on port 5173 and the local runner on
+4318; both listen locally only. The prototype UI is in Polish.
 
-Wariant po zbudowaniu:
+Built variant:
 
 ```bash
 npm run build
 npm start
 ```
 
-Backend udostępnia wtedy zbudowany interfejs pod **http://127.0.0.1:4318**. Przy pracy w trybie developerskim używaj portu 5173.
+The backend then serves the built interface at **http://127.0.0.1:4318**.
 
-## Pierwszy scenariusz
+Verification: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run build`.
+Browser tests use the system `/usr/bin/chromium` when available; otherwise install
+Chromium for Playwright (`npx playwright install chromium`) or point
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` at a browser. Formatting: `npm run format` and
+`npm run format:check`.
 
-1. Otwórz przykładowy projekt sklepu albo systemu zgłoszeń. Możesz też utworzyć pusty projekt.
-2. Nowy scenariusz zawiera ręczny **Start**. Dodaj klocek z biblioteki kliknięciem lub przeciągnięciem. Skonfiguruj go w panelu po prawej; wybrane argumenty są edytowalne bezpośrednio na klocku.
-3. Połącz **Dalej** z górnym wejściem kolejnego klocka albo wybierz **Następny krok** w konfiguracji. Pierwszy request nowego scenariusza łączy się ze Startem automatycznie. Kliknij klocek prawym przyciskiem albo wybierz **Akcja**. Dostępne akcje projektu wynikają z typu wyjścia. Wybrana akcja tworzy połączony krok.
-4. Podepnij źródła danych do nazwanych wejść. Możesz też wybrać wcześniejszy krok i ścieżkę JSON w konfiguracji argumentu.
-5. W zakładce danych wyjściowych kliknij pole odpowiedzi, aby dodać jego sprawdzenie.
-6. Wybierz **Symulacja** lub **Rzeczywiste API** i uruchom test. Symulacja używa jawnie zapisanych przykładów; rzeczywisty przebieg wysyła requesty przez backend.
-7. Otwórz wynik kroku: raport pokazuje wejścia, wyjścia, request i response, wartości oczekiwane i otrzymane oraz wnętrze własnych komponentów.
+## How it works
 
-Przy pełnym uruchomieniu projektu sklepu tryb rzeczywisty korzysta z lokalnego API demonstracyjnego, tworzy koszyk, sprawdza cenę i usuwa koszyk w sekcji **Po teście**. Produkt `123` ma cenę promocyjną 80, a `124` — 90. Zmiana ID przy oczekiwanej cenie 80 pozwala zobaczyć wykrytą rozbieżność.
+### A first scenario
 
-Dane demonstracyjne są zdefiniowane w `shared/demos.ts` i `api/demo.ts`; nie należą do silnika wykonania.
+1. Open the shop or ticketing demo project, or create an empty project.
+2. A new scenario contains a manual **Start**. Add a block from the library by clicking or
+   dragging. Configure it in the right panel; chosen arguments can be edited directly on
+   the block.
+3. Connect **Next** to the top input of the following block, or choose the next step in
+   the configuration. The first request of a new scenario is connected to Start
+   automatically. Right-click a block or choose **Action**: the project actions offered
+   follow from the output type, and the chosen action creates a connected step.
+4. Bind data sources to named inputs, or choose an earlier step and a JSON path in the
+   argument configuration.
+5. In the output data, click a response field to add a check for it.
+6. Choose **Simulation** or **API** and run the test. Simulation uses explicitly saved
+   samples; a live run sends real requests.
+7. Open a step result: the report shows inputs, outputs, request and response, expected
+   and actual values and the inside of custom components.
 
-## Kolejność i IF / ELSE
+A full run of the shop project in live mode uses the local demo API: it creates a cart,
+checks the price and deletes the cart in the **After test** section. Product `123` has a
+promotional price of 80 and `124` of 90; changing the ID while expecting 80 shows a
+detected discrepancy.
 
-W bibliotece wybierz **Przykład: kolejność i IF**, a następnie **API → Uruchom test**. Przepływ pobiera cenę produktu, sprawdza status 200 w IF, tworzy pusty koszyk i dopiero potem dodaje produkty. ID koszyka i dane produktu pochodzą z aktualnych odpowiedzi; końcowe Porównanie sprawdza sumę. Sekcja **Po teście** usuwa koszyk.
+### Ordering and IF / ELSE
 
-**Start** uruchamia połączoną ścieżkę. Każdy request kończy się przed rozpoczęciem następnego. **IF / ELSE** przyjmuje takie same argumenty i operacje jak Porównanie, ale wynik wybiera wyjście **Tak** lub **Nie**. Fałsz sam w sobie nie jest błędem testu. Połącz wyjścia z istniejącymi klockami przez przeciągnięcie lub listy w konfiguracji; kliknięcie **Dalej / Tak / Nie** na klocku pozwala dodać nowy krok od razu z połączeniem.
+**Start** runs the connected path. Each request finishes before the next one starts.
+**IF / ELSE** takes the same arguments and operations as Comparison, but its result
+selects the **Yes** or **No** output; false by itself is not a test failure.
 
-Kroki poza ścieżką od Startu i niewybrane gałęzie są pomijane bez requestów. Dane dodatkowo ustanawiają zależności: blok czeka na źródła wszystkich argumentów. Alternatywne połączenia kolejności mogą schodzić się do wspólnego kroku; wystarcza aktywna gałąź, ale argumenty nadal muszą być dostępne. Odwołanie do odpowiedzi pominiętej gałęzi nie uruchomi jej ponownie. Starsze zapisane grafy bez Startu zachowują poprzednie wykonanie wszystkich korzeni i mają widoczną informację o tym trybie. Dodaj Start i połącz ścieżkę, aby ograniczyć uruchamiane kroki.
+Steps outside the path from Start and unchosen branches are skipped without requests.
+Data adds dependencies: a block waits for the sources of all its arguments. Alternative
+ordering connections can merge into a shared step; one active branch is enough, but the
+arguments must still be available. A reference to the response of a skipped branch never
+runs it. Older graphs without Start keep the previous behaviour of running every root.
 
-W przykładzie zmień endpoint produktu na `/products/999`, aby zobaczyć IF → Nie i brak tworzenia koszyka. Gałąź Nie zawiera Porównanie zgłaszające nieoczekiwany status.
+The workflow example fetches a product price, checks for status 200 in IF, creates an
+empty cart and only then adds products; the final Comparison checks the total and the
+**After test** section deletes the cart. Changing the product endpoint to `/products/999`
+shows IF → No and no cart being created.
 
-## Własne komponenty
+### Custom components
 
-Zaznacz kroki na grafie (Ctrl/Cmd + klik) i zapisz zaznaczenie jako komponent. Wybierz publiczne argumenty, zwracane dane i opcjonalny argument zasilany z menu **Dodaj akcję**. Komponent może zawierać inne komponenty. Kontrakty danych definiujesz w ustawieniach projektu.
+Select steps on the graph (Ctrl + click) and save the selection as a component. Choose
+public arguments, returned data and an optional argument fed from the **Add action**
+menu. Components can contain other components; data contracts are defined in the project
+settings.
 
-Edycja wnętrza komponentu tworzy nową rewizję. Istniejące instancje pozostają przy swojej rewizji; wybraną instancję aktualizujesz w jej konfiguracji. Oryginalny fragment scenariusza pozostaje na grafie po zapisaniu komponentu do biblioteki.
+Editing the inside of a component creates a new revision. Existing instances keep their
+revision; update a chosen instance in its configuration. The original fragment stays on
+the graph after the component is saved.
 
-## Dane i wykonanie
+### Operators, variables and response fields
 
-- Projekty zapisują się lokalnie w przeglądarce. Eksport/import JSON pozwala zachować kopię i przenieść definicje.
-- Sekrety środowiska są przechowywane tylko w pamięci bieżącej sesji i nie trafiają do eksportu projektu. Nagłówki autoryzacji oraz rozpoznane wartości tajne są maskowane w raportach. Nie wpisuj tokenów jako zwykłych wartości literalnych w definicji projektu.
-- Base URL może zawierać prefiks, np. `https://example.test/api/v1`. Ścieżka `/users/:id` jest do niego dołączana; pełny URL pomija base URL.
-- Dostępne są argumenty ścieżki `:argument`, podstawienia `{{argument}}` w URL/query/nagłówkach oraz body JSON. Całe podstawienie w wartości body zachowuje typ argumentu.
-- Status HTTP 4xx/5xx jest danymi do sprawdzenia. Dodaj asercję statusu, jeśli chcesz zaliczać tylko wybrane odpowiedzi.
-- Po błędzie można zatrzymać scenariusz lub kontynuować możliwe kroki. Niespełniony warunek danych blokuje zależne kroki. Sprzątanie ma osobny przebieg i wykonuje się także po błędzie lub kontrolowanym anulowaniu.
-- Wykonanie do wybranego klocka jest częściowym przebiegiem. Pojedynczy krok może korzystać z jawnie wskazanych danych wcześniejszego wykonania; jego wynik jest diagnostyczny.
+Any argument can hold a nested **operator** block. 37 operators in six groups cover
+mathematics, comparison, logic, text, functions and JSON data. Mathematics and logic
+require proper types: missing data and null are not zero. See
+[docs/poc/operator-blocks.md](docs/poc/operator-blocks.md).
 
-## Weryfikacja
+**Variables** are separate blocks with a name and a value of any JSON type. Dropping a
+variable on an argument creates a type-preserving binding; dropping it into a URL, query
+value, header or select path inserts `{{name}}` at the caret and binds the source. A
+variable can take a response field: the assignment stores `request → output → path`, so
+every run reads a fresh value. `null`, `false` and zero remain valid values; a missing
+field is an error.
 
-```bash
-npm run typecheck
-npm test
-npm run test:e2e
-npm run build
-```
+**Check** next to a field in the output data or the report creates a **Comparison** with
+the actual and the expected value. Its operation can be equality, containment, "has type"
+and more; both arguments can come from a literal, another step, a parameter or the
+environment.
 
-Testy silnika korzystają z kontrolowanego lokalnego serwera. Testy przeglądarkowe używają systemowego `/usr/bin/chromium`, jeśli jest dostępny; w innym przypadku wymagają Chromium dla Playwright (`npx playwright install chromium`). Można wskazać przeglądarkę przez `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Konfiguracja testów uruchamia frontend/backend lub korzysta z już uruchomionego podglądu.
+On the board, **Ctrl+C** copies the selection with its configuration, **Ctrl+V** pastes
+an independent copy and **Ctrl+D** duplicates. Internal connections of the group are
+remapped to the copy; references to other blocks keep their sources.
 
-## Ograniczenia prototypu
+### Data and execution
 
-- Jeden użytkownik, lokalna aplikacja; brak współpracy w czasie rzeczywistym i publicznego hostingu runnera.
-- Acykliczne grafy wykonywane sekwencyjnie; bez pętli, macierzy przypadków, zaawansowanych rozgałęzień i skryptów JavaScript.
-- Requesty HTTP z JSON-em lub odpowiedzią tekstową; brak multipart, automatycznej obsługi OAuth, automatycznych retry i przekierowań HTTP.
-- Timeout requestu do 60 sekund, limit odpowiedzi 2 MiB, budżet scenariusza 120 sekund i osobne 10 sekund na sprzątanie.
-- Historia wyników jest sesyjna i ograniczona w pamięci backendu; projekt można zapisać trwale, raport wyeksportować.
-- Anulowanie nie cofa operacji wykonanych przez testowane API. Awaria procesu nie gwarantuje wykonania sprzątania.
+- Projects are saved locally; JSON export/import keeps a copy and moves definitions.
+- Environment secrets are kept in memory for the session only and never reach a project
+  export. Authorisation headers and recognised secret values are masked in reports. Do
+  not type tokens as ordinary literal values in a project.
+- The base URL may contain a prefix, e.g. `https://example.test/api/v1`. The path
+  `/users/:id` is appended to it; a full URL bypasses the base URL.
+- Path arguments `:argument`, `{{argument}}` substitution in URL/query/headers and a JSON
+  body are supported. A whole substitution in a body value keeps the argument's type.
+- HTTP 4xx/5xx is data to check. Add a status assertion to accept only chosen responses.
+- After an error the scenario can stop or continue with the steps that can still run. An
+  unmet data condition blocks dependent steps. Cleanup runs separately and also after an
+  error or a controlled cancellation.
+- Running up to a chosen block is a partial run. A single step may use explicitly chosen
+  data of an earlier run; its result is diagnostic.
 
-Specyfikacja zakresu: [PROTOTYPE.md](PROTOTYPE.md). Podział prac i kryteria: [AGENT_TASKS.md](AGENT_TASKS.md). Wcześniejsza makieta znajduje się w `design-preview/`.
+### Limitations
 
-Nowy request zaczyna bez argumentów. Nazwij własne argumenty w konfiguracji, określ ich typ i wybierz, które pokazać na klocku. Nazwy mogą odpowiadać filtrom, tekstom, flagom, obiektom czy parametrom ścieżki; `id` nie ma specjalnego znaczenia.
+- Single user, local application; no real-time collaboration and no public runner.
+- Acyclic graphs executed sequentially; no loops, case matrices or JavaScript scripts.
+- HTTP requests with JSON or text responses; no multipart, automatic OAuth, automatic
+  retries or HTTP redirects.
+- Request timeout up to 60 seconds, 2 MiB response limit, 120-second scenario budget and a
+  separate 10 seconds for cleanup.
+- Cancellation does not undo operations performed by the tested API. A process crash
+  cannot guarantee cleanup.
 
-Przy polu w danych wyjściowych lub raporcie wybierz **Sprawdź**. Powstanie komponent **Porównanie** z argumentami: wartością otrzymaną i oczekiwaną. W jego konfiguracji wybierzesz operację (np. równość, zawieranie lub „Ma typ”). Dla „Ma typ” wybierzesz oczekiwany typ z listy. Oba argumenty mogą pochodzić z wpisanej wartości, wyniku innego kroku, parametru lub środowiska.
-
-Formatowanie kodu: `npm run format`; kontrola bez zmian: `npm run format:check`.
-
-PoC bloków operatorów: w bibliotece kliknij **Otwórz przykład blokowy**. Projekt zawiera odczyt lokalnego API oraz dwa porównania z zagnieżdżonymi operatorami. Wybierz klocek porównania, aby zobaczyć zielone bloki w jego argumentach. Przycisk **API** uruchamia ten sam scenariusz na lokalnym serwerze demonstracyjnym.
-
-W dowolnym argumencie wybierz źródło **Operator · zagnieżdżony blok** lub przeciągnij operator z zielonej palety na argument. Kolejne gniazda mogą zawierać inne operatory, wartości, parametry, zmienne środowiska i pola wcześniejszych odpowiedzi. Kliknięcie operatora w palecie dodaje go jako osobny krok grafu. Operator zwraca wartość; **Porównanie** sprawdza jej zgodność z oczekiwaniem. „Typ wartości” jest operatorem zwracającym tekst, np. `number`, `array` lub `null`.
-
-Dostępnych jest 37 operatorów w sześciu grupach. Matematyka i logika wymagają właściwych typów: brak danych i null nie są zerem. Reguły, zakres PoC i kolejne etapy opisuje [BLOCKS_POC.md](BLOCKS_POC.md). Pętle i rozgałęzienia wykonania są poza obecnym PoC.
-
-W argumencie ze źródłem „Wynik innego kroku” przycisk **Wybierz pole…** otwiera wyszukiwarkę pól z typami i podglądem wartości. Korzysta z ostatniej odpowiedzi wybranego kroku (także po zmianie porównania) lub przykładowych danych; pochodzenie jest widoczne. Można wybrać całe body, zagnieżdżone pole, element listy albo wpisać własną ścieżkę.
-
-Sekcja **Zmienne** w bibliotece zawiera przeciągane bloczki. Przycisk **+** dodaje do grafu osobną zmienną z nazwą i wartością dowolnego typu JSON. W tej samej sekcji są parametry scenariusza, argumenty edytowanego komponentu, zmienne środowiska i nazwy sekretów.
-
-Przeciągnij zmienną na wartość argumentu (także wewnątrz operatora lub bezpośrednio na klocku), aby utworzyć powiązanie zachowujące typ. W URL-u, wartości query, nagłówku albo ścieżce „Wybierz dane” upuszczenie wstawia `{{nazwa}}` w miejscu kursora lub zaznaczonego tekstu i automatycznie wiąże źródło. Pomarańczowe bloczki pod tekstem można przeciągać ponownie. Zmiana wartości zmiennej działa w następnym wykonaniu; cykle są odrzucane. Payload przeciągania nie zawiera wartości sekretów.
-
-Aby zmienna pobierała pole odpowiedzi, zaznacz jej bloczek, kliknij **Wybierz wartość z odpowiedzi**, wskaż request i wybierz pole z listy. Możesz też użyć **Do zmiennej** przy polu w danych wyjściowych lub raporcie: utwórz nową zmienną albo wybierz istniejącą. Nazwę pola odpowiedzi można przeciągnąć na wartość zmiennej, również bezpośrednio na grafie.
-
-Przypisanie przechowuje źródło `request → wyjście → ścieżka`, więc przy kolejnym uruchomieniu pobiera świeżą wartość, zachowując typ JSON. Request wykona się przed zmienną, a zmienna przed porównaniem, które jej używa. Brak pola daje błąd zamiast zapamiętanej starej wartości; `null`, `false` i zero pozostają poprawnymi wartościami. Cykl zależności jest odrzucany.
-
-Na planszy zaznacz klocek lub grupę (Ctrl/Cmd + klik). **Ctrl/Cmd+C** kopiuje zaznaczenie z konfiguracją, a **Ctrl/Cmd+V** wkleja niezależną kopię na tej samej planszy. **Ctrl/Cmd+D** duplikuje od razu. Te same akcje są w pasku narzędzi grafu. Schowek planszy przechowuje stan z chwili kopiowania, a kolejne wklejenia dostają nowe ID i przesunięte pozycje. Wewnętrzne połączenia grupy są przepinane do kopii; odwołania do pozostałych klocków pozostają przy swoich źródłach. Wklejenie można cofnąć przez Ctrl/Cmd+Z. W polach tekstowych skróty kopiują i wklejają tekst.
+Historical prototype documents: [docs/poc](docs/poc). The earlier mock-up is in
+`design-preview/`.

@@ -1,33 +1,71 @@
-# Plan i PoC: testy z bloków operatorów
+# Plan and PoC: tests built from operator blocks
 
-## Sposób budowania
+Status: implemented in the TypeScript prototype; semantics are ported to Rust in
+`apiforge-core::operator` (see [ADR 0001](../decisions/0001-numeric-semantics.md)).
 
-Requesty, porównania i komponenty pozostają krokami scenariusza. Każdy ich argument może zawierać wartość, źródło danych albo zagnieżdżony blok operatora. Wynik operatora zasila otaczający argument. Np. Porównanie przyjmuje wynik `i(typ(status) = tekst, długość(status) > 0)` i oczekuje `true`. Połączenia ze źródłami wewnątrz bloków pozostają jawnymi zależnościami grafu.
+## Authoring model
 
-Jedno Porównanie jest miejscem zaliczenia/niezaliczenia testu. Operatory porównania i logiki tylko zwracają wartość boolean. Nie mnożymy osobnych komponentów „sprawdź typ”, „sprawdź długość” itp.
+Requests, comparisons and components remain scenario steps. Each of their arguments can
+contain a value, a data source or a nested operator block. The operator's result feeds
+the enclosing argument. For example, a Comparison takes the result of
+`and(type(status) = text, length(status) > 0)` and expects `true`. Connections to sources
+inside blocks remain explicit graph dependencies.
 
-## Etapy
+A single Comparison is where a test passes or fails. Comparison and logic operators only
+return a boolean. We do not multiply separate "check type", "check length" components.
 
-1. Wspólny katalog operatorów: arytmetyka, losowanie, porównania, i/lub/nie, tekst, modulo, zaokrąglenie i funkcje matematyczne; dodatkowo typ, istnienie, listy i odczyt pola JSON.
-2. Serializowalne drzewo wyrażeń w istniejącym modelu Binding; jeden interpreter dla symulacji i rzeczywistego API. Walidacja zagnieżdżeń, typów, referencji i cykli; bez eval.
-3. Edytor kolorowych, zagnieżdżonych bloków w gniazdach argumentów. Wybór operatora z grup, dodawanie kliknięciem i przeciągnięciem z palety. Edycja liści przez istniejący edytor wartości i źródeł.
-4. Integracja grafu, zapisu/importu, cofania, duplikowania i własnych komponentów. Przykład: odczyt API → złożony warunek → jedno Porównanie.
-5. Testy interpretera, błędów typów, referencji w zagnieżdżeniach i pełnego przebiegu w przeglądarce.
+## Stages
 
-## Reguły PoC
+1. A shared operator catalogue: arithmetic, random, comparisons, and/or/not, text, modulo,
+   rounding and mathematical functions; plus type, existence, lists and JSON field access.
+2. A serialisable expression tree in the existing Binding model; one interpreter for
+   simulation and the real API. Validation of nesting, types, references and cycles; no
+   eval.
+3. An editor of coloured, nested blocks in argument slots. Operators chosen from groups,
+   added by clicking or dragging from a palette. Leaves edited with the existing value and
+   source editor.
+4. Integration with the graph, storage/import, undo, duplication and custom components.
+   Example: read the API → compound condition → one Comparison.
+5. Tests of the interpreter, type errors, references inside nesting and a full browser
+   run.
 
-Inspiracją jest katalog operatorów Scratch: https://github.com/scratchfoundation/scratch-vm/blob/develop/src/blocks/scratch3_operators.js. Nie kopiujemy niejawnej konwersji typów: null i brak pola nie stają się zerem, tekst nie staje się liczbą, logika przyjmuje boolean. To potrzebne, żeby test API wykrywał błędy kontraktu. Porównanie równości uwzględnia typ i strukturę JSON; zawieranie tekstu uwzględnia wielkość liter. Kąty funkcji trygonometrycznych i numer litery odpowiadają konwencji Scratch (stopnie i indeks od 1). Zaokrąglenie dodatkowo przyjmuje precyzję. Pola i indeksy JSON zachowują dotychczasowe ścieżki i indeksy od 0.
+## PoC rules
 
-Operatory są skończonym katalogiem, nie kodem JavaScript. Losowanie jest jawne i nie służy jako stabilny wzorzec oczekiwań. Maksymalnie 12 poziomów i 200 bloków w jednym argumencie. Eksport z operatorami wymaga tej lub nowszej wersji aplikacji; starsza aplikacja odrzuci nieznany rodzaj powiązania.
+The inspiration is the Scratch operator catalogue:
+https://github.com/scratchfoundation/scratch-vm/blob/develop/src/blocks/scratch3_operators.js.
+We do not copy its implicit type conversion: null and a missing field never become zero,
+text never becomes a number, logic takes booleans. API tests need this to detect contract
+errors. Equality compares JSON type and structure; text containment is case-sensitive.
+Trigonometric angles and the letter index follow the Scratch convention (degrees and
+1-based index). Rounding additionally takes a precision. JSON fields and indices keep the
+existing paths and 0-based indices.
 
-## Poza PoC
+Operators are a finite catalogue, not JavaScript code. Random is explicit and never a
+stable expected value. At most 12 levels and 200 blocks per argument. An export with
+operators needs this or a newer application version; an older one rejects the unknown
+binding kind.
 
-Pętle, czekanie/retry, równoległość i pełny edytor stosów poleceń wymagają rozszerzenia modelu wykonania i raportu. To kolejny etap. Obecny PoC dotyczy składania wyrażeń z bloków w rzeczywistych scenariuszach API, bez zmiany silnika na wykonujący dowolne skrypty.
+## Outside the PoC
 
-## Rozszerzenie: przepływ wykonania (zrealizowane)
+Loops, waiting/retry, parallelism and a full command-stack editor require extending the
+execution and report model. That is the next stage. The PoC covers composing expressions
+from blocks in real API scenarios, without turning the engine into an arbitrary script
+runner.
 
-1. Model: ręczny Start, IF z tymi samymi predykatami co Porównanie i krawędzie kolejności z `branch: true/false` (wartości tekstowe). Maksymalnie jeden Start w grafie, bez wejść; graf nadal jest acykliczny.
-2. Runner: czeka na zakończenie operacji; uruchamia ścieżkę od Startu i zależne bloki danych, a nieaktywne gałęzie oznacza jako pominięte. IF false jest poprawnym wynikiem kroku, wybierającym ELSE. Dane nie mogą wymusić uruchomienia requestu z pominiętej gałęzi. Starsze grafy bez Startu zachowują poprzednią semantykę.
-3. Edytor: większe porty sterowania, podpisane wyjścia Dalej / Tak / Nie, dodawanie połączonego kroku z wyjścia i edycja połączeń istniejących bloków w konfiguracji. Powiązania danych pozostają osobnymi portami.
-4. Przykład: ceny produktu → IF status 200 → pusty koszyk → dodanie produktów → porównanie sumy; ELSE raportuje brak cen, sprzątanie usuwa wyłącznie utworzony koszyk.
-5. Weryfikacja: lokalne HTTP mierzące kolejność i maksymalną liczbę aktywnych requestów; true/false, dalsze kroki obu gałęzi, scalenie, niedostępne dane, błędy, koszyk i cleanup, zapis/reload oraz łączenie w przeglądarce.
+## Extension: execution flow (implemented)
+
+1. Model: a manual Start, IF with the same predicates as Comparison, and ordering edges
+   with `branch: true/false` (string values). At most one Start per graph, with no inputs;
+   the graph stays acyclic.
+2. Runner: waits for operations to finish; runs the path from Start and dependent data
+   blocks, and marks inactive branches as skipped. IF false is a valid step result that
+   selects ELSE. Data can never force a request from a skipped branch to run. Older graphs
+   without Start keep their previous semantics.
+3. Editor: larger control ports, labelled Next / Yes / No outputs, adding a connected step
+   from an output, and editing connections of existing blocks in the configuration. Data
+   bindings remain separate ports.
+4. Example: product prices → IF status 200 → empty cart → add products → compare the
+   total; ELSE reports missing prices, and cleanup deletes only the created cart.
+5. Verification: local HTTP measuring ordering and the maximum number of active
+   requests; true/false, later steps of both branches, merging, unavailable data, errors,
+   cart and cleanup, save/reload and connecting in the browser.

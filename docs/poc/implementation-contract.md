@@ -1,4 +1,6 @@
-# Implementation contract
+# Implementation contract (TypeScript prototype)
+
+> Historical contract of the TypeScript prototype, kept as a reference for the Rust port.
 
 Import types from shared/model.ts and utilities from shared/graph.ts (relative imports). Only coordinator edits shared files.
 

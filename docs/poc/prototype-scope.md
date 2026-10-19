@@ -1,119 +1,210 @@
-# API Forge — zakres prototypu v1
+# API Forge — prototype v1 scope
 
-Status: zakres zaakceptowany do implementacji. Development rozpoczęty na polecenie użytkownika; aktualne działanie i ograniczenia opisuje README.md. Makieta w `design-preview/` pozostaje wcześniejszym eksperymentem interfejsu.
+Status: historical. This scope was accepted for the TypeScript prototype, which is now
+the behavioural reference for the native Rust port ([RUST_MIGRATION.md](../../RUST_MIGRATION.md)).
+The mock-up in `design-preview/` was an earlier interface experiment.
 
-## 1. Cel i granice
+## 1. Goal and boundaries
 
-Tester manualny buduje i uruchamia scenariusze REST API na grafie. Zespół definiuje swoje requesty, typy danych, komponenty oraz akcje biznesowe. Produkt, koszyk i promocja są wyłącznie przykładem konfiguracji jednego projektu. Silnik i interfejs nie zawierają ich specjalnej obsługi.
+A manual tester builds and runs REST API scenarios on a graph. The team defines its own
+requests, data types, components and business actions. Product, cart and promotion are
+only an example configuration of one project; neither the engine nor the interface
+handles them specially.
 
-Główny przebieg: zdefiniuj request → zapisz jako komponent z argumentami → umieść go na grafie → wybierz pasującą akcję → połącz dane → dodaj sprawdzenie → uruchom → obejrzyj przyczynę wyniku.
+Main flow: define a request → save it as a component with arguments → place it on the
+graph → choose a matching action → connect data → add a check → run → inspect why the
+result is what it is.
 
-Założenia projektowe v1: lokalna aplikacja dla jednego użytkownika, jeden otwarty projekt, trwały zapis lokalny i eksport/import JSON. Interfejs po polsku. Bez wymogu pisania JavaScriptu. Założenia można zmienić po ocenie prototypu; nie wymagają teraz kolejnego wywiadu.
+v1 design assumptions: a local single-user application, one open project, durable
+local storage and JSON export/import. No JavaScript authoring required. (The prototype
+UI was in Polish; the native application is in English.)
 
-## 2. Dwa etapy prototypu
+## 2. Two prototype stages
 
-**P1 — sprawdzenie sposobu projektowania.** Działający edytor: drag and drop, połączenia, konfiguracja requestów, menu akcji, tworzenie własnych komponentów, podgląd odpowiedzi, budowanie asercji. Wyniki pochodzą z jawnie oznaczonych danych przykładowych. To pierwszy punkt oceny przez użytkownika.
+**P1 — validate the authoring model.** A working editor: drag and drop, connections,
+request configuration, action menu, custom components, response preview and assertion
+building. Results come from explicitly labelled sample data. This is the first review
+point with the user.
 
-**P2 — użyteczny test API.** Ten sam zapisany graf wykonuje prawdziwe requesty przez lokalny backend. Dodajemy raport, wykonanie części scenariusza, obsługę błędów i sprzątanie. Dopiero P2 spełnia kryteria kompletnego prototypu v1. Symulacja nigdy nie udaje rzeczywistego uruchomienia.
+**P2 — a useful API test.** The same saved graph performs real requests through a local
+backend. Adds the report, partial runs, error handling and cleanup. Only P2 meets the
+complete v1 acceptance criteria. A simulation never pretends to be a real run.
 
-## 3. Edytor
+## 3. Editor
 
-- Lewa biblioteka: operacje wbudowane oraz komponenty bieżącego projektu.
-- Środek: przesuwany i skalowany graf. Przeciąganie klocków z biblioteki, przenoszenie, łączenie, usuwanie, duplikowanie, zaznaczanie wielu klocków, cofanie/ponawianie zmian grafu.
-- Na klocku: nazwa, krótki opis działania, wybrane przez autora istotne argumenty, nazwane porty i stan wykonania. Dla requestu: metoda i wzorzec ścieżki. Argument `id` jest zwykłym argumentem zdefiniowanym przez autora.
-- Prawy panel: pełna konfiguracja zaznaczonego klocka lub wnętrze komponentu.
-- Dolny panel: przebieg wykonania, wejścia, wyjścia, request, response i błędy.
-- Widoczny przycisk „Dodaj akcję” daje te same możliwości co prawy przycisk myszy. Podstawowy scenariusz da się zbudować klikaniem, bez przeciągania.
-- W v1 użytkownik może wybrać jeden jawnie podany zestaw argumentów scenariusza. Tabele przypadków i pętle są kolejnym rozszerzeniem.
+- Left library: built-in operations and components of the current project.
+- Centre: a pannable, zoomable graph. Dragging blocks from the library, moving,
+  connecting, deleting, duplicating, multi-selection and graph undo/redo.
+- On a block: name, a short description, the arguments the author marked as important,
+  named ports and execution state. For a request: method and path pattern. An `id`
+  argument is an ordinary author-defined argument.
+- Right panel: full configuration of the selected block or the inside of a component.
+- Bottom panel: run progress, inputs, outputs, request, response and errors.
+- A visible "Add action" button offers the same options as the context menu. A basic
+  scenario can be built by clicking alone, without dragging.
+- In v1 the user can choose one explicit set of scenario arguments. Case tables and
+  loops are a later extension.
 
-### Menu kontekstowe i tworzenie połączeń
+### Context menu and creating connections
 
-Prawy przycisk na komponencie lub przeciągnięcie z portu w puste miejsce pokazuje akcje zgodne z wybranym wyjściem. Przy wielu wyjściach użytkownik wskazuje konkretne wyjście.
+Right-clicking a component, or dragging from a port into empty space, shows actions
+compatible with the chosen output. With several outputs the user picks a specific one.
 
-Akcję można przeciągnąć z menu na graf lub kliknąć, aby dodać ją obok źródła. Tworzony jest klocek i połączenie. Zgodne wejście przypisuje się automatycznie; jeśli pasuje kilka wejść, użytkownik wybiera jedno. Pozostałe wymagane argumenty są widocznie oznaczone.
+An action can be dragged from the menu onto the graph or clicked to add it next to the
+source. Both create the block and the connection. A compatible input is bound
+automatically; if several inputs match, the user picks one. Remaining required
+arguments are visibly marked.
 
-Menu łączy uniwersalne operacje i akcje projektu. Autor komponentu określa, przy jakim typie wyjścia komponent ma być proponowany oraz które jego wejście ma być zasilane. Nie ma zaszytej wiedzy o nazwach endpointów ani znaczeniu pól.
+The menu combines universal operations with project actions. A component author decides
+for which output type the component is offered and which of its inputs is fed. There is
+no built-in knowledge of endpoint names or field meanings.
 
-## 4. Własne komponenty i kontrakty danych
+## 4. Custom components and data contracts
 
-Komponent może opakowywać pojedynczy request albo graf kilku operacji. Zaznaczenie fragmentu grafu i „Zapisz jako komponent” otwiera edytor publicznych argumentów, wyjść i pól pokazywanych na klocku. Przecinające granicę połączenia trzeba jawnie przypisać do publicznych portów.
+A component can wrap a single request or a graph of several operations. Selecting part
+of the graph and choosing "Save as component" opens an editor for public arguments,
+outputs and fields shown on the block. Connections crossing the boundary must be
+explicitly mapped to public ports.
 
-Definicja zawiera: stabilne ID, nazwę, opis, rewizję, argumenty z typami i domyślnymi wartościami, graf wewnętrzny, mapowanie wyjść oraz opcjonalne przypisania do menu akcji. Edytor umożliwia zmianę wnętrza i zapis nowej rewizji. Instancja przypina konkretną rewizję; aktualizację stosuje się jawnie do wybranych instancji. Zapisany test nie zmienia zachowania po cichej aktualizacji biblioteki.
+A definition contains a stable ID, name, description, revision, typed arguments with
+defaults, the inner graph, output mapping and optional action-menu bindings. The editor
+can change the inside and save a new revision. An instance pins a specific revision;
+updates are applied explicitly to chosen instances. A saved test never changes
+behaviour because the library was silently updated.
 
-Typy bazowe: tekst, liczba, boolean, obiekt, lista, dowolny JSON. Zespół może nazwać kontrakt obiektu, np. `User` albo `Product`, i przypisać mu opis pól. W v1 zgodność akcji wynika z typu bazowego lub identyfikatora kontraktu projektu; nie implementujemy pełnego systemu zgodności JSON Schema.
+Base types: text, number, boolean, object, list, any JSON. A team can name an object
+contract, e.g. `User` or `Product`, and describe its fields. In v1 action compatibility
+follows from the base type or the project contract ID; there is no full JSON Schema
+compatibility system.
 
-Struktura odpowiedzi pochodzi z ręcznego opisu lub zapisanej przykładowej odpowiedzi. Struktura rozpoznana z pojedynczej odpowiedzi jest oznaczona jako podpowiedź. Obserwowane pole nie staje się automatycznie wymaganiem testowym. Import OpenAPI odkładamy.
+Response structure comes from a manual description or a saved sample response. Structure
+inferred from a single response is marked as a suggestion; an observed field never
+automatically becomes a test requirement. OpenAPI import is deferred.
 
-Przy tworzeniu komponentu zagnieżdżonego można korzystać z innych zapisanych komponentów. Zależności cykliczne i rekurencyjne są niedozwolone.
+Nested components may use other saved components. Cyclic and recursive dependencies are
+not allowed.
 
-## 5. Wbudowane klocki
+## 5. Built-in blocks
 
-| Klocek               | Zakres v1                                                                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Request HTTP         | Metoda, URL lub base URL + ścieżka, argumenty ścieżki, query, nagłówki, body JSON, timeout. Wyjście: status, nagłówki, body JSON lub tekst, czas.      |
-| Wybierz dane         | Wybór z drzewa JSON lub prosta ścieżka: pole, zagnieżdżenie, indeks listy. Rozróżnia brak pola, `null`, pusty tekst i zero.                            |
-| Zbuduj dane          | Obiekt/lista składana z literałów i wartości wcześniejszych klocków; do przygotowania body i argumentów.                                               |
-| Formuła              | Dodawanie, odejmowanie, mnożenie, dzielenie, zaokrąglenie i składanie tekstu. Argumenty jako wartości lub powiązania. Operacje można łączyć na grafie. |
-| Porównanie / asercja | Równość, nierówność, porównanie liczb, tolerancja liczbowa, istnienie, typ, niepuste, zawieranie. Wynik zawiera wartość oczekiwaną i otrzymaną.        |
-| Warunek wejściowy    | Te same proste predykaty, łączone przez „wszystkie” lub „dowolny”. Niespełnienie oznacza niewłaściwe dane i blokuje zależne kroki.                     |
+| Block                | v1 scope                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP request         | Method, URL or base URL + path, path arguments, query, headers, JSON body, timeout. Outputs: status, headers, JSON or text body, duration.    |
+| Select data          | Choose from a JSON tree or a simple path: field, nesting, list index. Distinguishes a missing field, `null`, empty text and zero.             |
+| Build data           | An object or list assembled from literals and earlier blocks' values, to prepare bodies and arguments.                                        |
+| Formula              | Addition, subtraction, multiplication, division, rounding and text joining. Arguments as values or bindings. Operations can be chained.       |
+| Comparison/assertion | Equality, inequality, numeric comparison, numeric tolerance, existence, type, non-empty, containment. The result carries expected and actual. |
+| Entry condition      | The same simple predicates, combined with "all" or "any". Not being met means invalid data and blocks dependent steps.                        |
 
-Formuły są zapisem dozwolonych operacji, bez `eval` i wykonywania dowolnego JavaScriptu. W obliczeniach cen tester jawnie wskazuje sposób zaokrąglania i tolerancję; silnik nie zakłada żadnej waluty ani reguł biznesowych.
+Formulas are a record of permitted operations: no `eval` and no arbitrary JavaScript.
+For price calculations the tester explicitly states rounding and tolerance; the engine
+assumes no currency or business rules.
 
-## 6. Powiązania i wykonanie
+## 6. Bindings and execution
 
-- Argument jest literałem, parametrem scenariusza, zmienną środowiska albo odwołaniem `nodeId + outputPort + path`.
-- Połączenie przenosi wskazane dane oraz ustanawia zależność wykonania. Podpięty argument pokazuje źródło zamiast edytowalnej wartości literalnej.
-- Wybór danych wcześniejszego klocka tworzy jawne powiązanie i zależność. Nie używamy niewidocznego, nadpisywanego globalnego „bieżącego response”.
-- Są również połączenia „Dalej”, gdy potrzebna jest kolejność bez przekazania danych. Ręczny Start wyznacza punkt wejścia; IF / ELSE wybiera gałąź Tak albo Nie. Nieaktywne kroki są pomijane. Starsze grafy bez Startu uruchamiają wszystkie korzenie.
-- Graf jest acykliczny. Klocek oczekuje na wszystkie wymagane wejścia. Do jednego wejścia przypisujemy jedno źródło. Połączenie dwóch gałęzi wymaga oddzielnych nazwanych wejść.
-- v1 wykonuje gotowe kroki sekwencyjnie w stabilnej kolejności; równoległość jest późniejszym rozszerzeniem.
-- Każdy przebieg używa utrwalonej kopii grafu, rewizji komponentów i parametrów. Edycja grafu nie zmienia aktywnego przebiegu.
+- An argument is a literal, a scenario parameter, an environment variable or a
+  reference `nodeId + outputPort + path`.
+- A connection carries the selected data and creates an execution dependency. A bound
+  argument shows its source instead of an editable literal.
+- Picking data from an earlier block creates an explicit binding and dependency. There
+  is no invisible, overwritten global "current response".
+- "Next" connections exist when ordering is needed without passing data. A manual Start
+  marks the entry point; IF / ELSE chooses the Yes or No branch. Inactive steps are
+  skipped. Older graphs without Start run every root.
+- The graph is acyclic. A block waits for all required inputs. One input has exactly one
+  source; joining two branches needs separate named inputs.
+- v1 executes ready steps sequentially in a stable order; parallelism is a later
+  extension.
+- Every run uses a frozen copy of the graph, component revisions and parameters. Editing
+  the graph does not affect an active run.
 
-### Błędy i kontynuacja
+### Errors and continuation
 
-Rozróżniamy: niespełnioną asercję, błąd wykonania, niewłaściwe dane wejściowe, krok zablokowany, pominięty i anulowany. Raport nie oznacza zablokowanych sprawdzeń jako poprawnych.
+We distinguish a failed assertion, an execution error, invalid input data, a blocked
+step, a skipped step and a cancelled step. The report never marks blocked checks as
+passing.
 
-Odpowiedź HTTP 4xx/5xx nadal jest odpowiedzią do testowania; status można jawnie sprawdzić asercją. Timeout, brak połączenia lub niemożliwe mapowanie danych są błędami wykonania. Brak pola można sprawdzić asercją, ale nie można bez ostrzeżenia zamienić go na zero w formule.
+An HTTP 4xx/5xx response is still a response to test; its status can be asserted
+explicitly. A timeout, connection failure or impossible data mapping is an execution
+error. A missing field can be asserted, but it is never silently turned into zero in a
+formula.
 
-Ustawienie scenariusza: zatrzymaj po błędzie albo kontynuuj możliwe kroki. W drugim trybie asercja z wynikiem negatywnym zachowuje swoje dane, a kolejne sprawdzenia mogą działać. Kroki wymagające nieistniejących wyjść pozostają zablokowane; niezależne gałęzie mogą działać. Warunek wejściowy zawsze blokuje swoje zależne kroki.
+Scenario setting: stop after an error, or continue with the steps that can still run. In
+the second mode a failed assertion keeps its data and later checks can still run. Steps
+that need non-existent outputs stay blocked; independent branches may run. An entry
+condition always blocks its dependants.
 
-### Wykonanie częściowe i sprzątanie
+### Partial runs and cleanup
 
-- „Uruchom test” oraz „uruchom do klocka” wykonują świeży przebieg; drugi tryb uruchamia wyłącznie przodków i wskazany klocek.
-- „Wykonaj ten krok” używa aktualnych literałów albo jawnie wybranych, zapisanych wejść poprzedniego przebiegu. UI pokazuje ich pochodzenie i czas. Taki wynik jest diagnostyczny, nie zalicza pełnego testu.
-- Operacje HTTP nie są automatycznie ponawiane. Powtórzenie kroku może ponownie zmienić dane; kliknięcie wykonania jest świadomym wyborem użytkownika.
-- Osobna sekcja „Po teście” zawiera zwykły graf sprzątania, uruchamiany także po błędzie i kontrolowanym anulowaniu. Brak utworzonego ID daje jawne pominięcie odpowiedniego kroku. Awaria procesu nie gwarantuje sprzątania.
-- Błąd sprzątania jest pokazany osobno i nie nadpisuje pierwotnego błędu testu. Anulowanie nie cofa requestów już wykonanych przez zewnętrzny serwer.
+- "Run test" and "run up to the block" perform a fresh run; the latter runs only the
+  ancestors and the chosen block.
+- "Run this step" uses current literals or explicitly chosen inputs saved from a previous
+  run. The UI shows their origin and time. Such a result is diagnostic and never passes
+  the full test.
+- HTTP operations are never retried automatically. Repeating a step may change data
+  again; clicking run is a deliberate user choice.
+- A separate "After test" section holds an ordinary cleanup graph, which runs also after
+  an error or a controlled cancellation. A missing created ID explicitly skips the
+  related step. A process crash cannot guarantee cleanup.
+- A cleanup error is shown separately and never overwrites the original test error.
+  Cancellation does not undo requests the external server already processed.
 
-## 7. Asercje z odpowiedzi i raport
+## 7. Assertions from responses and the report
 
-Kliknięcie pola w drzewie odpowiedzi daje „Sprawdź…”, „Użyj jako argument” oraz „Wystaw jako wyjście komponentu”. Dodanie asercji uzupełnia ścieżkę i źródło. Dla pola liczbowego można wybrać wartość, inne pole lub wynik formuły jako oczekiwanie.
+Clicking a field in the response tree offers "Check…", "Use as argument" and "Expose as
+component output". Adding an assertion fills in the path and the source. For a numeric
+field, the expectation can be a value, another field or a formula result.
 
-Wynik pokazuje status każdego kroku, dane wejściowe, odpowiedź, czas oraz szczegóły asercji. Błąd własnego komponentu wskazuje wewnętrzny krok. Dostępne są pełne request/response z maskowaniem pól oznaczonych jako sekrety i nagłówków autoryzacji.
+The result shows each step's status, inputs, response, duration and assertion details.
+An error in a custom component points to the inner step. Full request/response is
+available, with secret fields and authorisation headers masked.
 
-Porównanie dwóch endpointów potwierdza ich spójność; niezależna wartość lub formuła stanowi osobny wzorzec. UI nie przedstawia samej zgodności endpointów jako dowodu poprawności reguły biznesowej.
+Comparing two endpoints shows that they are consistent; an independent value or
+formula is a separate reference. The UI never presents agreement between endpoints as
+proof that a business rule is correct.
 
-## 8. Środowisko i zapis
+## 8. Environment and storage
 
-Projekt przechowuje scenariusze, komponenty, kontrakty i przykładowe odpowiedzi. Import i eksport mają wersję formatu i walidację. Nieznana wersja lub brak definicji komponentu daje czytelny błąd. Dane projektu przetrwają odświeżenie strony; historia przebiegów może być sesyjna w v1, z ręcznym eksportem raportu.
+A project stores scenarios, components, contracts and sample responses. Import and
+export carry a format version and are validated. An unknown version or a missing
+component definition gives a clear error. Project data survives a page reload; run
+history may be session-only in v1, with manual report export.
 
-Środowisko ma base URL, zwykłe zmienne i wartości tajne. Obsługujemy nagłówki, w tym Bearer/API key. Sekrety wpisane na czas sesji nie trafiają do eksportu projektu ani raportów; pełne response mogą zawierać dane wrażliwe, dlatego eksport raportu jest jawną akcją. OAuth i automatyczne przepływy logowania są poza v1; projekt może przygotować zwykły request logowania i powiązać jego wynik.
+An environment has a base URL, ordinary variables and secret values. Headers are
+supported, including Bearer/API key. Secrets entered for the session never reach the
+project export or reports; full responses may contain sensitive data, so exporting a
+report is an explicit action. OAuth and automatic login flows are out of scope; a project
+can contain an ordinary login request and bind its result.
 
-Requesty wykonuje lokalny backend Express, aby klient nie zależał od CORS testowanego API. Runner jest dostępny lokalnie, z walidacją przychodzących żądań, ograniczeniami czasu i rozmiaru oraz kontrolą źródła wywołania. Sieć lokalna i localhost pozostają dostępnymi celami testów. Publiczny, wieloużytkownikowy hosting wymaga osobnego projektu zabezpieczeń i nie należy do v1.
+Requests were performed by a local Express backend so that the client did not depend on
+the tested API's CORS. The runner was reachable only locally, with request validation,
+time and size limits and origin checks. Localhost and private networks remain valid test
+targets. Public multi-user hosting needs a separate security design and is out of v1.
 
-## 9. Zakres odłożony
+## 9. Deferred scope
 
-Pętle i tabele wariantów, równoległe wykonanie, import OpenAPI, generowanie testów przez AI, dowolne skrypty JS, testy wizualne przeglądarki, CI i harmonogramy, współpraca wielu osób, chmurowe środowiska, marketplace, automatyczne ponawianie i oczekiwanie na eventual consistency. Projekt formatu umożliwia późniejsze dodanie tych funkcji bez implementowania ich teraz.
+Loops and variant tables, parallel execution, OpenAPI import, AI-generated tests,
+arbitrary JS scripts, browser visual tests, CI and schedules, multi-user collaboration,
+cloud environments, a marketplace, automatic retries and waiting for eventual
+consistency. The format allows these to be added later without implementing them now.
 
-## 10. Odbiór v1
+## 10. v1 acceptance
 
-1. Tester definiuje request na dowolny endpoint, dowolne nazwane argumenty i strukturę odpowiedzi bez edycji kodu aplikacji.
-2. Zapisuje komponent i umieszcza go na grafie; wybrane argumenty edytuje bezpośrednio na klocku.
-3. Dodaje asercję z pola odpowiedzi przez kliknięcie; źródło danych i połączenie powstają automatycznie.
-4. Zapisuje kilka kroków jako własną akcję z argumentami i wyjściami; akcja pojawia się przy zgodnym typie danych.
-5. Przeciąga akcję na graf oraz wykonuje równoważną operację samymi kliknięciami.
-6. Uruchamia prawdziwy scenariusz: odczyt → utworzenie danych → kolejny odczyt → porównanie → sprzątanie.
-7. Rozpoznaje błąd asercji, błąd sieci i niewłaściwe dane; polityka kontynuacji działa zgodnie z opisem.
-8. Zapisuje, odświeża, eksportuje i importuje projekt bez utraty powiązań i rewizji.
-9. Dwa projekty demonstracyjne z różnych domen korzystają z tych samych operacji, a różnią się wyłącznie definicjami projektu. Żaden warunek w silniku ani UI nie sprawdza nazwy „Produkt” czy konkretnej ścieżki endpointa.
-10. Symulacje, wcześniejsze odpowiedzi i rzeczywiste przebiegi są wyraźnie rozróżnione.
+1. A tester defines a request to any endpoint, any named arguments and a response
+   structure without editing application code.
+2. They save a component and place it on the graph, editing chosen arguments directly on
+   the block.
+3. They add an assertion from a response field by clicking; the data source and the
+   connection are created automatically.
+4. They save several steps as a custom action with arguments and outputs; the action is
+   offered for a compatible data type.
+5. They drag the action onto the graph and perform the equivalent operation by clicking
+   alone.
+6. They run a real scenario: read → create data → read again → compare → clean up.
+7. They can tell an assertion failure, a network error and invalid data apart; the
+   continuation policy behaves as described.
+8. They save, reload, export and import the project without losing bindings or
+   revisions.
+9. Two demo projects from different domains use the same operations and differ only in
+   project definitions. No engine or UI condition checks the name "Product" or a specific
+   endpoint path.
+10. Simulations, earlier responses and real runs are clearly distinguished.

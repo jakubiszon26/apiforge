@@ -1,120 +1,258 @@
-# Audyt wymagań wydania Rust / egui
+# Release requirements audit for Rust / egui
 
-Status: plan wymagań i odbioru, nie deklaracja gotowości produkcyjnej. Audyt dotyczy kodu dostępnego w repozytorium 19.10.2026. Docelowo aplikacja desktopowa dla jednego użytkownika. Użytkownik potwierdził Linux i Windows w pierwszym wydaniu; obie platformy wymagają natywnego CI, artefaktów i testów instalacji. Proponowany zakres Windows: 10/11 x86_64; dokładne wspierane wydania Windows oraz dystrybucja i minimalna glibc Linux wymagają zatwierdzenia przed budowaniem pakietów. macOS pozostaje poza pierwszym wydaniem.
+Status: a requirements and acceptance plan, not a claim of production readiness. The
+audit covers the code in the repository on 19 October 2026. The target is a single-user
+desktop application. The user confirmed Linux and Windows for the first release; both
+platforms need native CI, artefacts and installation tests. Proposed Windows scope: 10/11
+x86_64; the exact supported Windows releases and the Linux distribution and minimum glibc
+need approval before packages are built. macOS is out of the first release.
 
-## Co istnieje i co trzeba zachować
+## What exists and must be kept
 
-| Obszar         | Dowód w aktualnym kodzie                                                                                                                         | Wniosek dla migracji                                                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Zapis projektu | `app/features/workspace/storage.ts`, `Workspace.tsx`: JSON v1 w localStorage, walidacja, eksport, debounce 350 ms, flush przy opuszczeniu strony | Zaimportować v1 bez utraty konfiguracji; przeglądarka i desktop nie współdzielą storage. Wymagany jawny eksport z dotychczasowej aplikacji i import w desktopie.                           |
-| Migracje       | Obecna migracja zmienia dawny adres lokalnego demo; obcy numer wersji jest odrzucany                                                             | Potrzebne jawne, testowane migracje formatu, kopia źródła i bezpieczne zachowanie przy nowszej wersji.                                                                                     |
-| Sekrety        | `publicProject` usuwa wartości zadeklarowanych sekretów; wartości sesyjne są w pamięci                                                           | Nie przenosić tokenów do ustawień egui, projektu, schowka bloczków ani raportów.                                                                                                           |
-| Raport         | Runner maskuje nazwy wrażliwe i znane wartości, frontend dodatkowo maskuje eksport                                                               | Zachować centralną redakcję przed publikacją zdarzeń. Heurystyka nazw i wyszukiwanie wartości nie gwarantują usunięcia każdej transformacji sekretu ani danych osobowych.                  |
-| HTTP           | `api/runner/index.ts`: HTTP/HTTPS, brak danych logowania w URL, brak przekierowań i retry; 4xx/5xx pozostają danymi                              | Zachować semantykę oraz jawnie udostępnić obsługiwaną konfigurację transportu.                                                                                                             |
-| Limity         | Timeout requestu domyślnie 10 s, maks. 60 s; odpowiedź 2 MiB; budżet main 120 s i cleanup 10 s; budżety grafu/raportu                            | Przenieść limity do typowanej polityki wykonania i egzekwować także podczas streamowania oraz dekodowania. Nie traktować limitu samego Content-Length jako wystarczającego.                |
-| Kolejność i IF | `api/runner/control.ts`, testy workflow: Start, serialny DAG, wybór gałęzi, zależności danych                                                    | Kontrakt wykonania jest cechą produktu. Przepisanie na async Rust nie może niejawnie wprowadzić równoległych requestów.                                                                    |
-| Anulowanie     | Main honoruje sygnał; cleanup ma niezależny budżet. Awaria procesu nie gwarantuje sprzątania                                                     | Zachować osobne stany anulowania i sprzątania; nie obiecywać cofnięcia skutków requestu.                                                                                                   |
-| Historia       | `api/routes/runs.ts`: pamięć sesji, 4 aktywne runs, do 100 zakończonych, próg 32 MiB                                                             | Ustalić jawny limit/retencję desktopu. Obecny próg pamięci nie ogranicza twardo rozmiaru wszystkich aktywnych runs.                                                                        |
-| Testy          | Testy modelu, runnera z lokalnym serwerem, workflow, sekretów, komponentów, Playwright dla UI                                                    | Zachować zestaw fixtures jako oracle; nie deklarować pokrycia desktopu na podstawie testów przeglądarki.                                                                                   |
-| Wydawanie      | Skrypty typecheck/test/build; istniejący Dockerfile dotyczy aplikacji Node                                                                       | Brak wykazanego pipeline wydania desktopu. Dockerfile finalnie nie kopiuje `api`/`shared`, a `npm start` wymaga `tsx` z devDependencies; nie stanowi działającej ścieżki dystrybucji Rust. |
+| Area            | Evidence in the current code                                                                                                           | Consequence for the migration                                                                                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Project storage | `app/features/workspace/storage.ts`, `Workspace.tsx`: JSON v1 in localStorage, validation, export, 350 ms debounce, flush on page exit | Import v1 without losing configuration; browser and desktop share no storage. Explicit export from the old application and import in the desktop are required.                 |
+| Migrations      | The current migration changes the old local demo address; an unknown version is rejected                                               | Explicit, tested format migrations, a copy of the source and safe behaviour for a newer version are needed.                                                                    |
+| Secrets         | `publicProject` removes values of declared secrets; session values stay in memory                                                      | Do not move tokens into egui settings, the project, the block clipboard or reports.                                                                                            |
+| Report          | The runner masks sensitive names and known values; the frontend masks export additionally                                              | Keep central redaction before events are published. Name heuristics and value search do not guarantee removing every transformation of a secret or personal data.              |
+| HTTP            | `api/runner/index.ts`: HTTP/HTTPS, no credentials in URLs, no redirects or retries; 4xx/5xx stay data                                  | Keep the semantics and expose the supported transport configuration explicitly.                                                                                                |
+| Limits          | Request timeout 10 s by default, 60 s maximum; 2 MiB response; main budget 120 s and cleanup 10 s; graph/report budgets                | Move limits into a typed execution policy and enforce them while streaming and decoding too. A Content-Length limit alone is not sufficient.                                   |
+| Ordering and IF | `api/runner/control.ts`, workflow tests: Start, serial DAG, branch choice, data dependencies                                           | The execution contract is a product feature. Rewriting in async Rust must not implicitly introduce parallel requests.                                                          |
+| Cancellation    | Main honours the signal; cleanup has an independent budget. A process crash cannot guarantee cleanup                                   | Keep separate cancellation and cleanup states; do not promise undoing a request's effects.                                                                                     |
+| History         | `api/routes/runs.ts`: session memory, 4 active runs, up to 100 finished, 32 MiB threshold                                              | Define an explicit desktop limit/retention. The current memory threshold does not hard-limit the size of all active runs.                                                      |
+| Tests           | Model, runner with a local server, workflow, secrets, components, Playwright for the UI                                                | Keep the fixture set as an oracle; do not claim desktop coverage from browser tests.                                                                                           |
+| Releasing       | typecheck/test/build scripts; the existing Dockerfile is for the Node application                                                      | No proven desktop release pipeline. The Dockerfile does not copy `api`/`shared`, and `npm start` needs `tsx` from devDependencies; it is not a working Rust distribution path. |
 
-## Granica zaufania i jawny zakres bezpieczeństwa
+## Trust boundary and explicit security scope
 
-Projekt importowany z pliku jest niezaufany. Importowanie, podgląd i migracja nie mogą wysyłać requestów, rozwiązywać sekretów ani odtwarzać sprzątania. Walidacja obejmuje rozmiar pliku, liczbę elementów, głębokość JSON i wyrażeń, duplikaty ID, zakres liczb, porty, referencje, rewizje oraz cykle. Edytor nie wykonuje dowolnego JS/Rust ani komend systemowych z projektu.
+A project imported from a file is untrusted. Importing, previewing and migrating must
+never send requests, resolve secrets or replay cleanup. Validation covers file size,
+element counts, JSON and expression depth, duplicate IDs, number ranges, ports,
+references, revisions and cycles. The editor never executes arbitrary JS/Rust or system
+commands from a project.
 
-Runner API testing świadomie ma dostęp do localhost i sieci prywatnych; ich ogólna blokada uniemożliwiłaby podstawowe zastosowanie. Wydanie lokalne ufa użytkownikowi uruchamiającemu scenariusz. Interfejs pokazuje tryb Live, środowisko i docelowy host; uruchomienie wymaga jawnej akcji. Projekt może zawierać pełny URL pomijający base URL, co musi być widoczne przy przeglądzie konfiguracji. Publiczny lub zdalny wieloużytkownikowy runner wymaga osobnego modelu autoryzacji i izolacji sieci i nie należy do tego wydania.
+An API testing runner deliberately reaches localhost and private networks; blocking them
+globally would prevent the basic use case. A local release trusts the user who runs a
+scenario. The interface shows Live mode, the environment and the target host; running
+needs an explicit action. A project may contain a full URL bypassing the base URL, which
+must be visible when reviewing configuration. A public or remote multi-user runner needs a
+separate authorisation and network isolation model and is out of this release.
 
-Natywna aplikacja powinna wykonywać runner bez otwartego portu HTTP: komunikaty i kanały wewnątrz procesu, z oddzieleniem UI od runtime. Jeśli lokalny daemon okaże się wymagany, jego uwierzytelnienie, IPC, uprawnienia i lifecycle stają się osobnym blokującym zadaniem; nie należy przenosić obecnego publicznego kontraktu localhost bez analizy.
+The native application should run the runner without an open HTTP port: in-process
+messages and channels, separating the UI from the runtime. If a local daemon turns out to
+be necessary, its authentication, IPC, permissions and lifecycle become a separate
+blocking task; do not carry over the current public localhost contract without analysis.
 
-## Bramki wydania
+## Release gates
 
-Każda bramka wymaga dowodu z CI lub zapisanego protokołu testu na docelowej platformie. Niespełnienie bramki zatrzymuje stabilne wydanie; ukończenie samego kodu nie zamyka zadania.
+Each gate needs evidence from CI or a recorded test protocol on the target platform. An
+unmet gate stops the stable release; finishing the code alone does not close a task.
 
-### G1 — zgodność danych i odzyskiwalny zapis
+### G1 — data compatibility and recoverable storage
 
-1. Zdefiniować osobno wersję dokumentu projektu i wersję ustawień aplikacji. Wersję czytać przed deserializacją właściwego modelu. Nowszą wersję otwierać z czytelnym błędem bez modyfikacji oryginału.
-2. Projekty zapisywać jako przenośne, wersjonowane dokumenty JSON. Stan UI i indeks ostatnich plików przechowywać oddzielnie; nie mieszać sekretów ze stanem `eframe`.
-3. Zapis pliku: walidacja modelu → plik tymczasowy w tym samym katalogu → flush/sync → atomowe zastąpienie → synchronizacja katalogu tam, gdzie platforma pozwala. Zachować ostatnią poprawną kopię i procedurę odtworzenia. Obsłużyć brak miejsca, uprawnień i przerwanie operacji; po błędzie UI nadal pokazuje niezapisane zmiany.
-4. Autosave/recovery przechowywać pod identyfikatorem dokumentu, z uprawnieniami użytkownika. Po awarii zaoferować odzyskanie, pokazać datę i źródło, nie nadpisywać pliku bez wiedzy użytkownika.
-5. Dwie instancje edytujące plik muszą wykryć konflikt przez blokadę lub rewizję/hash; brak cichej utraty ostatniego zapisu. Zewnętrzna zmiana pliku również wymaga wykrycia.
-6. Migracja v1 importuje wszystkie rodzaje klocków, zagnieżdżone bindingi, template inputs, rewizje, kontrakty, Start/IF, cleanup oraz pozycje. Sekrety deklarowane w starym pliku usuwa się z modelu przeznaczonego do zapisu i nie drukuje w błędzie walidacji. Zachować źródłowy plik; migracje nie kontaktują się z demo API.
+1. Define the project document version and the application settings version separately.
+   Read the version before deserialising the actual model. Open a newer version with a
+   clear error without modifying the original.
+2. Save projects as portable, versioned JSON documents. Keep UI state and the recent-files
+   index separately; never mix secrets with `eframe` state.
+3. File save: validate the model → temporary file in the same directory → flush/sync →
+   atomic replace → sync the directory where the platform allows. Keep the last valid copy
+   and a recovery procedure. Handle missing space, permissions and interruption; after an
+   error the UI still shows unsaved changes.
+4. Keep autosave/recovery under the document identifier, with user permissions. After a
+   crash offer recovery, show the date and source, and never overwrite the file without
+   the user knowing.
+5. Two instances editing a file must detect the conflict through a lock or a
+   revision/hash; no silent loss of the last save. External file changes must be detected
+   too.
+6. The v1 migration imports every block kind, nested bindings, template inputs,
+   revisions, contracts, Start/IF, cleanup and positions. Secrets declared in the old file
+   are removed from the model meant for saving and never printed in validation errors.
+   Keep the source file; migrations never contact the demo API.
 
-Dowody: golden fixtures z aktualnych przykładów i projektów granicznych; import → save → reopen zachowuje semantykę; testy uszkodzonego/truncated JSON, future-version, przerwania każdego etapu zapisu, konfliktu i disk-full (przez fault injection). Recovery sprawdzone na rzeczywistym filesystemie Linux i Windows, z uwzględnieniem różnic atomowego zastępowania pliku i blokad.
+Evidence: golden fixtures from current examples and boundary projects; import → save →
+reopen preserves semantics; tests for corrupted/truncated JSON, a future version,
+interruption at each save step, conflict and disk full (via fault injection). Recovery
+checked on a real Linux and Windows filesystem, accounting for differences in atomic file
+replacement and locking.
 
-### G2 — sekrety, prywatność i raportowanie
+### G2 — secrets, privacy and reporting
 
-1. Domyślnie sekrety pozostają sesyjne. Trwały magazyn poświadczeń jest opcjonalnym późniejszym zakresem; jeśli wejdzie do wydania, wymaga systemowego keyringu, jawnej zgody na zapis, obsługi zablokowanego/brakującego keyringu i zakazu cichego fallbacku do plaintext.
-2. Typy `SecretRef`/`SecretValue` oraz jeden resolver oddzielają model projektu od poświadczeń. Brak sekretu daje diagnostykę wskazującą nazwę, bez wartości. `Debug`, `Display`, błędy i tracing nie mogą ujawniać wartości.
-3. Zdarzenia UI, eksport i trwała historia przechodzą przez wspólny mechanizm redakcji. Raw request/response są potrzebne do bieżących obliczeń runnera, ale nie mogą znaleźć się przypadkiem w logu, `Debug` taska ani panic payloadzie. Wrażliwe nagłówki są maskowane niezależnie od deklaracji sekretów.
-4. Obsłużyć znane wartości i ich formy URL-encoded; testować echo sekretu w dowolnym polu, błędzie, URL, query, nagłówkach, body i wnętrzu komponentu. Wspierać dodatkowe ścieżki pól do maskowania odpowiedzi oraz tryb raportu z metadanymi bez payloadów.
-5. Historia sesyjna i domyślnie brak telemetrii/persistowania payloadów. Ewentualny zapis historii wymaga jawnego ustawienia retencji, limitu miejsca, kasowania i ostrzeżenia o wrażliwych danych odpowiedzi. Log techniczny domyślnie zawiera identyfikatory i kody błędów, nie body ani pełne URL z query.
-6. Opisać ograniczenia: arbitralnie zakodowany/zaszyfrowany/połączony sekret i PII pod dowolnym polem nie są automatycznie wykrywalne. Zrzuty pamięci i logi testowanego API są poza gwarancją redakcji aplikacji. Nie obiecywać kryptograficznego wymazania wszystkich kopii w pamięci.
+1. Secrets are session-only by default. A durable credential store is an optional later
+   scope; if it enters the release it needs the system keyring, explicit consent to save,
+   handling of a locked/missing keyring and no silent plaintext fallback.
+2. `SecretRef`/`SecretValue` types and one resolver separate the project model from
+   credentials. A missing secret gives a diagnostic naming it, without its value. `Debug`,
+   `Display`, errors and tracing must not reveal values.
+3. UI events, export and durable history go through a shared redaction mechanism. Raw
+   request/response is needed for the runner's current calculations but must never end up
+   by accident in a log, a task's `Debug` or a panic payload. Sensitive headers are masked
+   regardless of secret declarations.
+4. Handle known values and their URL-encoded forms; test a secret echoed in any field,
+   error, URL, query, headers, body and inside a component. Support extra response field
+   paths to mask and a report mode with metadata but no payloads.
+5. Session history and, by default, no telemetry or persisted payloads. Any history
+   storage needs an explicit retention setting, a space limit, deletion and a warning about
+   sensitive response data. The technical log contains identifiers and error codes by
+   default, not bodies or full URLs with query.
+6. Document limitations: an arbitrarily encoded/encrypted/combined secret and PII under an
+   arbitrary field cannot be detected automatically. Memory dumps and logs of the tested
+   API are outside the application's redaction guarantee. Do not promise cryptographic
+   erasure of all in-memory copies.
 
-Dowody: canary secrets w macierzy miejsc i transformacji; inspekcja eksportu, plików autosave, logów i zdarzeń; brak wartości w schowku bloczków. Osobny test blokuje pomylenie zredagowanej historii z surowymi danymi do wykonania pojedynczego kroku.
+Evidence: canary secrets across the matrix of locations and transformations; inspection
+of exports, autosave files, logs and events; no values in the block clipboard. A separate
+test prevents confusing redacted history with raw data for executing a single step.
 
-### G3 — HTTP przewidywalne w środowisku użytkownika
+### G3 — predictable HTTP in the user's environment
 
-1. Zachować: statusy HTTP są danymi, brak automatycznych retry i przekierowań, brak odziedziczonego cookie jar między niezależnymi przebiegami. Ponowienie POST po timeout nie może następować automatycznie.
-2. TLS weryfikuje certyfikat i nazwę hosta. Nie dodawać globalnego `accept invalid certificates`. Wydanie wymaga wskazanej polityki trust store: systemowe CA oraz jawny dodatkowy CA per środowisko, bez mutacji globalnego magazynu systemu. Testy lokalnego CA obejmują wygasły certyfikat i zły hostname.
-3. Proxy musi być jawne i widoczne: bezpośrednie albo konfigurowane per środowisko, w tym `no_proxy`; nie odziedziczyć przypadkiem proxy procesu i nie wyciekać poświadczeniami w logach. Jeśli początkowo proxy nie jest obsługiwane, wydać to jako udokumentowaną nieobsługiwaną konfigurację, bez pozornego pola w UI.
-4. Osobne limity connect i całego requestu; cancellation musi przerywać także czytanie wolnego body. Limit wielkości obejmuje rozkodowaną odpowiedź i dane przekazane parserowi, a ponadto request body, liczbę/wielkość nagłówków, głębokość JSON i budżet raportu. Błąd limitu zachowuje metadane bez publikowania częściowego wrażliwego body.
-5. Widoczne rozróżnienie DNS, connect, TLS, timeout, cancellation, przekroczenia limitu, niepoprawnego JSON i błędu konfiguracji. Treść błędu transportu przechodzi redakcję.
-6. Ustalić i pokazać reguły charset, kompresji, nie-JSON response, query duplicate keys i pustego body. Migracja zachowuje obecne znaczenie base URL jako prefiksu oraz typed body interpolation.
+1. Keep: HTTP statuses are data, no automatic retries or redirects, no cookie jar shared
+   between independent runs. A POST must never be retried automatically after a timeout.
+2. TLS verifies the certificate and host name. Do not add a global "accept invalid
+   certificates". The release needs a defined trust store policy: system CAs plus an
+   explicit extra CA per environment, without mutating the system store. Local CA tests
+   cover an expired certificate and a wrong host name.
+3. Proxy must be explicit and visible: direct, or configured per environment, including
+   `no_proxy`; never inherit a process proxy by accident or leak its credentials in logs.
+   If proxies are initially unsupported, release that as a documented unsupported
+   configuration, without a fake UI field.
+4. Separate connect and whole-request limits; cancellation must also interrupt reading a
+   slow body. The size limit covers the decoded response and data passed to the parser,
+   plus the request body, header count/size, JSON depth and the report budget. A limit
+   error keeps metadata without publishing a partial sensitive body.
+5. Visibly distinguish DNS, connect, TLS, timeout, cancellation, limit exceeded, invalid
+   JSON and configuration errors. Transport error text goes through redaction.
+6. Define and show the rules for charset, compression, non-JSON responses, duplicate query
+   keys and empty bodies. The migration keeps the current meaning of the base URL as a
+   prefix and typed body interpolation.
 
-Klienty mTLS, OAuth flows, upload multipart, WebSocket i obsługa redirect/retry mogą pozostać poza pierwszym wydaniem. Dodatkowy CA jest wymagany dla zadeklarowanego profilu pracy z wewnętrznymi API; jeśli profil zostanie zawężony do publicznych CA, należy zmienić kryterium jawnie przed implementacją, a nie pominąć je przy odbiorze.
+mTLS clients, OAuth flows, multipart upload, WebSocket and redirect/retry support may stay
+out of the first release. An extra CA is required for the declared profile of working
+with internal APIs; if the profile is narrowed to public CAs, the criterion must be changed
+explicitly before implementation, not skipped at acceptance.
 
-Dowody: wyłącznie kontrolowane serwery fixture dla HTTP/TLS/proxy, chunked/slow/chunked-compressed response, błędnego JSON, certyfikatów i przerwania po przyjęciu POST. Smoke test połączenia na maszynie odbiorczej; brak zależności testów od publicznego API.
+Evidence: only controlled fixture servers for HTTP/TLS/proxy, chunked/slow/compressed
+responses, invalid JSON, certificates and interruption after a POST was accepted. A
+connection smoke test on the acceptance machine; no test depends on a public API.
 
-### G4 — wykonanie, anulowanie i sprzątanie
+### G4 — execution, cancellation and cleanup
 
-1. UI nie blokuje się na sieci, parsowaniu i filesystemie. Runtime komunikuje się przez ograniczone kolejki; duży/aktywny raport nie może doprowadzić do nieograniczonego buforowania ani zatrzymać przycisku Anuluj.
-2. Run działa na niezmiennym snapshotcie grafu, środowiska i rewizji komponentów. Każde zdarzenie ma run ID i stabilną tożsamość kroku wraz ze ścieżką instancji komponentu. Zmiana edytora nie zmienia aktywnego run.
-3. Wewnątrz scenariusza wykonanie jest serialne i deterministyczne. Niewybrana gałąź nie wysyła requestów; brak danych z gałęzi pominiętej nie uruchamia jej ponownie. Scenariusze starsze bez Startu zachowują jawny tryb zgodności.
-4. Dopuszczalna liczba jednoczesnych run ma twardy limit (początkowo zachować maks. 4), a kolejki mają granice. Buforowanie danych i raportów musi mieć łączny budżet, nie tylko per-response.
-5. Maszyna stanów definiuje dokładnie jeden stan końcowy oraz status każdego kroku. Anulowanie blokuje rozpoczynanie kolejnych kroków main i uruchamia cleanup z niezależnym budżetem. Powtórne Cancel jest idempotentne; UI pokazuje, że cleanup nadal trwa.
-6. Cleanup uruchamia się również po błędzie komponentu i timeout; operuje wyłącznie na dostępnych bieżących danych. Awaria cleanup nie maskuje pierwotnego błędu i jest widoczna osobno. Zamknięcie okna podczas run oferuje dokończenie sprzątania lub jawne zakończenie procesu.
-7. Żaden mechanizm nie gwarantuje, że request anulowany po wysłaniu nie został wykonany przez serwer. Po twardej awarii journal oznacza run jako przerwany z nieznanym wynikiem skutków; nie wznawia automatycznie requestów ani cleanup. Użytkownik dostaje kontekst do ręcznej weryfikacji.
+1. The UI never blocks on network, parsing or the filesystem. The runtime communicates
+   through bounded queues; a large/active report must not cause unbounded buffering or
+   freeze the Cancel button.
+2. A run works on an immutable snapshot of the graph, environment and component
+   revisions. Every event has the run ID and a stable step identity with the component
+   instance path. Editor changes do not change the active run.
+3. Within a scenario execution is serial and deterministic. An unchosen branch sends no
+   requests; missing data from a skipped branch does not rerun it. Older scenarios without
+   Start keep an explicit compatibility mode.
+4. The number of concurrent runs has a hard limit (initially keep at most 4), and queues
+   are bounded. Data and report buffering needs an overall budget, not only per response.
+5. A state machine defines exactly one final state and the status of each step.
+   Cancellation stops starting further main steps and starts cleanup with an independent
+   budget. Repeated Cancel is idempotent; the UI shows that cleanup is still running.
+6. Cleanup also runs after a component error and a timeout; it operates only on available
+   current data. A cleanup failure does not mask the original error and is shown
+   separately. Closing the window during a run offers finishing cleanup or explicitly
+   terminating the process.
+7. No mechanism guarantees that a request cancelled after sending was not executed by the
+   server. After a hard crash, a journal marks the run as interrupted with unknown side
+   effects; it never resumes requests or cleanup automatically. The user gets context for
+   manual verification.
 
-Dowody: konformacyjne fixtures TS/Rust dla workflow i wszystkich operatorów; anulowanie na każdym etapie (także TLS, body i cleanup); zamknięcie aplikacji, duże raporty, konflikt edycji i run, wielokrotne Cancel. Test cart: ceny → IF 200 → utwórz pusty koszyk → dodaj produkty → porównaj sumę → usuń koszyk, a gałąź 404 nie tworzy koszyka.
+Evidence: TS/Rust conformance fixtures for workflows and all operators; cancellation at
+every stage (including TLS, body and cleanup); closing the application, large reports, a
+conflict between editing and a run, repeated Cancel. Cart test: prices → IF 200 → create
+an empty cart → add products → compare the total → delete the cart, while the 404 branch
+creates no cart.
 
-### G5 — testy i pipeline wydania
+### G5 — tests and the release pipeline
 
-1. Rust workspace ma przypięty toolchain, MSRV, lockfile, `fmt --check`, `clippy` z wybranym limitem ostrzeżeń, unit/integration/doc tests, analizę zależności i licencji oraz build release w CI. Egzekwować aktualizację lockfile przez kontrolowany proces, nie przypadkowe pobieranie najnowszych wersji w release.
-2. Domain/runner testuje się bez egui. Fixture parity pokrywa null/missing/false/zero, liczby i Unicode, operatory losowe kontrolowane seedem, template aliases, snapshoty, rewizje, IF merge, cleanup oraz import starszego formatu. Różnice semantyki Rust/JS muszą być opisane i zatwierdzone testem.
-3. Property/fuzz tests obejmują parser/import, referencje i cykle, JSON path, remap ID przy kopiowaniu, migracje i politykę redakcji. Fuzz nie zastępuje ręcznej analizy bezpieczeństwa.
-4. Automatyczne scenariusze UI desktopu obejmują utworzenie grafu, drag/drop zmiennej, wybór pola odpowiedzi, IF, kopiowanie grupy z konfiguracją, undo/redo, resize raportu, zapis/reopen i anulowanie. Zewnętrzne testy przeglądarki pozostają testami starego UI.
-5. Artefakt wydania jest budowany przez CI, posiada checksumy, manifest wersji/toolchainu i listę licencji; uruchamia się na czystej maszynie bez Node, npm ani repozytorium. Linux i Windows mają oddzielne natywne joby CI oraz test instalacji, uruchomienia, aktualizacji i deinstalacji na czystej maszynie/VM. Dla Linux ustalić minimalną wersję glibc, dystrybucję bazową, architekturę i wymagane biblioteki graficzne; zweryfikować Wayland i X11. Proponowany baseline do potwierdzenia: Ubuntu 22.04 x86_64 / glibc 2.35. Dla Windows ustalić wspierane wydania 10/11 x86_64, podpisany instalator, zakres uprawnień per-user i działanie bez zainstalowanego toolchainu; sprawdzić ścieżki z Unicode i spacje.
-6. Artefakty/manifest mają weryfikowalny podpis wydawcy oraz dokumentowaną procedurę przechowywania i rotacji klucza CI. Windows wymaga podpisu instalatora i binarek oraz weryfikacji podpisu w smoke teście; oddzielne natywne testy są obowiązkowe. macOS nie jest objęty tym wydaniem; dodanie go później wymaga codesign/notarization i własnej macierzy testów. Cross-kompilacja nie zastępuje testów uruchomienia.
-7. Pierwsze stabilne wydanie może aktualizować się ręcznie z podpisanego artefaktu. Auto-update nie jest wymagany; jeśli zostanie włączony, wymaga podpisanego manifestu, weryfikacji artefaktu, ochrony przed downgrade i zachowania danych przy nieudanej aktualizacji.
-8. Release checklist obejmuje odtworzenie projektu z backupu, aktualizację ze wspieranej wersji, cofnięcie binarki bez uszkodzenia danych, znane ograniczenia i instrukcję zebrania diagnostyki bez sekretów.
+1. The Rust workspace has a pinned toolchain, MSRV, lockfile, `fmt --check`, `clippy`
+   with a chosen warning limit, unit/integration/doc tests, dependency and licence analysis
+   and a release build in CI. Lockfile updates go through a controlled process, never by
+   accidentally fetching the newest versions in a release.
+2. Domain/runner are tested without egui. Fixture parity covers null/missing/false/zero,
+   numbers and Unicode, seed-controlled random operators, template aliases, snapshots,
+   revisions, IF merge, cleanup and importing the older format. Rust/JS semantic
+   differences must be documented and approved by a test.
+3. Property/fuzz tests cover the parser/import, references and cycles, JSON paths, ID
+   remapping on copy, migrations and the redaction policy. Fuzzing does not replace manual
+   security analysis.
+4. Automated desktop UI scenarios cover creating a graph, dragging a variable, choosing a
+   response field, IF, copying a group with configuration, undo/redo, report resize,
+   save/reopen and cancellation. External browser tests remain tests of the old UI.
+5. The release artefact is built by CI, has checksums, a version/toolchain manifest and a
+   licence list; it runs on a clean machine without Node, npm or the repository. Linux and
+   Windows have separate native CI jobs and installation, start, upgrade and uninstall tests
+   on a clean machine/VM. For Linux, define the minimum glibc version, base distribution,
+   architecture and required graphics libraries; verify Wayland and X11. Proposed baseline
+   to confirm: Ubuntu 22.04 x86_64 / glibc 2.35. For Windows, define the supported 10/11
+   x86_64 releases, a signed installer, per-user permissions and running without an
+   installed toolchain; check Unicode paths and spaces.
+6. Artefacts/manifest carry a verifiable publisher signature and a documented procedure
+   for storing and rotating the CI key. Windows needs signed installers and binaries and a
+   signature check in the smoke test; separate native tests are mandatory. macOS is not
+   part of this release; adding it later needs codesign/notarisation and its own test
+   matrix. Cross-compilation does not replace start-up tests.
+7. The first stable release may be updated manually from a signed artefact. Auto-update
+   is not required; if enabled it needs a signed manifest, artefact verification, downgrade
+   protection and data preservation on a failed update.
+8. The release checklist covers restoring a project from backup, upgrading from a
+   supported version, rolling back the binary without corrupting data, known limitations
+   and instructions for collecting diagnostics without secrets.
 
-### G6 — używalność, dostępność i mierzalna wydajność
+### G6 — usability, accessibility and measurable performance
 
-Do czasu uzgodnienia sprzętu referencyjnego poniższe liczby są proponowanymi celami odbioru, a nie wynikami pomiarów: Linux i Windows x86_64, 4 rdzenie, 8 GiB RAM, zintegrowane GPU, 1920×1080, skala 100% i 200%. Pomiar trzeba wykonać osobno na obu platformach.
+Until reference hardware is agreed, the numbers below are proposed acceptance targets,
+not measurements: Linux and Windows x86_64, 4 cores, 8 GiB RAM, integrated GPU,
+1920×1080, 100% and 200% scale. Measure separately on both platforms.
 
-- Graf 200 węzłów / 1000 połączeń: p95 czasu klatki podczas pan/zoom/drag ≤ 16,7 ms; p99 ≤ 33,3 ms. Dodatkowy syntetyczny profil 500 węzłów / 1000 przewodów: p95 ≤ 33 ms; ten profil obciążenia nie rozszerza automatycznie limitu importu v1. Zmierzyć z normalnymi etykietami i otwartym inspectorem, nie pustymi prostokątami.
-- Zarejestrowanie Cancel w UI ≤ 100 ms; zatrzymanie lokalnego fixture request i przejście do cleanup ≤ 1 s. Nie obejmuje cofnięcia operacji po stronie testowanego serwera.
-- Start pustego projektu do interaktywnego okna ≤ 2 s; pamięć ustabilizowana dla grafu testowego ≤ 500 MiB poza jawnie zadeklarowanym budżetem aktywnych payloadów. Serie 100 run nie wykazują monotonicznego przyrostu pamięci po zakończeniu i usunięciu raportów.
-- Raport z dużym JSON renderuje się przyrostowo/wirtualnie; brak rozwijania całego drzewa i serializacji pełnego raportu w każdej klatce.
-- Wszystkie kluczowe operacje dostępne klawiaturą: fokus i wybór węzłów, tworzenie połączenia przez formularz/listę, edycja argumentu, wybór pola, Start/Cancel, copy/paste/undo i resize raportu. Przeciąganie nie jest jedyną metodą obsługi.
-- Widoczny fokus, czytelność błędów i stanów bez polegania wyłącznie na kolorze, skalowanie fontów, kontrast i poprawne polskie znaki. Dialogi mają przewidywalny fokus i Escape; skróty grafu nie przechwytują edycji tekstu.
-- Dostępność egui przez dostępny backend musi zostać sprawdzona z czytnikiem ekranu na wspieranej platformie. Własny canvas wymaga semantycznej alternatywy listy kroków i formularzy połączeń. Sama obecność biblioteki dostępności nie zamyka odbioru.
+- 200 nodes / 1000 connections: p95 frame time during pan/zoom/drag ≤ 16.7 ms; p99 ≤
+  33.3 ms. An extra synthetic profile of 500 nodes / 1000 wires: p95 ≤ 33 ms; this load
+  profile does not automatically extend the v1 import limit. Measure with normal labels
+  and an open inspector, not empty rectangles.
+- Registering Cancel in the UI ≤ 100 ms; stopping a local fixture request and moving to
+  cleanup ≤ 1 s. This does not include undoing the operation on the tested server.
+- Start of an empty project to an interactive window ≤ 2 s; stabilised memory for the test
+  graph ≤ 500 MiB outside an explicitly declared budget of active payloads. A series of
+  100 runs shows no monotonic memory growth after reports finish and are removed.
+- A report with large JSON renders incrementally/virtually; no expanding the whole tree
+  and no serialising the full report every frame.
+- All key operations are available from the keyboard: focusing and selecting nodes,
+  creating a connection through a form/list, editing an argument, choosing a field,
+  Start/Cancel, copy/paste/undo and report resize. Dragging is never the only method.
+- Visible focus, readable errors and states without relying on colour alone, font
+  scaling, contrast and correct non-ASCII text. Dialogs have predictable focus and Escape;
+  graph shortcuts do not capture text editing.
+- egui accessibility through the available backend must be checked with a screen reader
+  on a supported platform. A custom canvas needs a semantic alternative: a step list and
+  connection forms. The mere presence of an accessibility library does not close
+  acceptance.
 
-Dowody: profil obciążenia i surowe wyniki pomiarów z identyfikatorem builda/sprzętu; ręczny protokół klawiatury/czytnika; testy skalowania i screenshoty. W razie nieosiągnięcia celu najpierw profilowanie, potem zmiana implementacji albo jawna korekta wspieranego limitu.
+Evidence: a load profile and raw measurements with a build/hardware identifier; a manual
+keyboard/screen reader protocol; scaling tests and screenshots. If a target is missed,
+profile first, then change the implementation or explicitly correct the supported limit.
 
-## Kolejność zadań i odpowiedzialność
+## Task order and ownership
 
-Poniższe P0–P7 to lokalny podział audytu. Nadrzędny backlog, właściciele i etapy R0–R10 znajdują się w [RUST_MIGRATION.md](../../RUST_MIGRATION.md). Magazyn roboczy to SQLite; wymagania atomowego zapisu plików dotyczą eksportu i plików pomocniczych, nie zastępują transakcji i spójnego backupu SQLite.
+P0–P7 below are the audit's local breakdown. The overall backlog, owners and stages
+R0–R10 are in [RUST_MIGRATION.md](../../RUST_MIGRATION.md). Atomic file save requirements
+apply to the document store, exports and auxiliary files.
 
-| Zadanie                                       | Zależności                                          | Właściciel modułu               | Warunek zamknięcia                                                                                 |
-| --------------------------------------------- | --------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------- |
-| P0: kontrakt kompatybilności i fixture corpus | Audyt obecnego modelu i runnera                     | Domain / koordynator            | Zapisane reguły i fixtures obejmujące funkcje istniejącego produktu; brak cichej zmiany znaczenia. |
-| P1: import/migracje i storage recovery        | P0, decyzja o platformie                            | Persistence                     | G1 i testy fault injection.                                                                        |
-| P2: typy sekretów, redakcja, log policy       | P0                                                  | Security / runner               | G2, zanim pierwsze zdarzenie runnera trafi do UI lub pliku.                                        |
-| P3: klient HTTP, budżety, runtime             | P0 + P2, decyzje TLS/proxy                          | Runner                          | G3 oraz backpressure i limit pamięci.                                                              |
-| P4: scheduler, anulowanie, cleanup            | P0 + P3                                             | Runner                          | G4 i cart fixture, zgodność ze starym silnikiem.                                                   |
-| P5: aplikacja desktopowa i interakcje         | P0; integracja P1/P4                                | UI                              | Zachowana pełna lista funkcji; G6 i automatyczne scenariusze UI.                                   |
-| P6: CI/artefakty                              | Kontrakt workspace i platformy; równolegle do P1–P5 | Release / koordynator           | Reprodukowalna procedura builda, podpis, czysty smoke test.                                        |
-| P7: kandydat stabilnego wydania               | P1–P6                                               | Koordynator + niezależny review | Wszystkie G1–G6 z dowodami; otwarte defekty sklasyfikowane i brak blokujących.                     |
+| Task                                          | Dependencies                                       | Module owner                     | Closing condition                                                                         |
+| --------------------------------------------- | -------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| P0: compatibility contract and fixture corpus | Audit of the current model and runner              | Domain / coordinator             | Recorded rules and fixtures covering existing product features; no silent meaning change. |
+| P1: import/migrations and storage recovery    | P0, platform decision                              | Persistence                      | G1 and fault injection tests.                                                             |
+| P2: secret types, redaction, log policy       | P0                                                 | Security / runner                | G2, before the first runner event reaches the UI or a file.                               |
+| P3: HTTP client, budgets, runtime             | P0 + P2, TLS/proxy decisions                       | Runner                           | G3 plus backpressure and the memory limit.                                                |
+| P4: scheduler, cancellation, cleanup          | P0 + P3                                            | Runner                           | G4 and the cart fixture, compatibility with the old engine.                               |
+| P5: desktop application and interactions      | P0; integration of P1/P4                           | UI                               | The full feature list kept; G6 and automated UI scenarios.                                |
+| P6: CI/artefacts                              | Workspace and platform contract; parallel to P1–P5 | Release / coordinator            | A reproducible build procedure, signing, a clean smoke test.                              |
+| P7: stable release candidate                  | P1–P6                                              | Coordinator + independent review | All of G1–G6 with evidence; open defects classified and none blocking.                    |
 
-Dalsze funkcje, które nie blokują zgodnego pierwszego wydania: współpraca zespołowa, chmura, publiczny runner, automatyczne OAuth, keyring, wydania macOS i inne poza zadeklarowaną macierzą Linux/Windows, automatyczne aktualizacje, pętle i równoległe wykonanie grafu. Nie należy używać tego odroczenia do pominięcia poprawności danych, bezpieczeństwa lokalnego wykonania ani istniejących funkcji edytora.
+Further features that do not block a compatible first release: team collaboration,
+cloud, a public runner, automatic OAuth, keyring, macOS and other releases outside the
+declared Linux/Windows matrix, automatic updates, loops and parallel graph execution. This
+deferral must not be used to skip data correctness, local execution safety or existing
+editor features.
