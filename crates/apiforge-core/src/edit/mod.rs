@@ -6,12 +6,17 @@
 //! whose `Display` text is shown to the user as is.
 
 mod clipboard;
+mod component;
 mod connect;
 mod fold;
 mod nodes;
 mod variables;
 
 pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
+pub use component::{
+    ComponentDraft, DraftError, DraftSection, InputRow, InputTarget, OutputRow, add_component,
+    initialize_inputs, initialize_outputs, materialize_component, validate_draft,
+};
 pub use connect::{connect, remove_connections};
 pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
@@ -20,7 +25,7 @@ pub use variables::{
     TextSelection, VariableBlock, bind_variable_text, insert_variable_token, prune_template_inputs,
 };
 
-use crate::ids::new_id;
+use crate::{ImportError, ids::new_id};
 use thiserror::Error;
 
 /// Why an edit was rejected. The messages are user-facing.
@@ -60,6 +65,22 @@ pub enum EditError {
         "This assignment creates a cycle: a request cannot use a variable taken from its own response."
     )]
     AssignmentCycle,
+    #[error("{}", join_lines(.0))]
+    InvalidDraft(Vec<DraftError>),
+    #[error("Invalid operator argument path.")]
+    InvalidOperandPath,
+    #[error("The component to revise does not exist.")]
+    ComponentNotFound,
+    #[error("{0}")]
+    InvalidProject(#[from] ImportError),
+}
+
+fn join_lines(errors: &[DraftError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A fresh identifier that `taken` does not report as used.
