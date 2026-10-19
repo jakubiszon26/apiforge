@@ -1,0 +1,15 @@
+# Component editing UI
+
+These modules use `shared/model.ts` and callbacks; project persistence and graph history belong to the application shell.
+
+- `NodeInspector` (`../inspector/NodeInspector.tsx`): `{ node, graph, project, onChange, onEditComponent, onAssertField, step?, parameters? }`. `graph` may contain both main and cleanup nodes so cleanup bindings can reference main outputs. `onChange` replaces one node. `onAssertField(nodeId, port, path, value)` requests a new graph assertion. `step` is explicitly labeled as the last execution; absent step shows sample data only. Mount with `key={node.id}` to reset the selected panel on node changes.
+- `ComponentBuilder`: `{ graph, selectedIds, project, onSave, onClose, initialDefinition? }`. It creates a definition without replacing the selected graph. External references become required public argument mappings; literals may become default arguments; environment bindings remain environment bindings. Shared parameter bindings become a single public argument with multiple internal destinations. `initialDefinition` preserves existing public metadata and output bindings when revising. The shell assigns the revision number and updates only chosen instances. Mount a fresh builder when opening/editing a different draft. `onSave` does not call `onClose`; the shell can validate the definition before closing.
+- `EnvironmentEditor` (`../environments/EnvironmentEditor.tsx`): `{ environment, secrets, onChange, onSecretsChange, onClose }`. It edits a local draft and emits updates only when saved, then closes. The shell must keep `secrets` in memory only, outside persisted project state. Cancel does not emit updates.
+
+All modules import scoped `../inspector/inspector.css`. Browser/DOM globals are not used while rendering. JSON path suggestions come from examples and are clearly marked as hints. No JavaScript evaluation is performed. Named contract creation belongs to the shell; inspectors and builders select existing project contracts.
+
+Form bindings reject cycles before mutation. Whole-value type incompatibility is displayed inline. Free-form paths remain editable because a response sample is not a complete schema; runner validation remains authoritative for actual values.
+
+Component extraction/revision mapping lives in `componentDraft.ts`. Behavioral tests in `componentDraft.test.ts` cover boundary mappings, public parameter fan-out, output alias preservation, duplicate names, graph immutability and the root recursion validator. `../inspector/jsonPaths.test.ts` verifies paths against the shared runner accessor, including quoted property names.
+
+`NodeInspector` and `RunPanel` also accept optional `onAssignField(nodeId, port, path)` for response-to-variable assignments. Response fields drag ordinary reference bindings using the variable drag format. `ResponseBindingPicker` selects a source and path for an existing variable; `assignResponseVariable` creates or updates a variable without copying response data and rejects cycles.

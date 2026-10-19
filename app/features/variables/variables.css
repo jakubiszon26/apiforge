@@ -1,0 +1,120 @@
+.af-variable-palette {
+  margin: 10px 8px 16px;
+}
+.af-variable-palette .af-library-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 6px;
+}
+.af-variable-palette .af-library-category button {
+  cursor: pointer;
+  border: 1px solid #edd0a8;
+  background: #fff4e5;
+  border-radius: 4px;
+  color: #aa661e;
+}
+.af-variable-palette > p {
+  margin: 6px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #a58d6a;
+}
+.af-variable-chip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin: 5px 0;
+  padding: 8px 10px;
+  border: 1px solid #e6b875;
+  border-radius: 18px;
+  background: #fff0d8;
+  color: #925914;
+  cursor: grab;
+  font-size: 11px !important;
+}
+.af-variable-chip strong {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.af-variable-chip small {
+  font-size: 8px;
+  opacity: 0.7;
+}
+.af-variable-chip:hover {
+  background: #ffe2b4;
+}
+.af-variable-drop-over {
+  outline: 2px dashed #d38c31 !important;
+  outline-offset: 2px;
+  background: #fff5e5 !important;
+}
+.af-kind-variable .af-block-icon {
+  background: #fff0d8;
+  color: #bd771b;
+}
+
+.af-bound-variable {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  gap: 6px;
+  border: 1px solid #e4b779;
+  border-radius: 14px;
+  background: #fff0d8;
+  color: #925914;
+  font-size: 11px;
+  padding: 4px 9px;
+}
+.af-bound-variable > span {
+  cursor: grab;
+  overflow-wrap: anywhere;
+}
+.af-editor .af-bound-variable > button {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  color: #a16b27;
+  line-height: 1;
+}
+.af-variable-text-field {
+  display: block;
+  min-width: 0;
+  flex: 1;
+}
+.af-text-variable-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.af-text-variable-tokens .af-bound-variable {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+.af-text-variable-name {
+  border-radius: 10px;
+  background: #fff0d8;
+  color: #925914;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+.af-response-variable-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+.af-response-variable-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.af-response-variable-dialog header p {
+  color: #8c795d;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.af-draggable-response-field {
+  cursor: grab;
+}

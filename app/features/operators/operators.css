@@ -1,0 +1,175 @@
+.af-operator-palette {
+  margin: 16px 0;
+}
+.af-operator-help {
+  color: #948774;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 0 14px;
+}
+.af-operator-palette details {
+  margin: 5px 8px;
+}
+.af-operator-palette summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #53694f;
+  padding: 6px;
+}
+.af-operator-palette summary small {
+  opacity: 0.6;
+  float: right;
+}
+.af-operator-chip {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  cursor: grab;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border-radius: 18px;
+  background: #eef7e8;
+  border: 1px solid #b9d59c;
+  color: #3c6131;
+  text-align: left;
+  font-size: 11px !important;
+}
+.af-operator-chip.is-boolean {
+  border-radius: 6px 16px;
+  background: #e0f0d8;
+}
+.af-operator-chip small {
+  font-size: 8px;
+  color: #73866a;
+}
+.af-operator-chip:hover {
+  background: #dfedcf;
+}
+.af-expression {
+  border: 1px solid #a7c989;
+  background: #edf7e5;
+  padding: 10px;
+  border-radius: 16px;
+  min-width: 0;
+}
+.af-expression.is-boolean {
+  background: #e7f3df;
+  border-radius: 6px 18px;
+}
+.af-expression header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #557942;
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+.af-expression header b {
+  font-weight: 500;
+  opacity: 0.7;
+}
+.af-expression-slots {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.af-expression-slot {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #cbdcbe;
+  background: #ffffffa8;
+  border-radius: 9px;
+}
+.af-expression-slot .af-binding {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.af-expression .af-expression {
+  padding: 7px;
+}
+.af-binding-drop-target {
+  min-width: 0;
+}
+.af-binding-drop-target.is-drop-target {
+  outline: 2px dashed #76a348;
+  outline-offset: 2px;
+}
+.af-expression-hint {
+  color: #628349;
+  font-size: 10px;
+}
+.af-inspector-slot:has(.af-expression) {
+  width: min(540px, 45vw);
+  min-width: min(380px, 40vw);
+}
+
+.af-operator-example {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 8px;
+  border: 1px solid #c6d9b9;
+  border-radius: 6px;
+  background: #f2f8ed;
+  color: #52723d;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 10px !important;
+}
+
+.af-editor .af-expression .af-operator-unwrap {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #567644;
+  line-height: 1;
+  padding: 1px 4px;
+}
+
+.af-editor .af-expression .af-binding {
+  padding: 0;
+  gap: 5px;
+  background: transparent;
+  border: 0;
+}
+.af-editor .af-expression .af-binding-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.af-editor .af-expression .af-binding-head select {
+  width: auto;
+  max-width: 190px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+.af-editor .af-expression input:not([type='checkbox']),
+.af-editor .af-expression select {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.af-reference-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.af-reference-fields summary {
+  cursor: pointer;
+  padding: 5px;
+  border: 1px solid #c9dabd;
+  border-radius: 6px;
+  background: white;
+  color: #587346;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.af-reference-fields.is-root > summary {
+  display: none;
+}
+.af-reference-fields > :not(summary) {
+  margin-top: 7px;
+}
