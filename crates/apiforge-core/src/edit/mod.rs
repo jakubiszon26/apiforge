@@ -7,12 +7,17 @@
 
 mod clipboard;
 mod connect;
+mod fold;
 mod nodes;
+mod variables;
 
 pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
 pub use connect::{connect, remove_connections};
 pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
+};
+pub use variables::{
+    TextSelection, VariableBlock, bind_variable_text, insert_variable_token, prune_template_inputs,
 };
 
 use crate::ids::new_id;
