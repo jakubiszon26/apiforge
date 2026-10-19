@@ -1,0 +1,1085 @@
+//! Serial execution of a scenario: scheduling, node operations, components, cleanup.
+//!
+//! Operations run one at a time and each is awaited. A node becomes ready when all
+//! its data and ordering dependencies inside the graph have finished; among ready
+//! nodes the order of `graph.nodes` decides. Ordering edges activate a path (IF
+//! branches select one, alternatives merge with OR); data references additionally
+//! require producers whose results are usable. A graph without Start keeps the
+//! legacy behaviour where every root runs.
+//!
+//! Raw values are used for execution. Only redacted copies leave the engine.
+
+use crate::{
+    http::{self, HttpError},
+    plan::ExecutionPlan,
+    redact::Redactor,
+    request::{RunError, RunLimits, RunOptions, RunRequest, validate},
+    support::{byte_size, duration_label, rfc3339_millis, sentence},
+};
+use apiforge_core::{
+    binding::Reference,
+    format::{Binding, Graph, Node, OptionalJson, Project, Scenario},
+    graph::{ancestors_and_self, component_definition, input_ports, predicate},
+    js::{self, js_key_order},
+    model::{Branch, BuildType, HttpMethod, Match, NodeKind, ValueType},
+    operator::{Operator, OperatorError, RandomSource},
+    path,
+    predicate::PredicateError,
+    run::{Phase, RequestSnapshot, RunResult, RunSnapshot, RunStatus, StepResult, StepStatus},
+    template::{self, TemplateError},
+};
+use indexmap::{IndexMap, IndexSet};
+use serde_json::{Map, Value};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    pin::Pin,
+    time::{Duration, SystemTime},
+};
+use thiserror::Error;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
+use url::Url;
+
+/// Runs a scenario to completion and returns its redacted report.
+///
+/// `on_update` receives a redacted snapshot after the run starts, after every
+/// top-level step and when the run finishes. Cancelling `cancel` stops the main
+/// phase; cleanup still runs with its own budget. An error is returned only for a
+/// request that fails validation, before anything is executed.
+pub async fn run_scenario(
+    request: RunRequest,
+    options: RunOptions,
+    cancel: CancellationToken,
+    on_update: impl FnMut(&RunResult) + Send,
+) -> Result<RunResult, RunError> {
+    validate(&request)?;
+    run_validated(request, options, cancel, on_update).await
+}
+
+/// [`run_scenario`] for a request that has already been validated.
+pub(crate) async fn run_validated(
+    request: RunRequest,
+    options: RunOptions,
+    cancel: CancellationToken,
+    on_update: impl FnMut(&RunResult) + Send,
+) -> Result<RunResult, RunError> {
+    let scenario = request
+        .project
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id == request.scenario_id)
+        .ok_or_else(|| RunError::ScenarioNotFound(request.scenario_id.clone()))?;
+    let mut engine = Engine::new(&request, scenario, options, on_update);
+    Ok(engine.run(cancel).await)
+}
+
+/// Resolved inputs of a node; `None` is a missing value, distinct from JSON null.
+type Values = IndexMap<String, Option<Value>>;
+
+type BoxFuture<'s, T> = Pin<Box<dyn Future<Output = T> + Send + 's>>;
+
+/// Cancellation by the user or by an exhausted time budget.
+#[derive(Clone, Debug)]
+struct Signal {
+    token: CancellationToken,
+    deadline: Instant,
+}
+
+impl Signal {
+    fn is_aborted(&self) -> bool {
+        self.token.is_cancelled() || Instant::now() >= self.deadline
+    }
+
+    async fn aborted(&self) {
+        tokio::select! {
+            () = self.token.cancelled() => {}
+            () = tokio::time::sleep_until(self.deadline) => {}
+        }
+    }
+}
+
+/// Where a graph executes: its arguments, finished steps and phase.
+struct Context {
+    /// Scenario parameters, or a component's arguments.
+    parameters: Values,
+    /// Finished steps by node ID. Cleanup shares the map with the main phase.
+    outputs: HashMap<String, StepResult>,
+    signal: Signal,
+    /// `id@revision` of every enclosing component.
+    stack: Vec<String>,
+    phase: Phase,
+}
+
+/// Why a step ended with an error. Messages are shown in reports.
+#[derive(Debug, Error)]
+enum StepError {
+    #[error("Exceeded the limit of {0} steps (including component steps).")]
+    StepLimit(usize),
+    #[error("Missing required input: {0}.")]
+    MissingInput(String),
+    #[error("Input {name}: expected type {expected}.")]
+    InputType { name: String, expected: ValueType },
+    #[error("{}", sentence(&.0.to_string()))]
+    Template(#[from] TemplateError),
+    #[error("{}", sentence(&.0.to_string()))]
+    Predicate(#[from] PredicateError),
+    #[error("{}", sentence(&.0.to_string()))]
+    Operator(#[from] OperatorError),
+    /// An error inside an expression binding, prefixed with the operator.
+    #[error("{operator}: {message}")]
+    Expression { operator: String, message: String },
+    #[error("Missing value to build data.")]
+    IncompleteBuild,
+    #[error("The component revision does not exist.")]
+    MissingComponent,
+    #[error("Component recursion or nesting too deep.")]
+    ComponentDepth,
+    #[error("The graph contains unresolvable dependencies.")]
+    Unresolvable,
+    #[error("Invalid URL.")]
+    InvalidUrl,
+    #[error("Only HTTP/HTTPS addresses without credentials in the URL are allowed.")]
+    UrlNotAllowed,
+    #[error("GET and HEAD requests cannot have a body.")]
+    BodyNotAllowed,
+    #[error("No sample response for the simulation.")]
+    MissingSample,
+    #[error("Request timed out after {0} ms.")]
+    Timeout(String),
+    #[error(transparent)]
+    Http(#[from] HttpError),
+    #[error("Cancelled.")]
+    Cancelled,
+}
+
+const OUTSIDE_PATH: &str = "Step outside the active execution path.";
+const UNAVAILABLE: &str = "Unavailable data or an unmet condition of an earlier step.";
+const STOPPED: &str = "Stopped after an error.";
+const CANCELLED: &str = "Cancelled.";
+
+struct Engine<'a, F> {
+    request: &'a RunRequest,
+    project: &'a Project,
+    scenario: &'a Scenario,
+    /// Project variables, then session secrets, then `baseUrl`.
+    env: IndexMap<String, Value>,
+    limits: RunLimits,
+    transport: http::HttpTransport,
+    random: Box<dyn RandomSource + Send>,
+    redactor: Redactor,
+    run: RunResult,
+    executed_steps: usize,
+    report_bytes: usize,
+    on_update: F,
+}
+
+impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
+    fn new(
+        request: &'a RunRequest,
+        scenario: &'a Scenario,
+        options: RunOptions,
+        on_update: F,
+    ) -> Self {
+        let project = &request.project;
+        let environment = &project.environment;
+        let mut env: IndexMap<String, Value> = environment
+            .variables
+            .iter()
+            .map(|(name, value)| (name.clone(), Value::String(value.clone())))
+            .collect();
+        for (name, value) in &request.secrets {
+            env.insert(name.clone(), Value::String(value.clone()));
+        }
+        env.insert(
+            "baseUrl".into(),
+            Value::String(environment.base_url.clone()),
+        );
+
+        let mut redactor = Redactor::new();
+        for secret in request.secrets.values() {
+            redactor.add(secret);
+        }
+        for name in &environment.secret_names {
+            if let Some(Value::String(secret)) = env.get(name) {
+                redactor.add(secret);
+            }
+        }
+        if let Ok(document) = serde_json::to_value(project) {
+            redactor.collect(&document);
+        }
+
+        let run = RunResult {
+            id: uuid::Uuid::new_v4().to_string(),
+            scenario_id: scenario.id.clone(),
+            mode: request.mode,
+            started_at: rfc3339_millis(SystemTime::now()),
+            finished_at: None,
+            status: RunStatus::Running,
+            steps: Vec::new(),
+            diagnostic: request.single_node_id.is_some() || request.target_node_id.is_some(),
+            snapshot: Some(RunSnapshot {
+                graph: scenario.graph.clone(),
+                cleanup: scenario.cleanup.clone(),
+            }),
+            error: None,
+            notice: None,
+        };
+        Self {
+            request,
+            project,
+            scenario,
+            env,
+            limits: options.limits,
+            transport: options.transport,
+            random: options.random,
+            redactor,
+            run,
+            executed_steps: 0,
+            report_bytes: 0,
+            on_update,
+        }
+    }
+
+    fn notify(&mut self) {
+        let snapshot = self.redactor.redact_run(&self.run);
+        (self.on_update)(&snapshot);
+    }
+
+    async fn run(&mut self, cancel: CancellationToken) -> RunResult {
+        let request = self.request;
+        let scenario = self.scenario;
+        let main_deadline = Instant::now() + self.limits.main_budget;
+        let mut context = Context {
+            parameters: scenario
+                .parameters
+                .iter()
+                .map(|(name, value)| (name.clone(), Some(value.clone())))
+                .collect(),
+            outputs: HashMap::new(),
+            signal: Signal {
+                token: cancel.clone(),
+                deadline: main_deadline,
+            },
+            stack: Vec::new(),
+            phase: Phase::Main,
+        };
+
+        let selection: Option<IndexSet<String>> = if let Some(single) = &request.single_node_id {
+            // History is redacted; it shows what an earlier run saw, not real secrets.
+            for step in request.previous_run.iter().flat_map(|run| &run.steps) {
+                if step.phase == Phase::Main && &step.node_id != single {
+                    context.outputs.insert(step.node_id.clone(), step.clone());
+                }
+            }
+            self.run.notice = Some(match &request.previous_run {
+                Some(previous) => format!(
+                    "Historical inputs from run {}, {}.",
+                    previous.id,
+                    previous.finished_at.as_deref().unwrap_or("unknown time")
+                ),
+                None => "Single step: no historical inputs.".to_owned(),
+            });
+            Some(IndexSet::from([single.clone()]))
+        } else {
+            request
+                .target_node_id
+                .as_deref()
+                .map(|target| ancestors_and_self(&scenario.graph, target))
+        };
+        self.notify();
+
+        if let Err(error) = self
+            .execute_graph(&scenario.graph, &mut context, true, selection.as_ref())
+            .await
+        {
+            self.run.error = Some(error.to_string());
+        }
+        // Cleanup gets its own budget, unaffected by cancellation of the main phase.
+        context.phase = Phase::Cleanup;
+        context.signal = Signal {
+            token: CancellationToken::new(),
+            deadline: Instant::now() + self.limits.cleanup_budget,
+        };
+        if let Err(error) = self
+            .execute_graph(&scenario.cleanup, &mut context, true, None)
+            .await
+        {
+            let cleanup = format!("Cleanup error: {error}");
+            self.run.error = Some(match self.run.error.take() {
+                Some(previous) => format!("{previous} {cleanup}"),
+                None => cleanup,
+            });
+        }
+        if Instant::now() >= main_deadline {
+            self.run.error = Some(format!(
+                "The run exceeded the {} time limit.",
+                duration_label(self.limits.main_budget)
+            ));
+        }
+        self.run.status = if cancel.is_cancelled() {
+            RunStatus::Cancelled
+        } else if self.run.steps.iter().any(|step| step.status.fails_run())
+            || self.run.error.is_some()
+        {
+            RunStatus::Failed
+        } else {
+            RunStatus::Passed
+        };
+        self.run.finished_at = Some(rfc3339_millis(SystemTime::now()));
+        self.notify();
+        self.redactor.redact_run(&self.run)
+    }
+
+    /// Executes the nodes of a graph (or the `selected` subset) in dependency order.
+    fn execute_graph<'s>(
+        &'s mut self,
+        graph: &'a Graph,
+        context: &'s mut Context,
+        publish: bool,
+        selected: Option<&'s IndexSet<String>>,
+    ) -> BoxFuture<'s, Result<Vec<StepResult>, StepError>>
+    where
+        'a: 's,
+    {
+        Box::pin(async move {
+            let plan = ExecutionPlan::new(graph);
+            let mut pending: Vec<&'a Node> = graph
+                .nodes
+                .iter()
+                .filter(|node| selected.is_none_or(|selected| selected.contains(&node.id)))
+                .collect();
+            let graph_ids: HashSet<&str> = pending.iter().map(|node| node.id.as_str()).collect();
+            let mut results = Vec::with_capacity(pending.len());
+            let mut stopped = false;
+            while !pending.is_empty() {
+                let index = pending
+                    .iter()
+                    .position(|node| {
+                        plan.dependencies_of(&node.id)
+                            .all(|id| !graph_ids.contains(id) || context.outputs.contains_key(id))
+                    })
+                    .ok_or(StepError::Unresolvable)?;
+                let node = pending.remove(index);
+                let bypass_gate = self.request.single_node_id.as_deref() == Some(node.id.as_str())
+                    && selected.is_some_and(|selected| selected.len() == 1);
+                let gate = self.gate(graph, &plan, node, context, bypass_gate);
+                let status = if context.signal.is_aborted() {
+                    Some(StepStatus::Cancelled)
+                } else if gate.inactive || stopped || gate.missing_cleanup_input {
+                    Some(StepStatus::Skipped)
+                } else if gate.blocked {
+                    Some(match context.phase {
+                        Phase::Cleanup => StepStatus::Skipped,
+                        Phase::Main => StepStatus::Blocked,
+                    })
+                } else {
+                    None
+                };
+                let step = match status {
+                    Some(status) => {
+                        let mut step =
+                            StepResult::new(&node.id, &node.name, node.kind, context.phase);
+                        step.status = status;
+                        step.message = Some(
+                            if gate.inactive {
+                                OUTSIDE_PATH
+                            } else if status == StepStatus::Cancelled {
+                                CANCELLED
+                            } else if gate.blocked || gate.missing_cleanup_input {
+                                UNAVAILABLE
+                            } else {
+                                STOPPED
+                            }
+                            .to_owned(),
+                        );
+                        step
+                    }
+                    None => self.execute(node, context).await,
+                };
+                if self.scenario.error_policy == apiforge_core::model::ErrorPolicy::Stop
+                    && context.phase == Phase::Main
+                    && matches!(
+                        step.status,
+                        StepStatus::Failed | StepStatus::Error | StepStatus::Blocked
+                    )
+                {
+                    stopped = true;
+                }
+                context.outputs.insert(node.id.clone(), step.clone());
+                if publish {
+                    self.run.steps.push(step.clone());
+                    self.notify();
+                }
+                results.push(step);
+            }
+            Ok(results)
+        })
+    }
+
+    /// Decides whether a ready node is on the active path and has usable inputs.
+    fn gate(
+        &self,
+        graph: &Graph,
+        plan: &ExecutionPlan<'_>,
+        node: &Node,
+        context: &Context,
+        bypass: bool,
+    ) -> Gate {
+        let dependencies: Vec<&str> = plan.dependencies_of(&node.id).collect();
+        let incoming: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.target == node.id)
+            .collect();
+        let takes_branch = |branch: Option<Branch>, source: &StepResult| {
+            source.outputs.get("passed") == Some(&Value::Bool(branch == Some(Branch::True)))
+        };
+        let active_order = incoming
+            .iter()
+            .filter(|edge| {
+                context.outputs.get(&edge.source).is_some_and(|source| {
+                    !matches!(
+                        source.status,
+                        StepStatus::Skipped
+                            | StepStatus::Blocked
+                            | StepStatus::Error
+                            | StepStatus::Cancelled
+                    ) && (edge.branch.is_none() || takes_branch(edge.branch, source))
+                })
+            })
+            .count();
+        // Alternative branches merge with OR. An inactive branch is never a failure.
+        let inactive = !bypass
+            && (!plan.is_reachable(&node.id)
+                || (!incoming.is_empty()
+                    && active_order == 0
+                    && incoming.iter().all(|edge| {
+                        context.outputs.get(&edge.source).is_some_and(|source| {
+                            source.status == StepStatus::Skipped
+                                || (edge.branch.is_some()
+                                    && source.status == StepStatus::Passed
+                                    && !takes_branch(edge.branch, source))
+                        })
+                    }))
+                || (incoming.is_empty()
+                    && dependencies.iter().any(|id| {
+                        context
+                            .outputs
+                            .get(*id)
+                            .is_some_and(|source| source.status == StepStatus::Skipped)
+                    })));
+        let references: Vec<Reference<'_>> =
+            node.inputs.values().flat_map(Binding::references).collect();
+        let blocked = dependencies.iter().any(|id| {
+            let Some(source) = context.outputs.get(*id) else {
+                return true;
+            };
+            let mut used = references
+                .iter()
+                .filter(|reference| reference.node_id == *id)
+                .peekable();
+            let data_dependency = used.peek().is_some();
+            if !data_dependency && active_order > 0 && source.status == StepStatus::Skipped {
+                return false;
+            }
+            if context.phase == Phase::Cleanup {
+                // A component may create a resource and fail later. Exported resource
+                // IDs remain usable for cleanup, while main-phase steps stay blocked.
+                // An order-only cleanup dependency means "after completion".
+                if !data_dependency || used.all(|reference| is_available(reference, context)) {
+                    return false;
+                }
+            }
+            source.status.is_unavailable()
+        });
+        let missing_cleanup_input = context.phase == Phase::Cleanup
+            && references
+                .iter()
+                .any(|reference| !is_available(reference, context));
+        Gate {
+            inactive,
+            blocked,
+            missing_cleanup_input,
+        }
+    }
+
+    /// Executes one node. Failures become the step's status and message.
+    async fn execute(&mut self, node: &'a Node, context: &mut Context) -> StepResult {
+        let started = Instant::now();
+        let mut step = StepResult::new(&node.id, &node.name, node.kind, context.phase);
+        if let Err(error) = self.operate(node, context, &mut step).await {
+            step.status = if context.signal.is_aborted() {
+                StepStatus::Cancelled
+            } else {
+                StepStatus::Error
+            };
+            step.message = Some(error.to_string());
+        }
+        step.duration_ms = milliseconds(started.elapsed());
+        let size = serde_json::to_vec(&step).map_or(usize::MAX, |bytes| bytes.len());
+        if self.report_bytes.saturating_add(size) > self.limits.max_report_bytes {
+            step.status = StepStatus::Error;
+            step.message = Some(format!(
+                "Exceeded the run data limit of {}.",
+                byte_size(self.limits.max_report_bytes)
+            ));
+            step.inputs.clear();
+            step.outputs.clear();
+            step.children = None;
+            step.request = None;
+            step.expected = OptionalJson::Missing;
+            step.actual = OptionalJson::Missing;
+        } else {
+            self.report_bytes += size;
+        }
+        step
+    }
+
+    async fn operate(
+        &mut self,
+        node: &'a Node,
+        context: &mut Context,
+        step: &mut StepResult,
+    ) -> Result<(), StepError> {
+        self.executed_steps += 1;
+        if self.executed_steps > self.limits.max_steps {
+            return Err(StepError::StepLimit(self.limits.max_steps));
+        }
+        let mut values = Values::with_capacity(node.inputs.len());
+        for (name, binding) in &node.inputs {
+            let value = self.resolve(binding, context)?;
+            values.insert(name.clone(), value);
+        }
+        let ports = input_ports(node, self.project);
+        for port in &ports {
+            if values.get(&port.name).is_none_or(Option::is_none)
+                && let Some(default) = port.default()
+            {
+                values.insert(port.name.clone(), Some(default.clone()));
+            }
+        }
+        let values: Values = js_key_order(values).into_iter().collect();
+        step.inputs = compact(&values);
+        // Checks may inspect missing fields explicitly. Other operations require
+        // their declared inputs.
+        if !matches!(
+            node.kind,
+            NodeKind::Assert | NodeKind::Condition | NodeKind::If | NodeKind::Select
+        ) {
+            for port in &ports {
+                match values.get(&port.name).and_then(Option::as_ref) {
+                    None if port.is_required() => {
+                        return Err(StepError::MissingInput(port.name.clone()));
+                    }
+                    Some(value) if !has_type(value, port.value_type) => {
+                        return Err(StepError::InputType {
+                            name: port.name.clone(),
+                            expected: port.value_type,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let input = |name: &str| values.get(name).cloned().flatten();
+        match node.kind {
+            NodeKind::Trigger => {}
+            NodeKind::Variable => step.outputs = single_output(input("value")),
+            NodeKind::Request => self.request(node, &values, step, context).await?,
+            NodeKind::Select => {
+                let lookup = template_lookup(&values, &self.env);
+                let field = template::expand(node.config.path.as_deref().unwrap_or(""), &lookup)?;
+                let selected = values
+                    .get("value")
+                    .and_then(Option::as_ref)
+                    .and_then(|value| path::resolve(value, &field))
+                    .map(|value| value.into_owned());
+                step.outputs = single_output(selected);
+            }
+            NodeKind::Build => {
+                if values.values().any(Option::is_none) {
+                    return Err(StepError::IncompleteBuild);
+                }
+                let fields = compact(&values);
+                let built = match node.config.build_type.unwrap_or_default() {
+                    BuildType::Array => Value::Array(fields.into_values().collect()),
+                    BuildType::Object => Value::Object(fields.into_iter().collect()),
+                };
+                step.outputs.insert("value".into(), built);
+            }
+            NodeKind::Formula => {
+                let operator = apiforge_core::graph::formula_operator(node);
+                let value = operator.evaluate(
+                    input("left").as_ref(),
+                    input("right").as_ref(),
+                    self.random.as_mut(),
+                )?;
+                step.outputs = single_output(value);
+            }
+            NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
+                self.check(node, &values, step)?
+            }
+            NodeKind::Component => self.component(node, values, step, context).await?,
+        }
+        Ok(())
+    }
+
+    fn check(&self, node: &Node, values: &Values, step: &mut StepResult) -> Result<(), StepError> {
+        let config = &node.config;
+        let tolerance = config.tolerance.unwrap_or(0.0);
+        let input = |name: &str| values.get(name).cloned().flatten();
+        let passed = match &config.predicates {
+            Some(predicates) if !predicates.is_empty() && node.kind == NodeKind::Condition => {
+                let lookup = template_lookup(values, &self.env);
+                let mut checks = Vec::with_capacity(predicates.len());
+                for condition in predicates {
+                    let field = template::expand(condition.path.as_deref().unwrap_or(""), &lookup)?;
+                    let actual = values
+                        .get(&condition.input)
+                        .and_then(Option::as_ref)
+                        .and_then(|value| path::resolve(value, &field))
+                        .map(|value| value.into_owned());
+                    let expected = input(&condition.expected);
+                    checks.push(condition.predicate.check(
+                        actual.as_ref(),
+                        expected.as_ref(),
+                        tolerance,
+                    )?);
+                }
+                match config.match_mode {
+                    Some(Match::Any) => checks.contains(&true),
+                    _ => checks.iter().all(|passed| *passed),
+                }
+            }
+            _ => predicate(node).check(
+                input("actual").as_ref(),
+                input("expected").as_ref(),
+                tolerance,
+            )?,
+        };
+        let actual = input("actual");
+        let expected = input("expected");
+        step.outputs = single_output(actual.clone());
+        step.outputs.insert("passed".into(), Value::Bool(passed));
+        if let Some(actual) = actual {
+            step.actual = OptionalJson::Present(actual);
+        }
+        if let Some(expected) = expected {
+            step.expected = OptionalJson::Present(expected);
+        }
+        if node.kind == NodeKind::If {
+            step.message = Some(
+                if passed {
+                    "Branch selected: yes."
+                } else {
+                    "Branch selected: no."
+                }
+                .to_owned(),
+            );
+        } else if !passed {
+            let (status, message) = if node.kind == NodeKind::Condition {
+                (
+                    StepStatus::Blocked,
+                    "Invalid data: the input condition is not met.",
+                )
+            } else {
+                (StepStatus::Failed, "The comparison failed.")
+            };
+            step.status = status;
+            step.message = Some(message.to_owned());
+        }
+        Ok(())
+    }
+
+    async fn component(
+        &mut self,
+        node: &'a Node,
+        values: Values,
+        step: &mut StepResult,
+        context: &Context,
+    ) -> Result<(), StepError> {
+        let component =
+            component_definition(self.project, node).ok_or(StepError::MissingComponent)?;
+        let key = format!("{}@{}", component.id, component.revision);
+        if context.stack.contains(&key) || context.stack.len() >= self.limits.max_component_depth {
+            return Err(StepError::ComponentDepth);
+        }
+        let mut stack = context.stack.clone();
+        stack.push(key);
+        let mut nested = Context {
+            parameters: values,
+            outputs: HashMap::new(),
+            signal: context.signal.clone(),
+            stack,
+            phase: context.phase,
+        };
+        let children = self
+            .execute_graph(&component.graph, &mut nested, false, None)
+            .await?;
+        step.children = Some(children);
+        for port in &component.outputs {
+            if let Some(value) = self.resolve(&port.binding, &nested)? {
+                step.outputs.insert(port.name.clone(), value);
+            }
+        }
+        step.outputs = js_key_order(std::mem::take(&mut step.outputs))
+            .into_iter()
+            .collect();
+        let children = step.children.as_deref().unwrap_or_default();
+        let any = |status: StepStatus| children.iter().any(|child| child.status == status);
+        if let Some(status) = [
+            StepStatus::Cancelled,
+            StepStatus::Error,
+            StepStatus::Blocked,
+            StepStatus::Failed,
+        ]
+        .into_iter()
+        .find(|status| any(*status))
+        {
+            step.status = status;
+            step.message = Some("Check the results of the component's inner steps.".to_owned());
+        }
+        Ok(())
+    }
+
+    async fn request(
+        &mut self,
+        node: &Node,
+        values: &Values,
+        step: &mut StepResult,
+        context: &Context,
+    ) -> Result<(), StepError> {
+        let config = &node.config;
+        let env = &self.env;
+        let lookup = template_lookup(values, env);
+        let address = template::expand(config.url.as_deref().unwrap_or(""), &lookup)?;
+        let address = template::expand_path_parameters(&address, &|name| {
+            values.get(name).cloned().flatten()
+        })?;
+        // A configured base URL is an API prefix, including its path.
+        let address = if has_http_scheme(&address) {
+            address
+        } else {
+            format!(
+                "{}/{}",
+                self.project.environment.base_url.trim_end_matches('/'),
+                address.trim_start_matches('/')
+            )
+        };
+        let mut url = Url::parse(&address).map_err(|_| StepError::InvalidUrl)?;
+        if !matches!(url.scheme(), "http" | "https")
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(StepError::UrlNotAllowed);
+        }
+        for (name, value) in config.query.iter().flatten() {
+            let value = template::expand(value, &lookup)?;
+            set_search_param(&mut url, name, &value);
+        }
+        self.redactor.collect_query(&url);
+        let mut headers = IndexMap::new();
+        for (name, value) in config.headers.iter().flatten() {
+            headers.insert(name.clone(), template::expand(value, &lookup)?);
+        }
+        let mut headers: IndexMap<String, String> = js_key_order(headers).into_iter().collect();
+        let body = match values.get("body") {
+            Some(Some(body)) => Some(template::expand_body(body, &lookup)?),
+            _ => None,
+        };
+        if body.is_some()
+            && !headers
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case("content-type"))
+        {
+            headers.insert("Content-Type".into(), "application/json".into());
+        }
+        self.redactor.collect(&text_map(&headers));
+        if let Some(body) = &body {
+            self.redactor.collect(body);
+        }
+        let method = config.method.unwrap_or(HttpMethod::Get);
+        if body.is_some() && matches!(method, HttpMethod::Get | HttpMethod::Head) {
+            return Err(StepError::BodyNotAllowed);
+        }
+        step.request = Some(RequestSnapshot {
+            method: http::method_name(method).to_owned(),
+            url: url.to_string(),
+            headers: headers.clone(),
+            body: body
+                .clone()
+                .map_or(OptionalJson::Missing, OptionalJson::Present),
+        });
+
+        if self.request.mode == apiforge_core::run::RunMode::Simulation {
+            let OptionalJson::Present(sample) = &config.sample_response else {
+                return Err(StepError::MissingSample);
+            };
+            step.outputs = IndexMap::from([
+                ("body".to_owned(), sample.clone()),
+                (
+                    "status".to_owned(),
+                    Value::from(config.sample_status.unwrap_or(200)),
+                ),
+                ("headers".to_owned(), Value::Object(Map::new())),
+                ("duration".to_owned(), Value::from(0)),
+            ]);
+            self.redactor.collect(&outputs_value(&step.outputs));
+            return Ok(());
+        }
+
+        let (timeout, timeout_label) = match config.timeout_ms {
+            Some(milliseconds) => (
+                Duration::try_from_secs_f64(milliseconds / 1000.0)
+                    .unwrap_or(self.limits.default_request_timeout),
+                js::number_to_string(milliseconds),
+            ),
+            None => (
+                self.limits.default_request_timeout,
+                self.limits.default_request_timeout.as_millis().to_string(),
+            ),
+        };
+        let transport = self.transport.clone();
+        let limit = self.limits.max_response_bytes;
+        let body_text = body.as_ref().map(js::json_stringify);
+        let started = Instant::now();
+        let exchange = async move {
+            let response = transport.send(method, url, &headers, body_text).await?;
+            let status = response.status().as_u16();
+            let headers = http::response_headers(&response);
+            let body = http::read_body(response, limit).await;
+            Ok::<_, HttpError>((status, headers, body))
+        };
+        let outcome = tokio::select! {
+            biased;
+            () = context.signal.aborted() => return Err(StepError::Cancelled),
+            outcome = tokio::time::timeout(timeout, exchange) => outcome,
+        };
+        let (status, headers, body) = outcome.map_err(|_| StepError::Timeout(timeout_label))??;
+        let headers = text_map(&headers);
+        self.redactor.collect(&headers);
+        let body = http::decode_body(&body?, self.limits.max_response_depth)?;
+        step.outputs = IndexMap::from([
+            ("body".to_owned(), body),
+            ("status".to_owned(), Value::from(status)),
+            ("headers".to_owned(), headers),
+            (
+                "duration".to_owned(),
+                Value::from(milliseconds(started.elapsed())),
+            ),
+        ]);
+        self.redactor.collect(&outputs_value(&step.outputs));
+        Ok(())
+    }
+
+    /// Resolves a binding against the context; `Ok(None)` is a missing value.
+    fn resolve(
+        &mut self,
+        binding: &Binding,
+        context: &Context,
+    ) -> Result<Option<Value>, StepError> {
+        Ok(match binding {
+            Binding::Expression { operator, inputs } => self
+                .evaluate(*operator, inputs, context)
+                .map_err(|error| StepError::Expression {
+                operator: operator_id(*operator),
+                message: error.to_string(),
+            })?,
+            Binding::Literal { value } => Some(value.clone()),
+            Binding::Parameter { name } => context.parameters.get(name).cloned().flatten(),
+            Binding::Environment { name } => self.env.get(name).cloned(),
+            Binding::Reference {
+                node_id,
+                port,
+                path,
+            } => reference_value(
+                &Reference {
+                    node_id,
+                    port,
+                    path,
+                },
+                context,
+            ),
+        })
+    }
+
+    /// Evaluates an expression eagerly: every operand is resolved, in order.
+    fn evaluate(
+        &mut self,
+        operator: Operator,
+        inputs: &IndexMap<String, Binding>,
+        context: &Context,
+    ) -> Result<Option<Value>, StepError> {
+        let mut operands = IndexMap::with_capacity(inputs.len());
+        for (name, child) in inputs {
+            let value = self.resolve(child, context)?;
+            operands.insert(name.as_str(), value);
+        }
+        let operand = |name: &str| operands.get(name).cloned().flatten();
+        Ok(operator.evaluate(
+            operand("left").as_ref(),
+            operand("right").as_ref(),
+            self.random.as_mut(),
+        )?)
+    }
+}
+
+/// The scheduler's verdict on a ready node.
+struct Gate {
+    /// Not on the active path: skipped, never a failure.
+    inactive: bool,
+    /// A dependency's result is unusable.
+    blocked: bool,
+    /// A cleanup step references data that does not exist.
+    missing_cleanup_input: bool,
+}
+
+fn reference_value(reference: &Reference<'_>, context: &Context) -> Option<Value> {
+    context
+        .outputs
+        .get(reference.node_id)
+        .and_then(|step| step.outputs.get(reference.port))
+        .and_then(|value| path::resolve(value, reference.path))
+        .map(|value| value.into_owned())
+}
+
+fn is_available(reference: &Reference<'_>, context: &Context) -> bool {
+    context
+        .outputs
+        .get(reference.node_id)
+        .and_then(|step| step.outputs.get(reference.port))
+        .is_some_and(|value| path::resolve(value, reference.path).is_some())
+}
+
+/// Template arguments: node inputs first, then the environment. A present input
+/// that resolved to nothing does not fall back to the environment.
+fn template_lookup<'v>(
+    values: &'v Values,
+    env: &'v IndexMap<String, Value>,
+) -> impl Fn(&str) -> Option<Value> + 'v {
+    move |key| match values.get(key) {
+        Some(value) => value.clone(),
+        None => env.get(key).cloned(),
+    }
+}
+
+fn compact(values: &Values) -> IndexMap<String, Value> {
+    values
+        .iter()
+        .filter_map(|(name, value)| Some((name.clone(), value.clone()?)))
+        .collect()
+}
+
+fn single_output(value: Option<Value>) -> IndexMap<String, Value> {
+    value
+        .map(|value| IndexMap::from([("value".to_owned(), value)]))
+        .unwrap_or_default()
+}
+
+fn has_type(value: &Value, expected: ValueType) -> bool {
+    match expected {
+        ValueType::Any => true,
+        ValueType::String => value.is_string(),
+        ValueType::Number => value.is_number(),
+        ValueType::Boolean => value.is_boolean(),
+        ValueType::Object => value.is_object(),
+        ValueType::Array => value.is_array(),
+    }
+}
+
+/// Whether the address is absolute: `http://` or `https://`, case-insensitively.
+fn has_http_scheme(address: &str) -> bool {
+    ["http://", "https://"].iter().any(|scheme| {
+        address
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
+}
+
+/// `URLSearchParams.set`: replaces the first parameter of that name and removes the
+/// others, or appends it; the whole query is then re-serialised as a form.
+fn set_search_param(url: &mut Url, name: &str, value: &str) {
+    let mut pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+    match pairs.iter().position(|(key, _)| key == name) {
+        Some(index) => {
+            pairs[index].1 = value.to_owned();
+            let mut position = 0;
+            pairs.retain(|(key, _)| {
+                position += 1;
+                key != name || position - 1 == index
+            });
+        }
+        None => pairs.push((name.to_owned(), value.to_owned())),
+    }
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(&pairs)
+        .finish();
+    url.set_query((!query.is_empty()).then_some(query.as_str()));
+}
+
+fn text_map(values: &IndexMap<String, String>) -> Value {
+    Value::Object(
+        values
+            .iter()
+            .map(|(name, value)| (name.clone(), Value::String(value.clone())))
+            .collect(),
+    )
+}
+
+fn outputs_value(outputs: &IndexMap<String, Value>) -> Value {
+    Value::Object(
+        outputs
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+/// The document name of an operator, e.g. `multiply`.
+fn operator_id(operator: Operator) -> String {
+    match serde_json::to_value(operator) {
+        Ok(Value::String(name)) => name,
+        _ => format!("{operator:?}"),
+    }
+}
+
+/// Whole milliseconds, rounded like `Math.round`.
+fn milliseconds(duration: Duration) -> u64 {
+    (duration.as_secs_f64() * 1000.0).round() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_params_are_set_like_url_search_params() {
+        let mut url = Url::parse("http://h/p?a=1&b=2&a=3&c=x%20y").unwrap();
+        set_search_param(&mut url, "a", "new value");
+        assert_eq!(url.as_str(), "http://h/p?a=new+value&b=2&c=x+y");
+        set_search_param(&mut url, "d", "ż&=");
+        assert_eq!(
+            url.as_str(),
+            "http://h/p?a=new+value&b=2&c=x+y&d=%C5%BC%26%3D"
+        );
+        let mut url = Url::parse("http://h/p").unwrap();
+        set_search_param(&mut url, "", "");
+        assert_eq!(url.as_str(), "http://h/p?=");
+    }
+
+    #[test]
+    fn absolute_addresses_are_detected_case_insensitively() {
+        assert!(has_http_scheme("HTTPS://example.com"));
+        assert!(has_http_scheme("http://x"));
+        assert!(!has_http_scheme("/http://x"));
+        assert!(!has_http_scheme("ftp://x"));
+        assert!(!has_http_scheme("ht"));
+    }
+
+    #[test]
+    fn operator_ids_use_document_names() {
+        assert_eq!(operator_id(Operator::Power10), "power10");
+        assert_eq!(operator_id(Operator::TypeOf), "typeOf");
+    }
+}

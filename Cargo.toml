@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/apiforge-core", "crates/apiforge-desktop"]
+members = ["crates/apiforge-core", "crates/apiforge-runner", "crates/apiforge-desktop"]
 resolver = "3"
 
 [workspace.package]
@@ -10,12 +10,18 @@ publish = false
 
 [workspace.dependencies]
 apiforge-core = { path = "crates/apiforge-core" }
+apiforge-runner = { path = "crates/apiforge-runner" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
 indexmap = { version = "=2.14.2", features = ["serde"] }
 thiserror = "=2.0.21"
 libm = "=0.2.16"
 uuid = { version = "=1.28.0", features = ["v4"] }
+# HTTP/1.1 only with rustls; no implicit proxy, cookie or decompression behaviour.
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-util = { version = "=0.7.19", default-features = false }
+url = "=2.5.8"
 # Keep the tested egui release while the native editor is migrated.
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 rfd = "=0.17.2"
