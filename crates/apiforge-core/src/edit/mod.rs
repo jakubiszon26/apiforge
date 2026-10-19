@@ -11,6 +11,7 @@ mod connect;
 mod fold;
 mod inspect;
 mod nodes;
+mod storage;
 mod variables;
 
 pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
@@ -26,6 +27,7 @@ pub use inspect::{
 pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
 };
+pub use storage::{migrate_demo_address, public_project};
 pub use variables::{
     TextSelection, VariableBlock, bind_variable_text, insert_variable_token, prune_template_inputs,
 };
