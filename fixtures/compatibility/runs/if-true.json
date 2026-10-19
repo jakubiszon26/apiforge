@@ -1,0 +1,490 @@
+{
+  "description": "IF true runs only the yes branch and merges alternatives.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "if-true",
+      "name": "if-true",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "join",
+                "kind": "request",
+                "name": "join",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/join",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "joined": true
+                  }
+                }
+              },
+              {
+                "id": "yes-next",
+                "kind": "request",
+                "name": "yes-next",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/yes/next",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "step": 2
+                  }
+                }
+              },
+              {
+                "id": "no-next",
+                "kind": "request",
+                "name": "no-next",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/no/next",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "step": 2
+                  }
+                }
+              },
+              {
+                "id": "yes",
+                "kind": "request",
+                "name": "yes",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/yes",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "side": "yes"
+                  }
+                }
+              },
+              {
+                "id": "no",
+                "kind": "request",
+                "name": "no",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/no",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "side": "no"
+                  }
+                }
+              },
+              {
+                "id": "if",
+                "kind": "if",
+                "name": "if",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "literal",
+                    "value": true
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "start",
+                "kind": "trigger",
+                "name": "start",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "uses-yes",
+                "kind": "request",
+                "name": "uses-yes",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "reference",
+                    "nodeId": "yes",
+                    "port": "body",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "method": "POST",
+                  "url": "/uses",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "checks-yes",
+                "kind": "assert",
+                "name": "checks-yes",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "yes",
+                    "port": "body",
+                    "path": "side"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "yes"
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "no-side",
+                "kind": "variable",
+                "name": "no-side",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "no",
+                    "port": "body",
+                    "path": "side"
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "mixed",
+                "kind": "select",
+                "name": "mixed",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "yes",
+                    "port": "body",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "path": "side"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "start->if",
+                "source": "start",
+                "target": "if"
+              },
+              {
+                "id": "if->yes",
+                "source": "if",
+                "target": "yes",
+                "branch": "true"
+              },
+              {
+                "id": "if->no",
+                "source": "if",
+                "target": "no",
+                "branch": "false"
+              },
+              {
+                "id": "yes->yes-next",
+                "source": "yes",
+                "target": "yes-next"
+              },
+              {
+                "id": "no->no-next",
+                "source": "no",
+                "target": "no-next"
+              },
+              {
+                "id": "yes-next->join",
+                "source": "yes-next",
+                "target": "join"
+              },
+              {
+                "id": "no-next->join",
+                "source": "no-next",
+                "target": "join"
+              },
+              {
+                "id": "no->mixed",
+                "source": "no",
+                "target": "mixed"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "start",
+        "name": "start",
+        "kind": "trigger",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "if",
+        "name": "if",
+        "kind": "if",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": true,
+          "expected": true
+        },
+        "outputs": {
+          "value": true,
+          "passed": true
+        },
+        "actual": true,
+        "expected": true
+      },
+      {
+        "nodeId": "yes",
+        "name": "yes",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "side": "yes"
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/yes",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "yes-next",
+        "name": "yes-next",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "step": 2
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/yes/next",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "no",
+        "name": "no",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "no-next",
+        "name": "no-next",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "join",
+        "name": "join",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "joined": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/join",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "uses-yes",
+        "name": "uses-yes",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "body": {
+            "side": "yes"
+          }
+        },
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "POST",
+          "url": "https://api.example.test/v1/uses",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "side": "yes"
+          }
+        }
+      },
+      {
+        "nodeId": "checks-yes",
+        "name": "checks-yes",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "yes",
+          "expected": "yes"
+        },
+        "outputs": {
+          "value": "yes",
+          "passed": true
+        },
+        "actual": "yes",
+        "expected": "yes"
+      },
+      {
+        "nodeId": "no-side",
+        "name": "no-side",
+        "kind": "variable",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "mixed",
+        "name": "mixed",
+        "kind": "select",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      }
+    ]
+  }
+}

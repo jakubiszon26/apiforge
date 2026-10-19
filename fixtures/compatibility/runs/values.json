@@ -1,0 +1,1206 @@
+{
+  "description": "Values, templates, operators, request preparation and errors.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "values",
+      "name": "values",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "parameters": {
+            "bonus": 1
+          },
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "source",
+                "kind": "request",
+                "name": "source",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/source",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "items": [
+                      {
+                        "price": 0,
+                        "flag": false,
+                        "optional": null
+                      }
+                    ],
+                    "name": "Zażółć",
+                    "n": 7
+                  }
+                }
+              },
+              {
+                "id": "variable",
+                "kind": "variable",
+                "name": "variable",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "items[0]"
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "templated-select",
+                "kind": "select",
+                "name": "templated-select",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": ""
+                  },
+                  "index": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                "config": {
+                  "path": "items[{{index}}].price"
+                }
+              },
+              {
+                "id": "missing-select",
+                "kind": "select",
+                "name": "missing-select",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "path": "absent.deeper"
+                }
+              },
+              {
+                "id": "array",
+                "kind": "build",
+                "name": "array",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "2": {
+                    "kind": "literal",
+                    "value": 2
+                  },
+                  "10": {
+                    "kind": "literal",
+                    "value": 10
+                  },
+                  "b": {
+                    "kind": "literal",
+                    "value": "b"
+                  },
+                  "a": {
+                    "kind": "literal",
+                    "value": "a"
+                  }
+                },
+                "config": {
+                  "buildType": "array"
+                }
+              },
+              {
+                "id": "object",
+                "kind": "build",
+                "name": "object",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "1": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "n"
+                  },
+                  "z": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "y": {
+                    "kind": "literal",
+                    "value": null
+                  }
+                },
+                "config": {
+                  "buildType": "object"
+                }
+              },
+              {
+                "id": "incomplete",
+                "kind": "build",
+                "name": "incomplete",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "a": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "absent"
+                  }
+                },
+                "config": {
+                  "buildType": "object"
+                }
+              },
+              {
+                "id": "random",
+                "kind": "formula",
+                "name": "random",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 6
+                  }
+                },
+                "config": {
+                  "operation": "random"
+                }
+              },
+              {
+                "id": "random-real",
+                "kind": "formula",
+                "name": "random-real",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": 0.5
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 1.5
+                  }
+                },
+                "config": {
+                  "operation": "random"
+                }
+              },
+              {
+                "id": "rounded",
+                "kind": "formula",
+                "name": "rounded",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": 2.5
+                  }
+                },
+                "config": {
+                  "operation": "round"
+                }
+              },
+              {
+                "id": "missing-left",
+                "kind": "formula",
+                "name": "missing-left",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "absent"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                "config": {
+                  "operation": "add"
+                }
+              },
+              {
+                "id": "wrong-type",
+                "kind": "formula",
+                "name": "wrong-type",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": "1"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                "config": {
+                  "operation": "add"
+                }
+              },
+              {
+                "id": "null-operand",
+                "kind": "formula",
+                "name": "null-operand",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "items[0].optional"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              },
+              {
+                "id": "nested",
+                "kind": "formula",
+                "name": "nested",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "expression",
+                    "operator": "add",
+                    "inputs": {
+                      "left": {
+                        "kind": "expression",
+                        "operator": "length",
+                        "inputs": {
+                          "left": {
+                            "kind": "reference",
+                            "nodeId": "source",
+                            "port": "body",
+                            "path": "name"
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "parameter",
+                        "name": "bonus"
+                      }
+                    }
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 3
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              },
+              {
+                "id": "nested-error",
+                "kind": "formula",
+                "name": "nested-error",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "expression",
+                    "operator": "add",
+                    "inputs": {
+                      "left": {
+                        "kind": "expression",
+                        "operator": "divide",
+                        "inputs": {
+                          "left": {
+                            "kind": "literal",
+                            "value": 1
+                          },
+                          "right": {
+                            "kind": "literal",
+                            "value": 0
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 3
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              },
+              {
+                "id": "get-with-body",
+                "kind": "request",
+                "name": "get-with-body",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "literal",
+                    "value": {}
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/x",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "no-sample",
+                "kind": "request",
+                "name": "no-sample",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/x",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "missing-template",
+                "kind": "request",
+                "name": "missing-template",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/items/{{nothing}}",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "missing-path-argument",
+                "kind": "request",
+                "name": "missing-path-argument",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "typed-body",
+                "kind": "request",
+                "name": "typed-body",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "literal",
+                    "value": "a b/ż"
+                  },
+                  "name": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "name"
+                  },
+                  "amount": {
+                    "kind": "literal",
+                    "value": 20
+                  },
+                  "body": {
+                    "kind": "literal",
+                    "value": {
+                      "amount": "{{amount}}",
+                      "label": "#{{amount}}",
+                      "list": [
+                        "{{id}}"
+                      ],
+                      "nested": {
+                        "r": "{{region}}"
+                      }
+                    }
+                  }
+                },
+                "config": {
+                  "method": "PUT",
+                  "url": "/items/:id/{{name}}",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "sampleStatus": 422
+                }
+              },
+              {
+                "id": "absolute",
+                "kind": "request",
+                "name": "absolute",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "HEAD",
+                  "url": "HTTPS://other.example.test/path?q=1",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "ftp",
+                "kind": "request",
+                "name": "ftp",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "ftp://files.example.test/x",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "invalid-url",
+                "kind": "request",
+                "name": "invalid-url",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "http://[",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "required-port",
+                "kind": "request",
+                "name": "required-port",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "needed": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "name"
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/ports",
+                  "headers": {
+                    "X-Typed": "{{typed}}"
+                  },
+                  "query": {
+                    "needed": "{{needed}}",
+                    "typed": "{{typed}}"
+                  },
+                  "timeoutMs": 10000,
+                  "inputPorts": [
+                    {
+                      "name": "needed",
+                      "type": "string",
+                      "required": true
+                    },
+                    {
+                      "name": "typed",
+                      "type": "number",
+                      "defaultValue": 5
+                    }
+                  ],
+                  "sampleResponse": {
+                    "ok": true
+                  }
+                }
+              },
+              {
+                "id": "approximately",
+                "kind": "assert",
+                "name": "approximately",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "literal",
+                    "value": 1.05
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                "config": {
+                  "predicate": "approximately",
+                  "tolerance": 0.1
+                }
+              },
+              {
+                "id": "not-equals",
+                "kind": "assert",
+                "name": "not-equals",
+                "position": {
+                  "x": 0,
+                  "y": 0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "source",
+                    "port": "body",
+                    "path": "items"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": [
+                      {
+                        "price": 0,
+                        "flag": false,
+                        "optional": null
+                      }
+                    ]
+                  }
+                },
+                "config": {
+                  "predicate": "notEquals"
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "source",
+        "name": "source",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "items": [
+              {
+                "price": 0,
+                "flag": false,
+                "optional": null
+              }
+            ],
+            "name": "Zażółć",
+            "n": 7
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/source",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "variable",
+        "name": "variable",
+        "kind": "variable",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        },
+        "outputs": {
+          "value": {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        }
+      },
+      {
+        "nodeId": "templated-select",
+        "name": "templated-select",
+        "kind": "select",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": {
+            "items": [
+              {
+                "price": 0,
+                "flag": false,
+                "optional": null
+              }
+            ],
+            "name": "Zażółć",
+            "n": 7
+          },
+          "index": 0
+        },
+        "outputs": {
+          "value": 0
+        }
+      },
+      {
+        "nodeId": "missing-select",
+        "name": "missing-select",
+        "kind": "select",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": {
+            "items": [
+              {
+                "price": 0,
+                "flag": false,
+                "optional": null
+              }
+            ],
+            "name": "Zażółć",
+            "n": 7
+          }
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "array",
+        "name": "array",
+        "kind": "build",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "2": 2,
+          "10": 10,
+          "b": "b",
+          "a": "a"
+        },
+        "outputs": {
+          "value": [
+            2,
+            10,
+            "b",
+            "a"
+          ]
+        }
+      },
+      {
+        "nodeId": "object",
+        "name": "object",
+        "kind": "build",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "1": 7,
+          "z": 1,
+          "y": null
+        },
+        "outputs": {
+          "value": {
+            "1": 7,
+            "z": 1,
+            "y": null
+          }
+        }
+      },
+      {
+        "nodeId": "incomplete",
+        "name": "incomplete",
+        "kind": "build",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "random",
+        "name": "random",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 1,
+          "right": 6
+        },
+        "outputs": {
+          "value": 2
+        }
+      },
+      {
+        "nodeId": "random-real",
+        "name": "random-real",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 0.5,
+          "right": 1.5
+        },
+        "outputs": {
+          "value": 0.5881250454112887
+        }
+      },
+      {
+        "nodeId": "rounded",
+        "name": "rounded",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 2.5,
+          "right": 0
+        },
+        "outputs": {
+          "value": 3
+        }
+      },
+      {
+        "nodeId": "missing-left",
+        "name": "missing-left",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 0,
+          "right": 1
+        },
+        "outputs": {
+          "value": 1
+        }
+      },
+      {
+        "nodeId": "wrong-type",
+        "name": "wrong-type",
+        "kind": "formula",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "left": "1",
+          "right": 1
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "null-operand",
+        "name": "null-operand",
+        "kind": "formula",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "left": null,
+          "right": 2
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "nested",
+        "name": "nested",
+        "kind": "formula",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "left": 7,
+          "right": 3
+        },
+        "outputs": {
+          "value": 21
+        }
+      },
+      {
+        "nodeId": "nested-error",
+        "name": "nested-error",
+        "kind": "formula",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "get-with-body",
+        "name": "get-with-body",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "body": {}
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "no-sample",
+        "name": "no-sample",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {},
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/x",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "missing-template",
+        "name": "missing-template",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "missing-path-argument",
+        "name": "missing-path-argument",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "typed-body",
+        "name": "typed-body",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "id": "a b/ż",
+          "name": "Zażółć",
+          "amount": 20,
+          "body": {
+            "amount": "{{amount}}",
+            "label": "#{{amount}}",
+            "list": [
+              "{{id}}"
+            ],
+            "nested": {
+              "r": "{{region}}"
+            }
+          }
+        },
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 422,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "PUT",
+          "url": "https://api.example.test/v1/items/a%20b%2F%C5%BC/Za%C5%BC%C3%B3%C5%82%C4%87",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "amount": 20,
+            "label": "#20",
+            "list": [
+              "a b/ż"
+            ],
+            "nested": {
+              "r": "eu"
+            }
+          }
+        }
+      },
+      {
+        "nodeId": "absolute",
+        "name": "absolute",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "HEAD",
+          "url": "https://other.example.test/path?q=1",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "ftp",
+        "name": "ftp",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/ftp://files.example.test/x",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "invalid-url",
+        "name": "invalid-url",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "required-port",
+        "name": "required-port",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "needed": "Zażółć",
+          "typed": 5
+        },
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/ports?needed=Za%C5%BC%C3%B3%C5%82%C4%87&typed=5",
+          "headers": {
+            "X-Typed": "5"
+          }
+        }
+      },
+      {
+        "nodeId": "approximately",
+        "name": "approximately",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": 1.05,
+          "expected": 1
+        },
+        "outputs": {
+          "value": 1.05,
+          "passed": true
+        },
+        "actual": 1.05,
+        "expected": 1
+      },
+      {
+        "nodeId": "not-equals",
+        "name": "not-equals",
+        "kind": "assert",
+        "status": "failed",
+        "phase": "main",
+        "inputs": {
+          "actual": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ],
+          "expected": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ]
+        },
+        "outputs": {
+          "value": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ],
+          "passed": false
+        },
+        "actual": [
+          {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        ],
+        "expected": [
+          {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        ]
+      }
+    ]
+  }
+}

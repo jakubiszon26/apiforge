@@ -1,0 +1,277 @@
+{
+  "description": "Demo project blocks, scenario blocks-demo.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "blocks-poc",
+      "name": "Bloki operatorów · PoC",
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "http://127.0.0.1:4318/demo/shop",
+        "variables": {},
+        "secretNames": []
+      },
+      "scenarios": [
+        {
+          "id": "blocks-demo",
+          "name": "Test z zagnieżdżonych bloków",
+          "description": "Odczyt API → typ i długość nazwy oraz reguła ceny → porównanie z true. Zielone bloki zwracają wartości; Porównanie zalicza test.",
+          "parameters": {},
+          "errorPolicy": "continue",
+          "graph": {
+            "nodes": [
+              {
+                "id": "response",
+                "kind": "request",
+                "name": "Odczytaj dane API",
+                "position": {
+                  "x": 60,
+                  "y": 170
+                },
+                "inputs": {
+                  "code": {
+                    "kind": "literal",
+                    "value": 123
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/products/:code",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000,
+                  "inputPorts": [
+                    {
+                      "name": "code",
+                      "type": "any",
+                      "exposed": true,
+                      "required": true
+                    }
+                  ],
+                  "sampleResponse": {
+                    "id": 123,
+                    "name": "Kawa ziarnista",
+                    "price": 100,
+                    "promotion": {
+                      "type": "fixed_price",
+                      "active": true,
+                      "price": 80,
+                      "inna_nazwa": "Oferta jesienna"
+                    }
+                  }
+                }
+              },
+              {
+                "id": "name-check",
+                "kind": "assert",
+                "name": "Nazwa jest niepustym tekstem",
+                "position": {
+                  "x": 470,
+                  "y": 30
+                },
+                "config": {
+                  "predicate": "equals"
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "expression",
+                    "operator": "and",
+                    "inputs": {
+                      "left": {
+                        "kind": "expression",
+                        "operator": "equals",
+                        "inputs": {
+                          "left": {
+                            "kind": "expression",
+                            "operator": "typeOf",
+                            "inputs": {
+                              "left": {
+                                "kind": "reference",
+                                "nodeId": "response",
+                                "port": "body",
+                                "path": "name"
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "literal",
+                            "value": "string"
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "expression",
+                        "operator": "greater",
+                        "inputs": {
+                          "left": {
+                            "kind": "expression",
+                            "operator": "length",
+                            "inputs": {
+                              "left": {
+                                "kind": "reference",
+                                "nodeId": "response",
+                                "port": "body",
+                                "path": "name"
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "literal",
+                            "value": 0
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              },
+              {
+                "id": "discount-check",
+                "kind": "assert",
+                "name": "Aktywna promocja daje minimum 10%",
+                "position": {
+                  "x": 470,
+                  "y": 350
+                },
+                "config": {
+                  "predicate": "equals"
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "expression",
+                    "operator": "and",
+                    "inputs": {
+                      "left": {
+                        "kind": "reference",
+                        "nodeId": "response",
+                        "port": "body",
+                        "path": "promotion.active"
+                      },
+                      "right": {
+                        "kind": "expression",
+                        "operator": "atMost",
+                        "inputs": {
+                          "left": {
+                            "kind": "reference",
+                            "nodeId": "response",
+                            "port": "body",
+                            "path": "promotion.price"
+                          },
+                          "right": {
+                            "kind": "expression",
+                            "operator": "multiply",
+                            "inputs": {
+                              "left": {
+                                "kind": "reference",
+                                "nodeId": "response",
+                                "port": "body",
+                                "path": "price"
+                              },
+                              "right": {
+                                "kind": "literal",
+                                "value": 0.9
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          }
+        }
+      ]
+    },
+    "scenarioId": "blocks-demo",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "response",
+        "name": "Odczytaj dane API",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "code": 123
+        },
+        "outputs": {
+          "body": {
+            "id": 123,
+            "name": "Kawa ziarnista",
+            "price": 100,
+            "promotion": {
+              "type": "fixed_price",
+              "active": true,
+              "price": 80,
+              "inna_nazwa": "Oferta jesienna"
+            }
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "http://127.0.0.1:4318/demo/shop/products/123",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "name-check",
+        "name": "Nazwa jest niepustym tekstem",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": true,
+          "expected": true
+        },
+        "outputs": {
+          "value": true,
+          "passed": true
+        },
+        "actual": true,
+        "expected": true
+      },
+      {
+        "nodeId": "discount-check",
+        "name": "Aktywna promocja daje minimum 10%",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": true,
+          "expected": true
+        },
+        "outputs": {
+          "value": true,
+          "passed": true
+        },
+        "actual": true,
+        "expected": true
+      }
+    ]
+  }
+}

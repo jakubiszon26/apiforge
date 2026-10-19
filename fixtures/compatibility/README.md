@@ -8,6 +8,11 @@ prototype by `scripts/export-compatibility-fixtures.ts`:
 - `workspace-v1.json` — a workspace export containing all of them,
 - `semantics/*.jsonl` — expected results of the reference semantics (operators, field
   paths and number formatting), one case per line,
+- `runs/*.json` — run reports of the reference runner in simulation mode: every demo
+  scenario plus hand-built graphs (IF branches, legacy graphs without Start, error
+  policies, conditions, components, cleanup, diagnostics, redaction). Each file holds
+  the run request and the normalised report (run IDs, timestamps, durations and the
+  Polish messages are dropped),
 - `manifest.json` — SHA-256 checksums of every generated file.
 
 ## Purpose
@@ -18,7 +23,9 @@ v1) and of the workspace export. Random identifiers (`project-*`, `scenario-*`, 
 (`prefix-00000001`, …), and values of variables listed in `environment.secretNames` are
 removed.
 
-The semantic corpus is replayed by `crates/apiforge-core/tests/semantic_corpus.rs`. A
+The semantic corpus is replayed by `crates/apiforge-core/tests/semantic_corpus.rs` and
+the run corpus by `crates/apiforge-runner/tests/run_corpus.rs`, which lists its
+deliberate divergences. A
 mismatch means the Rust port changed observable behaviour of existing projects: fix the
 port, or record a deliberate divergence in an ADR under `docs/decisions/`. Never edit the
 corpus by hand.

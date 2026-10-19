@@ -3,6 +3,7 @@ members = [
     "crates/apiforge-core",
     "crates/apiforge-demo-api",
     "crates/apiforge-desktop",
+    "crates/apiforge-runner",
     "crates/apiforge-storage",
 ]
 resolver = "3"
@@ -15,6 +16,7 @@ publish = false
 
 [workspace.dependencies]
 apiforge-core = { path = "crates/apiforge-core" }
+apiforge-runner = { path = "crates/apiforge-runner" }
 apiforge-storage = { path = "crates/apiforge-storage" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
@@ -26,7 +28,11 @@ dirs = "=6.0.0"
 tempfile = "=3.27.0"
 # Local demo API: HTTP/1 only, a current-thread runtime and no tracing or macros.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "=1.53.2", default-features = false, features = ["net", "rt", "sync"] }
+# HTTP/1.1 only with rustls; no implicit proxy, cookie or decompression behaviour.
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "=1.53.2", default-features = false, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "=0.7.19", default-features = false }
+url = "=2.5.8"
 # Keep the tested egui release while the native editor is migrated.
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 rfd = "=0.17.2"

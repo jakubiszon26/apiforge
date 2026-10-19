@@ -272,6 +272,45 @@ pub fn trim(text: &str) -> &str {
     })
 }
 
+/// The numeric value of a canonical array index key (`"0"`, `"17"`, never `"01"`),
+/// which JavaScript objects order before every other key.
+pub fn array_index_key(key: &str) -> Option<u32> {
+    let canonical = key == "0" || (!key.starts_with('0') && !key.is_empty());
+    if !canonical || !key.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    // 2^32 - 1 is not an array index.
+    key.parse::<u32>().ok().filter(|index| *index != u32::MAX)
+}
+
+/// Reorders object entries the way a JavaScript object enumerates its own keys:
+/// array index keys in ascending numeric order, then the others in insertion order.
+///
+/// Objects built by the reference implementation from arbitrary names (node inputs,
+/// headers, parsed responses) follow this order, which `Object.values` exposes.
+pub fn js_key_order<K: AsRef<str>, V>(entries: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)> {
+    let (mut indices, names): (Vec<_>, Vec<_>) = entries
+        .into_iter()
+        .partition(|(key, _)| array_index_key(key.as_ref()).is_some());
+    indices.sort_by_key(|(key, _)| array_index_key(key.as_ref()));
+    indices.extend(names);
+    indices
+}
+
+/// [`js_key_order`] applied to every object inside a JSON value, as `JSON.parse` does.
+pub fn with_js_key_order(value: Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.into_iter().map(with_js_key_order).collect()),
+        Value::Object(fields) => Value::Object(
+            js_key_order(fields)
+                .into_iter()
+                .map(|(key, value)| (key, with_js_key_order(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +340,27 @@ mod tests {
         for (value, expected) in cases {
             assert_eq!(number_to_string(value), expected, "{value:e}");
         }
+    }
+
+    #[test]
+    fn object_keys_follow_javascript_enumeration_order() {
+        assert_eq!(array_index_key("0"), Some(0));
+        assert_eq!(array_index_key("4294967294"), Some(4_294_967_294));
+        for key in ["", "01", "-1", "1.5", "4294967295", "1e3", " 1", "x"] {
+            assert_eq!(array_index_key(key), None, "{key:?}");
+        }
+        let ordered: Vec<_> = js_key_order([("b", 1), ("10", 2), ("a", 3), ("2", 4), ("01", 5)])
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(ordered, ["2", "10", "b", "a", "01"]);
+        let parsed: Value =
+            serde_json::from_str(r#"{"z": {"y": 1, "3": 2}, "1": [{"b": 0, "0": 0}]}"#)
+                .expect("valid JSON");
+        assert_eq!(
+            serde_json::to_string(&with_js_key_order(parsed)).expect("serializable"),
+            r#"{"1":[{"0":0,"b":0}],"z":{"3":2,"y":1}}"#
+        );
     }
 
     #[test]
