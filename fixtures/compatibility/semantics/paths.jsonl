@@ -1,0 +1,55 @@
+{"document":{"7":"numeric key","a":{"b":"nested"},"a.b":{"id":"literal"},"items[0]":123,"":false,"zażółć":"unicode","list":[{"value":42},null,[7,8]],"present":null,"with \"quote\"":"quoted","back\\slash":"escaped"}}
+{"path":"","outcome":{"value":{"7":"numeric key","a":{"b":"nested"},"a.b":{"id":"literal"},"items[0]":123,"":false,"zażółć":"unicode","list":[{"value":42},null,[7,8]],"present":null,"with \"quote\"":"quoted","back\\slash":"escaped"}}}
+{"path":"a","outcome":{"value":{"b":"nested"}}}
+{"path":"a.b","outcome":{"value":"nested"}}
+{"path":"a.b.c","outcome":{"missing":true}}
+{"path":"[\"a.b\"].id","outcome":{"value":"literal"}}
+{"path":"[\"items[0]\"]","outcome":{"value":123}}
+{"path":"[\"\"]","outcome":{"value":false}}
+{"path":"zażółć","outcome":{"value":"unicode"}}
+{"path":"[\"za\\u017c\\u00f3\\u0142\\u0107\"]","outcome":{"value":"unicode"}}
+{"path":"list[0].value","outcome":{"value":42}}
+{"path":"list.0.value","outcome":{"value":42}}
+{"path":"list[1]","outcome":{"value":null}}
+{"path":"list[2][1]","outcome":{"value":8}}
+{"path":"list.2.1","outcome":{"value":8}}
+{"path":"list[3]","outcome":{"missing":true}}
+{"path":"list.01","outcome":{"missing":true}}
+{"path":"list[01].value","outcome":{"missing":true}}
+{"path":"list.first","outcome":{"missing":true}}
+{"path":"list.length","outcome":{"value":3}}
+{"path":"list[\"length\"]","outcome":{"value":3}}
+{"path":"list.length.x","outcome":{"missing":true}}
+{"path":"list[2].length","outcome":{"value":2}}
+{"path":"[007]","outcome":{"value":"numeric key"}}
+{"path":"[7]","outcome":{"value":"numeric key"}}
+{"path":"7","outcome":{"value":"numeric key"}}
+{"path":"list.[0].value","outcome":{"value":42}}
+{"path":"present","outcome":{"value":null}}
+{"path":"present.x","outcome":{"missing":true}}
+{"path":"absent","outcome":{"missing":true}}
+{"path":"[\"with \\\"quote\\\"\"]","outcome":{"value":"quoted"}}
+{"path":"[\"back\\\\slash\"]","outcome":{"value":"escaped"}}
+{"path":".a","outcome":{"missing":true}}
+{"path":"a.","outcome":{"missing":true}}
+{"path":"a..b","outcome":{"missing":true}}
+{"path":"a]","outcome":{"missing":true}}
+{"path":"a[x]","outcome":{"missing":true}}
+{"path":"a[1","outcome":{"missing":true}}
+{"path":"a[-1]","outcome":{"missing":true}}
+{"path":"[\"x","outcome":{"missing":true}}
+{"path":"[\"x\"x]","outcome":{"missing":true}}
+{"path":"list[0]value","outcome":{"missing":true}}
+{"path":"[\"\\q\"]","outcome":{"missing":true}}
+{"path":"a b","outcome":{"missing":true}}
+{"path":"a-b","outcome":{"missing":true}}
+{"path":"[99999999999999999999999]","outcome":{"missing":true}}
+{"path":"constructor","outcome":{"missing":true}}
+{"path":"a.constructor","outcome":{"missing":true}}
+{"path":"[\"prototype\"]","outcome":{"missing":true}}
+{"path":"__proto__","outcome":{"missing":true}}
+{"path":"a[\"b\"]","outcome":{"value":"nested"}}
+{"path":"a[ 0 ]","outcome":{"missing":true}}
+{"path":"list[0.5]","outcome":{"missing":true}}
+{"path":"list[+1]","outcome":{"missing":true}}
+{"path":"list[1e0]","outcome":{"missing":true}}

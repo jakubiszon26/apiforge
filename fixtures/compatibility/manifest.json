@@ -19,6 +19,18 @@
       "sha256": "f6de3e6fbde8194e9ff83f087b03e531d723b83906d454841cdca8d21eba5168"
     },
     {
+      "path": "semantics/numbers.jsonl",
+      "sha256": "456bcd87487692995e0bcbf5030467f5ba61d2367852152068c0d192c152b1bd"
+    },
+    {
+      "path": "semantics/operators.jsonl",
+      "sha256": "89a5879a4c63dbb805517a5518c99b9e20f0d55ed79da1aea95724aa67798d7e"
+    },
+    {
+      "path": "semantics/paths.jsonl",
+      "sha256": "949ba54f69bae3fb6c80034fcb3b26c6e7fa48a12596ee0fe01fa79679f635c6"
+    },
+    {
       "path": "workspace-v1.json",
       "sha256": "d9a8e3ba3fb5b4c1c17e7d8ac8256a58301360ccd1a8d42b57b7dc01948b74e7"
     }

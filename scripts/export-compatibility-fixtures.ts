@@ -10,6 +10,7 @@ import {
 } from '../shared/demos';
 import { validateProject } from '../shared/graph';
 import type { Project } from '../shared/model';
+import { buildSemanticFixtures } from './semantic-fixtures';
 
 const ID_PATTERN = /^(node|order|scenario|project)-[0-9a-f]{8}$/;
 type IdPrefix = 'node' | 'order' | 'scenario' | 'project';
@@ -144,6 +145,7 @@ function buildFixtureFiles(): Map<string, string> {
     projects,
   };
   files.set('workspace-v1.json', toJsonText(workspace));
+  for (const [relativePath, content] of buildSemanticFixtures()) files.set(relativePath, content);
 
   const manifestEntries = Array.from(files.entries())
     .sort(([pathA], [pathB]) => (pathA < pathB ? -1 : pathA > pathB ? 1 : 0))
