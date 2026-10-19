@@ -4,6 +4,7 @@ use crate::{
     canvas::{self, Canvas, Command},
     editor::{BlockClipboard, Editor},
     files,
+    inspector::{self, Inspector},
     library::{self, Library},
     persistence::{SaveStatus, Saver},
     theme, widgets,
@@ -39,6 +40,7 @@ pub struct App {
     saved_revision: u64,
     canvas: Canvas,
     library: Library,
+    inspector: Inspector,
     notice: Option<String>,
     mode: RunMode,
     dialog: Option<Dialog>,
@@ -80,12 +82,26 @@ impl App {
             saved_revision: 0,
             canvas: Canvas::default(),
             library: Library::default(),
+            inspector: Inspector::default(),
             notice,
             mode: RunMode::Simulation,
             dialog: None,
             files: files::Files::default(),
             report_open: true,
             report_height: 240.0,
+        }
+    }
+
+    /// Selects a node of the current board by id or name (used by screenshots).
+    pub fn select_node(&mut self, key: &str) {
+        if let Some(node) = self
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.id == key || node.name == key)
+        {
+            self.editor.selection = vec![node.id.clone()];
         }
     }
 
@@ -512,29 +528,82 @@ impl App {
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
-        let Some(kind) = self.editor.selected_node().map(|node| node.kind) else {
+        let Some(node) = self.editor.selected_node().cloned() else {
             return;
         };
-        ui.horizontal(|ui| {
-            widgets::caption(ui, &kind.label().to_uppercase());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .small_button("✕")
-                    .on_hover_text("Close the configuration")
-                    .clicked()
-                {
-                    self.editor.selection.clear();
-                }
-            });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            if ui
+                .small_button("✕")
+                .on_hover_text("Close the configuration")
+                .clicked()
+            {
+                self.editor.selection.clear();
+            }
         });
-        if let Some(node) = self.editor.selected_node() {
-            ui.label(
-                RichText::new(&node.name)
-                    .size(18.0)
-                    .family(theme::bold_family()),
-            );
-            widgets::hint(ui, node.kind.description());
+        let reference = self.editor.reference_graph().into_owned();
+        let parameters = self.editor.parameter_names();
+        let actions = {
+            let context = inspector::Context {
+                node: &node,
+                graph: &reference,
+                board: self.editor.graph(),
+                project: self.editor.project(),
+                parameters: &parameters,
+                run: None,
+                step: None,
+            };
+            self.inspector.show(ui, &context)
+        };
+        for action in actions {
+            match action {
+                inspector::Action::UpdateNode(updated) => {
+                    let mut graph = self.editor.graph().clone();
+                    if let Some(slot) = graph
+                        .nodes
+                        .iter_mut()
+                        .find(|candidate| candidate.id == updated.id)
+                    {
+                        *slot = updated;
+                        self.apply_graph(graph);
+                    }
+                }
+                inspector::Action::UpdateGraph(graph) => self.apply_graph(graph),
+                inspector::Action::EditComponent => self.edit_component(&node.id),
+                inspector::Action::AssertField { port, path, value } => {
+                    self.add_field_assertion(&node.id, &port, &path, &value)
+                }
+                inspector::Action::AssignField { .. } => {
+                    self.notice =
+                        Some("Assigning response fields to variables is not available yet.".into());
+                }
+                inspector::Action::Error(message) => self.canvas.set_error(message),
+            }
         }
+    }
+
+    fn add_field_assertion(
+        &mut self,
+        source: &str,
+        port: &str,
+        path: &str,
+        value: &serde_json::Value,
+    ) {
+        let Some(node) = self
+            .editor
+            .reference_graph()
+            .nodes
+            .iter()
+            .find(|node| node.id == source)
+            .cloned()
+        else {
+            return;
+        };
+        let assertion = edit::field_assertion(&node, port, path, value);
+        let label = if path.is_empty() { port } else { path };
+        self.push_node(assertion);
+        self.notice = Some(format!(
+            "Added a comparison for “{label}”. Check the expected value or type in its configuration."
+        ));
     }
 
     fn board(&mut self, ui: &mut egui::Ui) {

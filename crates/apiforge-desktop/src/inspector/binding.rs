@@ -1,0 +1,784 @@
+//! Editing one argument: a literal, another step's output, a nested operator block,
+//! a parameter or an environment value.
+
+use super::{fields, response};
+use crate::{dnd::Payload, theme, widgets};
+use apiforge_core::{
+    format::{Binding, Graph, Node, Port, Project},
+    graph::{ancestors_and_self, compatible, output_ports},
+    model::ValueType,
+    operator::{Operator, OperatorGroup},
+    path,
+    run::RunResult,
+};
+use eframe::egui::{self, Id, RichText, Stroke, Ui};
+use serde_json::Value;
+
+/// Nesting limit of operator blocks, as in version-one validation.
+const MAX_DEPTH: usize = 11;
+
+pub struct Context<'a> {
+    pub node: &'a Node,
+    /// Nodes a reference may point to.
+    pub graph: &'a Graph,
+    pub project: &'a Project,
+    pub parameters: &'a [String],
+    pub run: Option<&'a RunResult>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Unset,
+    Literal,
+    Reference,
+    Expression,
+    Parameter,
+    Environment,
+}
+
+impl Kind {
+    fn of(binding: Option<&Binding>) -> Self {
+        match binding {
+            None => Self::Unset,
+            Some(Binding::Literal { .. }) => Self::Literal,
+            Some(Binding::Reference { .. }) => Self::Reference,
+            Some(Binding::Expression { .. }) => Self::Expression,
+            Some(Binding::Parameter { .. }) => Self::Parameter,
+            Some(Binding::Environment { .. }) => Self::Environment,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Unset => "Not set",
+            Self::Literal => "Typed value",
+            Self::Reference => "Result of another step",
+            Self::Expression => "Operator block",
+            Self::Parameter => "Parameter",
+            Self::Environment => "Environment / secret",
+        }
+    }
+}
+
+/// Steps whose outputs this node may use without creating a cycle.
+fn sources<'a>(context: &Context<'a>) -> Vec<&'a Node> {
+    context
+        .graph
+        .nodes
+        .iter()
+        .filter(|candidate| {
+            candidate.id != context.node.id
+                && !output_ports(candidate, context.project).is_empty()
+                && !ancestors_and_self(context.graph, &candidate.id).contains(&context.node.id)
+        })
+        .collect()
+}
+
+/// Shows the editor and updates `value`; returns whether it changed.
+pub fn editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    let frame = egui::Frame::new()
+        .fill(if depth == 0 {
+            theme::WHITE
+        } else {
+            theme::FIELD
+        })
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::same(10));
+    let response = frame
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let label = if port.is_required() {
+                    format!("{} *", port.display_name())
+                } else {
+                    port.display_name().to_owned()
+                };
+                ui.label(RichText::new(label).strong());
+                ui.label(
+                    RichText::new(port.value_type.as_str())
+                        .size(10.5)
+                        .color(theme::MUTED),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    changed |= kind_combo(ui, context, port, value, depth, id);
+                });
+            });
+            changed |= body(ui, context, port, value, depth, id);
+            if value.is_none() && port.is_required() {
+                ui.colored_label(
+                    theme::DANGER,
+                    RichText::new("Set this required argument.").size(11.0),
+                );
+            }
+        })
+        .response;
+
+    // Dropping a variable replaces the source; dropping an operator wraps the value.
+    if let Some(payload) = response.dnd_hover_payload::<Payload>() {
+        let accepts = matches!(*payload, Payload::Variable { .. })
+            || (matches!(*payload, Payload::Operator(_)) && depth < MAX_DEPTH);
+        if accepts {
+            ui.painter().rect_stroke(
+                response.rect,
+                8.0,
+                Stroke::new(1.5, theme::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    if let Some(payload) = response.dnd_release_payload::<Payload>() {
+        match payload.as_ref() {
+            Payload::Variable { binding, .. } => {
+                *value = Some(binding.clone());
+                changed = true;
+            }
+            Payload::Operator(operator) if depth < MAX_DEPTH => {
+                *value = Some(wrap(*operator, value.take()));
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+/// A new operator block with the current value in its first slot.
+fn wrap(operator: Operator, current: Option<Binding>) -> Binding {
+    let block = Binding::expression(operator);
+    match (current, operator.spec().operand("left")) {
+        (Some(current), Some(_)) => block.replace_at(&["left".into()], current).unwrap_or(block),
+        _ => block,
+    }
+}
+
+fn kind_combo(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let current = Kind::of(value.as_ref());
+    let mut chosen = current;
+    let available_sources = sources(context);
+    egui::ComboBox::from_id_salt(id.with("kind"))
+        .selected_text(current.label())
+        .width(170.0)
+        .show_ui(ui, |ui| {
+            for kind in [
+                Kind::Unset,
+                Kind::Literal,
+                Kind::Reference,
+                Kind::Expression,
+                Kind::Parameter,
+                Kind::Environment,
+            ] {
+                let enabled = match kind {
+                    Kind::Reference => !available_sources.is_empty(),
+                    Kind::Expression => depth < MAX_DEPTH,
+                    _ => true,
+                };
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.selectable_value(&mut chosen, kind, kind.label());
+                });
+            }
+        });
+    if chosen == current {
+        return false;
+    }
+    *value = match chosen {
+        Kind::Unset => None,
+        Kind::Literal => Some(Binding::literal(
+            port.default()
+                .cloned()
+                .unwrap_or_else(|| fields::empty_literal(port.value_type)),
+        )),
+        Kind::Reference => available_sources.first().map(|source| {
+            let output = output_ports(source, context.project)
+                .first()
+                .map_or_else(|| "value".to_owned(), |port| port.name.clone());
+            Binding::reference(source.id.clone(), output, "")
+        }),
+        Kind::Expression => Some(wrap(Operator::Add, value.take())),
+        Kind::Parameter => Some(Binding::parameter(
+            context
+                .parameters
+                .first()
+                .cloned()
+                .unwrap_or_else(|| port.name.clone()),
+        )),
+        Kind::Environment => Some(Binding::environment(
+            context
+                .project
+                .environment
+                .variables
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| "baseUrl".into()),
+        )),
+    };
+    true
+}
+
+fn body(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    match value {
+        None => false,
+        Some(Binding::Literal { value: literal }) => literal_editor(ui, context, port, literal, id),
+        Some(Binding::Expression { operator, inputs }) => {
+            let mut unwrap = false;
+            let changed =
+                expression_editor(ui, context, port, operator, inputs, depth, id, &mut unwrap);
+            if unwrap {
+                *value = inputs.get("left").cloned();
+                return true;
+            }
+            changed
+        }
+        Some(Binding::Reference {
+            node_id,
+            port: output,
+            path,
+        }) => reference_editor(ui, context, port, node_id, output, path, id),
+        Some(Binding::Parameter { name }) => name_editor(
+            ui,
+            id,
+            name,
+            context.parameters,
+            "A scenario parameter or a component argument.",
+        ),
+        Some(Binding::Environment { name }) => {
+            let environment = &context.project.environment;
+            let names: Vec<String> = std::iter::once("baseUrl".to_owned())
+                .chain(environment.variables.keys().cloned())
+                .chain(environment.secret_names.iter().cloned())
+                .collect();
+            name_editor(
+                ui,
+                id,
+                name,
+                &names,
+                "Secrets are only available in the current session.",
+            )
+        }
+    }
+}
+
+fn literal_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    literal: &mut Value,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    if context.node.kind.is_check()
+        && apiforge_core::graph::predicate(context.node) == apiforge_core::model::Predicate::Type
+        && port.name == "expected"
+    {
+        let mut text = literal.as_str().unwrap_or_default().to_owned();
+        if fields::assertion_type_combo(ui, id.with("assert-type"), &mut text) {
+            *literal = Value::String(text);
+            changed = true;
+        }
+        return changed;
+    }
+    let mut value_type = fields::literal_type(literal);
+    if port.value_type == ValueType::Any || value_type != port.value_type {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Type").size(11.0).color(theme::MUTED));
+            if fields::type_combo(ui, id.with("literal-type"), &mut value_type) {
+                *literal = fields::empty_literal(value_type);
+                changed = true;
+            }
+        });
+    }
+    match literal {
+        Value::String(text) => {
+            changed |= ui
+                .add(
+                    egui::TextEdit::singleline(text)
+                        .id(id.with("text"))
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+        }
+        Value::Number(number) => {
+            let key = id.with("number");
+            let shown =
+                apiforge_core::js::number_to_string(apiforge_core::js::number_as_f64(number));
+            let mut text: String = ui
+                .data_mut(|data| data.get_temp(key))
+                .unwrap_or_else(|| shown.clone());
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(key)
+                    .desired_width(f32::INFINITY),
+            );
+            let parsed = text
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .and_then(apiforge_core::js::number_value);
+            if field.changed()
+                && let Some(parsed) = parsed.clone()
+            {
+                *literal = parsed;
+                changed = true;
+            }
+            if parsed.is_none() {
+                ui.colored_label(
+                    theme::DANGER,
+                    RichText::new("Enter a finite number.").size(11.0),
+                );
+            }
+            if field.has_focus() {
+                ui.data_mut(|data| data.insert_temp(key, text));
+            } else {
+                ui.data_mut(|data| data.remove::<String>(key));
+            }
+        }
+        Value::Bool(flag) => {
+            egui::ComboBox::from_id_salt(id.with("bool"))
+                .selected_text(if *flag { "Yes (true)" } else { "No (false)" })
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(flag, true, "Yes (true)").changed();
+                    changed |= ui.selectable_value(flag, false, "No (false)").changed();
+                });
+        }
+        Value::Null => {
+            widgets::hint(ui, "An explicit null value.");
+        }
+        structured => {
+            if let Some(next) = fields::json_editor(ui, id.with("json"), structured, 4) {
+                if fields::literal_type(&next) == value_type {
+                    *structured = next;
+                    changed = true;
+                } else {
+                    ui.colored_label(
+                        theme::DANGER,
+                        RichText::new(format!(
+                            "Enter {}.",
+                            fields::value_type_label(value_type).to_lowercase()
+                        ))
+                        .size(11.0),
+                    );
+                }
+            }
+        }
+    }
+    changed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expression_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    operator: &mut Operator,
+    inputs: &mut indexmap::IndexMap<String, Binding>,
+    depth: usize,
+    id: Id,
+    unwrap: &mut bool,
+) -> bool {
+    let mut changed = false;
+    let spec = operator.spec();
+    let boolean = spec.output == ValueType::Boolean;
+    egui::Frame::new()
+        .fill(theme::OPERATOR.gamma_multiply(0.06))
+        .stroke(Stroke::new(1.0, theme::OPERATOR.gamma_multiply(0.4)))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(spec.group.label().to_uppercase())
+                        .size(9.5)
+                        .color(theme::OPERATOR),
+                );
+                ui.label(
+                    RichText::new(if boolean { "condition" } else { "value" })
+                        .size(9.5)
+                        .color(theme::MUTED),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text("Remove this operator and keep argument A")
+                        .clicked()
+                    {
+                        *unwrap = true;
+                    }
+                });
+            });
+            let mut chosen = *operator;
+            operator_combo(ui, id.with("operator"), &mut chosen);
+            if chosen != *operator {
+                let rebuilt = Binding::Expression {
+                    operator: *operator,
+                    inputs: inputs.clone(),
+                }
+                .with_operator(chosen);
+                if let Binding::Expression {
+                    operator: next,
+                    inputs: slots,
+                } = rebuilt
+                {
+                    *operator = next;
+                    *inputs = slots;
+                }
+                changed = true;
+            }
+            for operand in operator.spec().operands {
+                let mut slot = inputs.get(operand.name).cloned();
+                let mut slot_port = Port::new(operand.name, operand.value_type)
+                    .labelled(operand.label)
+                    .required(operand.required);
+                if let Some(default) = operand.default {
+                    slot_port.default_value =
+                        apiforge_core::format::OptionalJson::Present(default.to_value());
+                }
+                if editor(
+                    ui,
+                    context,
+                    &slot_port,
+                    &mut slot,
+                    depth + 1,
+                    id.with(operand.name),
+                ) {
+                    match slot {
+                        Some(binding) => {
+                            inputs.insert(operand.name.to_owned(), binding);
+                        }
+                        None => {
+                            inputs.shift_remove(operand.name);
+                        }
+                    }
+                    changed = true;
+                }
+            }
+        });
+    let output = operator.spec().output;
+    if port.value_type != ValueType::Any && output != ValueType::Any && output != port.value_type {
+        ui.colored_label(
+            theme::DANGER,
+            RichText::new(format!(
+                "This operator returns {output}, but the argument needs {}.",
+                port.value_type
+            ))
+            .size(11.0),
+        );
+    }
+    changed
+}
+
+/// Operators grouped by catalogue group.
+pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(value.label())
+        .width(ui.available_width())
+        .height(360.0)
+        .show_ui(ui, |ui| {
+            for group in OperatorGroup::ALL {
+                ui.label(
+                    RichText::new(group.label().to_uppercase())
+                        .size(9.5)
+                        .color(theme::MUTED),
+                );
+                for operator in Operator::ALL
+                    .into_iter()
+                    .filter(|operator| operator.spec().group == group)
+                {
+                    ui.selectable_value(value, operator, operator.label());
+                }
+            }
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reference_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    node_id: &mut String,
+    output: &mut String,
+    field: &mut String,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    let candidates = sources(context);
+    let source = context.graph.nodes.iter().find(|node| &node.id == node_id);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Step").size(11.0).color(theme::MUTED));
+        egui::ComboBox::from_id_salt(id.with("source"))
+            .selected_text(source.map_or("Unavailable source", |node| node.name.as_str()))
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for candidate in &candidates {
+                    if ui
+                        .selectable_label(&candidate.id == node_id, &candidate.name)
+                        .clicked()
+                        && &candidate.id != node_id
+                    {
+                        *node_id = candidate.id.clone();
+                        *output = output_ports(candidate, context.project)
+                            .first()
+                            .map_or_else(|| "value".into(), |port| port.name.clone());
+                        field.clear();
+                        changed = true;
+                    }
+                }
+            });
+    });
+    let outputs = source
+        .map(|source| output_ports(source, context.project))
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Output").size(11.0).color(theme::MUTED));
+        egui::ComboBox::from_id_salt(id.with("output"))
+            .selected_text(
+                outputs
+                    .iter()
+                    .find(|port| &port.name == output)
+                    .map_or(output.as_str(), |port| port.display_name()),
+            )
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for candidate in &outputs {
+                    changed |= ui
+                        .selectable_value(output, candidate.name.clone(), candidate.display_name())
+                        .changed();
+                }
+            });
+    });
+    if let Some(source) = source {
+        let data = response::source(source, output, context.project, context.run);
+        let selected = data
+            .value
+            .as_ref()
+            .and_then(|value| path::resolve(value, field).map(|value| value.into_owned()));
+        let button = egui::Button::new(
+            RichText::new(format!(
+                "Field:  {}   ▾",
+                if field.is_empty() {
+                    format!("whole {output}")
+                } else {
+                    field.clone()
+                }
+            ))
+            .monospace(),
+        )
+        .min_size(egui::vec2(ui.available_width(), 26.0));
+        if ui
+            .add(button)
+            .on_hover_text("Choose a field from the response")
+            .clicked()
+        {
+            ui.data_mut(|memory| memory.insert_temp(id.with("picker"), String::new()));
+        }
+        let preview = selected
+            .as_ref()
+            .map(|value| {
+                format!(
+                    " · {}: {}",
+                    response::type_label(apiforge_core::js::type_name(Some(value))),
+                    crate::labels::literal_summary(value)
+                )
+            })
+            .unwrap_or_default();
+        widgets::hint(ui, format!("{}{preview}", data.origin));
+        if let Some(path) = field_picker(ui.ctx(), id.with("picker"), &data, output) {
+            *field = path;
+            changed = true;
+        }
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Path").size(11.0).color(theme::MUTED));
+        changed |= ui
+            .add(
+                egui::TextEdit::singleline(field)
+                    .hint_text("e.g. data.items[0].name; empty = whole value")
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY),
+            )
+            .changed();
+    });
+    if field.is_empty()
+        && let Some(output_port) = outputs.iter().find(|candidate| &candidate.name == output)
+        && !compatible(output_port, port)
+    {
+        ui.colored_label(
+            theme::DANGER,
+            RichText::new(
+                "The output type does not match this argument. Choose a field or another source.",
+            )
+            .size(11.0),
+        );
+    }
+    changed
+}
+
+/// A modal list of response fields; returns the chosen path.
+fn field_picker(
+    ctx: &egui::Context,
+    id: Id,
+    source: &response::Source,
+    port: &str,
+) -> Option<String> {
+    let mut search: String = ctx.data_mut(|data| data.get_temp(id))?;
+    let mut chosen = None;
+    let mut close = false;
+    let fields = response::fields(source.value.as_ref());
+    egui::Modal::new(id.with("modal")).show(ctx, |ui| {
+        ui.set_width(520.0);
+        ui.label(
+            RichText::new("Choose a response field")
+                .size(16.0)
+                .family(theme::bold_family()),
+        );
+        widgets::hint(ui, &source.origin);
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut search)
+                .hint_text("Search names, paths or values…")
+                .desired_width(f32::INFINITY),
+        );
+        field.request_focus();
+        let query = search.to_lowercase();
+        let visible: Vec<_> = fields
+            .iter()
+            .filter(|field| {
+                format!(
+                    "{} {} {}",
+                    field.path,
+                    field.preview,
+                    response::type_label(field.value_type)
+                )
+                .to_lowercase()
+                .contains(&query)
+            })
+            .collect();
+        egui::ScrollArea::vertical()
+            .max_height(380.0)
+            .show(ui, |ui| {
+                for field in &visible {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 26.0),
+                        egui::Sense::click(),
+                    );
+                    if response.hovered() {
+                        ui.painter().rect_filled(rect, 4.0, theme::BG);
+                    }
+                    let label = if field.path.is_empty() {
+                        format!("Whole {port}")
+                    } else {
+                        field.path.clone()
+                    };
+                    ui.painter().text(
+                        rect.left_center()
+                            + egui::vec2(6.0 + field.depth.min(6) as f32 * 10.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        crate::labels::truncate(&label, 40),
+                        egui::FontId::monospace(11.5),
+                        theme::LINK,
+                    );
+                    ui.painter().text(
+                        rect.left_center() + egui::vec2(300.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        response::type_label(field.value_type),
+                        egui::FontId::proportional(10.5),
+                        theme::MUTED,
+                    );
+                    ui.painter().with_clip_rect(rect).text(
+                        rect.left_center() + egui::vec2(370.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        &field.preview,
+                        egui::FontId::proportional(10.5),
+                        theme::TEXT,
+                    );
+                    if response.clicked() {
+                        chosen = Some(field.path.clone());
+                    }
+                }
+                if visible.is_empty() {
+                    widgets::hint(
+                        ui,
+                        if source.value.is_none() {
+                            "Run the request or add a sample response. You can also type a path."
+                        } else {
+                            "No matching field. Change the search or type a path."
+                        },
+                    );
+                }
+            });
+        ui.separator();
+        ui.horizontal(|ui| {
+            widgets::hint(
+                ui,
+                format!(
+                    "{} fields · choosing a field sets the binding, not an expected value.",
+                    visible.len()
+                ),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        });
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
+    });
+    if chosen.is_some() || close {
+        ctx.data_mut(|data| data.remove::<String>(id));
+    } else {
+        ctx.data_mut(|data| data.insert_temp(id, search));
+    }
+    chosen
+}
+
+fn name_editor(ui: &mut Ui, id: Id, name: &mut String, suggestions: &[String], hint: &str) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        changed |= ui
+            .add(
+                egui::TextEdit::singleline(name)
+                    .id(id.with("name"))
+                    .desired_width(ui.available_width() - 34.0),
+            )
+            .changed();
+        egui::ComboBox::from_id_salt(id.with("names"))
+            .selected_text("")
+            .width(24.0)
+            .show_ui(ui, |ui| {
+                for suggestion in suggestions {
+                    if ui
+                        .selectable_label(suggestion == name, suggestion)
+                        .clicked()
+                    {
+                        *name = suggestion.clone();
+                        changed = true;
+                    }
+                }
+            });
+    });
+    widgets::hint(ui, hint);
+    changed
+}

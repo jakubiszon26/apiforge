@@ -12,6 +12,7 @@ mod capture;
 mod dnd;
 mod editor;
 mod files;
+mod inspector;
 mod labels;
 mod library;
 mod persistence;
@@ -40,6 +41,7 @@ enum Arguments {
     Screenshot {
         output: PathBuf,
         project: Option<PathBuf>,
+        select: Option<String>,
     },
     Help,
 }
@@ -56,17 +58,26 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
         Some(Some("--check")) => Arguments::Check(path("Missing file path")?),
         Some(Some("--screenshot")) => {
             let output = path("Missing screenshot PNG path")?;
-            let project = match values.next() {
-                None => None,
-                Some(flag) if flag == "--project" => Some(
-                    values
-                        .next()
-                        .map(PathBuf::from)
-                        .ok_or("Missing project file")?,
-                ),
-                Some(_) => return Err("Expected --project FILE after the screenshot path"),
-            };
-            Arguments::Screenshot { output, project }
+            let (mut project, mut select) = (None, None);
+            while let Some(flag) = values.next() {
+                let value = values
+                    .next()
+                    .ok_or("Missing value after a screenshot option")?;
+                match flag.to_str() {
+                    Some("--project") => project = Some(PathBuf::from(value)),
+                    Some("--select") => select = Some(value.to_string_lossy().into_owned()),
+                    _ => {
+                        return Err(
+                            "Unknown screenshot option; use --project FILE or --select NODE",
+                        );
+                    }
+                }
+            }
+            Arguments::Screenshot {
+                output,
+                project,
+                select,
+            }
         }
         _ => return Err("Unknown argument; use --help"),
     };
@@ -82,7 +93,7 @@ const HELP: &str = "API Forge
   apiforge-desktop --project FILE       open a project or workspace for this session only
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
-  apiforge-desktop --screenshot OUT.png [--project FILE]
+  apiforge-desktop --screenshot OUT.png [--project FILE] [--select NODE]
 
 Opening a document never executes requests.";
 
@@ -123,15 +134,24 @@ fn main() -> ExitCode {
         Arguments::SmokeTest(path) => session(&path, Probe::Smoke),
         Arguments::Screenshot {
             output,
-            project: Some(project),
-        } => session(&project, Probe::Screenshot(output)),
-        Arguments::Screenshot {
-            output,
-            project: None,
-        } => run_window(
-            app::Source::Session(app::default_workspace()),
-            Probe::Screenshot(output),
-        ),
+            project,
+            select,
+        } => {
+            let workspace = match project {
+                Some(project) => match files::read_document(&project) {
+                    Ok(document) => document.into_workspace(),
+                    Err(message) => {
+                        eprintln!("{message}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => app::default_workspace(),
+            };
+            run_window(
+                app::Source::Session(workspace),
+                Probe::Screenshot(output, select),
+            )
+        }
     }
 }
 
@@ -149,7 +169,8 @@ fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
 enum Probe {
     None,
     Smoke,
-    Screenshot(PathBuf),
+    /// Capture the window, optionally with a node (by id or name) selected.
+    Screenshot(PathBuf, Option<String>),
 }
 
 struct Window {
@@ -201,13 +222,19 @@ fn run_window(source: app::Source, probe: Probe) -> ExitCode {
         "API Forge",
         options,
         Box::new(move |context| {
-            let (capture, smoke) = match probe {
-                Probe::None => (None, false),
-                Probe::Smoke => (None, true),
-                Probe::Screenshot(path) => (Some(capture::Capture::new(path)), false),
+            let (capture, smoke, select) = match probe {
+                Probe::None => (None, false, None),
+                Probe::Smoke => (None, true, None),
+                Probe::Screenshot(path, select) => {
+                    (Some(capture::Capture::new(path)), false, select)
+                }
             };
+            let mut app = app::App::new(&context.egui_ctx, source);
+            if let Some(node) = select {
+                app.select_node(&node);
+            }
             Ok(Box::new(Window {
-                app: app::App::new(&context.egui_ctx, source),
+                app,
                 capture,
                 smoke,
                 frames: 0,

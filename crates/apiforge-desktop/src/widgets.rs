@@ -20,6 +20,12 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).size(11.0).color(theme::MUTED));
 }
 
+/// The label above a form field.
+pub fn field_label(ui: &mut Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(RichText::new(text).size(11.5).color(theme::MUTED));
+}
+
 /// A titled block of a form.
 pub fn section(ui: &mut Ui, title: &str) {
     ui.add_space(10.0);
