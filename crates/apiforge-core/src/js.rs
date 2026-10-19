@@ -264,6 +264,14 @@ pub fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
+/// JavaScript `String.prototype.trim`: Unicode white space and line terminators,
+/// including U+FEFF but, unlike [`str::trim`], not U+0085.
+pub fn trim(text: &str) -> &str {
+    text.trim_matches(|character: char| {
+        character == '\u{feff}' || (character != '\u{85}' && character.is_whitespace())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +367,11 @@ mod tests {
     fn utf16_length_counts_surrogate_pairs_twice() {
         assert_eq!(utf16_len("a😀b"), 4);
         assert_eq!(utf16_len("zażółć"), 6);
+    }
+
+    #[test]
+    fn trim_matches_javascript_white_space() {
+        assert_eq!(trim("\u{feff}\t a b \u{a0}\n\u{2028}"), "a b");
+        assert_eq!(trim("\u{85}x\u{85}"), "\u{85}x\u{85}");
     }
 }
