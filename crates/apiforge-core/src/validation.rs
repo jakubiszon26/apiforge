@@ -111,7 +111,7 @@ pub(crate) fn workspace(workspace: &Workspace) -> Result {
     }
     Ok(())
 }
-fn validate_project(project: &Project, path: &str) -> Result {
+pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
     require(project.version == 1, path, "Unsupported project version")?;
     text(&project.name, path)?;
     require(
@@ -417,9 +417,8 @@ fn graph(
         for (name, value) in &node.inputs {
             id(name, &node_path)?;
             binding(value, &nodes, parameters, project, 0, &mut 0, &node_path)?;
-            let mut references = Vec::new();
-            value.references(&mut references);
-            for (source, _) in references {
+            for reference in value.references() {
+                let source = reference.node_id;
                 if local.contains(source) {
                     dependencies.entry(&node.id).or_default().insert(source);
                 }

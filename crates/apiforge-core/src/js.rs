@@ -115,6 +115,45 @@ fn write_display(value: &Value, output: &mut String) {
     }
 }
 
+/// Compact JSON text with the result of JavaScript `JSON.stringify(value)`.
+///
+/// Differs from `serde_json::to_string` only in number formatting (`1e+21`).
+pub fn json_stringify(value: &Value) -> String {
+    let mut output = String::new();
+    write_json(value, &mut output);
+    output
+}
+
+fn write_json(value: &Value, output: &mut String) {
+    match value {
+        Value::Number(number) => output.push_str(&number_to_string(number_as_f64(number))),
+        Value::Array(items) => {
+            output.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                write_json(item, output);
+            }
+            output.push(']');
+        }
+        Value::Object(fields) => {
+            output.push('{');
+            for (index, (key, item)) in fields.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                write_json(&Value::String(key.clone()), output);
+                output.push(':');
+                write_json(item, output);
+            }
+            output.push('}');
+        }
+        // Strings, booleans and null serialise identically in both implementations.
+        scalar => output.push_str(&scalar.to_string()),
+    }
+}
+
 /// Formats a double like ECMAScript `Number.prototype.toString()` in radix 10.
 ///
 /// Uses the shortest digit string that round-trips, switching to exponential
@@ -294,6 +333,14 @@ mod tests {
         );
         assert_eq!(to_display_string(&json!([{"a": 1}])), "[object Object]");
         assert_eq!(to_display_string(&json!({})), "[object Object]");
+    }
+
+    #[test]
+    fn json_stringify_formats_numbers_like_javascript() {
+        assert_eq!(
+            json_stringify(&json!({"a": [1, 1.5, 1e21, null], "b\"": "x\n"})),
+            r#"{"a":[1,1.5,1e+21,null],"b\"":"x\n"}"#
+        );
     }
 
     #[test]

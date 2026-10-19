@@ -40,18 +40,6 @@ pub enum Binding {
         name: String,
     },
 }
-impl Binding {
-    pub fn references<'a>(&'a self, result: &mut Vec<(&'a str, &'a str)>) {
-        match self {
-            Self::Reference { node_id, port, .. } => result.push((node_id, port)),
-            Self::Expression { inputs, .. } => inputs
-                .values()
-                .for_each(|binding| binding.references(result)),
-            _ => {}
-        }
-    }
-}
-
 // JSON defaults need explicit presence: Option<Value> would erase present(null).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -497,6 +485,13 @@ pub struct ValidatedDocument {
 impl ValidatedDocument {
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
+    }
+    pub fn into_workspace(self) -> Workspace {
+        self.workspace
+    }
+    /// Whether the file held a single project rather than a workspace export.
+    pub fn is_standalone_project(&self) -> bool {
+        self.standalone
     }
     pub fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         if self.standalone {

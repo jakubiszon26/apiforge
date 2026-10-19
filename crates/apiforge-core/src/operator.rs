@@ -71,6 +71,28 @@ pub enum OperatorGroup {
     Json,
 }
 
+impl OperatorGroup {
+    pub const ALL: [Self; 6] = [
+        Self::Math,
+        Self::Comparison,
+        Self::Logic,
+        Self::Text,
+        Self::Functions,
+        Self::Json,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Math => "Maths",
+            Self::Comparison => "Comparisons",
+            Self::Logic => "Logic",
+            Self::Text => "Text",
+            Self::Functions => "Functions",
+            Self::Json => "JSON data",
+        }
+    }
+}
+
 /// Value an editor places in an operand slot when the operator is chosen.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OperandDefault {
@@ -95,6 +117,8 @@ impl OperandDefault {
 pub struct OperandSpec {
     /// Slot name used in documents (`left` or `right`).
     pub name: &'static str,
+    /// Human-readable name shown in the editor.
+    pub label: &'static str,
     pub value_type: ValueType,
     /// A required operand must be present; an optional one may be missing.
     pub required: bool,
@@ -116,42 +140,84 @@ impl OperatorSpec {
 
 const fn operand(
     name: &'static str,
+    label: &'static str,
     value_type: ValueType,
     default: OperandDefault,
 ) -> OperandSpec {
     OperandSpec {
         name,
+        label,
         value_type,
         required: true,
         default: Some(default),
     }
 }
 
-const LEFT_NUMBER: OperandSpec = operand("left", ValueType::Number, OperandDefault::Integer(0));
-const RIGHT_NUMBER: OperandSpec = operand("right", ValueType::Number, OperandDefault::Integer(1));
-const LEFT_ANY: OperandSpec = operand("left", ValueType::Any, OperandDefault::Null);
-const RIGHT_ANY: OperandSpec = operand("right", ValueType::Any, OperandDefault::Null);
-const LEFT_BOOLEAN: OperandSpec = operand("left", ValueType::Boolean, OperandDefault::Bool(false));
-const RIGHT_BOOLEAN: OperandSpec =
-    operand("right", ValueType::Boolean, OperandDefault::Bool(false));
+const LEFT_NUMBER: OperandSpec =
+    operand("left", "A", ValueType::Number, OperandDefault::Integer(0));
+const RIGHT_NUMBER: OperandSpec =
+    operand("right", "B", ValueType::Number, OperandDefault::Integer(1));
+const LEFT_ANY: OperandSpec = operand("left", "A", ValueType::Any, OperandDefault::Null);
+const RIGHT_ANY: OperandSpec = operand("right", "B", ValueType::Any, OperandDefault::Null);
+const LEFT_BOOLEAN: OperandSpec =
+    operand("left", "A", ValueType::Boolean, OperandDefault::Bool(false));
+const RIGHT_BOOLEAN: OperandSpec = operand(
+    "right",
+    "B",
+    ValueType::Boolean,
+    OperandDefault::Bool(false),
+);
 
 const NUMBER_PAIR: &[OperandSpec] = &[LEFT_NUMBER, RIGHT_NUMBER];
-const NUMBER_UNARY: &[OperandSpec] = &[LEFT_NUMBER];
+const VALUE_NUMBER: OperandSpec = operand(
+    "left",
+    "Value",
+    ValueType::Number,
+    OperandDefault::Integer(0),
+);
+const VALUE_ANY: OperandSpec = operand("left", "Value", ValueType::Any, OperandDefault::Null);
+const NUMBER_UNARY: &[OperandSpec] = &[VALUE_NUMBER];
 const ANY_PAIR: &[OperandSpec] = &[LEFT_ANY, RIGHT_ANY];
 const ROUND: &[OperandSpec] = &[
-    LEFT_NUMBER,
-    operand("right", ValueType::Number, OperandDefault::Integer(0)),
+    VALUE_NUMBER,
+    operand(
+        "right",
+        "Decimal places",
+        ValueType::Number,
+        OperandDefault::Integer(0),
+    ),
 ];
 const LETTER: &[OperandSpec] = &[
-    operand("left", ValueType::String, OperandDefault::Text("")),
-    RIGHT_NUMBER,
+    operand("left", "Text", ValueType::String, OperandDefault::Text("")),
+    operand(
+        "right",
+        "Letter position",
+        ValueType::Number,
+        OperandDefault::Integer(1),
+    ),
+];
+const LENGTH: &[OperandSpec] = &[operand(
+    "left",
+    "Text or list",
+    ValueType::Any,
+    OperandDefault::Null,
+)];
+const CONTAINS: &[OperandSpec] = &[
+    operand("left", "Text or list", ValueType::Any, OperandDefault::Null),
+    operand(
+        "right",
+        "Search value",
+        ValueType::Any,
+        OperandDefault::Null,
+    ),
 ];
 const FIELD: &[OperandSpec] = &[
-    LEFT_ANY,
-    operand("right", ValueType::String, OperandDefault::Text("")),
+    operand("left", "Data", ValueType::Any, OperandDefault::Null),
+    operand("right", "Path", ValueType::String, OperandDefault::Text("")),
 ];
 const EXISTS: &[OperandSpec] = &[OperandSpec {
     name: "left",
+    label: "Value",
     value_type: ValueType::Any,
     required: false,
     default: None,
@@ -199,6 +265,49 @@ impl Operator {
         Self::Field,
     ];
 
+    /// Short name shown in the editor and as the default node name.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Add => "A + B",
+            Self::Subtract => "A − B",
+            Self::Multiply => "A × B",
+            Self::Divide => "A ÷ B",
+            Self::Modulo => "A modulo B",
+            Self::Random => "Random from A to B",
+            Self::Round => "Round",
+            Self::Equals => "A = B",
+            Self::NotEquals => "A ≠ B",
+            Self::Greater => "A > B",
+            Self::Less => "A < B",
+            Self::AtLeast => "A ≥ B",
+            Self::AtMost => "A ≤ B",
+            Self::And => "A and B",
+            Self::Or => "A or B",
+            Self::Not => "Not A",
+            Self::Concat => "Join texts",
+            Self::Letter => "Letter of text",
+            Self::Length => "Length of text / list",
+            Self::Contains => "A contains B",
+            Self::Abs => "Absolute value",
+            Self::Floor => "Round down",
+            Self::Ceiling => "Round up",
+            Self::Sqrt => "Square root",
+            Self::Sin => "Sine (degrees)",
+            Self::Cos => "Cosine (degrees)",
+            Self::Tan => "Tangent (degrees)",
+            Self::Asin => "Arcsine",
+            Self::Acos => "Arccosine",
+            Self::Atan => "Arctangent",
+            Self::Ln => "Natural logarithm",
+            Self::Log => "Base-10 logarithm",
+            Self::Exp => "e to the power of A",
+            Self::Power10 => "10 to the power of A",
+            Self::TypeOf => "Type of value",
+            Self::Exists => "Value exists",
+            Self::Field => "Object field / list item",
+        }
+    }
+
     pub fn spec(self) -> OperatorSpec {
         use OperatorGroup as G;
         use ValueType as T;
@@ -218,8 +327,8 @@ impl Operator {
             Self::Not => (G::Logic, T::Boolean, &[LEFT_BOOLEAN][..]),
             Self::Concat => (G::Text, T::String, ANY_PAIR),
             Self::Letter => (G::Text, T::String, LETTER),
-            Self::Length => (G::Text, T::Number, &[LEFT_ANY][..]),
-            Self::Contains => (G::Text, T::Boolean, ANY_PAIR),
+            Self::Length => (G::Text, T::Number, LENGTH),
+            Self::Contains => (G::Text, T::Boolean, CONTAINS),
             Self::Abs
             | Self::Floor
             | Self::Ceiling
@@ -234,7 +343,7 @@ impl Operator {
             | Self::Log
             | Self::Exp
             | Self::Power10 => (G::Functions, T::Number, NUMBER_UNARY),
-            Self::TypeOf => (G::Json, T::String, &[LEFT_ANY][..]),
+            Self::TypeOf => (G::Json, T::String, &[VALUE_ANY][..]),
             Self::Exists => (G::Json, T::Boolean, EXISTS),
             Self::Field => (G::Json, T::Any, FIELD),
         };

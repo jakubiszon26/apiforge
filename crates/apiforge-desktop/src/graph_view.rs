@@ -797,9 +797,8 @@ pub fn project_graph(graph: &Graph, project: &Project) -> Canvas {
     }
     for node in &graph.nodes {
         for (name, binding) in &node.inputs {
-            let mut references = Vec::new();
-            binding.references(&mut references);
-            for (source, port) in references {
+            for reference in binding.references() {
+                let (source, port) = (reference.node_id, reference.port);
                 if let (Some(&source), Some(&target)) = (ids.get(source), ids.get(&node.id)) {
                     result.wires.push(Wire {
                         source,

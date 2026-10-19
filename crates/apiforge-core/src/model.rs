@@ -22,22 +22,6 @@ pub enum NodeKind {
     Trigger,
     If,
 }
-impl NodeKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Request => "Request HTTP",
-            Self::Select => "Wybierz dane",
-            Self::Build => "Zbuduj dane",
-            Self::Formula => "Operator",
-            Self::Assert => "Porównanie",
-            Self::Condition => "Warunek danych",
-            Self::Component => "Komponent",
-            Self::Variable => "Zmienna",
-            Self::Trigger => "Start",
-            Self::If => "IF / ELSE",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
