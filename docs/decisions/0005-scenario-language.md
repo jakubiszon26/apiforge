@@ -18,12 +18,33 @@ expression-oriented, over the document model of [ADR 0004](0004-document-format-
 
 ### Model, not text, is the truth
 
-Text is parsed into a lossless syntax tree, then *lowered* onto the document model.
-The model is printed back by one canonical formatter. Two properties are tested
-over generated graphs and every fixture:
+Text is parsed into a lossless syntax tree, then *lowered* to a **semantic
+scenario**: the document model without identity or layout. A separate
+*reconciliation* step ([Identity during edits](#identity-during-edits)) turns it
+into document changes. The model is printed back by one canonical formatter.
 
-1. **Round trip:** `lower(parse(print(g))) == g`, ignoring layout.
+**Semantic equivalence.** `semantic(s)` of a scenario or component is the document
+with:
+
+- node `id`s replaced by handles, in node fields, references and ordering edges;
+- edge `id`s removed, and edges compared as a set of (source, target, branch);
+- nodes compared as a set keyed by handle, so their order does not matter;
+- `position`, `pinned` and `proxies` removed;
+- component instances naming their definition by component handle and revision
+  instead of component id.
+
+Everything else is semantic and must survive the text: kinds, labels, notes,
+configuration, bindings in canonical form ([ADR 0004](0004-document-format-v2.md)),
+scenario name, description, parameters and error policy, and component inputs,
+action and description.
+
+Two properties are tested over generated graphs and every fixture:
+
+1. **Round trip:** `semantic(lower(parse(print(g)))) == semantic(g)`.
 2. **Idempotence:** `print(lower(parse(t)))` does not change when printed again.
+
+Identity preservation is a separate contract, tested separately, because the text
+deliberately carries no identifiers.
 
 The parser never panics. It always returns a tree with diagnostics, and lowering
 skips erroneous statements instead of giving up. Fuzzing enforces this.
@@ -143,7 +164,7 @@ key      = IDENT | STRING ;
 | `+ - * / %`, `== != > < >= <=`, `&& \|\| !` | `expression` with Add, Subtract, Multiply, Divide, Modulo, Equals, NotEquals, Greater, Less, AtLeast, AtMost, And, Or, Not |
 | `round(x, 2)`, `sqrt(x)`, `concat(a, b)`, … | `expression`, one function per remaining operator, named after its identifier in the catalogue |
 | `"text {{x}}"` | `template`; without interpolation a string `literal` |
-| `{ a: x }`, `[x, y]` | `object` / `array`; with only literal leaves a `literal` |
+| `{ a: x }`, `[x, y]` | always `object` / `array`, also when every leaf is a literal |
 | `env.name` | `environment` |
 | `param.name` | `parameter` |
 | `handle.path` | `reference` |
@@ -193,17 +214,60 @@ drop it. `@label("…")` sets the display label.
 
 ### Identity during edits
 
-Lowering reconciles with the current graph instead of creating nodes afresh:
+Reconciliation applies a semantic scenario to the current document. It never
+guesses: when the text is ambiguous, a new block is safer than a block that
+silently inherits another one's identity, position and run history.
 
-1. A statement whose handle matches a node keeps that node's `id`, `position`
-   and `pinned`.
-2. An unmatched statement that takes the place of an unmatched node of the same
-   kind is a rename of that node. *The same place* means the same index among
-   statements of that kind.
-3. Otherwise a new node is created with a fresh id and no position.
+1. A node whose handle and kind are unchanged keeps its `id`, `position` and
+   `pinned`, whatever else changed.
+2. **Unambiguous rename.** Exactly one node disappears and exactly one appears
+   within one synchronisation. They have the same kind and are equal apart from
+   the handle, and every use of the old handle now names the new one. The new
+   node keeps the old identity. Any other combination, for example a removed
+   request and a different request written in its place, creates a new node.
+3. Every other new statement creates a node with a fresh id and no position.
+4. A statement that keeps a handle but changes the kind (e.g. a Value rewritten
+   as a request) creates a new node; the old one is removed.
 
-The same rules apply to components by handle. The editor's explicit rename (F2)
-renames a handle and every use, and never depends on the heuristic.
+**Explicit rename.** The editor's rename action (F2 in code, the handle field in
+the inspector) renames the handle in the document first, updates every use, then
+reprints. It always keeps identity and never depends on rule 2.
+
+Components follow the same rules by component handle. Reconciliation is tested
+against the cases above, including insert-in-place and swap of two statements,
+which must not exchange identities.
+
+### Command line
+
+A `.afs` file names components, environment variables and parameters, but holds
+neither their definitions nor environment values. The CLI therefore always works
+against a workspace or project document (the version-2 JSON of storage and
+export):
+
+```text
+apiforge fmt <file.afs>                      syntax only; formats in place or --check
+apiforge check --workspace <doc.json> [--scenario <name|id>] [<file.afs>]
+apiforge print --workspace <doc.json> --scenario <name|id>      document → text
+apiforge apply --workspace <doc.json> --scenario <name|id> <file.afs>
+apiforge run   --workspace <doc.json> --scenario <name|id> [<file.afs>]
+               [--mode simulation|live] [--base-url <url>] [--secrets <file>]
+```
+
+- `check` resolves handles, components (by handle, latest revision unless
+  `Name@revision`), contracts, parameters and environment names against the
+  document. Without `<file.afs>` it checks the scenario stored in the document.
+- `apply` validates, reconciles and writes the document atomically with a backup,
+  using the storage rules ([ADR 0002](0002-workspace-storage.md)).
+- `run` runs the stored scenario, or the given text applied in memory without
+  writing the document. The base URL comes from the document's environment unless
+  overridden. Secret values never appear on the command line: they come from
+  `APIFORGE_SECRET_<NAME>` environment variables or a `--secrets` file of
+  `NAME=value` lines, and are redacted like in the application.
+- Exit codes: 0 success or passed run, 1 diagnostics, document errors or a failed
+  run, 2 invalid arguments.
+
+A git-friendly project layout of `.afs` files remains an open question; it would
+add a project manifest, not change these commands.
 
 ### API
 
@@ -211,7 +275,8 @@ renames a handle and every use, and never depends on the heuristic.
 
 ```rust
 pub fn parse(text: &str) -> SyntaxTree;                       // lossless, never fails
-pub fn lower(tree: &SyntaxTree, context: &LowerContext) -> Lowered; // document + diagnostics
+pub fn lower(tree: &SyntaxTree, context: &LowerContext) -> Lowered; // semantic scenario + diagnostics
+pub fn reconcile(current: &Graph, lowered: &Lowered) -> Reconciled; // document changes, identities kept
 pub fn print_scenario(project: &Project, scenario: &Scenario) -> String;
 pub fn print_component(project: &Project, component: &Component) -> String;
 pub fn complete(tree: &SyntaxTree, offset: usize, context: &CompletionContext) -> Vec<Completion>;

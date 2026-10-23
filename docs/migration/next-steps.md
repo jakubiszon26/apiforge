@@ -10,6 +10,13 @@ not a statement that every issue remains open or that every proposed fix shipped
 
 ## Current priorities
 
+The active feature work is the [scenario code and canvas plan](../plans/code-and-canvas.md).
+Its milestone order takes storage safety (item 4, STOR-01) as milestone S1 directly
+after the format change (M1), before anything else extends what is stored. Items
+5 and 6 and Windows evidence stay release gates and are scheduled between the
+plan's milestones. UI polish (item 1) continues only where a milestone touches the
+screen.
+
 1. **UI polish:** the header now combines title, project context and actions;
    typography, spacing, card zoom and symbolic action buttons have been revised.
    Tabs and toolbars follow the requested Postman-inspired direction. See the

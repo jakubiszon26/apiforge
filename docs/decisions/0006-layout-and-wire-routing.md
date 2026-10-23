@@ -56,16 +56,36 @@ is selected, ignores pins and clears them. It is one undoable edit.
    corners (interesting x/y lines of a sparse grid). Edges blocked by obstacles are
    omitted.
 4. **Search.** A\* with cost = length + 40 px per bend + 120 px per crossing of an
-   already routed wire. Wires are routed longest first. A route that cannot be
-   found falls back to a direct orthogonal Z through the obstacles, so a wire is
-   never missing.
+   already routed wire. Wires are routed longest first. The graph always includes
+   the frame around the bounding box of all cards inflated by the margin, so a route
+   around everything exists whenever both stubs end outside other cards.
 5. **Nudging.** Segments sharing a channel are spaced evenly (minimum 6 px), and
    wires keep a consistent order along the channel to avoid extra crossings.
 6. **Bridges.** At each crossing, the wire routed later draws a small semicircle.
 
 **Spline style** renders the same polyline with rounded corners (radius up to
 24 px, limited by half of each adjacent segment) blended into cubic segments.
-Both styles therefore avoid blocks equally well.
+
+### Guarantees
+
+A **final route** is one drawn when no card is being dragged. For final routes:
+
+- No segment, rounded corner or bridge intersects the rectangle of a card other
+  than the wire's own source and target. The geometry is checked after nudging
+  and after smoothing. A nudged segment that would collide falls back to its
+  un-nudged channel; a corner that would collide gets a smaller radius, down to a
+  sharp corner.
+- The only exception is a port that itself lies inside another card, because cards
+  overlap. Then the wire may cross that card only within its stub. Overlapping
+  cards are a layout problem that *Tidy up* resolves.
+- There is no fallback through obstacles. When the search fails, which by
+  construction only happens for ports inside overlapping cards, the wire takes the
+  frame route.
+
+**Interactive routes.** While cards are dragged, wires whose rerouting exceeds the
+frame budget are drawn as direct, lighter curves, which may cross cards. They are
+replaced by final routes on the first idle frame. Tests assert the guarantees on
+final routes only and the budget on interactive frames.
 
 ### Performance
 

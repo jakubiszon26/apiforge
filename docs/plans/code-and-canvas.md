@@ -40,8 +40,9 @@ GUI-free API and a CLI, not the server.
 | Completion | Code editor, body editor, small fields (URL, headers, query) and response paths |
 | Wires | Orthogonal with bridges at crossings by default; *spline* mode smooths the same route |
 | Ordering | Explicit `after`. Line order in code is a canonical topological order without meaning |
-| Delivery | Foundation → wires → proxies → language → editor → live sync, each a merged, tested branch |
-| MCP | Pure library API and `apiforge fmt/check/run` CLI; the server comes later |
+| Delivery | Format → storage safety → language → wires → editor → live sync → proxies, each a merged, tested branch |
+| MCP | Pure library API and a CLI that works against a workspace document (`fmt`, `check`, `print`, `apply`, `run`); the server comes later |
+| Unfinished code | Buffers, drafts and two histories as in ADR 0007 |
 
 ## Architecture
 
@@ -147,15 +148,15 @@ block's note.
 
 The equivalence contract, enforced by property tests:
 
-1. `lower(parse(print(g))) == g` for every valid graph, ignoring layout.
+1. `semantic(lower(parse(print(g)))) == semantic(g)` for every valid graph, where
+   `semantic` drops identifiers, order and layout as defined in ADR 0005.
 2. `print(lower(parse(t)))` is idempotent under a second round.
 3. The parser never panics and always returns a tree plus diagnostics (fuzzed).
 
-**Identity across edits.** Lowering reconciles with the current graph: statements
-match nodes by handle first. An unmatched new handle that replaces an unmatched
-old one of the same kind at the same statement index is treated as a rename. The
-node therefore keeps its `id`, pin and position. The editor's rename action (F2)
-renames a handle and all its uses explicitly.
+**Identity across edits** is a separate contract: a block keeps its identity when
+its handle and kind stay, through an explicit rename (F2 or the inspector), or
+through an unambiguous rename (one block replaced by one equal block under a new
+name). Anything ambiguous creates a new block. See ADR 0005.
 
 ## Completion engine
 
@@ -188,29 +189,32 @@ semantic index powers hover (type and source of a name) and go to definition.
 The widget sits behind its own module boundary so that a custom text engine can
 replace `TextEdit` later if performance or features require it.
 
-**Code panel.** A resizable panel beside the board with tabs: *Scenario*,
-*Cleanup*, and *Body: <request>* opened from the inspector or a card. Inside a
-component, the tab shows the component. The panel width and state persist in
-settings.
+**Code panel.** A resizable panel beside the board with tabs: *Scenario*
+(including its `cleanup { }` block) and *Body: <request>* opened from the inspector
+or a card. A body tab is a view of the scenario's code, not a separate document.
+Inside a component, the tab shows the component. The panel width and state persist
+in settings.
 
 **Small fields.** URL, header and query fields use the completion engine in
 template mode. Their expand button opens the field as a panel tab.
 
 ## Live synchronisation
 
-- **Code → diagram.** 250 ms after the last keystroke the text is parsed, lowered
-  and validated. On success the reconciled graph replaces the board's graph as one
-  coalesced undo step, and unpositioned blocks are placed by auto-layout. On
-  failure the board keeps the last valid graph, shows a "code has errors" badge, and
-  the editor marks the problems.
-- **Diagram → code.** A board edit reprints the code. The cursor and scroll are
-  anchored to the statement under the cursor (by handle) and restored after the
-  reprint. While the code has errors, board editing is disabled with an
-  explanation. This avoids silently discarding the user's unfinished text.
+[ADR 0007](../decisions/0007-code-editing-state.md) holds the rules. In short:
+
+- Each scenario and component draft has one code buffer: Clean, Applied or
+  Invalid. Valid text is applied 250 ms after the last keystroke as one document
+  edit, and unpositioned blocks are placed by auto-layout.
+- An Invalid buffer is never reprinted. Its board is read-only until the code is
+  fixed or discarded, so unfinished text is never overwritten.
+- Keystrokes have their own text history, and applied changes are document
+  history. The focused panel decides which one Ctrl+Z uses.
+- Unfinished code is a draft. Drafts follow the user across scenarios, are saved
+  atomically beside the workspace, and are restored after closing or a crash.
+- Run executes the document. With invalid code it first asks whether to run the
+  last valid version.
 - **Selection.** The cursor's statement highlights its block; selecting a block
   highlights and reveals its statement.
-- **History.** One undo stack for both views, using the existing coalescing in
-  `editor.rs`.
 
 ## Auto-layout and wire routing
 
@@ -265,37 +269,57 @@ changes are verified with screenshots. Nothing is pushed.
 
 | # | Branch | Content | Depends on |
 | --- | --- | --- | --- |
-| M0 | `docs/code-canvas-plan` | This plan; [ADR 0004](../decisions/0004-document-format-v2.md), [0005](../decisions/0005-scenario-language.md), [0006](../decisions/0006-layout-and-wire-routing.md) | — |
+| M0 | `docs/code-canvas-plan` | This plan; [ADR 0004](../decisions/0004-document-format-v2.md), [0005](../decisions/0005-scenario-language.md), [0006](../decisions/0006-layout-and-wire-routing.md), [0007](../decisions/0007-code-editing-state.md) | — |
 | M1 | `feat/format-v2` | Model v2, validation, runner, storage, desktop adapted to Value/Export/templates/layout; v1 rejection; converter and converted fixtures; Export editing on the component board; the component builder creates Export blocks | M0 |
-| M2 | `feat/layout-routing` | `apiforge-layout`; auto-placement of unpositioned blocks, pinning, *Tidy up*; routed wires, bridges, spline mode, settings; benchmarks | M1 |
-| M3 | `feat/variable-proxies` | Variable mark in the inspector, Variables panel, proxies, nearest-proxy wiring, navigation | M1, M2 |
-| M4 | `feat/script-language` | `apiforge-script` lexer/parser/lowering/printer/diagnostics, property tests and fuzz target; `apiforge-cli fmt/check` | M1 |
-| M5 | `feat/code-editor` | Completion engine, `CodeEditor` widget, body tabs and modes, completion in small fields | M4 |
-| M6 | `feat/live-sync` | Code panel, both sync directions, reconciliation, selection sync, error state, unified history; `apiforge-cli run` | M2, M5 |
-| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, language reference for users and MCP, screenshot QA | M6 |
+| S1 | `feat/storage-safety` | STOR-01 from the [migration next steps](../migration/next-steps.md): single-writer lock, detection of external changes with a reload prompt, deliberate backup recovery; the drafts file of ADR 0007 under the same rules | M1 |
+| M4 | `feat/script-language` | `apiforge-script` lexer/parser/lowering/reconciliation/printer/diagnostics, property tests and fuzz target; `apiforge fmt/check/print/apply` | M1 |
+| M2 | `feat/layout-routing` | `apiforge-layout`; auto-placement of unpositioned blocks, pinning, *Tidy up*; routed wires with the ADR 0006 guarantees, bridges, spline mode, settings; benchmarks | M1 |
+| M5 | `feat/code-editor` | Completion engine, `CodeEditor` widget, body views and modes, completion in small fields | M4 |
+| M6 | `feat/live-sync` | Code panel, buffers, drafts and both histories (ADR 0007), both sync directions, selection sync; `apiforge run` | S1, M2, M5 |
+| M3 | `feat/variable-proxies` | Variable mark in the inspector, Variables panel, proxies, nearest-proxy wiring, navigation | M2 |
+| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, language reference for users and MCP, screenshot QA | M6, M3 |
 
-M2 and M4 are independent after M1 and can be developed in parallel worktrees.
-M3 can run alongside M4 and M5.
+S1 lands before anything extends what is stored, because M1 already changes the
+file format and ADR 0007 adds a second file. M4 and M2 are independent and can run
+in parallel worktrees after S1. Proxies (M3) and visual polish wait until the code
+path works end to end.
+
+**Open release work outside this plan** keeps its place in the
+[migration next steps](../migration/next-steps.md) and is scheduled between
+milestones, not dropped: the interrupted Live run journal (RUN-02) after M4,
+Windows execution evidence and assistive-technology acceptance (A11Y-01) as release
+gates before M7 completes. A milestone that touches these areas updates their
+evidence.
 
 ### Acceptance per milestone
 
-- **M1:** every converted run fixture replays to the same report, apart from kind
-  renames. Demos load and run. Importing v1 gives a clear error. Exports appear as
+- **M1:** every converted run fixture replays to the same report, apart from the
+  mechanical conversion and divergences listed with their ADR in `run_corpus.rs`. Demos load and run. Importing v1 gives a clear error. Exports appear as
   instance outputs and run correctly, including nested components.
-- **M2:** routing tests on generated boards confirm that no wire crosses a block
-  rectangle. Tests also cover deterministic output and bridges at every crossing.
-  Budgets hold. Pinned blocks never move without *Tidy up*. Screenshots cover both
-  styles.
+- **S1:** a second instance cannot write the workspace and says why. An external
+  change is detected before the next save and offered for reload. A corrupt main
+  file is recovered from the backup only after the user confirms. Tests cover
+  each case and the drafts file.
+- **M2:** on generated boards no final route intersects a card other than its own
+  ends, after nudging and smoothing (overlapping cards excepted, ADR 0006). Tests
+  also cover deterministic output and bridges at every crossing. Interactive frames
+  meet the drag budget. Pinned blocks never move without *Tidy up*. Screenshots
+  cover both styles.
 - **M3:** proxies survive save/load and do not appear in code. Deleting a variable
   removes its proxies in one undo step. A wire is never drawn twice for one consumer.
 - **M4:** the equivalence properties hold over generated graphs and every fixture.
-  Fuzzing finds no panics in a sustained run. Diagnostics include ranges and fixes
-  where obvious. `fmt` is idempotent.
+  Reconciliation keeps identities only by the ADR 0005 rules: tests include
+  insert-in-place, swapping two statements and replacing a request by a different
+  one, none of which may transfer an identity. Fuzzing finds no panics in a
+  sustained run. Diagnostics include ranges and fixes where obvious. `fmt` is
+  idempotent. The CLI follows its contract, including secrets only from the
+  environment or a file.
 - **M5:** completion covers each listed source in each mode. Secret values never
   appear. Keyboard-only use works. Large bodies (1 MB) stay responsive.
-- **M6:** a scripted session (type in code, edit on board, undo across both,
-  introduce and fix an error) leaves code and graph equivalent at every step.
-  Renames keep positions.
+- **M6:** a scripted session (type in code, edit on board, undo in both histories,
+  introduce an error, switch scenario and back, close and reopen, fix the error)
+  never loses text and leaves code and document equivalent whenever the buffer is
+  valid. Explicit renames keep positions. Run with invalid code asks first.
 - **M7:** budgets are measured and recorded. The language reference is complete
   enough that a model can write a valid scenario from it alone.
 
@@ -307,9 +331,11 @@ M3 can run alongside M4 and M5.
 - **Orthogonal routing quality.** Nudging and port ordering are where routers look
   amateurish. Mitigation: dedicated test boards with screenshot review, and the
   spline style as a fallback.
-- **Identity on edits.** Heuristic renames can misfire on large pastes.
-  Mitigation: match only on kind and index, provide explicit F2 rename, and keep
-  one undo step per sync.
+- **Identity on edits.** A rename typed by hand that is not unambiguous creates a
+  new block, which loses its position and pin. Mitigation: explicit rename (F2),
+  and *Tidy up* places the new block next to its neighbours.
+- **Read-only board while code is invalid.** It can surprise users. Mitigation: a
+  clear banner with *Show errors* and *Discard code changes*.
 - **Notes from comments.** Comments not attached to a statement move to the
   enclosing block. This is documented, and the formatter makes it visible
   immediately.

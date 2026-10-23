@@ -167,6 +167,11 @@ kinds. Report JSON is therefore not comparable with version-one reports.
   --check` covers only the semantic corpus afterwards. Each changed expectation in
   the run fixtures is reviewed and attributed to one of these decisions:
   kind names, handles, Value step messages, or encoded URL values.
+- A Value's expression is evaluated like any nested expression. An operand that
+  resolves to a missing value is therefore an error, where a version-one formula
+  block substituted the operand's default. The run corpus lists this divergence.
+- Parameter bindings gain an optional field `path`, so a field of a component input
+  (`param.product.id`) needs no extra selection block.
 - [ADR 0002](0002-workspace-storage.md) stays valid. A version-one workspace file
   and its backup are renamed to `workspace.v1.json` and `workspace.v1.json.bak`
   before the first save, so the first save never overwrites them. The application
