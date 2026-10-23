@@ -3,10 +3,13 @@
 use crate::v1;
 use apiforge_core::{
     format::{self as current, TemplatePart},
-    graph::{BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, condition_inputs},
-    handle::{handle_base, unique_handle},
+    graph::{
+        BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, condition_inputs,
+        create_node, export_position,
+    },
+    handle::{handle_base, is_valid_handle, unique_handle},
     js::js_key_order,
-    model::{NodeKind, Operator},
+    model::{NodeKind, Operator, ValueType},
     path::JsonPath,
     template,
 };
@@ -27,7 +30,27 @@ pub fn project(source: &v1::Project) -> current::Project {
         id: source.id.clone(),
         name: source.name.clone(),
         scenarios: source.scenarios.iter().map(scenario).collect(),
-        components: source.components.iter().map(component).collect(),
+        components: {
+            // Revisions of a component share a handle; other components get their own.
+            let mut handles: Vec<(String, String)> = Vec::new();
+            source
+                .components
+                .iter()
+                .map(|source| {
+                    let handle = match handles.iter().find(|(id, _)| id == &source.id) {
+                        Some((_, handle)) => handle.clone(),
+                        None => {
+                            let handle = unique_handle(&handle_base(&source.name), |taken| {
+                                handles.iter().any(|(_, handle)| handle == taken)
+                            });
+                            handles.push((source.id.clone(), handle.clone()));
+                            handle
+                        }
+                    };
+                    component(source, handle)
+                })
+                .collect()
+        },
         contracts: source
             .contracts
             .iter()
@@ -65,28 +88,50 @@ fn scenario(source: &v1::Scenario) -> current::Scenario {
     }
 }
 
-fn component(source: &v1::Component) -> current::Component {
+/// A component whose outputs become Export blocks named like the outputs, in a
+/// column to the right of its graph. Inner blocks give way to the output names.
+/// Output defaults, `required` and `exposed` had no effect on runs and are dropped.
+fn component(source: &v1::Component, handle: String) -> current::Component {
+    let mut handles: HashSet<String> = source
+        .outputs
+        .iter()
+        .map(|output| output.name.clone())
+        .collect();
+    let mut graph = graph(&source.graph, &mut handles);
+    let exports: Vec<current::Node> = source
+        .outputs
+        .iter()
+        .enumerate()
+        .map(|(index, output)| {
+            assert!(
+                is_valid_handle(&output.name),
+                "output `{}` of component {} is not a valid handle",
+                output.name,
+                source.id
+            );
+            let mut export =
+                create_node(NodeKind::Export, export_position(&graph.nodes, index), None);
+            export.id = format!("{}-export-{}", source.id, output.name);
+            export.handle = output.name.clone();
+            export.label = output.label.clone();
+            export.config.output_type =
+                (output.value_type != ValueType::Any).then_some(output.value_type);
+            export.config.contract_id = output.contract_id.clone();
+            export
+                .inputs
+                .insert(VALUE_INPUT.to_owned(), binding(&output.binding));
+            export
+        })
+        .collect();
+    graph.nodes.extend(exports);
     current::Component {
         id: source.id.clone(),
         revision: source.revision,
+        handle,
         name: source.name.clone(),
         description: source.description.clone(),
         inputs: source.inputs.iter().map(port).collect(),
-        outputs: source
-            .outputs
-            .iter()
-            .map(|output| current::OutputPort {
-                name: output.name.clone(),
-                value_type: output.value_type,
-                label: output.label.clone(),
-                contract_id: output.contract_id.clone(),
-                required: output.required,
-                default_value: optional_json(&output.default_value),
-                exposed: output.exposed,
-                binding: binding(&output.binding),
-            })
-            .collect(),
-        graph: graph(&source.graph, &mut HashSet::new()),
+        graph,
         action: source
             .action
             .as_ref()
@@ -573,6 +618,7 @@ fn config(source: &v1::NodeConfig) -> current::NodeConfig {
         variable: None,
         component_id: source.component_id.clone(),
         revision: source.revision,
+        output_type: None,
         predicates: None,
         match_mode: source.match_mode,
     }

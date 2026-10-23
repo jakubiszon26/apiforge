@@ -36,6 +36,7 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
         NodeKind::If | NodeKind::Assert => whole("actual"),
         NodeKind::Condition => whole(&condition_inputs(1).0),
         NodeKind::Request => whole("body"),
+        NodeKind::Export => whole(VALUE_INPUT),
         NodeKind::Value => match node.inputs.get(VALUE_INPUT) {
             Some(Binding::Object { fields }) => fields
                 .keys()

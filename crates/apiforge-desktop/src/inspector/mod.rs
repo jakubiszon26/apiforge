@@ -20,7 +20,7 @@ use apiforge_core::{
         output_ports, predicate,
     },
     handle::is_valid_handle,
-    model::{BodyFormat, Branch, Match, NodeKind, Predicate},
+    model::{BodyFormat, Branch, Match, NodeKind, Predicate, ValueType},
     run::{RunResult, StepResult},
     template_text::{Scope, print_template},
 };
@@ -193,6 +193,23 @@ impl Inspector {
             }
             NodeKind::Request => request(ui, id, context, node),
             NodeKind::Assert => check(ui, id, node),
+            NodeKind::Export => {
+                widgets::field_label(ui, "Output type");
+                let mut value_type = node.config.output_type.unwrap_or(ValueType::Any);
+                if fields::type_combo(ui, id.with("output-type"), &mut value_type) {
+                    node.config.output_type = (value_type != ValueType::Any).then_some(value_type);
+                }
+                contract_combo(
+                    ui,
+                    id.with("output-contract"),
+                    context,
+                    &mut node.config.contract_id,
+                );
+                widgets::hint(
+                    ui,
+                    "Steps using this component read the value as an output named like this block in code.",
+                );
+            }
             NodeKind::Condition => {}
             NodeKind::Component => {
                 let definition = component_definition(context.project, node);
@@ -867,27 +884,36 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
     );
 }
 
+/// Chooses a named data contract of the project, or none.
+fn contract_combo(ui: &mut Ui, id: Id, context: &Context<'_>, contract: &mut Option<String>) {
+    widgets::field_label(ui, "Data contract");
+    let selected = contract
+        .as_ref()
+        .and_then(|id| {
+            context
+                .project
+                .contracts
+                .iter()
+                .find(|candidate| &candidate.id == id)
+        })
+        .map_or("No named contract", |contract| contract.name.as_str());
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(selected)
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
+            ui.selectable_value(contract, None, "No named contract");
+            for candidate in &context.project.contracts {
+                ui.selectable_value(contract, Some(candidate.id.clone()), &candidate.name);
+            }
+        });
+}
+
 fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     ui.add_space(8.0);
     egui::CollapsingHeader::new(RichText::new("Contract and sample response").strong())
         .id_salt(id.with("samples"))
         .show(ui, |ui| {
-            widgets::field_label(ui, "Data contract");
-            let mut contract = node.config.contract_id.clone();
-            let selected = contract
-                .as_ref()
-                .and_then(|id| context.project.contracts.iter().find(|candidate| &candidate.id == id))
-                .map_or("No named contract", |contract| contract.name.as_str());
-            egui::ComboBox::from_id_salt(id.with("contract"))
-                .selected_text(selected)
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut contract, None, "No named contract");
-                    for candidate in &context.project.contracts {
-                        ui.selectable_value(&mut contract, Some(candidate.id.clone()), &candidate.name);
-                    }
-                });
-            node.config.contract_id = contract;
+            contract_combo(ui, id.with("contract"), context, &mut node.config.contract_id);
             widgets::field_label(ui, "Sample HTTP status");
             let mut status = node.config.sample_status.unwrap_or(200);
             if ui.add(egui::DragValue::new(&mut status).range(100..=599)).changed() {

@@ -57,9 +57,6 @@ impl SettingsChange {
             for port in &mut component.inputs {
                 clear(&mut port.contract_id);
             }
-            for port in &mut component.outputs {
-                clear(&mut port.contract_id);
-            }
             if let Some(action) = &mut component.action {
                 clear(&mut action.contract_id);
             }
@@ -549,9 +546,6 @@ mod tests {
                 node.config.contract_id = Some(removed.clone());
             }
             for port in &mut component.inputs {
-                port.contract_id = Some(removed.clone());
-            }
-            for port in &mut component.outputs {
                 port.contract_id = Some(removed.clone());
             }
             if let Some(action) = &mut component.action {

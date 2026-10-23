@@ -223,6 +223,7 @@
         {
           "id": "double",
           "revision": 1,
+          "handle": "double",
           "name": "Double",
           "description": "",
           "inputs": [
@@ -230,18 +231,6 @@
               "name": "amount",
               "type": "number",
               "required": true
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "type": "number",
-              "binding": {
-                "kind": "reference",
-                "nodeId": "calc",
-                "port": "value",
-                "path": ""
-              }
             }
           ],
           "graph": {
@@ -271,6 +260,26 @@
                   }
                 },
                 "config": {}
+              },
+              {
+                "id": "double-export-result",
+                "handle": "result",
+                "kind": "export",
+                "position": {
+                  "x": 340.0,
+                  "y": 80.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "calc",
+                    "port": "value",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "type": "number"
+                }
               }
             ],
             "edges": []
@@ -279,6 +288,7 @@
         {
           "id": "double",
           "revision": 2,
+          "handle": "double",
           "name": "Double",
           "description": "",
           "inputs": [
@@ -286,18 +296,6 @@
               "name": "amount",
               "type": "number",
               "required": true
-            }
-          ],
-          "outputs": [
-            {
-              "name": "result",
-              "type": "number",
-              "binding": {
-                "kind": "reference",
-                "nodeId": "calc",
-                "port": "value",
-                "path": ""
-              }
             }
           ],
           "graph": {
@@ -327,6 +325,26 @@
                   }
                 },
                 "config": {}
+              },
+              {
+                "id": "double-export-result",
+                "handle": "result",
+                "kind": "export",
+                "position": {
+                  "x": 340.0,
+                  "y": 80.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "calc",
+                    "port": "value",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "type": "number"
+                }
               }
             ],
             "edges": []
@@ -335,31 +353,10 @@
         {
           "id": "create-then-fail",
           "revision": 1,
+          "handle": "create_then_fail",
           "name": "Create then fail",
           "description": "",
           "inputs": [],
-          "outputs": [
-            {
-              "name": "id",
-              "type": "string",
-              "binding": {
-                "kind": "reference",
-                "nodeId": "create",
-                "port": "body",
-                "path": "id"
-              }
-            },
-            {
-              "name": "missing",
-              "type": "any",
-              "binding": {
-                "kind": "reference",
-                "nodeId": "broken",
-                "port": "value",
-                "path": ""
-              }
-            }
-          ],
           "graph": {
             "nodes": [
               {
@@ -413,6 +410,44 @@
                   }
                 },
                 "config": {}
+              },
+              {
+                "id": "create-then-fail-export-id",
+                "handle": "id",
+                "kind": "export",
+                "position": {
+                  "x": 340.0,
+                  "y": 80.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "id"
+                  }
+                },
+                "config": {
+                  "type": "string"
+                }
+              },
+              {
+                "id": "create-then-fail-export-missing",
+                "handle": "missing",
+                "kind": "export",
+                "position": {
+                  "x": 340.0,
+                  "y": 220.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "broken",
+                    "port": "value",
+                    "path": ""
+                  }
+                },
+                "config": {}
               }
             ],
             "edges": []
@@ -421,6 +456,7 @@
         {
           "id": "branching",
           "revision": 1,
+          "handle": "branching",
           "name": "Branching",
           "description": "",
           "inputs": [
@@ -428,18 +464,6 @@
               "name": "flag",
               "type": "boolean",
               "defaultValue": false
-            }
-          ],
-          "outputs": [
-            {
-              "name": "side",
-              "type": "any",
-              "binding": {
-                "kind": "reference",
-                "nodeId": "inner-no",
-                "port": "body",
-                "path": "side"
-              }
             }
           ],
           "graph": {
@@ -524,6 +548,24 @@
                     "side": "no"
                   }
                 }
+              },
+              {
+                "id": "branching-export-side",
+                "handle": "side",
+                "kind": "export",
+                "position": {
+                  "x": 340.0,
+                  "y": 80.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "inner-no",
+                    "port": "body",
+                    "path": "side"
+                  }
+                },
+                "config": {}
               }
             ],
             "edges": [
@@ -550,10 +592,10 @@
         {
           "id": "failing",
           "revision": 1,
+          "handle": "failing",
           "name": "Failing",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -627,6 +669,19 @@
             "outputs": {
               "value": 6
             }
+          },
+          {
+            "nodeId": "double-export-result",
+            "handle": "result",
+            "kind": "export",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "value": 6
+            },
+            "outputs": {
+              "value": 6
+            }
           }
         ]
       },
@@ -648,6 +703,19 @@
             "nodeId": "calc",
             "handle": "calc",
             "kind": "value",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "value": 30
+            },
+            "outputs": {
+              "value": 30
+            }
+          },
+          {
+            "nodeId": "double-export-result",
+            "handle": "result",
+            "kind": "export",
             "status": "passed",
             "phase": "main",
             "inputs": {
@@ -713,6 +781,28 @@
             "handle": "broken",
             "kind": "value",
             "status": "error",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "nodeId": "create-then-fail-export-id",
+            "handle": "id",
+            "kind": "export",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "value": "new"
+            },
+            "outputs": {
+              "value": "new"
+            }
+          },
+          {
+            "nodeId": "create-then-fail-export-missing",
+            "handle": "missing",
+            "kind": "export",
+            "status": "blocked",
             "phase": "main",
             "inputs": {},
             "outputs": {}
@@ -799,6 +889,19 @@
               "method": "GET",
               "url": "https://api.example.test/v1/inner/no",
               "headers": {}
+            }
+          },
+          {
+            "nodeId": "branching-export-side",
+            "handle": "side",
+            "kind": "export",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "value": "no"
+            },
+            "outputs": {
+              "value": "no"
             }
           }
         ]

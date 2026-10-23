@@ -154,7 +154,7 @@ pub fn block_color(block: Block) -> Color32 {
             Color32::from_rgb(77, 138, 97)
         }
         Block::Value | Block::Object => Color32::from_rgb(152, 110, 177),
-        Block::Component | Block::Variable => Color32::from_rgb(188, 105, 59),
+        Block::Component | Block::Variable | Block::Export => Color32::from_rgb(188, 105, 59),
     }
 }
 
@@ -182,6 +182,18 @@ pub fn block_icon(painter: &egui::Painter, rect: egui::Rect, block: Block, color
                     .collect(),
                 stroke,
             ));
+        }
+        Block::Export => {
+            // An arrow leaving a box: the value goes out of the component.
+            let box_rect = egui::Rect::from_center_size(
+                center + egui::vec2(-radius * 0.25, radius * 0.25),
+                egui::vec2(radius * 1.3, radius * 1.3),
+            );
+            painter.rect_stroke(box_rect, 1.0, stroke, egui::StrokeKind::Middle);
+            let tip = center + egui::vec2(radius, -radius);
+            painter.line_segment([center, tip], stroke);
+            painter.line_segment([tip, tip + egui::vec2(-radius * 0.6, 0.0)], stroke);
+            painter.line_segment([tip, tip + egui::vec2(0.0, radius * 0.6)], stroke);
         }
         Block::Component => {
             let points: Vec<_> = (0..6)

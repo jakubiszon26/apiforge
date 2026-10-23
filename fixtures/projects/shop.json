@@ -231,6 +231,7 @@
     {
       "id": "get-product",
       "revision": 1,
+      "handle": "produkt",
       "name": "Produkt",
       "description": "Pobierz produkt po ID wraz z promocją.",
       "inputs": [
@@ -241,20 +242,6 @@
           "required": true,
           "defaultValue": 123,
           "exposed": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "product",
-          "type": "object",
-          "label": "Produkt",
-          "contractId": "Product",
-          "binding": {
-            "kind": "reference",
-            "nodeId": "fetch",
-            "port": "body",
-            "path": ""
-          }
         }
       ],
       "graph": {
@@ -301,6 +288,28 @@
                 }
               }
             }
+          },
+          {
+            "id": "get-product-export-product",
+            "handle": "product",
+            "label": "Produkt",
+            "kind": "export",
+            "position": {
+              "x": 420.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "value": {
+                "kind": "reference",
+                "nodeId": "fetch",
+                "port": "body",
+                "path": ""
+              }
+            },
+            "config": {
+              "contractId": "Product",
+              "type": "object"
+            }
           }
         ],
         "edges": []
@@ -309,6 +318,7 @@
     {
       "id": "active-promotion",
       "revision": 1,
+      "handle": "aktywna_promocja",
       "name": "Aktywna promocja",
       "description": "Sprawdź, czy produkt ma aktywną promocję.",
       "inputs": [
@@ -318,17 +328,6 @@
           "label": "Produkt",
           "contractId": "Product",
           "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "product",
-          "type": "object",
-          "contractId": "Product",
-          "binding": {
-            "kind": "parameter",
-            "name": "product"
-          }
         }
       ],
       "graph": {
@@ -379,6 +378,25 @@
                 }
               ]
             }
+          },
+          {
+            "id": "active-promotion-export-product",
+            "handle": "product",
+            "kind": "export",
+            "position": {
+              "x": 740.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "value": {
+                "kind": "parameter",
+                "name": "product"
+              }
+            },
+            "config": {
+              "contractId": "Product",
+              "type": "object"
+            }
           }
         ],
         "edges": []
@@ -392,6 +410,7 @@
     {
       "id": "product-cart",
       "revision": 1,
+      "handle": "dodaj_do_koszyka",
       "name": "Dodaj do koszyka",
       "description": "Utwórz koszyk z produktem i pobierz jego wyliczoną cenę.",
       "inputs": [
@@ -408,20 +427,6 @@
           "required": true,
           "defaultValue": 1,
           "exposed": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "cart",
-          "type": "object",
-          "label": "Koszyk",
-          "contractId": "Cart",
-          "binding": {
-            "kind": "reference",
-            "nodeId": "read",
-            "port": "body",
-            "path": ""
-          }
         }
       ],
       "graph": {
@@ -542,6 +547,28 @@
                 "quantity": 1,
                 "total": 80
               }
+            }
+          },
+          {
+            "id": "product-cart-export-cart",
+            "handle": "cart",
+            "label": "Koszyk",
+            "kind": "export",
+            "position": {
+              "x": 1290.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "value": {
+                "kind": "reference",
+                "nodeId": "read",
+                "port": "body",
+                "path": ""
+              }
+            },
+            "config": {
+              "contractId": "Cart",
+              "type": "object"
             }
           }
         ],

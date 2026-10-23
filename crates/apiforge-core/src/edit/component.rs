@@ -2,14 +2,15 @@
 //!
 //! The builder proposes a public argument for every input leaf fed from outside the
 //! selection and one output per port of the selection; the user edits the
-//! [`ComponentDraft`] and [`materialize_component`] turns it into a definition. The
-//! scenario itself is never changed.
-use super::EditError;
+//! [`ComponentDraft`] and [`materialize_component`] turns it into a definition whose
+//! outputs are Export blocks. The scenario itself is never changed.
+use super::{EditError, unique_id};
 use crate::{
-    format::{Binding, Component, ComponentAction, Graph, OptionalJson, OutputPort, Port, Project},
-    graph::{input_ports, output_ports},
+    format::{Binding, Component, ComponentAction, Graph, Node, OptionalJson, Port, Project},
+    graph::{VALUE_INPUT, create_node, export_position, input_ports, output_ports},
+    handle::{handle_base, is_valid_handle, unique_handle},
     js,
-    model::ValueType,
+    model::{NodeKind, ValueType},
 };
 use serde_json::Value;
 use std::{
@@ -114,7 +115,9 @@ pub enum DraftError {
     EmptyName(DraftSection),
     #[error("{0}: names must be unique.")]
     DuplicateName(DraftSection),
-    #[error("{0}: use letters without diacritics, digits, _ or -, and start with a letter or _.")]
+    #[error(
+        "{0}: use letters without diacritics, digits and _, start with a letter or _, and avoid reserved words."
+    )]
     InvalidName(DraftSection),
     #[error("Choose an available action argument.")]
     UnknownAction,
@@ -307,8 +310,9 @@ pub fn initialize_inputs(
     rows
 }
 
-/// Proposes outputs: those of the revised definition, or every output port of the
-/// selection with only the first port of the last selected block enabled.
+/// Proposes outputs: the Export blocks of the revised definition, or every output
+/// port of the selection with only the first port of the last selected block
+/// enabled.
 pub fn initialize_outputs(
     graph: &Graph,
     selected: &HashSet<&str>,
@@ -317,34 +321,38 @@ pub fn initialize_outputs(
 ) -> Vec<OutputRow> {
     if let Some(initial) = initial {
         return initial
-            .outputs
+            .graph
+            .nodes
             .iter()
-            .enumerate()
-            .map(|(index, output)| {
-                let (node_id, port, path) = match &output.binding {
-                    Binding::Reference {
+            .filter(|node| node.kind == NodeKind::Export)
+            .map(|export| {
+                let value = export.inputs.get(VALUE_INPUT);
+                let (node_id, port, path) = match value {
+                    Some(Binding::Reference {
                         node_id,
                         port,
                         path,
-                    } => (node_id.clone(), port.clone(), path.clone()),
+                    }) => (node_id.clone(), port.clone(), path.clone()),
                     _ => Default::default(),
                 };
                 OutputRow {
-                    key: format!("output-{index}"),
+                    key: export.id.clone(),
                     enabled: true,
-                    name: output.name.clone(),
-                    label: output.label.clone(),
-                    value_type: output.value_type,
-                    contract_id: output.contract_id.clone(),
+                    name: export.handle.clone(),
+                    label: export.label.clone(),
+                    value_type: export.config.output_type.unwrap_or(ValueType::Any),
+                    contract_id: export.config.contract_id.clone(),
                     node_id,
                     port,
                     path,
-                    original_binding: Some(output.binding.clone()),
+                    original_binding: value.cloned(),
                 }
             })
             .collect();
     }
-    let nodes: Vec<_> = selected_nodes(graph, selected).collect();
+    let nodes: Vec<_> = selected_nodes(graph, selected)
+        .filter(|node| node.kind != NodeKind::Export)
+        .collect();
     let last = nodes.len().saturating_sub(1);
     nodes
         .iter()
@@ -369,13 +377,10 @@ pub fn initialize_outputs(
         .collect()
 }
 
-/// Public names: an ASCII letter or `_`, then ASCII letters, digits, `_` or `-`.
+/// Public names are written in scenario code (`param.name`, `cart.name`), so they
+/// follow the rules of handles.
 fn valid_public_name(name: &str) -> bool {
-    let mut characters = name.chars();
-    characters
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-        && characters.all(|next| next.is_ascii_alphanumeric() || matches!(next, '_' | '-'))
+    is_valid_handle(name)
 }
 
 fn check_names<'a>(
@@ -468,7 +473,8 @@ pub fn materialize_component(
     let outputs = draft.outputs.iter().filter(|row| row.enabled);
 
     let mut nodes = Vec::new();
-    for node in selected_nodes(graph, selected) {
+    // Export blocks are rebuilt from the output rows below.
+    for node in selected_nodes(graph, selected).filter(|node| node.kind != NodeKind::Export) {
         let mut node = node.clone();
         for row in &inputs {
             let name = js::trim(&row.name);
@@ -507,8 +513,21 @@ pub fn materialize_component(
             _ => None,
         })
         .collect();
-    let outputs = outputs
-        .map(|row| {
+    // Inner blocks give way to output names, which are the Exports' handles.
+    let output_names: HashSet<String> = outputs
+        .clone()
+        .map(|row| js::trim(&row.name).to_owned())
+        .collect();
+    let mut handles: HashSet<String> = output_names.clone();
+    for node in &mut nodes {
+        if handles.contains(&node.handle) {
+            node.handle = unique_handle(&node.handle, |handle| handles.contains(handle));
+        }
+        handles.insert(node.handle.clone());
+    }
+    let exports: Vec<Node> = outputs
+        .enumerate()
+        .map(|(index, row)| {
             let binding = match &row.original_binding {
                 Some(binding) if !matches!(binding, Binding::Reference { .. }) => binding.clone(),
                 _ => Binding::reference(&row.node_id, &row.port, &row.path),
@@ -526,18 +545,18 @@ pub fn materialize_component(
                     })
                 })
                 .unwrap_or(binding);
-            OutputPort {
-                name: js::trim(&row.name).to_owned(),
-                value_type: row.value_type,
-                label: row.label.clone(),
-                contract_id: non_empty(&row.contract_id),
-                required: None,
-                default_value: OptionalJson::Missing,
-                exposed: None,
-                binding,
-            }
+            let mut export = create_node(NodeKind::Export, export_position(&nodes, index), None);
+            export.id = unique_id("node", |id| nodes.iter().any(|node| node.id == id));
+            export.handle = js::trim(&row.name).to_owned();
+            export.label = row.label.clone();
+            export.config.output_type =
+                (row.value_type != ValueType::Any).then_some(row.value_type);
+            export.config.contract_id = non_empty(&row.contract_id);
+            export.inputs.insert(VALUE_INPUT.to_owned(), binding);
+            export
         })
         .collect();
+    nodes.extend(exports);
 
     let action = draft.action.as_ref().and_then(|action| {
         inputs
@@ -555,6 +574,10 @@ pub fn materialize_component(
             |initial| initial.id.clone(),
         ),
         revision: initial.map_or(1, |initial| initial.revision),
+        handle: initial.map_or_else(
+            || handle_base(js::trim(&draft.name)),
+            |initial| initial.handle.clone(),
+        ),
         name: js::trim(&draft.name).to_owned(),
         description: js::trim(&draft.description).to_owned(),
         inputs: inputs
@@ -572,7 +595,6 @@ pub fn materialize_component(
                 exposed: Some(row.exposed),
             })
             .collect(),
-        outputs,
         graph: Graph {
             nodes,
             edges: graph
@@ -601,6 +623,15 @@ pub fn add_component(
     revision_of: Option<&str>,
 ) -> Result<Project, EditError> {
     let mut saved = component.clone();
+    // A new component takes a handle no other component uses.
+    if revision_of.is_none() {
+        saved.handle = unique_handle(&saved.handle, |handle| {
+            project
+                .components
+                .iter()
+                .any(|other| other.id != saved.id && other.handle == handle)
+        });
+    }
     if let Some(id) = revision_of {
         let latest = project
             .components

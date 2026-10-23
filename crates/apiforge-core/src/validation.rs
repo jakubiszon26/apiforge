@@ -158,9 +158,24 @@ pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
         json(&contract.sample, 0, path)?;
     }
     let mut revisions = HashSet::new();
+    // Revisions of one component share its handle; other components may not.
+    let mut component_handles: HashMap<&str, &str> = HashMap::new();
     for (index, component) in project.components.iter().enumerate() {
         let path = format!("{path}.components[{index}]");
         id(&component.id, &path)?;
+        require(
+            crate::handle::is_valid_handle(&component.handle),
+            &path,
+            "Invalid component handle",
+        )?;
+        require(
+            *component_handles
+                .entry(&component.handle)
+                .or_insert(&component.id)
+                == component.id,
+            &path,
+            "Duplicate component handle",
+        )?;
         text(&component.name, &path)?;
         text(&component.description, &path)?;
         require(
@@ -169,41 +184,12 @@ pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
             "Duplicate or invalid component revision",
         )?;
         ports(&component.inputs, &path)?;
-        require(component.outputs.len() <= 100, &path, "Too many outputs")?;
-        unique(
-            component.outputs.iter().map(|output| output.name.as_str()),
-            &path,
-        )?;
         let parameters: HashSet<&str> = component
             .inputs
             .iter()
             .map(|input| input.name.as_str())
             .collect();
-        graph(&component.graph, &[], &parameters, project, &path)?;
-        let nodes: HashMap<&str, &Node> = component
-            .graph
-            .nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node))
-            .collect();
-        for output in &component.outputs {
-            if let Some(label) = &output.label {
-                text(label, &path)?;
-            }
-            if let Some(contract) = &output.contract_id {
-                id(contract, &path)?;
-            }
-            optional_json(&output.default_value, &path)?;
-            binding(
-                &output.binding,
-                &nodes,
-                &parameters,
-                project,
-                0,
-                &mut 0,
-                &path,
-            )?;
-        }
+        graph(&component.graph, &[], &parameters, project, true, &path)?;
         if let Some(action) = &component.action {
             require(
                 parameters.contains(action.input.as_str()),
@@ -234,6 +220,7 @@ pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
             &[],
             &parameters,
             project,
+            false,
             &format!("{path}.graph"),
         )?;
         graph(
@@ -241,6 +228,7 @@ pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
             &scenario.graph.nodes,
             &parameters,
             project,
+            false,
             &format!("{path}.cleanup"),
         )?;
     }
@@ -298,11 +286,14 @@ fn output_exists(node: &Node, port: &str, project: &Project) -> bool {
         NodeKind::If | NodeKind::Assert | NodeKind::Condition => {
             ["value", "passed"].contains(&port)
         }
-        NodeKind::Component => project.components.iter().any(|component| {
-            Some(&component.id) == node.config.component_id.as_ref()
-                && Some(component.revision) == node.config.revision
-                && component.outputs.iter().any(|output| output.name == port)
-        }),
+        NodeKind::Component => {
+            crate::graph::component_definition(project, node).is_some_and(|component| {
+                crate::graph::component_outputs(component)
+                    .iter()
+                    .any(|output| output.name == port)
+            })
+        }
+        NodeKind::Export => false,
         _ => port == "value",
     }
 }
@@ -401,8 +392,14 @@ fn graph(
     external: &[Node],
     parameters: &HashSet<&str>,
     project: &Project,
+    in_component: bool,
     path: &str,
 ) -> Result {
+    require(
+        in_component || graph.nodes.iter().all(|node| node.kind != NodeKind::Export),
+        path,
+        "Export blocks belong in components",
+    )?;
     require(
         graph.nodes.len() <= 200 && graph.edges.len() <= 1000,
         path,

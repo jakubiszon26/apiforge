@@ -6,8 +6,8 @@
 
 use crate::{
     format::{
-        Binding, Component, ConditionPredicate, Graph, Node, NodeConfig, OptionalJson, OutputPort,
-        Port, Position, Project,
+        Binding, Component, ConditionPredicate, Graph, Node, NodeConfig, OptionalJson, Port,
+        Position, Project,
     },
     ids::new_id,
     model::{Branch, HttpMethod, NodeKind, Predicate, ValueType},
@@ -31,7 +31,7 @@ pub const QUERY_INPUT: &str = "query";
 pub const BODY_INPUT: &str = "body";
 
 impl NodeKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Trigger,
         Self::If,
         Self::Request,
@@ -39,6 +39,7 @@ impl NodeKind {
         Self::Assert,
         Self::Condition,
         Self::Component,
+        Self::Export,
     ];
 
     /// Default node name and library title.
@@ -51,6 +52,7 @@ impl NodeKind {
             Self::Assert => "Comparison",
             Self::Condition => "Data condition",
             Self::Component => "Component",
+            Self::Export => "Export",
         }
     }
 
@@ -63,6 +65,7 @@ impl NodeKind {
             Self::Assert => "Check the received result",
             Self::Condition => "Check scenario conditions",
             Self::Component => "Your own set of steps",
+            Self::Export => "An output of this component",
         }
     }
 
@@ -76,6 +79,7 @@ impl NodeKind {
             Self::Assert => "check",
             Self::Condition => "guard",
             Self::Component => "component_step",
+            Self::Export => "output",
         }
     }
 
@@ -130,18 +134,24 @@ impl Port {
     }
 }
 
-impl From<&OutputPort> for Port {
-    fn from(output: &OutputPort) -> Self {
-        Self {
-            name: output.name.clone(),
-            value_type: output.value_type,
-            label: output.label.clone(),
-            contract_id: output.contract_id.clone(),
-            required: output.required,
-            default_value: output.default_value.clone(),
-            exposed: output.exposed,
-        }
-    }
+/// The outputs of a component: one per Export node of its graph, in graph order,
+/// named by the Export's handle.
+pub fn component_outputs(component: &Component) -> Vec<Port> {
+    component
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Export)
+        .map(|node| {
+            let mut port = Port::new(
+                node.handle.clone(),
+                node.config.output_type.unwrap_or(ValueType::Any),
+            );
+            port.label = node.label.clone();
+            port.contract_id = node.config.contract_id.clone();
+            port
+        })
+        .collect()
 }
 
 /// The component revision an instance node is pinned to.
@@ -189,6 +199,16 @@ pub fn condition_predicates(node: &Node) -> Vec<Predicate> {
 pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
         NodeKind::Trigger => vec![],
+        NodeKind::Export => {
+            let mut port = Port::new(
+                VALUE_INPUT,
+                node.config.output_type.unwrap_or(ValueType::Any),
+            )
+            .labelled("Output value");
+            port.contract_id = node.config.contract_id.clone();
+            port.exposed = Some(true);
+            vec![port]
+        }
         NodeKind::Value => {
             // A missing result is not an error: dependants report their own input.
             let mut port = Port::new(VALUE_INPUT, ValueType::Any)
@@ -249,9 +269,9 @@ pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
 
 pub fn output_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
-        NodeKind::Trigger => vec![],
+        NodeKind::Trigger | NodeKind::Export => vec![],
         NodeKind::Component => component_definition(project, node)
-            .map(|component| component.outputs.iter().map(Port::from).collect())
+            .map(component_outputs)
             .unwrap_or_default(),
         NodeKind::Request => {
             let mut body = Port::new("body", ValueType::Any).labelled("Response");
@@ -603,10 +623,10 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
             node.inputs.insert(actual, literal(Value::Null));
             node.inputs.insert(expected, literal(Value::Null));
         }
-        NodeKind::Trigger | NodeKind::Component => {}
+        NodeKind::Trigger | NodeKind::Component | NodeKind::Export => {}
     }
     if let Some(component) = component {
-        node.handle = crate::handle::handle_base(&component.name);
+        node.handle = component.handle.clone();
         node.config = NodeConfig {
             component_id: Some(component.id.clone()),
             revision: Some(component.revision),
@@ -634,6 +654,20 @@ pub fn create_operator_node(operator: Operator, position: Position) -> Node {
     let mut node = create_value_node(Binding::expression(operator), position);
     node.handle = crate::handle::handle_base(operator.label());
     node
+}
+
+/// Where the `index`-th Export block of a component goes: in a column to the right
+/// of `nodes`.
+pub fn export_position(nodes: &[Node], index: usize) -> Position {
+    let x = nodes
+        .iter()
+        .map(|node| node.position.x)
+        .reduce(f64::max)
+        .map_or(100.0, |right| right + 340.0);
+    Position {
+        x,
+        y: 80.0 + index as f64 * 140.0,
+    }
 }
 
 /// A position to the right of every node, clear of existing hit targets.

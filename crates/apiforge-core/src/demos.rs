@@ -9,10 +9,9 @@
 use crate::{
     format::{
         Binding, Component, ComponentAction, ConditionPredicate, Contract, Environment, Graph,
-        Node, NodeConfig, OptionalJson, OrderEdge, OutputPort, Port, Position, Project, Scenario,
-        TemplatePart,
+        Node, NodeConfig, OptionalJson, OrderEdge, Port, Position, Project, Scenario, TemplatePart,
     },
-    graph::create_node,
+    graph::{create_node, export_position},
     handle::handle_base,
     ids::new_id,
     model::{Branch, ErrorPolicy, HttpMethod, NodeKind, Predicate, ValueType},
@@ -73,11 +72,11 @@ pub fn empty_project() -> Project {
 /// checks the promotion and a cart component, followed by price assertions and a
 /// cleanup phase that deletes the cart.
 pub fn shop_project() -> Project {
-    let product_component = Component {
-        id: "get-product".into(),
+    let product_component = Definition {
+        id: "get-product",
         revision: 1,
-        name: "Product".into(),
-        description: "Fetch a product by ID together with its promotion.".into(),
+        name: "Product",
+        description: "Fetch a product by ID together with its promotion.",
         inputs: vec![Port {
             default_value: OptionalJson::Present(json!(123)),
             exposed: Some(true),
@@ -102,12 +101,13 @@ pub fn shop_project() -> Project {
             at(80.0, 80.0),
         )]),
         action: None,
-    };
-    let active_component = Component {
-        id: "active-promotion".into(),
+    }
+    .build();
+    let active_component = Definition {
+        id: "active-promotion",
         revision: 1,
-        name: "Active promotion".into(),
-        description: "Check that the product has an active promotion.".into(),
+        name: "Active promotion",
+        description: "Check that the product has an active promotion.",
         inputs: vec![
             contract_port("product", "Product")
                 .labelled("Product")
@@ -145,13 +145,14 @@ pub fn shop_project() -> Project {
             ),
         ]),
         action: Some(object_action("product", "Product")),
-    };
+    }
+    .build();
     let cart_sample = json!({ "id": "sample-cart", "productId": 123, "quantity": 1, "total": 80 });
-    let cart_component = Component {
-        id: "product-cart".into(),
+    let cart_component = Definition {
+        id: "product-cart",
         revision: 1,
-        name: "Add to cart".into(),
-        description: "Create a cart with the product and fetch its calculated price.".into(),
+        name: "Add to cart",
+        description: "Create a cart with the product and fetch its calculated price.",
         inputs: vec![
             contract_port("product", "Product").required(true),
             Port {
@@ -205,7 +206,8 @@ pub fn shop_project() -> Project {
             ),
         ]),
         action: Some(object_action("product", "Product")),
-    };
+    }
+    .build();
 
     let nodes = vec![
         component_node(
@@ -320,11 +322,11 @@ pub fn shop_project() -> Project {
 /// a ticket lookup component and an action that checks the ticket status.
 pub fn tickets_project() -> Project {
     let sample = ticket_sample();
-    let component = Component {
-        id: "get-ticket".into(),
+    let component = Definition {
+        id: "get-ticket",
         revision: 1,
-        name: "Ticket".into(),
-        description: "Read a ticket by its identifier.".into(),
+        name: "Ticket",
+        description: "Read a ticket by its identifier.",
         inputs: vec![Port {
             default_value: OptionalJson::Present(json!(7)),
             exposed: Some(true),
@@ -347,12 +349,13 @@ pub fn tickets_project() -> Project {
             at(80.0, 80.0),
         )]),
         action: None,
-    };
-    let action = Component {
-        id: "ticket-open".into(),
+    }
+    .build();
+    let action = Definition {
+        id: "ticket-open",
         revision: 1,
-        name: "Check open ticket".into(),
-        description: "Check the ticket status.".into(),
+        name: "Check open ticket",
+        description: "Check the ticket status.",
         inputs: vec![contract_port("ticket", "Ticket").required(true)],
         outputs: vec![output(
             "passed",
@@ -381,7 +384,8 @@ pub fn tickets_project() -> Project {
             ),
         ]),
         action: Some(object_action("ticket", "Ticket")),
-    };
+    }
+    .build();
     let nodes = vec![
         component_node(
             "ticket",
@@ -872,21 +876,73 @@ fn contract_port(name: &str, contract_id: &str) -> Port {
     }
 }
 
-fn output(
-    name: &str,
-    label: Option<&str>,
+/// A component of a demo: its outputs become Export blocks to the right of its
+/// graph, and its handle derives from its name.
+struct Definition {
+    id: &'static str,
+    revision: u32,
+    name: &'static str,
+    description: &'static str,
+    inputs: Vec<Port>,
+    outputs: Vec<Output>,
+    graph: Graph,
+    action: Option<ComponentAction>,
+}
+
+struct Output {
+    name: &'static str,
+    label: Option<&'static str>,
     value_type: ValueType,
-    contract_id: Option<&str>,
+    contract_id: Option<&'static str>,
     binding: Binding,
-) -> OutputPort {
-    OutputPort {
-        name: name.into(),
+}
+
+impl Definition {
+    fn build(self) -> Component {
+        let mut graph = self.graph;
+        let exports: Vec<Node> = self
+            .outputs
+            .into_iter()
+            .enumerate()
+            .map(|(index, output)| {
+                let mut export =
+                    create_node(NodeKind::Export, export_position(&graph.nodes, index), None);
+                export.id = format!("{}-export-{}", self.id, output.name);
+                export.handle = output.name.into();
+                export.label = output.label.map(Into::into);
+                export.config.output_type =
+                    (output.value_type != ValueType::Any).then_some(output.value_type);
+                export.config.contract_id = output.contract_id.map(Into::into);
+                export.inputs.insert("value".into(), output.binding);
+                export
+            })
+            .collect();
+        graph.nodes.extend(exports);
+        Component {
+            id: self.id.into(),
+            revision: self.revision,
+            handle: handle_base(self.name),
+            name: self.name.into(),
+            description: self.description.into(),
+            inputs: self.inputs,
+            graph,
+            action: self.action,
+        }
+    }
+}
+
+fn output(
+    name: &'static str,
+    label: Option<&'static str>,
+    value_type: ValueType,
+    contract_id: Option<&'static str>,
+    binding: Binding,
+) -> Output {
+    Output {
+        name,
+        label,
         value_type,
-        label: label.map(Into::into),
-        contract_id: contract_id.map(Into::into),
-        required: None,
-        default_value: OptionalJson::Missing,
-        exposed: None,
+        contract_id,
         binding,
     }
 }

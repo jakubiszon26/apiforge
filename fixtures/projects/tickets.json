@@ -91,6 +91,7 @@
     {
       "id": "get-ticket",
       "revision": 1,
+      "handle": "zgloszenie",
       "name": "Zgłoszenie",
       "description": "Odczytaj zgłoszenie po identyfikatorze.",
       "inputs": [
@@ -100,19 +101,6 @@
           "required": true,
           "defaultValue": 7,
           "exposed": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "ticket",
-          "type": "object",
-          "contractId": "Ticket",
-          "binding": {
-            "kind": "reference",
-            "nodeId": "fetch",
-            "port": "body",
-            "path": ""
-          }
         }
       ],
       "graph": {
@@ -154,6 +142,27 @@
                 "priority": "high"
               }
             }
+          },
+          {
+            "id": "get-ticket-export-ticket",
+            "handle": "ticket",
+            "kind": "export",
+            "position": {
+              "x": 420.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "value": {
+                "kind": "reference",
+                "nodeId": "fetch",
+                "port": "body",
+                "path": ""
+              }
+            },
+            "config": {
+              "contractId": "Ticket",
+              "type": "object"
+            }
           }
         ],
         "edges": []
@@ -162,6 +171,7 @@
     {
       "id": "ticket-open",
       "revision": 1,
+      "handle": "sprawdz_otwarte_zgloszenie",
       "name": "Sprawdź otwarte zgłoszenie",
       "description": "Sprawdź status zgłoszenia.",
       "inputs": [
@@ -170,18 +180,6 @@
           "type": "object",
           "contractId": "Ticket",
           "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "passed",
-          "type": "boolean",
-          "binding": {
-            "kind": "reference",
-            "nodeId": "check",
-            "port": "passed",
-            "path": ""
-          }
         }
       ],
       "graph": {
@@ -227,6 +225,26 @@
             },
             "config": {
               "predicate": "equals"
+            }
+          },
+          {
+            "id": "ticket-open-export-passed",
+            "handle": "passed",
+            "kind": "export",
+            "position": {
+              "x": 720.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "value": {
+                "kind": "reference",
+                "nodeId": "check",
+                "port": "passed",
+                "path": ""
+              }
+            },
+            "config": {
+              "type": "boolean"
             }
           }
         ],

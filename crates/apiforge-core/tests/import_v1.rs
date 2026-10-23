@@ -58,8 +58,8 @@ fn missing_json_fields_and_present_null_have_distinct_round_trips() {
     let mut value = workflow();
     value["scenarios"][0]["graph"]["nodes"][1]["config"]["sampleResponse"] = Value::Null;
     value["components"] = json!([{
-        "id": "defaults", "revision": 1, "name": "Defaults",
-        "description": "", "outputs": [], "graph": {"nodes": [], "edges": []},
+        "id": "defaults", "revision": 1, "handle": "defaults", "name": "Defaults",
+        "description": "", "graph": {"nodes": [], "edges": []},
         "inputs": [
             {"name":"nullable", "type":"any", "defaultValue": null},
             {"name":"missing", "type":"any"}
@@ -187,7 +187,7 @@ fn enforces_byte_node_expression_and_text_limits() {
 fn validates_component_identity_recursion_and_depth_even_when_subgraphs_are_cached() {
     let component = |id: &str, next: Option<&str>| {
         json!({
-            "id":id,"revision":1,"name":id,"description":"","inputs":[],"outputs":[],
+            "id":id,"revision":1,"handle":id,"name":id,"description":"","inputs":[],
             "graph":{"nodes":next.map(|next| vec![json!({"id":"child","kind":"component","handle":"child","position":{"x":0,"y":0},"inputs":{},"config":{"componentId":next,"revision":1}})]).unwrap_or_default(),"edges":[]}
         })
     };

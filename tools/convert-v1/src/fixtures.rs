@@ -2,7 +2,7 @@
 
 use crate::{convert, v1};
 use apiforge_core::{
-    format::{Graph, Project, Scenario},
+    format::{Component, Graph, Node, Project, Scenario},
     graph::{VALUE_INPUT, component_definition, condition_inputs},
     model::NodeKind,
     template::{self, template_text},
@@ -162,6 +162,11 @@ fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), Strin
                     Some((&definition.graph, &source_definition.graph)),
                     context,
                 )?;
+                let phase = next.get("phase").cloned().unwrap_or(Value::Null);
+                let outputs = next.get("outputs").cloned().unwrap_or(Value::Null);
+                if let Some(Value::Array(children)) = next.get_mut("children") {
+                    append_exports(children, definition, &outputs, &phase);
+                }
             }
             *fields = next;
         }
@@ -182,6 +187,66 @@ fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), Strin
     match report.get_mut("steps") {
         Some(Value::Array(list)) => convert_steps(list, None, context),
         _ => Ok(()),
+    }
+}
+
+/// The steps of a component's Export blocks, which run after the blocks they read.
+/// An Export passes the value the recorded output had; it is blocked or skipped
+/// like any step whose source was unavailable or skipped.
+fn append_exports(
+    children: &mut Vec<Value>,
+    definition: &Component,
+    outputs: &Value,
+    phase: &Value,
+) {
+    let exports: Vec<&Node> = definition
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Export)
+        .collect();
+    for export in exports {
+        let statuses: Vec<&str> = export
+            .inputs
+            .values()
+            .flat_map(|binding| binding.references())
+            .filter_map(|reference| {
+                children
+                    .iter()
+                    .find(|step| step["nodeId"] == reference.node_id)
+                    .and_then(|step| step["status"].as_str())
+            })
+            .collect();
+        let status = if statuses
+            .iter()
+            .any(|status| matches!(*status, "error" | "blocked" | "cancelled"))
+        {
+            "blocked"
+        } else if statuses.contains(&"skipped") {
+            "skipped"
+        } else {
+            "passed"
+        };
+        let value = outputs.get(&export.handle).filter(|_| status == "passed");
+        let single = |value: Option<&Value>| {
+            Value::Object(
+                value
+                    .map(|value| Map::from_iter([(VALUE_INPUT.to_owned(), value.clone())]))
+                    .unwrap_or_default(),
+            )
+        };
+        let mut step = Map::new();
+        step.insert("nodeId".into(), Value::String(export.id.clone()));
+        step.insert("handle".into(), Value::String(export.handle.clone()));
+        if let Some(label) = &export.label {
+            step.insert("label".into(), Value::String(label.clone()));
+        }
+        step.insert("kind".into(), Value::String("export".into()));
+        step.insert("status".into(), Value::String(status.into()));
+        step.insert("phase".into(), phase.clone());
+        step.insert("inputs".into(), single(value));
+        step.insert("outputs".into(), single(value));
+        children.push(Value::Object(step));
     }
 }
 

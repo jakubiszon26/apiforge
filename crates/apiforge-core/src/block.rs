@@ -27,6 +27,8 @@ pub enum Block {
     Comparison,
     Condition,
     Component,
+    /// An output of the component being edited.
+    Export,
 }
 
 impl Block {
@@ -50,6 +52,7 @@ impl Block {
             Self::Comparison => NodeKind::Assert,
             Self::Condition => NodeKind::Condition,
             Self::Component => NodeKind::Component,
+            Self::Export => NodeKind::Export,
         }
     }
 
@@ -109,6 +112,7 @@ impl Block {
             NodeKind::Assert => Self::Comparison,
             NodeKind::Condition => Self::Condition,
             NodeKind::Component => Self::Component,
+            NodeKind::Export => Self::Export,
         }
     }
 }
@@ -121,7 +125,10 @@ mod tests {
 
     #[test]
     fn blocks_create_nodes_they_recognise() {
-        for block in Block::BUILTIN.into_iter().chain([Block::Variable]) {
+        for block in Block::BUILTIN
+            .into_iter()
+            .chain([Block::Variable, Block::Export])
+        {
             let node = block.create(AT, None);
             assert_eq!(node.kind, block.kind(), "{block:?}");
             assert_eq!(Block::of(&node), block, "{block:?}");

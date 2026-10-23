@@ -80,27 +80,40 @@ fn draft(
     }
 }
 
-fn output(name: &str, value_type: ValueType, binding: Binding) -> OutputPort {
-    OutputPort {
-        name: name.into(),
-        value_type,
-        label: None,
-        contract_id: None,
-        required: None,
-        default_value: OptionalJson::Missing,
-        exposed: None,
-        binding,
-    }
+/// An Export block named `name` passing `binding` on.
+fn output(name: &str, value_type: ValueType, binding: Binding) -> Node {
+    let mut export = create_node(NodeKind::Export, Position { x: 0.0, y: 0.0 }, None);
+    export.id = format!("export-{name}");
+    export.handle = name.into();
+    export.config.output_type = Some(value_type);
+    export.inputs.insert("value".into(), binding);
+    export
+}
+
+/// `component` with `exports` added to its graph.
+fn with_outputs(mut component: Component, exports: Vec<Node>) -> Component {
+    component.graph.nodes.extend(exports);
+    component
+}
+
+/// The Export blocks of a component, in graph order.
+fn exports(component: &Component) -> Vec<&Node> {
+    component
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Export)
+        .collect()
 }
 
 fn component(id: &str, revision: u32, graph: Graph) -> Component {
     Component {
         id: id.into(),
         revision,
+        handle: "read".into(),
         name: "Read".into(),
         description: String::new(),
         inputs: vec![],
-        outputs: vec![],
         graph,
         action: None,
     }
@@ -166,7 +179,7 @@ fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
     );
     assert_eq!(result.graph.edges, vec![edge("order", "get", "select")]);
     assert_eq!(
-        result.outputs[0].binding,
+        exports(&result)[0].inputs["value"],
         Binding::reference("select", "value", "")
     );
     assert_eq!(graph, before);
@@ -193,13 +206,15 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
         Binding::reference("two", "body", "data.record"),
     );
     record.label = Some("Selected record".into());
-    let initial = Component {
-        name: "Read twice".into(),
-        description: "Description".into(),
-        inputs: vec![public],
-        outputs: vec![record],
-        ..component("reusable", 3, graph.clone())
-    };
+    let initial = with_outputs(
+        Component {
+            name: "Read twice".into(),
+            description: "Description".into(),
+            inputs: vec![public],
+            ..component("reusable", 3, graph.clone())
+        },
+        vec![record],
+    );
     let ids = HashSet::from(["one", "two"]);
     let p = project(graph.clone(), vec![initial.clone()]);
     let mut d = draft(&graph, &ids, &p, Some(&initial));
@@ -214,12 +229,20 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
         OptionalJson::Present(Value::Null)
     );
     assert_eq!(result.inputs[0].label.as_deref(), Some("Record identifier"));
-    assert_eq!(result.outputs[0].label.as_deref(), Some("Selected record"));
-    for node in &result.graph.nodes {
+    assert_eq!(
+        exports(&result)[0].label.as_deref(),
+        Some("Selected record")
+    );
+    for node in result
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Request)
+    {
         assert_eq!(node.inputs["body"], Binding::parameter("targetId"));
     }
     assert_eq!(
-        result.outputs[0].binding,
+        exports(&result)[0].inputs["value"],
         Binding::reference("two", "body", "data.record")
     );
     assert_eq!(initial.graph.nodes[0].inputs["body"], parameter);
@@ -233,9 +256,12 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
     };
     let mut context = Port::new("context", ValueType::Object).required(false);
     context.default_value = OptionalJson::Present(json!({"source": "manual"}));
-    let initial = Component {
-        inputs: vec![context],
-        outputs: vec![
+    let initial = with_outputs(
+        Component {
+            inputs: vec![context],
+            ..component("reusable", 1, graph.clone())
+        },
+        vec![
             output("context", ValueType::Object, Binding::parameter("context")),
             output(
                 "body",
@@ -243,8 +269,7 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
                 Binding::reference("request", "body", ""),
             ),
         ],
-        ..component("reusable", 1, graph.clone())
-    };
+    );
     let ids = HashSet::from(["request"]);
     let p = project(graph.clone(), vec![initial.clone()]);
     let mut d = draft(&graph, &ids, &p, Some(&initial));
@@ -257,7 +282,10 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
     assert_eq!(row.label, "Public argument → context");
     row.name = "metadata".into();
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
-    assert_eq!(result.outputs[0].binding, Binding::parameter("metadata"));
+    assert_eq!(
+        exports(&result)[0].inputs["value"],
+        Binding::parameter("metadata")
+    );
     let metadata = result.inputs.iter().find(|input| input.name == "metadata");
     assert_eq!(
         metadata.map(|input| &input.default_value),
@@ -386,8 +414,11 @@ fn existing_output_aliases_keep_literal_environment_and_nested_bindings() {
         nodes: vec![plain_request("read")],
         edges: vec![],
     };
-    let initial = Component {
-        outputs: vec![
+    let initial = with_outputs(
+        Component {
+            ..component("component", 2, graph.clone())
+        },
+        vec![
             output(
                 "nested",
                 ValueType::String,
@@ -400,17 +431,15 @@ fn existing_output_aliases_keep_literal_environment_and_nested_bindings() {
                 Binding::environment("baseUrl"),
             ),
         ],
-        ..component("component", 2, graph.clone())
-    };
+    );
     let ids = HashSet::from(["read"]);
     let p = project(graph.clone(), vec![initial.clone()]);
     let d = draft(&graph, &ids, &p, Some(&initial));
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
     let bindings = |component: &Component| -> Vec<Binding> {
-        component
-            .outputs
+        exports(component)
             .iter()
-            .map(|output| output.binding.clone())
+            .map(|export| export.inputs["value"].clone())
             .collect()
     };
     assert_eq!(bindings(&result), bindings(&initial));
@@ -426,14 +455,16 @@ fn project_validation_rejects_a_recursive_definition() {
         nodes: vec![nested],
         edges: vec![],
     };
-    let initial = Component {
-        outputs: vec![output(
+    let initial = with_outputs(
+        Component {
+            ..component("recursive", 1, graph.clone())
+        },
+        vec![output(
             "value",
             ValueType::Any,
             Binding::reference("self", "value", ""),
         )],
-        ..component("recursive", 1, graph.clone())
-    };
+    );
     let empty = Graph {
         nodes: vec![],
         edges: vec![],

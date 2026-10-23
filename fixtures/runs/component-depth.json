@@ -42,10 +42,10 @@
         {
           "id": "level-17",
           "revision": 1,
+          "handle": "level_17",
           "name": "Level 17",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -73,10 +73,10 @@
         {
           "id": "level-16",
           "revision": 1,
+          "handle": "level_16",
           "name": "Level 16",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -101,10 +101,10 @@
         {
           "id": "level-15",
           "revision": 1,
+          "handle": "level_15",
           "name": "Level 15",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -129,10 +129,10 @@
         {
           "id": "level-14",
           "revision": 1,
+          "handle": "level_14",
           "name": "Level 14",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -157,10 +157,10 @@
         {
           "id": "level-13",
           "revision": 1,
+          "handle": "level_13",
           "name": "Level 13",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -185,10 +185,10 @@
         {
           "id": "level-12",
           "revision": 1,
+          "handle": "level_12",
           "name": "Level 12",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -213,10 +213,10 @@
         {
           "id": "level-11",
           "revision": 1,
+          "handle": "level_11",
           "name": "Level 11",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -241,10 +241,10 @@
         {
           "id": "level-10",
           "revision": 1,
+          "handle": "level_10",
           "name": "Level 10",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -269,10 +269,10 @@
         {
           "id": "level-9",
           "revision": 1,
+          "handle": "level_9",
           "name": "Level 9",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -297,10 +297,10 @@
         {
           "id": "level-8",
           "revision": 1,
+          "handle": "level_8",
           "name": "Level 8",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -325,10 +325,10 @@
         {
           "id": "level-7",
           "revision": 1,
+          "handle": "level_7",
           "name": "Level 7",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -353,10 +353,10 @@
         {
           "id": "level-6",
           "revision": 1,
+          "handle": "level_6",
           "name": "Level 6",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -381,10 +381,10 @@
         {
           "id": "level-5",
           "revision": 1,
+          "handle": "level_5",
           "name": "Level 5",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -409,10 +409,10 @@
         {
           "id": "level-4",
           "revision": 1,
+          "handle": "level_4",
           "name": "Level 4",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -437,10 +437,10 @@
         {
           "id": "level-3",
           "revision": 1,
+          "handle": "level_3",
           "name": "Level 3",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -465,10 +465,10 @@
         {
           "id": "level-2",
           "revision": 1,
+          "handle": "level_2",
           "name": "Level 2",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {
@@ -493,10 +493,10 @@
         {
           "id": "level-1",
           "revision": 1,
+          "handle": "level_1",
           "name": "Level 1",
           "description": "",
           "inputs": [],
-          "outputs": [],
           "graph": {
             "nodes": [
               {

@@ -170,6 +170,14 @@ pub struct NodeConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub tolerance: Option<f64>,
+    /// The type of an Export's output.
+    #[serde(
+        rename = "type",
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub output_type: Option<ValueType>,
     /// A Value listed in the Variables panel, which can be placed as a proxy.
     #[serde(
         default,
@@ -288,45 +296,6 @@ pub struct Contract {
     pub sample: Value,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct OutputPort {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub value_type: ValueType,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub label: Option<String>,
-    #[serde(
-        rename = "contractId",
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub contract_id: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub required: Option<bool>,
-    #[serde(
-        rename = "defaultValue",
-        default,
-        skip_serializing_if = "OptionalJson::is_missing"
-    )]
-    pub default_value: OptionalJson,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub exposed: Option<bool>,
-    pub binding: Binding,
-}
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ComponentAction {
     pub input: String,
@@ -344,10 +313,12 @@ pub struct ComponentAction {
 pub struct Component {
     pub id: String,
     pub revision: u32,
+    /// The component's name in scenario code, unique within the project.
+    pub handle: String,
     pub name: String,
     pub description: String,
     pub inputs: Vec<Port>,
-    pub outputs: Vec<OutputPort>,
+    /// Its Export nodes are the component's outputs.
     pub graph: Graph,
     #[serde(
         default,
@@ -385,6 +356,7 @@ pub enum Operation {
     Condition { predicate: Predicate },
     If { predicate: Predicate },
     Component { id: String, revision: u32 },
+    Export,
 }
 impl Node {
     /// Whether the node is a Value marked as a variable.
@@ -407,6 +379,7 @@ impl Node {
                 timeout_ms: c.timeout_ms.unwrap_or(10_000.0),
             },
             NodeKind::Value => Operation::Value,
+            NodeKind::Export => Operation::Export,
             NodeKind::Assert => Operation::Assert {
                 predicate: c.predicate.unwrap_or_default(),
             },

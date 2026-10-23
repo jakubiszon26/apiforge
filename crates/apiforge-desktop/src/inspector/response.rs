@@ -43,12 +43,12 @@ fn sample_output_at(node: &Node, port: &str, project: &Project, depth: usize) ->
         },
         NodeKind::Component => {
             let component = component_definition(project, node)?;
-            match &component
-                .outputs
+            let export = component
+                .graph
+                .nodes
                 .iter()
-                .find(|output| output.name == port)?
-                .binding
-            {
+                .find(|node| node.kind == NodeKind::Export && node.handle == port)?;
+            match export.inputs.get(apiforge_core::graph::VALUE_INPUT)? {
                 Binding::Literal { value } => Some(value.clone()),
                 Binding::Reference {
                     node_id,
@@ -129,7 +129,7 @@ mod tests {
             .find(|node| node.kind == NodeKind::Component)
             .unwrap();
         let component = component_definition(&project, node).unwrap();
-        let output = &component.outputs[0].name;
+        let output = &apiforge_core::graph::component_outputs(component)[0].name;
         assert!(sample_output(node, output, &project).is_some());
         assert_eq!(type_label("array"), "List");
         assert_eq!(fields(Some(&json!({"a": 1}))).fields.len(), 2);

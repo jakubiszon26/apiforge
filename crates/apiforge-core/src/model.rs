@@ -19,6 +19,8 @@ pub enum NodeKind {
     Assert,
     Condition,
     Component,
+    /// An output of the component whose graph holds it.
+    Export,
     Trigger,
     If,
 }

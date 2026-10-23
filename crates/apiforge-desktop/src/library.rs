@@ -217,7 +217,9 @@ impl Library {
                 }
                 if show_blocks {
                     widgets::subcaption(ui, "BASIC STEPS");
-                    for block in BUILTIN {
+                    // Only a component's graph can pass values out.
+                    let export = context.editing_component.then_some(Block::Export);
+                    for block in BUILTIN.into_iter().chain(export) {
                         if matches(&format!("{} {}", block.label(), block.description())) {
                             let payload = Payload::Node {
                                 block,

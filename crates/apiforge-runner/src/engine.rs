@@ -589,7 +589,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         let input = |name: &str| values.get(name).cloned().flatten();
         match node.kind {
             NodeKind::Trigger => {}
-            NodeKind::Value => step.outputs = single_output(input(VALUE_INPUT)),
+            NodeKind::Value | NodeKind::Export => step.outputs = single_output(input(VALUE_INPUT)),
             NodeKind::Request => self.request(node, &values, step, context).await?,
             NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
                 self.check(node, &values, step)?
@@ -694,9 +694,19 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             .execute_graph(&component.graph, &mut nested, false, None)
             .await?;
         step.children = Some(children);
-        for port in &component.outputs {
-            if let Some(value) = self.resolve(&port.binding, &nested)? {
-                step.outputs.insert(port.name.clone(), value);
+        // An Export that ran passes its value out under its handle.
+        for export in component
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Export)
+        {
+            if let Some(value) = nested
+                .outputs
+                .get(&export.id)
+                .and_then(|step| step.outputs.get(VALUE_INPUT))
+            {
+                step.outputs.insert(export.handle.clone(), value.clone());
             }
         }
         step.outputs = js_key_order(std::mem::take(&mut step.outputs))
