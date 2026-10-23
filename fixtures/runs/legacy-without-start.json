@@ -46,23 +46,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "reference",
-                    "nodeId": "first",
-                    "port": "body",
-                    "path": "id"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/second/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "first",
+                          "port": "body",
+                          "path": "id"
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/second/{{id}}",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "n": 2
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -73,17 +81,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/first"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/first",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "x/1"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -94,17 +103,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/independent"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/independent",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {

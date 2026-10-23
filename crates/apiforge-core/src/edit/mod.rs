@@ -1,4 +1,4 @@
-//! Editing operations of the board: connections, clipboard, variables, component
+//! Editing operations of the board: connections, clipboard, component
 //! extraction, response field pickers and project export.
 //!
 //! Every operation borrows its inputs and returns new values, so the editor can keep
@@ -12,7 +12,6 @@ mod fold;
 mod inspect;
 mod nodes;
 mod storage;
-mod variables;
 
 pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
 pub use component::{
@@ -28,9 +27,6 @@ pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
 };
 pub use storage::{migrate_demo_address, public_project};
-pub use variables::{
-    TextSelection, VariableBlock, bind_variable_text, insert_variable_token, prune_template_inputs,
-};
 
 pub(crate) use fold::push_identifier_part;
 

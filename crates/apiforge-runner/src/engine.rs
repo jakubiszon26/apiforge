@@ -19,14 +19,17 @@ use crate::{
 use apiforge_core::{
     binding::Reference,
     format::{Binding, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
-    graph::{VALUE_INPUT, ancestors_and_self, component_definition, input_ports, predicate},
+    graph::{
+        BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, ancestors_and_self,
+        component_definition, condition_inputs, condition_predicates, input_ports, predicate,
+    },
     js::{self, js_key_order},
-    model::{Branch, HttpMethod, Match, NodeKind, ValueType},
+    model::{BodyFormat, Branch, HttpMethod, Match, NodeKind, ValueType},
     operator::{Operator, OperatorError, RandomSource},
     path,
     predicate::PredicateError,
     run::{Phase, RequestSnapshot, RunResult, RunSnapshot, RunStatus, StepResult, StepStatus},
-    template::{self, TemplateError},
+    template,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{Map, Value};
@@ -120,8 +123,6 @@ enum StepError {
     MissingInput(String),
     #[error("Input {name}: expected type {expected}.")]
     InputType { name: String, expected: ValueType },
-    #[error("{}", sentence(&.0.to_string()))]
-    Template(#[from] TemplateError),
     #[error("{}", sentence(&.0.to_string()))]
     Predicate(#[from] PredicateError),
     #[error("{}", sentence(&.0.to_string()))]
@@ -602,37 +603,39 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         let config = &node.config;
         let tolerance = config.tolerance.unwrap_or(0.0);
         let input = |name: &str| values.get(name).cloned().flatten();
-        let passed = match &config.predicates {
-            Some(predicates) if !predicates.is_empty() && node.kind == NodeKind::Condition => {
-                let lookup = template_lookup(values, &self.env);
-                let mut checks = Vec::with_capacity(predicates.len());
-                for condition in predicates {
-                    let field = template::expand(condition.path.as_deref().unwrap_or(""), &lookup)?;
-                    let actual = values
-                        .get(&condition.input)
-                        .and_then(Option::as_ref)
-                        .and_then(|value| path::resolve(value, &field))
-                        .map(|value| value.into_owned());
-                    let expected = input(&condition.expected);
-                    checks.push(condition.predicate.check(
-                        actual.as_ref(),
-                        expected.as_ref(),
-                        tolerance,
-                    )?);
-                }
-                match config.match_mode {
-                    Some(Match::Any) => checks.contains(&true),
-                    _ => checks.iter().all(|passed| *passed),
-                }
+        // A condition's first check stands for the node in its value and report.
+        let (actual_name, expected_name) = match node.kind {
+            NodeKind::Condition => condition_inputs(1),
+            _ => ("actual".to_owned(), "expected".to_owned()),
+        };
+        let passed = if node.kind == NodeKind::Condition {
+            let predicates = condition_predicates(node);
+            let mut checks = Vec::with_capacity(predicates.len());
+            for (index, predicate) in predicates.iter().enumerate() {
+                let (actual, expected) = condition_inputs(index + 1);
+                checks.push(predicate.check(
+                    input(&actual).as_ref(),
+                    input(&expected).as_ref(),
+                    tolerance,
+                )?);
             }
-            _ => predicate(node).check(
+            match config.match_mode {
+                Some(Match::Any) => checks.contains(&true),
+                _ => checks.iter().all(|passed| *passed),
+            }
+        } else {
+            predicate(node).check(
                 input("actual").as_ref(),
                 input("expected").as_ref(),
                 tolerance,
-            )?,
+            )?
         };
-        let actual = input("actual");
-        let expected = input("expected");
+        let single = node.kind != NodeKind::Condition || condition_predicates(node).len() == 1;
+        let actual = match node.kind {
+            NodeKind::Condition if node.inputs.contains_key(VALUE_INPUT) => input(VALUE_INPUT),
+            _ => input(&actual_name),
+        };
+        let expected = input(&expected_name).filter(|_| single);
         step.outputs = single_output(actual.clone());
         step.outputs.insert("passed".into(), Value::Bool(passed));
         if let Some(actual) = actual {
@@ -724,12 +727,17 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         context: &Context,
     ) -> Result<(), StepError> {
         let config = &node.config;
-        let env = &self.env;
-        let lookup = template_lookup(values, env);
-        let address = template::expand(config.url.as_deref().unwrap_or(""), &lookup)?;
-        let address = template::expand_path_parameters(&address, &|name| {
-            values.get(name).cloned().flatten()
-        })?;
+        // Values interpolated into a URL template are percent-encoded; a URL from
+        // any other binding is used as it is.
+        let address = match node.inputs.get(URL_INPUT) {
+            Some(Binding::Template { parts }) => self.render(parts, context, true)?,
+            _ => values
+                .get(URL_INPUT)
+                .cloned()
+                .flatten()
+                .map(|value| template::template_text(&value))
+                .unwrap_or_default(),
+        };
         // A configured base URL is an API prefix, including its path.
         let address = if has_http_scheme(&address) {
             address
@@ -747,18 +755,18 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         {
             return Err(StepError::UrlNotAllowed);
         }
-        for (name, value) in config.query.iter().flatten() {
-            let value = template::expand(value, &lookup)?;
-            set_search_param(&mut url, name, &value);
+        for (name, value) in text_fields(values, QUERY_INPUT) {
+            set_search_param(&mut url, &name, &value);
         }
         self.redactor.collect_query(&url);
-        let mut headers = IndexMap::new();
-        for (name, value) in config.headers.iter().flatten() {
-            headers.insert(name.clone(), template::expand(value, &lookup)?);
-        }
+        let headers: IndexMap<String, String> = text_fields(values, HEADERS_INPUT).collect();
         let mut headers: IndexMap<String, String> = js_key_order(headers).into_iter().collect();
-        let body = match values.get("body") {
-            Some(Some(body)) => Some(template::expand_body(body, &lookup)?),
+        let format = config.body_format.unwrap_or_default();
+        let body = match (values.get(BODY_INPUT), format) {
+            (Some(Some(body)), BodyFormat::Json) => Some(body.clone()),
+            (Some(Some(body)), BodyFormat::Text) => {
+                Some(Value::String(template::template_text(body)))
+            }
             _ => None,
         };
         if body.is_some()
@@ -766,7 +774,11 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 .keys()
                 .any(|name| name.eq_ignore_ascii_case("content-type"))
         {
-            headers.insert("Content-Type".into(), "application/json".into());
+            let content_type = match format {
+                BodyFormat::Json => "application/json",
+                BodyFormat::Text => "text/plain",
+            };
+            headers.insert("Content-Type".into(), content_type.into());
         }
         self.redactor.collect(&text_map(&headers));
         if let Some(body) = &body {
@@ -815,7 +827,10 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         };
         let transport = self.transport.clone();
         let limit = self.limits.max_response_bytes;
-        let body_text = body.as_ref().map(js::json_stringify);
+        let body_text = body.as_ref().map(|body| match (format, body) {
+            (BodyFormat::Text, Value::String(text)) => text.clone(),
+            _ => js::json_stringify(body),
+        });
         let started = Instant::now();
         let exchange = async move {
             let response = transport.send(method, url, &headers, body_text).await?;
@@ -981,16 +996,15 @@ fn is_available(reference: &Reference<'_>, context: &Context) -> bool {
         .is_some_and(|value| path::resolve(value, reference.path).is_some())
 }
 
-/// Template arguments: node inputs first, then the environment. A present input
-/// that resolved to nothing does not fall back to the environment.
-fn template_lookup<'v>(
-    values: &'v Values,
-    env: &'v IndexMap<String, Value>,
-) -> impl Fn(&str) -> Option<Value> + 'v {
-    move |key| match values.get(key) {
-        Some(value) => value.clone(),
-        None => env.get(key).cloned(),
-    }
+/// Fields of an object input (headers or query) as text, like `String(value)`.
+fn text_fields<'v>(values: &'v Values, input: &str) -> impl Iterator<Item = (String, String)> + 'v {
+    values
+        .get(input)
+        .and_then(Option::as_ref)
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(name, value)| (name.clone(), template::template_text(value)))
 }
 
 fn compact(values: &Values) -> IndexMap<String, Value> {
@@ -1113,9 +1127,9 @@ mod tests {
         scenario.graph = serde_json::from_value(serde_json::json!({
             "nodes": [
                 {"id": "start", "kind": "trigger", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
-                {"id": "active", "kind": "request", "handle": "active", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}},
+                {"id": "active", "kind": "request", "handle": "active", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "template", "parts": [{"kind": "text", "text": url}, {"kind": "value", "binding": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}]}}, "config": {}},
                 {"id": "shared", "kind": "value", "handle": "shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
-                {"id": "disconnected", "kind": "request", "handle": "disconnected", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}}
+                {"id": "disconnected", "kind": "request", "handle": "disconnected", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "template", "parts": [{"kind": "text", "text": url}, {"kind": "value", "binding": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}]}}, "config": {}}
             ],
             "edges": [{"id": "start-active", "source": "start", "target": "active"}]
         })).unwrap();

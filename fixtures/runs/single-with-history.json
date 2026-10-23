@@ -33,18 +33,19 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/first"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/first",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "item",
                     "price": 100
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -79,17 +80,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/unrelated"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/unrelated",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -100,17 +102,30 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/disconnected/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "environment",
+                          "name": "region"
+                        }
+                      }
+                    ]
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/disconnected/{{region}}",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -288,18 +303,19 @@
                 "x": 0.0,
                 "y": 0.0
               },
-              "inputs": {},
+              "inputs": {
+                "url": {
+                  "kind": "literal",
+                  "value": "/first"
+                }
+              },
               "config": {
                 "method": "GET",
-                "url": "/first",
-                "headers": {},
-                "query": {},
                 "timeoutMs": 10000.0,
                 "sampleResponse": {
                   "id": "item",
                   "price": 100
-                },
-                "inputPorts": []
+                }
               }
             },
             {
@@ -334,17 +350,18 @@
                 "x": 0.0,
                 "y": 0.0
               },
-              "inputs": {},
+              "inputs": {
+                "url": {
+                  "kind": "literal",
+                  "value": "/unrelated"
+                }
+              },
               "config": {
                 "method": "GET",
-                "url": "/unrelated",
-                "headers": {},
-                "query": {},
                 "timeoutMs": 10000.0,
                 "sampleResponse": {
                   "ok": true
-                },
-                "inputPorts": []
+                }
               }
             },
             {
@@ -355,17 +372,30 @@
                 "x": 0.0,
                 "y": 0.0
               },
-              "inputs": {},
+              "inputs": {
+                "url": {
+                  "kind": "template",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "/disconnected/"
+                    },
+                    {
+                      "kind": "value",
+                      "binding": {
+                        "kind": "environment",
+                        "name": "region"
+                      }
+                    }
+                  ]
+                }
+              },
               "config": {
                 "method": "GET",
-                "url": "/disconnected/{{region}}",
-                "headers": {},
-                "query": {},
                 "timeoutMs": 10000.0,
                 "sampleResponse": {
                   "ok": true
-                },
-                "inputPorts": []
+                }
               }
             },
             {

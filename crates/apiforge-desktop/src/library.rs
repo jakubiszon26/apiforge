@@ -405,7 +405,7 @@ impl Library {
             ));
         }
         ui.label(
-            RichText::new("Drag onto an argument, or into a URL, query, header or path.")
+            RichText::new("Drag onto an argument, or into a URL, query or header.")
                 .size(11.0)
                 .color(theme::MUTED),
         );

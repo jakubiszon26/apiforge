@@ -150,9 +150,8 @@ mod tests {
             connect,
             test_support::{at, empty_project, left, node, trio},
         },
-        format::Port,
         graph::{ORDER_PORT, dependencies, wires},
-        model::{Branch, ValueType},
+        model::Branch,
         operator::Operator,
     };
     use serde_json::json;
@@ -231,7 +230,6 @@ mod tests {
         let mut source = node(NodeKind::Component);
         source.config.component_id = Some("custom".into());
         source.config.revision = Some(7);
-        source.config.template_inputs = Some(vec![Port::new("filter", ValueType::Object)]);
         source.inputs.insert(
             "filter".into(),
             Binding::literal(json!({"active": true, "fields": ["name", "price"]})),

@@ -46,17 +46,6 @@ impl SettingsChange {
         let clear_graph = |graph: &mut apiforge_core::format::Graph| {
             for node in &mut graph.nodes {
                 clear(&mut node.config.contract_id);
-                for ports in [
-                    &mut node.config.input_ports,
-                    &mut node.config.template_inputs,
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    for port in ports {
-                        clear(&mut port.contract_id);
-                    }
-                }
             }
         };
         for scenario in &mut project.scenarios {

@@ -22,36 +22,129 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "key": {
-                    "kind": "environment",
-                    "name": "API_KEY"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items?key="
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "environment",
+                          "name": "API_KEY"
+                        }
+                      }
+                    ]
+                  },
+                  "headers": {
+                    "kind": "object",
+                    "fields": {
+                      "Authorization": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "Bearer "
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "environment",
+                              "name": "API_KEY"
+                            }
+                          }
+                        ]
+                      },
+                      "X-Trace": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "trace-"
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "environment",
+                              "name": "API_KEY"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "query": {
+                    "kind": "object",
+                    "fields": {
+                      "api_key": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "environment",
+                              "name": "API_KEY"
+                            }
+                          }
+                        ]
+                      },
+                      "page": {
+                        "kind": "literal",
+                        "value": "2"
+                      }
+                    }
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "secret": "body {{key}}",
-                      "plain": "uses {{key}}",
-                      "note": "visible"
+                    "kind": "object",
+                    "fields": {
+                      "secret": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "body "
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "environment",
+                              "name": "API_KEY"
+                            }
+                          }
+                        ]
+                      },
+                      "plain": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "uses "
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "environment",
+                              "name": "API_KEY"
+                            }
+                          }
+                        ]
+                      },
+                      "note": {
+                        "kind": "literal",
+                        "value": "visible"
+                      }
                     }
                   }
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/items?key={{API_KEY}}",
-                  "headers": {
-                    "Authorization": "Bearer {{API_KEY}}",
-                    "X-Trace": "trace-{{key}}"
-                  },
-                  "query": {
-                    "api_key": "{{key}}",
-                    "page": "2"
-                  },
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "new",
                     "token": "response-token-value"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -62,18 +155,19 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/echo"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/echo",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "echoed": "my+session secret",
                     "encoded": "my%2Bsession%20secret"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -84,17 +178,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "https://user:pa%20ss@api.example.test/"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "https://user:pa%20ss@api.example.test/",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "never": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -147,17 +242,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/?api-key=hardcoded+query+secret&x=1"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/?api-key=hardcoded+query+secret&x=1",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {

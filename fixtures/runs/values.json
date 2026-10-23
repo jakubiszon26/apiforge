@@ -21,12 +21,14 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/source"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/source",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "items": [
@@ -38,8 +40,7 @@
                     ],
                     "name": "Zażółć",
                     "n": 7
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -478,6 +479,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/x"
+                  },
                   "body": {
                     "kind": "literal",
                     "value": {}
@@ -485,14 +490,10 @@
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/x",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -504,14 +505,15 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/x"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/x",
-                  "headers": {},
-                  "query": {},
-                  "timeoutMs": 10000.0,
-                  "inputPorts": []
+                  "timeoutMs": 10000.0
                 }
               },
               {
@@ -523,17 +525,30 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "environment",
+                          "name": "nothing"
+                        }
+                      }
+                    ]
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/items/{{nothing}}",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -545,17 +560,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/items/:id"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/items/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -568,45 +584,86 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "literal",
-                    "value": "a b/ż"
-                  },
-                  "name": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "name"
-                  },
-                  "amount": {
-                    "kind": "literal",
-                    "value": 20
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "literal",
+                          "value": "a b/ż"
+                        }
+                      },
+                      {
+                        "kind": "text",
+                        "text": "/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "source",
+                          "port": "body",
+                          "path": "name"
+                        }
+                      }
+                    ]
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "amount": "{{amount}}",
-                      "label": "#{{amount}}",
-                      "list": [
-                        "{{id}}"
-                      ],
+                    "kind": "object",
+                    "fields": {
+                      "amount": {
+                        "kind": "literal",
+                        "value": 20
+                      },
+                      "label": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "#"
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "literal",
+                              "value": 20
+                            }
+                          }
+                        ]
+                      },
+                      "list": {
+                        "kind": "array",
+                        "items": [
+                          {
+                            "kind": "literal",
+                            "value": "a b/ż"
+                          }
+                        ]
+                      },
                       "nested": {
-                        "r": "{{region}}"
+                        "kind": "object",
+                        "fields": {
+                          "r": {
+                            "kind": "environment",
+                            "name": "region"
+                          }
+                        }
                       }
                     }
                   }
                 },
                 "config": {
                   "method": "PUT",
-                  "url": "/items/:id/{{name}}",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
                   },
-                  "sampleStatus": 422,
-                  "inputPorts": []
+                  "sampleStatus": 422
                 }
               },
               {
@@ -617,17 +674,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "HTTPS://other.example.test/path?q=1"
+                  }
+                },
                 "config": {
                   "method": "HEAD",
-                  "url": "HTTPS://other.example.test/path?q=1",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -638,17 +696,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "ftp://files.example.test/x"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "ftp://files.example.test/x",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -660,17 +719,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "http://["
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "http://[",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -683,39 +743,65 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "needed": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "name"
+                  "url": {
+                    "kind": "literal",
+                    "value": "/ports"
+                  },
+                  "headers": {
+                    "kind": "object",
+                    "fields": {
+                      "X-Typed": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "literal",
+                              "value": 5
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "query": {
+                    "kind": "object",
+                    "fields": {
+                      "needed": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "reference",
+                              "nodeId": "source",
+                              "port": "body",
+                              "path": "name"
+                            }
+                          }
+                        ]
+                      },
+                      "typed": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "literal",
+                              "value": 5
+                            }
+                          }
+                        ]
+                      }
+                    }
                   }
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/ports",
-                  "headers": {
-                    "X-Typed": "{{typed}}"
-                  },
-                  "query": {
-                    "needed": "{{needed}}",
-                    "typed": "{{typed}}"
-                  },
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": [
-                    {
-                      "name": "needed",
-                      "type": "string",
-                      "required": true
-                    },
-                    {
-                      "name": "typed",
-                      "type": "number",
-                      "defaultValue": 5
-                    }
-                  ]
+                  }
                 }
               },
               {

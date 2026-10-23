@@ -1864,7 +1864,10 @@ mod tests {
             Position { x: 0.0, y: 0.0 },
             None,
         );
-        cleanup.config.url = Some("/cleanup".into());
+        cleanup.inputs.insert(
+            apiforge_core::graph::URL_INPUT.into(),
+            Binding::literal(serde_json::json!("/cleanup")),
+        );
         project.scenarios[0].cleanup.nodes.push(cleanup);
         let workspace = Workspace {
             version: 1,

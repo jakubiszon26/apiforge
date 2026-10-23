@@ -33,17 +33,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "http://["
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "http://[",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "never": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -54,17 +55,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/good"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/good",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -75,17 +77,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/join"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/join",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -119,17 +122,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/skipped"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/skipped",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -141,17 +145,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/after"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/after",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               }
             ],

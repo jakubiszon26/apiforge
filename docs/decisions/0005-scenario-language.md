@@ -55,7 +55,7 @@ skips erroneous statements instead of giving up. Fuzzing enforces this.
 - `// comment` runs to the end of the line.
 - Identifiers: `[A-Za-z_][A-Za-z0-9_]*`. Reserved words: `scenario component
   cleanup param input var export start assert condition if else all any exists
-  nonempty contains is within true false null env`. Words that appear only inside
+  nonempty contains is within with true false null env`. Words that appear only inside
   request blocks (`headers query body text timeout sample contract`) are contextual.
 - Numbers use JSON syntax. A request timeout uses a duration: `250ms`, `5s`.
 - Strings are `"…"` with JSON escapes. `"""…"""` is a multi-line string whose
@@ -99,7 +99,7 @@ order      = IDENT ( "." ("then" | "else") )? ;
 form       = "start"
            | METHOD expr request_block?
            | "assert" check
-           | "condition" ("all" | "any") "{" check ("," check)* ","? "}"
+           | "condition" ("all" | "any") "{" check ("," check)* ","? "}" ( "with" expr )?
            | "if" check "{" statement* "}" ( "else" "{" statement* "}" )?
            | IDENT "(" ( IDENT ":" expr ("," IDENT ":" expr)* ","? )? ")"
            | expr ;
@@ -182,7 +182,8 @@ output port, the following segments are the path into it, so `first.price` reads
 
 `assert`, `if` and each `condition` entry hold one predicate: `==` Equals, `!=`
 NotEquals, `>` Greater, `<` Less, `~= … within t` Approximately with tolerance,
-`contains`, `is` Type, `exists`, `nonempty`. A check that is a bare expression
+`contains`, `is` Type, `exists`, `nonempty`. `condition … with expr` sets the data
+the condition passes on (its `value` input). A check that is a bare expression
 means `expr == true`. The printer writes it in that full form, so `assert a >= b`
 prints as `assert (a >= b) == true`. Inside a check, an operand that is itself a
 comparison is parenthesised. Condition entry *n* lowers to inputs `actual<n>` and

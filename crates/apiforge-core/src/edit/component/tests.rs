@@ -1,35 +1,35 @@
 use super::*;
 use crate::{
     edit::test_support::at,
-    format::{Environment, Node, NodeConfig, OrderEdge, Position, Scenario},
+    format::{Environment, Node, OrderEdge, Position, Scenario},
     graph::{create_node, create_value_node},
-    model::{ErrorPolicy, HttpMethod, NodeKind},
+    model::{ErrorPolicy, NodeKind},
     operator::Operator,
 };
 use indexmap::IndexMap;
 use serde_json::json;
 
+/// A request whose `body` takes the binding given as `id`.
 fn request(id: &str, inputs: &[(&str, Binding)]) -> Node {
-    let mut port = Port::new("id", ValueType::Any).required(true);
-    port.exposed = Some(true);
-    Node {
-        id: id.into(),
-        kind: NodeKind::Request,
-        handle: id.into(),
-        label: None,
-        note: None,
-        position: Position { x: 0.0, y: 0.0 },
-        inputs: inputs
-            .iter()
-            .map(|(name, binding)| ((*name).to_owned(), binding.clone()))
-            .collect(),
-        config: NodeConfig {
-            method: Some(HttpMethod::Get),
-            url: Some("/records/:id".into()),
-            input_ports: Some(vec![port]),
-            ..NodeConfig::default()
-        },
+    let mut node = create_node(NodeKind::Request, Position { x: 0.0, y: 0.0 }, None);
+    node.id = id.into();
+    node.handle = id.into();
+    for (name, binding) in inputs {
+        let name = if *name == "id" { "body" } else { name };
+        node.inputs.insert(name.to_owned(), binding.clone());
     }
+    node
+}
+
+/// The draft row of the first block's `body`, enabled as an argument.
+fn body_row(draft: &mut ComponentDraft) -> &mut InputRow {
+    let row = draft
+        .inputs
+        .iter_mut()
+        .find(|row| row.input == "body")
+        .expect("a body row");
+    row.enabled = true;
+    row
 }
 
 fn plain_request(id: &str) -> Node {
@@ -144,9 +144,9 @@ fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
     let ids = HashSet::from(["get", "select"]);
     let p = project(graph.clone(), vec![]);
     let mut d = draft(&graph, &ids, &p, None);
-    let argument = d.inputs.iter_mut().find(|row| row.input == "id").unwrap();
+    let argument = d.inputs.iter_mut().find(|row| row.input == "body").unwrap();
     assert!(argument.mandatory && argument.enabled);
-    assert_eq!(argument.label, "get → id");
+    assert_eq!(argument.label, "get → Body");
     argument.name = "recordId".into();
     assert_eq!(
         d.outputs.iter().filter(|row| row.enabled).count(),
@@ -157,7 +157,7 @@ fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
     assert!(result.id.starts_with("component-"));
     assert_eq!(result.revision, 1);
     assert_eq!(
-        result.graph.nodes[0].inputs["id"],
+        result.graph.nodes[0].inputs["body"],
         Binding::parameter("recordId")
     );
     assert_eq!(
@@ -204,9 +204,9 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
     let p = project(graph.clone(), vec![initial.clone()]);
     let mut d = draft(&graph, &ids, &p, Some(&initial));
     assert_eq!(d.inputs.iter().filter(|row| row.enabled).count(), 1);
-    assert_eq!(d.inputs[0].targets.len(), 2);
-    assert_eq!(d.inputs[0].default_value, Some(Value::Null));
-    d.inputs[0].name = "targetId".into();
+    assert_eq!(body_row(&mut d).targets.len(), 2);
+    assert_eq!(body_row(&mut d).default_value, Some(Value::Null));
+    body_row(&mut d).name = "targetId".into();
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
     assert_eq!((result.id.as_str(), result.revision), ("reusable", 3));
     assert_eq!(
@@ -216,13 +216,13 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
     assert_eq!(result.inputs[0].label.as_deref(), Some("Record identifier"));
     assert_eq!(result.outputs[0].label.as_deref(), Some("Selected record"));
     for node in &result.graph.nodes {
-        assert_eq!(node.inputs["id"], Binding::parameter("targetId"));
+        assert_eq!(node.inputs["body"], Binding::parameter("targetId"));
     }
     assert_eq!(
         result.outputs[0].binding,
         Binding::reference("two", "body", "data.record")
     );
-    assert_eq!(initial.graph.nodes[0].inputs["id"], parameter);
+    assert_eq!(initial.graph.nodes[0].inputs["body"], parameter);
 }
 
 #[test]
@@ -274,7 +274,8 @@ fn duplicate_names_and_disabled_boundary_arguments_are_rejected() {
     let ids = HashSet::from(["one", "two"]);
     let p = project(graph.clone(), vec![]);
     let mut d = draft(&graph, &ids, &p, None);
-    for row in d.inputs.iter_mut().filter(|row| row.enabled) {
+    for row in d.inputs.iter_mut().filter(|row| row.input == "body") {
+        row.enabled = true;
         row.name = "id".into();
     }
     assert!(
@@ -321,7 +322,7 @@ fn every_draft_problem_is_reported() {
     let mut d = draft(&graph, &HashSet::from(["one"]), &p, None);
     d.name = " ".into();
     d.action = Some("missing".into());
-    d.inputs[0].name = " 1d".into();
+    body_row(&mut d).name = " 1d".into();
     d.outputs[0].name = String::new();
     assert_eq!(
         validate_draft(&graph, &none, &d),
@@ -353,16 +354,16 @@ fn the_action_input_and_contracts_are_saved() {
     let ids = HashSet::from(["one"]);
     let p = project(graph.clone(), vec![]);
     let mut d = draft(&graph, &ids, &p, None);
-    d.inputs[0].name = " recordId ".into();
-    d.inputs[0].contract_id = Some(String::new());
-    d.action = Some(d.inputs[0].key.clone());
+    body_row(&mut d).name = " recordId ".into();
+    body_row(&mut d).contract_id = Some(String::new());
+    d.action = Some(body_row(&mut d).key.clone());
     d.action_type = ValueType::Object;
     d.action_contract = Some("Product".into());
     assert!(
         validate_draft(&graph, &ids, &d)
             .contains(&DraftError::InvalidName(DraftSection::Arguments))
     );
-    d.inputs[0].name = "recordId".into();
+    body_row(&mut d).name = "recordId".into();
     let result = materialize_component(&graph, &ids, &d, None).unwrap();
     assert_eq!(
         result.action,

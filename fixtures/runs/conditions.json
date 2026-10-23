@@ -21,12 +21,14 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/read"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/read",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "price": 100,
@@ -37,8 +39,7 @@
                       "a"
                     ],
                     "empty": null
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -50,19 +51,23 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "actual": {
+                  "actual1": {
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
                     "path": "price"
                   },
-                  "expected": {
+                  "expected1": {
                     "kind": "literal",
                     "value": 0
                   }
                 },
                 "config": {
-                  "predicate": "less"
+                  "predicates": [
+                    {
+                      "predicate": "less"
+                    }
+                  ]
                 }
               },
               {
@@ -115,49 +120,63 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "actual": {
+                  "value": {
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
                     "path": ""
                   },
-                  "expected": {
-                    "kind": "literal",
-                    "value": null
-                  },
-                  "price": {
+                  "actual1": {
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
                     "path": "price"
                   },
-                  "target": {
+                  "expected1": {
                     "kind": "literal",
                     "value": 99.95
                   },
-                  "kind": {
+                  "actual2": {
+                    "kind": "expression",
+                    "operator": "field",
+                    "inputs": {
+                      "left": {
+                        "kind": "reference",
+                        "nodeId": "read",
+                        "port": "body",
+                        "path": ""
+                      },
+                      "right": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "meta."
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "parameter",
+                              "name": "field"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "expected2": {
                     "kind": "literal",
                     "value": "book"
-                  },
-                  "field": {
-                    "kind": "parameter",
-                    "name": "field"
                   }
                 },
                 "config": {
-                  "predicate": "equals",
                   "tolerance": 0.1,
                   "predicates": [
                     {
-                      "input": "price",
-                      "expected": "target",
                       "predicate": "approximately"
                     },
                     {
-                      "input": "actual",
-                      "expected": "kind",
-                      "predicate": "equals",
-                      "path": "meta.{{field}}"
+                      "predicate": "equals"
                     }
                   ],
                   "match": "all"
@@ -173,35 +192,40 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "actual": {
+                  "value": {
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
                     "path": ""
                   },
-                  "expected": {
-                    "kind": "literal",
-                    "value": null
+                  "actual1": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "meta.kind"
                   },
-                  "wrong": {
+                  "expected1": {
+                    "kind": "literal",
+                    "value": "x"
+                  },
+                  "actual2": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "tags"
+                  },
+                  "expected2": {
                     "kind": "literal",
                     "value": "x"
                   }
                 },
                 "config": {
-                  "predicate": "equals",
                   "predicates": [
                     {
-                      "input": "actual",
-                      "expected": "wrong",
-                      "predicate": "equals",
-                      "path": "meta.kind"
+                      "predicate": "equals"
                     },
                     {
-                      "input": "actual",
-                      "expected": "wrong",
-                      "predicate": "notEmpty",
-                      "path": "tags"
+                      "predicate": "notEmpty"
                     }
                   ],
                   "match": "any"
@@ -217,29 +241,27 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "actual": {
+                  "value": {
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
                     "path": ""
                   },
-                  "expected": {
-                    "kind": "literal",
-                    "value": null
+                  "actual1": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": "missing"
                   },
-                  "limit": {
+                  "expected1": {
                     "kind": "literal",
                     "value": 1
                   }
                 },
                 "config": {
-                  "predicate": "equals",
                   "predicates": [
                     {
-                      "input": "actual",
-                      "expected": "limit",
-                      "predicate": "greater",
-                      "path": "missing"
+                      "predicate": "greater"
                     }
                   ]
                 }
@@ -487,8 +509,8 @@
         "status": "blocked",
         "phase": "main",
         "inputs": {
-          "actual": 100,
-          "expected": 0
+          "actual1": 100,
+          "expected1": 0
         },
         "outputs": {
           "value": 100,
@@ -526,7 +548,7 @@
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "actual": {
+          "value": {
             "price": 100,
             "meta": {
               "kind": "book"
@@ -536,11 +558,10 @@
             ],
             "empty": null
           },
-          "expected": null,
-          "price": 100,
-          "target": 99.95,
-          "kind": "book",
-          "field": "kind"
+          "actual1": 100,
+          "expected1": 99.95,
+          "actual2": "book",
+          "expected2": "book"
         },
         "outputs": {
           "value": {
@@ -564,8 +585,7 @@
             "a"
           ],
           "empty": null
-        },
-        "expected": null
+        }
       },
       {
         "nodeId": "any-of",
@@ -575,7 +595,7 @@
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "actual": {
+          "value": {
             "price": 100,
             "meta": {
               "kind": "book"
@@ -585,8 +605,12 @@
             ],
             "empty": null
           },
-          "expected": null,
-          "wrong": "x"
+          "actual1": "book",
+          "expected1": "x",
+          "actual2": [
+            "a"
+          ],
+          "expected2": "x"
         },
         "outputs": {
           "value": {
@@ -610,8 +634,7 @@
             "a"
           ],
           "empty": null
-        },
-        "expected": null
+        }
       },
       {
         "nodeId": "broken-list",
@@ -621,7 +644,7 @@
         "status": "error",
         "phase": "main",
         "inputs": {
-          "actual": {
+          "value": {
             "price": 100,
             "meta": {
               "kind": "book"
@@ -631,8 +654,7 @@
             ],
             "empty": null
           },
-          "expected": null,
-          "limit": 1
+          "expected1": 1
         },
         "outputs": {}
       },

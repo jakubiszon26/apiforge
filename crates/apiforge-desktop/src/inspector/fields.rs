@@ -3,11 +3,11 @@
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
-    edit::{TextSelection, VariableBlock},
     format::Binding,
     js::{json_stringify, type_name},
     model::ValueType,
     path::JsonPath,
+    template_text::{Scope, parse_template, print_reference, print_template},
 };
 use eframe::egui::{self, Id, RichText, Ui};
 use indexmap::IndexMap;
@@ -145,24 +145,45 @@ pub fn json_editor(ui: &mut Ui, id: Id, value: &Value, rows: usize) -> Option<Va
     result
 }
 
-/// What happened in a text field that accepts variables.
-#[derive(Default)]
-pub struct TextEvent {
-    pub changed: bool,
-    /// A variable dropped at the caret (character offsets).
-    pub dropped: Option<(VariableBlock, usize, usize)>,
+/// The template text field's draft while it is focused or invalid.
+#[derive(Clone, Default)]
+struct TemplateDraft {
+    text: String,
+    error: Option<String>,
 }
 
-/// A single-line text field; dropping a variable inserts a `{{token}}` at the caret.
-pub fn variable_text(ui: &mut Ui, id: Id, text: &mut String, hint: &str) -> TextEvent {
-    let mut event = TextEvent::default();
-    let output = crate::widgets::text_edit(text)
-        .id(id)
+/// A one-line field for text with `{{reference}}` tokens, e.g. a URL or a header
+/// value. Dropping a variable inserts its reference at the caret. Returns the new
+/// binding when the text changed and parses; invalid text stays in the field with
+/// its error and changes nothing.
+///
+/// A binding whose values are not plain references cannot be shown as text; the
+/// field then says so and returns `None`.
+pub fn template_field(
+    ui: &mut Ui,
+    id: Id,
+    binding: &Binding,
+    scope: Scope<'_>,
+    hint: &str,
+) -> Option<Binding> {
+    let Some(printed) = print_template(binding, scope) else {
+        widgets::hint(ui, "Calculated value — edit it as an argument below.");
+        return None;
+    };
+    let mut draft: TemplateDraft =
+        ui.data_mut(|data| data.get_temp(id))
+            .unwrap_or_else(|| TemplateDraft {
+                text: printed.clone(),
+                error: None,
+            });
+    let output = crate::widgets::text_edit(&mut draft.text)
+        .id(id.with("text"))
         .hint_text(hint)
+        .font(egui::TextStyle::Monospace)
         .desired_width(f32::INFINITY)
         .show(ui);
     let response = output.response;
-    event.changed = response.changed();
+    let mut changed = response.changed();
     if response
         .dnd_hover_payload::<Payload>()
         .is_some_and(|payload| matches!(*payload, Payload::Variable { .. }))
@@ -175,55 +196,72 @@ pub fn variable_text(ui: &mut Ui, id: Id, text: &mut String, hint: &str) -> Text
         );
     }
     if let Some(payload) = response.dnd_release_payload::<Payload>()
-        && let Payload::Variable { label, binding } = payload.as_ref()
+        && let Payload::Variable { binding, .. } = payload.as_ref()
+        && let Some(reference) = print_reference(binding, scope)
     {
-        let length = text.chars().count();
+        let length = draft.text.chars().count();
         let (start, end) = output.cursor_range.map_or((length, length), |range| {
             let (a, b) = (range.primary.index, range.secondary.index);
             (a.min(b).into(), a.max(b).into())
         });
-        event.dropped = Some((
-            VariableBlock {
-                label: label.clone(),
-                binding: binding.clone(),
-            },
-            start,
-            end,
-        ));
+        let byte = |offset: usize| {
+            draft
+                .text
+                .char_indices()
+                .nth(offset)
+                .map_or(draft.text.len(), |(index, _)| index)
+        };
+        let (start, end) = (byte(start), byte(end));
+        draft
+            .text
+            .replace_range(start..end, &format!("{{{{{reference}}}}}"));
+        changed = true;
     }
-    event
+    let mut result = None;
+    if changed {
+        match parse_template(&draft.text, scope) {
+            Ok(next) => {
+                draft.error = None;
+                result = (next != *binding).then_some(next);
+            }
+            Err(error) => draft.error = Some(error.to_string()),
+        }
+    }
+    if let Some(error) = &draft.error {
+        ui.colored_label(theme::DANGER, RichText::new(error).size(11.0));
+    }
+    if response.has_focus() || draft.error.is_some() {
+        ui.data_mut(|data| data.insert_temp(id, draft));
+    } else {
+        ui.data_mut(|data| data.remove::<TemplateDraft>(id));
+    }
+    result
 }
 
-pub fn selection(text: &str, start: usize, end: usize) -> TextSelection<'_> {
-    TextSelection {
-        value: text,
-        start,
-        end,
-    }
-}
-
-pub type DroppedVariable = (String, VariableBlock, usize, usize);
-
-/// Edits a string map (query parameters, headers). Returns the new map when it
-/// changed, and a variable dropped into one of its values.
-pub fn string_map(
+/// Edits an object of text fields, such as request headers or query parameters.
+/// Returns the new binding when it changed; `Some(None)` when the last field was
+/// removed.
+pub fn template_map(
     ui: &mut Ui,
     id: Id,
     label: &str,
-    map: &IndexMap<String, String>,
-) -> (Option<IndexMap<String, String>>, Option<DroppedVariable>) {
-    let mut next = map.clone();
+    binding: Option<&Binding>,
+    scope: Scope<'_>,
+) -> Option<Option<Binding>> {
+    let mut fields = match binding {
+        Some(Binding::Object { fields }) => fields.clone(),
+        _ => IndexMap::new(),
+    };
     let mut changed = false;
-    let mut dropped = None;
     ui.label(RichText::new(label).strong());
     let mut remove = None;
-    for (key, value) in next.iter_mut() {
+    for (key, value) in fields.iter_mut() {
         ui.horizontal(|ui| {
             ui.add_sized(
                 [ui.available_width() - 30.0, 22.0],
-                egui::Label::new(RichText::new(key).monospace()).truncate(),
+                egui::Label::new(RichText::new(key.as_str()).monospace()).truncate(),
             )
-            .on_hover_text(key);
+            .on_hover_text(key.as_str());
             if ui
                 .add(
                     widgets::icon_button(Icon::Trash, "Remove")
@@ -235,15 +273,20 @@ pub fn string_map(
                 remove = Some(key.clone());
             }
         });
-        let event = variable_text(ui, id.with(("value", key)), value, "Value or {{argument}}");
-        changed |= event.changed;
-        if let Some((variable, start, end)) = event.dropped {
-            dropped = Some((key.clone(), variable, start, end));
+        if let Some(next) = template_field(
+            ui,
+            id.with(("value", key.as_str())),
+            value,
+            scope,
+            "Value or {{block.field}}",
+        ) {
+            *value = next;
+            changed = true;
         }
         ui.add_space(3.0);
     }
     if let Some(key) = remove {
-        next.shift_remove(&key);
+        fields.shift_remove(&key);
         changed = true;
     }
     let new_id = id.with("new");
@@ -254,23 +297,23 @@ pub fn string_map(
         let field = ui.add(
             crate::widgets::text_edit(&mut name)
                 .hint_text("Name")
-                .desired_width(ui.available_width() - 60.0),
+                .desired_width(ui.available_width() - 80.0),
         );
         let trimmed = name.trim().to_owned();
-        let valid = !trimmed.is_empty() && !next.contains_key(&trimmed);
+        let valid = !trimmed.is_empty() && !fields.contains_key(&trimmed);
         let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         if ui
             .add_enabled(valid, widgets::action(Icon::Plus, "Add"))
             .clicked()
             || (valid && submit)
         {
-            next.insert(trimmed, String::new());
+            fields.insert(trimmed, Binding::literal(Value::String(String::new())));
             name.clear();
             changed = true;
         }
     });
     ui.data_mut(|data| data.insert_temp(new_id, name));
-    (changed.then_some(next), dropped)
+    changed.then(|| (!fields.is_empty()).then_some(Binding::Object { fields }))
 }
 
 /// What the user chose in the output tree.

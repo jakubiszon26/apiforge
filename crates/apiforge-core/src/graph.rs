@@ -6,8 +6,8 @@
 
 use crate::{
     format::{
-        Binding, Component, Graph, Node, NodeConfig, OptionalJson, OutputPort, Port, Position,
-        Project,
+        Binding, Component, ConditionPredicate, Graph, Node, NodeConfig, OptionalJson, OutputPort,
+        Port, Position, Project,
     },
     ids::new_id,
     model::{Branch, HttpMethod, NodeKind, Predicate, ValueType},
@@ -24,6 +24,11 @@ pub const FALSE_PORT: &str = "__false";
 
 /// The input of a Value block holding its expression.
 pub const VALUE_INPUT: &str = "value";
+/// Inputs of a request: its URL template, header and query objects and body.
+pub const URL_INPUT: &str = "url";
+pub const HEADERS_INPUT: &str = "headers";
+pub const QUERY_INPUT: &str = "query";
+pub const BODY_INPUT: &str = "body";
 
 impl NodeKind {
     pub const ALL: [Self; 7] = [
@@ -164,20 +169,24 @@ pub fn predicate(node: &Node) -> Predicate {
     node.config.predicate.unwrap_or_default()
 }
 
-/// Declared inputs of a node, followed by text template aliases.
-pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
-    let mut ports = builtin_input_ports(node, project);
-    if let Some(templates) = &node.config.template_inputs {
-        for port in templates {
-            if !ports.iter().any(|existing| existing.name == port.name) {
-                ports.push(port.clone());
-            }
-        }
-    }
-    ports
+/// The inputs check `index` (from 1) of a Data condition compares. A condition's
+/// optional `value` input is the data it passes on; without it, `actual1`.
+pub fn condition_inputs(index: usize) -> (String, String) {
+    (format!("actual{index}"), format!("expected{index}"))
 }
 
-fn builtin_input_ports(node: &Node, project: &Project) -> Vec<Port> {
+/// The checks of a Data condition; at least one.
+pub fn condition_predicates(node: &Node) -> Vec<Predicate> {
+    match node.config.predicates.as_deref() {
+        Some(predicates) if !predicates.is_empty() => {
+            predicates.iter().map(|check| check.predicate).collect()
+        }
+        _ => vec![Predicate::Equals],
+    }
+}
+
+/// The inputs a node declares.
+pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
         NodeKind::Trigger => vec![],
         NodeKind::Value => {
@@ -192,29 +201,48 @@ fn builtin_input_ports(node: &Node, project: &Project) -> Vec<Port> {
             .map(|component| component.inputs.clone())
             .unwrap_or_default(),
         NodeKind::Request => {
-            let mut ports = node.config.input_ports.clone().unwrap_or_default();
-            if !ports.iter().any(|port| port.name == "body") {
-                ports.push(Port::new("body", ValueType::Any).required(false));
-            }
-            ports
-        }
-        NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
-            let expected_required =
-                !matches!(predicate(node), Predicate::Exists | Predicate::NotEmpty);
             let mut ports = vec![
-                Port::new("actual", ValueType::Any)
-                    .labelled("Actual value")
+                Port::new(URL_INPUT, ValueType::String)
+                    .labelled("URL")
                     .required(true),
-                Port::new("expected", ValueType::Any)
-                    .labelled("Expected value")
-                    .required(expected_required),
             ];
-            for name in node.inputs.keys() {
-                if !ports.iter().any(|port| &port.name == name) {
-                    ports.push(Port::new(name.clone(), ValueType::Any));
+            // Headers and query appear once the request has some.
+            for (name, label) in [(HEADERS_INPUT, "Headers"), (QUERY_INPUT, "Query")] {
+                if node.inputs.contains_key(name) {
+                    ports.push(Port::new(name, ValueType::Object).labelled(label));
                 }
             }
+            ports.push(Port::new(BODY_INPUT, ValueType::Any).labelled("Body"));
             ports
+        }
+        NodeKind::Assert | NodeKind::If => vec![
+            Port::new("actual", ValueType::Any)
+                .labelled("Actual value")
+                .required(true),
+            Port::new("expected", ValueType::Any)
+                .labelled("Expected value")
+                .required(predicate(node).takes_expected()),
+        ],
+        NodeKind::Condition => {
+            let checks = condition_predicates(node).into_iter().enumerate().flat_map(
+                |(index, predicate)| {
+                    let (actual, expected) = condition_inputs(index + 1);
+                    [
+                        Port::new(actual, ValueType::Any)
+                            .labelled(format!("Value {}", index + 1))
+                            .required(true),
+                        Port::new(expected, ValueType::Any)
+                            .labelled(format!("Expected {}", index + 1))
+                            .required(predicate.takes_expected()),
+                    ]
+                },
+            );
+            // The data the condition guards; its output when the checks hold.
+            let guarded = node
+                .inputs
+                .contains_key(VALUE_INPUT)
+                .then(|| Port::new(VALUE_INPUT, ValueType::Any).labelled("Data passed on"));
+            guarded.into_iter().chain(checks).collect()
         }
     }
 }
@@ -553,21 +581,27 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
         NodeKind::Request => {
             node.config = NodeConfig {
                 method: Some(HttpMethod::Get),
-                url: Some("/endpoint".into()),
-                headers: Some(IndexMap::new()),
-                query: Some(IndexMap::new()),
                 timeout_ms: Some(10_000.0),
-                input_ports: Some(vec![]),
                 ..NodeConfig::default()
             };
+            node.inputs
+                .insert(URL_INPUT.into(), literal(json!("/endpoint")));
         }
         NodeKind::Value => {
             node.inputs.insert(VALUE_INPUT.into(), literal(json!("")));
         }
-        NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
+        NodeKind::Assert | NodeKind::If => {
             node.config.predicate = Some(Predicate::Equals);
             node.inputs.insert("actual".into(), literal(Value::Null));
             node.inputs.insert("expected".into(), literal(Value::Null));
+        }
+        NodeKind::Condition => {
+            node.config.predicates = Some(vec![ConditionPredicate {
+                predicate: Predicate::Equals,
+            }]);
+            let (actual, expected) = condition_inputs(1);
+            node.inputs.insert(actual, literal(Value::Null));
+            node.inputs.insert(expected, literal(Value::Null));
         }
         NodeKind::Trigger | NodeKind::Component => {}
     }
@@ -646,7 +680,10 @@ mod tests {
     fn new_nodes_have_the_reference_defaults() {
         let request = create_node(NodeKind::Request, Position { x: 1.0, y: 2.0 }, None);
         assert!(request.id.starts_with("node-") && request.id.len() == 13);
-        assert_eq!(request.config.url.as_deref(), Some("/endpoint"));
+        assert_eq!(
+            request.inputs[URL_INPUT],
+            Binding::literal(json!("/endpoint"))
+        );
         assert_eq!(request.config.timeout_ms, Some(10_000.0));
         let check = create_node(NodeKind::If, Position { x: 0.0, y: 0.0 }, None);
         assert_eq!(check.inputs["actual"], Binding::literal(Value::Null));
@@ -667,13 +704,35 @@ mod tests {
         assert_eq!(inputs[1].name, "expected");
         assert!(!inputs[1].is_required());
 
+        let names = |node: &Node| -> Vec<String> {
+            input_ports(node, &project)
+                .into_iter()
+                .map(|port| port.name)
+                .collect()
+        };
         let mut request = node("r", NodeKind::Request);
-        request.config.template_inputs = Some(vec![Port::new("alias", ValueType::Any)]);
-        let names: Vec<_> = input_ports(&request, &project)
-            .into_iter()
-            .map(|port| port.name)
-            .collect();
-        assert_eq!(names, ["body", "alias"]);
+        assert_eq!(names(&request), ["url", "body"]);
+        request.inputs.insert(
+            QUERY_INPUT.into(),
+            Binding::Object {
+                fields: IndexMap::new(),
+            },
+        );
+        assert_eq!(names(&request), ["url", "query", "body"]);
+
+        let mut condition = create_node(NodeKind::Condition, Position { x: 0.0, y: 0.0 }, None);
+        assert_eq!(names(&condition), ["actual1", "expected1"]);
+        condition.config.predicates = Some(vec![
+            ConditionPredicate {
+                predicate: Predicate::Equals,
+            },
+            ConditionPredicate {
+                predicate: Predicate::Exists,
+            },
+        ]);
+        let ports = input_ports(&condition, &project);
+        assert_eq!(ports[2].name, "actual2");
+        assert!(!ports[3].is_required(), "exists takes no expected value");
 
         let value_type = |binding: Binding| {
             let value = create_value_node(binding, Position { x: 0.0, y: 0.0 });

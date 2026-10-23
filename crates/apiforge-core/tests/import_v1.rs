@@ -57,10 +57,14 @@ fn every_typescript_export_round_trips_without_dropping_configuration() {
 fn missing_json_fields_and_present_null_have_distinct_round_trips() {
     let mut value = workflow();
     value["scenarios"][0]["graph"]["nodes"][1]["config"]["sampleResponse"] = Value::Null;
-    value["scenarios"][0]["graph"]["nodes"][1]["config"]["inputPorts"] = json!([
-        {"name":"nullable", "type":"any", "defaultValue": null},
-        {"name":"missing", "type":"any"}
-    ]);
+    value["components"] = json!([{
+        "id": "defaults", "revision": 1, "name": "Defaults",
+        "description": "", "outputs": [], "graph": {"nodes": [], "edges": []},
+        "inputs": [
+            {"name":"nullable", "type":"any", "defaultValue": null},
+            {"name":"missing", "type":"any"}
+        ]
+    }]);
     let document = parse(&value).expect("valid nulls");
     let actual: Value = serde_json::from_slice(&document.to_json().expect("export")).expect("JSON");
     assert_semantic_json(&actual, &value);

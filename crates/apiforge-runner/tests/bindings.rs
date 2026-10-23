@@ -12,8 +12,9 @@ use tokio_util::sync::CancellationToken;
 fn project(nodes: Value) -> Project {
     let mut all = vec![json!({
         "id": "source", "kind": "request", "handle": "source",
-        "position": {"x": 0, "y": 0}, "inputs": {},
-        "config": {"method": "GET", "url": "/source",
+        "position": {"x": 0, "y": 0},
+        "inputs": {"url": {"kind": "literal", "value": "/source"}},
+        "config": {"method": "GET",
                    "sampleResponse": {"id": 7, "name": "Zażółć", "tags": ["a", "b"]}}
     })];
     all.extend(nodes.as_array().cloned().unwrap_or_default());
@@ -111,6 +112,53 @@ async fn a_missing_child_is_an_error_naming_it() {
         assert_eq!(result.status, StepStatus::Error, "{id}");
         assert_eq!(result.message.as_deref(), Some(message), "{id}");
     }
+}
+
+#[tokio::test]
+async fn requests_send_encoded_url_values_text_fields_and_bodies() {
+    let text = |text: &str| json!({"kind": "text", "text": text});
+    let value = |binding: Value| json!({"kind": "value", "binding": binding});
+    let request = |id: &str, format: &str, body: Value| {
+        json!({
+            "id": id, "kind": "request", "handle": id, "position": {"x": 0, "y": 0},
+            "inputs": {
+                "url": {"kind": "template", "parts": [
+                    text("/items/"), value(reference("name")), text("?fixed=a b")
+                ]},
+                "headers": {"kind": "object", "fields": {
+                    "X-Tags": reference("tags"),
+                    "X-Id": {"kind": "template", "parts": [text("id-"), value(reference("id"))]}
+                }},
+                "query": {"kind": "object", "fields": {"n": reference("id")}},
+                "body": body
+            },
+            "config": {"method": "POST", "bodyFormat": format, "sampleResponse": {}}
+        })
+    };
+    let run = run(project(json!([
+        request("json", "json", reference("tags")),
+        request("text", "text", reference("id")),
+    ])))
+    .await;
+    let snapshot = |id: &str| step(&run, id).request.clone().expect("request snapshot");
+    let json = snapshot("json");
+    assert_eq!(
+        json.url,
+        "https://api.example.test/items/Za%C5%BC%C3%B3%C5%82%C4%87?fixed=a+b&n=7"
+    );
+    assert_eq!(json.headers["X-Tags"], r#"["a","b"]"#);
+    assert_eq!(json.headers["X-Id"], "id-7");
+    assert_eq!(json.headers["Content-Type"], "application/json");
+    assert_eq!(
+        json.body,
+        apiforge_core::format::OptionalJson::Present(json!(["a", "b"]))
+    );
+    let text = snapshot("text");
+    assert_eq!(text.headers["Content-Type"], "text/plain");
+    assert_eq!(
+        text.body,
+        apiforge_core::format::OptionalJson::Present(json!("7"))
+    );
 }
 
 #[tokio::test]

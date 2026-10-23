@@ -533,17 +533,23 @@ fn graph(
 }
 fn config(node: &Node, project: &Project, path: &str) -> Result {
     let c = &node.config;
-    for value in [&c.url, &c.contract_id, &c.component_id]
-        .into_iter()
-        .flatten()
-    {
+    for value in [&c.contract_id, &c.component_id].into_iter().flatten() {
         text(value, path)?;
     }
-    for map in [&c.headers, &c.query].into_iter().flatten() {
-        require(map.len() <= 100, path, "Too many request fields")?;
-        for (key, value) in map {
-            text(key, path)?;
-            text(value, path)?;
+    if node.kind == NodeKind::Request {
+        require(
+            node.inputs.contains_key(crate::graph::URL_INPUT),
+            path,
+            "A request needs a URL",
+        )?;
+        for name in [crate::graph::HEADERS_INPUT, crate::graph::QUERY_INPUT] {
+            require(
+                node.inputs
+                    .get(name)
+                    .is_none_or(|binding| matches!(binding, Binding::Object { .. })),
+                path,
+                "Request headers and query must be objects",
+            )?;
         }
     }
     if let Some(timeout) = c.timeout_ms {
@@ -568,21 +574,25 @@ fn config(node: &Node, project: &Project, path: &str) -> Result {
         )?;
     }
     optional_json(&c.sample_response, path)?;
-    if let Some(values) = &c.input_ports {
-        ports(values, path)?;
-    }
-    if let Some(values) = &c.template_inputs {
-        ports(values, path)?;
-    }
-    if let Some(predicates) = &c.predicates {
-        require(predicates.len() <= 100, path, "Too many predicates")?;
-        for predicate in predicates {
-            id(&predicate.input, path)?;
-            id(&predicate.expected, path)?;
-            if let Some(field) = &predicate.path {
-                text(field, path)?;
-            }
-        }
+    if node.kind == NodeKind::Condition {
+        let count = c.predicates.as_ref().map_or(0, Vec::len);
+        require(
+            (1..=100).contains(&count),
+            path,
+            "A data condition needs 1..100 checks",
+        )?;
+        // Check n compares actual<n> with expected<n>; `value` is the data passed on.
+        require(
+            node.inputs.keys().all(|name| {
+                name == crate::graph::VALUE_INPUT
+                    || (1..=count).any(|index| {
+                        let (actual, expected) = crate::graph::condition_inputs(index);
+                        *name == actual || *name == expected
+                    })
+            }),
+            path,
+            "Data condition inputs must be value, actual<n> and expected<n> of its checks",
+        )?;
     }
     if node.kind == NodeKind::Component {
         require(

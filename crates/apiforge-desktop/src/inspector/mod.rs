@@ -12,15 +12,17 @@ pub use response::sample_output;
 use crate::icons::Icon;
 use crate::{labels, theme, widgets};
 use apiforge_core::{
-    edit::{self, bind_variable_text, prune_template_inputs},
+    edit,
     format::{Binding, ConditionPredicate, Graph, Node, OptionalJson, Port, Project},
     graph::{
-        FALSE_PORT, ORDER_PORT, TRUE_PORT, component_definition, input_ports, output_ports,
-        predicate,
+        BODY_INPUT, FALSE_PORT, HEADERS_INPUT, ORDER_PORT, QUERY_INPUT, TRUE_PORT, URL_INPUT,
+        VALUE_INPUT, component_definition, condition_inputs, condition_predicates, input_ports,
+        output_ports, predicate,
     },
     handle::is_valid_handle,
-    model::{Branch, Match, NodeKind, Predicate, ValueType},
+    model::{BodyFormat, Branch, Match, NodeKind, Predicate},
     run::{RunResult, StepResult},
+    template_text::{Scope, print_template},
 };
 use eframe::egui::{self, Id, RichText, Ui};
 use std::collections::HashSet;
@@ -71,7 +73,6 @@ struct ResponseChoiceState {
 pub struct Inspector {
     node_id: String,
     tab: Tab,
-    new_input: String,
     choosing_response: Option<ResponseChoiceState>,
 }
 
@@ -80,7 +81,6 @@ impl Default for Inspector {
         Self {
             node_id: String::new(),
             tab: Tab::Configuration,
-            new_input: String::new(),
             choosing_response: None,
         }
     }
@@ -126,7 +126,7 @@ impl Inspector {
         self.response_choice(ui.ctx(), context, &mut node);
 
         if node != *context.node {
-            actions.push(Action::UpdateNode(Box::new(prune_template_inputs(&node))));
+            actions.push(Action::UpdateNode(Box::new(node)));
         }
         actions
     }
@@ -192,7 +192,8 @@ impl Inspector {
                 );
             }
             NodeKind::Request => request(ui, id, context, node),
-            NodeKind::Assert | NodeKind::Condition => check(ui, id, node),
+            NodeKind::Assert => check(ui, id, node),
+            NodeKind::Condition => {}
             NodeKind::Component => {
                 let definition = component_definition(context.project, node);
                 ui.add_space(6.0);
@@ -255,7 +256,7 @@ impl Inspector {
             flow_connections(ui, context, actions);
         }
         if node.kind == NodeKind::Condition {
-            condition_predicates(ui, id, context, node);
+            condition_checks(ui, id, context, node);
         }
         if node.kind == NodeKind::Request {
             samples(ui, id, context, node);
@@ -263,8 +264,21 @@ impl Inspector {
     }
 
     fn arguments(&mut self, ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
-        let ports = input_ports(node, context.project);
-        if ports.is_empty() && !matches!(node.kind, NodeKind::Request | NodeKind::Condition) {
+        let scope = scope(context);
+        // Fields shown as text in the request section are edited there; a value
+        // that text cannot express falls back to an argument editor.
+        let ports: Vec<Port> = input_ports(node, context.project)
+            .into_iter()
+            .filter(|port| match node.kind {
+                NodeKind::Condition => false,
+                NodeKind::Request if port.name != BODY_INPUT => node
+                    .inputs
+                    .get(&port.name)
+                    .is_some_and(|binding| !has_text_form(binding, scope)),
+                _ => true,
+            })
+            .collect();
+        if ports.is_empty() {
             return;
         }
         ui.add_space(10.0);
@@ -277,82 +291,16 @@ impl Inspector {
             );
         });
         ui.add_space(2.0);
-        let binding_context = binding::Context {
-            node: context.node,
-            graph: context.graph,
-            project: context.project,
-            parameters: context.parameters,
-            run: context.run,
-        };
-        let mut remove = None;
+        let binding_context = binding_context(context);
         for port in &ports {
-            let mut value = node.inputs.get(&port.name).cloned();
-            if binding::editor(
+            argument(
                 ui,
                 &binding_context,
                 port,
-                &mut value,
-                0,
+                node,
                 id.with(("argument", &port.name)),
-            ) {
-                match value {
-                    Some(binding) => {
-                        node.inputs.insert(port.name.clone(), binding);
-                    }
-                    None => {
-                        node.inputs.shift_remove(&port.name);
-                    }
-                }
-            }
-            if node.kind == NodeKind::Request
-                && port.name != "body"
-                && let Some(true) =
-                    argument_settings(ui, id.with(("settings", &port.name)), node, &port.name)
-            {
-                remove = Some(port.name.clone());
-            }
+            );
             ui.add_space(4.0);
-        }
-        if let Some(name) = remove {
-            node.inputs.shift_remove(&name);
-            if let Some(ports) = &mut node.config.input_ports {
-                ports.retain(|port| port.name != name);
-            }
-        }
-        if matches!(node.kind, NodeKind::Request | NodeKind::Condition) {
-            ui.horizontal(|ui| {
-                let hint = "Argument name";
-                let field = ui.add(
-                    crate::widgets::text_edit(&mut self.new_input)
-                        .hint_text(hint)
-                        .desired_width(ui.available_width() - 56.0),
-                );
-                let name = self.new_input.trim().to_owned();
-                let valid = !name.is_empty()
-                    && !node.inputs.contains_key(&name)
-                    && !ports.iter().any(|port| port.name == name);
-                let submit =
-                    field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if ui
-                    .add_enabled(valid, widgets::action(Icon::Plus, "Add"))
-                    .clicked()
-                    || (valid && submit)
-                {
-                    node.inputs.insert(
-                        name.clone(),
-                        Binding::literal(serde_json::Value::String(String::new())),
-                    );
-                    if node.kind == NodeKind::Request {
-                        let mut port = Port::new(name, ValueType::Any).required(true);
-                        port.exposed = Some(true);
-                        node.config
-                            .input_ports
-                            .get_or_insert_with(Vec::new)
-                            .push(port);
-                    }
-                    self.new_input.clear();
-                }
-            });
         }
     }
 
@@ -580,42 +528,35 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
 }
 
 fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
+    let scope = scope(context);
     ui.add_space(6.0);
     widgets::field_label(ui, "Method and URL or path");
-    ui.horizontal(|ui| {
-        let mut method = node
-            .config
-            .method
-            .unwrap_or(apiforge_core::model::HttpMethod::Get);
-        egui::ComboBox::from_id_salt(id.with("method"))
-            .selected_text(labels::method(method))
-            .width(86.0)
-            .show_ui(ui, |ui| {
-                for option in labels::METHODS {
-                    ui.selectable_value(&mut method, option, labels::method(option));
-                }
-            });
-        node.config.method = Some(method);
-        let mut url = node.config.url.clone().unwrap_or_default();
-        let event = fields::variable_text(ui, id.with("url"), &mut url, "/endpoint/:argument");
-        if event.changed {
-            node.config.url = Some(url.clone());
-        }
-        if let Some((variable, start, end)) = event.dropped {
-            *node = bind_variable_text(
-                node,
-                &variable,
-                &fields::selection(&url, start, end),
-                |mut next, text| {
-                    next.config.url = Some(text);
-                    next
-                },
-            );
-        }
-    });
+    let mut method = node
+        .config
+        .method
+        .unwrap_or(apiforge_core::model::HttpMethod::Get);
+    egui::ComboBox::from_id_salt(id.with("method"))
+        .selected_text(labels::method(method))
+        .width(86.0)
+        .show_ui(ui, |ui| {
+            for option in labels::METHODS {
+                ui.selectable_value(&mut method, option, labels::method(option));
+            }
+        });
+    node.config.method = Some(method);
+    let url = node
+        .inputs
+        .get(URL_INPUT)
+        .cloned()
+        .unwrap_or_else(|| Binding::literal(serde_json::json!("")));
+    if let Some(next) =
+        fields::template_field(ui, id.with("url"), &url, scope, "/orders/{{order.body.id}}")
+    {
+        node.inputs.insert(URL_INPUT.into(), next);
+    }
     widgets::hint(
         ui,
-        "A relative address uses the environment's base URL. Arguments: :argument or {{argument}}.",
+        "A relative address uses the environment's base URL. Insert values as {{block.field}}, {{env.name}} or {{param.name}}; they are URL-encoded.",
     );
 
     widgets::field_label(ui, "Timeout (ms)");
@@ -631,80 +572,91 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         node.config.timeout_ms = Some(timeout.round());
     }
 
-    ui.add_space(6.0);
-    for (label, key) in [("Query parameters", "query"), ("Headers", "headers")] {
-        let current = if key == "query" {
-            node.config.query.clone()
-        } else {
-            node.config.headers.clone()
-        }
-        .unwrap_or_default();
-        let (changed, dropped) = fields::string_map(ui, id.with(key), label, &current);
-        let set = |node: &mut Node, map| {
-            if key == "query" {
-                node.config.query = Some(map);
-            } else {
-                node.config.headers = Some(map);
+    widgets::field_label(ui, "Body format");
+    let mut format = node.config.body_format.unwrap_or_default();
+    egui::ComboBox::from_id_salt(id.with("body-format"))
+        .selected_text(body_format_label(format))
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
+            for option in [BodyFormat::Json, BodyFormat::Text] {
+                ui.selectable_value(&mut format, option, body_format_label(option));
             }
-        };
-        if let Some(map) = changed {
-            set(node, map);
+        });
+    node.config.body_format = (format != BodyFormat::default()).then_some(format);
+
+    ui.add_space(6.0);
+    for (label, input) in [
+        ("Query parameters", QUERY_INPUT),
+        ("Headers", HEADERS_INPUT),
+    ] {
+        let current = node.inputs.get(input);
+        if current.is_some_and(|binding| !has_text_form(binding, scope)) {
+            continue;
         }
-        if let Some((entry, variable, start, end)) = dropped {
-            let text = current.get(&entry).cloned().unwrap_or_default();
-            *node = bind_variable_text(
-                node,
-                &variable,
-                &fields::selection(&text, start, end),
-                |mut next, value| {
-                    let map = if key == "query" {
-                        &mut next.config.query
-                    } else {
-                        &mut next.config.headers
-                    };
-                    map.get_or_insert_with(Default::default)
-                        .insert(entry.clone(), value);
-                    next
-                },
-            );
+        match fields::template_map(ui, id.with(input), label, current, scope) {
+            Some(Some(next)) => {
+                node.inputs.insert(input.into(), next);
+            }
+            Some(None) => {
+                node.inputs.shift_remove(input);
+            }
+            None => {}
         }
         ui.add_space(4.0);
     }
     widgets::hint(
         ui,
-        "Values may use {{argument}}. Put tokens in an argument bound to Environment / secret, e.g. Authorization = Bearer {{token}}.",
+        "Secrets belong in the environment: Authorization = Bearer {{env.token}}.",
     );
-    let _ = context;
 }
 
-/// Settings of a request's own argument; returns `Some(true)` to remove it.
-fn argument_settings(ui: &mut Ui, id: Id, node: &mut Node, name: &str) -> Option<bool> {
-    let ports = node.config.input_ports.as_mut()?;
-    let port = ports.iter_mut().find(|port| port.name == name)?;
-    let mut remove = false;
-    egui::CollapsingHeader::new(RichText::new("Argument settings").size(11.0))
-        .id_salt(id)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Type");
-                fields::type_combo(ui, id.with("type"), &mut port.value_type);
-            });
-            let mut required = port.required.unwrap_or(false);
-            if ui.checkbox(&mut required, "Required").changed() {
-                port.required = Some(required);
+fn body_format_label(format: BodyFormat) -> &'static str {
+    match format {
+        BodyFormat::Json => "JSON",
+        BodyFormat::Text => "Text",
+    }
+}
+
+/// Whether a request field can be edited as text with `{{reference}}` tokens.
+fn has_text_form(binding: &Binding, scope: Scope<'_>) -> bool {
+    match binding {
+        Binding::Object { fields } => fields
+            .values()
+            .all(|field| print_template(field, scope).is_some()),
+        other => print_template(other, scope).is_some(),
+    }
+}
+
+fn scope<'a>(context: &Context<'a>) -> Scope<'a> {
+    Scope {
+        nodes: &context.graph.nodes,
+        project: context.project,
+    }
+}
+
+fn binding_context<'a>(context: &Context<'a>) -> binding::Context<'a> {
+    binding::Context {
+        node: context.node,
+        graph: context.graph,
+        project: context.project,
+        parameters: context.parameters,
+        run: context.run,
+    }
+}
+
+/// The editor of one input: sets or removes it.
+fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut Node, id: Id) {
+    let mut value = node.inputs.get(&port.name).cloned();
+    if binding::editor(ui, context, port, &mut value, 0, id) {
+        match value {
+            Some(binding) => {
+                node.inputs.insert(port.name.clone(), binding);
             }
-            let mut exposed = port.exposed.unwrap_or(false);
-            if ui.checkbox(&mut exposed, "Show on the block").changed() {
-                port.exposed = Some(exposed);
+            None => {
+                node.inputs.shift_remove(&port.name);
             }
-            if ui
-                .add(widgets::action(Icon::Trash, "Remove argument").danger())
-                .clicked()
-            {
-                remove = true;
-            }
-        });
-    Some(remove)
+        }
+    }
 }
 
 fn check(ui: &mut Ui, id: Id, node: &mut Node) {
@@ -745,12 +697,6 @@ fn check(ui: &mut Ui, id: Id, node: &mut Node) {
             node.config.tolerance = Some(tolerance.max(0.0));
         }
     }
-    if node.kind == NodeKind::Condition {
-        widgets::hint(
-            ui,
-            "An unmet condition means invalid data and blocks dependent steps.",
-        );
-    }
 }
 
 fn predicate_label(predicate: Predicate) -> &'static str {
@@ -767,121 +713,158 @@ fn predicate_label(predicate: Predicate) -> &'static str {
     }
 }
 
-fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
-    ui.add_space(8.0);
-    widgets::section(ui, "Additional conditions");
-    let ports: Vec<String> = input_ports(node, context.project)
-        .into_iter()
-        .map(|port| port.name)
-        .collect();
-    let mut matching = node.config.match_mode.unwrap_or(Match::All);
-    egui::ComboBox::from_id_salt(id.with("match"))
-        .selected_text(if matching == Match::All {
-            "All conditions"
-        } else {
-            "Any condition"
-        })
-        .width(ui.available_width())
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut matching, Match::All, "All conditions");
-            ui.selectable_value(&mut matching, Match::Any, "Any condition");
-        });
-    if node.config.match_mode.is_some() || matching != Match::All {
-        node.config.match_mode = Some(matching);
+/// The checks of a Data condition: each compares `actual<n>` with `expected<n>`.
+fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
+    let mut predicates = condition_predicates(node);
+    ui.add_space(10.0);
+    widgets::section_inline(ui, "Checks");
+    if predicates.len() > 1 {
+        let mut mode = node.config.match_mode.unwrap_or(Match::All);
+        egui::ComboBox::from_id_salt(id.with("match"))
+            .selected_text(match mode {
+                Match::All => "All checks must hold",
+                Match::Any => "At least one check must hold",
+            })
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut mode, Match::All, "All checks must hold");
+                ui.selectable_value(&mut mode, Match::Any, "At least one check must hold");
+            });
+        node.config.match_mode = Some(mode);
     }
-    let mut predicates = node.config.predicates.clone().unwrap_or_default();
-    let mut remove = None;
-    let mut dropped_on_path = None;
-    for (index, condition) in predicates.iter_mut().enumerate() {
-        let row = id.with(("condition", index));
-        egui::Frame::new()
-            .fill(theme::FIELD)
-            .corner_radius(6)
-            .inner_margin(egui::Margin::same(8))
-            .show(ui, |ui| {
-                widgets::field_label(ui, "Actual argument");
-                name_combo(ui, row.with("input"), &mut condition.input, &ports);
-                widgets::field_label(ui, "Comparison");
-                let mut predicate = condition.predicate;
-                egui::ComboBox::from_id_salt(row.with("predicate"))
-                    .selected_text(predicate_label(predicate))
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        for option in Predicate::ALL {
-                            ui.selectable_value(&mut predicate, option, predicate_label(option));
-                        }
-                    });
-                condition.predicate = predicate;
-                widgets::field_label(ui, "Expected argument");
-                name_combo(ui, row.with("expected"), &mut condition.expected, &ports);
-                let mut field = condition.path.clone().unwrap_or_default();
-                let event =
-                    fields::variable_text(ui, row.with("path"), &mut field, "Path (optional)");
-                if event.changed {
-                    condition.path = Some(field.clone());
-                }
-                if let Some((variable, start, end)) = event.dropped {
-                    dropped_on_path = Some((index, field, variable, start, end));
-                }
+    let binding_context = binding_context(context);
+    let ports = input_ports(node, context.project);
+    let port = |name: &str| ports.iter().find(|port| port.name == name).cloned();
+    let mut removed = None;
+    for (index, predicate) in predicates.iter_mut().enumerate() {
+        let (actual, expected) = condition_inputs(index + 1);
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("Check {}", index + 1)).family(theme::bold_family()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let can_remove = node
+                    .config
+                    .predicates
+                    .as_ref()
+                    .is_some_and(|list| list.len() > 1);
                 if ui
-                    .add(
-                        widgets::icon_button(Icon::Trash, "Remove condition")
+                    .add_enabled(
+                        can_remove,
+                        widgets::icon_button(Icon::Trash, "Remove check")
                             .compact()
                             .danger(),
                     )
                     .clicked()
                 {
-                    remove = Some(index);
+                    removed = Some(index);
                 }
             });
+        });
+        egui::ComboBox::from_id_salt(id.with(("check", index)))
+            .selected_text(predicate_label(*predicate))
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for option in Predicate::ALL {
+                    ui.selectable_value(predicate, option, predicate_label(option));
+                }
+            });
+        if let Some(port) = port(&actual) {
+            argument(
+                ui,
+                &binding_context,
+                &port,
+                node,
+                id.with(("actual", index)),
+            );
+        }
+        if predicate.takes_expected()
+            && let Some(port) = port(&expected)
+        {
+            argument(
+                ui,
+                &binding_context,
+                &port,
+                node,
+                id.with(("expected", index)),
+            );
+        }
     }
-    if let Some(index) = remove {
+    if let Some(index) = removed {
         predicates.remove(index);
+        // Later checks move up, so their inputs are renumbered.
+        let mut inputs = node.inputs.clone();
+        for position in index + 1..=predicates.len() + 1 {
+            let (from_actual, from_expected) = condition_inputs(position + 1);
+            let (to_actual, to_expected) = condition_inputs(position);
+            for (from, to) in [(from_actual, to_actual), (from_expected, to_expected)] {
+                match node.inputs.get(&from) {
+                    Some(binding) => {
+                        inputs.insert(to, binding.clone());
+                    }
+                    None => {
+                        inputs.shift_remove(&to);
+                    }
+                }
+                inputs.shift_remove(&from);
+            }
+        }
+        node.inputs = inputs;
     }
     if ui
-        .add(widgets::action(Icon::Plus, "Condition").quiet())
+        .add(widgets::action(Icon::Plus, "Add check").quiet())
         .clicked()
     {
-        predicates.push(ConditionPredicate {
-            input: "actual".into(),
-            expected: "expected".into(),
-            predicate: predicate(node),
-            path: None,
-        });
+        predicates.push(Predicate::Equals);
+        let (actual, expected) = condition_inputs(predicates.len());
+        node.inputs
+            .insert(actual, Binding::literal(serde_json::Value::Null));
+        node.inputs
+            .insert(expected, Binding::literal(serde_json::Value::Null));
     }
-    if node.config.predicates.is_some() || !predicates.is_empty() {
-        node.config.predicates = Some(predicates);
+    if predicates.contains(&Predicate::Approximately) {
+        widgets::field_label(ui, "Allowed difference");
+        let mut tolerance = node.config.tolerance.unwrap_or(0.01);
+        if ui
+            .add(
+                egui::DragValue::new(&mut tolerance)
+                    .range(0.0..=f64::MAX)
+                    .speed(0.01),
+            )
+            .changed()
+        {
+            node.config.tolerance = Some(tolerance.max(0.0));
+        }
     }
-    if let Some((index, current_path, variable, start, end)) = dropped_on_path {
-        *node = bind_variable_text(
-            node,
-            &variable,
-            &fields::selection(&current_path, start, end),
-            |mut next, text| {
-                if let Some(list) = &mut next.config.predicates
-                    && let Some(item) = list.get_mut(index)
-                {
-                    item.path = Some(text);
-                }
-                next
-            },
-        );
+    node.config.predicates = Some(
+        predicates
+            .into_iter()
+            .map(|predicate| ConditionPredicate { predicate })
+            .collect(),
+    );
+
+    ui.add_space(6.0);
+    let mut passes_data = node.inputs.contains_key(VALUE_INPUT);
+    if ui
+        .checkbox(&mut passes_data, "Pass on other data")
+        .on_hover_text("Without it, the condition passes on the first checked value")
+        .changed()
+    {
+        if passes_data {
+            node.inputs.insert(
+                VALUE_INPUT.into(),
+                Binding::literal(serde_json::Value::Null),
+            );
+        } else {
+            node.inputs.shift_remove(VALUE_INPUT);
+        }
+    }
+    if passes_data && let Some(port) = port(VALUE_INPUT) {
+        argument(ui, &binding_context, &port, node, id.with("passed-on"));
     }
     widgets::hint(
         ui,
-        "With a list, the engine checks these conditions instead of the single check above.",
+        "An unmet condition means invalid data and blocks dependent steps.",
     );
-}
-
-fn name_combo(ui: &mut Ui, id: Id, value: &mut String, names: &[String]) {
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(value.as_str())
-        .width(ui.available_width())
-        .show_ui(ui, |ui| {
-            for name in names {
-                ui.selectable_value(value, name.clone(), name);
-            }
-        });
 }
 
 fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {

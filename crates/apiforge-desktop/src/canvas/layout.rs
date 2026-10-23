@@ -6,8 +6,12 @@ use crate::labels;
 use apiforge_core::{
     block::Block,
     format::{Binding, Graph, Node, Port, Project},
-    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, VALUE_INPUT, input_slots, output_ports, predicate},
+    graph::{
+        FALSE_PORT, ORDER_PORT, TRUE_PORT, URL_INPUT, VALUE_INPUT, condition_predicates,
+        input_slots, output_ports, predicate,
+    },
     model::{NodeKind, Predicate, ValueType},
+    template_text::{Scope, print_template},
 };
 use eframe::egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -306,12 +310,19 @@ impl Card {
                         .method
                         .unwrap_or(apiforge_core::model::HttpMethod::Get)
                 ),
-                node.config
-                    .url
-                    .as_deref()
+                node.inputs
+                    .get(URL_INPUT)
+                    .and_then(|url| print_template(
+                        url,
+                        Scope {
+                            nodes: &reference_graph.nodes,
+                            project,
+                        }
+                    ))
                     .filter(|url| !url.is_empty())
-                    .unwrap_or("/endpoint")
+                    .unwrap_or_else(|| "…".to_owned())
             )),
+            NodeKind::Condition => Some(condition_subtitle(node)),
             NodeKind::Value => value_subtitle(node),
             NodeKind::Assert | NodeKind::If => Some(predicate(node).label().to_owned()),
             _ => None,
@@ -446,6 +457,17 @@ impl Card {
         let mut card = self.clone();
         card.origin += offset;
         card
+    }
+}
+
+/// The predicate of a single check, or how many checks must hold.
+fn condition_subtitle(node: &Node) -> String {
+    match condition_predicates(node).as_slice() {
+        [single] => single.label().to_owned(),
+        checks => match node.config.match_mode {
+            Some(apiforge_core::model::Match::Any) => format!("any of {} checks", checks.len()),
+            _ => format!("all {} checks", checks.len()),
+        },
     }
 }
 

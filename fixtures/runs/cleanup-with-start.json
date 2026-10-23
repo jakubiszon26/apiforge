@@ -22,6 +22,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/items"
+                  },
                   "body": {
                     "kind": "literal",
                     "value": {
@@ -31,14 +35,10 @@
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/items",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "item-7"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -100,17 +100,21 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "actual": {
+                  "actual1": {
                     "kind": "literal",
                     "value": 1
                   },
-                  "expected": {
+                  "expected1": {
                     "kind": "literal",
                     "value": 2
                   }
                 },
                 "config": {
-                  "predicate": "equals"
+                  "predicates": [
+                    {
+                      "predicate": "equals"
+                    }
+                  ]
                 }
               },
               {
@@ -121,17 +125,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/read"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/read",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               }
             ],
@@ -166,23 +171,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "reference",
-                    "nodeId": "create",
-                    "port": "body",
-                    "path": "id"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "create",
+                          "port": "body",
+                          "path": "id"
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "DELETE",
-                  "url": "/items/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "deleted": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -195,23 +208,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "reference",
-                    "nodeId": "create",
-                    "port": "body",
-                    "path": "absent"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "create",
+                          "port": "body",
+                          "path": "absent"
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "DELETE",
-                  "url": "/items/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "deleted": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -224,6 +245,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/broken"
+                  },
                   "body": {
                     "kind": "literal",
                     "value": {
@@ -233,14 +258,10 @@
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/broken",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "never": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -252,17 +273,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/after"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/after",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -275,23 +297,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "value": {
-                    "kind": "reference",
-                    "nodeId": "broken",
-                    "port": "value",
-                    "path": ""
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/errors/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "broken",
+                          "port": "value",
+                          "path": ""
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/errors/:value",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -304,6 +334,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/blocked"
+                  },
                   "body": {
                     "kind": "reference",
                     "nodeId": "read",
@@ -313,14 +347,10 @@
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/blocked",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -332,14 +362,15 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/no-sample"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/no-sample",
-                  "headers": {},
-                  "query": {},
-                  "timeoutMs": 10000.0,
-                  "inputPorts": []
+                  "timeoutMs": 10000.0
                 }
               }
             ],
@@ -451,8 +482,8 @@
         "status": "blocked",
         "phase": "main",
         "inputs": {
-          "actual": 1,
-          "expected": 2
+          "actual1": 1,
+          "expected1": 2
         },
         "outputs": {
           "value": 1,

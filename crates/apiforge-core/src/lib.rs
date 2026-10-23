@@ -18,6 +18,7 @@ pub mod predicate;
 pub mod run;
 mod strict_json;
 pub mod template;
+pub mod template_text;
 mod validation;
 
 pub use format::{ImportError, ImportLimits, ValidatedDocument, import_document};

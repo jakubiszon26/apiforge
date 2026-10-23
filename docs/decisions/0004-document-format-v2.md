@@ -61,7 +61,7 @@ must not be reserved words of the language.
 | `request` | `url` (required), `headers`, `query`, `body` | `method`, `timeoutMs`, `bodyFormat` (`json` \| `text`), `sampleResponse`, `sampleStatus`, `contractId` | `body`, `status`, `headers`, `duration` |
 | `value` | `value` | `variable: bool` | `value` |
 | `assert`, `if` | `actual`, `expected` | `predicate`, `tolerance` | `value`, `passed` |
-| `condition` | `actual1`, `expected1`, … | `predicates`, `match`, `tolerance` | `value`, `passed` |
+| `condition` | `value` (optional), `actual1`, `expected1`, … | `predicates`, `match`, `tolerance` | `value`, `passed` |
 | `component` | the definition's inputs | `componentId`, `revision` | the definition's exports |
 | `export` | `value` | `type`, `contractId` | — |
 
@@ -79,7 +79,9 @@ must not be reserved words of the language.
   `inputPorts`, `templateInputs` and `/:name` path parameters are removed.
 - **Condition** predicates refer to their inputs by position. Predicate *n* (from 1)
   compares `actual<n>` with `expected<n>`. A field path is part of the actual
-  value's reference binding, not of the predicate.
+  value's reference binding, not of the predicate. The optional `value` input is
+  the data the condition passes on when its checks hold; without it the condition
+  passes on `actual1`. The report shows an expected value only for a single check.
 - **Export** is valid only in a component graph. Its handle is the output name.
   Its value type and contract describe the output port. A skipped or failed Export
   leaves the output missing.

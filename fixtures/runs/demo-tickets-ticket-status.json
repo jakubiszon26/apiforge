@@ -131,31 +131,32 @@
                   "y": 80.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "parameter",
-                    "name": "id"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/tickets/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "parameter",
+                          "name": "id"
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "GET",
-                  "url": "/tickets/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": 7,
                     "title": "Problem z logowaniem",
                     "status": "open",
                     "priority": "high"
-                  },
-                  "inputPorts": [
-                    {
-                      "name": "id",
-                      "type": "any",
-                      "required": true,
-                      "exposed": true
-                    }
-                  ]
+                  }
                 }
               }
             ],

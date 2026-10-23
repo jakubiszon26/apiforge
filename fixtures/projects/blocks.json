@@ -19,16 +19,25 @@
               "y": 170.0
             },
             "inputs": {
-              "code": {
-                "kind": "literal",
-                "value": 123
+              "url": {
+                "kind": "template",
+                "parts": [
+                  {
+                    "kind": "text",
+                    "text": "/products/"
+                  },
+                  {
+                    "kind": "value",
+                    "binding": {
+                      "kind": "literal",
+                      "value": 123
+                    }
+                  }
+                ]
               }
             },
             "config": {
               "method": "GET",
-              "url": "/products/:code",
-              "headers": {},
-              "query": {},
               "timeoutMs": 10000.0,
               "sampleResponse": {
                 "id": 123,
@@ -40,15 +49,7 @@
                   "price": 80,
                   "inna_nazwa": "Oferta jesienna"
                 }
-              },
-              "inputPorts": [
-                {
-                  "name": "code",
-                  "type": "any",
-                  "required": true,
-                  "exposed": true
-                }
-              ]
+              }
             }
           },
           {

@@ -9,7 +9,7 @@
 //! safety net behind explicit secret declarations.
 
 use apiforge_core::{
-    format::{Binding, Graph, Node, NodeConfig, OptionalJson, Port, TemplatePart},
+    format::{Binding, Graph, Node, NodeConfig, OptionalJson, TemplatePart},
     js::utf16_len,
     run::{RequestSnapshot, RunResult, RunSnapshot, StepResult},
     template::encode_uri_component,
@@ -340,47 +340,12 @@ impl Redactor {
         }
     }
 
-    fn redact_port(&self, port: &Port) -> Port {
-        Port {
-            name: self.redact_str(&port.name),
-            label: port.label.as_deref().map(|text| self.redact_str(text)),
-            contract_id: port
-                .contract_id
-                .as_deref()
-                .map(|text| self.redact_str(text)),
-            default_value: self.redact_optional(&port.default_value),
-            ..port.clone()
-        }
-    }
-
     fn redact_config(&self, config: &NodeConfig) -> NodeConfig {
         let text = |value: &Option<String>| value.as_deref().map(|value| self.redact_str(value));
-        let ports = |ports: &Option<Vec<Port>>| {
-            ports
-                .as_ref()
-                .map(|ports| ports.iter().map(|port| self.redact_port(port)).collect())
-        };
         NodeConfig {
-            url: text(&config.url),
-            headers: config.headers.as_ref().map(|map| self.redact_texts(map)),
-            query: config.query.as_ref().map(|map| self.redact_texts(map)),
             sample_response: self.redact_optional(&config.sample_response),
             contract_id: text(&config.contract_id),
             component_id: text(&config.component_id),
-            input_ports: ports(&config.input_ports),
-            template_inputs: ports(&config.template_inputs),
-            predicates: config.predicates.as_ref().map(|predicates| {
-                predicates
-                    .iter()
-                    .map(|predicate| {
-                        let mut predicate = predicate.clone();
-                        predicate.input = self.redact_str(&predicate.input);
-                        predicate.expected = self.redact_str(&predicate.expected);
-                        predicate.path = text(&predicate.path);
-                        predicate
-                    })
-                    .collect()
-            }),
             ..config.clone()
         }
     }

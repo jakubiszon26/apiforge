@@ -33,12 +33,14 @@
                   "x": 370.0,
                   "y": 100.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/products/123"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/products/123",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": 123,
@@ -50,8 +52,7 @@
                       "price": 80,
                       "inna_nazwa": "Oferta jesienna"
                     }
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -89,6 +90,10 @@
                   "y": 20.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/carts"
+                  },
                   "body": {
                     "kind": "literal",
                     "value": {}
@@ -96,9 +101,6 @@
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/carts",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "demo-cart",
@@ -106,8 +108,7 @@
                     "quantity": 0,
                     "items": []
                   },
-                  "sampleStatus": 201,
-                  "inputPorts": []
+                  "sampleStatus": 201
                 }
               },
               {
@@ -148,11 +149,27 @@
                   "y": 20.0
                 },
                 "inputs": {
-                  "cartId": {
-                    "kind": "reference",
-                    "nodeId": "flow-cart",
-                    "port": "body",
-                    "path": "id"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/carts/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "flow-cart",
+                          "port": "body",
+                          "path": "id"
+                        }
+                      },
+                      {
+                        "kind": "text",
+                        "text": "/items"
+                      }
+                    ]
                   },
                   "body": {
                     "kind": "reference",
@@ -163,9 +180,6 @@
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/carts/{{cartId}}/items",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "demo-cart",
@@ -178,15 +192,7 @@
                         "price": 80
                       }
                     ]
-                  },
-                  "inputPorts": [
-                    {
-                      "name": "cartId",
-                      "type": "any",
-                      "required": true,
-                      "exposed": true
-                    }
-                  ]
+                  }
                 }
               },
               {
@@ -299,30 +305,31 @@
                   "y": 80.0
                 },
                 "inputs": {
-                  "cartId": {
-                    "kind": "reference",
-                    "nodeId": "flow-cart",
-                    "port": "body",
-                    "path": "id"
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/carts/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "flow-cart",
+                          "port": "body",
+                          "path": "id"
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "DELETE",
-                  "url": "/carts/{{cartId}}",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "deleted": true
-                  },
-                  "inputPorts": [
-                    {
-                      "name": "cartId",
-                      "type": "any",
-                      "required": true,
-                      "exposed": true
-                    }
-                  ]
+                  }
                 }
               }
             ],

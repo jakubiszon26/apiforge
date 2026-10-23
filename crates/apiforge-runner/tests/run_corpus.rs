@@ -63,6 +63,29 @@ const STEP_DIVERGENCES: &[(&str, &str, &str, &str)] = &[
     ("values", "missing-left", "status", r#""error""#),
     ("values", "missing-left", "inputs", "{}"),
     ("values", "missing-left", "outputs", "{}"),
+    // ADR 0004: values interpolated into a URL are percent-encoded, as path
+    // parameters always were; a version-one `{{name}}` URL token was not.
+    (
+        "legacy-without-start",
+        "second",
+        "request",
+        r#"{"method": "GET", "url": "https://api.example.test/v1/second/x%2F1", "headers": {}}"#,
+    ),
+    // ADR 0004: URLs have no `/:name` parameters any more, so `:id` without an
+    // argument is plain text instead of a missing-argument error.
+    ("values", "missing-path-argument", "status", r#""passed""#),
+    (
+        "values",
+        "missing-path-argument",
+        "outputs",
+        r#"{"body": {"ok": true}, "status": 200, "headers": {}, "duration": 0}"#,
+    ),
+    (
+        "values",
+        "missing-path-argument",
+        "request",
+        r#"{"method": "GET", "url": "https://api.example.test/v1/items/:id", "headers": {}}"#,
+    ),
 ];
 
 /// Fixtures the reference runs but the port rejects before running, with the reason.
@@ -84,11 +107,15 @@ fn lcg(seed: u32) -> impl FnMut() -> f64 + Send {
 
 fn normalize_step(step: &Value) -> Value {
     let mut output = Map::new();
+    // A request's inputs report its resolved bindings, whose shape changed with
+    // ADR 0004 (url, headers, query and body instead of named arguments). What the
+    // request sent is compared through `request` instead.
+    let request = step.get("kind").and_then(Value::as_str) == Some("request");
     for key in [
         "nodeId", "handle", "label", "kind", "status", "phase", "inputs", "outputs", "actual",
         "expected", "request",
     ] {
-        if let Some(value) = step.get(key) {
+        if let Some(value) = step.get(key).filter(|_| !(request && key == "inputs")) {
             output.insert(key.to_owned(), value.clone());
         }
     }
@@ -99,6 +126,20 @@ fn normalize_step(step: &Value) -> Value {
         );
     }
     Value::Object(output)
+}
+
+/// Removes request inputs from recorded steps, as [`normalize_step`] does.
+fn strip_request_inputs(steps: &mut Value) {
+    for step in steps.as_array_mut().into_iter().flatten() {
+        if step["kind"] == "request"
+            && let Some(fields) = step.as_object_mut()
+        {
+            fields.remove("inputs");
+        }
+        if let Some(children) = step.get_mut("children") {
+            strip_request_inputs(children);
+        }
+    }
 }
 
 fn normalize_run(run: &RunResult, single: bool) -> Value {
@@ -201,6 +242,7 @@ async fn simulation_runs_match_the_reference() {
                 *field = Value::String(text.replace(leaked, "[REDACTED]"));
             }
         }
+        strip_request_inputs(&mut expected["steps"]);
         for (fixture_slug, node_id, field, value) in STEP_DIVERGENCES {
             if *fixture_slug != slug {
                 continue;

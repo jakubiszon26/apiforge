@@ -21,17 +21,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/join"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/join",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "joined": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -43,17 +44,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/yes/next"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/yes/next",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "step": 2
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -65,17 +67,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/no/next"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/no/next",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "step": 2
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -86,17 +89,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/yes"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/yes",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "side": "yes"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -107,17 +111,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/no"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/no",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "side": "no"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -165,6 +170,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/uses"
+                  },
                   "body": {
                     "kind": "reference",
                     "nodeId": "yes",
@@ -174,14 +183,10 @@
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/uses",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "ok": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {

@@ -44,6 +44,7 @@ pub const RESERVED_WORDS: &[&str] = &[
     "start",
     "true",
     "var",
+    "with",
     "within",
 ];
 

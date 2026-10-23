@@ -7,7 +7,7 @@ use super::{
 use crate::{
     block::Block,
     format::{Binding, Component, Graph, Node, Position, Project},
-    graph::{VALUE_INPUT, create_node, has_cycle, output_ports, position_after},
+    graph::{VALUE_INPUT, condition_inputs, create_node, has_cycle, output_ports, position_after},
     handle::{handle_base, unique_handle},
     js,
     model::NodeKind,
@@ -33,7 +33,8 @@ pub struct AddedNode {
 fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
     let whole = |input: &str| Some((input.to_owned(), Vec::new()));
     match node.kind {
-        NodeKind::If | NodeKind::Assert | NodeKind::Condition => whole("actual"),
+        NodeKind::If | NodeKind::Assert => whole("actual"),
+        NodeKind::Condition => whole(&condition_inputs(1).0),
         NodeKind::Request => whole("body"),
         NodeKind::Value => match node.inputs.get(VALUE_INPUT) {
             Some(Binding::Object { fields }) => fields
@@ -254,15 +255,18 @@ mod tests {
     const AT: Position = Position { x: 0.0, y: 0.0 };
 
     #[test]
-    fn new_requests_have_no_domain_specific_arguments() {
+    fn new_requests_have_only_a_url() {
         let request = node(NodeKind::Request);
-        assert!(request.inputs.is_empty());
+        assert_eq!(request.inputs.keys().collect::<Vec<_>>(), ["url"]);
         let names: Vec<_> = input_ports(&request, &empty_project())
             .into_iter()
             .map(|port| port.name)
             .collect();
-        assert_eq!(names, ["body"]);
-        assert_eq!(request.config.url.as_deref(), Some("/endpoint"));
+        assert_eq!(names, ["url", "body"]);
+        assert_eq!(
+            request.inputs["url"],
+            Binding::literal(serde_json::json!("/endpoint"))
+        );
         assert!(request.config.sample_response.is_missing());
     }
 
@@ -479,7 +483,7 @@ mod tests {
         for (block, input, path) in [
             (Block::Branch, "actual", vec![]),
             (Block::Comparison, "actual", vec![]),
-            (Block::Condition, "actual", vec![]),
+            (Block::Condition, "actual1", vec![]),
             (Block::Value, "value", vec![]),
             (Block::Variable, "value", vec![]),
             (Block::Object, "value", fields("field")),

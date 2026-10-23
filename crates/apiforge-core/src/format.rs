@@ -137,19 +137,7 @@ pub struct NodeConfig {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub url: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub headers: Option<IndexMap<String, String>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub query: Option<IndexMap<String, String>>,
+    pub body_format: Option<BodyFormat>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -206,18 +194,6 @@ pub struct NodeConfig {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub input_ports: Option<Vec<Port>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub template_inputs: Option<Vec<Port>>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub predicates: Option<Vec<ConditionPredicate>>,
     #[serde(
         rename = "match",
@@ -227,18 +203,14 @@ pub struct NodeConfig {
     )]
     pub match_mode: Option<Match>,
 }
+/// One check of a Data condition. Check *n* (from 1) compares the inputs
+/// `actual<n>` and `expected<n>` ([ADR 0004]).
+///
+/// [ADR 0004]: ../../../docs/decisions/0004-document-format-v2.md
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConditionPredicate {
-    pub input: String,
-    pub expected: String,
     pub predicate: Predicate,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub path: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -407,25 +379,12 @@ pub struct Workspace {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
     Trigger,
-    Request {
-        method: HttpMethod,
-        url: String,
-        timeout_ms: f64,
-    },
+    Request { method: HttpMethod, timeout_ms: f64 },
     Value,
-    Assert {
-        predicate: Predicate,
-    },
-    Condition {
-        predicate: Predicate,
-    },
-    If {
-        predicate: Predicate,
-    },
-    Component {
-        id: String,
-        revision: u32,
-    },
+    Assert { predicate: Predicate },
+    Condition { predicate: Predicate },
+    If { predicate: Predicate },
+    Component { id: String, revision: u32 },
 }
 impl Node {
     /// Whether the node is a Value marked as a variable.
@@ -445,7 +404,6 @@ impl Node {
             NodeKind::Trigger => Operation::Trigger,
             NodeKind::Request => Operation::Request {
                 method: c.method.unwrap_or(HttpMethod::Get),
-                url: c.url.clone().unwrap_or_default(),
                 timeout_ms: c.timeout_ms.unwrap_or(10_000.0),
             },
             NodeKind::Value => Operation::Value,

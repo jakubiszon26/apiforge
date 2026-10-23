@@ -79,6 +79,16 @@ pub enum HttpMethod {
     Delete,
     Options,
 }
+/// How a request sends its body.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyFormat {
+    /// The body value as JSON, `Content-Type: application/json` by default.
+    #[default]
+    Json,
+    /// The body value as text (`String(value)`), `Content-Type: text/plain` by default.
+    Text,
+}
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Match {

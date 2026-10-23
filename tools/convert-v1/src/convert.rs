@@ -3,7 +3,7 @@
 use crate::v1;
 use apiforge_core::{
     format::{self as current, TemplatePart},
-    graph::VALUE_INPUT,
+    graph::{BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, condition_inputs},
     handle::{handle_base, unique_handle},
     js::js_key_order,
     model::{NodeKind, Operator},
@@ -138,6 +138,8 @@ fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
                 .unwrap_or_default();
             (inputs, config)
         }
+        None if source.kind == v1::NodeKind::Request => request(source),
+        None if source.kind == v1::NodeKind::Condition => condition(source),
         None => (bindings(&source.inputs), config(&source.config)),
     };
     current::Node {
@@ -155,6 +157,252 @@ fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
         },
         inputs,
         config,
+    }
+}
+
+/// A Data condition with positional inputs: check *n* compares `actual<n>`, the
+/// predicate's input narrowed to its path, with `expected<n>`. A condition without
+/// a predicate list is one check of its `actual` and `expected` inputs.
+fn condition(source: &v1::Node) -> (current::Bindings, current::NodeConfig) {
+    let config = &source.config;
+    let checks: Vec<(
+        apiforge_core::model::Predicate,
+        String,
+        Option<String>,
+        String,
+    )> = match config.predicates.as_ref().filter(|list| !list.is_empty()) {
+        Some(list) => list
+            .iter()
+            .map(|check| {
+                (
+                    check.predicate,
+                    check.input.clone(),
+                    check.path.clone(),
+                    check.expected.clone(),
+                )
+            })
+            .collect(),
+        None => vec![(
+            config.predicate.unwrap_or_default(),
+            "actual".into(),
+            None,
+            "expected".into(),
+        )],
+    };
+    let mut inputs = current::Bindings::new();
+    // A condition with a predicate list passed its `actual` input on.
+    if config
+        .predicates
+        .as_ref()
+        .is_some_and(|list| !list.is_empty())
+        && let Some(value) = source.inputs.get("actual")
+    {
+        inputs.insert(VALUE_INPUT.to_owned(), binding(value));
+    }
+    for (index, (_, actual, path, expected)) in checks.iter().enumerate() {
+        let (actual_name, expected_name) = condition_inputs(index + 1);
+        let value = source.inputs.get(actual).map(binding);
+        if let Some(value) = select(source, value, path.clone().unwrap_or_default()) {
+            inputs.insert(actual_name, value);
+        }
+        if let Some(value) = source.inputs.get(expected) {
+            inputs.insert(expected_name, binding(value));
+        }
+    }
+    let config = current::NodeConfig {
+        predicates: Some(
+            checks
+                .iter()
+                .map(|(predicate, ..)| current::ConditionPredicate {
+                    predicate: *predicate,
+                })
+                .collect(),
+        ),
+        tolerance: config.tolerance,
+        match_mode: config.match_mode,
+        ..current::NodeConfig::default()
+    };
+    (inputs, config)
+}
+
+/// A request's inputs and configuration. URL, header and query templates become
+/// bindings: `{{name}}` and `/:name` take the node input of that name, and a token
+/// without an input names an environment variable, as the reference runner
+/// resolved them. Literal bodies are expanded the same way.
+fn request(source: &v1::Node) -> (current::Bindings, current::NodeConfig) {
+    let mut inputs = current::Bindings::new();
+    inputs.insert(
+        URL_INPUT.to_owned(),
+        text_binding(source, source.config.url.as_deref().unwrap_or(""), true),
+    );
+    for (name, map) in [
+        (HEADERS_INPUT, &source.config.headers),
+        (QUERY_INPUT, &source.config.query),
+    ] {
+        if let Some(map) = map.as_ref().filter(|map| !map.is_empty()) {
+            let fields = map
+                .iter()
+                .map(|(key, value)| (key.clone(), text_binding(source, value, false)))
+                .collect();
+            inputs.insert(name.to_owned(), current::Binding::Object { fields });
+        }
+    }
+    if let Some(body) = source.inputs.get(BODY_INPUT) {
+        let body = match body {
+            v1::Binding::Literal { value } => body_binding(source, value),
+            other => binding(other),
+        };
+        inputs.insert(BODY_INPUT.to_owned(), body);
+    }
+    let config = current::NodeConfig {
+        method: source.config.method,
+        timeout_ms: source.config.timeout_ms,
+        sample_response: optional_json(&source.config.sample_response),
+        sample_status: source.config.sample_status,
+        contract_id: source.config.contract_id.clone(),
+        ..current::NodeConfig::default()
+    };
+    (inputs, config)
+}
+
+/// The binding a `{{name}}` token or `/:name` parameter stood for: the node input,
+/// the default of a declared argument without one, or an environment variable.
+fn token_binding(source: &v1::Node, key: &str) -> current::Binding {
+    let declared_default = || {
+        source
+            .config
+            .input_ports
+            .iter()
+            .chain(source.config.template_inputs.iter())
+            .flatten()
+            .find(|port| port.name == key)
+            .and_then(|port| match &port.default_value {
+                v1::OptionalJson::Present(value) => Some(current::Binding::literal(value.clone())),
+                v1::OptionalJson::Missing => None,
+            })
+    };
+    source
+        .inputs
+        .get(key)
+        .map(binding)
+        .or_else(declared_default)
+        .unwrap_or_else(|| current::Binding::environment(key))
+}
+
+/// Text with `{{name}}` tokens and, in a URL, `/:name` parameters as a literal or
+/// template.
+fn text_binding(source: &v1::Node, text: &str, url: bool) -> current::Binding {
+    let mut parts = Vec::new();
+    let mut push_text = |parts: &mut Vec<TemplatePart>, text: &str| {
+        if text.is_empty() {
+            return;
+        }
+        match parts.last_mut() {
+            Some(TemplatePart::Text { text: last }) => last.push_str(text),
+            _ => parts.push(TemplatePart::Text {
+                text: text.to_owned(),
+            }),
+        }
+    };
+    let mut last = 0;
+    for token in template::tokens(text) {
+        url_text(
+            source,
+            &text[last..token.range.start],
+            url,
+            &mut parts,
+            &mut push_text,
+        );
+        parts.push(TemplatePart::Value {
+            binding: token_binding(source, token.key),
+        });
+        last = token.range.end;
+    }
+    url_text(source, &text[last..], url, &mut parts, &mut push_text);
+    if parts
+        .iter()
+        .all(|part| matches!(part, TemplatePart::Text { .. }))
+    {
+        return current::Binding::literal(Value::String(text.to_owned()));
+    }
+    current::Binding::Template { parts }
+}
+
+/// Literal text of a template; in a URL, `/:name` parameters naming an input
+/// become values (which the runner percent-encodes, as it did for parameters).
+fn url_text(
+    source: &v1::Node,
+    text: &str,
+    url: bool,
+    parts: &mut Vec<TemplatePart>,
+    push_text: &mut impl FnMut(&mut Vec<TemplatePart>, &str),
+) {
+    if !url {
+        push_text(parts, text);
+        return;
+    }
+    let mut rest = text;
+    while let Some(index) = rest.find("/:") {
+        let after = &rest[index + 2..];
+        let length = after
+            .char_indices()
+            .find(|(position, character)| {
+                !(character.is_ascii_alphanumeric()
+                    || *character == '_'
+                    || (*position > 0 && *character == '-'))
+            })
+            .map_or(after.len(), |(position, _)| position);
+        let name = &after[..length];
+        let starts_well = name
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_');
+        if starts_well && source.inputs.contains_key(name) {
+            push_text(parts, &rest[..index + 1]);
+            parts.push(TemplatePart::Value {
+                binding: token_binding(source, name),
+            });
+            rest = &after[length..];
+        } else {
+            push_text(parts, &rest[..index + 2]);
+            rest = after;
+        }
+    }
+    push_text(parts, rest);
+}
+
+/// A literal JSON body with its tokens: a string that is exactly one token takes
+/// the value with its type, other strings with tokens become templates.
+fn body_binding(source: &v1::Node, value: &Value) -> current::Binding {
+    fn has_tokens(value: &Value) -> bool {
+        match value {
+            Value::String(text) => !template::tokens(text).is_empty(),
+            Value::Array(items) => items.iter().any(has_tokens),
+            Value::Object(fields) => fields.values().any(has_tokens),
+            _ => false,
+        }
+    }
+    if !has_tokens(value) {
+        return current::Binding::literal(value.clone());
+    }
+    match value {
+        Value::String(text) => match template::tokens(text).as_slice() {
+            [token] if token.range == (0..text.len()) => token_binding(source, token.key),
+            _ => text_binding(source, text, false),
+        },
+        Value::Array(items) => current::Binding::Array {
+            items: items
+                .iter()
+                .map(|item| body_binding(source, item))
+                .collect(),
+        },
+        Value::Object(fields) => current::Binding::Object {
+            fields: fields
+                .iter()
+                .map(|(key, item)| (key.clone(), body_binding(source, item)))
+                .collect(),
+        },
+        other => current::Binding::literal(other.clone()),
     }
 }
 
@@ -215,7 +463,20 @@ fn value_binding(source: &v1::Node) -> Option<Option<current::Binding>> {
 /// inputs, or else environment variables, as the reference runner resolved them.
 fn selection(source: &v1::Node) -> Option<current::Binding> {
     let value = source.inputs.get("value").map(binding);
-    let path = source.config.path.clone().unwrap_or_default();
+    select(
+        source,
+        value,
+        source.config.path.clone().unwrap_or_default(),
+    )
+}
+
+/// `value` narrowed to a field path, as a Select node or a condition predicate's
+/// path selected it.
+fn select(
+    source: &v1::Node,
+    value: Option<current::Binding>,
+    path: String,
+) -> Option<current::Binding> {
     let tokens = template::tokens(&path);
     if tokens.is_empty() {
         if path.is_empty() {
@@ -302,9 +563,7 @@ fn kind(source: v1::NodeKind) -> NodeKind {
 fn config(source: &v1::NodeConfig) -> current::NodeConfig {
     current::NodeConfig {
         method: source.method,
-        url: source.url.clone(),
-        headers: source.headers.clone(),
-        query: source.query.clone(),
+        body_format: None,
         timeout_ms: source.timeout_ms,
         sample_response: optional_json(&source.sample_response),
         sample_status: source.sample_status,
@@ -314,25 +573,7 @@ fn config(source: &v1::NodeConfig) -> current::NodeConfig {
         variable: None,
         component_id: source.component_id.clone(),
         revision: source.revision,
-        input_ports: source
-            .input_ports
-            .as_ref()
-            .map(|ports| ports.iter().map(port).collect()),
-        template_inputs: source
-            .template_inputs
-            .as_ref()
-            .map(|ports| ports.iter().map(port).collect()),
-        predicates: source.predicates.as_ref().map(|predicates| {
-            predicates
-                .iter()
-                .map(|predicate| current::ConditionPredicate {
-                    input: predicate.input.clone(),
-                    expected: predicate.expected.clone(),
-                    predicate: predicate.predicate,
-                    path: predicate.path.clone(),
-                })
-                .collect()
-        }),
+        predicates: None,
         match_mode: source.match_mode,
     }
 }

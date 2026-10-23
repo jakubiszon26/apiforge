@@ -148,23 +148,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "reference",
-                    "nodeId": "creator",
-                    "port": "id",
-                    "path": ""
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "creator",
+                          "port": "id",
+                          "path": ""
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "DELETE",
-                  "url": "/items/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "deleted": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -177,23 +185,31 @@
                   "y": 0.0
                 },
                 "inputs": {
-                  "id": {
-                    "kind": "reference",
-                    "nodeId": "creator",
-                    "port": "missing",
-                    "path": ""
+                  "url": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "text",
+                        "text": "/items/"
+                      },
+                      {
+                        "kind": "value",
+                        "binding": {
+                          "kind": "reference",
+                          "nodeId": "creator",
+                          "port": "missing",
+                          "path": ""
+                        }
+                      }
+                    ]
                   }
                 },
                 "config": {
                   "method": "DELETE",
-                  "url": "/items/:id",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "deleted": true
-                  },
-                  "inputPorts": []
+                  }
                 }
               }
             ],
@@ -355,6 +371,10 @@
                   "y": 0.0
                 },
                 "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/items"
+                  },
                   "body": {
                     "kind": "literal",
                     "value": {}
@@ -362,14 +382,10 @@
                 },
                 "config": {
                   "method": "POST",
-                  "url": "/items",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "id": "new"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -472,17 +488,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/inner/yes"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/inner/yes",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "side": "yes"
-                  },
-                  "inputPorts": []
+                  }
                 }
               },
               {
@@ -494,17 +511,18 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "inputs": {},
+                "inputs": {
+                  "url": {
+                    "kind": "literal",
+                    "value": "/inner/no"
+                  }
+                },
                 "config": {
                   "method": "GET",
-                  "url": "/inner/no",
-                  "headers": {},
-                  "query": {},
                   "timeoutMs": 10000.0,
                   "sampleResponse": {
                     "side": "no"
-                  },
-                  "inputPorts": []
+                  }
                 }
               }
             ],

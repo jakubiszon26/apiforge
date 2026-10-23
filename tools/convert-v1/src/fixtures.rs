@@ -3,8 +3,9 @@
 use crate::{convert, v1};
 use apiforge_core::{
     format::{Graph, Project, Scenario},
-    graph::{VALUE_INPUT, component_definition},
+    graph::{VALUE_INPUT, component_definition, condition_inputs},
     model::NodeKind,
+    template::{self, template_text},
 };
 use serde_json::{Map, Value};
 use std::{
@@ -58,28 +59,43 @@ fn convert_run(bytes: &[u8]) -> Result<String, String> {
         .iter()
         .find(|scenario| scenario.id == scenario_id)
         .ok_or("the fixture's scenario does not exist")?;
+    let source_scenario = source
+        .scenarios
+        .iter()
+        .find(|candidate| candidate.id == scenario_id)
+        .ok_or("the fixture's scenario does not exist")?;
+    let context = Context {
+        project: &project,
+        scenario,
+        source: &source,
+        source_scenario,
+    };
     if let Some(previous) = request.get_mut("previousRun") {
-        convert_report(previous, &project, scenario)?;
+        convert_report(previous, &context)?;
     }
     request["project"] = serde_json::to_value(&project).map_err(|error| error.to_string())?;
-    convert_report(&mut fixture["expected"], &project, scenario)?;
+    convert_report(&mut fixture["expected"], &context)?;
     Ok(json_text(&fixture))
+}
+
+/// The converted project of a run fixture and its version-one source.
+struct Context<'a> {
+    project: &'a Project,
+    scenario: &'a Scenario,
+    source: &'a v1::Project,
+    source_scenario: &'a v1::Scenario,
 }
 
 /// Adapts a recorded report: each step's `name` becomes its node's handle and label.
 /// Steps are looked up in the graph they ran in: main, cleanup, or the component
 /// definition of the step that contains them.
-fn convert_report(
-    report: &mut Value,
-    project: &Project,
-    scenario: &Scenario,
-) -> Result<(), String> {
+fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), String> {
     fn convert_steps(
         steps: &mut [Value],
-        graph: Option<&Graph>,
-        project: &Project,
-        scenario: &Scenario,
+        graphs: Option<(&Graph, &v1::Graph)>,
+        context: &Context<'_>,
     ) -> Result<(), String> {
+        let (project, scenario) = (context.project, context.scenario);
         for step in steps {
             let Value::Object(fields) = step else {
                 return Err("a step is not an object".into());
@@ -89,13 +105,18 @@ fn convert_report(
                 .and_then(Value::as_str)
                 .ok_or("a step without a node identifier")?
                 .to_owned();
-            let graph = match graph {
-                Some(graph) => graph,
+            let (graph, source_graph) = match graphs {
+                Some(graphs) => graphs,
                 None if fields.get("phase").and_then(Value::as_str) == Some("cleanup") => {
-                    &scenario.cleanup
+                    (&scenario.cleanup, &context.source_scenario.cleanup)
                 }
-                None => &scenario.graph,
+                None => (&scenario.graph, &context.source_scenario.graph),
             };
+            let source_node = source_graph
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .ok_or_else(|| format!("a step of unknown node {id}"))?;
             let node = graph
                 .nodes
                 .iter()
@@ -122,10 +143,25 @@ fn convert_report(
                     .unwrap_or_default();
                 next.insert("inputs".into(), Value::Object(inputs));
             }
+            if node.kind == NodeKind::Condition {
+                condition_step(&mut next, source_node);
+            }
             if let Some(Value::Array(children)) = next.get_mut("children") {
                 let definition = component_definition(project, node)
                     .ok_or_else(|| format!("children of {id} without a component"))?;
-                convert_steps(children, Some(&definition.graph), project, scenario)?;
+                let source_definition = context
+                    .source
+                    .components
+                    .iter()
+                    .find(|component| {
+                        component.id == definition.id && component.revision == definition.revision
+                    })
+                    .ok_or_else(|| format!("children of {id} without a source component"))?;
+                convert_steps(
+                    children,
+                    Some((&definition.graph, &source_definition.graph)),
+                    context,
+                )?;
             }
             *fields = next;
         }
@@ -144,9 +180,71 @@ fn convert_report(
         snapshot["cleanup"] = serde_json::to_value(cleanup).map_err(|error| error.to_string())?;
     }
     match report.get_mut("steps") {
-        Some(Value::Array(list)) => convert_steps(list, None, project, scenario),
+        Some(Value::Array(list)) => convert_steps(list, None, context),
         _ => Ok(()),
     }
+}
+
+/// A condition step with positional inputs: check *n* reports `actual<n>`, the
+/// recorded input narrowed to the predicate's path, and `expected<n>`. A condition
+/// with several checks passes its `actual` input on as `value` and reports no
+/// single expected value.
+fn condition_step(step: &mut Map<String, Value>, source: &v1::Node) {
+    let recorded = step
+        .get("inputs")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let checks = source
+        .config
+        .predicates
+        .as_ref()
+        .filter(|checks| !checks.is_empty());
+    let mut inputs = Map::new();
+    match checks {
+        Some(checks) => {
+            if let Some(value) = recorded.get("actual") {
+                inputs.insert(VALUE_INPUT.to_owned(), value.clone());
+            }
+            for (index, check) in checks.iter().enumerate() {
+                let (actual, expected) = condition_inputs(index + 1);
+                let lookup = |key: &str| recorded.get(key).map(template_text);
+                let path = check.path.clone().unwrap_or_default();
+                let mut expanded = String::new();
+                let mut last = 0;
+                let mut complete = true;
+                for token in template::tokens(&path) {
+                    expanded.push_str(&path[last..token.range.start]);
+                    match lookup(token.key) {
+                        Some(text) => expanded.push_str(&text),
+                        None => complete = false,
+                    }
+                    last = token.range.end;
+                }
+                expanded.push_str(&path[last..]);
+                if let Some(value) = recorded
+                    .get(&check.input)
+                    .filter(|_| complete)
+                    .and_then(|value| apiforge_core::path::resolve(value, &expanded))
+                {
+                    inputs.insert(actual, value.into_owned());
+                }
+                if let Some(value) = recorded.get(&check.expected) {
+                    inputs.insert(expected, value.clone());
+                }
+            }
+            step.remove("expected");
+        }
+        None => {
+            let (actual, expected) = condition_inputs(1);
+            for (from, to) in [("actual", actual), ("expected", expected)] {
+                if let Some(value) = recorded.get(from) {
+                    inputs.insert(to, value.clone());
+                }
+            }
+        }
+    }
+    step.insert("inputs".into(), Value::Object(inputs));
 }
 
 fn json_text(value: &Value) -> String {

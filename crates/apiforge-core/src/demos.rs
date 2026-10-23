@@ -8,8 +8,9 @@
 
 use crate::{
     format::{
-        Binding, Component, ComponentAction, Contract, Environment, Graph, Node, NodeConfig,
-        OptionalJson, OrderEdge, OutputPort, Port, Position, Project, Scenario,
+        Binding, Component, ComponentAction, ConditionPredicate, Contract, Environment, Graph,
+        Node, NodeConfig, OptionalJson, OrderEdge, OutputPort, Port, Position, Project, Scenario,
+        TemplatePart,
     },
     graph::create_node,
     handle::handle_base,
@@ -132,10 +133,15 @@ pub fn shop_project() -> Project {
                 "Promotion must be active",
                 at(400.0, 80.0),
                 vec![
-                    ("actual", reference("active", "value", "")),
-                    ("expected", literal(json!(true))),
+                    ("actual1", reference("active", "value", "")),
+                    ("expected1", literal(json!(true))),
                 ],
-                predicate(Predicate::Equals),
+                NodeConfig {
+                    predicates: Some(vec![ConditionPredicate {
+                        predicate: Predicate::Equals,
+                    }]),
+                    ..NodeConfig::default()
+                },
             ),
         ]),
         action: Some(object_action("product", "Product")),
@@ -772,7 +778,8 @@ fn node(
     }
 }
 
-/// A request node whose non-body inputs are exposed as required arguments.
+/// A request. `:name` and `{{name}}` in `url` take the input of that name; the
+/// `body` input is the request body.
 fn request(
     id: &str,
     name: &str,
@@ -782,25 +789,64 @@ fn request(
     method: HttpMethod,
     position: Position,
 ) -> Node {
-    let input_ports = inputs
-        .iter()
-        .filter(|(name, _)| *name != "body")
-        .map(|(name, _)| Port {
-            exposed: Some(true),
-            ..Port::new(*name, ValueType::Any).required(true)
-        })
-        .collect();
     let config = NodeConfig {
         method: Some(method),
-        url: Some(url.into()),
-        headers: Some(IndexMap::new()),
-        query: Some(IndexMap::new()),
         timeout_ms: Some(10_000.0),
-        input_ports: Some(input_ports),
         sample_response: OptionalJson::Present(sample_response),
         ..NodeConfig::default()
     };
-    node(id, NodeKind::Request, name, position, inputs, config)
+    let arguments: IndexMap<&str, Binding> = inputs.into_iter().collect();
+    let mut node_inputs = vec![("url", url_template(url, &arguments))];
+    if let Some(body) = arguments.get("body") {
+        node_inputs.push(("body", body.clone()));
+    }
+    node(id, NodeKind::Request, name, position, node_inputs, config)
+}
+
+/// A URL whose `:name` and `{{name}}` placeholders are values of `arguments`.
+fn url_template(url: &str, arguments: &IndexMap<&str, Binding>) -> Binding {
+    let mut parts = Vec::new();
+    let mut text = String::new();
+    let mut rest = url;
+    while !rest.is_empty() {
+        let placeholder = if let Some(after) = rest.strip_prefix("/:") {
+            let length = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                .unwrap_or(after.len());
+            text.push('/');
+            Some((&after[..length], &after[length..]))
+        } else if let Some(after) = rest.strip_prefix("{{") {
+            let end = after.find("}}").expect("closed placeholder");
+            Some((after[..end].trim(), &after[end + 2..]))
+        } else {
+            None
+        };
+        match placeholder {
+            Some((name, after)) => {
+                if !text.is_empty() {
+                    parts.push(TemplatePart::Text {
+                        text: std::mem::take(&mut text),
+                    });
+                }
+                parts.push(TemplatePart::Value {
+                    binding: arguments[name].clone(),
+                });
+                rest = after;
+            }
+            None => {
+                let next = rest.chars().next().expect("non-empty");
+                text.push(next);
+                rest = &rest[next.len_utf8()..];
+            }
+        }
+    }
+    if parts.is_empty() {
+        return literal(json!(text));
+    }
+    if !text.is_empty() {
+        parts.push(TemplatePart::Text { text });
+    }
+    Binding::Template { parts }
 }
 
 /// A node using revision 1 of a project component.
