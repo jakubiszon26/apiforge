@@ -70,8 +70,13 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         allow_unresolved_environment: context.allow_unresolved_environment,
         component: context.component,
         ranges: HashMap::new(),
+        slot_ranges: HashMap::new(),
+        handle: String::new(),
     };
     let document = tree.file.as_ref().map(|file| lower.file(file));
+    if let Some(document) = &document {
+        lower.type_warnings(document);
+    }
     // Run the same structural, cycle and size validation as document imports.
     // Diagnostics deliberately omit the import error's path (it can contain names).
     if !lower
@@ -119,6 +124,10 @@ struct Lower<'a> {
     component: Option<&'a Component>,
     /// Statement ranges by lowered node ID, to locate document validation errors.
     ranges: HashMap<String, Range<usize>>,
+    /// Source of each slot (handle, input, operand path) for type warnings.
+    slot_ranges: HashMap<(String, String, Vec<String>), Range<usize>>,
+    /// Handle of the statement being lowered.
+    handle: String,
 }
 
 /// The statement behind a validation path such as `….graph.edges[3].target`.
@@ -359,6 +368,7 @@ impl Lower<'_> {
                 None
             };
             let before = self.diagnostics.len();
+            self.handle.clone_from(&statement.handle);
             let Some(mut node) = self.nodes.get(&statement.handle).cloned() else {
                 continue;
             };
@@ -712,7 +722,95 @@ impl Lower<'_> {
     }
     fn slot(&mut self, node: &mut Node, name: &str, value: &Expr, cleanup: bool) {
         if let Some(binding) = self.binding(value, cleanup) {
+            self.record_slots(name, value, &binding);
             node.inputs.insert(name.into(), binding);
+        }
+    }
+    /// Remembers where the input and, for an operator, each operand came from.
+    fn record_slots(&mut self, input: &str, value: &Expr, binding: &Binding) {
+        let key = |path: Vec<String>| (self.handle.clone(), input.to_owned(), path);
+        self.slot_ranges.insert(key(vec![]), value.range.clone());
+        let Binding::Expression { operator, .. } = binding else {
+            return;
+        };
+        let operands = operator.spec().operands;
+        let parts: Vec<(Option<&str>, &Expr)> = match &ungroup(value).kind {
+            ExprKind::Binary { left, right, .. } => vec![(None, left), (None, right)],
+            ExprKind::Not(base) => vec![(None, base)],
+            ExprKind::Call { arguments, .. } => arguments
+                .iter()
+                .map(|argument| (argument.name.as_deref(), &argument.value))
+                .collect(),
+            _ => vec![],
+        };
+        for (index, (name, expr)) in parts.into_iter().enumerate() {
+            if let Some(operand) = name.or_else(|| operands.get(index).map(|o| o.name)) {
+                let slot = key(vec![operand.to_owned()]);
+                self.slot_ranges.insert(slot, expr.range.clone());
+            }
+        }
+    }
+    fn warning(&mut self, range: Range<usize>, message: &'static str) {
+        if self.diagnostics.len() < crate::MAX_DIAGNOSTICS {
+            self.diagnostics.push(Diagnostic {
+                severity: Severity::Warning,
+                ..Diagnostic::error(range, message)
+            });
+        }
+    }
+    /// The board's connection rule, applied to values written in code: a whole
+    /// output must be compatible with the slot it fills, and a value with a
+    /// statically known type (literal, operator, template, object, array) must
+    /// have the slot's base type. The document model accepts mismatches, and runtime
+    /// checks stay authoritative for dynamic values, so these are warnings.
+    fn type_warnings(&mut self, document: &Document) {
+        let graphs = match document {
+            Document::Scenario(scenario) => vec![&scenario.graph, &scenario.cleanup],
+            Document::Component(component) => vec![&component.graph],
+        };
+        let nodes: HashMap<&str, &Node> = graphs
+            .iter()
+            .flat_map(|graph| &graph.nodes)
+            .map(|node| (node.id.as_str(), node))
+            .collect();
+        for node in graphs.iter().flat_map(|graph| &graph.nodes) {
+            for slot in graph::input_slots(node, self.project) {
+                let Some(binding) = node.inputs.get(&slot.input).and_then(|b| b.at(&slot.path))
+                else {
+                    continue;
+                };
+                let fits = match binding {
+                    Binding::Reference {
+                        node_id,
+                        port,
+                        path,
+                    } if path.is_empty() => nodes.get(node_id.as_str()).is_none_or(|source| {
+                        graph::output_ports(source, self.project)
+                            .iter()
+                            .find(|output| output.name == *port)
+                            .is_none_or(|output| graph::compatible(output, &slot.port))
+                    }),
+                    Binding::Reference { .. } => true,
+                    // Null and dynamic sources (parameters, environment,
+                    // arguments) report `any`, as do operators returning any.
+                    Binding::Literal { value } if value.is_null() => true,
+                    _ => {
+                        let found = graph::binding_type(binding);
+                        found == ValueType::Any
+                            || slot.port.value_type == ValueType::Any
+                            || found == slot.port.value_type
+                    }
+                };
+                if !fits {
+                    let range = self
+                        .slot_ranges
+                        .get(&(node.handle.clone(), slot.input.clone(), slot.path.clone()))
+                        .or_else(|| self.ranges.get(&node.id))
+                        .cloned()
+                        .unwrap_or_default();
+                    self.warning(range, "The value's type does not match this input");
+                }
+            }
         }
     }
     fn check(

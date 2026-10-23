@@ -524,3 +524,53 @@ fn document_validation_errors_point_at_their_statement() {
         assert_eq!(&source[errors[0].range.clone()], statement);
     }
 }
+
+#[test]
+fn type_mismatches_the_board_would_refuse_are_located_warnings() {
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    // Every stored document was built through the board's connection rule.
+    for project in &workspace.projects {
+        for scenario in &project.scenarios {
+            let text = print_scenario(project, scenario).unwrap();
+            let result = lower(&parse(&text), &LowerContext::new(project));
+            assert!(
+                result.diagnostics.is_empty(),
+                "{}: {:?}",
+                scenario.name,
+                result.diagnostics
+            );
+        }
+    }
+    let source = r#"scenario "Types" {
+  r = GET "/products"
+  sum = r.headers + 1
+  joined = concat("a", "b") - 2
+  number = produkt(id: "seven")
+  promoted = aktywna_promocja@1(product: r.body)
+  fine = r.status + r.body.price
+  later = early + 1
+  early = { a: 1 }
+}"#;
+    let result = lower(&parse(source), &LowerContext::new(project));
+    assert!(!result.has_errors(), "{:?}", result.diagnostics);
+    let warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .map(|d| {
+            assert_eq!(d.severity, apiforge_script::Severity::Warning);
+            &source[d.range.clone()]
+        })
+        .collect();
+    // Order follows the document; a forward reference (`early`) is typed too.
+    assert_eq!(
+        warnings,
+        [
+            "r.headers",
+            "concat(\"a\", \"b\")",
+            "\"seven\"",
+            "r.body",
+            "early"
+        ]
+    );
+}
