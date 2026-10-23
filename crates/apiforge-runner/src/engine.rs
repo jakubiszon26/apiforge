@@ -106,6 +106,7 @@ impl Signal {
 struct Context {
     /// Scenario parameters, or a component's arguments.
     parameters: Values,
+    arguments: Values,
     /// Finished steps by node ID. Cleanup shares the map with the main phase.
     outputs: HashMap<String, StepResult>,
     signal: Signal,
@@ -258,6 +259,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 .iter()
                 .map(|(name, value)| (name.clone(), Some(value.clone())))
                 .collect(),
+            arguments: Values::new(),
             outputs: HashMap::new(),
             signal: Signal {
                 token: cancel.clone(),
@@ -550,10 +552,31 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         if self.executed_steps > self.limits.max_steps {
             return Err(StepError::StepLimit(self.limits.max_steps));
         }
+        context.arguments.clear();
         let mut values = Values::with_capacity(node.inputs.len());
+        // Resolve local arguments in dependency order, irrespective of their
+        // insertion order. The document validator rejects missing names/cycles.
+        if node.kind == NodeKind::Request {
+            let mut pending: Vec<_> = node
+                .inputs
+                .iter()
+                .filter(|(name, _)| apiforge_core::graph::is_request_argument(name))
+                .collect();
+            while !pending.is_empty() {
+                let index = pending.iter().position(|(_, binding)| binding.leaves().iter().all(|(_, leaf)| {
+                    !matches!(leaf, Binding::Argument { name, .. } if !context.arguments.contains_key(name))
+                })).ok_or_else(|| StepError::MissingInput("cyclic request arguments".into()))?;
+                let (name, binding) = pending.remove(index);
+                let value = self.resolve(binding, context)?;
+                context.arguments.insert(name.clone(), value.clone());
+                values.insert(name.clone(), value);
+            }
+        }
         for (name, binding) in &node.inputs {
-            let value = self.resolve(binding, context)?;
-            values.insert(name.clone(), value);
+            if !values.contains_key(name) {
+                let value = self.resolve(binding, context)?;
+                values.insert(name.clone(), value);
+            }
         }
         let ports = input_ports(node, self.project);
         for port in &ports {
@@ -685,6 +708,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         stack.push(key);
         let mut nested = Context {
             parameters: values,
+            arguments: Values::new(),
             outputs: HashMap::new(),
             signal: context.signal.clone(),
             stack,
@@ -892,6 +916,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 .flatten()
                 .and_then(|value| path::resolve(&value, field).map(|value| value.into_owned())),
             Binding::Environment { name } => self.env.get(name).cloned(),
+            Binding::Argument { name, path: field } => context
+                .arguments
+                .get(name)
+                .cloned()
+                .flatten()
+                .and_then(|value| path::resolve(&value, field).map(|value| value.into_owned())),
             Binding::Reference {
                 node_id,
                 port,

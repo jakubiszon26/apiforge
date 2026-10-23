@@ -317,6 +317,7 @@ impl Card {
                         Scope {
                             nodes: &reference_graph.nodes,
                             project,
+                            request: Some(node),
                         }
                     ))
                     .filter(|url| !url.is_empty())

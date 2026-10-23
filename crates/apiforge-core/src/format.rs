@@ -48,6 +48,13 @@ pub enum Binding {
     Environment {
         name: String,
     },
+    /// A named input of this request, e.g. `input.productId`. Only request
+    /// bindings may use it; validation checks local names and cycles.
+    Argument {
+        name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        path: String,
+    },
     /// An object whose field values are bindings.
     Object {
         fields: Bindings,

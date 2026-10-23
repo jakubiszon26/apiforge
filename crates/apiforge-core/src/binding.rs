@@ -91,6 +91,10 @@ impl Binding {
                 path: field,
             } => Self::reference(node_id, port, path(field)),
             Self::Parameter { name, path: field } => Self::parameter_field(name, path(field)),
+            Self::Argument { name, path: field } => Self::Argument {
+                name: name.clone(),
+                path: path(field),
+            },
             Self::Environment { .. } => self.clone(),
             Self::Expression { operator, inputs } => Self::Expression {
                 operator: *operator,

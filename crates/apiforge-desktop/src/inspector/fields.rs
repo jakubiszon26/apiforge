@@ -624,3 +624,184 @@ mod tree_tests {
         assert_eq!(limited, 0);
     }
 }
+
+/// Request bodies accept input.* in the same text the user sends. Invalid edits
+/// remain drafts; the last valid binding stays in the document and run snapshot.
+pub fn request_body_editor(
+    ui: &mut Ui,
+    id: Id,
+    binding: Option<&Binding>,
+    format: apiforge_core::model::BodyFormat,
+    scope: Scope<'_>,
+) -> Option<Option<Binding>> {
+    use apiforge_core::{body_text, model::BodyFormat};
+    let mut draft: BodyDraft = ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
+    // Source changes (undo, another editor, switching formats) invalidate a draft.
+    // Cache the projection: large bodies are not printed/parsed every paint.
+    if draft.source.as_ref().is_none_or(|(source, source_format)| {
+        source.as_ref() != binding || *source_format != format
+    }) {
+        let printed = match binding {
+            None => Some(String::new()),
+            Some(binding) => match format {
+                BodyFormat::Json => body_text::print_json_body(binding, scope),
+                BodyFormat::Text => body_text::print_text_body(binding, scope),
+            },
+        };
+        draft = BodyDraft {
+            source: Some((binding.cloned(), format)),
+            editable: printed.is_some(),
+            text: printed.unwrap_or_default(),
+            error: None,
+        };
+    }
+    if !draft.editable {
+        ui.data_mut(|data| data.insert_temp(id, draft));
+        widgets::hint(
+            ui,
+            "This body uses a calculated value. Edit it with Body value source below.",
+        );
+        return None;
+    }
+    let response = ui.add(
+        crate::widgets::text_area(&mut draft.text)
+            .id(id.with("text"))
+            .code_editor()
+            .desired_rows(8)
+            .desired_width(f32::INFINITY)
+            .hint_text(if format == BodyFormat::Json {
+                "{\n  \"productId\": \"{{input.productId}}\"\n}"
+            } else {
+                "<product>{{input.productId}}</product>"
+            }),
+    );
+    let mut result = None;
+    if response.changed() {
+        match draft.parse(format, scope) {
+            Ok(next) => {
+                draft.error = None;
+                // Keep the user's spacing while they continue typing.
+                draft.source = Some((next.clone(), format));
+                if next.as_ref() != binding {
+                    result = Some(next);
+                }
+            }
+            Err(message) => draft.error = Some(message),
+        }
+    }
+    if let Some(error) = &draft.error {
+        ui.colored_label(theme::DANGER, RichText::new(error).size(11.0));
+    }
+    widgets::hint(
+        ui,
+        if format == BodyFormat::Json {
+            "Use {{input.name}} as a JSON value (quotes are optional). A whole placeholder keeps its JSON type; text around it produces a string. Empty = no body."
+        } else {
+            "Insert request arguments as {{input.name}}. Empty = no body."
+        },
+    );
+    ui.data_mut(|data| data.insert_temp(id, draft));
+    result
+}
+
+#[derive(Clone, Default)]
+struct BodyDraft {
+    editable: bool,
+    source: Option<(Option<Binding>, apiforge_core::model::BodyFormat)>,
+    text: String,
+    error: Option<String>,
+}
+impl BodyDraft {
+    fn parse(
+        &self,
+        format: apiforge_core::model::BodyFormat,
+        scope: Scope<'_>,
+    ) -> Result<Option<Binding>, String> {
+        use apiforge_core::{body_text, model::BodyFormat};
+        // Whitespace can be an intentional text body.
+        if self.text.is_empty() || (format == BodyFormat::Json && self.text.trim().is_empty()) {
+            return Ok(None);
+        }
+        match format {
+            BodyFormat::Json => body_text::parse_json_body(&self.text, scope),
+            BodyFormat::Text => body_text::parse_text_body(&self.text, scope),
+        }
+        .map(Some)
+        .map_err(|error| format!("{} — the last valid body is kept.", error.message))
+    }
+}
+
+#[cfg(test)]
+mod body_editor_tests {
+    use super::*;
+    use apiforge_core::{
+        demos,
+        format::Position,
+        graph,
+        model::{BodyFormat, NodeKind},
+    };
+
+    #[test]
+    fn typing_body_json_resolves_input_arguments_and_invalid_drafts_keep_the_last_body() {
+        let project = demos::empty_project();
+        let mut request = graph::create_node(NodeKind::Request, Position { x: 0.0, y: 0.0 }, None);
+        request
+            .inputs
+            .insert("productId".into(), Binding::literal(serde_json::json!(123)));
+        let scope = Scope {
+            nodes: &[],
+            project: &project,
+            request: Some(&request),
+        };
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let id = Id::new("body-input-test");
+        let mut value = None;
+        let mut render = |events: Vec<egui::Event>| {
+            let mut result = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(300.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        result =
+                            request_body_editor(ui, id, value.as_ref(), BodyFormat::Json, scope);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            if let Some(next) = &result {
+                value = next.clone();
+            }
+            result
+        };
+        assert!(render(vec![]).is_none());
+        ctx.memory_mut(|memory| memory.request_focus(id.with("text")));
+        let result = render(vec![egui::Event::Text(
+            r#"{"productId": "{{input.productId}}"}"#.into(),
+        )]);
+        let Some(Some(Binding::Object { fields })) = result else {
+            panic!("body input did not produce bindings")
+        };
+        assert_eq!(
+            fields["productId"],
+            Binding::Argument {
+                name: "productId".into(),
+                path: String::new()
+            }
+        );
+        assert!(render(vec![egui::Event::Text(",".into())]).is_none());
+        assert!(render(vec![]).is_none());
+        drop(render);
+        let draft = ctx.data_mut(|data| data.get_temp::<BodyDraft>(id)).unwrap();
+        assert!(draft.text.ends_with(','));
+        assert!(draft.error.is_some());
+        assert!(matches!(value, Some(Binding::Object { .. })));
+    }
+}

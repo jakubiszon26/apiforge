@@ -18,6 +18,7 @@ use serde_json::Value;
 /// Nesting limit of composite bindings, one below the validator's 32 levels.
 const MAX_DEPTH: usize = 31;
 
+#[derive(Clone, Copy)]
 pub struct Context<'a> {
     pub node: &'a Node,
     /// Nodes a reference may point to.
@@ -25,6 +26,9 @@ pub struct Context<'a> {
     pub project: &'a Project,
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
+    /// Owning input slot, retained through object fields, arrays and operators.
+    /// A nested field's display name must not hide a same-named request argument.
+    pub input: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,9 +42,10 @@ enum Kind {
     Template,
     Parameter,
     Environment,
+    Argument,
 }
 
-const KINDS: [Kind; 9] = [
+const KINDS: [Kind; 10] = [
     Kind::Unset,
     Kind::Literal,
     Kind::Reference,
@@ -50,6 +55,7 @@ const KINDS: [Kind; 9] = [
     Kind::Template,
     Kind::Parameter,
     Kind::Environment,
+    Kind::Argument,
 ];
 
 impl Kind {
@@ -61,6 +67,7 @@ impl Kind {
             Some(Binding::Expression { .. }) => Self::Expression,
             Some(Binding::Parameter { .. }) => Self::Parameter,
             Some(Binding::Environment { .. }) => Self::Environment,
+            Some(Binding::Argument { .. }) => Self::Argument,
             Some(Binding::Object { .. }) => Self::Object,
             Some(Binding::Array { .. }) => Self::List,
             Some(Binding::Template { .. }) => Self::Template,
@@ -75,6 +82,7 @@ impl Kind {
             Self::Expression => "Operator block",
             Self::Parameter => "Parameter",
             Self::Environment => "Environment / secret",
+            Self::Argument => "Request argument",
             Self::Object => "Object",
             Self::List => "List",
             Self::Template => "Text with values",
@@ -96,6 +104,21 @@ fn sources<'a>(context: &Context<'a>) -> Vec<&'a Node> {
         .collect()
 }
 
+fn argument_names(context: &Context<'_>) -> Vec<String> {
+    if context.node.kind != apiforge_core::model::NodeKind::Request {
+        return vec![];
+    }
+    context
+        .node
+        .inputs
+        .keys()
+        .filter(|name| {
+            apiforge_core::graph::is_request_argument(name) && context.input != Some(name.as_str())
+        })
+        .cloned()
+        .collect()
+}
+
 /// Shows the editor and updates `value`; returns whether it changed.
 pub fn editor(
     ui: &mut Ui,
@@ -105,6 +128,15 @@ pub fn editor(
     depth: usize,
     id: Id,
 ) -> bool {
+    let root_context = Context {
+        input: if depth == 0 {
+            Some(&port.name)
+        } else {
+            context.input
+        },
+        ..*context
+    };
+    let context = &root_context;
     let mut changed = false;
     let frame = egui::Frame::new()
         .fill(if depth == 0 {
@@ -202,6 +234,7 @@ fn kind_combo(
             for kind in KINDS {
                 let enabled = match kind {
                     Kind::Reference => !available_sources.is_empty(),
+                    Kind::Argument => !argument_names(context).is_empty(),
                     Kind::Expression | Kind::Object | Kind::List | Kind::Template => {
                         depth < MAX_DEPTH
                     }
@@ -245,6 +278,15 @@ fn kind_combo(
                 .cloned()
                 .unwrap_or_else(|| port.name.clone()),
         )),
+        Kind::Argument => {
+            argument_names(context)
+                .into_iter()
+                .next()
+                .map(|name| Binding::Argument {
+                    name,
+                    path: String::new(),
+                })
+        }
         Kind::Environment => Some(Binding::environment(
             context
                 .project
@@ -285,6 +327,21 @@ fn body(
             port: output,
             path,
         }) => reference_editor(ui, context, port, node_id, output, path, id),
+        Some(Binding::Argument { name, path }) => {
+            let names = argument_names(context);
+            let mut changed =
+                name_editor(ui, id, name, &names, "A named argument of this request.");
+            widgets::field_label(ui, "Field (optional)");
+            changed |= ui
+                .add(
+                    crate::widgets::text_edit(path)
+                        .id(id.with("argument-path"))
+                        .hint_text("e.g. items[0].id; empty = whole value")
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+            changed
+        }
         Some(Binding::Parameter { name, path }) => {
             let mut changed = name_editor(
                 ui,
@@ -564,6 +621,7 @@ fn template_from(current: Option<Binding>) -> Vec<TemplatePart> {
         }) if !text.is_empty() => parts.push(TemplatePart::Text { text }),
         Some(
             binding @ (Binding::Reference { .. }
+            | Binding::Argument { .. }
             | Binding::Parameter { .. }
             | Binding::Environment { .. }
             | Binding::Expression { .. }),
@@ -1162,6 +1220,7 @@ mod tests {
             project,
             parameters: &[],
             run: None,
+            input: None,
         };
         let mut output = context.run_ui(
             egui::RawInput {
@@ -1221,5 +1280,43 @@ mod tests {
                 .any(|field| field.path == "product.active")
         );
         assert!(filter_response_fields(&fields.fields, "zzzz-missing").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod request_argument_scope_tests {
+    use super::*;
+    #[test]
+    fn nested_body_fields_can_select_arguments_with_the_same_name() {
+        let project = apiforge_core::demos::empty_project();
+        let mut node = apiforge_core::graph::create_node(
+            apiforge_core::model::NodeKind::Request,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        node.inputs
+            .insert("productId".into(), Binding::literal(serde_json::json!(123)));
+        let graph = Graph {
+            nodes: vec![node.clone()],
+            edges: vec![],
+        };
+        let context = Context {
+            node: &node,
+            graph: &graph,
+            project: &project,
+            parameters: &[],
+            run: None,
+            input: Some("body"),
+        };
+        // The nested field is also productId. Only the owning input participates
+        // in self-reference exclusion, so the body can still select this source.
+        assert_eq!(argument_names(&context), ["productId"]);
+        assert!(
+            argument_names(&Context {
+                input: Some("productId"),
+                ..context
+            })
+            .is_empty()
+        );
     }
 }

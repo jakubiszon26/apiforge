@@ -284,18 +284,8 @@ impl Inspector {
         let scope = scope(context);
         // Fields shown as text in the request section are edited there; a value
         // that text cannot express falls back to an argument editor.
-        let ports: Vec<Port> = input_ports(node, context.project)
-            .into_iter()
-            .filter(|port| match node.kind {
-                NodeKind::Condition => false,
-                NodeKind::Request if port.name != BODY_INPUT => node
-                    .inputs
-                    .get(&port.name)
-                    .is_some_and(|binding| !has_text_form(binding, scope)),
-                _ => true,
-            })
-            .collect();
-        if ports.is_empty() {
+        let ports = argument_ports(node, context.project, scope);
+        if ports.is_empty() && node.kind != NodeKind::Request {
             return;
         }
         ui.add_space(10.0);
@@ -308,6 +298,9 @@ impl Inspector {
             );
         });
         ui.add_space(2.0);
+        if node.kind == NodeKind::Request {
+            request_argument_controls(ui, id.with("custom-argument"), node);
+        }
         let binding_context = binding_context(context);
         for port in &ports {
             argument(
@@ -317,6 +310,22 @@ impl Inspector {
                 node,
                 id.with(("argument", &port.name)),
             );
+            if node.kind == NodeKind::Request
+                && apiforge_core::graph::is_request_argument(&port.name)
+                && ui
+                    .add_enabled(
+                        !request_argument_is_used(node, &port.name),
+                        widgets::icon_button(Icon::Trash, "Remove argument")
+                            .compact()
+                            .danger(),
+                    )
+                    .on_disabled_hover_text("Remove this argument's uses before deleting it.")
+                    .clicked()
+            {
+                // References remain visible as unconnected slots, rather than
+                // silently substituting null into a previously configured field.
+                remove_request_argument(node, &port.name);
+            }
             ui.add_space(4.0);
         }
     }
@@ -573,7 +582,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     }
     widgets::hint(
         ui,
-        "A relative address uses the environment's base URL. Insert values as {{block.field}}, {{env.name}} or {{param.name}}; they are URL-encoded.",
+        "A relative address uses the environment's base URL. Insert values as {{input.argument}}, {{block.field}}, {{env.name}} or {{param.name}}; they are URL-encoded.",
     );
 
     widgets::field_label(ui, "Timeout (ms)");
@@ -648,6 +657,7 @@ fn scope<'a>(context: &Context<'a>) -> Scope<'a> {
     Scope {
         nodes: &context.graph.nodes,
         project: context.project,
+        request: (context.node.kind == NodeKind::Request).then_some(context.node),
     }
 }
 
@@ -658,13 +668,40 @@ fn binding_context<'a>(context: &Context<'a>) -> binding::Context<'a> {
         project: context.project,
         parameters: context.parameters,
         run: context.run,
+        input: None,
     }
 }
 
 /// The editor of one input: sets or removes it.
 fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut Node, id: Id) {
     let mut value = node.inputs.get(&port.name).cloned();
-    if binding::editor(ui, context, port, &mut value, 0, id) {
+    let mut changed = false;
+    if node.kind == NodeKind::Request && port.name == BODY_INPUT {
+        widgets::field_label(ui, "Body");
+        let scope = Scope {
+            nodes: &context.graph.nodes,
+            project: context.project,
+            request: Some(node),
+        };
+        if let Some(next) = fields::request_body_editor(
+            ui,
+            id.with("body-source"),
+            value.as_ref(),
+            node.config.body_format.unwrap_or_default(),
+            scope,
+        ) {
+            value = next;
+            changed = true;
+        }
+        egui::CollapsingHeader::new("Body value source")
+            .id_salt(id.with("body-binding"))
+            .show(ui, |ui| {
+                changed |= binding::editor(ui, context, port, &mut value, 0, id);
+            });
+    } else {
+        changed = binding::editor(ui, context, port, &mut value, 0, id);
+    }
+    if changed {
         match value {
             Some(binding) => {
                 node.inputs.insert(port.name.clone(), binding);
@@ -1012,5 +1049,180 @@ fn handle_field(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         ui.data_mut(|data| data.insert_temp(id, draft));
     } else {
         ui.data_mut(|data| data.remove::<String>(id));
+    }
+}
+
+fn request_argument_controls(ui: &mut Ui, id: Id, node: &mut Node) -> egui::Response {
+    let mut name: String = ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
+    let button = ui
+        .horizontal(|ui| {
+            let edit = ui.add(
+                crate::widgets::text_edit(&mut name)
+                    .id(id.with("name"))
+                    .hint_text("Argument name")
+                    .desired_width((ui.available_width() - 72.0).max(40.0)),
+            );
+            let valid = valid_request_argument_name(node, name.trim());
+            let button = ui.add_enabled(valid, widgets::action(Icon::Plus, "Add").quiet());
+            if valid
+                && (button.clicked()
+                    || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+            {
+                node.inputs.insert(
+                    name.trim().to_owned(),
+                    Binding::literal(serde_json::Value::Null),
+                );
+                name.clear();
+            }
+            button
+        })
+        .inner;
+    ui.data_mut(|data| data.insert_temp(id, name));
+    widgets::hint(
+        ui,
+        "Use a named argument as {{input.name}} in URL, query, headers or body.",
+    );
+    button
+}
+
+fn valid_request_argument_name(node: &Node, name: &str) -> bool {
+    !name.is_empty()
+        && name.encode_utf16().count() <= 200
+        && !["__proto__", "constructor", "prototype"].contains(&name)
+        && apiforge_core::graph::is_request_argument(name)
+        && !node.inputs.contains_key(name)
+        && node.inputs.len() < 100
+}
+
+fn request_argument_is_used(node: &Node, name: &str) -> bool {
+    node.inputs.values().any(|binding| {
+        binding.leaves().iter().any(
+            |(_, leaf)| matches!(leaf, Binding::Argument { name: source, .. } if source == name),
+        )
+    })
+}
+
+fn remove_request_argument(node: &mut Node, name: &str) {
+    if !request_argument_is_used(node, name) {
+        node.inputs.shift_remove(name);
+    }
+}
+
+fn argument_ports(node: &Node, project: &Project, scope: Scope<'_>) -> Vec<Port> {
+    input_ports(node, project)
+        .into_iter()
+        .filter(|port| match node.kind {
+            NodeKind::Condition => false,
+            NodeKind::Request
+                if [URL_INPUT, HEADERS_INPUT, QUERY_INPUT].contains(&port.name.as_str()) =>
+            {
+                node.inputs
+                    .get(&port.name)
+                    .is_some_and(|binding| !has_text_form(binding, scope))
+            }
+            _ => true,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod request_argument_tests {
+    use super::*;
+    use egui::{Event, PointerButton, Pos2, RawInput, Rect};
+
+    fn draw(ctx: &egui::Context, node: &mut Node, id: Id, events: Vec<Event>) -> egui::Response {
+        let mut button = None;
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(300.0, 900.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    button = Some(request_argument_controls(ui, id, node));
+                });
+            },
+        );
+        output.textures_delta.clear();
+        button.unwrap()
+    }
+    #[test]
+    fn add_button_creates_an_editable_custom_request_port_and_prevents_duplicates() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let id = Id::new("custom-request-argument");
+        let mut node = apiforge_core::graph::create_node(
+            NodeKind::Request,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        ctx.data_mut(|data| data.insert_temp(id, "productId".to_owned()));
+        let button = draw(&ctx, &mut node, id, vec![]);
+        assert!(button.enabled());
+        let position = button.rect.center();
+        for pressed in [true, false] {
+            draw(
+                &ctx,
+                &mut node,
+                id,
+                vec![
+                    Event::PointerMoved(position),
+                    Event::PointerButton {
+                        pos: position,
+                        button: PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert_eq!(
+            node.inputs.get("productId"),
+            Some(&Binding::literal(serde_json::Value::Null))
+        );
+        let project = apiforge_core::demos::empty_project();
+        assert!(
+            input_ports(&node, &project)
+                .iter()
+                .any(|p| p.name == "productId")
+        );
+        let scope = Scope {
+            nodes: &[],
+            project: &project,
+            request: Some(&node),
+        };
+        assert!(
+            argument_ports(&node, &project, scope)
+                .iter()
+                .any(|p| p.name == "productId")
+        );
+        assert!(!valid_request_argument_name(&node, "productId"));
+        assert!(!valid_request_argument_name(&node, "body"));
+        assert!(!valid_request_argument_name(&node, "__proto__"));
+        ctx.data_mut(|data| data.insert_temp(id, "productId".to_owned()));
+        assert!(!draw(&ctx, &mut node, id, vec![]).enabled());
+    }
+    #[test]
+    fn deleting_an_argument_requires_removing_its_uses_first() {
+        let mut node = apiforge_core::graph::create_node(
+            NodeKind::Request,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        node.inputs
+            .insert("productId".into(), Binding::literal(serde_json::json!(7)));
+        node.inputs.insert(
+            "body".into(),
+            Binding::Argument {
+                name: "productId".into(),
+                path: String::new(),
+            },
+        );
+        remove_request_argument(&mut node, "productId");
+        assert!(node.inputs.contains_key("productId"));
+        node.inputs.shift_remove("body");
+        remove_request_argument(&mut node, "productId");
+        assert!(!node.inputs.contains_key("productId"));
     }
 }

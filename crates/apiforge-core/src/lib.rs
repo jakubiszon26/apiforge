@@ -5,6 +5,7 @@
 //! v1 documents are handled only by the separate development converter.
 pub mod binding;
 pub mod block;
+pub mod body_text;
 pub mod demos;
 pub mod edit;
 pub mod format;
