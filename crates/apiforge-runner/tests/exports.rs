@@ -61,6 +61,7 @@ async fn run(project: Project) -> RunResult {
             limits: Default::default(),
             transport: HttpTransport::new().unwrap(),
             random: Box::new(SeededRandom::new(1)),
+            journal: None,
         },
         CancellationToken::new(),
         |_| {},

@@ -10,7 +10,7 @@ use std::{
 };
 use thiserror::Error;
 
-const MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CODE_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -39,6 +39,10 @@ pub enum StorageError {
     InvalidDrafts(&'static str),
     #[error("Unsupported code draft version; existing drafts were preserved.")]
     UnsupportedDraftVersion,
+    #[error("Invalid run journal: {0}")]
+    InvalidJournal(&'static str),
+    #[error("Unsupported run journal version; the existing journal was preserved.")]
+    UnsupportedJournalVersion,
 }
 
 fn io_error(path: &Path, source: io::Error) -> StorageError {

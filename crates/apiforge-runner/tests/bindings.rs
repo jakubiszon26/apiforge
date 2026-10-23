@@ -44,6 +44,7 @@ async fn run(project: Project) -> RunResult {
         limits: Default::default(),
         transport: HttpTransport::new().expect("client builds"),
         random: Box::new(SeededRandom::new(1)),
+        journal: None,
     };
     run_scenario(
         RunRequest::new(project, "main", RunMode::Simulation),

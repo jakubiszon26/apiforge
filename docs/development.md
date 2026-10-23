@@ -104,6 +104,14 @@ after confirmation. A version-one workspace is preserved as `workspace.v1.json` 
 fresh workspace opens. Details are in [ADR 0002](decisions/0002-workspace-storage.md)
 and [ADR 0008](decisions/0008-storage-sessions.md).
 
+A live run records every request in `journal.json` beside the workspace before it is
+sent, and removes the run when it reports its own outcome. A journal that is still
+there at the next start belonged to a process that died mid-run: the window lists the
+requests that may have changed the tested API and clears them only when the user
+marks them as handled. A session without a writable workspace (a read-only second
+window, `--project`, a temporary workspace) cannot keep a journal and says so before
+a live run. Details are in [ADR 0009](decisions/0009-run-journal.md).
+
 To convert a version-one document during development:
 
 ```bash

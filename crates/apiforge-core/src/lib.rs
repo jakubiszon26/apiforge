@@ -12,6 +12,7 @@ pub mod format;
 pub mod graph;
 pub mod handle;
 pub mod ids;
+pub mod journal;
 pub mod js;
 pub mod model;
 pub mod operator;

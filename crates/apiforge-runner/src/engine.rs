@@ -10,7 +10,7 @@
 //! Raw values are used for execution. Only redacted copies leave the engine.
 
 use crate::{
-    http::{self, HttpError},
+    http::{self, HttpError, Reached},
     plan::ExecutionPlan,
     redact::Redactor,
     request::{RunError, RunLimits, RunOptions, RunRequest, validate},
@@ -23,6 +23,7 @@ use apiforge_core::{
         BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, ancestors_and_self,
         component_definition, condition_inputs, condition_predicates, input_ports, predicate,
     },
+    journal::{EffectState, JournalEntry, JournalRun, JournalSink},
     js::{self, js_key_order},
     model::{BodyFormat, Branch, HttpMethod, Match, NodeKind, ValueType},
     operator::{Operator, OperatorError, RandomSource},
@@ -37,6 +38,7 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
@@ -152,9 +154,30 @@ enum StepError {
     Timeout(String),
     #[error(transparent)]
     Http(#[from] HttpError),
-    #[error("Cancelled.")]
-    Cancelled,
+    #[error("Cancelled while the request was being sent.")]
+    CancelledWhileSending,
+    /// The journal could not record a live request, so the request was not sent.
+    #[error("The run journal could not be written: {0}")]
+    Journal(String),
 }
+
+impl StepError {
+    /// What the error implies about the tested API, for a live run's report. `None`
+    /// is an error outside the sending stage, where there is nothing to say.
+    fn reached_the_api(&self) -> Option<Reached> {
+        match self {
+            Self::Http(error) => Some(error.reached_the_api()),
+            Self::Timeout(_) | Self::CancelledWhileSending => Some(Reached::Maybe),
+            Self::Journal(_) => Some(Reached::No),
+            _ => None,
+        }
+    }
+}
+
+/// Sentences a live run's report adds to a failed request, so that a reader knows
+/// whether the tested API can be holding a change.
+const MAY_HAVE_HAPPENED: &str = "The API may have performed this request.";
+const NOTHING_SENT: &str = "Nothing was sent to the API.";
 
 const OUTSIDE_PATH: &str = "Step outside the active execution path.";
 const UNAVAILABLE: &str = "Unavailable data or an unmet condition of an earlier step.";
@@ -171,6 +194,14 @@ struct Engine<'a, F> {
     transport: http::HttpTransport,
     random: Box<dyn RandomSource + Send>,
     redactor: Redactor,
+    /// Records live requests before they are sent; `None` for a simulation or a
+    /// session that has no place to keep a journal.
+    journal: Option<Arc<dyn JournalSink>>,
+    /// Live requests journalled so far, counted from one.
+    journal_sequence: u64,
+    /// A journal write that failed after its request had been sent. The run reports
+    /// it, because the entry on disk then overstates what is unknown.
+    journal_error: Option<String>,
     run: RunResult,
     executed_steps: usize,
     report_bytes: usize,
@@ -237,6 +268,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             transport: options.transport,
             random: options.random,
             redactor,
+            // A simulation sends nothing, so there is nothing to record.
+            journal: options
+                .journal
+                .filter(|_| request.mode == apiforge_core::run::RunMode::Live),
+            journal_sequence: 0,
+            journal_error: None,
             run,
             executed_steps: 0,
             report_bytes: 0,
@@ -293,6 +330,17 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         };
         self.notify();
 
+        // A live run announces itself before it can send anything, so a process that
+        // dies leaves the run's identity, scenario and start time behind. A journal
+        // that cannot be written stops the run before the first request.
+        if let Err(error) = self.journal_begin() {
+            self.run.error = Some(error.to_string());
+            self.run.status = RunStatus::Failed;
+            self.run.finished_at = Some(rfc3339_millis(SystemTime::now()));
+            self.notify();
+            return self.redactor.redact_run(&self.run);
+        }
+
         if let Err(error) = self
             .execute_graph(&scenario.graph, &mut context, true, selection.as_ref())
             .await
@@ -303,6 +351,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         // independent deadline and must not turn a successful main phase into a timeout.
         let main_budget_exceeded = Instant::now() >= main_deadline;
         // Cleanup gets its own budget, unaffected by cancellation of the main phase.
+        self.journal_cleanup_started();
         context.phase = Phase::Cleanup;
         context.signal = Signal {
             token: CancellationToken::new(),
@@ -334,8 +383,83 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             RunStatus::Passed
         };
         self.run.finished_at = Some(rfc3339_millis(SystemTime::now()));
+        // The report is the record of a run that reached its end, so the journal
+        // drops it. Only an interrupted run stays on disk.
+        self.journal_finish();
+        if let Some(problem) = self.journal_error.take() {
+            let note = format!("Run journal: {problem}");
+            self.run.error = Some(match self.run.error.take() {
+                Some(previous) => format!("{previous} {note}"),
+                None => note,
+            });
+        }
         self.notify();
         self.redactor.redact_run(&self.run)
+    }
+
+    /// Opens the journal entry of a live run. Simulations have no journal.
+    fn journal_begin(&mut self) -> Result<(), StepError> {
+        let Some(sink) = self.journal.clone() else {
+            return Ok(());
+        };
+        let run = JournalRun::new(
+            &self.run.id,
+            &self.scenario.id,
+            self.redactor.redact_str(&self.scenario.name),
+            &self.run.started_at,
+        );
+        sink.begin_run(&run)
+            .map_err(|error| StepError::Journal(error.to_string()))
+    }
+
+    /// Records one live request before it is sent.
+    fn journal_record(&mut self, entry: &JournalEntry) -> Result<(), StepError> {
+        let Some(sink) = self.journal.clone() else {
+            return Ok(());
+        };
+        sink.record(&self.run.id, entry)
+            .map_err(|error| StepError::Journal(error.to_string()))
+    }
+
+    /// Resolves what is known about a request that has already been sent.
+    ///
+    /// Refusing to send is no longer an option here, so a failed write is reported
+    /// rather than fatal: the entry keeps its earlier state, which overstates the
+    /// uncertainty instead of hiding it.
+    fn journal_resolve(
+        &mut self,
+        entry: &mut JournalEntry,
+        state: EffectState,
+        status: Option<u16>,
+        detail: Option<String>,
+    ) {
+        let Some(sink) = self.journal.clone() else {
+            return;
+        };
+        entry.state = state;
+        entry.status = status;
+        entry.detail = detail.map(|detail| self.redactor.redact_str(&detail));
+        if let Err(error) = sink.record(&self.run.id, entry) {
+            self.journal_error.get_or_insert_with(|| error.to_string());
+        }
+    }
+
+    fn journal_cleanup_started(&mut self) {
+        let Some(sink) = self.journal.clone() else {
+            return;
+        };
+        if let Err(error) = sink.cleanup_started(&self.run.id) {
+            self.journal_error.get_or_insert_with(|| error.to_string());
+        }
+    }
+
+    fn journal_finish(&mut self) {
+        let Some(sink) = self.journal.clone() else {
+            return;
+        };
+        if let Err(error) = sink.finish_run(&self.run.id) {
+            self.journal_error.get_or_insert_with(|| error.to_string());
+        }
     }
 
     /// Executes the nodes of a graph (or the `selected` subset) in dependency order.
@@ -520,7 +644,17 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             } else {
                 StepStatus::Error
             };
-            step.message = Some(error.to_string());
+            // A live request that failed leaves the reader one question: can the
+            // tested API be holding a change? The error's category answers it.
+            let effect = match error.reached_the_api() {
+                Some(Reached::Maybe) => Some(MAY_HAVE_HAPPENED),
+                Some(Reached::No) => Some(NOTHING_SENT),
+                Some(Reached::Yes) | None => None,
+            };
+            step.message = Some(match effect {
+                Some(effect) => format!("{error} {effect}"),
+                None => error.to_string(),
+            });
         }
         step.duration_ms = milliseconds(started.elapsed());
         let size = serde_json::to_vec(&step).map_or(usize::MAX, |bytes| bytes.len());
@@ -866,6 +1000,25 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             _ => js::json_stringify(body),
         });
         let started = Instant::now();
+        // The request can change the tested API, so it is journalled before it is
+        // sent and resolved on every way out of the exchange below.
+        let mut entry = JournalEntry {
+            sequence: self.journal_sequence + 1,
+            node_id: node.id.clone(),
+            handle: node.handle.clone(),
+            label: node.label.clone(),
+            phase: context.phase,
+            method: http::method_name(method).to_owned(),
+            url: self.redactor.redact_str(url.as_str()),
+            started_at: rfc3339_millis(SystemTime::now()),
+            state: EffectState::InFlight,
+            status: None,
+            detail: None,
+        };
+        if self.journal.is_some() {
+            self.journal_record(&entry)?;
+            self.journal_sequence += 1;
+        }
         let exchange = async move {
             let response = transport.send(method, url, &headers, body_text).await?;
             let status = response.status().as_u16();
@@ -875,10 +1028,44 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         };
         let outcome = tokio::select! {
             biased;
-            () = context.signal.aborted() => return Err(StepError::Cancelled),
+            () = context.signal.aborted() => {
+                // Bytes were already on their way; only the API knows what it did.
+                self.journal_resolve(
+                    &mut entry,
+                    EffectState::Uncertain,
+                    None,
+                    Some("cancelled while the request was being sent".to_owned()),
+                );
+                return Err(StepError::CancelledWhileSending);
+            }
             outcome = tokio::time::timeout(timeout, exchange) => outcome,
         };
-        let (status, headers, body) = outcome.map_err(|_| StepError::Timeout(timeout_label))??;
+        let sent = match outcome {
+            Err(_elapsed) => {
+                self.journal_resolve(
+                    &mut entry,
+                    EffectState::Uncertain,
+                    None,
+                    Some(format!("no response within {timeout_label} ms")),
+                );
+                return Err(StepError::Timeout(timeout_label));
+            }
+            Ok(Err(error)) => {
+                let state = match error.reached_the_api() {
+                    Reached::No => EffectState::NotSent,
+                    Reached::Maybe => EffectState::Uncertain,
+                    Reached::Yes => EffectState::Completed,
+                };
+                let status = error.response_status();
+                self.journal_resolve(&mut entry, state, status, Some(error.to_string()));
+                return Err(StepError::Http(error));
+            }
+            Ok(Ok(sent)) => sent,
+        };
+        let (status, headers, body) = sent;
+        // A status is proof that the API performed the request, whatever the body
+        // turns out to be.
+        self.journal_resolve(&mut entry, EffectState::Completed, Some(status), None);
         let headers = text_map(&headers);
         self.redactor.collect(&headers);
         let body = http::decode_body(&body?, self.limits.max_response_depth)?;

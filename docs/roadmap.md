@@ -1,7 +1,6 @@
 # Roadmap: scenario code, Export, variables and wire routing
 
-- Status: in progress; M0, M1, S1 and M4 are complete; the run journal is next,
-  then M2
+- Status: in progress; M0, M1, S1, M4 and the run journal are complete; M2 is next
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
@@ -292,16 +291,23 @@ path works end to end.
 | M1 | Complete: format version 2, Value and Export blocks, structured bindings, converted fixtures |
 | S1 | Complete: single-writer sessions, external-change detection, deliberate recovery, draft storage ([ADR 0008](decisions/0008-storage-sessions.md)) |
 | M4 | Complete: parser, formatter, lowering, printer, reconciliation, located diagnostics and type warnings, `fmt/check/print/apply`; generated-topology property tests and sustained syntax and semantic fuzzing |
-| M2 | Next milestone, after the run journal |
+| M2 | Next milestone |
 | M5, M6, M3, M7 | Planned |
+
+The run journal gate is closed: live requests are recorded before they are sent and
+resolved afterwards, an interrupted run is reported at the next start, and reports
+name the failure category and whether the API may have performed the request
+([ADR 0009](decisions/0009-run-journal.md)).
 
 ### Release work outside the milestones
 
 These items are scheduled between milestones and are release gates where noted:
 
-- **Run journal (release gate).** Record uncertain effects of a live run interrupted
-  by a crash; distinguish DNS and TLS failures more precisely in reports. Scheduled
-  directly after M4.
+- **Run journal (release gate). Complete.** Uncertain effects of a live run
+  interrupted by a crash are recorded in `journal.json` and reported at the next
+  start; reports distinguish DNS, TLS, connection, timeout, body and decoding
+  failures and say whether the tested API may have performed the request
+  ([ADR 0009](decisions/0009-run-journal.md)).
 - **Windows (release gate).** Native execution evidence for the application, storage
   locking and the window probes; power-loss durability of directory metadata.
 - **Accessibility (release gate).** Verify that AccessKit labels reach the platform
