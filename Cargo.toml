@@ -6,6 +6,7 @@ members = [
     "crates/apiforge-runner",
     "crates/apiforge-storage",
     "crates/apiforge-script",
+    "crates/apiforge-layout",
     "crates/apiforge-cli",
     "tools/convert-v1",
 ]
@@ -21,6 +22,7 @@ publish = false
 apiforge-core = { path = "crates/apiforge-core" }
 apiforge-runner = { path = "crates/apiforge-runner" }
 apiforge-storage = { path = "crates/apiforge-storage" }
+apiforge-layout = { path = "crates/apiforge-layout" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
 indexmap = { version = "=2.14.2", features = ["serde"] }
