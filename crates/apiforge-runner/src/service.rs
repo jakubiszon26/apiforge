@@ -11,7 +11,10 @@ use crate::{
     request::{RunError, RunLimits, RunOptions, RunRequest, validate},
     support::{SeededRandom, rfc3339_millis},
 };
-use apiforge_core::run::{RunResult, RunStatus};
+use apiforge_core::{
+    journal::JournalSink,
+    run::{RunResult, RunStatus},
+};
 use std::{
     io,
     sync::{
@@ -34,6 +37,8 @@ pub struct RunnerService {
     runtime: Option<Runtime>,
     transport: HttpTransport,
     limits: RunLimits,
+    /// Journals live runs; see [`RunOptions::journal`].
+    journal: Option<Arc<dyn JournalSink>>,
     notify: Notify,
     active: Arc<AtomicUsize>,
     runs: Mutex<Vec<Arc<Shared>>>,
@@ -55,10 +60,23 @@ impl RunnerService {
             runtime: Some(runtime),
             transport,
             limits,
+            journal: None,
             notify,
             active: Arc::new(AtomicUsize::new(0)),
             runs: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Records live runs of this service in `journal`.
+    #[must_use]
+    pub fn with_journal(mut self, journal: Arc<dyn JournalSink>) -> Self {
+        self.journal = Some(journal);
+        self
+    }
+
+    /// Whether live runs of this service are journalled.
+    pub fn is_journalled(&self) -> bool {
+        self.journal.is_some()
     }
 
     /// Validates and starts a run. Nothing executes when an error is returned.
@@ -83,6 +101,7 @@ impl RunnerService {
             limits: self.limits.clone(),
             transport: self.transport.clone(),
             random: Box::new(SeededRandom::from_entropy()),
+            journal: self.journal.clone(),
         };
         let guard = ActiveGuard(Arc::clone(&self.active));
         let task_shared = Arc::clone(&shared);

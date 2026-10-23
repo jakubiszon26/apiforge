@@ -18,10 +18,11 @@ use apiforge_core::{
     edit,
     format::{Binding, Graph, Position, Project, Workspace},
     graph::{create_operator_node, delete_nodes, position_after},
+    journal::{CleanupState, JournalRun},
     run::{Phase, RunMode, RunResult, RunStatus, StepResult},
 };
 use apiforge_runner::{RunHandle, RunRequest, RunnerService};
-use apiforge_storage::WorkspaceStore;
+use apiforge_storage::{JournalStore, WorkspaceStore};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
@@ -92,6 +93,11 @@ pub struct App {
     storage_message: Option<String>,
     storage_prompt: Option<StoragePrompt>,
     storage_busy: bool,
+    /// Keeps the live-run journal of this session; `None` when there is nowhere to
+    /// write one, in which case an interrupted live run leaves no record.
+    journal: Option<Arc<JournalStore>>,
+    /// Live runs a previous process left unfinished, until the user has seen them.
+    interrupted: Option<Vec<JournalRun>>,
 }
 
 impl App {
@@ -100,6 +106,8 @@ impl App {
         let mut notice = None;
         let mut storage_prompt = None;
         let mut storage_message = None;
+        let mut journal: Option<Arc<JournalStore>> = None;
+        let mut interrupted = None;
         let (workspace, saver) = match source {
             Source::Session(workspace) => (workspace, None),
             Source::Storage(store) => {
@@ -154,6 +162,27 @@ impl App {
                 if !writable && storage_message.is_none() {
                     storage_message = Some("Temporary workspace — autosave is disabled. Export to keep changes from this session.".into());
                 }
+                // The journal shares the session's writer lock, so it is opened from
+                // a clone before the saver takes ownership of the store.
+                if writable {
+                    match JournalStore::open(store.clone()) {
+                        Ok(loaded) => {
+                            if loaded.unreadable && notice.is_none() {
+                                notice = Some("A previous live run left a run journal that could not be read. It was preserved as journal.unreadable.json.".into());
+                            }
+                            if !loaded.interrupted.is_empty() {
+                                interrupted = Some(loaded.interrupted);
+                            }
+                            journal = Some(Arc::new(loaded.store));
+                        }
+                        Err(error) if notice.is_none() => {
+                            notice = Some(format!(
+                                "{error} Live runs in this session are not recorded, so an interrupted run leaves no record of what it sent."
+                            ));
+                        }
+                        Err(_) => {}
+                    }
+                }
                 let repaint = context.clone();
                 let saver = writable
                     .then(|| {
@@ -172,7 +201,11 @@ impl App {
                     notice = Some(format!("Cannot start the runner: {error}"));
                 }
             })
-            .ok();
+            .ok()
+            .map(|runner| match &journal {
+                Some(journal) => runner.with_journal(Arc::clone(journal) as _),
+                None => runner,
+            });
         Self {
             editor: Editor::new(workspace),
             saver,
@@ -196,6 +229,8 @@ impl App {
             storage_message,
             storage_prompt,
             storage_busy: false,
+            journal,
+            interrupted,
         }
     }
 
@@ -387,6 +422,108 @@ impl App {
             self.reload_storage(recovery);
         } else if temporary {
             self.use_temporary_workspace();
+        }
+    }
+
+    /// Reports live runs that a previous process left unfinished.
+    ///
+    /// The journal only holds a run that never reported its own outcome, so every
+    /// entry here is an effect the tested API may be holding with no report to
+    /// explain it. Marking them as handled is the only thing that clears them.
+    fn interrupted_runs_dialog(&mut self, context: &egui::Context) {
+        let Some(runs) = self.interrupted.clone() else {
+            return;
+        };
+        let mut dismiss = false;
+        let mut handled = false;
+        let response = dialogs::centered_modal(egui::Id::new("interrupted-runs"), context).show(
+            context,
+            |ui| {
+                ui.set_width((context.content_rect().width() - 80.0).clamp(320.0, 560.0));
+                ui.heading(if runs.len() == 1 {
+                    "A live run did not finish".to_owned()
+                } else {
+                    format!("{} live runs did not finish", runs.len())
+                });
+                ui.add_space(8.0);
+                ui.label(
+                    "API Forge closed before these runs reported their result. The requests below reached, or may have reached, the tested API, and cleanup may not have run. Check the API before relying on it.",
+                );
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for run in &runs {
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(format!("{} — {}", run.scenario_name, run.started_at))
+                                    .strong(),
+                            );
+                            ui.label(
+                                RichText::new(match run.cleanup {
+                                    CleanupState::NotStarted => "Cleanup had not started.",
+                                    CleanupState::Started => "Cleanup had started; it may not have finished.",
+                                })
+                                .size(12.0),
+                            );
+                            let effects: Vec<_> = run.effects().collect();
+                            if effects.is_empty() {
+                                ui.label(
+                                    RichText::new("No request had been sent.").size(12.0).italics(),
+                                );
+                            }
+                            for entry in effects {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {} — {} ({})",
+                                        entry.method,
+                                        entry.url,
+                                        entry.state.label(),
+                                        entry.display_name()
+                                    ))
+                                    .size(12.0),
+                                );
+                            }
+                            if run.elided > 0 {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} earlier requests are not listed.",
+                                        run.elided
+                                    ))
+                                    .size(12.0)
+                                    .italics(),
+                                );
+                            }
+                        }
+                    });
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    handled = ui
+                        .add(widgets::primary_button("Mark as handled"))
+                        .on_hover_text("Remove these runs from the journal")
+                        .clicked();
+                    dismiss = ui
+                        .button("Remind me later")
+                        .on_hover_text("Keep the journal and report it again at the next start")
+                        .clicked();
+                });
+            },
+        );
+        if response.is_top_modal
+            && context.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            dismiss = true;
+        }
+        if handled {
+            let ids: Vec<String> = runs.iter().map(|run| run.run_id.clone()).collect();
+            if let Some(journal) = &self.journal
+                && let Err(error) = journal.discard(&ids)
+            {
+                self.notice = Some(format!("The run journal could not be updated: {error}"));
+            }
+            self.interrupted = None;
+        } else if dismiss {
+            self.interrupted = None;
         }
     }
 
@@ -605,6 +742,7 @@ impl App {
             self.canvas.reveal(id);
         }
         self.storage_dialog(ui.ctx());
+        self.interrupted_runs_dialog(ui.ctx());
         self.save_if_changed();
     }
 
@@ -937,12 +1075,26 @@ impl App {
                     }
                 }
                 ui.add_space(6.0);
+                let unrecorded = self
+                    .runner
+                    .as_ref()
+                    .is_some_and(|runner| !runner.is_journalled());
+                let mut chose_live = false;
                 ui.add_enabled_ui(!running, |ui| {
-                    ui.selectable_value(&mut self.mode, RunMode::Live, "API")
-                        .on_hover_text("Send real requests to the configured API");
+                    chose_live = ui
+                        .selectable_value(&mut self.mode, RunMode::Live, "API")
+                        .on_hover_text(if unrecorded {
+                            "Send real requests to the configured API. This session cannot record them, so an interrupted run leaves no record."
+                        } else {
+                            "Send real requests to the configured API"
+                        })
+                        .clicked();
                     ui.selectable_value(&mut self.mode, RunMode::Simulation, "Simulation")
                         .on_hover_text("Use saved sample responses; no requests are sent");
                 });
+                if chose_live && unrecorded && self.notice.is_none() {
+                    self.notice = Some("Live requests in this session are not recorded in a run journal. If the window closes during a run, there will be no record of what the API was asked to do.".into());
+                }
             });
         });
         if let Some(message) = &self.storage_message {
@@ -1914,6 +2066,103 @@ mod tests {
         );
         drop(app);
         assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    /// Writes a journal of one interrupted live run beside `path`.
+    fn write_interrupted_journal(path: &std::path::Path) {
+        use apiforge_core::journal::{EffectState, Journal, JournalEntry};
+        let mut run = JournalRun::new("run-7", "scen-1", "Checkout", "2026-10-23T09:00:00.000Z");
+        run.record(JournalEntry {
+            sequence: 1,
+            node_id: "order".into(),
+            handle: "order".into(),
+            label: Some("Create order".into()),
+            phase: Phase::Main,
+            method: "POST".into(),
+            url: "http://127.0.0.1:4318/demo/shop/carts".into(),
+            started_at: "2026-10-23T09:00:01.000Z".into(),
+            state: EffectState::InFlight,
+            status: None,
+            detail: None,
+        });
+        let mut journal = Journal::default();
+        journal.begin(run);
+        std::fs::write(
+            path.with_file_name("journal.json"),
+            serde_json::to_vec_pretty(&journal).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_interrupted_live_run_is_reported_and_cleared_only_when_handled() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let journal_path = directory.path().join("journal.json");
+        write_interrupted_journal(&path);
+        let context = egui::Context::default();
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        assert!(app.journal.is_some(), "a writable session owns the journal");
+        let runs = app
+            .interrupted
+            .clone()
+            .expect("the interrupted run is read");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].effects().count(), 1);
+        draw_frame(&mut app, &context, vec![]);
+
+        // Remind me later keeps the file, so the next start reports it again.
+        click_storage_button(&mut app, &context, "Remind me later");
+        assert!(app.interrupted.is_none());
+        assert!(journal_path.exists());
+        drop(app);
+
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        assert!(app.interrupted.is_some());
+        draw_frame(&mut app, &context, vec![]);
+        click_storage_button(&mut app, &context, "Mark as handled");
+        assert!(app.interrupted.is_none());
+        assert!(!journal_path.exists(), "a handled run leaves the journal");
+        assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn a_session_without_a_writable_workspace_says_live_runs_are_not_recorded() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let _writer = WorkspaceStore::open_exclusive(&path).unwrap();
+        let context = egui::Context::default();
+        // A read-only second window must not write files the first window owns.
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_read_only(&path).unwrap()),
+        );
+        assert!(app.journal.is_none());
+        assert!(app.interrupted.is_none());
+        assert!(
+            app.runner
+                .as_ref()
+                .is_some_and(|runner| !runner.is_journalled())
+        );
+        app.notice = None;
+        app.mode = RunMode::Simulation;
+        draw_frame(&mut app, &context, vec![]);
+        click_storage_button(&mut app, &context, "API");
+        assert_eq!(app.mode, RunMode::Live);
+        assert!(
+            app.notice
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not recorded"),
+            "{:?}",
+            app.notice
+        );
     }
 
     #[test]

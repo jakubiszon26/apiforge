@@ -7,13 +7,14 @@ use crate::{
 use apiforge_core::{
     ImportError,
     format::Project,
+    journal::JournalSink,
     js::utf16_len,
     operator::RandomSource,
     run::{RunMode, RunResult, RunStatus},
     validate_project,
 };
 use indexmap::IndexMap;
-use std::{collections::HashSet, fmt, time::Duration};
+use std::{collections::HashSet, fmt, sync::Arc, time::Duration};
 use thiserror::Error;
 
 /// A request to run one scenario of a frozen project.
@@ -86,16 +87,29 @@ pub struct RunOptions {
     pub transport: HttpTransport,
     /// Source of the `random` operator.
     pub random: Box<dyn RandomSource + Send>,
+    /// Records live requests before they are sent, so that a process which dies
+    /// mid-run leaves evidence of what the tested API may have performed. `None`
+    /// disables journalling, which is correct for a simulation and is the only
+    /// option for a session with no workspace to keep a journal beside.
+    pub journal: Option<Arc<dyn JournalSink>>,
 }
 
 impl RunOptions {
-    /// Default limits and an unpredictably seeded random source.
+    /// Default limits, an unpredictably seeded random source and no journal.
     pub fn new(transport: HttpTransport) -> Self {
         Self {
             limits: RunLimits::default(),
             transport,
             random: Box::new(SeededRandom::from_entropy()),
+            journal: None,
         }
+    }
+
+    /// The same options with a journal for live runs.
+    #[must_use]
+    pub fn with_journal(mut self, journal: Arc<dyn JournalSink>) -> Self {
+        self.journal = Some(journal);
+        self
     }
 }
 

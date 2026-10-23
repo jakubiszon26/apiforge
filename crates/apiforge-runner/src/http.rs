@@ -57,6 +57,7 @@ impl HttpTransport {
         }
         let method = Method::from_bytes(method_name(method).as_bytes())
             .map_err(|_| HttpError::InvalidHeader(String::new()))?;
+        let secure = url.scheme() == "https";
         let mut builder = self.client.request(method, url).headers(map);
         if let Some(body) = body {
             builder = builder.body(body);
@@ -64,7 +65,7 @@ impl HttpTransport {
         let response = builder
             .send()
             .await
-            .map_err(|error| HttpError::Transport(transport_error_detail(error)))?;
+            .map_err(|error| HttpError::Transport(transport_failure(error, secure)))?;
         if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
             return Err(HttpError::Redirect(response.status()));
         }
@@ -81,8 +82,8 @@ pub struct TransportError(String);
 pub(crate) enum HttpError {
     #[error("Invalid request header: {0}.")]
     InvalidHeader(String),
-    #[error("Request failed: {0}.")]
-    Transport(String),
+    #[error("{0}")]
+    Transport(TransportFailure),
     #[error("Redirects are not followed (HTTP {0}).")]
     Redirect(StatusCode),
     #[error("The response exceeds the {} limit.", byte_size(*.0))]
@@ -91,6 +92,102 @@ pub(crate) enum HttpError {
     TooDeep(usize),
     #[error("The response JSON contains a number outside the finite range.")]
     NonFinite,
+}
+
+impl HttpError {
+    /// The response status, where the error came with one.
+    pub(crate) fn response_status(&self) -> Option<u16> {
+        match self {
+            Self::Redirect(status) => Some(status.as_u16()),
+            // A body or decoding limit is reported without the status that carried
+            // it; the entry still records that the request was performed.
+            _ => None,
+        }
+    }
+
+    /// Whether the tested API may have performed the request despite the error.
+    pub(crate) fn reached_the_api(&self) -> Reached {
+        match self {
+            // A header the client rejects is never put on the wire.
+            Self::InvalidHeader(_) => Reached::No,
+            Self::Transport(failure) => failure.kind.reached_the_api(),
+            // A status or a body means the request was answered, so it happened.
+            Self::Redirect(_) | Self::TooLarge(_) | Self::TooDeep(_) | Self::NonFinite => {
+                Reached::Yes
+            }
+        }
+    }
+}
+
+/// How far a request got before it failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reached {
+    /// The request never left this process; the API cannot have performed it.
+    No,
+    /// Bytes were sent and the outcome is unknown; the API may have performed it.
+    Maybe,
+    /// The API answered, so it performed the request.
+    Yes,
+}
+
+/// Why a live request failed, in the terms a report needs: a category the reader can
+/// act on, and whether the tested API may already have performed the request.
+///
+/// `reqwest` groups name resolution, TLS and TCP into one connect error, so the
+/// category is taken from the cause chain. The chain's wording belongs to the HTTP
+/// and TLS stacks and is matched case-insensitively against the markers below; an
+/// unrecognised connect failure stays [`FailureKind::Connect`], which is the
+/// conservative answer rather than a guess.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[error("Request failed: {kind} ({detail}).", kind = self.kind.label())]
+pub(crate) struct TransportFailure {
+    pub(crate) kind: FailureKind,
+    /// The error with its causes, without the URL.
+    pub(crate) detail: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailureKind {
+    /// The host name could not be resolved.
+    Dns,
+    /// The TLS handshake or certificate validation failed.
+    Tls,
+    /// The connection could not be established, e.g. refused or unreachable.
+    Connect,
+    /// No answer within the request's timeout.
+    Timeout,
+    /// The request body could not be sent, or the response body not read.
+    Body,
+    /// The response could not be decoded.
+    Decode,
+    /// The request could not be built or started.
+    Request,
+    /// None of the above; the transport reported no category.
+    Other,
+}
+
+impl FailureKind {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Dns => "the host name could not be resolved",
+            Self::Tls => "the TLS connection failed",
+            Self::Connect => "the connection failed",
+            Self::Timeout => "no response in time",
+            Self::Body => "the body could not be transferred",
+            Self::Decode => "the response could not be decoded",
+            Self::Request => "the request could not be sent",
+            Self::Other => "transport error",
+        }
+    }
+
+    fn reached_the_api(self) -> Reached {
+        match self {
+            // Resolution, TLS and connection setup all precede the request itself.
+            Self::Dns | Self::Tls | Self::Connect | Self::Request => Reached::No,
+            // The request was on its way; only the API knows whether it ran.
+            Self::Timeout | Self::Body | Self::Decode | Self::Other => Reached::Maybe,
+        }
+    }
 }
 
 pub(crate) fn method_name(method: HttpMethod) -> &'static str {
@@ -157,11 +254,12 @@ pub(crate) async fn read_body(
     if announced.is_some_and(|length| length > limit as f64) {
         return Err(HttpError::TooLarge(limit));
     }
+    let secure = response.url().scheme() == "https";
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| HttpError::Transport(transport_error_detail(error)))?
+        .map_err(|error| HttpError::Transport(transport_failure(error, secure)))?
     {
         if body.len() + chunk.len() > limit {
             return Err(HttpError::TooLarge(limit));
@@ -215,27 +313,86 @@ fn normalize(value: Value, depth: usize, max_depth: usize) -> Result<Value, Http
     })
 }
 
-/// Formats a `reqwest::Error` with an explicit failure category prefix (`timeout`,
-/// `connect`, `body`, `decode`, or `request`) followed by its full cause chain.
-fn transport_error_detail(error: reqwest::Error) -> String {
-    let category = if error.is_timeout() {
-        Some("timeout")
+/// Classifies a `reqwest::Error` and keeps its full cause chain as the detail.
+///
+/// The URL is stripped before anything else, so neither the detail nor the category
+/// can be decided by a word that happens to appear in the address; `secure` carries
+/// the one thing the address does decide, namely whether TLS was involved at all.
+fn transport_failure(error: reqwest::Error, secure: bool) -> TransportFailure {
+    let error = error.without_url();
+    let detail = error_chain(&error);
+    // A connect error covers resolution, TLS and TCP; the chain tells them apart.
+    // The timeout check comes first because a connect timeout is reported as both
+    // and the stage it stopped at is then unknown.
+    let kind = if error.is_timeout() {
+        FailureKind::Timeout
     } else if error.is_connect() {
-        Some("connect")
+        connect_kind(&detail, secure)
     } else if error.is_body() {
-        Some("body")
+        FailureKind::Body
     } else if error.is_decode() {
-        Some("decode")
+        FailureKind::Decode
     } else if error.is_request() {
-        Some("request")
+        FailureKind::Request
     } else {
-        None
+        FailureKind::Other
     };
-    let chain = error_chain(&error.without_url());
-    let lower = chain.to_ascii_lowercase();
-    match category {
-        Some(prefix) if !lower.starts_with(prefix) => format!("{prefix}: {chain}"),
-        _ => chain,
+    TransportFailure { kind, detail }
+}
+
+/// Markers of a failed name resolution in the cause chain, lowercase.
+const DNS_MARKERS: [&str; 7] = [
+    "dns error",
+    "failed to lookup address",
+    "name or service not known",
+    "nodename nor servname",
+    "temporary failure in name resolution",
+    "no such host",
+    "name resolution",
+];
+
+/// Markers of a connection that was never established, lowercase.
+const TCP_MARKERS: [&str; 8] = [
+    "tcp connect error",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "network is unreachable",
+    "no route to host",
+    "host is unreachable",
+    "address not available",
+];
+
+/// Markers of a failed TLS handshake or certificate check, lowercase.
+const TLS_MARKERS: [&str; 6] = [
+    "tls",
+    "certificate",
+    "handshake",
+    "webpki",
+    "ssl",
+    "unknown issuer",
+];
+
+/// Splits a connect failure into resolution, TLS and connection setup.
+///
+/// Resolution is checked first: a name that cannot be resolved never reaches TLS,
+/// while a TLS error about a host name can mention both. A connection that was
+/// never established comes next. What remains, on an `https` address, happened
+/// while the secure channel was being set up, whatever the TLS stack called it —
+/// its wordings (`received corrupt message`, `peer misbehaved`, a numbered alert)
+/// share no reliable keyword. On an `http` address the same remainder stays a
+/// connection failure rather than becoming a guess.
+fn connect_kind(chain: &str, secure: bool) -> FailureKind {
+    let chain = chain.to_ascii_lowercase();
+    let contains = |markers: &[&str]| markers.iter().any(|marker| chain.contains(marker));
+    if contains(&DNS_MARKERS) {
+        FailureKind::Dns
+    } else if contains(&TCP_MARKERS) {
+        FailureKind::Connect
+    } else if contains(&TLS_MARKERS) || secure {
+        FailureKind::Tls
+    } else {
+        FailureKind::Connect
     }
 }
 
@@ -293,6 +450,131 @@ mod tests {
             decode_body(nested(500).as_bytes(), 100),
             Err(HttpError::TooDeep(100))
         );
+    }
+
+    #[test]
+    fn connect_failures_are_split_by_their_cause_chain() {
+        // Wordings observed from hyper-util, rustls and the operating system.
+        for secure in [false, true] {
+            assert_eq!(
+                connect_kind(
+                    "error trying to connect: dns error: failed to lookup address information: Name or service not known",
+                    secure
+                ),
+                FailureKind::Dns
+            );
+            assert_eq!(
+                connect_kind(
+                    "error trying to connect: Temporary failure in name resolution",
+                    secure
+                ),
+                FailureKind::Dns
+            );
+            assert_eq!(
+                connect_kind(
+                    "error trying to connect: tcp connect error: Connection refused (os error 111)",
+                    secure
+                ),
+                FailureKind::Connect
+            );
+            assert_eq!(
+                connect_kind(
+                    "error trying to connect: invalid peer certificate: UnknownIssuer",
+                    secure
+                ),
+                FailureKind::Tls
+            );
+        }
+        // Wordings with no keyword at all: TLS only where TLS was in use.
+        let corrupt = "error sending request: client error (Connect): received corrupt message";
+        assert_eq!(connect_kind(corrupt, true), FailureKind::Tls);
+        assert_eq!(connect_kind(corrupt, false), FailureKind::Connect);
+    }
+
+    #[test]
+    fn a_failure_decides_whether_the_api_may_have_performed_the_request() {
+        let failure = |kind| {
+            HttpError::Transport(TransportFailure {
+                kind,
+                detail: String::new(),
+            })
+        };
+        for kind in [
+            FailureKind::Dns,
+            FailureKind::Tls,
+            FailureKind::Connect,
+            FailureKind::Request,
+        ] {
+            assert_eq!(failure(kind).reached_the_api(), Reached::No, "{kind:?}");
+        }
+        for kind in [
+            FailureKind::Timeout,
+            FailureKind::Body,
+            FailureKind::Decode,
+            FailureKind::Other,
+        ] {
+            assert_eq!(failure(kind).reached_the_api(), Reached::Maybe, "{kind:?}");
+        }
+        assert_eq!(
+            HttpError::InvalidHeader("a b".into()).reached_the_api(),
+            Reached::No
+        );
+        for error in [
+            HttpError::Redirect(StatusCode::FOUND),
+            HttpError::TooLarge(1),
+            HttpError::TooDeep(1),
+            HttpError::NonFinite,
+        ] {
+            assert_eq!(error.reached_the_api(), Reached::Yes, "{error:?}");
+        }
+    }
+
+    /// The categories of real failures, not of strings written in this test.
+    #[tokio::test]
+    async fn real_transport_failures_carry_their_category() {
+        let transport = HttpTransport::new().unwrap();
+        let send = async |url: &str| {
+            let error = transport
+                .send(
+                    HttpMethod::Get,
+                    Url::parse(url).unwrap(),
+                    &IndexMap::new(),
+                    None,
+                )
+                .await
+                .expect_err("the request cannot succeed");
+            match error {
+                HttpError::Transport(failure) => failure,
+                other => panic!("expected a transport failure, got {other:?}"),
+            }
+        };
+
+        // A reserved name (RFC 2606) never resolves, however the host is configured.
+        let dns = send("http://host.invalid/orders").await;
+        assert_eq!(dns.kind, FailureKind::Dns, "{}", dns.detail);
+        assert_eq!(dns.kind.reached_the_api(), Reached::No);
+
+        // A closed port on loopback: the connection itself fails.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = closed.local_addr().unwrap();
+        drop(closed);
+        let refused = send(&format!("http://{address}/orders")).await;
+        assert_eq!(refused.kind, FailureKind::Connect, "{}", refused.detail);
+        assert_eq!(refused.kind.reached_the_api(), Reached::No);
+
+        // A plain TCP server answering an HTTPS request fails the handshake.
+        let plain = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = plain.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = plain.accept().await {
+                use tokio::io::AsyncWriteExt;
+                let _ = socket.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        let tls = send(&format!("https://{address}/orders")).await;
+        assert_eq!(tls.kind, FailureKind::Tls, "{}", tls.detail);
+        assert_eq!(tls.kind.reached_the_api(), Reached::No);
     }
 
     #[test]

@@ -18,8 +18,10 @@ the first release targets.
 - **Components.** A selection becomes a reusable, revisioned component with typed
   inputs, Export outputs and an optional business action.
 - **Runs.** Simulation mode uses saved sample responses; live mode sends real requests.
-  Reports show every step's inputs, outputs, request and response, with secrets masked.
-  An independent cleanup phase also runs after errors and cancellation.
+  Reports show every step's inputs, outputs, request and response, with secrets masked,
+  and say whether a failed request can have changed anything. An independent cleanup
+  phase also runs after errors and cancellation. A live run is journalled, so a run
+  interrupted by a crash is reported at the next start.
 - **Scenario language.** A lossless parser, a formatter and a CLI to check, print and
   apply scenarios against a workspace.
 - **Safe local storage.** Atomic saves with a validated backup, a single writer per
@@ -95,4 +97,5 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 - Requests time out after 10 seconds unless configured (at most 60), responses are
   limited to 2 MiB, the main phase to 120 seconds and cleanup to 10 seconds.
 - Cancellation cannot undo operations already performed by the tested API, and a
-  process crash cannot guarantee cleanup.
+  process crash cannot guarantee cleanup. The run journal reports what such a run
+  may have performed; it does not compensate for it.

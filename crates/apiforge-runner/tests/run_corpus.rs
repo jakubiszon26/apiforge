@@ -208,6 +208,7 @@ async fn simulation_runs_match_the_reference() {
             limits: RunLimits::default(),
             transport: transport.clone(),
             random: Box::new(lcg(fixture.random_seed)),
+            journal: None,
         };
         let result = run_scenario(run_request, options, CancellationToken::new(), |_| {}).await;
         if let Some((_, reason)) = REJECTED.iter().find(|(rejected, _)| *rejected == slug) {
