@@ -141,30 +141,73 @@ errors, both fixture checks and the workspace debug build pass. The process-lock
 helper remains the one intentional ignored test, launched by its parent.
 No native window or Windows evidence is added here.
 
+## Generated topologies, semantic fuzzing and diagnostics
+
+`tests/topology.rs` generates 400 random scenario DAGs (about 5000 blocks) from
+every statement form: Values and variables, requests with arguments, headers,
+query and bodies, `assert`, `condition`, nested IF branches, `@after` with
+`.then`/`.else`, component instances and cleanup. Each one must lower and
+validate; print -> lower must keep its semantics and print identically again;
+reapplying the printed source must keep every node ID, position and edge ID; a
+complete rename of any handle must keep identity; and an inserted statement
+must be the only node needing layout. The shared generator lives in
+`tests/support/generator.rs`.
+
+The test found that the printer filtered one global topological order per IF
+block. A branch statement reading a later outer statement made each print choose
+a different order. Each block is now ordered by the dependencies of its
+members' whole subtrees; a greedy stable choice makes print -> lower -> print a
+fixed point.
+
+The dependency-free `fuzz_semantics` example mutates generated sources by
+lines and tokens (deletion, duplication, swaps, handle substitution and
+fragments such as `@after`, `if`, `cleanup`, `argument`, `@inputs`). It checks
+diagnostic ranges, that failed lowering never reconciles, and that every
+successful lowering prints, round-trips, prints identically and reconciles
+without dangling references:
+
+```bash
+cargo run -p apiforge-script --example fuzz_semantics --release --locked -- 60 2718281828
+```
+
+It found that the printer wrote undeclared component instance inputs as call
+arguments, which lowering rejects; they now use `@inputs`.
+On Linux, release runs found no further failure: seeds `1592639710`,
+`31415926` and `424242` for 120 seconds each (1,156,429 cases, 176,681 of them
+lowered without errors), then `2718281828` for 300 seconds (914,606 cases,
+139,625 valid) on the code with type warnings. A final 180-second run with seed
+`1592639710` on the code including the `@config` correction below completed
+552,135 cases, 83,931 valid. The syntax fuzzer passed 30 more seconds
+(5,673,127 mutations).
+
+Document validation errors (for example Start inside a branch or `@after` on an
+IF without `.then`/`.else`) now point at the statement instead of the whole
+file. Edge errors are reported at their target statement.
+
+Lowering adds static type warnings that mirror the board's connection rule
+(`graph::compatible`): a whole output must be compatible with the slot it fills,
+including contracts, and literals, operators, templates, objects and arrays
+must have the slot's base type. Warnings point at the operand or input. They are
+not errors because the document model accepts such bindings and runtime checks
+remain authoritative. Every stored fixture document lowers without warnings.
+
+A manual CLI acceptance pass over a copy of `fixtures/workspace.json` found that
+`@config` silently overrode visible shorthand. The printed cleanup request carries
+`@config` (its sample status is absent) next to `timeout 10s`; changing it to
+`3s` made `apply` exit 0 without changing `timeoutMs`. Every setting the
+shorthand writes must now agree with `@config` or be absent there while the
+shorthand writes its default; otherwise lowering reports an error at `@config`
+and `apply` preserves the document (exit 1). A no-op `apply` of the printed
+scenario still leaves the file and backup untouched.
+
+The Linux workspace run passes all 334 tests, including the topology test and
+16 semantic tests. Formatting, Clippy with warnings as errors, both fixture checks,
+`fmt --check` on both example scripts and `check` on the workspace fixture pass.
+The process-lock helper remains the one intentional ignored test. No native
+window or Windows evidence is added.
+
 ## Remaining M4 work
 
-- Broader generated graph topology tests and sustained semantic-lowering fuzzing,
-  in addition to the existing syntax fuzzer and generated metadata cases.
-- Detailed static type diagnostics beyond the shared document validator; runtime
-  input/operator checking remains authoritative for dynamic values.
-- Complete acceptance review before merging M4. Desktop code editing/live sync
-  stays in M5/M6; CLI execution stays in M6. No native Windows acceptance is claimed.
-
-## Body input regression follow-up
-
-The request inspector now has a multiline JSON/text body editor. Both
-`{"productId": "{{input.productId}}"}` and
-`{"productId": {{input.productId}}}` produce typed argument leaves; text around a
-placeholder produces a template string. The same editor accepts raw text body
-templates. Invalid drafts keep the last valid body. Projection is cached between
-source changes; complex bindings retain their existing **Body value source**
-controls. A separate source-picker fix keeps `input.productId` available inside a
-body field named `productId`, while still excluding a custom input's own source.
-Tests exercise text entry through egui, invalid draft retention, same-name nested
-sources, JSON projection/escaping/limits and the runner's actual request snapshot
-for JSON types and text interpolation. No runtime substitution or document version
-change was introduced.
-
-The body follow-up passes all 327 workspace tests, formatting, Clippy with warnings
-as errors and the workspace debug build. The one ignored process-lock helper is
-still launched by its parent. GUI evidence here remains headless egui input tests.
+- Acceptance review before merging M4 into `main`. Desktop code editing and live
+  sync stay in M5/M6; CLI execution stays in M6. No native Windows acceptance is
+  claimed.

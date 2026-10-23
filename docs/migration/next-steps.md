@@ -14,8 +14,9 @@ The active feature work is the [scenario code and canvas plan](../plans/code-and
 M1 (format v2) and S1 (storage safety) are implemented and locally verified on
 Linux. M4, scenario language and CLI, is in progress on `feat/script-language`.
 The lexer, recovering parser, lowering, identity reconciliation, document printer
-and `apiforge fmt/check/print/apply` are implemented. Broader semantic graph/fuzz
-coverage, detailed static type diagnostics and the acceptance review remain.
+and `apiforge fmt/check/print/apply` are implemented, with generated topology
+tests, a semantic fuzzer, located validation errors and static type warnings.
+The acceptance review before merging remains.
 The named request argument regression is fixed across inspector, bindings, runner
 and source projection. See the [implementation notes](scenario-language.md). M2 layout/routing
 can follow independently. The milestone order puts storage safety before anything
@@ -58,6 +59,11 @@ executable controller plan. Windows execution, release packaging/signing and
 assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
+
+The latest M4 follow-up passes 334 workspace tests, formatting, Clippy with
+warnings as errors and both fixture checks. Generated topologies and semantic
+fuzzing found two printer bugs and a silent `@config` override, all fixed with
+regression tests; see the [language implementation notes](scenario-language.md).
 
 The M4 syntax checkpoint passes 302 workspace tests, formatting, Clippy with
 warnings as errors, both fixture checks and the workspace debug build. It includes
