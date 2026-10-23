@@ -186,7 +186,7 @@ mod tests {
         let source = graph
             .nodes
             .iter()
-            .find(|node| node.kind != apiforge_core::model::NodeKind::Trigger)
+            .find(|node| node.kind != apiforge_core::model::NodeKind::Start)
             .unwrap();
         let mut dialog = AssignVariableDialog::new(graph, &source.id, "body", "cart.id");
         assert_eq!(dialog.name, "id");

@@ -588,7 +588,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         }
         let input = |name: &str| values.get(name).cloned().flatten();
         match node.kind {
-            NodeKind::Trigger => {}
+            NodeKind::Start => {}
             NodeKind::Value | NodeKind::Export => step.outputs = single_output(input(VALUE_INPUT)),
             NodeKind::Request => self.request(node, &values, step, context).await?,
             NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
@@ -1136,7 +1136,7 @@ mod tests {
         let scenario = &mut project.scenarios[0];
         scenario.graph = serde_json::from_value(serde_json::json!({
             "nodes": [
-                {"id": "start", "kind": "trigger", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
+                {"id": "start", "kind": "start", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
                 {"id": "active", "kind": "request", "handle": "active", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "template", "parts": [{"kind": "text", "text": url}, {"kind": "value", "binding": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}]}}, "config": {}},
                 {"id": "shared", "kind": "value", "handle": "shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
                 {"id": "disconnected", "kind": "request", "handle": "disconnected", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "template", "parts": [{"kind": "text", "text": url}, {"kind": "value", "binding": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}]}}, "config": {}}
@@ -1183,7 +1183,7 @@ mod tests {
         scenario.cleanup = Graph {
             nodes: vec![
                 serde_json::from_value(serde_json::json!({
-                    "id": "cleanup-start", "kind": "trigger", "handle": "cleanup_start",
+                    "id": "cleanup-start", "kind": "start", "handle": "cleanup_start",
                     "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}
                 }))
                 .unwrap(),

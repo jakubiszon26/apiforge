@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "diagnostics",
       "name": "diagnostics",
       "scenarios": [
@@ -17,7 +17,7 @@
                 "id": "start",
                 "handle": "begin",
                 "label": "start",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0

@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "if-true",
       "name": "if-true",
       "scenarios": [
@@ -152,7 +152,7 @@
                 "id": "start",
                 "handle": "begin",
                 "label": "start",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -329,7 +329,7 @@
         "nodeId": "start",
         "handle": "begin",
         "label": "start",
-        "kind": "trigger",
+        "kind": "start",
         "status": "passed",
         "phase": "main",
         "inputs": {},

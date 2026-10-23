@@ -20,7 +20,7 @@ impl<'a> ExecutionPlan<'a> {
         let reachable = graph
             .nodes
             .iter()
-            .find(|node| node.kind == NodeKind::Trigger)
+            .find(|node| node.kind == NodeKind::Start)
             .map(|trigger| reachable_from(graph, &dependencies, &trigger.id));
         Self {
             dependencies,
@@ -104,6 +104,7 @@ mod tests {
             label: None,
             note: None,
             position: Position { x: 0.0, y: 0.0 },
+            auto_placed: false,
             inputs: IndexMap::new(),
             config: NodeConfig::default(),
         }
@@ -142,7 +143,7 @@ mod tests {
     fn start_reaches_successors_and_pulls_in_pure_arguments_only() {
         let graph = Graph {
             nodes: vec![
-                node("start", NodeKind::Trigger),
+                node("start", NodeKind::Start),
                 with_input(
                     with_input(
                         with_input(node("call", NodeKind::Request), "value"),
@@ -172,7 +173,7 @@ mod tests {
     fn a_shared_pure_argument_does_not_enable_its_other_consumers() {
         let graph = Graph {
             nodes: vec![
-                node("start", NodeKind::Trigger),
+                node("start", NodeKind::Start),
                 with_input(node("active", NodeKind::Request), "shared"),
                 node("shared", NodeKind::Value),
                 with_input(node("side-effect", NodeKind::Request), "shared"),
@@ -188,7 +189,7 @@ mod tests {
     fn an_explicitly_sequenced_value_still_activates_its_consumers() {
         let graph = Graph {
             nodes: vec![
-                node("start", NodeKind::Trigger),
+                node("start", NodeKind::Start),
                 node("value", NodeKind::Value),
                 with_input(node("consumer", NodeKind::Request), "value"),
             ],
@@ -201,8 +202,8 @@ mod tests {
     fn the_first_start_node_is_the_root() {
         let graph = Graph {
             nodes: vec![
-                node("first", NodeKind::Trigger),
-                node("second", NodeKind::Trigger),
+                node("first", NodeKind::Start),
+                node("second", NodeKind::Start),
                 node("after-second", NodeKind::Request),
             ],
             edges: vec![edge("second", "after-second")],

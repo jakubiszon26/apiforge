@@ -44,7 +44,7 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
                 .map(|field| (VALUE_INPUT.to_owned(), vec![field.clone()])),
             _ => whole(VALUE_INPUT),
         },
-        NodeKind::Trigger | NodeKind::Component => None,
+        NodeKind::Start | NodeKind::Component => None,
     }
 }
 
@@ -67,11 +67,8 @@ pub fn add_node(
     source: Option<OutputRef<'_>>,
 ) -> Result<AddedNode, EditError> {
     let kind = block.kind();
-    let start = graph
-        .nodes
-        .iter()
-        .find(|node| node.kind == NodeKind::Trigger);
-    if kind == NodeKind::Trigger && start.is_some() {
+    let start = graph.nodes.iter().find(|node| node.kind == NodeKind::Start);
+    if kind == NodeKind::Start && start.is_some() {
         return Err(EditError::SecondStart);
     }
     if let Some(source) = source
@@ -396,7 +393,7 @@ mod tests {
     }
 
     fn start_graph() -> (Graph, String) {
-        let start = node(NodeKind::Trigger);
+        let start = node(NodeKind::Start);
         let id = start.id.clone();
         (
             Graph {

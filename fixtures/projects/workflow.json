@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "id": "workflow-poc",
   "name": "Przepływ: ceny i koszyk",
   "scenarios": [
@@ -12,7 +12,7 @@
           {
             "id": "flow-start",
             "handle": "begin",
-            "kind": "trigger",
+            "kind": "start",
             "position": {
               "x": 40.0,
               "y": 100.0
@@ -91,8 +91,8 @@
                 "value": "/carts"
               },
               "body": {
-                "kind": "literal",
-                "value": {}
+                "kind": "object",
+                "fields": {}
               }
             },
             "config": {

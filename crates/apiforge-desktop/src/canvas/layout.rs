@@ -426,7 +426,7 @@ impl Card {
     /// deepest row containing it), or of the ordering input for [`ORDER_PORT`].
     pub fn input_anchor(&self, name: &str, path: &[String]) -> Option<Pos2> {
         if name == ORDER_PORT {
-            return (self.kind != NodeKind::Trigger).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
+            return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
         }
         let index = self
             .inputs

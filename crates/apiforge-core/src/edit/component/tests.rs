@@ -38,7 +38,7 @@ fn plain_request(id: &str) -> Node {
 
 fn project(graph: Graph, components: Vec<Component>) -> Project {
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "test-project".into(),
         name: "Test".into(),
         components,

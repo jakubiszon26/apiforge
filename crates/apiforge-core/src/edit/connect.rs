@@ -61,7 +61,7 @@ pub fn connect(
     let mut next = graph.clone();
     match control_branch(source_port) {
         Some(branch) if target_input == ORDER_PORT => {
-            if to.kind == NodeKind::Trigger {
+            if to.kind == NodeKind::Start {
                 return Err(EditError::StartHasPredecessor);
             }
             if (from.kind == NodeKind::If) != branch.is_some() {
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn control_connections_follow_start_and_branch_rules() {
         let project = empty_project();
-        let start = node(NodeKind::Trigger);
+        let start = node(NodeKind::Start);
         let branch = node(NodeKind::If);
         let request = node(NodeKind::Request);
         let graph = Graph {

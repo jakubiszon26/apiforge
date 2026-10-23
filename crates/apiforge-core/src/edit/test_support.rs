@@ -29,7 +29,7 @@ pub fn at(name: &str) -> Project {
 /// A project with one empty scenario, like the reference `createEmptyProject`.
 pub fn empty_project() -> Project {
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "empty".into(),
         name: "Empty".into(),
         scenarios: vec![Scenario {

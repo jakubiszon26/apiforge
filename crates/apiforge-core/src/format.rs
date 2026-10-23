@@ -1,4 +1,7 @@
-//! Version-one wire format. Unknown fields are rejected rather than silently lost.
+//! The document format, version 2 ([ADR 0004]). Unknown fields are rejected rather
+//! than silently lost.
+//!
+//! [ADR 0004]: ../../../docs/decisions/0004-document-format-v2.md
 use crate::model::*;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -6,6 +9,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 pub type Bindings = IndexMap<String, Binding>;
+
+/// The document format version this crate reads and writes.
+pub const FORMAT_VERSION: u32 = 2;
 
 // Missing optional metadata is allowed. Explicit null in typed metadata is rejected,
 // otherwise deserializing and exporting would silently erase it.
@@ -248,6 +254,16 @@ pub struct Node {
     pub note: Option<String>,
     pub kind: NodeKind,
     pub position: Position,
+    /// Placed by automatic layout, which may move it again; a block the user placed
+    /// keeps its position ([ADR 0006]).
+    ///
+    /// [ADR 0006]: ../../../docs/decisions/0006-layout-and-wire-routing.md
+    #[serde(
+        rename = "autoPlaced",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub auto_placed: bool,
     pub inputs: Bindings,
     pub config: NodeConfig,
 }
@@ -349,7 +365,7 @@ pub struct Workspace {
 /// Runtime operation types are separate from the permissive legacy config layout.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operation {
-    Trigger,
+    Start,
     Request { method: HttpMethod, timeout_ms: f64 },
     Value,
     Assert { predicate: Predicate },
@@ -373,7 +389,7 @@ impl Node {
     pub fn operation(&self) -> Option<Operation> {
         let c = &self.config;
         Some(match self.kind {
-            NodeKind::Trigger => Operation::Trigger,
+            NodeKind::Start => Operation::Start,
             NodeKind::Request => Operation::Request {
                 method: c.method.unwrap_or(HttpMethod::Get),
                 timeout_ms: c.timeout_ms.unwrap_or(10_000.0),
@@ -412,6 +428,10 @@ impl Default for ImportLimits {
 pub enum ImportError {
     #[error("Unsupported document version")]
     UnsupportedVersion,
+    #[error(
+        "This document uses format version 1, which is no longer supported. Convert it with the apiforge-convert-v1 tool."
+    )]
+    LegacyVersion,
     #[error("Document exceeds the {limit}-byte import limit")]
     TooLarge { limit: usize },
     // Never include raw input fragments (which may contain credentials) in diagnostics.
@@ -470,14 +490,16 @@ pub fn import_document(
     let value = serde_json::from_slice::<crate::strict_json::StrictValue>(bytes)
         .map_err(parse_error)?
         .0;
-    if value.get("version").and_then(Value::as_u64) != Some(1) {
-        return Err(ImportError::UnsupportedVersion);
+    match value.get("version").and_then(Value::as_u64) {
+        Some(version) if version == u64::from(FORMAT_VERSION) => {}
+        Some(1) => return Err(ImportError::LegacyVersion),
+        _ => return Err(ImportError::UnsupportedVersion),
     }
     let standalone = value.get("projects").is_none();
     let workspace = if standalone {
         let project: Project = serde_json::from_slice(bytes).map_err(parse_error)?;
         Workspace {
-            version: 1,
+            version: crate::format::FORMAT_VERSION,
             active_id: project.id.clone(),
             projects: vec![project],
         }

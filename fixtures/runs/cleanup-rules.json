@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "cleanup-rules",
       "name": "cleanup-rules",
       "scenarios": [
@@ -27,9 +27,12 @@
                     "value": "/items"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "n": 1
+                    "kind": "object",
+                    "fields": {
+                      "n": {
+                        "kind": "literal",
+                        "value": 1
+                      }
                     }
                   }
                 },
@@ -238,9 +241,12 @@
                     "value": "/broken"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "a": 1
+                    "kind": "object",
+                    "fields": {
+                      "a": {
+                        "kind": "literal",
+                        "value": 1
+                      }
                     }
                   }
                 },

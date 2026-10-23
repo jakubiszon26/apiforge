@@ -1,9 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "activeId": "shop",
   "projects": [
     {
-      "version": 1,
+      "version": 2,
       "id": "shop",
       "name": "Sklep demonstracyjny",
       "scenarios": [
@@ -617,7 +617,7 @@
       }
     },
     {
-      "version": 1,
+      "version": 2,
       "id": "tickets",
       "name": "System zgłoszeń",
       "scenarios": [
@@ -894,7 +894,7 @@
       }
     },
     {
-      "version": 1,
+      "version": 2,
       "id": "blocks-poc",
       "name": "Bloki operatorów · PoC",
       "scenarios": [
@@ -1095,7 +1095,7 @@
       }
     },
     {
-      "version": 1,
+      "version": 2,
       "id": "workflow-poc",
       "name": "Przepływ: ceny i koszyk",
       "scenarios": [
@@ -1108,7 +1108,7 @@
               {
                 "id": "flow-start",
                 "handle": "begin",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 40.0,
                   "y": 100.0
@@ -1187,8 +1187,8 @@
                     "value": "/carts"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {}
+                    "kind": "object",
+                    "fields": {}
                   }
                 },
                 "config": {

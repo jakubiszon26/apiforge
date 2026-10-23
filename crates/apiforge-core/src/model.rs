@@ -21,7 +21,7 @@ pub enum NodeKind {
     Component,
     /// An output of the component whose graph holds it.
     Export,
-    Trigger,
+    Start,
     If,
 }
 

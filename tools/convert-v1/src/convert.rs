@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 pub fn workspace(source: &v1::Workspace) -> current::Workspace {
     current::Workspace {
-        version: source.version,
+        version: current::FORMAT_VERSION,
         active_id: source.active_id.clone(),
         projects: source.projects.iter().map(project).collect(),
     }
@@ -26,7 +26,7 @@ pub fn workspace(source: &v1::Workspace) -> current::Workspace {
 
 pub fn project(source: &v1::Project) -> current::Project {
     current::Project {
-        version: source.version,
+        version: current::FORMAT_VERSION,
         id: source.id.clone(),
         name: source.name.clone(),
         scenarios: source.scenarios.iter().map(scenario).collect(),
@@ -117,9 +117,10 @@ fn component(source: &v1::Component, handle: String) -> current::Component {
             export.config.output_type =
                 (output.value_type != ValueType::Any).then_some(output.value_type);
             export.config.contract_id = output.contract_id.clone();
-            export
-                .inputs
-                .insert(VALUE_INPUT.to_owned(), binding(&output.binding));
+            export.inputs.insert(
+                VALUE_INPUT.to_owned(),
+                binding(&output.binding).normalized(),
+            );
             export
         })
         .collect();
@@ -200,7 +201,12 @@ fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
             x: source.position.x,
             y: source.position.y,
         },
-        inputs,
+        auto_placed: false,
+        // Version two writes every binding in canonical form.
+        inputs: inputs
+            .into_iter()
+            .map(|(name, binding)| (name, binding.normalized()))
+            .collect(),
         config,
     }
 }
@@ -600,7 +606,7 @@ fn kind(source: v1::NodeKind) -> NodeKind {
         v1::NodeKind::Assert => NodeKind::Assert,
         v1::NodeKind::Condition => NodeKind::Condition,
         v1::NodeKind::Component => NodeKind::Component,
-        v1::NodeKind::Trigger => NodeKind::Trigger,
+        v1::NodeKind::Trigger => NodeKind::Start,
         v1::NodeKind::If => NodeKind::If,
     }
 }

@@ -32,7 +32,7 @@ pub const BODY_INPUT: &str = "body";
 
 impl NodeKind {
     pub const ALL: [Self; 8] = [
-        Self::Trigger,
+        Self::Start,
         Self::If,
         Self::Request,
         Self::Value,
@@ -45,7 +45,7 @@ impl NodeKind {
     /// Default node name and library title.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Trigger => "Start",
+            Self::Start => "Start",
             Self::If => "IF / ELSE",
             Self::Request => "HTTP request",
             Self::Value => "Value",
@@ -58,7 +58,7 @@ impl NodeKind {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Trigger => "Runs when you start the test",
+            Self::Start => "Runs when you start the test",
             Self::If => "Choose a branch: yes or no",
             Self::Request => "Any REST API endpoint",
             Self::Value => "Data, a selected field or a calculation",
@@ -72,7 +72,7 @@ impl NodeKind {
     /// Handle of a new block before de-duplication, e.g. `request` or `check_2`.
     pub fn handle_base(self) -> &'static str {
         match self {
-            Self::Trigger => "begin",
+            Self::Start => "begin",
             Self::If => "branch",
             Self::Request => "request",
             Self::Value => "value",
@@ -198,7 +198,7 @@ pub fn condition_predicates(node: &Node) -> Vec<Predicate> {
 /// The inputs a node declares.
 pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
-        NodeKind::Trigger => vec![],
+        NodeKind::Start => vec![],
         NodeKind::Export => {
             let mut port = Port::new(
                 VALUE_INPUT,
@@ -269,7 +269,7 @@ pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
 
 pub fn output_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
-        NodeKind::Trigger | NodeKind::Export => vec![],
+        NodeKind::Start | NodeKind::Export => vec![],
         NodeKind::Component => component_definition(project, node)
             .map(component_outputs)
             .unwrap_or_default(),
@@ -593,6 +593,7 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
         note: None,
         kind,
         position,
+        auto_placed: false,
         inputs: IndexMap::new(),
         config: NodeConfig::default(),
     };
@@ -623,7 +624,7 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
             node.inputs.insert(actual, literal(Value::Null));
             node.inputs.insert(expected, literal(Value::Null));
         }
-        NodeKind::Trigger | NodeKind::Component | NodeKind::Export => {}
+        NodeKind::Start | NodeKind::Component | NodeKind::Export => {}
     }
     if let Some(component) = component {
         node.handle = component.handle.clone();
@@ -635,7 +636,7 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
         for port in &component.inputs {
             if let Some(default) = port.default() {
                 node.inputs
-                    .insert(port.name.clone(), literal(default.clone()));
+                    .insert(port.name.clone(), Binding::from_json(default.clone()));
             }
         }
     }

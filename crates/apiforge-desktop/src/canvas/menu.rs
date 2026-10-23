@@ -32,7 +32,7 @@ pub struct ActionMenu {
 pub fn default_source(graph: &Graph, project: &Project, node_id: &str) -> Option<(String, String)> {
     let node = graph.nodes.iter().find(|node| node.id == node_id)?;
     let port = match node.kind {
-        NodeKind::Trigger => ORDER_PORT.to_owned(),
+        NodeKind::Start => ORDER_PORT.to_owned(),
         NodeKind::If => TRUE_PORT.to_owned(),
         _ => output_ports(node, project)
             .first()

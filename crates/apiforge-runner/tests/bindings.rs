@@ -19,7 +19,7 @@ fn project(nodes: Value) -> Project {
     })];
     all.extend(nodes.as_array().cloned().unwrap_or_default());
     serde_json::from_value(json!({
-        "version": 1, "id": "p", "name": "p", "components": [], "contracts": [],
+        "version": 2, "id": "p", "name": "p", "components": [], "contracts": [],
         "environment": {"baseUrl": "https://api.example.test", "variables": {"region": "eu"}, "secretNames": []},
         "scenarios": [{
             "id": "main", "name": "main", "description": "", "parameters": {"count": 2},

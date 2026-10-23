@@ -560,7 +560,7 @@ mod tests {
         let selected = graph
             .nodes
             .iter()
-            .filter(|node| node.kind != NodeKind::Trigger)
+            .filter(|node| node.kind != NodeKind::Start)
             .take(1)
             .map(|node| node.id.clone())
             .collect();

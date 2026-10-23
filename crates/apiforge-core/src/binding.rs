@@ -56,6 +56,90 @@ impl Binding {
         Self::Environment { name: name.into() }
     }
 
+    /// A JSON value as a binding in canonical form: scalars are literals, objects
+    /// and arrays are object and array bindings ([ADR 0004]).
+    ///
+    /// [ADR 0004]: ../../../docs/decisions/0004-document-format-v2.md
+    pub fn from_json(value: Value) -> Self {
+        match value {
+            Value::Object(fields) => Self::Object {
+                fields: fields
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from_json(value)))
+                    .collect(),
+            },
+            Value::Array(items) => Self::Array {
+                items: items.into_iter().map(Self::from_json).collect(),
+            },
+            scalar => Self::literal(scalar),
+        }
+    }
+
+    /// The binding in canonical form: structured literals become object and array
+    /// bindings, template text parts are merged and non-empty, a template without
+    /// values is a literal, and valid field paths are written canonically.
+    pub fn normalized(&self) -> Self {
+        let path = |text: &str| {
+            crate::path::JsonPath::parse(text)
+                .map_or_else(|_| text.to_owned(), |path| path.to_string())
+        };
+        match self {
+            Self::Literal { value } => Self::from_json(value.clone()),
+            Self::Reference {
+                node_id,
+                port,
+                path: field,
+            } => Self::reference(node_id, port, path(field)),
+            Self::Parameter { name, path: field } => Self::parameter_field(name, path(field)),
+            Self::Environment { .. } => self.clone(),
+            Self::Expression { operator, inputs } => Self::Expression {
+                operator: *operator,
+                inputs: inputs
+                    .iter()
+                    .map(|(name, child)| (name.clone(), child.normalized()))
+                    .collect(),
+            },
+            Self::Object { fields } => Self::Object {
+                fields: fields
+                    .iter()
+                    .map(|(name, child)| (name.clone(), child.normalized()))
+                    .collect(),
+            },
+            Self::Array { items } => Self::Array {
+                items: items.iter().map(Self::normalized).collect(),
+            },
+            Self::Template { parts } => {
+                let mut normalized: Vec<TemplatePart> = Vec::with_capacity(parts.len());
+                for part in parts {
+                    match part {
+                        TemplatePart::Text { text } if text.is_empty() => {}
+                        TemplatePart::Text { text } => match normalized.last_mut() {
+                            Some(TemplatePart::Text { text: last }) => last.push_str(text),
+                            _ => normalized.push(part.clone()),
+                        },
+                        TemplatePart::Value { binding } => normalized.push(TemplatePart::Value {
+                            binding: binding.normalized(),
+                        }),
+                    }
+                }
+                if normalized
+                    .iter()
+                    .all(|part| matches!(part, TemplatePart::Text { .. }))
+                {
+                    let text = normalized
+                        .into_iter()
+                        .map(|part| match part {
+                            TemplatePart::Text { text } => text,
+                            TemplatePart::Value { .. } => String::new(),
+                        })
+                        .collect();
+                    return Self::literal(Value::String(text));
+                }
+                Self::Template { parts: normalized }
+            }
+        }
+    }
+
     /// An expression whose operand slots hold the operator's catalogue defaults.
     pub fn expression(operator: Operator) -> Self {
         let inputs = operator

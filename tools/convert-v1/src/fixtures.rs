@@ -133,6 +133,10 @@ fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), Strin
                     next.insert(key, value);
                 }
             }
+            next.insert(
+                "kind".into(),
+                serde_json::to_value(node.kind).map_err(|error| error.to_string())?,
+            );
             if node.kind == NodeKind::Value {
                 // A Value's only input is its expression, whose result it outputs.
                 next.insert("kind".into(), Value::String("value".into()));

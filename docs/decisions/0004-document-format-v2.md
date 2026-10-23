@@ -43,8 +43,8 @@ Node {
   kind: NodeKind
   inputs: IndexMap<String, Binding>
   config: NodeConfig
-  position: Option<Position> // None: placed by auto-layout
-  pinned: bool               // placed by the user; omitted when false
+  position: Position
+  autoPlaced: bool           // placed by auto-layout, which may move it; omitted when false
 }
 ```
 
@@ -142,17 +142,23 @@ order. The component builder creates Export nodes instead of output rows.
 
 Layout is the only part of the document without meaning for a run:
 
-- `position: None` marks a node for automatic placement; the editor places it
-  when the board is opened or the graph changes.
-- `pinned: true` marks a node the user placed. Automatic placement treats pinned
-  nodes as fixed obstacles and moves only unpinned ones. *Tidy up* moves both and
-  clears the pin.
+- Every node has a position, so a document can always be drawn. Blocks created
+  without one (from code or the CLI) are placed by auto-layout during
+  reconciliation and marked `autoPlaced: true`.
+- `autoPlaced` blocks may be moved again by automatic placement; every other block
+  was placed by the user and is a fixed obstacle. Moving a block by hand clears the
+  flag. *Tidy up* moves both kinds and marks them `autoPlaced`.
 - `Graph::proxies: Vec<Proxy>`, with `Proxy { id, source, position }` and
   `source` being `variable { nodeId }`, `environment { name }` or
-  `parameter { name }`, holds variable proxies ([plan](../plans/code-and-canvas.md#variable-proxies)).
+  `parameter { name }`, will hold variable proxies. It is an additive field added
+  with them in milestone M3 ([plan](../plans/code-and-canvas.md#variable-proxies)).
+
+(Revised during M1: an optional position would have spread "no position yet"
+handling through every view, while a required position plus a flag keeps the
+document always drawable.)
 
 Scenario code never contains layout. Equivalence is defined on the document
-without `position`, `pinned` and `proxies`.
+without `position`, `autoPlaced` and `proxies`.
 
 ### Run reports
 

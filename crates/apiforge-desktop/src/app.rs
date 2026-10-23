@@ -1610,7 +1610,7 @@ pub fn default_workspace() -> Workspace {
         apiforge_core::demos::tickets_project(),
     ];
     Workspace {
-        version: 1,
+        version: apiforge_core::format::FORMAT_VERSION,
         active_id: projects[0].id.clone(),
         projects,
     }
@@ -1870,7 +1870,7 @@ mod tests {
         );
         project.scenarios[0].cleanup.nodes.push(cleanup);
         let workspace = Workspace {
-            version: 1,
+            version: apiforge_core::format::FORMAT_VERSION,
             active_id: project.id.clone(),
             projects: vec![project],
         };

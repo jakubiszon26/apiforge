@@ -46,7 +46,7 @@ pub fn empty_scenario(name: impl Into<String>) -> Scenario {
         name: name.into(),
         description: String::new(),
         graph: Graph {
-            nodes: vec![create_node(NodeKind::Trigger, at(80.0, 60.0), None)],
+            nodes: vec![create_node(NodeKind::Start, at(80.0, 60.0), None)],
             edges: vec![],
         },
         cleanup: empty_graph(),
@@ -58,7 +58,7 @@ pub fn empty_scenario(name: impl Into<String>) -> Scenario {
 /// A new project with one empty scenario and no environment.
 pub fn empty_project() -> Project {
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: new_id("project"),
         name: DEFAULT_PROJECT_NAME.into(),
         scenarios: vec![empty_scenario(DEFAULT_SCENARIO_NAME)],
@@ -295,7 +295,7 @@ pub fn shop_project() -> Project {
     ];
 
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "shop".into(),
         name: "Demo shop".into(),
         contracts: vec![
@@ -415,7 +415,7 @@ pub fn tickets_project() -> Project {
     ];
 
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "tickets".into(),
         name: "Ticket system".into(),
         environment: environment(SUPPORT_BASE_URL),
@@ -502,7 +502,7 @@ pub fn blocks_project() -> Project {
     );
 
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "blocks-poc".into(),
         name: "Operator blocks · PoC".into(),
         components: vec![],
@@ -527,7 +527,7 @@ pub fn blocks_project() -> Project {
 pub fn workflow_project() -> Project {
     let start = Node {
         id: "flow-start".into(),
-        ..create_node(NodeKind::Trigger, at(40.0, 100.0), None)
+        ..create_node(NodeKind::Start, at(40.0, 100.0), None)
     };
     let prices = request(
         "flow-prices",
@@ -643,7 +643,7 @@ pub fn workflow_project() -> Project {
     ]);
 
     Project {
-        version: 1,
+        version: crate::format::FORMAT_VERSION,
         id: "workflow-poc".into(),
         name: "Workflow: prices and cart".into(),
         components: vec![],
@@ -709,8 +709,9 @@ fn environment(base_url: &str) -> Environment {
     }
 }
 
+/// A constant in canonical form: structured values become object and array bindings.
 fn literal(value: Value) -> Binding {
-    Binding::literal(value)
+    Binding::from_json(value)
 }
 
 fn reference(node_id: &str, port: &str, path: &str) -> Binding {
@@ -777,6 +778,7 @@ fn node(
         note: None,
         kind,
         position,
+        auto_placed: false,
         inputs: bindings(inputs),
         config,
     }
@@ -1083,7 +1085,7 @@ mod tests {
         assert_eq!(scenario.name, "Checkout");
         assert!(scenario.id.starts_with("scenario-"));
         let kinds: Vec<_> = scenario.graph.nodes.iter().map(|node| node.kind).collect();
-        assert_eq!(kinds, [NodeKind::Trigger]);
+        assert_eq!(kinds, [NodeKind::Start]);
         assert!(scenario.graph.edges.is_empty() && scenario.cleanup.nodes.is_empty());
 
         let project = empty_project();

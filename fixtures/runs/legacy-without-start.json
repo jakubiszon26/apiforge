@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "legacy",
       "name": "legacy",
       "scenarios": [

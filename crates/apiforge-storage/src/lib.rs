@@ -469,7 +469,7 @@ mod tests {
         store.save(&original).unwrap();
         let backup = fs::read(store.backup_path()).unwrap();
         let mut newer = original.clone();
-        newer.version = 2;
+        newer.version = apiforge_core::format::FORMAT_VERSION + 1;
         let main = serde_json::to_vec(&newer).unwrap();
         fs::write(store.path(), &main).unwrap();
         assert!(matches!(

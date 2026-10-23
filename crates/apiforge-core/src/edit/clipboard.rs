@@ -52,12 +52,7 @@ pub fn paste_selection(
     offset: &Position,
     external_ids: &[&str],
 ) -> Result<Pasted, EditError> {
-    let has_start = |graph: &Graph| {
-        graph
-            .nodes
-            .iter()
-            .any(|node| node.kind == NodeKind::Trigger)
-    };
+    let has_start = |graph: &Graph| graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
     if has_start(fragment) && has_start(graph) {
         return Err(EditError::PasteSecondStart);
     }
@@ -332,7 +327,7 @@ mod tests {
 
     #[test]
     fn pasting_start_cannot_create_a_second_trigger() {
-        let start = node(NodeKind::Trigger);
+        let start = node(NodeKind::Start);
         let graph = Graph {
             nodes: vec![start.clone()],
             edges: vec![],

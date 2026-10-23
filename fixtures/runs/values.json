@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "values",
       "name": "values",
       "scenarios": [
@@ -484,8 +484,8 @@
                     "value": "/x"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {}
+                    "kind": "object",
+                    "fields": {}
                   }
                 },
                 "config": {
@@ -844,12 +844,24 @@
                     "path": "items"
                   },
                   "expected": {
-                    "kind": "literal",
-                    "value": [
+                    "kind": "array",
+                    "items": [
                       {
-                        "price": 0,
-                        "flag": false,
-                        "optional": null
+                        "kind": "object",
+                        "fields": {
+                          "price": {
+                            "kind": "literal",
+                            "value": 0
+                          },
+                          "flag": {
+                            "kind": "literal",
+                            "value": false
+                          },
+                          "optional": {
+                            "kind": "literal",
+                            "value": null
+                          }
+                        }
                       }
                     ]
                   }

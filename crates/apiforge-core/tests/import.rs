@@ -91,11 +91,18 @@ fn preserves_named_argument_order_and_json_unicode_values() {
     assert_eq!(keys, ["z", "a", "0"]);
 }
 #[test]
+fn version_one_documents_are_rejected_with_a_hint() {
+    let mut value = workflow();
+    value["version"] = json!(1);
+    let error = parse(&value).err().expect("version 1").to_string();
+    assert!(error.contains("version 1"), "{error}");
+}
+#[test]
 fn rejects_future_versions_unknown_fields_and_null_typed_metadata() {
     for field in ["version", "futureField", "method"] {
         let mut value = workflow();
         match field {
-            "version" => value["version"] = json!(2),
+            "version" => value["version"] = json!(3),
             "futureField" => value["futureField"] = json!(true),
             _ => value["scenarios"][0]["graph"]["nodes"][1]["config"]["method"] = Value::Null,
         }
@@ -222,7 +229,7 @@ fn validates_component_identity_recursion_and_depth_even_when_subgraphs_are_cach
 }
 #[test]
 fn validates_workspace_envelope_and_reserved_keys() {
-    let mut workspace = json!({"version":1,"activeId":"missing","projects":[workflow()]});
+    let mut workspace = json!({"version":2,"activeId":"missing","projects":[workflow()]});
     assert!(parse(&workspace).is_err());
     workspace["activeId"] = json!("workflow-poc");
     assert!(parse(&workspace).is_ok());

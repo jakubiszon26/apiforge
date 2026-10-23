@@ -300,8 +300,14 @@ impl Editor {
         if has_cycle(&next) {
             return Err("This change creates a dependency cycle and was not applied.".into());
         }
-        // New blocks never take a handle of the sibling graph or of another block.
-        let next = dedupe_handles(&next, &self.sibling_handles());
+        // New blocks never take a handle of the sibling graph or of another block,
+        // and every binding is stored in canonical form (ADR 0004).
+        let mut next = dedupe_handles(&next, &self.sibling_handles());
+        for node in &mut next.nodes {
+            for binding in node.inputs.values_mut() {
+                *binding = binding.normalized();
+            }
+        }
         let current = self.graph();
         if next == *current {
             return Ok(());

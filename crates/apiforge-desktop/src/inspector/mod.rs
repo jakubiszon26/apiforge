@@ -155,7 +155,7 @@ impl Inspector {
         handle_field(ui, id.with("handle"), context, node);
 
         match node.kind {
-            NodeKind::Trigger => widgets::hint(
+            NodeKind::Start => widgets::hint(
                 ui,
                 "A manual trigger. Running the test starts this path. Connect Next to the first step.",
             ),
@@ -269,7 +269,7 @@ impl Inspector {
         self.arguments(ui, id, context, node);
         // Keep the values being configured near the top; ordering remains
         // available below them as a keyboard alternative to canvas wires.
-        if node.kind != NodeKind::Trigger || !context.board.nodes.is_empty() {
+        if node.kind != NodeKind::Start || !context.board.nodes.is_empty() {
             flow_connections(ui, context, actions);
         }
         if node.kind == NodeKind::Condition {
@@ -485,7 +485,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                         .width(ui.available_width())
                         .show_ui(ui, |ui| {
                             for target in board.nodes.iter().filter(|target| {
-                                target.id != node.id && target.kind != NodeKind::Trigger
+                                target.id != node.id && target.kind != NodeKind::Start
                             }) {
                                 if ui.selectable_label(false, target.display_name()).clicked() {
                                     match edit::connect(

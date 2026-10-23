@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "policy-stop",
       "name": "policy-stop",
       "scenarios": [
@@ -17,7 +17,7 @@
                 "id": "start",
                 "handle": "begin",
                 "label": "start",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -39,8 +39,8 @@
                     "value": "/items"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {}
+                    "kind": "object",
+                    "fields": {}
                   }
                 },
                 "config": {
@@ -230,7 +230,7 @@
         "nodeId": "start",
         "handle": "begin",
         "label": "start",
-        "kind": "trigger",
+        "kind": "start",
         "status": "passed",
         "phase": "main",
         "inputs": {},

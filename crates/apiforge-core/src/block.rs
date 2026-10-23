@@ -45,7 +45,7 @@ impl Block {
 
     pub fn kind(self) -> NodeKind {
         match self {
-            Self::Start => NodeKind::Trigger,
+            Self::Start => NodeKind::Start,
             Self::Branch => NodeKind::If,
             Self::Request => NodeKind::Request,
             Self::Value | Self::Object | Self::Variable => NodeKind::Value,
@@ -101,7 +101,7 @@ impl Block {
     /// The block a node was created as, as far as its configuration shows.
     pub fn of(node: &Node) -> Self {
         match node.kind {
-            NodeKind::Trigger => Self::Start,
+            NodeKind::Start => Self::Start,
             NodeKind::If => Self::Branch,
             NodeKind::Request => Self::Request,
             NodeKind::Value if node.is_variable() => Self::Variable,

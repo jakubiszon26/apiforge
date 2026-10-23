@@ -278,6 +278,7 @@ impl Redactor {
             label: node.label.as_deref().map(|text| self.redact_str(text)),
             note: node.note.as_deref().map(|text| self.redact_str(text)),
             position: node.position.clone(),
+            auto_placed: node.auto_placed,
             inputs: self.redact_bindings(&node.inputs),
             config: self.redact_config(&node.config),
         }

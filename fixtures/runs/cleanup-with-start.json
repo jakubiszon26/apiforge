@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "cleanup-with-start",
       "name": "cleanup-with-start",
       "scenarios": [
@@ -27,9 +27,12 @@
                     "value": "/items"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "n": 1
+                    "kind": "object",
+                    "fields": {
+                      "n": {
+                        "kind": "literal",
+                        "value": 1
+                      }
                     }
                   }
                 },
@@ -154,7 +157,7 @@
                 "id": "cleanup-start",
                 "handle": "begin",
                 "label": "cleanup-start",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -250,9 +253,12 @@
                     "value": "/broken"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {
-                      "a": 1
+                    "kind": "object",
+                    "fields": {
+                      "a": {
+                        "kind": "literal",
+                        "value": 1
+                      }
                     }
                   }
                 },
@@ -505,7 +511,7 @@
         "nodeId": "cleanup-start",
         "handle": "begin",
         "label": "cleanup-start",
-        "kind": "trigger",
+        "kind": "start",
         "status": "passed",
         "phase": "cleanup",
         "inputs": {},

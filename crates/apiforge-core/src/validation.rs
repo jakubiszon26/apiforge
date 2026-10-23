@@ -91,7 +91,7 @@ fn ports(values: &[Port], path: &str) -> Result {
 
 pub(crate) fn workspace(workspace: &Workspace) -> Result {
     require(
-        workspace.version == 1,
+        workspace.version == FORMAT_VERSION,
         "version",
         "Unsupported workspace version",
     )?;
@@ -118,7 +118,11 @@ pub(crate) fn workspace(workspace: &Workspace) -> Result {
     Ok(())
 }
 pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
-    require(project.version == 1, path, "Unsupported project version")?;
+    require(
+        project.version == FORMAT_VERSION,
+        path,
+        "Unsupported project version",
+    )?;
     text(&project.name, path)?;
     require(
         !project.scenarios.is_empty() && project.scenarios.len() <= 100,
@@ -281,7 +285,7 @@ fn component_dag(
 }
 fn output_exists(node: &Node, port: &str, project: &Project) -> bool {
     match node.kind {
-        NodeKind::Trigger => false,
+        NodeKind::Start => false,
         NodeKind::Request => ["body", "status", "headers", "duration"].contains(&port),
         NodeKind::If | NodeKind::Assert | NodeKind::Condition => {
             ["value", "passed"].contains(&port)
@@ -312,8 +316,19 @@ fn binding(
         path,
         "Binding exceeds nesting or item limit",
     )?;
+    // Canonical form (ADR 0004): every value has exactly one representation.
+    let canonical_path = |field: &str| {
+        crate::path::JsonPath::parse(field).is_ok_and(|parsed| parsed.to_string() == field)
+    };
     match value {
-        Binding::Literal { value } => json(value, 0, path),
+        Binding::Literal { value } => {
+            require(
+                !value.is_object() && !value.is_array(),
+                path,
+                "Structured values must be object or array bindings",
+            )?;
+            json(value, 0, path)
+        }
         Binding::Expression { operator, inputs } => {
             require(
                 inputs
@@ -336,6 +351,11 @@ fn binding(
             id(port, path)?;
             text(field, path)?;
             require(
+                canonical_path(field),
+                path,
+                "Invalid or non-canonical field path",
+            )?;
+            require(
                 nodes
                     .get(node_id.as_str())
                     .is_some_and(|source| output_exists(source, port, project)),
@@ -346,6 +366,11 @@ fn binding(
         Binding::Parameter { name, path: field } => {
             id(name, path)?;
             text(field, path)?;
+            require(
+                canonical_path(field),
+                path,
+                "Invalid or non-canonical field path",
+            )?;
             require(
                 parameters.contains(name.as_str()),
                 path,
@@ -375,6 +400,22 @@ fn binding(
         }
         Binding::Template { parts } => {
             require(parts.len() <= 1000, path, "Too many template parts")?;
+            require(
+                parts
+                    .iter()
+                    .any(|part| matches!(part, TemplatePart::Value { .. })),
+                path,
+                "A template without values must be a literal",
+            )?;
+            require(
+                parts.windows(2).all(|pair| {
+                    !matches!(pair, [TemplatePart::Text { .. }, TemplatePart::Text { .. }])
+                }) && parts
+                    .iter()
+                    .all(|part| !matches!(part, TemplatePart::Text { text } if text.is_empty())),
+                path,
+                "Template text parts must be merged and non-empty",
+            )?;
             for part in parts {
                 match part {
                     TemplatePart::Text { text: value } => text(value, path)?,
@@ -426,7 +467,7 @@ fn graph(
         graph
             .nodes
             .iter()
-            .filter(|node| node.kind == NodeKind::Trigger)
+            .filter(|node| node.kind == NodeKind::Start)
             .count()
             <= 1,
         path,
@@ -457,7 +498,7 @@ fn graph(
             "Non-finite position",
         )?;
         require(node.inputs.len() <= 100, &node_path, "Too many inputs")?;
-        if node.kind == NodeKind::Trigger {
+        if node.kind == NodeKind::Start {
             require(
                 node.inputs.is_empty(),
                 &node_path,
@@ -495,7 +536,7 @@ fn graph(
         require(
             nodes
                 .get(edge.target.as_str())
-                .is_none_or(|node| node.kind != NodeKind::Trigger),
+                .is_none_or(|node| node.kind != NodeKind::Start),
             &edge_path,
             "Start cannot have incoming edges",
         )?;

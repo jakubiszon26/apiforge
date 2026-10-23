@@ -3,7 +3,7 @@
   "randomSeed": 42,
   "request": {
     "project": {
-      "version": 1,
+      "version": 2,
       "id": "components",
       "name": "components",
       "scenarios": [
@@ -373,8 +373,8 @@
                     "value": "/items"
                   },
                   "body": {
-                    "kind": "literal",
-                    "value": {}
+                    "kind": "object",
+                    "fields": {}
                   }
                 },
                 "config": {
@@ -472,7 +472,7 @@
                 "id": "inner-start",
                 "handle": "begin",
                 "label": "inner-start",
-                "kind": "trigger",
+                "kind": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -835,7 +835,7 @@
             "nodeId": "inner-start",
             "handle": "begin",
             "label": "inner-start",
-            "kind": "trigger",
+            "kind": "start",
             "status": "passed",
             "phase": "main",
             "inputs": {},

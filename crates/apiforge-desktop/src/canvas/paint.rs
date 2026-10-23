@@ -421,10 +421,7 @@ pub const SHORTCUT_HINT_TEXT: &str =
     "Select: drag or Ctrl+click  ·  Pan: right-drag  ·  Zoom: Ctrl+scroll";
 
 pub fn mode_line_text(graph: &Graph) -> &'static str {
-    let has_start = graph
-        .nodes
-        .iter()
-        .any(|node| node.kind == NodeKind::Trigger);
+    let has_start = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
     if has_start {
         "Execution follows Start · Inactive branches are skipped."
     } else {
@@ -447,10 +444,7 @@ pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays
         Stroke::new(1.0, theme::BORDER),
     );
 
-    let starts = graph
-        .nodes
-        .iter()
-        .any(|node| node.kind == NodeKind::Trigger);
+    let starts = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
     let caption = format!(
         "{} steps  ·  {}",
         graph.nodes.len(),
