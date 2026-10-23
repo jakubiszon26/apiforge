@@ -1,5 +1,4 @@
 /target/
 
-# Local editor, tooling and QA artefacts
 .DS_Store
 .env
