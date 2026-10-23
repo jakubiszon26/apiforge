@@ -62,7 +62,7 @@ generated geometry and reusable by any future renderer.
 
 ## Format version 2
 
-Changes to the version-one document, decided in ADR 0004:
+A summary of [ADR 0004](../decisions/0004-document-format-v2.md):
 
 - **Handles.** Every node has a `handle`: an identifier `[A-Za-z_][A-Za-z0-9_]*`,
   unique within its graph (graph and cleanup share one namespace, so cleanup can
@@ -79,15 +79,17 @@ Changes to the version-one document, decided in ADR 0004:
   `template { parts: [text | binding] }`. Templates embed bindings directly, so the
   `templateInputs` alias mechanism is removed. Dependencies and wires are still
   derived from reference leaves, now including template parts.
-- **Export.** `kind: export`, `config.name`, `config.type`, optional contract, and
-  `inputs.value`. Allowed only in component graphs; names are unique. A
+- **Export.** `kind: export`, `config.type`, optional contract, and `inputs.value`;
+  its handle is the output name. Allowed only in component graphs. A
   component's outputs are derived from its Export blocks, so `Component.outputs`
   is removed. Inputs remain declared on the component.
-- **Notes.** `node.note: Option<String>` carries comments from code; the graph has
-  its own `note` for leading comments.
-- **Layout.** Semantics and layout are separated: `graph.layout` holds
-  `nodes: { id: { x, y, pinned } }` and `proxies: [{ id, variable, x, y }]`.
-  A node without a layout entry is placed by auto-layout on load.
+- **Notes.** `node.note: Option<String>` carries comments from code.
+- **Layout.** `node.position` is optional (absent: placed by auto-layout) and
+  `node.pinned` marks blocks the user placed. Proxies live in `graph.proxies`.
+  Layout never appears in code.
+- **Requests.** URL, headers and query become bindings (templates and objects),
+  replacing `templateInputs`, `inputPorts` and `/:name` path parameters. Values
+  interpolated into a URL are percent-encoded.
 
 The run report, inspector and library adapt to the new kinds. Operator entries in
 the library keep their names and simply create Value blocks.
@@ -100,14 +102,16 @@ TypeScript.
 
 ## The language
 
-A sketch of what ADR 0005 specifies in full:
+[ADR 0005](../decisions/0005-scenario-language.md) holds the grammar. An example:
 
 ```
 // Places an order for the first product.
 scenario "Checkout" {
-  param quantity: number = 2
+  param quantity = 2
 
-  products = GET "{{env.baseUrl}}/products" {
+  begin = start
+  @after(begin)
+  products = GET "/products" {
     headers { Accept: "application/json" }
     query { limit: 10 }
     timeout 5s
@@ -119,12 +123,9 @@ scenario "Checkout" {
 
   cart = AddToCart(product: first, qty: param.quantity)
 
-  order = POST "/orders" after status_ok {
-    body {
-      productId: first.id,
-      cartId: cart.id,
-      total: total
-    }
+  @after(status_ok)
+  order = POST "/orders" {
+    body { productId: first.id, cartId: cart.id, total: total }
   }
 
   created = if order.status == 201 {
@@ -137,33 +138,12 @@ scenario "Checkout" {
     removed = DELETE "/orders/{{order.body.id}}"
   }
 }
-
-component AddToCart(product: object, qty: number = 1) {
-  response = POST "/cart" {
-    body { id: product.id, qty: qty }
-  }
-  export id: string = response.body.cartId
-}
 ```
 
-Rules that make code and diagram equivalent:
-
-- Every statement is `handle = <form>`. The form determines the block kind:
-  an HTTP method is a request, `assert` / `condition all|any { … }` / `if` are
-  checks and branches, a component name with arguments is an instance, `export`
-  declares an output, and anything else is a Value. `var` marks a variable.
-- Anonymous statements are accepted while typing and receive a generated handle
-  (`assert_1`) that the formatter writes back.
-- `after a, b` writes ordering edges. Statements inside `if` blocks receive the
-  branch edge from the `if`. Start is implicit: top-level statements are
-  connected to it. Blocks not reachable from Start appear in a `detached { }`
-  section, so drafts on the board are never lost.
-- Strings with `{{expr}}` are templates; `"""…"""` is a multi-line raw template.
-  A `body { … }` is an object body; `body """…"""` is a text body.
-- `env.name`, `param.name` and `handle.port.path` are references. A bare
-  `handle.path` reads the block's main output (`body` for requests).
-- `//` comments directly above a statement become its note; others attach to the
-  enclosing block. The formatter states this in the language reference.
+The form of each `handle = …` statement decides the block kind. Ordering edges
+use `@after(…)` or `if` blocks, and Start is an ordinary statement, so everything
+the board can express has a text form. `//` comments above a statement become the
+block's note.
 
 The equivalence contract, enforced by property tests:
 
@@ -267,7 +247,7 @@ Settings: wire style (orthogonal / spline), bridges (on / off).
 
 - The *Variables* panel lists variables (Value blocks marked `var`), parameters and
   environment variables. Dragging one onto the board creates a proxy chip, which is
-  stored in `graph.layout.proxies`.
+  stored in `graph.proxies`.
 - A consumer's wire comes from the nearest proxy of that variable, or from the
   block itself when it is nearer. Proxies are layout only: the binding is unchanged,
   and code shows the plain reference.
@@ -285,7 +265,7 @@ changes are verified with screenshots. Nothing is pushed.
 
 | # | Branch | Content | Depends on |
 | --- | --- | --- | --- |
-| M0 | `docs/code-canvas-plan` | This plan; ADR 0004 (format v2), 0005 (language), 0006 (layout and routing) | — |
+| M0 | `docs/code-canvas-plan` | This plan; [ADR 0004](../decisions/0004-document-format-v2.md), [0005](../decisions/0005-scenario-language.md), [0006](../decisions/0006-layout-and-wire-routing.md) | — |
 | M1 | `feat/format-v2` | Model v2, validation, runner, storage, desktop adapted to Value/Export/templates/layout; v1 rejection; converter and converted fixtures; Export editing on the component board; the component builder creates Export blocks | M0 |
 | M2 | `feat/layout-routing` | `apiforge-layout`; auto-placement of unpositioned blocks, pinning, *Tidy up*; routed wires, bridges, spline mode, settings; benchmarks | M1 |
 | M3 | `feat/variable-proxies` | Variable mark in the inspector, Variables panel, proxies, nearest-proxy wiring, navigation | M1, M2 |
