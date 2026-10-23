@@ -25,6 +25,8 @@ use thiserror::Error;
 pub struct Scope<'a> {
     pub nodes: &'a [Node],
     pub project: &'a Project,
+    /// The request whose named arguments are available as `input.name`.
+    pub request: Option<&'a Node>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -116,6 +118,7 @@ fn escape(text: &str) -> String {
 /// The reference form of a reference, parameter or environment binding.
 pub fn print_reference(binding: &Binding, scope: Scope<'_>) -> Option<String> {
     let (root, port, path) = match binding {
+        Binding::Argument { name, path } => (format!("input{}", key(name, true)), None, &**path),
         Binding::Environment { name } => (format!("env{}", key(name, true)), None, ""),
         Binding::Parameter { name, path } => (format!("param{}", key(name, true)), None, &**path),
         Binding::Reference {
@@ -161,6 +164,22 @@ fn key(name: &str, named: bool) -> String {
 pub fn parse_reference(text: &str, scope: Scope<'_>) -> Result<Binding, SyntaxError> {
     let (root, segments) = split(text)?;
     match root.as_str() {
+        "input" => {
+            let ((_, name), rest) = segments
+                .split_first()
+                .ok_or_else(|| error(text.len(), "Name the request argument: input.name"))?;
+            if !crate::graph::is_request_argument(name)
+                || scope
+                    .request
+                    .is_none_or(|node| !node.inputs.contains_key(name))
+            {
+                return Err(error(0, "Request argument does not exist"));
+            }
+            Ok(Binding::Argument {
+                name: name.clone(),
+                path: join(rest),
+            })
+        }
         "env" => match segments.as_slice() {
             [(_, name)] => Ok(Binding::environment(name.clone())),
             [] => Err(error(text.len(), "Name the environment variable: env.name")),
@@ -279,7 +298,11 @@ mod tests {
     }
 
     fn scope<'a>(nodes: &'a [Node], project: &'a Project) -> Scope<'a> {
-        Scope { nodes, project }
+        Scope {
+            nodes,
+            project,
+            request: None,
+        }
     }
 
     #[test]
@@ -380,5 +403,42 @@ mod tests {
         );
         assert_eq!(parse_template("a {{ nope }}", scope).unwrap_err().offset, 5);
         assert_eq!(print_template(&Binding::literal(json!(1)), scope), None);
+    }
+}
+
+#[cfg(test)]
+mod request_argument_tests {
+    use super::*;
+    #[test]
+    fn local_arguments_round_trip_in_templates_and_validate_their_scope() {
+        let project = crate::demos::empty_project();
+        let mut request = crate::graph::create_node(
+            crate::model::NodeKind::Request,
+            crate::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        request
+            .inputs
+            .insert("product".into(), Binding::literal(serde_json::json!(null)));
+        let scope = Scope {
+            nodes: &[],
+            project: &project,
+            request: Some(&request),
+        };
+        let text = "/products/{{input.product.id}}";
+        let binding = parse_template(text, scope).unwrap();
+        assert_eq!(print_template(&binding, scope).as_deref(), Some(text));
+        assert!(parse_template("{{input.absent}}", scope).is_err());
+        assert!(parse_template("{{input.body}}", scope).is_err());
+        assert!(
+            parse_template(
+                text,
+                Scope {
+                    request: None,
+                    ..scope
+                }
+            )
+            .is_err()
+        );
     }
 }

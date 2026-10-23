@@ -195,6 +195,11 @@ pub fn condition_predicates(node: &Node) -> Vec<Predicate> {
     }
 }
 
+/// A user-defined request argument, distinct from its HTTP fields.
+pub fn is_request_argument(name: &str) -> bool {
+    ![URL_INPUT, HEADERS_INPUT, QUERY_INPUT, BODY_INPUT].contains(&name)
+}
+
 /// The inputs a node declares.
 pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
@@ -233,6 +238,12 @@ pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
                 }
             }
             ports.push(Port::new(BODY_INPUT, ValueType::Any).labelled("Body"));
+            ports.extend(
+                node.inputs
+                    .keys()
+                    .filter(|name| is_request_argument(name))
+                    .map(|name| Port::new(name, ValueType::Any).required(false)),
+            );
             ports
         }
         NodeKind::Assert | NodeKind::If => vec![
@@ -311,9 +322,10 @@ pub fn binding_type(binding: &Binding) -> ValueType {
         Binding::Object { .. } => ValueType::Object,
         Binding::Array { .. } => ValueType::Array,
         Binding::Template { .. } => ValueType::String,
-        Binding::Reference { .. } | Binding::Parameter { .. } | Binding::Environment { .. } => {
-            ValueType::Any
-        }
+        Binding::Argument { .. }
+        | Binding::Reference { .. }
+        | Binding::Parameter { .. }
+        | Binding::Environment { .. } => ValueType::Any,
     }
 }
 

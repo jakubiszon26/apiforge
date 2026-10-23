@@ -378,6 +378,15 @@ fn binding(
             )
         }
         Binding::Environment { name } => id(name, path),
+        Binding::Argument { name, path: field } => {
+            id(name, path)?;
+            text(field, path)?;
+            require(
+                canonical_path(field),
+                path,
+                "Invalid or non-canonical argument path",
+            )
+        }
         Binding::Object { fields } => {
             require(fields.len() <= 1000, path, "Too many object fields")?;
             for (key, child) in fields {
@@ -506,6 +515,7 @@ fn graph(
             )?;
         }
         config(node, project, &node_path)?;
+        local_arguments(node, &node_path)?;
         for (name, value) in &node.inputs {
             id(name, &node_path)?;
             binding(value, &nodes, parameters, project, 0, &mut 0, &node_path)?;
@@ -641,6 +651,42 @@ fn config(node: &Node, project: &Project, path: &str) -> Result {
             path,
             "Component revision does not exist",
         )?;
+    }
+    Ok(())
+}
+
+/// Request arguments form a small local DAG. They never become dependencies on
+/// this request's outputs and cannot escape into another block's scope.
+fn local_arguments(node: &Node, path: &str) -> Result {
+    let mut dependencies: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for (name, binding) in &node.inputs {
+        let mut sources = HashSet::new();
+        for (_, leaf) in binding.leaves() {
+            if let Binding::Argument { name: source, .. } = leaf {
+                require(
+                    node.kind == NodeKind::Request,
+                    path,
+                    "Named request arguments belong in requests",
+                )?;
+                require(
+                    crate::graph::is_request_argument(source) && node.inputs.contains_key(source),
+                    path,
+                    "Request argument does not exist",
+                )?;
+                sources.insert(source.as_str());
+            }
+        }
+        dependencies.insert(name, sources);
+    }
+    let mut done = HashSet::new();
+    while done.len() < dependencies.len() {
+        let before = done.len();
+        for (name, sources) in &dependencies {
+            if sources.iter().all(|source| done.contains(source)) {
+                done.insert(*name);
+            }
+        }
+        require(done.len() > before, path, "Cyclic request arguments")?;
     }
     Ok(())
 }

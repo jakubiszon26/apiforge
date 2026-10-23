@@ -30,6 +30,22 @@ node --import tsx scripts/export-compatibility-fixtures.ts --check
 
 Design decisions are recorded in [docs/decisions](docs/decisions).
 
+The scenario language and workspace-aware CLI are available separately:
+
+```bash
+cargo run -p apiforge-cli --locked -- fmt fixtures/scripts/checkout.afs --check
+cargo run -p apiforge-cli --locked -- fmt path/to/scenario.afs
+cargo run -p apiforge-cli --locked -- check --workspace fixtures/workspace.json
+cargo run -p apiforge-cli --locked -- print --workspace workspace.json --scenario <id>
+cargo run -p apiforge-cli --locked -- apply --workspace workspace.json --scenario <id> scenario.afs
+```
+
+`fmt` checks syntax and formats in place. `check` resolves source against the active
+project, `print` projects a stored scenario to code, and `apply` reconciles a
+scenario with stable identities and saves through an exclusive storage session.
+These commands do not execute requests. M4 remains in progress; see
+[the language implementation notes](docs/migration/scenario-language.md).
+
 ## TypeScript prototype
 
 ```bash
@@ -139,8 +155,13 @@ remapped to the copy; references to other blocks keep their sources.
   not type tokens as ordinary literal values in a project.
 - The base URL may contain a prefix, e.g. `https://example.test/api/v1`. The path
   `/users/:id` is appended to it; a full URL bypasses the base URL.
-- Path arguments `:argument`, `{{argument}}` substitution in URL/query/headers and a JSON
-  body are supported. A whole substitution in a body value keeps the argument's type.
+- Add named request arguments in **Arguments**, choose their value sources and use
+  `{{input.productId}}` in the URL, query or headers. For a typed body value, choose
+  **Request argument** as its binding source, or enter
+  `{"productId": "{{input.productId}}"}` directly in the **Body** editor. Whole
+  placeholders keep their JSON type; text around them produces a string. Text
+  bodies accept templates too. Argument fields can be objects or arrays;
+  `input.product.id` selects a field. URL values are percent-encoded.
 - HTTP 4xx/5xx is data to check. Add a status assertion to accept only chosen responses.
 - After an error the scenario can stop or continue with the steps that can still run. An
   unmet data condition blocks dependent steps. Cleanup runs separately and also after an

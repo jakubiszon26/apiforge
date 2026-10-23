@@ -319,6 +319,10 @@ impl Redactor {
                 Binding::parameter_field(self.redact_str(name), self.redact_str(path))
             }
             Binding::Environment { name } => Binding::environment(self.redact_str(name)),
+            Binding::Argument { name, path } => Binding::Argument {
+                name: self.redact_str(name),
+                path: self.redact_str(path),
+            },
             Binding::Object { fields } => Binding::Object {
                 fields: self.redact_bindings(fields),
             },

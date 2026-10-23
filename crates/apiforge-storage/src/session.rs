@@ -223,6 +223,23 @@ impl WorkspaceStore {
         Ok(())
     }
 
+    /// Writes a standalone project using the same lock, conflict and recovery
+    /// guards as workspace saves. The JSON envelope is retained.
+    pub fn save_project(
+        &self,
+        project: &apiforge_core::format::Project,
+    ) -> Result<(), StorageError> {
+        self.writable()?;
+        let mut state = self.session.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.workspace.expected.is_none() {
+            self.load_workspace(&mut state.workspace)?;
+        }
+        guard(self.path(), &state.workspace)?;
+        self.file.save_project(project)?;
+        state.workspace.expected = Some(snapshot(self.path())?);
+        Ok(())
+    }
+
     /// Restores the exact backup previewed by `load`. A changed backup or primary
     /// requires another reload and confirmation, including deletion/replacement.
     pub fn restore_backup(&self) -> Result<Workspace, StorageError> {

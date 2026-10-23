@@ -71,13 +71,13 @@ file       = scenario | component ;
 scenario   = "scenario" STRING "{" scenario_item* "}" ;
 scenario_item = "description" STRING
            | "on_error" ("stop" | "continue")
-           | "param" IDENT "=" literal
+           | "param" key "=" literal
            | statement
            | "cleanup" "{" statement* "}" ;
 component  = "component" IDENT STRING "{" component_item* "}" ;
 component_item = "description" STRING
-           | attribute* "input" IDENT ":" type ("=" literal)?
-           | "action" IDENT
+           | attribute* "input" key ":" type ("=" literal)?
+           | "action" key ( ":" type ("contract" STRING)? )?
            | statement ;
 type       = "any" | "string" | "number" | "boolean" | "object" | "array" ;
 ```
@@ -101,10 +101,11 @@ form       = "start"
            | "assert" check
            | "condition" ("all" | "any") "{" check ("," check)* ","? "}" ( "with" expr )?
            | "if" check "{" statement* "}" ( "else" "{" statement* "}" )?
-           | IDENT "(" ( IDENT ":" expr ("," IDENT ":" expr)* ","? )? ")"
+           | IDENT ("@" REVISION)? "(" ( key ":" expr ("," key ":" expr)* ","? )? ")"
            | expr ;
 request_block = "{" request_item* "}" ;
-request_item  = "headers" object
+request_item  = "argument" key "=" expr
+           | "headers" object
            | "query" object
            | "body" ( "text" )? expr
            | "timeout" DURATION
@@ -148,15 +149,18 @@ sum      = product ( ( "+" | "-" ) product )* ;
 product  = unary ( ( "*" | "/" | "%" ) unary )* ;
 unary    = "!" unary | postfix ;
 postfix  = primary ( "." IDENT | "[" ( NUMBER | STRING ) "]" )* ;
-primary  = literal | STRING | IDENT | IDENT "(" ( expr ( "," expr )* )? ")"
+primary  = literal | STRING | IDENT | call | "?"
          | "env" "." IDENT | "env" "[" STRING "]"
-         | "param" "." IDENT
+         | "param" "." IDENT | "param" "[" STRING "]"
+         | "input" "." IDENT | "input" "[" STRING "]"
          | "{" ( key ":" expr ( "," key ":" expr )* ","? )? "}"
          | "[" ( expr ( "," expr )* ","? )? "]"
          | "(" expr ")" ;
 literal  = NUMBER | "-" NUMBER | STRING_WITHOUT_INTERPOLATION | "true" | "false" | "null"
          | object or array of literals ;
 key      = IDENT | STRING ;
+call     = (IDENT | "op" "." IDENT) ("@" REVISION)? "(" arguments? ")" ;
+arguments = expr ("," expr)* ","? | key ":" expr ("," key ":" expr)* ","? ;
 ```
 
 | Syntax | Binding |
@@ -167,10 +171,21 @@ key      = IDENT | STRING ;
 | `{ a: x }`, `[x, y]` | always `object` / `array`, also when every leaf is a literal |
 | `env.name` | `environment` |
 | `param.name` | `parameter` |
+| `input.name.path` | local request `argument` |
 | `handle.path` | `reference` |
 
 Unary minus applies only to number literals, because no operator negates a value.
-Parentheses are printed only where precedence needs them.
+The syntax formatter preserves explicit parentheses. The document printer adds
+parentheses where precedence needs them.
+
+Parameter and component input names may be quoted to represent existing document
+keys that are not identifiers. The same applies to named call arguments. `?`
+represents an unconnected binding slot, distinct from a literal `null`; lowering
+may only omit it in a position that the document model permits to be absent.
+`op.add(left: value)` explicitly names an operator and its input slots, including
+incomplete operators. Ordinary function calls may use positional arguments;
+positional and named arguments cannot be mixed. Component revisions are positive
+integers. Revision qualifiers on operators are rejected during lowering.
 
 **References.** The identifier is a handle in scope. If the node has a single
 output port, the following segments are the path into it, so `first.price` reads
@@ -212,6 +227,45 @@ Consecutive `//` lines directly above a statement, and a comment at the end of
 its line, become the node's `note`. The printer writes notes back as line comments
 above the statement. Any other comment produces a warning that the formatter will
 drop it. `@label("…")` sets the display label.
+
+### Exact document metadata
+
+The first semantic implementation exposed fields that the shorthand could not
+retain: absent versus explicitly default configuration values, optional input
+flags, action metadata independent of the input, whitespace in notes and extra
+input bindings permitted by the document model. The following spellings preserve
+them without writing internal identities or layout:
+
+- `@config({ ... })` replaces a block's complete `NodeConfig`, excluding
+  `componentId` and `revision` (which come only from the component call). This is
+  literal JSON with the document's field names. Unknown fields are errors. It is
+  emitted only when the shorthand would change configuration presence or values.
+  It never silently overrides the statement: every setting the shorthand writes
+  (method, timeout, sample, predicate, tolerance, body format, `var`, export type,
+  condition mode, contract) must appear in `@config` with the same value, or be
+  absent there while the shorthand writes its default. Otherwise lowering
+  reports an error at `@config`, so editing `timeout 10s` beside it cannot be
+  ignored.
+- `@inputs({ name: expression, ... })` replaces the complete input map when the
+  block shorthand cannot carry all its slots. Bindings use ordinary expressions,
+  never raw node IDs. It does not bypass document validation.
+- `@note("...")` preserves an exact note that trimmed line comments cannot carry.
+- Component inputs support `@required(true|false)` and `@exposed(true|false)`;
+  `@optional` and `@hidden` remain the short forms for false.
+- `action key: type contract "id"` specifies action metadata independently of the
+  input's type/contract. Without a type, the action inherits the input metadata.
+  An explicit type without `contract` means an absent action contract.
+
+Named request arguments are declared with `argument key = expression` inside a
+request block. They are used as `input.key` in expressions and templates; each
+request has its own scope. HTTP field names are reserved. Dependencies among
+arguments are acyclic; declaration order has no meaning. See
+[ADR 0004's follow-up](0004-document-format-v2.md#named-request-arguments-follow-up-23-october-2026).
+
+Printing an existing editor document can retain an intentionally unresolved
+environment name. `LowerContext::document` supports this projection;
+`LowerContext::new` and CLI `check`/`apply` require workspace name resolution.
+No environment or secret values are substituted into source.
 
 ### Identity during edits
 

@@ -180,3 +180,162 @@ async fn templates_convert_values_like_javascript_strings() {
         json!("#7 Zażółć [\"a\",\"b\"]")
     );
 }
+
+#[tokio::test]
+async fn named_request_arguments_feed_all_http_fields_in_dependency_order() {
+    let arg = |name: &str, path: &str| json!({"kind": "argument", "name": name, "path": path});
+    let template = |prefix: &str, value: Value| {
+        json!({"kind": "template", "parts": [
+            {"kind": "text", "text": prefix}, {"kind": "value", "binding": value}
+        ]})
+    };
+    let mut document = project(json!([{
+        "id": "custom", "kind": "request", "handle": "custom", "position": {"x": 0, "y": 0},
+        "inputs": {
+            "url": template("/products/", arg("name", "")),
+            "headers": {"kind": "object", "fields": {"X-Product": template("id-", arg("productId", ""))}},
+            "query": {"kind": "object", "fields": {"product": arg("productId", ""), "active": arg("active", "")}},
+            "body": {"kind": "object", "fields": {
+                "id": arg("productId", ""), "active": arg("active", ""), "nullable": arg("nullable", ""), "zero": arg("zero", "")
+            }},
+            "productId": arg("product", "id"),
+            "name": arg("product", "name"),
+            "active": {"kind": "literal", "value": false},
+            "nullable": {"kind": "literal", "value": null},
+            "zero": {"kind": "literal", "value": 0},
+            "product": reference("")
+        },
+        "config": {"method": "POST", "sampleResponse": {}}
+    }]));
+    // Save/import retains the local sources and custom input names.
+    document = apiforge_core::import_document(
+        &serde_json::to_vec(&document).unwrap(),
+        &Default::default(),
+    )
+    .unwrap()
+    .into_workspace()
+    .projects
+    .remove(0);
+    let result = run(document).await;
+    let custom = step(&result, "custom");
+    assert_eq!(custom.status, StepStatus::Passed, "{:?}", custom.message);
+    let request = custom.request.as_ref().unwrap();
+    assert_eq!(
+        request.url,
+        "https://api.example.test/products/Za%C5%BC%C3%B3%C5%82%C4%87?product=7&active=false"
+    );
+    assert_eq!(request.headers["X-Product"], "id-7");
+    assert_eq!(
+        request.body,
+        apiforge_core::format::OptionalJson::Present(
+            json!({"id": 7, "active": false, "nullable": null, "zero": 0})
+        )
+    );
+}
+
+#[tokio::test]
+async fn local_argument_secrets_are_redacted_in_reports() {
+    let mut document = project(json!([{
+        "id": "custom", "kind": "request", "handle": "custom", "position": {"x": 0, "y": 0},
+        "inputs": {
+            "url": {"kind": "literal", "value": "/"},
+            "token": {"kind": "environment", "name": "token"},
+            "body": {"kind": "argument", "name": "token"}
+        }, "config": {"method": "POST", "sampleResponse": {}}
+    }]));
+    document.environment.secret_names.push("token".into());
+    let mut request = RunRequest::new(document, "main", RunMode::Simulation);
+    request
+        .secrets
+        .insert("token".into(), "canary-private-argument".into());
+    let result = run_scenario(
+        request,
+        RunOptions::new(HttpTransport::new().unwrap()),
+        CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        step(&result, "custom").status,
+        StepStatus::Passed,
+        "{:?}",
+        step(&result, "custom").message
+    );
+    assert!(
+        !serde_json::to_string(&result)
+            .unwrap()
+            .contains("canary-private-argument")
+    );
+}
+
+#[test]
+fn local_argument_cycles_unknown_names_and_escaping_scope_are_rejected() {
+    for inputs in [
+        json!({"url": {"kind": "argument", "name": "absent"}}),
+        json!({"url": {"kind": "literal", "value": "/"}, "a": {"kind": "argument", "name": "a"}}),
+        json!({"url": {"kind": "literal", "value": "/"}, "a": {"kind": "argument", "name": "b"}, "b": {"kind": "argument", "name": "a"}}),
+        json!({"url": {"kind": "argument", "name": "body"}, "body": {"kind": "literal", "value": 1}}),
+    ] {
+        let mut doc = project(json!([]));
+        doc.scenarios[0].graph.nodes[0].inputs = serde_json::from_value(inputs).unwrap();
+        assert!(apiforge_core::validate_project(&doc).is_err());
+    }
+    let doc = project(json!([variable(
+        "invalid",
+        json!({"kind": "argument", "name": "x"})
+    )]));
+    assert!(apiforge_core::validate_project(&doc).is_err());
+}
+
+#[tokio::test]
+async fn body_editor_templates_send_typed_inputs_and_interpolated_text() {
+    use apiforge_core::{body_text, format::OptionalJson, model::BodyFormat, template_text::Scope};
+    let mut document = project(json!([{
+        "id": "custom", "kind": "request", "handle": "custom", "position": {"x": 0, "y": 0},
+        "inputs": {
+            "url": {"kind": "literal", "value": "/body"},
+            "product": reference(""),
+            "zero": {"kind": "literal", "value": 0},
+            "active": {"kind": "literal", "value": false},
+            "nullable": {"kind": "literal", "value": null}
+        }, "config": {"method": "POST", "sampleResponse": {}}
+    }]));
+    let node = &document.scenarios[0].graph.nodes[1];
+    let scope = Scope {
+        nodes: &document.scenarios[0].graph.nodes,
+        project: &document,
+        request: Some(node),
+    };
+    let body = body_text::parse_json_body(r#"{"product": {{input.product}}, "id": "{{input.product.id}}", "zero": "{{input.zero}}", "active": {{input.active}}, "nullable": {{input.nullable}}, "label": "id-{{input.product.id}}"}"#, scope).unwrap();
+    document.scenarios[0].graph.nodes[1]
+        .inputs
+        .insert("body".into(), body);
+    let result = run(document.clone()).await;
+    let custom = step(&result, "custom");
+    assert_eq!(custom.status, StepStatus::Passed, "{:?}", custom.message);
+    assert_eq!(
+        custom.request.as_ref().unwrap().body,
+        OptionalJson::Present(json!({
+            "product": {"id": 7, "name": "Zażółć", "tags": ["a", "b"]}, "id": 7, "zero": 0, "active": false, "nullable": null, "label": "id-7"
+        }))
+    );
+    let node = &document.scenarios[0].graph.nodes[1];
+    let scope = Scope {
+        nodes: &document.scenarios[0].graph.nodes,
+        project: &document,
+        request: Some(node),
+    };
+    let text =
+        body_text::parse_text_body("<product>{{input.product.id}}</product>", scope).unwrap();
+    let node = &mut document.scenarios[0].graph.nodes[1];
+    node.inputs.insert("body".into(), text);
+    node.config.body_format = Some(BodyFormat::Text);
+    let result = run(document).await;
+    let custom = step(&result, "custom");
+    assert_eq!(custom.status, StepStatus::Passed, "{:?}", custom.message);
+    assert_eq!(
+        custom.request.as_ref().unwrap().body,
+        OptionalJson::Present(json!("<product>7</product>"))
+    );
+}
