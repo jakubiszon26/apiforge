@@ -185,5 +185,9 @@ kinds. Report JSON is therefore not comparable with version-one reports.
   before the first save, so the first save never overwrites them. The application
   starts with the demo projects and tells the user that the old file needs the
   converter.
+  Archive names are reserved without replacement using hard links; both files
+  are flushed before their original names are removed. Existing archive names or
+  an archiving failure leave autosave disabled. Storage never treats a v1 file
+  as corrupt or replaces it through backup recovery or a normal save.
 - Every crate changes. The work lands as one branch of small, individually green
   commits.

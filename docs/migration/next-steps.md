@@ -49,6 +49,16 @@ assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
 
+The format-v2 follow-up on `feat/format-v2` now protects version-one workspaces
+from backup fallback and ordinary saves. Startup archives the original and any
+backup without replacing an earlier archive, then opens a fresh demo workspace;
+an archive failure disables autosave. A regression test failed on the original
+fallback behaviour before the fix. All 258 workspace tests, formatting, Clippy
+with warnings as errors, both fixture checks and the workspace debug build pass.
+The six new tests cover storage protection, archive conflicts, exact preservation
+and desktop startup/save behaviour. Native Windows execution and the remaining
+M1 product acceptance still need evidence; S1 follows M1.
+
 The latest UI follow-up passes 241 workspace tests, formatting, Clippy with
 warnings as errors, compatibility fixture verification and a workspace debug
 build. Screenshots and direct KWin interaction evidence, including the incomplete

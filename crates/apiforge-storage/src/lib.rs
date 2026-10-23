@@ -1,6 +1,6 @@
 //! Durable local storage of the workspace and atomic JSON file writes.
 //!
-//! The workspace is stored as a version-one workspace document, the same format as a
+//! The workspace is stored as a version-two workspace document, the same format as a
 //! workspace export, so a saved file can always be opened by the importer. Each save
 //! writes a temporary file in the target directory, flushes it to disk and atomically
 //! replaces the previous file, which is first kept as a backup. A crash therefore
@@ -108,7 +108,10 @@ impl WorkspaceStore {
             // an older backup could silently overwrite data we cannot interpret.
             Err(
                 error @ StorageError::Invalid {
-                    source: ImportError::UnsupportedVersion | ImportError::TooLarge { .. },
+                    source:
+                        ImportError::LegacyVersion
+                        | ImportError::UnsupportedVersion
+                        | ImportError::TooLarge { .. },
                     ..
                 },
             ) => return Err(error),
@@ -126,6 +129,69 @@ impl WorkspaceStore {
             (Some(error), _) => Err(error),
             (None, Err(error)) => Err(error),
         }
+    }
+
+    /// Preserves a version-one workspace and its backup under `workspace.v1.json`
+    /// and `workspace.v1.json.bak` (ADR 0004), allowing a fresh v2 workspace.
+    /// Returns false for a missing or supported workspace, without changing it.
+    ///
+    /// The archive names must be unused. Hard links reserve them without replacing
+    /// existing archives, and both copies are made durable before either original
+    /// name is removed. On a filesystem without hard-link support this fails safely;
+    /// the desktop then opens a temporary session with autosave disabled.
+    pub fn archive_legacy_workspace(&self) -> Result<bool, StorageError> {
+        match read_workspace(&self.path) {
+            Err(StorageError::Invalid {
+                source: ImportError::LegacyVersion,
+                ..
+            }) => {}
+            Ok(_) => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        let archive = self.path.with_extension("v1.json");
+        let backup = self.backup_path();
+        let archive_backup = WorkspaceStore::at(&archive).backup_path();
+        // Check the backup name before reserving anything. A failure must keep
+        // the main file, its backup and any previous archive untouched.
+        let has_backup = match fs::symlink_metadata(&backup) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(StorageError::io(&backup, error)),
+        };
+        fs::hard_link(&self.path, &archive).map_err(|source| StorageError::io(&archive, source))?;
+        if has_backup && let Err(source) = fs::hard_link(&backup, &archive_backup) {
+            // Originals still exist; remove only the link created by this call.
+            let _ = fs::remove_file(&archive);
+            return Err(StorageError::io(&archive_backup, source));
+        }
+        let directory = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        // Windows requires a writable handle for FlushFileBuffers. Opening with
+        // write access here does not truncate or otherwise change the bytes.
+        File::options()
+            .read(true)
+            .write(true)
+            .open(&archive)
+            .and_then(|file| file.sync_all())
+            .map_err(|source| StorageError::io(&archive, source))?;
+        if has_backup {
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&archive_backup)
+                .and_then(|file| file.sync_all())
+                .map_err(|source| StorageError::io(&archive_backup, source))?;
+        }
+        sync_directory(directory).map_err(|source| StorageError::io(directory, source))?;
+        if has_backup {
+            fs::remove_file(&backup).map_err(|source| StorageError::io(&backup, source))?;
+        }
+        fs::remove_file(&self.path).map_err(|source| StorageError::io(&self.path, source))?;
+        sync_directory(directory).map_err(|source| StorageError::io(directory, source))?;
+        Ok(true)
     }
 
     /// Saves the workspace atomically, keeping the previous file as a backup.
@@ -166,7 +232,10 @@ impl WorkspaceStore {
             }
             Err(
                 error @ StorageError::Invalid {
-                    source: ImportError::UnsupportedVersion | ImportError::TooLarge { .. },
+                    source:
+                        ImportError::LegacyVersion
+                        | ImportError::UnsupportedVersion
+                        | ImportError::TooLarge { .. },
                     ..
                 },
             ) => return Err(error),
@@ -488,6 +557,103 @@ mod tests {
         ));
         assert_eq!(fs::read(store.path()).unwrap(), main);
         assert_eq!(fs::read(store.backup_path()).unwrap(), backup);
+    }
+
+    #[test]
+    fn legacy_workspace_is_neither_replaced_by_backup_nor_overwritten_by_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let original = workspace();
+        store.save(&original).unwrap();
+        store.save(&original).unwrap();
+        let backup = fs::read(store.backup_path()).unwrap();
+        let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
+        fs::write(store.path(), legacy).unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(StorageError::Invalid {
+                source: ImportError::LegacyVersion,
+                ..
+            })
+        ));
+        assert!(matches!(
+            store.save(&original),
+            Err(StorageError::Invalid {
+                source: ImportError::LegacyVersion,
+                ..
+            })
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), legacy);
+        assert_eq!(fs::read(store.backup_path()).unwrap(), backup);
+    }
+
+    #[test]
+    fn legacy_files_are_archived_byte_for_byte_before_a_fresh_save() {
+        for with_backup in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+            let archive = directory.path().join("workspace.v1.json");
+            let archive_backup = directory.path().join("workspace.v1.json.bak");
+            let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
+            fs::write(store.path(), legacy).unwrap();
+            // Preserve even a corrupt old backup as evidence for recovery.
+            let backup = b"{ old backup, incomplete";
+            if with_backup {
+                fs::write(store.backup_path(), backup).unwrap();
+            }
+            assert!(store.archive_legacy_workspace().unwrap());
+            assert!(!store.path().exists());
+            assert!(!store.backup_path().exists());
+            assert_eq!(fs::read(&archive).unwrap(), legacy);
+            if with_backup {
+                assert_eq!(fs::read(&archive_backup).unwrap(), backup);
+            } else {
+                assert!(!archive_backup.exists());
+            }
+            let fresh = workspace();
+            store.save(&fresh).unwrap();
+            store.save(&fresh).unwrap();
+            assert_eq!(store.load().unwrap().unwrap().workspace, fresh);
+            assert_eq!(fs::read(&archive).unwrap(), legacy);
+            if with_backup {
+                assert_eq!(fs::read(&archive_backup).unwrap(), backup);
+            }
+        }
+    }
+
+    #[test]
+    fn an_existing_legacy_archive_preserves_all_original_files() {
+        for conflict in ["workspace.v1.json", "workspace.v1.json.bak"] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+            let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
+            fs::write(store.path(), legacy).unwrap();
+            fs::write(store.backup_path(), b"original backup").unwrap();
+            let existing = directory.path().join(conflict);
+            fs::write(&existing, b"earlier archive").unwrap();
+            assert!(store.archive_legacy_workspace().is_err());
+            assert_eq!(fs::read(store.path()).unwrap(), legacy);
+            assert_eq!(fs::read(store.backup_path()).unwrap(), b"original backup");
+            assert_eq!(fs::read(existing).unwrap(), b"earlier archive");
+            assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 3);
+        }
+    }
+
+    #[test]
+    fn archiving_does_not_change_missing_current_newer_or_corrupt_workspaces() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        assert!(!store.archive_legacy_workspace().unwrap());
+        store.save(&workspace()).unwrap();
+        let current = fs::read(store.path()).unwrap();
+        assert!(!store.archive_legacy_workspace().unwrap());
+        assert_eq!(fs::read(store.path()).unwrap(), current);
+        for bytes in [b"{ truncated".as_slice(), br#"{"version":3}"#] {
+            fs::write(store.path(), bytes).unwrap();
+            assert!(store.archive_legacy_workspace().is_err());
+            assert_eq!(fs::read(store.path()).unwrap(), bytes);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]

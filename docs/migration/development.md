@@ -15,13 +15,13 @@ Ubuntu package list is in the [CI workflow](../../.github/workflows/rust.yml). M
 distribution and Windows versions and packaging still need acceptance.
 
 ```bash
-cargo run -p apiforge-desktop --locked -- --project fixtures/compatibility/workspace-v1.json
+cargo run -p apiforge-desktop --locked -- --project fixtures/workspace.json
 ```
 
 Without a graphical environment a file can be checked:
 
 ```bash
-cargo run -p apiforge-desktop --locked -- --check fixtures/compatibility/workspace-v1.json
+cargo run -p apiforge-desktop --locked -- --check fixtures/workspace.json
 ```
 
 Check mode returns 0 for a valid import, 1 for a document/read error and 2 for invalid
@@ -64,6 +64,21 @@ with autosave disabled and offers normal JSON export. Existing files remain unto
 A workspace from a newer format version is never replaced with an older backup.
 Truncated documents can still recover from a validated backup.
 
+The native application uses format version 2. Importing version 1 reports a converter
+hint; it never falls back to a different workspace or overwrites the source. At startup,
+an existing version-one workspace and its backup are preserved byte for byte as
+`workspace.v1.json` and `workspace.v1.json.bak` before a fresh demo workspace is opened.
+If either archive name is already taken or archiving fails, autosave stays disabled
+and the originals are preserved. Filesystems without hard-link support take this safe
+temporary-session path. Multiple writers and external edits remain S1 work.
+
+To convert an old document during development, write to a new output path and import it:
+
+```bash
+cargo run -p apiforge-convert-v1 --locked -- workspace.v1.json workspace-v2.json
+cargo run -p apiforge-desktop --locked -- --project workspace-v2.json
+```
+
 On Unix, successful writes include file and directory sync, including newly created
 parent directories; sync failures are surfaced. Windows uses flushed files and atomic
 replacement, but power-loss durability of directory metadata remains an explicit
@@ -86,18 +101,18 @@ A real window start-up test opens a document, draws at least three frames and cl
 application. It needs a graphical session:
 
 ```bash
-cargo run -p apiforge-desktop --locked -- --smoke-test fixtures/compatibility/workspace-v1.json
+cargo run -p apiforge-desktop --locked -- --smoke-test fixtures/workspace.json
 ```
 
 A screenshot of a document can be captured for visual review:
 
 ```bash
-cargo run -p apiforge-desktop --locked -- --screenshot out.png --project fixtures/compatibility/workspace-v1.json
+cargo run -p apiforge-desktop --locked -- --screenshot out.png --project fixtures/workspace.json
 ```
 
 ## Compatibility corpus
 
-The comparison corpus is generated from the TypeScript sources:
+Only the expression semantics corpus is generated from the TypeScript sources:
 
 ```bash
 node --import tsx scripts/export-compatibility-fixtures.ts
@@ -106,6 +121,9 @@ node --import tsx scripts/export-compatibility-fixtures.ts --check
 
 Never format the generated JSON by hand: its bytes and SHA-256 must match the generator.
 See [fixtures/compatibility/README.md](../../fixtures/compatibility/README.md).
+The native v2 project and run fixtures are generated from frozen v1 sources by
+`cargo run -p apiforge-convert-v1 --locked -- --fixtures`; add `--check` to verify them.
+See [fixtures/README.md](../../fixtures/README.md).
 
 ## Version control
 

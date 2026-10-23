@@ -98,6 +98,27 @@ impl App {
                         (loaded.workspace, true)
                     }
                     Ok(None) => (default_workspace(), true),
+                    Err(apiforge_storage::StorageError::Invalid {
+                        source: apiforge_core::ImportError::LegacyVersion,
+                        ..
+                    }) => match store.archive_legacy_workspace() {
+                        Ok(true) => {
+                            notice = Some(
+                                "Your format version 1 workspace and any backup were preserved as workspace.v1.json and workspace.v1.json.bak. Convert the archived workspace with apiforge-convert-v1 to import it. A new demo workspace was opened.".into(),
+                            );
+                            (default_workspace(), true)
+                        }
+                        result => {
+                            let reason = match result {
+                                Err(error) => error.to_string(),
+                                _ => "The workspace changed while it was being archived".into(),
+                            };
+                            notice = Some(format!(
+                                "{reason}. A temporary workspace was opened with autosave disabled to protect the existing files. Use Export to keep changes from this session."
+                            ));
+                            (default_workspace(), false)
+                        }
+                    },
                     Err(error) => {
                         notice = Some(format!(
                             "{error}. A temporary workspace was opened with autosave disabled to protect the existing files. Use Export to keep changes from this session."
@@ -1756,6 +1777,54 @@ mod tests {
             drop(app);
             assert_eq!(std::fs::read(store.path()).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn legacy_startup_archives_originals_and_allows_saving_a_fresh_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+        let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
+        std::fs::write(store.path(), legacy).unwrap();
+        std::fs::write(directory.path().join("workspace.json.bak"), legacy).unwrap();
+        let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
+        assert!(app.saver.is_some());
+        assert!(
+            app.notice
+                .as_deref()
+                .unwrap()
+                .contains("apiforge-convert-v1")
+        );
+        assert!(app.notice.as_deref().unwrap().contains("workspace.v1.json"));
+        app.editor
+            .change_project(|project| project.name = "New v2 workspace".into());
+        app.save_if_changed();
+        drop(app);
+        assert_eq!(
+            store.load().unwrap().unwrap().workspace.projects[0].name,
+            "New v2 workspace"
+        );
+        for name in ["workspace.v1.json", "workspace.v1.json.bak"] {
+            assert_eq!(std::fs::read(directory.path().join(name)).unwrap(), legacy);
+        }
+    }
+
+    #[test]
+    fn a_legacy_archive_conflict_disables_autosave_and_keeps_the_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+        let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
+        std::fs::write(store.path(), legacy).unwrap();
+        let archive = directory.path().join("workspace.v1.json");
+        std::fs::write(&archive, b"earlier archive").unwrap();
+        let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
+        assert!(app.saver.is_none());
+        assert!(app.notice.as_deref().unwrap().contains("autosave disabled"));
+        app.editor
+            .change_project(|project| project.name = "Temporary edits".into());
+        app.save_if_changed();
+        drop(app);
+        assert_eq!(std::fs::read(store.path()).unwrap(), legacy);
+        assert_eq!(std::fs::read(archive).unwrap(), b"earlier archive");
     }
 
     #[test]

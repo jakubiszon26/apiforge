@@ -1,7 +1,8 @@
 //! GUI-independent project documents, validated imports and expression semantics.
 //!
 //! Parsing never runs requests. A document becomes available to callers only after
-//! structural and graph validation; the v1 DTO stays intact for lossless round trips.
+//! structural and graph validation. Native documents use format version 2; frozen
+//! v1 documents are handled only by the separate development converter.
 pub mod binding;
 pub mod block;
 pub mod demos;

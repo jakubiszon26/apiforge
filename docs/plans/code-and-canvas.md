@@ -85,8 +85,9 @@ A summary of [ADR 0004](../decisions/0004-document-format-v2.md):
   component's outputs are derived from its Export blocks, so `Component.outputs`
   is removed. Inputs remain declared on the component.
 - **Notes.** `node.note: Option<String>` carries comments from code.
-- **Layout.** `node.position` is optional (absent: placed by auto-layout) and
-  `node.pinned` marks blocks the user placed. Proxies live in `graph.proxies`.
+- **Layout.** `node.position` is required so every document can be drawn.
+  `node.autoPlaced` marks blocks that automatic layout may move; moving one by hand
+  clears the flag. Proxies will live in `graph.proxies` from M3.
   Layout never appears in code.
 - **Requests.** URL, headers and query become bindings (templates and objects),
   replacing `templateInputs`, `inputPorts` and `/:name` path parameters. Values
