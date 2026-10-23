@@ -8,8 +8,8 @@
 //! ```
 //!
 //! Fixtures are generated from the frozen version-one sources in
-//! `tools/convert-v1/sources/`: the projects and workspace exported by the
-//! TypeScript prototype and the run reports it recorded.
+//! `tools/convert-v1/sources/`: version-one projects, a workspace and recorded
+//! run reports.
 //!
 //! [ADR 0004]: ../../docs/decisions/0004-document-format-v2.md
 

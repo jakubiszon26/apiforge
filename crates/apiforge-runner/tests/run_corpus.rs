@@ -1,9 +1,9 @@
-//! Differential tests against run reports recorded from the TypeScript reference.
+//! Golden tests against recorded run reports.
 //!
-//! The reports were recorded by the prototype and are converted to the current
-//! format by `apiforge-convert-v1` (see `fixtures/README.md`). Every run uses
+//! The reports were recorded with version-one documents and are converted to the
+//! current format by `apiforge-convert-v1` (see `fixtures/README.md`). Every run uses
 //! simulation mode and a seeded random source shared with the recording. A mismatch
-//! means the port changed observable behaviour; fix the port or record the
+//! means observable behaviour changed; fix the code or record the
 //! divergence below with its reason. Never edit the corpus by hand.
 
 use apiforge_core::{
@@ -44,18 +44,18 @@ struct FixtureRequest {
 }
 
 /// Deliberate divergences: (fixture, JSON pointer into the normalised report, text
-/// the reference publishes that the port masks).
+/// the recording published that the runner masks).
 const MASKED_LEAKS: &[(&str, &str, &str)] = &[(
     // The secret goes raw into a URL template; setting a query parameter re-serialises
     // the query as a form, so `my+session secret` becomes `my+session+secret`, which
-    // none of the reference's three masked forms matches.
+    // none of the recording's three masked forms matches.
     "redaction",
     "/steps/0/request/url",
     "my+session+secret",
 )];
 
 /// Deliberate divergences in individual steps: (fixture, node id, report field,
-/// value the port reports as JSON). Each one is a decision of an ADR.
+/// value the runner reports as JSON). Each one is a decision of an ADR.
 const STEP_DIVERGENCES: &[(&str, &str, &str, &str)] = &[
     // ADR 0004: a Value's expression is evaluated like any nested expression, so an
     // operand that resolves to a missing value is an error. A version-one formula
@@ -88,10 +88,10 @@ const STEP_DIVERGENCES: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
-/// Fixtures the reference runs but the port rejects before running, with the reason.
+/// Fixtures the recording ran but the runner rejects before running, with the reason.
 const REJECTED: &[(&str, &str)] = &[(
     // The core validator limits component nesting to 16 levels at import; the
-    // reference only detects it at run time. The runtime guard is tested separately.
+    // recording only detected it at run time. The runtime guard is tested separately.
     "component-depth",
     "Component nesting exceeds 16 levels",
 )];
@@ -212,7 +212,7 @@ async fn simulation_runs_match_the_reference() {
         let result = run_scenario(run_request, options, CancellationToken::new(), |_| {}).await;
         if let Some((_, reason)) = REJECTED.iter().find(|(rejected, _)| *rejected == slug) {
             let error = result
-                .expect_err("the port rejects this project")
+                .expect_err("the runner rejects this project")
                 .to_string();
             assert!(
                 error.contains(reason),

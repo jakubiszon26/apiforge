@@ -1,8 +1,8 @@
-//! Differential tests against results recorded from the TypeScript reference.
+//! Golden tests of expression semantics: operators, field paths and number
+//! formatting, recorded with a JavaScript engine (see `fixtures/README.md`).
 //!
-//! The corpus is produced by `scripts/export-compatibility-fixtures.ts`. A mismatch
-//! means the port changed observable behaviour of existing projects; fix the port
-//! or record a deliberate, versioned divergence instead of editing the corpus.
+//! A mismatch means observable behaviour of existing projects changed; fix the
+//! code or record a deliberate, versioned divergence instead of editing the corpus.
 
 use apiforge_core::{
     js::{number_to_string, strict_equals},
@@ -29,10 +29,11 @@ enum Outcome {
     },
 }
 
-/// Operators whose results may differ from V8 by one unit in the last place.
+/// Operators whose results may differ from the recording by one unit in the last place.
 ///
-/// See docs/decisions/0001-numeric-semantics.md: the port uses a platform-independent
-/// libm, and V8's `exp`, `pow` and `log10` are not correctly rounded in the same cases.
+/// See docs/decisions/0001-numeric-semantics.md: the code uses a platform-independent
+/// libm, and the recording engine's `exp`, `pow` and `log10` are not correctly rounded
+/// in the same cases.
 const ONE_ULP_OPERATORS: [Operator; 3] = [Operator::Exp, Operator::Log, Operator::Power10];
 
 /// Distance in units in the last place between two finite doubles of equal sign.
@@ -101,7 +102,7 @@ struct NumberCase {
 
 fn corpus<T: for<'de> Deserialize<'de>>(name: &str) -> Vec<T> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/compatibility/semantics")
+        .join("../../fixtures/semantics")
         .join(name);
     let text = fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"));
     text.lines()

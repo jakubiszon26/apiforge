@@ -1,7 +1,7 @@
 //! A small local HTTP API the demo projects run against.
 //!
 //! It serves a demo shop (products and carts) and a support ticket under `/demo`,
-//! with the routes, status codes and JSON shapes of the reference implementation.
+//! with the routes, status codes and JSON shapes the demo projects expect.
 //! State lives in memory and is bounded. The server only listens on loopback
 //! addresses and rejects requests addressed to other hosts or sent by foreign web
 //! pages, so a browser cannot be used to reach it through DNS rebinding.

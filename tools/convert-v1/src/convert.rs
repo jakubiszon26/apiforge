@@ -278,8 +278,8 @@ fn condition(source: &v1::Node) -> (current::Bindings, current::NodeConfig) {
 
 /// A request's inputs and configuration. URL, header and query templates become
 /// bindings: `{{name}}` and `/:name` take the node input of that name, and a token
-/// without an input names an environment variable, as the reference runner
-/// resolved them. Literal bodies are expanded the same way.
+/// without an input names an environment variable, as version one resolved
+/// them. Literal bodies are expanded the same way.
 fn request(source: &v1::Node) -> (current::Bindings, current::NodeConfig) {
     let mut inputs = current::Bindings::new();
     inputs.insert(
@@ -511,7 +511,7 @@ fn value_binding(source: &v1::Node) -> Option<Option<current::Binding>> {
 /// A Select node as one binding. A static path on a reference or parameter extends
 /// its path; any other selection becomes the `field` operator, whose path
 /// is a template when it contains `{{name}}` tokens. Tokens name the node's
-/// inputs, or else environment variables, as the reference runner resolved them.
+/// inputs, or else environment variables, as version one resolved them.
 fn selection(source: &v1::Node) -> Option<current::Binding> {
     let value = source.inputs.get("value").map(binding);
     select(

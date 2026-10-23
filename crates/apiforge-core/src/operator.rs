@@ -554,8 +554,8 @@ fn round(value: f64, places: f64) -> Result<f64, OperatorError> {
     if !is_integer(places) || !(0.0..=12.0).contains(&places) {
         return Err(OperatorError::InvalidPrecision);
     }
-    // Every power of ten up to 1e12 is exact. The epsilon nudge mirrors the
-    // reference implementation, so 1.005 rounds to 1.01.
+    // Every power of ten up to 1e12 is exact. The epsilon nudge keeps decimal
+    // intuition for values stored in binary, so 1.005 rounds to 1.01.
     let scale = libm::pow(10.0, places);
     Ok(js_math_round((value + f64::EPSILON) * scale) / scale)
 }

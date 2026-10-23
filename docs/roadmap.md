@@ -1,6 +1,7 @@
-# Plan: scenario code, Export, variables and wire routing
+# Roadmap: scenario code, Export, variables and wire routing
 
-- Status: approved for implementation (grill session, 23 October 2026)
+- Status: in progress; M0, M1, S1 and M4 are complete; the run journal is next,
+  then M2
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
@@ -63,7 +64,7 @@ generated geometry and reusable by any future renderer.
 
 ## Format version 2
 
-A summary of [ADR 0004](../decisions/0004-document-format-v2.md):
+A summary of [ADR 0004](decisions/0004-document-format-v2.md):
 
 - **Handles.** Every node has a `handle`: an identifier `[A-Za-z_][A-Za-z0-9_]*`,
   unique within its graph (graph and cleanup share one namespace, so cleanup can
@@ -97,14 +98,12 @@ The run report, inspector and library adapt to the new kinds. Operator entries i
 the library keep their names and simply create Value blocks.
 
 A development-only converter (`tools/convert-v1`, not shipped) rewrites the
-compatibility projects, run fixtures and demos. The semantic expression corpus
-(ADR 0001) is unaffected and stays tied to the TypeScript reference. The project and
-run fixtures are frozen at their converted form and no longer regenerated from
-TypeScript.
+project and run fixtures and the demos. The semantic expression corpus (ADR 0001) is
+unaffected.
 
 ## The language
 
-[ADR 0005](../decisions/0005-scenario-language.md) holds the grammar. An example:
+[ADR 0005](decisions/0005-scenario-language.md) holds the grammar. An example:
 
 ```
 // Places an order for the first product.
@@ -201,7 +200,7 @@ template mode. Their expand button opens the field as a panel tab.
 
 ## Live synchronisation
 
-[ADR 0007](../decisions/0007-code-editing-state.md) holds the rules. In short:
+[ADR 0007](decisions/0007-code-editing-state.md) holds the rules. In short:
 
 - Each scenario and component draft has one code buffer: Clean, Applied or
   Invalid. Valid text is applied 250 ms after the last keystroke as one document
@@ -264,15 +263,15 @@ Settings: wire style (orthogonal / spline), bridges (on / off).
 
 ## Milestones
 
-Each milestone is one `feat/…` branch, merged into local `main` after fmt,
-Clippy `-D warnings`, the full test suite and the compatibility check pass. GUI
-changes are verified with screenshots. Nothing is pushed.
+Each milestone is one `feat/…` branch, merged into `main` after the verification in
+the [development guide](development.md) passes. Interface changes are also reviewed
+with screenshots.
 
 | # | Branch | Content | Depends on |
 | --- | --- | --- | --- |
-| M0 | `docs/code-canvas-plan` | This plan; [ADR 0004](../decisions/0004-document-format-v2.md), [0005](../decisions/0005-scenario-language.md), [0006](../decisions/0006-layout-and-wire-routing.md), [0007](../decisions/0007-code-editing-state.md) | — |
+| M0 | `docs/code-canvas-plan` | This plan; [ADR 0004](decisions/0004-document-format-v2.md), [0005](decisions/0005-scenario-language.md), [0006](decisions/0006-layout-and-wire-routing.md), [0007](decisions/0007-code-editing-state.md) | — |
 | M1 | `feat/format-v2` | Model v2, validation, runner, storage, desktop adapted to Value/Export/templates/layout; v1 rejection; converter and converted fixtures; Export editing on the component board; the component builder creates Export blocks | M0 |
-| S1 | `feat/storage-safety` | STOR-01 from the [migration next steps](../migration/next-steps.md): single-writer lock, detection of external changes with a reload prompt, deliberate backup recovery; the drafts file of ADR 0007 under the same rules | M1 |
+| S1 | `feat/storage-safety` | Storage safety: single-writer lock, detection of external changes with a reload prompt, deliberate backup recovery; the drafts file of ADR 0007 under the same rules | M1 |
 | M4 | `feat/script-language` | `apiforge-script` lexer/parser/lowering/reconciliation/printer/diagnostics, property tests and fuzz target; `apiforge fmt/check/print/apply` | M1 |
 | M2 | `feat/layout-routing` | `apiforge-layout`; auto-placement of unpositioned blocks, pinning, *Tidy up*; routed wires with the ADR 0006 guarantees, bridges, spline mode, settings; benchmarks | M1 |
 | M5 | `feat/code-editor` | Completion engine, `CodeEditor` widget, body views and modes, completion in small fields | M4 |
@@ -285,27 +284,35 @@ file format and ADR 0007 adds a second file. M4 and M2 are independent and can r
 in parallel worktrees after S1. Proxies (M3) and visual polish wait until the code
 path works end to end.
 
-M1 is verified locally on Linux, including the current-board Export revision
-correction, nested Export execution and native GUI editing/save evidence. See
-[M1 acceptance](../migration/format-v2-acceptance.md).
-S1 is implemented and verified on Linux: directory locking, external-change
-fingerprints, deliberate recovery and draft storage are recorded in
-[ADR 0008](../decisions/0008-storage-sessions.md). Native Windows execution remains
-a release gate. M4 is in progress on `feat/script-language`: the lossless lexer,
-recovering parser, lowering, reconciliation, checked document printer and
-`fmt/check/print/apply` CLI are implemented, including fixture, generated
-metadata and generated topology round trips, a sustained semantic fuzzer,
-located validation errors and static type warnings. The acceptance review remains
-before M4 can merge. See the
-[implementation and validation notes](../migration/scenario-language.md).
-M2 can follow independently.
+### Status
 
-**Open release work outside this plan** keeps its place in the
-[migration next steps](../migration/next-steps.md) and is scheduled between
-milestones, not dropped: the interrupted Live run journal (RUN-02) after M4,
-Windows execution evidence and assistive-technology acceptance (A11Y-01) as release
-gates before M7 completes. A milestone that touches these areas updates their
-evidence.
+| # | State |
+| --- | --- |
+| M0 | Complete |
+| M1 | Complete: format version 2, Value and Export blocks, structured bindings, converted fixtures |
+| S1 | Complete: single-writer sessions, external-change detection, deliberate recovery, draft storage ([ADR 0008](decisions/0008-storage-sessions.md)) |
+| M4 | Complete: parser, formatter, lowering, printer, reconciliation, located diagnostics and type warnings, `fmt/check/print/apply`; generated-topology property tests and sustained syntax and semantic fuzzing |
+| M2 | Next milestone, after the run journal |
+| M5, M6, M3, M7 | Planned |
+
+### Release work outside the milestones
+
+These items are scheduled between milestones and are release gates where noted:
+
+- **Run journal (release gate).** Record uncertain effects of a live run interrupted
+  by a crash; distinguish DNS and TLS failures more precisely in reports. Scheduled
+  directly after M4.
+- **Windows (release gate).** Native execution evidence for the application, storage
+  locking and the window probes; power-loss durability of directory metadata.
+- **Accessibility (release gate).** Verify that AccessKit labels reach the platform
+  accessibility APIs and test real keyboard and screen-reader use.
+- **Demo API in live mode.** Start the demo API from the desktop application, with a
+  clean shutdown, instead of a separate process.
+- **Large JSON.** Cache response-field pickers and paginate the report's JSON view,
+  as the inspector already does.
+- **Packaging.** Installers and signing for Linux and Windows.
+- **Interface polish.** Continues where a milestone touches the screen; the minimum
+  supported window is 960 × 540.
 
 ### Acceptance per milestone
 

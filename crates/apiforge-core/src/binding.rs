@@ -398,7 +398,8 @@ impl Binding {
 
 /// Stable identifier of the data wire created by a reference leaf.
 ///
-/// Matches the reference implementation, e.g. `data:node-1:actual:left/right`.
+/// For example `data:node-1:actual:left/right`; identical in every release, so
+/// selections and exported documents stay stable.
 pub fn data_edge_id(node_id: &str, input: &str, path: &[String]) -> String {
     if path.is_empty() {
         format!("data:{node_id}:{input}")

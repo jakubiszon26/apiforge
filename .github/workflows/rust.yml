@@ -1,4 +1,4 @@
-name: Rust CI
+name: CI
 
 on:
   push:
@@ -12,18 +12,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  compatibility-fixtures:
-    name: Check TypeScript compatibility corpus
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: node --import tsx scripts/export-compatibility-fixtures.ts --check
-
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -75,6 +63,13 @@ jobs:
 
       - name: Run workspace unit and integration tests
         run: cargo test --workspace --all-targets --locked
+
+      - name: Check scenario examples and the workspace fixture
+        shell: bash
+        run: |
+          cargo run --locked -p apiforge-cli -- fmt --check fixtures/scripts/checkout.afs
+          cargo run --locked -p apiforge-cli -- fmt --check fixtures/scripts/lookup.afs
+          cargo run --locked -p apiforge-cli -- check --workspace fixtures/workspace.json
 
       - name: Build release desktop binary
         run: cargo build --release --package apiforge-desktop --locked

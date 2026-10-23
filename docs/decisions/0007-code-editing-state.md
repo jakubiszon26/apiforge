@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-23
 - Scope: `apiforge-desktop` (code panel, editor state), `apiforge-storage`
-- Plan: [scenario code and canvas](../plans/code-and-canvas.md)
+- Plan: [scenario code and canvas](../roadmap.md)
 
 ## Context
 

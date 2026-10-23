@@ -107,8 +107,7 @@ impl Line {
     }
 }
 
-/// `Number(value)` of the reference implementation for JSON scalars; other values
-/// are not numbers.
+/// JavaScript `Number(value)` for JSON scalars; other values are not numbers.
 pub fn js_number(value: &Value) -> f64 {
     match value {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),

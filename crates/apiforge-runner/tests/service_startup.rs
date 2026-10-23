@@ -24,7 +24,7 @@ fn imported_workflow_finishes_through_the_gui_service() {
         include_bytes!("../../../fixtures/projects/workflow.json"),
         &ImportLimits::default(),
     )
-    .expect("the React export must import");
+    .expect("the workflow fixture must import");
     let project = document.workspace().projects[0].clone();
     let scenario_id = project.scenarios[0].id.clone();
     let (sender, notifications) = mpsc::channel();

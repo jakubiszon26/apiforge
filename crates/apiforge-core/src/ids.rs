@@ -1,7 +1,7 @@
 //! Identifiers for new document entities.
 
-/// A fresh identifier such as `node-1a2b3c4d`, in the reference implementation's
-/// format: a prefix and the first eight hexadecimal digits of a random UUID.
+/// A fresh identifier such as `node-1a2b3c4d`, in the document format's
+/// convention: a prefix and the first eight hexadecimal digits of a random UUID.
 ///
 /// Eight digits keep documents readable; callers that insert into an existing
 /// collection should still check for a (very unlikely) collision.

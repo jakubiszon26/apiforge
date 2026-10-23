@@ -47,7 +47,7 @@ impl RunRequest {
     }
 }
 
-/// Execution limits. The defaults are those of the reference implementation.
+/// Execution limits. The defaults match the recorded run corpus.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunLimits {
     /// Executed steps, including steps inside components.
