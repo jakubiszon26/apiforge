@@ -1,5 +1,6 @@
 //! The application window: layout, global shortcuts and applying user actions.
 
+use crate::icons::Icon;
 use crate::{
     canvas::{self, Canvas, Command},
     dialogs::{self, Outcome},
@@ -455,7 +456,11 @@ impl App {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             let status = self.saver.as_ref().map(Saver::status);
-            if matches!(&status, Some(SaveStatus::Failed(_))) && ui.button("Retry save").clicked() {
+            if matches!(&status, Some(SaveStatus::Failed(_)))
+                && ui
+                    .add(widgets::action(Icon::Refresh, "Retry save").quiet())
+                    .clicked()
+            {
                 self.retry_save();
             }
             let (text, color) = match &status {
@@ -579,34 +584,39 @@ impl App {
 
     fn project_menu(&mut self, ui: &mut egui::Ui) {
         let running = self.is_running();
-        let menu = ui.menu_button("⋯", |ui| {
-            ui.set_min_width(180.0);
-            if ui
-                .add_enabled(
-                    !self.files.busy() && !running,
-                    egui::Button::new("Import project…"),
-                )
-                .clicked()
-            {
-                self.files.import();
-                ui.close();
-            }
-            if ui
-                .add_enabled(!self.files.busy(), egui::Button::new("Export project…"))
-                .clicked()
-            {
-                self.files
-                    .export(apiforge_storage::public_project(self.editor.project()));
-                ui.close();
-            }
-        });
-        menu.response.widget_info(|| {
+        let menu = widgets::action_menu(
+            ui,
+            widgets::icon_button(Icon::More, "Project actions"),
+            |ui| {
+                ui.set_min_width(180.0);
+                if ui
+                    .add_enabled(
+                        !self.files.busy() && !running,
+                        widgets::action(Icon::Import, "Import project…").quiet(),
+                    )
+                    .clicked()
+                {
+                    self.files.import();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        !self.files.busy(),
+                        widgets::action(Icon::Export, "Export project…").quiet(),
+                    )
+                    .clicked()
+                {
+                    self.files
+                        .export(apiforge_storage::public_project(self.editor.project()));
+                    ui.close();
+                }
+            },
+        );
+        menu.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Project file actions")
         });
-        menu.response.on_hover_text("Import or export projects");
         if ui
-            .button("Settings")
-            .on_hover_text("Project and scenario settings")
+            .add(widgets::icon_button(Icon::Settings, "Settings"))
             .clicked()
         {
             self.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
@@ -667,7 +677,7 @@ impl App {
                 self.project_menu(ui);
                 if let Some(draft) = &draft {
                     if ui
-                        .add(widgets::primary_button("Save revision"))
+                        .add(widgets::action(Icon::Save, "Save revision").primary())
                         .on_hover_text("Save the inner graph as a new revision")
                         .clicked()
                     {
@@ -685,19 +695,17 @@ impl App {
                                 Some(&draft.definition),
                             ))));
                     }
-                    if ui.button("← Back without saving").clicked() {
+                    if ui
+                        .add(widgets::action(Icon::ArrowLeft, "Back without saving").quiet())
+                        .clicked()
+                    {
                         self.editor.leave_component();
                     }
                     return;
                 }
                 if running {
                     if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new("■  Cancel").color(theme::DANGER).strong(),
-                            )
-                            .min_size(egui::vec2(0.0, 34.0)),
-                        )
+                        .add(widgets::action(Icon::Stop, "Cancel run").danger())
                         .on_hover_text("Stop the main phase; cleanup still runs")
                         .clicked()
                     {
@@ -707,34 +715,42 @@ impl App {
                     let can_run = !scenario.graph.nodes.is_empty();
                     let can_partial =
                         self.editor.phase() == Phase::Main && self.editor.selected_node().is_some();
-                    ui.menu_button("▾", |ui| {
-                        ui.set_min_width(220.0);
-                        if ui
-                            .add_enabled(can_partial, egui::Button::new("Run up to selected block"))
-                            .on_hover_text("Fresh data from preceding steps")
-                            .clicked()
-                        {
-                            self.start_run(RunKind::UntilSelected);
-                            ui.close();
-                        }
-                        let single_hint = if self.run.is_some() {
-                            "Use available inputs from the last run"
-                        } else {
-                            "Current literals and arguments; no run history"
-                        };
-                        if ui
-                            .add_enabled(can_partial, egui::Button::new("Run only selected step"))
-                            .on_hover_text(single_hint)
-                            .clicked()
-                        {
-                            self.start_run(RunKind::SingleSelected);
-                            ui.close();
-                        }
-                    })
-                    .response
-                    .on_hover_text("Run options");
+                    widgets::action_menu(
+                        ui,
+                        widgets::icon_button(Icon::ChevronDown, "Run options"),
+                        |ui| {
+                            ui.set_min_width(220.0);
+                            if ui
+                                .add_enabled(
+                                    can_partial,
+                                    widgets::action(Icon::Play, "Run up to selected block").quiet(),
+                                )
+                                .on_hover_text("Fresh data from preceding steps")
+                                .clicked()
+                            {
+                                self.start_run(RunKind::UntilSelected);
+                                ui.close();
+                            }
+                            let single_hint = if self.run.is_some() {
+                                "Use available inputs from the last run"
+                            } else {
+                                "Current literals and arguments; no run history"
+                            };
+                            if ui
+                                .add_enabled(
+                                    can_partial,
+                                    widgets::action(Icon::Play, "Run only selected step").quiet(),
+                                )
+                                .on_hover_text(single_hint)
+                                .clicked()
+                            {
+                                self.start_run(RunKind::SingleSelected);
+                                ui.close();
+                            }
+                        },
+                    );
                     if ui
-                        .add_enabled(can_run, widgets::primary_button("▶  Run test"))
+                        .add_enabled(can_run, widgets::action(Icon::Play, "Run test").primary())
                         .on_hover_text("Run the whole scenario")
                         .clicked()
                     {
@@ -760,7 +776,10 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.add(egui::Label::new(RichText::new(notice).size(12.0)).wrap());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.small_button("✕").on_hover_text("Dismiss").clicked() {
+                            if ui
+                                .add(widgets::icon_button(Icon::Close, "Dismiss notice").compact())
+                                .clicked()
+                            {
                                 self.notice = None;
                             }
                         });
@@ -776,23 +795,24 @@ impl App {
             }
             if self.editor.draft().is_none() {
                 let cleanup = self.editor.scenario().cleanup.nodes.len();
-                let phase = self.editor.phase();
-                if ui
-                    .selectable_label(phase == Phase::Main, "Scenario")
-                    .clicked()
-                {
+                let mut phase = self.editor.phase();
+                if widgets::tab_value(ui, &mut phase, Phase::Main, "Scenario").clicked() {
                     self.editor.set_phase(Phase::Main);
                 }
-                if ui
-                    .selectable_label(phase == Phase::Cleanup, format!("After test  {cleanup}"))
-                    .on_hover_text("Cleanup steps that run after the test, also after errors")
-                    .clicked()
+                if widgets::tab_value(
+                    ui,
+                    &mut phase,
+                    Phase::Cleanup,
+                    format!("After test  {cleanup}"),
+                )
+                .on_hover_text("Cleanup steps that run after the test, also after errors")
+                .clicked()
                 {
                     self.editor.set_phase(Phase::Cleanup);
                 }
             }
             if ui
-                .button("Find step…")
+                .add(widgets::action(Icon::Search, "Find step").quiet())
                 .on_hover_text("Find a block and open its configuration (Ctrl+K)")
                 .clicked()
             {
@@ -801,28 +821,31 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.editor.selected_node().is_some() {
                     let toggle_label = if self.inspector_collapsed {
-                        "Inspector ◂"
+                        "Show Inspector"
                     } else {
-                        "Inspector ▸"
+                        "Hide Inspector"
                     };
                     if ui
-                        .button(toggle_label)
-                        .on_hover_text("Show or hide the step inspector")
+                        .add(widgets::icon_button(Icon::Panel, toggle_label))
                         .clicked()
                     {
                         self.inspector_collapsed = !self.inspector_collapsed;
                     }
                 }
                 if ui
-                    .add_enabled(self.editor.can_redo(), egui::Button::new("↷"))
-                    .on_hover_text("Redo (Ctrl+Shift+Z)")
+                    .add_enabled(
+                        self.editor.can_redo(),
+                        widgets::icon_button(Icon::Redo, "Redo (Ctrl+Shift+Z)"),
+                    )
                     .clicked()
                 {
                     self.editor.redo();
                 }
                 if ui
-                    .add_enabled(self.editor.can_undo(), egui::Button::new("↶"))
-                    .on_hover_text("Undo (Ctrl+Z)")
+                    .add_enabled(
+                        self.editor.can_undo(),
+                        widgets::icon_button(Icon::Undo, "Undo (Ctrl+Z)"),
+                    )
                     .clicked()
                 {
                     self.editor.undo();
@@ -957,8 +980,7 @@ impl App {
         };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
             if ui
-                .small_button("✕")
-                .on_hover_text("Close the configuration")
+                .add(widgets::icon_button(Icon::Close, "Close Inspector").compact())
                 .clicked()
             {
                 self.editor.selection.clear();
@@ -1490,7 +1512,7 @@ impl App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let ready = !name.trim().is_empty();
                     if ui
-                        .add_enabled(ready, widgets::primary_button("Create →"))
+                        .add_enabled(ready, widgets::action(Icon::Plus, "Create").primary())
                         .clicked()
                         || (ready
                             && field.lost_focus()
@@ -1498,7 +1520,10 @@ impl App {
                     {
                         create = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .add(widgets::action(Icon::Close, "Cancel").quiet())
+                        .clicked()
+                    {
                         close = true;
                     }
                 });

@@ -4,6 +4,7 @@
 //! inner steps and the cleanup phase) and the selected step's comparison, outputs,
 //! inputs and HTTP request snapshot.
 
+use crate::icons::Icon;
 use crate::{dnd::Payload, labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, OptionalJson},
@@ -346,14 +347,13 @@ impl ReportPanel {
 
     fn toggle_bar(&mut self, ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         ui.horizontal(|ui| {
-            let arrow = if self.open { "▾" } else { "▸" };
+            let arrow = if self.open {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            };
             if ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(format!("{arrow}  Run results")).family(theme::bold_family()),
-                    )
-                    .frame(false),
-                )
+                .add(widgets::action(arrow, "Run results").quiet())
                 .clicked()
             {
                 self.open = !self.open;
@@ -548,18 +548,20 @@ impl ReportPanel {
         }
 
         ui.horizontal(|ui| {
-            ui.selectable_value(
+            widgets::tab_value(
+                ui,
                 &mut self.tab,
                 DetailTab::Outputs,
                 format!("Outputs  {}", step.outputs.len()),
             );
-            ui.selectable_value(
+            widgets::tab_value(
+                ui,
                 &mut self.tab,
                 DetailTab::Inputs,
                 format!("Inputs  {}", step.inputs.len()),
             );
             if step.request.is_some() {
-                ui.selectable_value(&mut self.tab, DetailTab::Request, "HTTP request");
+                widgets::tab_value(ui, &mut self.tab, DetailTab::Request, "HTTP request");
             }
             if selected.depth == 0 && self.tab == DetailTab::Outputs {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -751,7 +753,7 @@ impl ReportPanel {
                         path_text.as_str()
                     };
                     if ui
-                        .small_button("+ Check")
+                        .add(widgets::action(Icon::Check, "Check").compact().quiet())
                         .on_hover_text(format!("Check {target_name}"))
                         .clicked()
                     {
@@ -763,7 +765,11 @@ impl ReportPanel {
                         });
                     }
                     if ui
-                        .small_button("To variable")
+                        .add(
+                            widgets::action(Icon::Variable, "To variable")
+                                .compact()
+                                .quiet(),
+                        )
                         .on_hover_text(format!("Assign {target_name} to a variable"))
                         .clicked()
                     {
@@ -919,7 +925,10 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add_enabled(!files_busy, egui::Button::new("Export").small())
+                .add_enabled(
+                    !files_busy,
+                    widgets::action(Icon::Export, "Export").compact().quiet(),
+                )
                 .on_hover_text("Export JSON report with masked secrets")
                 .clicked()
             {

@@ -27,9 +27,29 @@ fallback. Sources and the OFL license are bundled beside the fonts.
 
 Shared theme values define 8/12/16/24-pixel spacing, 13-pixel body text,
 12-pixel labels, 11-pixel metadata and 20-pixel headings. Form inputs and primary
-controls use a 32-pixel target height. Panels use cool neutral surfaces, subtle
+controls use a 32-pixel target height. Panels use neutral gray surfaces, subtle
 borders and the existing orange accent. Library tabs have equal-width cells;
 navigation and library text truncate to measured available width.
+
+## Symbolic actions
+
+The controls follow the requested Postman-inspired direction: neutral gray chrome,
+quiet toolbars, orange primary actions and thin active-tab indicators. A shared
+set of vector symbols replaces the mixed font glyphs in project/run menus,
+Settings, search, undo/redo, Inspector, zoom/Fit, library actions, dialog controls,
+report actions and card actions. Icons use one 24-unit grid, rendered at 16 pixels
+in standard 32-pixel controls and 14 pixels in dense 26-pixel controls.
+
+Run and save actions retain text beside their icons. Icon-only actions expose
+descriptive tooltips and widget labels. Buttons retain keyboard activation,
+disabled behavior and visible focus; this is not full assistive-technology
+acceptance. Tabs use an underline rather than an action-button outline. Card
+component links and connected-step actions use the same vector symbols, scaled
+with the canvas.
+
+The GUI check also found that Add step could close immediately on its opening
+click. The menu now distinguishes that initial click from subsequent outside
+clicks, with an event regression covering both behaviors.
 
 ## Card zoom
 
@@ -49,11 +69,21 @@ tile-sized cell. Dense distant grid dots are reduced, and tiny branch labels hid
 
 ## Verification
 
-The local workspace passes 238 Rust tests, Clippy with warnings denied, formatting,
+The local workspace passes 241 Rust tests, Clippy with warnings denied, formatting,
 the TypeScript compatibility fixture check and a workspace debug build. New
 regressions check long and unbroken Unicode card labels at 25/35/45/60/75/100/160%
 zoom, and the header height with a long title/description at 960×540, 1280×800 and
 1600×1000, with Inspector open.
+
+The symbolic-control follow-up adds tests for mouse/keyboard activation, disabled
+actions, menu opening/Escape dismissal and the Add step opening-click bug. Current
+KWin evidence is under `.gui-qa/runs/ui-polish-icons-verified/`. Actual icon clicks
+undo and redo an Inspector rename, with saved workspace assertions. Captures also
+verify Import/Export and run/selection menus, the open Add step menu, component
+editor and Back action at 960×540, 25% zoom and Fit, Settings/Cancel, and a
+Simulation run reporting 8 passed steps at 960×540. The private session stopped
+cleanly. No file portals were launched. Earlier icon captures predate the Add
+step fix; use the `icons-verified` directory for final evidence.
 
 Actual KWin captures of the current build are retained under
 `.gui-qa/runs/ui-polish-final/`: `workspace.png`, `inspector.png`,

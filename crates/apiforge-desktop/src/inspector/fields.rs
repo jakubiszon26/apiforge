@@ -1,5 +1,6 @@
 //! Form fields of the inspector.
 
+use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     edit::{TextSelection, VariableBlock},
@@ -224,8 +225,11 @@ pub fn string_map(
             )
             .on_hover_text(key);
             if ui
-                .small_button("✕")
-                .on_hover_text(format!("Remove {key}"))
+                .add(
+                    widgets::icon_button(Icon::Trash, "Remove")
+                        .compact()
+                        .danger(),
+                )
                 .clicked()
             {
                 remove = Some(key.clone());
@@ -255,7 +259,11 @@ pub fn string_map(
         let trimmed = name.trim().to_owned();
         let valid = !trimmed.is_empty() && !next.contains_key(&trimmed);
         let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if ui.add_enabled(valid, egui::Button::new("Add")).clicked() || (valid && submit) {
+        if ui
+            .add_enabled(valid, widgets::action(Icon::Plus, "Add"))
+            .clicked()
+            || (valid && submit)
+        {
             next.insert(trimmed, String::new());
             name.clear();
             changed = true;
@@ -382,25 +390,25 @@ fn tree_row(
         // Actions have a fixed budget; a long value gets ellipsised rather than
         // pushing the buttons outside the inspector.
         ui.add_sized(
-            [(ui.available_width() - 142.0).max(24.0), 22.0],
+            [(ui.available_width() - 68.0).max(24.0), 22.0],
             egui::Label::new(RichText::new(&preview).size(11.0).color(theme::MUTED)).truncate(),
         )
         .on_hover_text(&preview);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .add_enabled(supported, egui::Button::new("To variable").small())
-                .on_hover_text("Assign this field to a variable")
+                .add_enabled(
+                    supported,
+                    widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
+                )
                 .clicked()
             {
                 *action = Some(TreeAction::Assign { path: text.clone() });
             }
             if ui
-                .add_enabled(supported, egui::Button::new("Check").small())
-                .on_hover_text(if supported {
-                    "Add a comparison for this field"
-                } else {
-                    "Reserved field name; compare the parent object instead"
-                })
+                .add_enabled(
+                    supported,
+                    widgets::icon_button(Icon::Check, "Add comparison").compact(),
+                )
                 .clicked()
             {
                 *action = Some(TreeAction::Check {
@@ -433,7 +441,10 @@ fn tree_row(
     if child_count > JSON_PAGE_SIZE {
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(range.start > 0, egui::Button::new("Previous 100").small())
+                .add_enabled(
+                    range.start > 0,
+                    widgets::icon_button(Icon::ArrowLeft, "Previous 100 fields").compact(),
+                )
                 .clicked()
             {
                 page = page.saturating_sub(1);
@@ -445,7 +456,7 @@ fn tree_row(
             if ui
                 .add_enabled(
                     range.end < child_count,
-                    egui::Button::new("Next 100").small(),
+                    widgets::icon_button(Icon::ChevronRight, "Next 100 fields").compact(),
                 )
                 .clicked()
             {

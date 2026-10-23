@@ -4,7 +4,7 @@ use super::{
     Camera,
     layout::{Card, RowValue, WIDTH},
 };
-use crate::{theme, widgets::paint_label as label};
+use crate::{icons::Icon, theme, widgets::paint_label as label};
 use apiforge_core::{
     format::Graph,
     model::{Branch, NodeKind},
@@ -215,20 +215,7 @@ pub fn card(
         );
         if full && card.kind == NodeKind::Component {
             let button = camera.rect(card.open_button());
-            clipped.rect_stroke(
-                button,
-                5.0 * z,
-                Stroke::new(1.0, theme::BORDER),
-                StrokeKind::Inside,
-            );
-            label(
-                &clipped,
-                button.shrink(3.0 * z),
-                "↗",
-                FontId::proportional(14.0 * z),
-                theme::MUTED,
-                egui::Align::Center,
-            );
+            Icon::ExternalLink.paint(&clipped, button.shrink(6.0 * z), theme::MUTED);
         }
         if let Some(subtitle) = &card.subtitle {
             label(
@@ -365,20 +352,7 @@ pub fn card(
                 color,
                 egui::Align::Min,
             );
-            clipped.rect_stroke(
-                action,
-                5.0 * z,
-                Stroke::new(0.75, theme::BORDER),
-                StrokeKind::Inside,
-            );
-            label(
-                &clipped,
-                action.shrink(3.0 * z),
-                "+ Action",
-                FontId::proportional(11.0 * z),
-                theme::MUTED,
-                egui::Align::Center,
-            );
+            Icon::Plus.paint(&clipped, action.shrink(5.0 * z), theme::MUTED);
             for (index, (port, text)) in card.controls.iter().enumerate() {
                 let button = camera.rect(card.control_button(index));
                 let color = match *port {
@@ -388,8 +362,11 @@ pub fn card(
                 };
                 label(
                     &clipped,
-                    button.shrink2(vec2(8.0 * z, 2.0 * z)),
-                    text,
+                    Rect::from_min_max(
+                        button.min + vec2(24.0 * z, 2.0 * z),
+                        button.max - vec2(24.0 * z, 2.0 * z),
+                    ),
+                    text.trim_end_matches(" →"),
                     FontId::proportional(11.0 * z),
                     color,
                     egui::Align::Center,

@@ -2,16 +2,18 @@
 use apiforge_core::model::NodeKind;
 use eframe::egui::{self, Color32, FontId, Stroke, TextStyle};
 
-pub const BG: Color32 = Color32::from_rgb(246, 248, 251);
+pub const BG: Color32 = Color32::from_rgb(247, 247, 247);
 pub const WHITE: Color32 = Color32::WHITE;
-pub const PANEL: Color32 = Color32::from_rgb(251, 252, 254);
-pub const TEXT: Color32 = Color32::from_rgb(32, 39, 51);
-pub const MUTED: Color32 = Color32::from_rgb(108, 117, 132);
-pub const BORDER: Color32 = Color32::from_rgb(225, 230, 237);
-pub const ACCENT: Color32 = Color32::from_rgb(216, 91, 44);
+pub const PANEL: Color32 = Color32::from_rgb(250, 250, 250);
+pub const TEXT: Color32 = Color32::from_rgb(38, 38, 38);
+pub const MUTED: Color32 = Color32::from_rgb(107, 107, 107);
+pub const BORDER: Color32 = Color32::from_rgb(228, 228, 228);
+pub const ACCENT: Color32 = Color32::from_rgb(224, 89, 39);
+pub const ACCENT_HOVER: Color32 = Color32::from_rgb(206, 76, 29);
+pub const ACCENT_PRESSED: Color32 = Color32::from_rgb(185, 66, 23);
 pub const LINK: Color32 = Color32::from_rgb(70, 106, 145);
-pub const FIELD: Color32 = Color32::from_rgb(246, 248, 251);
-pub const GRID: Color32 = Color32::from_rgb(207, 215, 226);
+pub const FIELD: Color32 = Color32::from_rgb(244, 244, 244);
+pub const GRID: Color32 = Color32::from_rgb(215, 215, 215);
 pub const SOCKET: Color32 = Color32::from_rgb(166, 176, 190);
 pub const MINIMAP: Color32 = Color32::from_rgb(222, 228, 237);
 pub const SUCCESS: Color32 = Color32::from_rgb(61, 140, 92);

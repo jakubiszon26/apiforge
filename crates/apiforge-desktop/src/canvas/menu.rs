@@ -2,6 +2,7 @@
 //! action buttons or by dropping a wire on empty space.
 
 use super::Command;
+use crate::icons::Icon;
 use crate::theme;
 use apiforge_core::{
     format::{Graph, Port, Position, Project},
@@ -137,6 +138,9 @@ impl ActionMenu {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, graph: &Graph, project: &Project) -> Outcome {
+        // The opening click belongs to the toolbar/card, outside the new popup.
+        // Preserve this before requesting search focus clears the initial flag.
+        let opening = self.focus_search;
         let mut outcome = Outcome::Open;
         let source_node = self
             .source
@@ -178,7 +182,12 @@ impl ActionMenu {
                                 );
                             });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                                if ui.small_button("✕").on_hover_text("Close (Esc)").clicked() {
+                                if ui
+                                    .add(
+                                        crate::widgets::icon_button(Icon::Close, "Close").compact(),
+                                    )
+                                    .clicked()
+                                {
                                     outcome = Outcome::Close;
                                 }
                             });
@@ -250,10 +259,7 @@ impl ActionMenu {
             outcome = Outcome::Close;
         }
         // Clicking elsewhere closes the menu.
-        if area.response.clicked_elsewhere()
-            && matches!(outcome, Outcome::Open)
-            && !self.focus_search
-        {
+        if area.response.clicked_elsewhere() && matches!(outcome, Outcome::Open) && !opening {
             let pressed_inside = ctx
                 .input(|input| input.pointer.press_origin())
                 .is_some_and(|origin| area.response.rect.contains(origin));
@@ -291,4 +297,71 @@ fn action_row(ui: &mut egui::Ui, action: &Action) -> egui::Response {
         theme::MUTED,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_click_keeps_step_menu_open_but_a_later_outside_click_closes_it() {
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let project = apiforge_core::demos::shop_project();
+        let graph = &project.scenarios[0].graph;
+        let mut popup = None;
+        let mut button = egui::Rect::NOTHING;
+        let mut frame = |events| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.add(crate::widgets::action(Icon::Plus, "Add step"));
+                    button = response.rect;
+                    if response.clicked() {
+                        popup = Some(ActionMenu::new(
+                            egui::pos2(100.0, 100.0),
+                            egui::Pos2::ZERO,
+                            None,
+                        ));
+                    }
+                    if let Some(menu) = &mut popup
+                        && matches!(menu.show(&context, graph, &project), Outcome::Close)
+                    {
+                        popup = None;
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            (button, popup.is_some())
+        };
+        let at = frame(vec![]).0.center();
+        let click = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at), click(at, true)]);
+        assert!(
+            frame(vec![click(at, false)]).1,
+            "opening click dismissed the menu"
+        );
+        assert!(frame(vec![]).1);
+        let outside = egui::pos2(700.0, 550.0);
+        frame(vec![
+            egui::Event::PointerMoved(outside),
+            click(outside, true),
+        ]);
+        assert!(
+            !frame(vec![click(outside, false)]).1,
+            "later outside click must dismiss the menu"
+        );
+    }
 }

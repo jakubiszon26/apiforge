@@ -5,6 +5,7 @@
 //! document, its saved copy or an export.
 
 use super::{Chrome, NameError, Outcome, autofocus, name_errors, new_name_error, submitted};
+use crate::icons::Icon;
 use crate::{theme, widgets};
 use apiforge_core::{format::Environment, js};
 use eframe::egui::{self, Ui};
@@ -248,8 +249,11 @@ impl EnvironmentDialog {
                     super::text_field(ui, &mut variable.value, "value", width, false)
                         .on_hover_text("Value");
                     if ui
-                        .add(widgets::icon_button("✕"))
-                        .on_hover_text("Remove variable")
+                        .add(
+                            widgets::icon_button(Icon::Trash, "Remove variable")
+                                .compact()
+                                .danger(),
+                        )
                         .clicked()
                     {
                         remove = Some(index);
@@ -283,17 +287,20 @@ impl EnvironmentDialog {
                             .hint_text("Value for this session")
                             .desired_width(width),
                     );
-                    let toggle = if secret.revealed { "Hide" } else { "Show" };
-                    if ui
-                        .add(egui::Button::new(toggle).min_size(egui::vec2(52.0, 0.0)))
-                        .on_hover_text("Show or hide the value")
-                        .clicked()
-                    {
+                    let (icon, toggle) = if secret.revealed {
+                        (Icon::EyeOff, "Hide secret")
+                    } else {
+                        (Icon::Eye, "Show secret")
+                    };
+                    if ui.add(widgets::icon_button(icon, toggle)).clicked() {
                         secret.revealed = !secret.revealed;
                     }
                     if ui
-                        .add(widgets::icon_button("✕"))
-                        .on_hover_text("Remove secret")
+                        .add(
+                            widgets::icon_button(Icon::Trash, "Remove secret")
+                                .compact()
+                                .danger(),
+                        )
                         .clicked()
                     {
                         remove = Some(index);
@@ -327,10 +334,7 @@ impl EnvironmentDialog {
                 let width = ui.available_width() - 120.0;
                 let field = super::text_field(ui, &mut name, hint, width, typed && error.is_some());
                 let clicked = ui
-                    .add_enabled(
-                        error.is_none(),
-                        egui::Button::new(label).min_size(egui::vec2(112.0, 0.0)),
-                    )
+                    .add_enabled(error.is_none(), widgets::action(Icon::Plus, label))
                     .clicked();
                 add = error.is_none() && (clicked || submitted(ui, &field));
                 if add {

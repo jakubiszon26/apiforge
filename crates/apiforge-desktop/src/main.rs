@@ -9,6 +9,7 @@ mod dialogs;
 mod dnd;
 mod editor;
 mod files;
+mod icons;
 mod inspector;
 mod labels;
 mod library;

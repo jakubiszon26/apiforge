@@ -7,6 +7,7 @@
 //! a rejection is shown with [`ComponentDialog::set_error`].
 
 use super::{Chrome, Outcome, autofocus, contract_picker, type_picker};
+use crate::icons::Icon;
 use crate::{inspector::sample_output, theme, widgets};
 use apiforge_core::{
     edit::{self, ComponentDraft, OutputRow},
@@ -322,7 +323,7 @@ impl ComponentDialog {
         if ui
             .add_enabled(
                 last_port.is_some(),
-                egui::Button::new("+ Additional output"),
+                widgets::action(Icon::Plus, "Additional output").quiet(),
             )
             .clicked()
             && let Some((node_id, port)) = last_port

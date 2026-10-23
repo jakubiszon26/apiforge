@@ -2,6 +2,7 @@
 //! a parameter or an environment value.
 
 use super::{fields, response};
+use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, Port, Project},
@@ -423,8 +424,11 @@ fn expression_editor(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .small_button("✕")
-                        .on_hover_text("Remove this operator and keep argument A")
+                        .add(
+                            widgets::icon_button(Icon::Trash, "Remove")
+                                .compact()
+                                .danger(),
+                        )
                         .clicked()
                     {
                         *unwrap = true;
@@ -789,7 +793,7 @@ fn field_picker(
         ui.horizontal(|ui| {
             widgets::hint(ui, format!("{visible_len} fields"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.add(widgets::action(Icon::Close, "Cancel").quiet()).clicked() {
                     close = true;
                 }
             });

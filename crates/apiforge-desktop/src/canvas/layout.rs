@@ -392,7 +392,7 @@ impl Card {
     /// The "+ Action" button in the footer.
     pub fn action_button(&self) -> Rect {
         let footer = self.footer();
-        Rect::from_min_size(footer.right_top() + vec2(-82.0, 7.0), vec2(70.0, 22.0))
+        Rect::from_min_size(footer.right_top() + vec2(-40.0, 5.0), vec2(26.0, 26.0))
     }
 
     /// The button opening a component's inner graph.

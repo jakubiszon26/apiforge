@@ -10,7 +10,8 @@ mod paint;
 
 pub use layout::{Card, parse_inline};
 
-use crate::{dnd::Payload, theme};
+use crate::icons::Icon;
+use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Position, Project},
     graph::{ORDER_PORT, WireKind, wires},
@@ -1046,7 +1047,7 @@ impl Canvas {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if ui
-                                .button("+ Add step")
+                                .add(widgets::action(Icon::Plus, "Add step").compact().quiet())
                                 .on_hover_text("Add a step to the board")
                                 .clicked()
                             {
@@ -1056,8 +1057,13 @@ impl Canvas {
                             }
                             if input.can_paste
                                 && ui
-                                    .button("Paste")
-                                    .on_hover_text("Paste copied steps (Ctrl+V)")
+                                    .add(
+                                        widgets::icon_button(
+                                            Icon::Clipboard,
+                                            "Paste steps (Ctrl+V)",
+                                        )
+                                        .compact(),
+                                    )
                                     .clicked()
                             {
                                 commands.push(Command::Paste);
@@ -1065,25 +1071,28 @@ impl Canvas {
                             // Keep infrequent selection actions in one menu rather
                             // than covering the board with disabled commands.
                             if has_selection || !self.selected_wires.is_empty() {
-                                ui.menu_button(
-                                    format!("Selection ({})", input.selection.len()),
+                                widgets::action_menu(
+                                    ui,
+                                    widgets::icon_button(Icon::Layers, "Selection actions")
+                                        .compact(),
                                     |ui| {
                                         let items = [
-                                            ("Copy", "Ctrl+C", Command::Copy),
-                                            ("Duplicate", "Ctrl+D", Command::Duplicate),
+                                            (Icon::Copy, "Copy", "Ctrl+C", Command::Copy),
+                                            (Icon::Copy, "Duplicate", "Ctrl+D", Command::Duplicate),
                                             (
+                                                Icon::Save,
                                                 "Save as component",
                                                 "",
                                                 Command::SaveSelectionAsComponent,
                                             ),
                                         ];
-                                        for (label, shortcut, command) in items {
+                                        for (icon, label, shortcut, command) in items {
                                             if ui
                                                 .add_enabled(
                                                     has_selection,
-                                                    egui::Button::new(label)
-                                                        .shortcut_text(shortcut),
+                                                    widgets::action(icon, label).quiet(),
                                                 )
+                                                .on_hover_text(shortcut)
                                                 .clicked()
                                             {
                                                 commands.push(command);
@@ -1092,9 +1101,9 @@ impl Canvas {
                                         }
                                         ui.separator();
                                         if ui
-                                            .button(
-                                                egui::RichText::new("Delete selection")
-                                                    .color(theme::DANGER),
+                                            .add(
+                                                widgets::action(Icon::Trash, "Delete selection")
+                                                    .danger(),
                                             )
                                             .clicked()
                                         {
@@ -1154,8 +1163,7 @@ impl Canvas {
                             ui.spacing_mut().interact_size = vec2(24.0, 26.0);
                             let center = overlays.focus.center();
                             if ui
-                                .add_sized([28.0, 28.0], egui::Button::new("−").frame(false))
-                                .on_hover_text("Zoom out")
+                                .add(widgets::icon_button(Icon::Minus, "Zoom out").compact())
                                 .clicked()
                             {
                                 self.zoom_at(viewport, center, 1.0 / 1.2);
@@ -1172,19 +1180,14 @@ impl Canvas {
                                 ),
                             );
                             if ui
-                                .add_sized([28.0, 28.0], egui::Button::new("+").frame(false))
-                                .on_hover_text("Zoom in")
+                                .add(widgets::icon_button(Icon::Plus, "Zoom in").compact())
                                 .clicked()
                             {
                                 self.zoom_at(viewport, center, 1.2);
                             }
                             ui.separator();
                             if ui
-                                .add(
-                                    egui::Button::new(egui::RichText::new("Fit").size(11.0))
-                                        .frame(false),
-                                )
-                                .on_hover_text("Fit the view")
+                                .add(widgets::icon_button(Icon::Fit, "Fit the view").compact())
                                 .clicked()
                             {
                                 self.fit(viewport, overlays.focus, cards);
@@ -1225,7 +1228,10 @@ impl Canvas {
                         .color(theme::MUTED),
                 );
                 ui.add_space(8.0);
-                if ui.button("+ Add an HTTP request").clicked() {
+                if ui
+                    .add(widgets::action(Icon::Plus, "Add an HTTP request"))
+                    .clicked()
+                {
                     commands.push(Command::AddNode {
                         kind: NodeKind::Request,
                         component: None,
@@ -1258,7 +1264,10 @@ impl Canvas {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.colored_label(theme::DANGER, &message);
-                            if ui.small_button("✕").on_hover_text("Dismiss").clicked() {
+                            if ui
+                                .add(widgets::icon_button(Icon::Close, "Dismiss").compact())
+                                .clicked()
+                            {
                                 self.error = None;
                             }
                         });

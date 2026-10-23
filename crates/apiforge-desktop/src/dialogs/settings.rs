@@ -6,6 +6,7 @@
 //! leave half a change behind.
 
 use super::{Chrome, Outcome, autofocus, json_text, parse_json};
+use crate::icons::Icon;
 use crate::widgets;
 use apiforge_core::{
     format::{Contract, Project},
@@ -295,8 +296,8 @@ impl SettingsDialog {
             } else {
                 "Data contracts"
             };
-            ui.selectable_value(&mut self.tab, Tab::Scenario, scenario);
-            ui.selectable_value(&mut self.tab, Tab::Contracts, contracts);
+            widgets::tab_value(ui, &mut self.tab, Tab::Scenario, scenario);
+            widgets::tab_value(ui, &mut self.tab, Tab::Contracts, contracts);
         });
         ui.add_space(4.0);
         match self.tab {
@@ -373,8 +374,11 @@ impl SettingsDialog {
                     widgets::hint(ui, format!("ID: {}", row.id));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add(widgets::icon_button("✕"))
-                            .on_hover_text("Remove contract")
+                            .add(
+                                widgets::icon_button(Icon::Trash, "Delete contract")
+                                    .compact()
+                                    .danger(),
+                            )
                             .clicked()
                         {
                             remove = Some(index);
@@ -393,7 +397,10 @@ impl SettingsDialog {
             self.contracts.remove(index);
         }
         ui.add_space(8.0);
-        if ui.button("+ Add contract").clicked() {
+        if ui
+            .add(widgets::action(Icon::Plus, "Add contract").quiet())
+            .clicked()
+        {
             self.contracts.push(ContractRow {
                 id: apiforge_core::ids::new_id("contract"),
                 name: "New contract".into(),

@@ -9,6 +9,7 @@ mod response;
 
 pub use response::sample_output;
 
+use crate::icons::Icon;
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     edit::{self, bind_variable_text, prune_template_inputs},
@@ -108,8 +109,8 @@ impl Inspector {
         );
         ui.add_space(theme::SPACE_SM);
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.tab, Tab::Configuration, "Configuration");
-            ui.selectable_value(&mut self.tab, Tab::Outputs, "Output data");
+            widgets::tab_value(ui, &mut self.tab, Tab::Configuration, "Configuration");
+            widgets::tab_value(ui, &mut self.tab, Tab::Outputs, "Output data");
         });
         ui.separator();
 
@@ -157,7 +158,7 @@ impl Inspector {
             NodeKind::Variable => {
                 ui.add_space(6.0);
                 if ui
-                    .button("Take the value from a response…")
+                    .add(widgets::action(Icon::Variable, "Use a response value").quiet())
                     .on_hover_text("Bind this variable to a field of a request's response")
                     .clicked()
                 {
@@ -235,7 +236,7 @@ impl Inspector {
                     if ui
                         .add_enabled(
                             definition.is_some(),
-                            egui::Button::new("Open the component ↗"),
+                            widgets::action(Icon::ExternalLink, "Open component").quiet(),
                         )
                         .clicked()
                     {
@@ -253,7 +254,13 @@ impl Inspector {
                         .unwrap_or(definition.revision);
                     if newest > definition.revision
                         && ui
-                            .button(format!("Update this instance to revision {newest}"))
+                            .add(
+                                widgets::action(
+                                    Icon::Refresh,
+                                    &format!("Update to revision {newest}"),
+                                )
+                                .quiet(),
+                            )
                             .on_hover_text("Other instances keep their revision")
                             .clicked()
                     {
@@ -335,7 +342,11 @@ impl Inspector {
                 }
             } else if node.kind == NodeKind::Build
                 && ui
-                    .small_button("Remove field")
+                    .add(
+                        widgets::action(Icon::Trash, "Remove field")
+                            .compact()
+                            .danger(),
+                    )
                     .on_hover_text("Remove this field from the built data")
                     .clicked()
             {
@@ -370,7 +381,11 @@ impl Inspector {
                     && !ports.iter().any(|port| port.name == name);
                 let submit =
                     field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if ui.add_enabled(valid, egui::Button::new("Add")).clicked() || (valid && submit) {
+                if ui
+                    .add_enabled(valid, widgets::action(Icon::Plus, "Add"))
+                    .clicked()
+                    || (valid && submit)
+                {
                     node.inputs.insert(
                         name.clone(),
                         Binding::literal(serde_json::Value::String(String::new())),
@@ -484,7 +499,7 @@ impl Inspector {
                     widgets::hint(ui, format!("{count} fields"));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.add(widgets::action(Icon::Close, "Cancel").quiet()).clicked() {
                         close = true;
                     }
                 });
@@ -593,8 +608,11 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .small_button("✕")
-                            .on_hover_text("Remove this ordering connection")
+                            .add(
+                                widgets::icon_button(Icon::Trash, "Remove")
+                                    .compact()
+                                    .danger(),
+                            )
                             .clicked()
                         {
                             actions.push(Action::UpdateGraph(edit::remove_connections(
@@ -727,9 +745,7 @@ fn argument_settings(ui: &mut Ui, id: Id, node: &mut Node, name: &str) -> Option
                 port.exposed = Some(exposed);
             }
             if ui
-                .add(egui::Button::new(
-                    RichText::new("Remove argument").color(theme::DANGER),
-                ))
+                .add(widgets::action(Icon::Trash, "Remove argument").danger())
                 .clicked()
             {
                 remove = true;
@@ -926,7 +942,14 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
                 if let Some((variable, start, end)) = event.dropped {
                     dropped_on_path = Some((index, field, variable, start, end));
                 }
-                if ui.small_button("Remove condition").clicked() {
+                if ui
+                    .add(
+                        widgets::icon_button(Icon::Trash, "Remove condition")
+                            .compact()
+                            .danger(),
+                    )
+                    .clicked()
+                {
                     remove = Some(index);
                 }
             });
@@ -934,7 +957,10 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
     if let Some(index) = remove {
         predicates.remove(index);
     }
-    if ui.button("+ Condition").clicked() {
+    if ui
+        .add(widgets::action(Icon::Plus, "Condition").quiet())
+        .clicked()
+    {
         predicates.push(ConditionPredicate {
             input: "actual".into(),
             expected: "expected".into(),

@@ -15,6 +15,7 @@ pub use component::ComponentDialog;
 pub use environment::{EnvironmentDialog, SessionSecrets};
 pub use settings::SettingsDialog;
 
+use crate::icons::Icon;
 use crate::{theme, widgets};
 use apiforge_core::{format::Contract, js, model::ValueType};
 use eframe::egui::{self, Key, Modifiers, RichText, Ui};
@@ -175,11 +176,7 @@ impl Chrome<'_> {
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if ui
-                        .add(widgets::icon_button("✕"))
-                        .on_hover_text("Close without saving (Esc)")
-                        .clicked()
-                    {
+                    if ui.add(widgets::icon_button(Icon::Close, "Close")).clicked() {
                         action = Action::Cancel;
                     }
                 });
@@ -217,7 +214,10 @@ impl Chrome<'_> {
                     {
                         action = Action::Apply;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .add(widgets::action(Icon::Close, "Cancel").quiet())
+                        .clicked()
+                    {
                         action = Action::Cancel;
                     }
                 });

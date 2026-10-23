@@ -11,7 +11,8 @@ not a statement that every issue remains open or that every proposed fix shipped
 ## Current priorities
 
 1. **UI polish:** the header now combines title, project context and actions;
-   typography, spacing and card zoom have been revised. See the
+   typography, spacing, card zoom and symbolic action buttons have been revised.
+   Tabs and toolbars follow the requested Postman-inspired direction. See the
    [layout and validation notes](ui-polish.md). Continue checking real screens
    and user feedback before moving to lower-priority feature work.
 2. **JSON performance (PERF-01):** picker rows are now virtualised and inspector
@@ -41,7 +42,7 @@ assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
 
-The latest UI follow-up passes 238 workspace tests, formatting, Clippy with
+The latest UI follow-up passes 241 workspace tests, formatting, Clippy with
 warnings as errors, compatibility fixture verification and a workspace debug
 build. Screenshots and direct KWin interaction evidence, including the incomplete
 Gemini attempt after its account quota was exhausted, are documented in the

@@ -1,5 +1,6 @@
 //! Small widgets shared across panels, so spacing and typography stay consistent.
 
+pub use crate::icons::Icon;
 use crate::{dnd::Payload, theme};
 use eframe::egui::{
     self, Align2, FontId, Response, RichText, Sense, Stroke, StrokeKind, Ui, Widget, vec2,
@@ -256,15 +257,8 @@ pub fn pill(ui: &mut Ui, text: &str, color: egui::Color32) -> Response {
 }
 
 /// The main call-to-action button.
-pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(
-        RichText::new(text.to_owned())
-            .color(theme::WHITE)
-            .family(theme::bold_family()),
-    )
-    .fill(theme::ACCENT)
-    .stroke(Stroke::NONE)
-    .min_size(vec2(0.0, theme::CONTROL_HEIGHT))
+pub fn primary_button(text: &str) -> ActionButton<'_> {
+    action(Icon::Check, text).primary()
 }
 
 /// A validation message shown directly below the field it describes.
@@ -319,13 +313,337 @@ pub fn error_box(ui: &mut Ui, messages: &[String]) {
         });
 }
 
-/// A small frameless button for row actions such as removing an entry.
-pub fn icon_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(
-        RichText::new(text.to_owned())
-            .size(12.0)
-            .color(theme::MUTED),
-    )
-    .frame(false)
-    .min_size(vec2(24.0, 24.0))
+#[derive(Clone, Copy, PartialEq)]
+enum ButtonStyle {
+    Secondary,
+    Quiet,
+    Primary,
+    Danger,
+}
+
+/// Every action uses the same icon grid, baseline, focus ring and hit target.
+pub struct ActionButton<'a> {
+    icon: Icon,
+    label: &'a str,
+    icon_only: bool,
+    style: ButtonStyle,
+    compact: bool,
+}
+
+pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
+    ActionButton {
+        icon,
+        label,
+        icon_only: false,
+        style: ButtonStyle::Secondary,
+        compact: false,
+    }
+}
+
+pub fn icon_button(icon: Icon, label: &str) -> ActionButton<'_> {
+    ActionButton {
+        icon_only: true,
+        style: ButtonStyle::Quiet,
+        ..action(icon, label)
+    }
+}
+
+impl ActionButton<'_> {
+    pub fn primary(mut self) -> Self {
+        self.style = ButtonStyle::Primary;
+        self
+    }
+    pub fn quiet(mut self) -> Self {
+        self.style = ButtonStyle::Quiet;
+        self
+    }
+    pub fn danger(mut self) -> Self {
+        self.style = ButtonStyle::Danger;
+        self
+    }
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
+}
+
+impl Widget for ActionButton<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        let height = if self.compact {
+            26.0
+        } else {
+            theme::CONTROL_HEIGHT
+        };
+        let icon_size = if self.compact { 14.0 } else { 16.0 };
+        let font = FontId::new(
+            if self.compact {
+                theme::FONT_LABEL
+            } else {
+                theme::FONT_BODY
+            },
+            if self.style == ButtonStyle::Primary {
+                theme::bold_family()
+            } else {
+                egui::FontFamily::Proportional
+            },
+        );
+        let galley = ui
+            .painter()
+            .layout_no_wrap(self.label.to_owned(), font.clone(), theme::TEXT);
+        let natural_width = if self.icon_only {
+            height
+        } else {
+            20.0 + icon_size + 6.0 + galley.size().x
+        };
+        let width = natural_width.min(ui.available_width()).max(height);
+        let (rect, response) = ui.allocate_at_least(vec2(width, height), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label)
+        });
+        if ui.is_rect_visible(rect) {
+            let engaged = response.hovered() || response.is_pointer_button_down_on();
+            let primary = self.style == ButtonStyle::Primary;
+            let fill = if primary {
+                if response.is_pointer_button_down_on() {
+                    theme::ACCENT_PRESSED
+                } else if response.hovered() {
+                    theme::ACCENT_HOVER
+                } else {
+                    theme::ACCENT
+                }
+            } else if engaged {
+                theme::FIELD
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            let border = if response.has_focus() {
+                Stroke::new(1.5, theme::ACCENT)
+            } else if self.style == ButtonStyle::Secondary {
+                Stroke::new(1.0, theme::BORDER)
+            } else {
+                Stroke::NONE
+            };
+            ui.painter()
+                .rect(rect.shrink(0.5), 5, fill, border, egui::StrokeKind::Inside);
+            let color = if primary {
+                theme::WHITE
+            } else if self.style == ButtonStyle::Danger {
+                theme::DANGER
+            } else {
+                theme::TEXT
+            };
+            let icon_color = if !primary && self.style != ButtonStyle::Danger {
+                theme::MUTED
+            } else {
+                color
+            };
+            let icon = egui::Rect::from_center_size(
+                if self.icon_only {
+                    rect.center()
+                } else {
+                    egui::pos2(rect.left() + 10.0 + icon_size / 2.0, rect.center().y)
+                },
+                vec2(icon_size, icon_size),
+            );
+            self.icon.paint(ui.painter(), icon, icon_color);
+            if !self.icon_only {
+                paint_label(
+                    ui.painter(),
+                    egui::Rect::from_min_max(
+                        egui::pos2(icon.right() + 6.0, rect.top()),
+                        egui::pos2(rect.right() - 10.0, rect.bottom()),
+                    ),
+                    self.label,
+                    font,
+                    color,
+                    egui::Align::Min,
+                );
+            }
+        }
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if self.icon_only {
+            response.on_hover_text(self.label)
+        } else {
+            response
+        }
+    }
+}
+
+pub fn action_menu(
+    ui: &mut Ui,
+    button: ActionButton<'_>,
+    content: impl FnOnce(&mut Ui),
+) -> Response {
+    let response = ui.add(button);
+    egui::Popup::menu(&response).show(content);
+    response
+}
+
+/// Tabs use a thin active indicator instead of looking like action buttons.
+pub fn tab_value<T: PartialEq>(
+    ui: &mut Ui,
+    value: &mut T,
+    candidate: T,
+    label: impl AsRef<str>,
+) -> Response {
+    let text = label.as_ref();
+    let selected = *value == candidate;
+    let font = FontId::proportional(theme::FONT_BODY);
+    let width = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT)
+        .size()
+        .x
+        + 24.0;
+    let (rect, mut response) =
+        ui.allocate_at_least(vec2(width, theme::CONTROL_HEIGHT), Sense::click());
+    if response.clicked() && !selected {
+        *value = candidate;
+        response.mark_changed();
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            text,
+        )
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 3, theme::FIELD);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            3,
+            Stroke::new(1.0, theme::ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if selected {
+        ui.painter().line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            Stroke::new(2.0, theme::ACCENT),
+        );
+    }
+    paint_label(
+        ui.painter(),
+        rect.shrink2(vec2(12.0, 0.0)),
+        text,
+        font,
+        if selected { theme::TEXT } else { theme::MUTED },
+        egui::Align::Center,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn click(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn frame(
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+        enabled: bool,
+        menu: bool,
+    ) -> (Response, bool) {
+        let mut response = None;
+        let mut menu_visible = false;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(640.0, 480.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                response = Some(if menu {
+                    action_menu(ui, icon_button(Icon::More, "Project actions"), |ui| {
+                        menu_visible = true;
+                        ui.label("Import project");
+                    })
+                } else {
+                    ui.add_enabled(enabled, action(Icon::Play, "Run test").primary())
+                });
+            },
+        );
+        output.textures_delta.clear();
+        (response.unwrap(), menu_visible)
+    }
+
+    #[test]
+    fn symbolic_actions_keep_mouse_keyboard_and_disabled_behavior() {
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let (button, _) = frame(&context, vec![], true, false);
+        let at = button.rect.center();
+        frame(
+            &context,
+            vec![egui::Event::PointerMoved(at), click(at, true)],
+            true,
+            false,
+        );
+        assert!(
+            frame(&context, vec![click(at, false)], true, false)
+                .0
+                .clicked()
+        );
+        button.request_focus();
+        assert!(
+            frame(&context, vec![key(egui::Key::Space, true)], true, false)
+                .0
+                .clicked()
+        );
+        frame(&context, vec![key(egui::Key::Space, false)], true, false);
+        frame(&context, vec![click(at, true)], false, false);
+        assert!(
+            !frame(&context, vec![click(at, false)], false, false)
+                .0
+                .clicked()
+        );
+        assert!(
+            !frame(&context, vec![key(egui::Key::Enter, true)], false, false)
+                .0
+                .clicked()
+        );
+    }
+
+    #[test]
+    fn symbolic_menu_opens_and_escape_dismisses_it() {
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let (button, visible) = frame(&context, vec![], true, true);
+        assert!(!visible);
+        let at = button.rect.center();
+        frame(
+            &context,
+            vec![egui::Event::PointerMoved(at), click(at, true)],
+            true,
+            true,
+        );
+        assert!(frame(&context, vec![click(at, false)], true, true).1);
+        frame(&context, vec![key(egui::Key::Escape, true)], true, true);
+        assert!(!frame(&context, vec![], true, true).1);
+    }
 }

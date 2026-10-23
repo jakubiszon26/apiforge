@@ -1,5 +1,6 @@
 //! The left sidebar: workspace and scenario navigation and the block library.
 
+use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     format::{Binding, Project},
@@ -97,7 +98,10 @@ impl Library {
                             ui.selectable_value(&mut selected, id.clone(), name);
                         }
                     });
-                if ui.button("+").on_hover_text("New project").clicked() {
+                if ui
+                    .add(widgets::icon_button(Icon::Plus, "New project"))
+                    .clicked()
+                {
                     actions.push(Action::NewProject);
                 }
             });
@@ -113,9 +117,8 @@ impl Library {
                 if ui
                     .add_enabled(
                         !context.running,
-                        egui::Button::new("+").small().frame(false),
+                        widgets::icon_button(Icon::Plus, "New scenario").compact(),
                     )
-                    .on_hover_text("New scenario")
                     .clicked()
                 {
                     actions.push(Action::NewScenario);
@@ -198,16 +201,28 @@ impl Library {
             .max_height((ui.available_height() - 68.0).max(80.0))
             .show(ui, |ui| {
                 if show_blocks && !context.editing_component {
-                    ui.menu_button("Example scenarios", |ui| {
-                        if ui.button("Ordering and IF / ELSE").clicked() {
-                            actions.push(Action::OpenExample(Example::Workflow));
-                            ui.close();
-                        }
-                        if ui.button("Operator blocks").clicked() {
-                            actions.push(Action::OpenExample(Example::OperatorBlocks));
-                            ui.close();
-                        }
-                    });
+                    widgets::action_menu(
+                        ui,
+                        widgets::action(Icon::Layers, "Examples").quiet(),
+                        |ui| {
+                            if ui
+                                .add(
+                                    widgets::action(Icon::Layers, "Ordering and IF / ELSE").quiet(),
+                                )
+                                .clicked()
+                            {
+                                actions.push(Action::OpenExample(Example::Workflow));
+                                ui.close();
+                            }
+                            if ui
+                                .add(widgets::action(Icon::Variable, "Operator blocks").quiet())
+                                .clicked()
+                            {
+                                actions.push(Action::OpenExample(Example::OperatorBlocks));
+                                ui.close();
+                            }
+                        },
+                    );
                     ui.add_space(4.0);
                 }
                 if show_blocks {
@@ -235,8 +250,7 @@ impl Library {
                         widgets::subcaption(ui, "VARIABLES");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
-                                .add(egui::Button::new("+").small().frame(false))
-                                .on_hover_text("Add a variable block")
+                                .add(widgets::icon_button(Icon::Plus, "Add variable").compact())
                                 .clicked()
                             {
                                 actions.push(Action::AddVariable);
