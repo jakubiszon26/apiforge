@@ -33,83 +33,87 @@ impl Navigator {
             return None;
         }
         let mut chosen = None;
-        let modal = egui::Modal::new(egui::Id::new("find-step")).show(context, |ui| {
-            ui.set_width(420.0);
-            ui.label(
-                RichText::new("Find a step")
-                    .size(18.0)
-                    .family(theme::bold_family()),
-            );
-            let field = ui.add(
-                egui::TextEdit::singleline(&mut self.query)
-                    .hint_text("Search by name or block type…")
-                    .desired_width(f32::INFINITY),
-            );
-            if self.focus_query {
-                field.request_focus();
-                self.focus_query = false;
-            }
-            if field.changed() {
-                self.selected = 0;
-            }
-            let query = self.query.trim().to_lowercase();
-            let matches: Vec<&Node> = graph
-                .nodes
-                .iter()
-                .filter(|node| {
-                    node.name.to_lowercase().contains(&query)
-                        || node.kind.label().to_lowercase().contains(&query)
-                })
-                .collect();
-            self.selected = self.selected.min(matches.len().saturating_sub(1));
-            let (previous, next, accept) = ui.input_mut(|input| {
-                (
-                    input.consume_key(Modifiers::NONE, Key::ArrowUp),
-                    input.consume_key(Modifiers::NONE, Key::ArrowDown),
-                    input.consume_key(Modifiers::NONE, Key::Enter),
-                )
-            });
-            if previous {
-                self.selected = self.selected.saturating_sub(1);
-            }
-            if next {
-                self.selected = (self.selected + 1).min(matches.len().saturating_sub(1));
-            }
-            if accept {
-                chosen = matches.get(self.selected).map(|node| node.id.clone());
-            }
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| {
-                    if matches.is_empty() {
-                        ui.label(
-                            RichText::new("No matching steps on this board.").color(theme::MUTED),
-                        );
-                    }
-                    for (index, node) in matches.iter().enumerate() {
-                        let response = ui.add_sized(
-                            [ui.available_width(), 32.0],
-                            egui::Button::selectable(
-                                index == self.selected,
-                                format!("{}   ·   {}", node.name, node.kind.label()),
-                            ),
-                        );
-                        if response.clicked() {
-                            chosen = Some(node.id.clone());
-                        }
-                        if index == self.selected && (previous || next || field.changed()) {
-                            response.scroll_to_me(Some(egui::Align::Center));
-                        }
-                    }
+        let modal = crate::dialogs::centered_modal(egui::Id::new("find-step"), context).show(
+            context,
+            |ui| {
+                ui.set_width(420.0);
+                ui.label(
+                    RichText::new("Find a step")
+                        .size(18.0)
+                        .family(theme::bold_family()),
+                );
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut self.query)
+                        .hint_text("Search by name or block type…")
+                        .desired_width(f32::INFINITY),
+                );
+                if self.focus_query {
+                    field.request_focus();
+                    self.focus_query = false;
+                }
+                if field.changed() {
+                    self.selected = 0;
+                }
+                let query = self.query.trim().to_lowercase();
+                let matches: Vec<&Node> = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        node.name.to_lowercase().contains(&query)
+                            || node.kind.label().to_lowercase().contains(&query)
+                    })
+                    .collect();
+                self.selected = self.selected.min(matches.len().saturating_sub(1));
+                let (previous, next, accept) = ui.input_mut(|input| {
+                    (
+                        input.consume_key(Modifiers::NONE, Key::ArrowUp),
+                        input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                        input.consume_key(Modifiers::NONE, Key::Enter),
+                    )
                 });
-            ui.separator();
-            ui.label(
-                RichText::new("↑ ↓ Choose   ·   Enter Open configuration   ·   Esc Close")
-                    .size(11.0)
-                    .color(theme::MUTED),
-            );
-        });
+                if previous {
+                    self.selected = self.selected.saturating_sub(1);
+                }
+                if next {
+                    self.selected = (self.selected + 1).min(matches.len().saturating_sub(1));
+                }
+                if accept {
+                    chosen = matches.get(self.selected).map(|node| node.id.clone());
+                }
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        if matches.is_empty() {
+                            ui.label(
+                                RichText::new("No matching steps on this board.")
+                                    .color(theme::MUTED),
+                            );
+                        }
+                        for (index, node) in matches.iter().enumerate() {
+                            let response = ui.add_sized(
+                                [ui.available_width(), 32.0],
+                                egui::Button::selectable(
+                                    index == self.selected,
+                                    format!("{}   ·   {}", node.name, node.kind.label()),
+                                ),
+                            );
+                            if response.clicked() {
+                                chosen = Some(node.id.clone());
+                            }
+                            if index == self.selected && (previous || next || field.changed()) {
+                                response.scroll_to_me(Some(egui::Align::Center));
+                            }
+                        }
+                    });
+                ui.separator();
+                ui.label(
+                    RichText::new("↑ ↓ Choose   ·   Enter Open configuration   ·   Esc Close")
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            },
+        );
         if chosen.is_some() || modal.should_close() {
             self.open = false;
         }

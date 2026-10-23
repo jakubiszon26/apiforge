@@ -151,7 +151,7 @@ impl Library {
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
             ui.spacing_mut().button_padding.x = 6.0;
             ui.selectable_value(&mut self.section, Section::Blocks, "Blocks");
@@ -168,7 +168,7 @@ impl Library {
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .max_height(ui.available_height() - 74.0)
+            .max_height((ui.available_height() - 68.0).max(80.0))
             .show(ui, |ui| {
                 if show_blocks && !context.editing_component {
                     ui.menu_button("Example scenarios", |ui| {

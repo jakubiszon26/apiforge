@@ -367,6 +367,11 @@ fn tree_row(
     });
     ui.add_space(3.0);
     if depth >= 10 {
+        if matches!(value, Value::Array(items) if !items.is_empty())
+            || matches!(value, Value::Object(fields) if !fields.is_empty())
+        {
+            widgets::hint(ui, "Nested deeper than 10 levels.");
+        }
         return;
     }
     let reserved = |key: &str| ["__proto__", "constructor", "prototype"].contains(&key);

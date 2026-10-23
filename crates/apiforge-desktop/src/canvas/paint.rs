@@ -377,52 +377,77 @@ fn socket(painter: &Painter, center: Pos2, control: bool, zoom: f32) {
     }
 }
 
-pub fn overlay_labels(painter: &Painter, viewport: Rect, graph: &Graph) {
+pub const SHORTCUT_HINT_TEXT: &str = "Ctrl+click: select several  ·  Drag the background: select  ·  Right-drag: pan  ·  Ctrl+wheel: zoom";
+
+pub fn mode_line_text(graph: &Graph) -> &'static str {
     let has_start = graph
         .nodes
         .iter()
         .any(|node| node.kind == NodeKind::Trigger);
+    if has_start {
+        "Start → steps run in order. Inactive branches are skipped."
+    } else {
+        "Legacy mode: every step runs. Add a Start and connect the execution path."
+    }
+}
+
+pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays, graph: &Graph) {
+    painter.rect_filled(overlays.header, 0.0, theme::BG);
+    painter.line_segment(
+        [
+            overlays.header.left_bottom(),
+            overlays.header.right_bottom(),
+        ],
+        Stroke::new(1.0, theme::BORDER),
+    );
+    painter.rect_filled(overlays.footer, 0.0, theme::BG);
+    painter.line_segment(
+        [overlays.footer.left_top(), overlays.footer.right_top()],
+        Stroke::new(1.0, theme::BORDER),
+    );
+
     painter.text(
-        viewport.left_top() + vec2(18.0, 22.0),
+        overlays.banner.left_top() + vec2(0.0, 7.0),
         Align2::LEFT_CENTER,
         format!("●  BOARD   ·   {} steps", graph.nodes.len()),
         FontId::proportional(10.0),
         theme::MUTED,
     );
-    painter.text(
-        viewport.left_top() + vec2(18.0, 40.0),
-        Align2::LEFT_CENTER,
-        if has_start {
-            "Start → steps run in order. Inactive branches are skipped."
-        } else {
-            "Legacy mode: every step runs. Add a Start and connect the execution path."
-        },
+    let mut job = egui::text::LayoutJob::simple(
+        mode_line_text(graph).to_owned(),
         FontId::proportional(10.0),
         theme::MUTED,
+        overlays.banner_wrap_width,
     );
-    painter.text(
-        viewport.center_bottom() - vec2(0.0, 16.0),
-        Align2::CENTER_CENTER,
-        "Ctrl+click: select several  ·  Drag the background: select  ·  Right-drag: pan  ·  Ctrl+wheel: zoom",
-        FontId::proportional(10.0),
+    job.wrap.break_anywhere = false;
+    let galley = painter.layout_job(job);
+    painter.galley(
+        overlays.banner.left_top() + vec2(0.0, 17.0),
+        galley,
         theme::MUTED,
     );
+
+    if let super::layout::HintPlacement::Inline(rect) = overlays.hint {
+        painter.text(
+            rect.left_center(),
+            Align2::LEFT_CENTER,
+            SHORTCUT_HINT_TEXT,
+            FontId::proportional(10.0),
+            theme::MUTED,
+        );
+    }
 }
 
 pub fn minimap(
     painter: &Painter,
-    viewport: Rect,
+    minimap_rect: Option<Rect>,
+    board_rect: Rect,
     cards: &[Card],
     camera: Camera,
     selection: &HashSet<&str>,
-) {
-    let Some(bounds) = cards.iter().map(Card::rect).reduce(Rect::union) else {
-        return;
-    };
-    let rect = Rect::from_min_size(
-        viewport.right_bottom() - vec2(150.0, 102.0),
-        vec2(136.0, 88.0),
-    );
+) -> Option<(Rect, Rect, f32)> {
+    let rect = minimap_rect?;
+    let bounds = cards.iter().map(Card::rect).reduce(Rect::union)?;
     painter.rect(
         rect,
         7.0,
@@ -431,7 +456,8 @@ pub fn minimap(
         StrokeKind::Inside,
     );
     let inner = rect.shrink(8.0);
-    let scale = (inner.width() / bounds.width()).min(inner.height() / bounds.height());
+    let scale =
+        (inner.width() / bounds.width().max(1.0)).min(inner.height() / bounds.height().max(1.0));
     let map = |point: Pos2| inner.min + (point - bounds.min) * scale;
     for card in cards {
         let fill = if selection.contains(card.id.as_str()) {
@@ -445,11 +471,15 @@ pub fn minimap(
             fill,
         );
     }
-    let visible = Rect::from_min_max(camera.to_world(viewport.min), camera.to_world(viewport.max));
+    let visible = Rect::from_min_max(
+        camera.to_world(board_rect.min),
+        camera.to_world(board_rect.max),
+    );
     painter.rect_stroke(
         Rect::from_min_max(map(visible.min), map(visible.max)).intersect(rect),
         1.0,
         Stroke::new(1.0, theme::MUTED),
         StrokeKind::Inside,
     );
+    Some((inner, bounds, scale))
 }

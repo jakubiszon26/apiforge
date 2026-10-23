@@ -48,6 +48,20 @@ enum RunKind {
     SingleSelected,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutMode {
+    Standard,
+    Compact,
+}
+
+pub fn layout_mode(available: egui::Vec2) -> LayoutMode {
+    if available.x < 1080.0 || available.y < 660.0 {
+        LayoutMode::Compact
+    } else {
+        LayoutMode::Standard
+    }
+}
+
 pub struct App {
     editor: Editor,
     saver: Option<Saver>,
@@ -56,6 +70,7 @@ pub struct App {
     library: Library,
     navigator: Navigator,
     inspector: Inspector,
+    inspector_collapsed: bool,
     report: ReportPanel,
     runner: Option<RunnerService>,
     run_handle: Option<RunHandle>,
@@ -116,6 +131,7 @@ impl App {
             library: Library::default(),
             navigator: Navigator::default(),
             inspector: Inspector::default(),
+            inspector_collapsed: false,
             report: ReportPanel::default(),
             runner,
             run_handle: None,
@@ -327,52 +343,82 @@ impl App {
         }
         self.shortcuts(ui.ctx());
 
-        egui::Panel::left("sidebar")
-            .exact_size(235.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(16, 14)),
-            )
-            .show(ui, |ui| self.sidebar(ui));
+        let compact = layout_mode(ui.ctx().content_rect().size()) == LayoutMode::Compact;
+        egui::Panel::left(if compact {
+            "sidebar-compact"
+        } else {
+            "sidebar"
+        })
+        .exact_size(if compact { 196.0 } else { 235.0 })
+        .resizable(false)
+        .frame(
+            egui::Frame::new()
+                .fill(theme::WHITE)
+                .inner_margin(if compact {
+                    egui::Margin::symmetric(12, 10)
+                } else {
+                    egui::Margin::symmetric(16, 14)
+                }),
+        )
+        .show(ui, |ui| self.sidebar(ui));
         egui::Panel::top("topbar")
-            .exact_size(52.0)
+            .exact_size(if compact { 44.0 } else { 52.0 })
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(24, 8)),
+                    .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 24 }, 8)),
             )
             .show(ui, |ui| self.topbar(ui));
         egui::Panel::top("scenario-header")
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(egui::Margin {
-                        left: 24,
-                        right: 24,
-                        top: 18,
-                        bottom: 18,
+                    .inner_margin(if compact {
+                        egui::Margin {
+                            left: 16,
+                            right: 16,
+                            top: 10,
+                            bottom: 10,
+                        }
+                    } else {
+                        egui::Margin {
+                            left: 24,
+                            right: 24,
+                            top: 18,
+                            bottom: 18,
+                        }
                     }),
             )
             .show(ui, |ui| self.scenario_header(ui));
         egui::Panel::top("editor-bar")
-            .exact_size(44.0)
+            .exact_size(40.0)
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(24, 6)),
+                    .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 24 }, 6)),
             )
             .show(ui, |ui| self.editor_bar(ui));
         if self.editor.draft().is_none() {
             self.report(ui);
         }
-        if self.editor.selected_node().is_some() {
-            egui::Panel::right("inspector")
-                .default_size(340.0)
-                .size_range(300.0..=520.0)
-                .frame(egui::Frame::new().fill(theme::WHITE).inner_margin(18))
-                .show(ui, |ui| self.inspector(ui));
+        if self.editor.selected_node().is_some() && !self.inspector_collapsed {
+            egui::Panel::right(if compact {
+                "inspector-compact"
+            } else {
+                "inspector"
+            })
+            .default_size(if compact { 256.0 } else { 340.0 })
+            .size_range(if compact {
+                220.0..=340.0
+            } else {
+                300.0..=520.0
+            })
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::WHITE)
+                    .inner_margin(if compact { 12 } else { 18 }),
+            )
+            .show(ui, |ui| self.inspector(ui));
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -380,6 +426,7 @@ impl App {
         self.dialogs(ui.ctx());
         if let Some(id) = self.navigator.show(ui.ctx(), self.editor.graph()) {
             self.editor.selection = vec![id.clone()];
+            self.inspector_collapsed = false;
             self.canvas.reveal(id);
         }
         self.save_if_changed();
@@ -589,52 +636,47 @@ impl App {
         let scenario = self.editor.scenario().clone();
         let running = self.is_running();
         ui.horizontal(|ui| {
-            let width = (ui.available_width() - 360.0).max(200.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, 70.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    // Reserve the title column even when its text is short, so
-                    // run controls stay aligned at the right edge.
-                    ui.set_min_width(width);
-                    let eyebrow = match &draft {
-                        Some(draft) => format!(
-                            "COMPONENT · REVISION {} · WORKING COPY   ·   {} steps",
-                            draft.definition.revision,
-                            draft.graph.nodes.len()
-                        ),
-                        None => format!(
-                            "API REGRESSION TEST   ·   {} steps · {} after test",
-                            scenario.graph.nodes.len(),
-                            scenario.cleanup.nodes.len()
-                        ),
-                    };
-                    ui.label(RichText::new(eyebrow).size(10.0).color(theme::MUTED));
-                    let title = draft.as_ref().map_or(scenario.name.as_str(), |draft| {
-                        draft.definition.name.as_str()
-                    });
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(title).size(24.0).family(theme::bold_family()),
-                        )
+            let width = (ui.available_width() - 320.0).max(160.0);
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                // Reserve the title column even when its text is short, so
+                // run controls stay aligned at the right edge.
+                ui.set_min_width(width);
+                let eyebrow = match &draft {
+                    Some(draft) => format!(
+                        "COMPONENT · REVISION {} · WORKING COPY   ·   {} steps",
+                        draft.definition.revision,
+                        draft.graph.nodes.len()
+                    ),
+                    None => format!(
+                        "API REGRESSION TEST   ·   {} steps · {} after test",
+                        scenario.graph.nodes.len(),
+                        scenario.cleanup.nodes.len()
+                    ),
+                };
+                ui.label(RichText::new(eyebrow).size(10.0).color(theme::MUTED));
+                let title = draft.as_ref().map_or(scenario.name.as_str(), |draft| {
+                    draft.definition.name.as_str()
+                });
+                ui.add(
+                    egui::Label::new(RichText::new(title).size(22.0).family(theme::bold_family()))
                         .truncate(),
-                    );
-                    let description = draft
-                        .as_ref()
-                        .map_or(scenario.description.as_str(), |draft| {
-                            draft.definition.description.as_str()
-                        });
-                    let description = if description.is_empty() {
-                        "Build the scenario from requests, data and checks."
-                    } else {
-                        description
-                    };
-                    ui.add(
-                        egui::Label::new(RichText::new(description).size(11.5).color(theme::MUTED))
-                            .truncate(),
-                    );
-                },
-            );
+                );
+                let description = draft
+                    .as_ref()
+                    .map_or(scenario.description.as_str(), |draft| {
+                        draft.definition.description.as_str()
+                    });
+                let description = if description.is_empty() {
+                    "Build the scenario from requests, data and checks."
+                } else {
+                    description
+                };
+                ui.add(
+                    egui::Label::new(RichText::new(description).size(11.5).color(theme::MUTED))
+                        .truncate(),
+                );
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(draft) = &draft {
                     if ui
@@ -770,6 +812,20 @@ impl App {
                 self.navigator.open();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.editor.selected_node().is_some() {
+                    let toggle_label = if self.inspector_collapsed {
+                        "Inspector ◂"
+                    } else {
+                        "Inspector ▸"
+                    };
+                    if ui
+                        .button(toggle_label)
+                        .on_hover_text("Show or hide the step inspector")
+                        .clicked()
+                    {
+                        self.inspector_collapsed = !self.inspector_collapsed;
+                    }
+                }
                 if ui
                     .add_enabled(self.editor.can_redo(), egui::Button::new("↷"))
                     .on_hover_text("Redo (Ctrl+Shift+Z)")
@@ -1343,20 +1399,7 @@ impl App {
                 Outcome::Open => {}
                 Outcome::Cancelled => self.dialog = None,
                 Outcome::Applied(change) => {
-                    self.editor.change_project(|project| {
-                        project.name = change.project_name;
-                        project.contracts = change.contracts;
-                        if let Some(scenario) = project
-                            .scenarios
-                            .iter_mut()
-                            .find(|scenario| scenario.id == change.scenario_id)
-                        {
-                            scenario.name = change.scenario_name;
-                            scenario.description = change.description;
-                            scenario.error_policy = change.error_policy;
-                            scenario.parameters = change.parameters;
-                        }
-                    });
+                    self.editor.change_project(|project| change.apply(project));
                     self.dialog = None;
                 }
             },
@@ -1449,7 +1492,7 @@ impl App {
         };
         let mut close = false;
         let mut create = false;
-        egui::Modal::new(egui::Id::new("new-item")).show(context, |ui| {
+        dialogs::centered_modal(egui::Id::new("new-item"), context).show(context, |ui| {
             ui.set_width(380.0);
             ui.label(RichText::new(title).size(17.0).family(theme::bold_family()));
             ui.add_space(8.0);
@@ -1913,5 +1956,117 @@ mod tests {
 
         app.report_action(report::Action::SetErrorPolicy(ErrorPolicy::Stop));
         assert_eq!(app.editor.scenario().error_policy, ErrorPolicy::Stop);
+    }
+
+    #[test]
+    fn compact_layout_mode_and_960x540_frame_render_cleanly() {
+        assert_eq!(layout_mode(egui::vec2(960.0, 540.0)), LayoutMode::Compact);
+        assert_eq!(layout_mode(egui::vec2(1280.0, 800.0)), LayoutMode::Standard);
+
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Source::Session(default_workspace()));
+        let first_id = app.editor.graph().nodes[0].id.clone();
+        app.editor.selection = vec![first_id];
+
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(960.0, 540.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input.take(), |ui| {
+            app.ui(ui);
+        });
+        output.textures_delta.clear();
+        assert!(!app.inspector_collapsed);
+    }
+    #[test]
+    fn delete_does_not_reach_the_board_behind_a_modal() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.editor.selection = vec![app.editor.graph().nodes[1].id.clone()];
+        let count = app.editor.graph().nodes.len();
+        draw_frame(&mut app, &context, vec![]);
+        app.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
+            app.editor.project(),
+            &app.editor.scenario().id,
+        )));
+        for _ in 0..3 {
+            draw_frame(&mut app, &context, vec![]);
+        }
+        context.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Key {
+                key: Key::Delete,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert_eq!(app.editor.graph().nodes.len(), count);
+    }
+    #[test]
+    fn report_grip_gets_keyboard_focus_above_the_canvas_and_drags() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.report.open = true;
+        for _ in 0..3 {
+            draw_frame(&mut app, &context, vec![]);
+        }
+        let (id, rect, before) = app.report.debug_resize_handle();
+        let click = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        draw_frame(
+            &mut app,
+            &context,
+            vec![
+                egui::Event::PointerMoved(rect.center()),
+                click(true, rect.center()),
+            ],
+        );
+        draw_frame(&mut app, &context, vec![click(false, rect.center())]);
+        assert!(context.memory(|memory| memory.has_focus(id)));
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Key {
+                key: Key::ArrowUp,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        draw_frame(&mut app, &context, vec![]);
+        let (_, rect, after_key) = app.report.debug_resize_handle();
+        assert!(after_key > before);
+        draw_frame(
+            &mut app,
+            &context,
+            vec![
+                egui::Event::PointerMoved(rect.center()),
+                click(true, rect.center()),
+            ],
+        );
+        let target = rect.center() - egui::vec2(0.0, 40.0);
+        draw_frame(&mut app, &context, vec![egui::Event::PointerMoved(target)]);
+        draw_frame(&mut app, &context, vec![click(false, target)]);
+        draw_frame(&mut app, &context, vec![]);
+        assert!(
+            app.report.debug_resize_handle().2 > after_key,
+            "dragging the actual grip must resize the panel"
+        );
     }
 }

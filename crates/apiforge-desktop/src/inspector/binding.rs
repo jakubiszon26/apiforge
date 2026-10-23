@@ -647,6 +647,111 @@ fn reference_editor(
     changed
 }
 
+/// Filters `fields` by a case-insensitive substring over path, preview and type label.
+pub(crate) fn filter_response_fields<'a>(
+    fields: &'a [apiforge_core::edit::ResponseField],
+    query: &str,
+) -> Vec<&'a apiforge_core::edit::ResponseField> {
+    let query = query.trim().to_lowercase();
+    fields
+        .iter()
+        .filter(|field| {
+            query.is_empty()
+                || format!(
+                    "{} {} {}",
+                    field.path,
+                    field.preview,
+                    response::type_label(field.value_type)
+                )
+                .to_lowercase()
+                .contains(&query)
+        })
+        .collect()
+}
+
+/// Renders the searchable list of response fields and returns `(chosen_path, visible_count)`.
+pub(crate) fn searchable_field_list(
+    ui: &mut Ui,
+    search: &mut String,
+    focus_search: bool,
+    fields: &[apiforge_core::edit::ResponseField],
+    has_source_value: bool,
+    port: &str,
+    max_height: f32,
+) -> (Option<String>, usize) {
+    let mut chosen = None;
+    let field = ui.add(
+        egui::TextEdit::singleline(search)
+            .hint_text("Search names, paths or values…")
+            .desired_width(f32::INFINITY),
+    );
+    if focus_search {
+        field.request_focus();
+    }
+    let visible = filter_response_fields(fields, search);
+    let visible_count = visible.len();
+    egui::ScrollArea::vertical()
+        .max_height(max_height)
+        .show(ui, |ui| {
+            for field in &visible {
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 46.0),
+                    egui::Sense::click(),
+                );
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, 4.0, theme::BG);
+                }
+                let label = if field.path.is_empty() {
+                    format!("Whole {port}")
+                } else {
+                    field.path.clone()
+                };
+                let summary = format!(
+                    "{} · {}",
+                    response::type_label(field.value_type),
+                    field.preview
+                );
+                let a11y_label = format!("{label} — {summary}");
+                response.widget_info(move || {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+                });
+                let inset = 8.0 + field.depth.min(6) as f32 * 8.0;
+                // Two lines keep long JSON paths separate from their type
+                // and value. Each row is clipped to its own hit target.
+                let painter = ui.painter().with_clip_rect(rect.shrink(4.0));
+                painter.text(
+                    rect.left_top() + egui::vec2(inset, 5.0),
+                    egui::Align2::LEFT_TOP,
+                    &label,
+                    egui::FontId::monospace(12.0),
+                    theme::LINK,
+                );
+                painter.text(
+                    rect.left_top() + egui::vec2(inset, 25.0),
+                    egui::Align2::LEFT_TOP,
+                    &summary,
+                    egui::FontId::proportional(11.5),
+                    theme::MUTED,
+                );
+                let response = response.on_hover_text(format!("{label}\n{}", field.preview));
+                if response.clicked() {
+                    chosen = Some(field.path.clone());
+                }
+            }
+            if visible.is_empty() {
+                widgets::hint(
+                    ui,
+                    if !has_source_value {
+                        "Run the request or add a sample response. You can also type a path."
+                    } else {
+                        "No matching field. Change the search or type a path."
+                    },
+                );
+            }
+        });
+    (chosen, visible_count)
+}
+
 /// A modal list of response fields; returns the chosen path.
 fn field_picker(
     ctx: &egui::Context,
@@ -658,7 +763,9 @@ fn field_picker(
     let mut chosen = None;
     let mut close = false;
     let fields = response::fields(source.value.as_ref());
-    egui::Modal::new(id.with("modal")).show(ctx, |ui| {
+    let focus_search =
+        ctx.data_mut(|data| data.remove_temp::<bool>(id.with("focus-search"))) == Some(true);
+    crate::dialogs::centered_modal(id.with("modal"), ctx).show(ctx, |ui| {
         ui.set_width(520.0_f32.min(ctx.content_rect().width() - 48.0));
         ui.label(
             RichText::new("Choose a response field")
@@ -666,86 +773,20 @@ fn field_picker(
                 .family(theme::bold_family()),
         );
         widgets::hint(ui, &source.origin);
-        let field = ui.add(
-            egui::TextEdit::singleline(&mut search)
-                .hint_text("Search names, paths or values…")
-                .desired_width(f32::INFINITY),
+        let (picked, visible_len) = searchable_field_list(
+            ui,
+            &mut search,
+            focus_search,
+            &fields,
+            source.value.is_some(),
+            port,
+            (ctx.content_rect().height() - 220.0).clamp(60.0, 380.0),
         );
-        if ctx.data_mut(|data| data.remove_temp::<bool>(id.with("focus-search"))) == Some(true) {
-            field.request_focus();
-        }
-        let query = search.to_lowercase();
-        let visible: Vec<_> = fields
-            .iter()
-            .filter(|field| {
-                format!(
-                    "{} {} {}",
-                    field.path,
-                    field.preview,
-                    response::type_label(field.value_type)
-                )
-                .to_lowercase()
-                .contains(&query)
-            })
-            .collect();
-        egui::ScrollArea::vertical()
-            .max_height(380.0)
-            .show(ui, |ui| {
-                for field in &visible {
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 46.0),
-                        egui::Sense::click(),
-                    );
-                    if response.hovered() {
-                        ui.painter().rect_filled(rect, 4.0, theme::BG);
-                    }
-                    let label = if field.path.is_empty() {
-                        format!("Whole {port}")
-                    } else {
-                        field.path.clone()
-                    };
-                    let inset = 8.0 + field.depth.min(6) as f32 * 8.0;
-                    // Two lines keep long JSON paths separate from their type
-                    // and value. Each row is clipped to its own hit target.
-                    let painter = ui.painter().with_clip_rect(rect.shrink(4.0));
-                    painter.text(
-                        rect.left_top() + egui::vec2(inset, 5.0),
-                        egui::Align2::LEFT_TOP,
-                        &label,
-                        egui::FontId::monospace(12.0),
-                        theme::LINK,
-                    );
-                    painter.text(
-                        rect.left_top() + egui::vec2(inset, 25.0),
-                        egui::Align2::LEFT_TOP,
-                        format!(
-                            "{} · {}",
-                            response::type_label(field.value_type),
-                            field.preview
-                        ),
-                        egui::FontId::proportional(11.5),
-                        theme::MUTED,
-                    );
-                    let response = response.on_hover_text(format!("{label}\n{}", field.preview));
-                    if response.clicked() {
-                        chosen = Some(field.path.clone());
-                    }
-                }
-                if visible.is_empty() {
-                    widgets::hint(
-                        ui,
-                        if source.value.is_none() {
-                            "Run the request or add a sample response. You can also type a path."
-                        } else {
-                            "No matching field. Change the search or type a path."
-                        },
-                    );
-                }
-            });
+        chosen = picked;
         ui.separator();
         widgets::hint(ui, "The chosen field is read again on each run.");
         ui.horizontal(|ui| {
-            widgets::hint(ui, format!("{} fields", visible.len()));
+            widgets::hint(ui, format!("{visible_len} fields"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Cancel").clicked() {
                     close = true;
@@ -855,5 +896,31 @@ mod tests {
         );
         output.textures_delta.clear();
         assert_eq!(value, original);
+    }
+
+    #[test]
+    fn response_field_filter_matches_path_preview_and_type_case_insensitively() {
+        let sample = serde_json::json!({
+            "product": {
+                "id": "p-1",
+                "price": 120,
+                "active": true
+            }
+        });
+        let fields = response::fields(Some(&sample));
+        assert_eq!(filter_response_fields(&fields, "").len(), fields.len());
+        let price_matches = filter_response_fields(&fields, "PRICE");
+        assert!(
+            price_matches
+                .iter()
+                .any(|field| field.path == "product.price")
+        );
+        let bool_matches = filter_response_fields(&fields, "yes / no");
+        assert!(
+            bool_matches
+                .iter()
+                .any(|field| field.path == "product.active")
+        );
+        assert!(filter_response_fields(&fields, "zzzz-missing").is_empty());
     }
 }

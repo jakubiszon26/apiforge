@@ -130,6 +130,22 @@ struct Chrome<'a> {
     note: Option<&'a str>,
 }
 
+/// Creates a modal anchored to the center of the current `ctx.content_rect()` on every
+/// frame and requests a repaint when the viewport changes.
+pub(crate) fn centered_modal(id: egui::Id, ctx: &egui::Context) -> egui::Modal {
+    let content = ctx.content_rect();
+    let rect_key = id.with("last-content-rect");
+    let last_rect: Option<egui::Rect> = ctx.data_mut(|data| data.get_temp(rect_key));
+    if last_rect != Some(content) {
+        ctx.data_mut(|data| data.insert_temp(rect_key, content));
+        ctx.request_repaint();
+    }
+    let area = egui::Modal::default_area(id)
+        .constrain_to(content)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO);
+    egui::Modal::new(id).area(area)
+}
+
 impl Chrome<'_> {
     fn show<S>(
         self,
@@ -139,69 +155,75 @@ impl Chrome<'_> {
         can_apply: impl FnOnce(&S) -> bool,
     ) -> Action {
         let width = self.width.min(ctx.content_rect().width() - 48.0).max(320.0);
-        let body_height = (ctx.content_rect().height() - 220.0).max(160.0);
+        let body_height = (ctx.content_rect().height() - 236.0).max(140.0);
         let frame = egui::Frame::popup(&ctx.global_style())
             .fill(theme::WHITE)
             .inner_margin(egui::Margin::same(20));
-        let response = egui::Modal::new(egui::Id::new(self.id))
-            .frame(frame)
-            .show(ctx, |ui| {
-                ui.set_width(width);
-                let mut action = Action::None;
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        if !self.eyebrow.is_empty() {
-                            widgets::caption(ui, self.eyebrow);
-                        }
-                        ui.label(
-                            RichText::new(self.title)
-                                .size(17.0)
-                                .family(theme::bold_family()),
-                        );
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        if ui
-                            .add(widgets::icon_button("✕"))
-                            .on_hover_text("Close without saving (Esc)")
-                            .clicked()
-                        {
-                            action = Action::Cancel;
-                        }
-                    });
-                });
-                ui.add_space(4.0);
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .id_salt((self.id, "body"))
-                    .max_height(body_height)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        ui.add_space(4.0);
-                        body(ui, state);
-                        ui.add_space(6.0);
-                    });
-                ui.separator();
-                ui.add_space(4.0);
-                let ready = can_apply(state);
-                ui.horizontal(|ui| {
-                    if let Some(note) = self.note {
-                        widgets::hint(ui, note);
+        let modal_id = egui::Id::new(self.id);
+        let response = centered_modal(modal_id, ctx).frame(frame).show(ctx, |ui| {
+            ui.set_width(width);
+            let mut action = Action::None;
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    if !self.eyebrow.is_empty() {
+                        widgets::caption(ui, self.eyebrow);
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_enabled(ready, widgets::primary_button(self.apply_label))
-                            .on_hover_text("Ctrl+Enter")
-                            .clicked()
-                        {
-                            action = Action::Apply;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            action = Action::Cancel;
-                        }
-                    });
+                    ui.label(
+                        RichText::new(self.title)
+                            .size(17.0)
+                            .family(theme::bold_family()),
+                    );
                 });
-                (action, ready)
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if ui
+                        .add(widgets::icon_button("✕"))
+                        .on_hover_text("Close without saving (Esc)")
+                        .clicked()
+                    {
+                        action = Action::Cancel;
+                    }
+                });
             });
+            ui.add_space(4.0);
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt((self.id, "body"))
+                .max_height(body_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin {
+                            left: 0,
+                            right: 12,
+                            top: 4,
+                            bottom: 8,
+                        })
+                        .show(ui, |ui| {
+                            body(ui, state);
+                        });
+                });
+            ui.separator();
+            ui.add_space(4.0);
+            let ready = can_apply(state);
+            ui.horizontal(|ui| {
+                if let Some(note) = self.note {
+                    widgets::hint(ui, note);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(ready, widgets::primary_button(self.apply_label))
+                        .on_hover_text("Ctrl+Enter")
+                        .clicked()
+                    {
+                        action = Action::Apply;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        action = Action::Cancel;
+                    }
+                });
+            });
+            (action, ready)
+        });
         let (mut action, ready) = response.inner;
         if response.is_top_modal && !response.any_popup_open {
             ctx.input_mut(|input| {

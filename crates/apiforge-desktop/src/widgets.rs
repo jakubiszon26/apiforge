@@ -33,6 +33,11 @@ pub fn section(ui: &mut Ui, title: &str) {
     ui.add_space(2.0);
 }
 
+/// A section title rendered inside a horizontal row (without adding horizontal pre-spacing).
+pub fn section_inline(ui: &mut Ui, title: &str) {
+    ui.label(RichText::new(title).size(12.5).family(theme::bold_family()));
+}
+
 pub fn ellipsis(text: &str, limit: usize) -> String {
     crate::labels::truncate(text, limit)
 }

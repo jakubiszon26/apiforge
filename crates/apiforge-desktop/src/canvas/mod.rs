@@ -22,7 +22,7 @@ use eframe::egui::{
     self, Align2, Color32, FontId, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Stroke,
     StrokeKind, Vec2, vec2,
 };
-use layout::RowValue;
+use layout::{BoardOverlays, HintPlacement, OverlayMeasures, RowValue};
 use menu::ActionMenu;
 use std::collections::HashSet;
 
@@ -134,8 +134,11 @@ pub struct Canvas {
     camera: Camera,
     context: String,
     fit_pending: bool,
+    camera_moved_by_user: bool,
     reveal_pending: Option<String>,
     last_size: Vec2,
+    last_focus: Option<Rect>,
+    last_viewport: Rect,
     drag: Option<Drag>,
     menu: Option<ActionMenu>,
     selected_wires: Vec<String>,
@@ -152,8 +155,11 @@ impl Default for Canvas {
             },
             context: String::new(),
             fit_pending: true,
+            camera_moved_by_user: false,
             reveal_pending: None,
             last_size: Vec2::ZERO,
+            last_focus: None,
+            last_viewport: Rect::NOTHING,
             drag: None,
             menu: None,
             selected_wires: Vec::new(),
@@ -176,7 +182,12 @@ impl Canvas {
 
     /// Board position of the visible centre, for blocks added from the library.
     pub fn visible_center(&self) -> Position {
-        let center = self.camera.to_world((self.last_size / 2.0).to_pos2());
+        let local_center = self
+            .last_focus
+            .map_or((self.last_size / 2.0).to_pos2(), |focus| {
+                (focus.center() - self.last_viewport.min).to_pos2()
+            });
+        let center = self.camera.to_world(local_center);
         Position {
             x: f64::from(center.x - layout::WIDTH / 2.0),
             y: f64::from(center.y - 80.0),
@@ -188,6 +199,8 @@ impl Canvas {
         if self.context != input.context {
             self.context = input.context.to_owned();
             self.fit_pending = true;
+            self.camera_moved_by_user = false;
+            self.last_focus = None;
             self.drag = None;
             self.menu = None;
             self.inline = None;
@@ -201,25 +214,72 @@ impl Canvas {
         let painter = ui.painter().with_clip_rect(viewport);
         painter.rect_filled(viewport, 0.0, theme::BG);
 
+        let measures = self.measure_overlays(ui, viewport, input);
+        let overlays = layout::board_overlays(viewport, &measures);
+
         let mut cards: Vec<Card> = input
             .graph
             .nodes
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
-        if self.fit_pending
-            || (viewport.size() - self.last_size).length() > 1.0 && self.last_size == Vec2::ZERO
-        {
-            self.fit(viewport, &cards);
+
+        let focus_changed = self
+            .last_focus
+            .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);
+        if self.fit_pending || self.last_size == Vec2::ZERO {
+            self.fit(viewport, overlays.focus, &cards);
+        } else if focus_changed {
+            if !self.camera_moved_by_user {
+                self.fit(viewport, overlays.focus, &cards);
+            } else if let Some(prev) = self.last_focus {
+                let delta = (overlays.focus.center() - viewport.min)
+                    - (prev.center() - self.last_viewport.min);
+                self.camera.pan += delta;
+                if let Some(selected_id) = input.selection.first()
+                    && let Some(card) = cards.iter().find(|c| &c.id == selected_id)
+                {
+                    let screen_card = self.screen_camera(viewport).rect(card.rect());
+                    if screen_card.width() <= overlays.focus.width()
+                        && screen_card.height() <= overlays.focus.height()
+                    {
+                        let mut shift = Vec2::ZERO;
+                        if screen_card.left() < overlays.focus.left() {
+                            shift.x = overlays.focus.left() - screen_card.left();
+                        } else if screen_card.right() > overlays.focus.right() {
+                            shift.x = overlays.focus.right() - screen_card.right();
+                        }
+                        if screen_card.top() < overlays.focus.top() {
+                            shift.y = overlays.focus.top() - screen_card.top();
+                        } else if screen_card.bottom() > overlays.focus.bottom() {
+                            shift.y = overlays.focus.bottom() - screen_card.bottom();
+                        }
+                        self.camera.pan += shift;
+                    }
+                }
+            }
         }
         self.last_size = viewport.size();
+        self.last_focus = Some(overlays.focus);
+        self.last_viewport = viewport;
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
-            self.camera.zoom = self.camera.zoom.max(0.85);
+            self.camera.zoom = self
+                .camera
+                .zoom
+                .max(0.85)
+                .min(overlays.focus.width() / card.rect().width())
+                .min(overlays.focus.height() / card.rect().height())
+                .clamp(MIN_ZOOM, MAX_ZOOM);
+            let local_focus_center = overlays.focus.center() - viewport.min;
             self.camera.pan =
-                viewport.size() / 2.0 - card.rect().center().to_vec2() * self.camera.zoom;
+                local_focus_center - card.rect().center().to_vec2() * self.camera.zoom;
+            // Navigation is an explicit camera action: later toolbar measurement
+            // or drawer resizing must preserve the chosen card, not refit all cards.
+            self.camera_moved_by_user = true;
         }
+        self.handle_camera(ui, &background, viewport);
         let origin_offset = viewport.min.to_vec2();
         // Cards are laid out in world space; the camera maps them into the viewport.
         let camera = Camera {
@@ -232,8 +292,8 @@ impl Canvas {
             }
         }
 
-        self.handle_camera(ui, &background, viewport);
-        paint::grid(&painter, viewport, camera);
+        let board_painter = painter.with_clip_rect(overlays.board);
+        paint::grid(&board_painter, overlays.board, camera);
 
         // Wires go under the cards.
         let graph_wires = wires(input.graph);
@@ -251,7 +311,7 @@ impl Canvas {
                 continue;
             };
             paint::wire(
-                &painter,
+                &board_painter,
                 camera.to_screen(start),
                 camera.to_screen(end),
                 wire.kind == WireKind::Order,
@@ -266,13 +326,25 @@ impl Canvas {
         let modifiers = ui.input(|state| state.modifiers);
         let mut clicked_card = false;
 
+        let mut board_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(overlays.board)
+                .layout(*ui.layout()),
+        );
+        board_ui.set_clip_rect(overlays.board);
+
         for card in &cards {
             let rect = camera.rect(card.rect());
-            if !rect.intersects(viewport) {
+            if !rect.intersects(overlays.board) {
                 continue;
             }
-            let id = ui.id().with(("card", &card.id));
-            let response = ui.interact(rect, id, Sense::click_and_drag());
+            let clipped_card_rect = rect.intersect(overlays.board);
+            let id = board_ui.id().with(("card", &card.id));
+            let response = board_ui.interact(clipped_card_rect, id, Sense::click_and_drag());
+            let a11y_label = format!("{} ({})", card.name, card.caption);
+            response.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+            });
             if response.clicked() {
                 clicked_card = true;
                 self.menu = None;
@@ -337,17 +409,17 @@ impl Canvas {
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
             paint::card(
-                &painter,
+                &board_painter,
                 card,
                 camera,
                 selection.contains(card.id.as_str()),
                 step,
             );
-            self.card_controls(ui, card, camera, input, &mut commands);
+            self.card_controls(&mut board_ui, card, camera, input, &mut commands);
         }
 
-        self.handle_wire_drag(ui, &cards, camera, input, &mut commands);
-        self.handle_box_selection(ui, &background, &cards, camera, input, &mut commands);
+        self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
+        self.handle_box_selection(&board_ui, &background, &cards, camera, input, &mut commands);
 
         if background.clicked() && !clicked_card {
             self.menu = None;
@@ -376,17 +448,43 @@ impl Canvas {
             self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
         }
 
-        self.handle_drop(ui, viewport, &cards, camera, &mut commands);
-        self.handle_keys(ui, &background, input, &mut commands);
+        self.handle_drop(&board_ui, overlays.board, &cards, camera, &mut commands);
+        self.handle_keys(ui, input, &mut commands);
 
-        paint::overlay_labels(&painter, viewport, input.graph);
-        self.toolbar(ui, viewport, input, &mut commands);
-        self.zoom_controls(ui, viewport, &cards);
-        paint::minimap(&painter, viewport, &cards, camera, &selection);
-        if input.graph.nodes.is_empty() {
-            self.empty_state(ui, viewport, &mut commands);
+        paint::overlay_chrome(&painter, &overlays, input.graph);
+        self.toolbar(ui, viewport, &overlays, input, &mut commands);
+        self.zoom_controls(ui, viewport, &overlays, &cards);
+        if let Some((mm_inner, bounds, scale)) = paint::minimap(
+            &painter,
+            overlays.minimap,
+            overlays.board,
+            &cards,
+            camera,
+            &selection,
+        ) && let Some(mm_rect) = overlays.minimap
+        {
+            let mm_response = ui
+                .interact(
+                    mm_rect,
+                    ui.id().with("board-minimap"),
+                    Sense::click_and_drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Click or drag to pan the board");
+            if (mm_response.clicked() || mm_response.dragged())
+                && let Some(pos) = mm_response.interact_pointer_pos()
+                && scale > 0.0
+            {
+                let world_target = bounds.min + (pos - mm_inner.min) / scale;
+                let local_focus_center = overlays.focus.center() - viewport.min;
+                self.camera.pan = local_focus_center - world_target.to_vec2() * self.camera.zoom;
+                self.camera_moved_by_user = true;
+            }
         }
-        self.error_banner(ui, viewport);
+        if input.graph.nodes.is_empty() {
+            self.empty_state(ui, overlays.board, &mut commands);
+        }
+        self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
             match menu.show(ui.ctx(), input.graph, input.project) {
                 menu::Outcome::Open => {}
@@ -400,8 +498,60 @@ impl Canvas {
         commands
     }
 
-    fn fit(&mut self, viewport: Rect, cards: &[Card]) {
+    fn measure_overlays(
+        &self,
+        ui: &egui::Ui,
+        viewport: Rect,
+        input: &Input<'_>,
+    ) -> OverlayMeasures {
+        let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
+        let toolbar_width = 96.0
+            + if input.can_paste { 56.0 } else { 0.0 }
+            + if has_selection { 108.0 } else { 0.0 };
+        let toolbar_size = ui
+            .ctx()
+            .data(|data| {
+                data.get_temp(ui.id().with((
+                    "toolbar-size",
+                    input.selection.len(),
+                    !self.selected_wires.is_empty(),
+                    input.can_paste,
+                )))
+            })
+            .unwrap_or(vec2(toolbar_width, 30.0));
+        let wrap_width = layout::banner_wrap_width(viewport.width(), toolbar_size.x);
+        let mut job = egui::text::LayoutJob::simple(
+            paint::mode_line_text(input.graph).to_owned(),
+            FontId::proportional(10.0),
+            theme::MUTED,
+            wrap_width,
+        );
+        job.wrap.break_anywhere = false;
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        let banner_height = 17.0 + galley.size().y;
+
+        let hint_galley = ui.fonts_mut(|fonts| {
+            fonts.layout_no_wrap(
+                paint::SHORTCUT_HINT_TEXT.to_owned(),
+                FontId::proportional(10.0),
+                theme::MUTED,
+            )
+        });
+        let error_size = self.error.as_ref().map(|_| vec2(320.0, 32.0));
+        OverlayMeasures {
+            banner_height,
+            toolbar_size,
+            zoom_size: vec2(88.0, 26.0),
+            hint_width: hint_galley.size().x,
+            shortcuts_badge_width: 78.0,
+            error_size,
+        }
+    }
+
+    fn fit(&mut self, viewport: Rect, focus: Rect, cards: &[Card]) {
         self.fit_pending = false;
+        self.camera_moved_by_user = false;
+        let local_focus_center = focus.center() - viewport.min;
         let Some(bounds) = cards.iter().map(Card::rect).reduce(Rect::union) else {
             self.camera = Camera {
                 zoom: 1.0,
@@ -409,14 +559,12 @@ impl Canvas {
             };
             return;
         };
-        let space = viewport.shrink2(vec2(50.0, 60.0));
-        let zoom = (space.width() / bounds.width())
-            .min(space.height() / bounds.height())
+        let zoom = (focus.width().max(60.0) / bounds.width().max(1.0))
+            .min(focus.height().max(60.0) / bounds.height().max(1.0))
             .clamp(MIN_ZOOM, 1.0);
-        let center = (viewport.size() / 2.0).to_pos2();
         self.camera = Camera {
             zoom,
-            pan: center.to_vec2() - bounds.center().to_vec2() * zoom,
+            pan: local_focus_center - bounds.center().to_vec2() * zoom,
         };
     }
 
@@ -425,6 +573,7 @@ impl Canvas {
         self.camera.zoom = (before * factor).clamp(MIN_ZOOM, MAX_ZOOM);
         let local = screen - viewport.min;
         self.camera.pan = local - (local - self.camera.pan) * (self.camera.zoom / before);
+        self.camera_moved_by_user = true;
     }
 
     fn handle_camera(&mut self, ui: &egui::Ui, background: &egui::Response, viewport: Rect) {
@@ -440,14 +589,16 @@ impl Canvas {
                 && let Some(pointer) = pointer
             {
                 self.zoom_at(viewport, pointer, zoom);
-            } else {
+            } else if scroll != Vec2::ZERO {
                 self.camera.pan += scroll;
+                self.camera_moved_by_user = true;
             }
         }
         if background.dragged_by(PointerButton::Middle)
             || background.dragged_by(PointerButton::Secondary)
         {
             self.camera.pan += background.drag_delta();
+            self.camera_moved_by_user = true;
         }
     }
 
@@ -833,16 +984,10 @@ impl Canvas {
         }
     }
 
-    fn handle_keys(
-        &mut self,
-        ui: &egui::Ui,
-        background: &egui::Response,
-        input: &Input<'_>,
-        commands: &mut Vec<Command>,
-    ) {
+    fn handle_keys(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
         // Keys belong to text fields while one has focus.
         if ui.ctx().egui_wants_keyboard_input()
-            || !(background.contains_pointer() || background.has_focus())
+            || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
         {
             return;
         }
@@ -864,13 +1009,13 @@ impl Canvas {
         &mut self,
         ui: &mut egui::Ui,
         viewport: Rect,
+        overlays: &BoardOverlays,
         input: &Input<'_>,
         commands: &mut Vec<Command>,
     ) {
         let has_selection = !input.selection.is_empty();
-        let anchor = viewport.right_top() + vec2(-14.0, 14.0);
-        egui::Area::new(ui.id().with("board-toolbar"))
-            .fixed_pos(anchor)
+        let measured = egui::Area::new(ui.id().with("board-toolbar"))
+            .fixed_pos(overlays.toolbar.right_top())
             .pivot(Align2::RIGHT_TOP)
             .fade_in(false)
             .show(ui.ctx(), |ui| {
@@ -946,6 +1091,17 @@ impl Canvas {
                         });
                     });
             });
+        let key = ui.id().with((
+            "toolbar-size",
+            input.selection.len(),
+            !self.selected_wires.is_empty(),
+            input.can_paste,
+        ));
+        let size = measured.response.rect.size();
+        if ui.ctx().data(|data| data.get_temp::<Vec2>(key)) != Some(size) {
+            ui.ctx().data_mut(|data| data.insert_temp(key, size));
+            ui.ctx().request_repaint();
+        }
     }
 
     fn screen_camera(&self, viewport: Rect) -> Camera {
@@ -955,26 +1111,26 @@ impl Canvas {
         }
     }
 
-    fn zoom_controls(&mut self, ui: &mut egui::Ui, viewport: Rect, cards: &[Card]) {
+    fn zoom_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        overlays: &BoardOverlays,
+        cards: &[Card],
+    ) {
         egui::Area::new(ui.id().with("board-zoom"))
-            .fixed_pos(viewport.left_bottom() + vec2(14.0, -14.0))
-            .pivot(Align2::LEFT_BOTTOM)
+            .fixed_pos(overlays.zoom_controls.left_center())
+            .pivot(Align2::LEFT_CENTER)
             .fade_in(false)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
                     .fill(theme::WHITE)
                     .stroke(Stroke::new(1.0, theme::BORDER))
                     .corner_radius(6)
+                    .inner_margin(egui::Margin::symmetric(4, 2))
                     .show(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            let center = viewport.center();
-                            if ui
-                                .add(egui::Button::new("+").frame(false))
-                                .on_hover_text("Zoom in")
-                                .clicked()
-                            {
-                                self.zoom_at(viewport, center, 1.2);
-                            }
+                        ui.horizontal(|ui| {
+                            let center = overlays.focus.center();
                             if ui
                                 .add(egui::Button::new("−").frame(false))
                                 .on_hover_text("Zoom out")
@@ -983,15 +1139,39 @@ impl Canvas {
                                 self.zoom_at(viewport, center, 1.0 / 1.2);
                             }
                             if ui
+                                .add(egui::Button::new("+").frame(false))
+                                .on_hover_text("Zoom in")
+                                .clicked()
+                            {
+                                self.zoom_at(viewport, center, 1.2);
+                            }
+                            if ui
                                 .add(egui::Button::new("⛶").frame(false))
                                 .on_hover_text("Fit the view")
                                 .clicked()
                             {
-                                self.fit(viewport, cards);
+                                self.fit(viewport, overlays.focus, cards);
                             }
                         });
                     });
             });
+        if let HintPlacement::Tooltip(badge_rect) = overlays.hint {
+            egui::Area::new(ui.id().with("board-shortcuts-hint"))
+                .fixed_pos(badge_rect.right_center())
+                .pivot(Align2::RIGHT_CENTER)
+                .fade_in(false)
+                .show(ui.ctx(), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("Shortcuts")
+                                .size(10.0)
+                                .color(theme::MUTED),
+                        )
+                        .sense(Sense::hover()),
+                    )
+                    .on_hover_text(paint::SHORTCUT_HINT_TEXT);
+                });
+        }
     }
 
     fn empty_state(&mut self, ui: &mut egui::Ui, viewport: Rect, commands: &mut Vec<Command>) {
@@ -1020,12 +1200,17 @@ impl Canvas {
         });
     }
 
-    fn error_banner(&mut self, ui: &mut egui::Ui, viewport: Rect) {
+    fn error_banner(&mut self, ui: &mut egui::Ui, overlays: &BoardOverlays) {
         let Some(message) = self.error.clone() else {
             return;
         };
+        let pos = overlays
+            .error_banner
+            .map_or(overlays.board.center_top() + vec2(0.0, 24.0), |r| {
+                r.center_top()
+            });
         egui::Area::new(ui.id().with("board-error"))
-            .fixed_pos(viewport.center_top() + vec2(0.0, 60.0))
+            .fixed_pos(pos)
             .pivot(Align2::CENTER_TOP)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
@@ -1113,4 +1298,84 @@ fn hit_wire(
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, id)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adding_a_block_uses_the_focus_center_with_viewport_offsets() {
+        let canvas = Canvas {
+            camera: Camera {
+                zoom: 0.7,
+                pan: vec2(12.0, -35.0),
+            },
+            last_viewport: Rect::from_min_size(egui::pos2(235.0, 220.0), vec2(800.0, 500.0)),
+            last_focus: Some(Rect::from_min_size(
+                egui::pos2(259.0, 290.0),
+                vec2(600.0, 340.0),
+            )),
+            ..Default::default()
+        };
+        let position = canvas.visible_center();
+        let world_center = egui::pos2(
+            position.x as f32 + layout::WIDTH / 2.0,
+            position.y as f32 + 80.0,
+        );
+        let actual = canvas
+            .screen_camera(canvas.last_viewport)
+            .to_screen(world_center);
+        assert!(actual.distance(canvas.last_focus.unwrap().center()) < 0.01);
+    }
+    #[test]
+    fn navigator_reveal_survives_toolbar_and_drawer_layout_settling() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let project = apiforge_core::demos::shop_project();
+        let graph = &project.scenarios[0].graph;
+        let target = &graph.nodes[0];
+        let mut canvas = Canvas::default();
+        let mut selection = Vec::new();
+        for frame in 0..8 {
+            if frame == 3 {
+                selection = vec![target.id.clone()];
+                canvas.reveal(target.id.clone());
+            }
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        Pos2::ZERO,
+                        vec2(if frame < 3 { 1200.0 } else { 850.0 }, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        canvas.show(
+                            ui,
+                            &Input {
+                                graph,
+                                reference_graph: graph,
+                                project: &project,
+                                selection: &selection,
+                                steps: None,
+                                can_paste: false,
+                                context: "test",
+                            },
+                        );
+                    });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        let card = Card::build(target, graph, &project);
+        let actual = canvas.screen_camera(canvas.last_viewport).rect(card.rect());
+        let focus = canvas.last_focus.unwrap();
+        assert!(
+            actual.center().distance(focus.center()) < 1.0,
+            "{actual:?} outside center {focus:?}"
+        );
+        assert!(focus.expand(0.1).contains_rect(actual));
+    }
 }

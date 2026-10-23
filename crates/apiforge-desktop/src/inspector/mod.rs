@@ -59,11 +59,19 @@ enum Tab {
     Outputs,
 }
 
+#[derive(Clone, Debug)]
+struct ResponseChoiceState {
+    source_id: String,
+    port: String,
+    search: String,
+    focus_search: bool,
+}
+
 pub struct Inspector {
     node_id: String,
     tab: Tab,
     new_input: String,
-    choosing_response: Option<(String, String)>,
+    choosing_response: Option<ResponseChoiceState>,
 }
 
 impl Default for Inspector {
@@ -153,7 +161,13 @@ impl Inspector {
                     .on_hover_text("Bind this variable to a field of a request's response")
                     .clicked()
                 {
-                    self.choosing_response = Some(initial_response_choice(context));
+                    let (source_id, port) = initial_response_choice(context);
+                    self.choosing_response = Some(ResponseChoiceState {
+                        source_id,
+                        port,
+                        search: String::new(),
+                        focus_search: true,
+                    });
                 }
                 widgets::hint(
                     ui,
@@ -276,15 +290,16 @@ impl Inspector {
         {
             return;
         }
-        ui.add_space(8.0);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            widgets::section(ui, "Arguments");
+            widgets::section_inline(ui, "Arguments");
             ui.label(
                 RichText::new(ports.len().to_string())
                     .size(11.0)
                     .color(theme::MUTED),
             );
         });
+        ui.add_space(2.0);
         let binding_context = binding::Context {
             node: context.node,
             graph: context.graph,
@@ -376,7 +391,7 @@ impl Inspector {
 
     /// The variable's "take the value from a response" dialog.
     fn response_choice(&mut self, ctx: &egui::Context, context: &Context<'_>, node: &mut Node) {
-        let Some((source_id, port)) = &mut self.choosing_response else {
+        let Some(state) = &mut self.choosing_response else {
             return;
         };
         let sources: Vec<&Node> = context
@@ -392,14 +407,16 @@ impl Inspector {
             .collect();
         let mut close = false;
         let mut chosen = None;
-        egui::Modal::new(Id::new("variable-response")).show(ctx, |ui| {
-            ui.set_width(520.0);
+        crate::dialogs::centered_modal(Id::new("variable-response"), ctx).show(ctx, |ui| {
+            ui.set_width(520.0_f32.min(ctx.content_rect().width() - 48.0));
             ui.label(
                 RichText::new("Take the value from a response")
                     .size(16.0)
                     .family(theme::bold_family()),
             );
-            let source = sources.iter().find(|candidate| &candidate.id == source_id);
+            let source = sources
+                .iter()
+                .find(|candidate| candidate.id == state.source_id);
             widgets::field_label(ui, "Request or component");
             egui::ComboBox::from_id_salt("variable-response-source")
                 .selected_text(source.map_or("No request available", |node| node.name.as_str()))
@@ -407,73 +424,71 @@ impl Inspector {
                 .show_ui(ui, |ui| {
                     for candidate in &sources {
                         if ui
-                            .selectable_label(&candidate.id == source_id, &candidate.name)
+                            .selectable_label(candidate.id == state.source_id, &candidate.name)
                             .clicked()
                         {
-                            *source_id = candidate.id.clone();
-                            *port = output_ports(candidate, context.project)
+                            state.source_id = candidate.id.clone();
+                            state.port = output_ports(candidate, context.project)
                                 .first()
                                 .map_or_else(|| "body".into(), |port| port.name.clone());
                         }
                     }
                 });
-            if let Some(source) = sources.iter().find(|candidate| &candidate.id == source_id) {
+            let mut visible_count = None;
+            if let Some(source) = sources
+                .iter()
+                .find(|candidate| candidate.id == state.source_id)
+            {
                 let outputs = output_ports(source, context.project);
                 widgets::field_label(ui, "Output");
                 egui::ComboBox::from_id_salt("variable-response-port")
-                    .selected_text(port.as_str())
+                    .selected_text(state.port.as_str())
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         for output in &outputs {
-                            ui.selectable_value(port, output.name.clone(), output.display_name());
+                            ui.selectable_value(
+                                &mut state.port,
+                                output.name.clone(),
+                                output.display_name(),
+                            );
                         }
                     });
-                let data = response::source(source, port, context.project, context.run);
+                let data = response::source(source, &state.port, context.project, context.run);
                 widgets::hint(ui, &data.origin);
-                egui::ScrollArea::vertical()
-                    .max_height(320.0)
-                    .show(ui, |ui| {
-                        for field in response::fields(data.value.as_ref()) {
-                            let label = if field.path.is_empty() {
-                                format!("Whole {port}")
-                            } else {
-                                field.path.clone()
-                            };
-                            let text = format!(
-                                "{label}    {} · {}",
-                                response::type_label(field.value_type),
-                                field.preview
-                            );
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(labels::truncate(&text, 80)).monospace(),
-                                    )
-                                    .frame(false),
-                                )
-                                .clicked()
-                            {
-                                chosen = Some(Binding::reference(
-                                    source.id.clone(),
-                                    port.clone(),
-                                    field.path.clone(),
-                                ));
-                            }
-                        }
-                        if data.value.is_none() {
-                            widgets::hint(
-                                ui,
-                                "Run the request or add a sample response to see its fields.",
-                            );
-                        }
-                    });
+                let fields = response::fields(data.value.as_ref());
+                let focus_search = std::mem::replace(&mut state.focus_search, false);
+                let (picked, count) = binding::searchable_field_list(
+                    ui,
+                    &mut state.search,
+                    focus_search,
+                    &fields,
+                    data.value.is_some(),
+                    &state.port,
+                    (ctx.content_rect().height() - 280.0).clamp(60.0, 320.0),
+                );
+                visible_count = Some(count);
+                if let Some(path) = picked {
+                    chosen = Some(Binding::reference(
+                        source.id.clone(),
+                        state.port.clone(),
+                        path,
+                    ));
+                }
             } else {
                 widgets::hint(ui, "Add a request that does not depend on this variable.");
             }
             ui.separator();
-            if ui.button("Cancel").clicked()
-                || ui.input(|input| input.key_pressed(egui::Key::Escape))
-            {
+            ui.horizontal(|ui| {
+                if let Some(count) = visible_count {
+                    widgets::hint(ui, format!("{count} fields"));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                 close = true;
             }
         });
@@ -878,6 +893,7 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
     }
     let mut predicates = node.config.predicates.clone().unwrap_or_default();
     let mut remove = None;
+    let mut dropped_on_path = None;
     for (index, condition) in predicates.iter_mut().enumerate() {
         let row = id.with(("condition", index));
         egui::Frame::new()
@@ -901,15 +917,13 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
                 widgets::field_label(ui, "Expected argument");
                 name_combo(ui, row.with("expected"), &mut condition.expected, &ports);
                 let mut field = condition.path.clone().unwrap_or_default();
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut field)
-                            .hint_text("Path (optional)")
-                            .desired_width(f32::INFINITY),
-                    )
-                    .changed()
-                {
-                    condition.path = Some(field);
+                let event =
+                    fields::variable_text(ui, row.with("path"), &mut field, "Path (optional)");
+                if event.changed {
+                    condition.path = Some(field.clone());
+                }
+                if let Some((variable, start, end)) = event.dropped {
+                    dropped_on_path = Some((index, field, variable, start, end));
                 }
                 if ui.small_button("Remove condition").clicked() {
                     remove = Some(index);
@@ -929,6 +943,21 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
     }
     if node.config.predicates.is_some() || !predicates.is_empty() {
         node.config.predicates = Some(predicates);
+    }
+    if let Some((index, current_path, variable, start, end)) = dropped_on_path {
+        *node = bind_variable_text(
+            node,
+            &variable,
+            &fields::selection(&current_path, start, end),
+            |mut next, text| {
+                if let Some(list) = &mut next.config.predicates
+                    && let Some(item) = list.get_mut(index)
+                {
+                    item.path = Some(text);
+                }
+                next
+            },
+        );
     }
     widgets::hint(
         ui,

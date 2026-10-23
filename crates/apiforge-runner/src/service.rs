@@ -9,16 +9,16 @@ use crate::{
     engine::run_validated,
     http::HttpTransport,
     request::{RunError, RunLimits, RunOptions, RunRequest, validate},
-    support::SeededRandom,
+    support::{SeededRandom, rfc3339_millis},
 };
-use apiforge_core::run::RunResult;
+use apiforge_core::run::{RunResult, RunStatus};
 use std::{
     io,
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
@@ -87,6 +87,22 @@ impl RunnerService {
         let guard = ActiveGuard(Arc::clone(&self.active));
         let task_shared = Arc::clone(&shared);
         let notify = Arc::clone(&self.notify);
+        let fallback = RunResult {
+            id: apiforge_core::ids::new_id("run"),
+            scenario_id: request.scenario_id.clone(),
+            mode: request.mode,
+            started_at: rfc3339_millis(SystemTime::now()),
+            finished_at: None,
+            status: RunStatus::Failed,
+            steps: Vec::new(),
+            diagnostic: request.target_node_id.is_some() || request.single_node_id.is_some(),
+            snapshot: None,
+            error: Some(
+                "Internal runner error: the worker terminated before finishing the run.".to_owned(),
+            ),
+            notice: None,
+        };
+        let finish = FinishGuard::new(Arc::clone(&shared), Arc::clone(&notify), fallback);
         runtime.spawn(async move {
             let _guard = guard;
             let publish = |run: &RunResult| {
@@ -94,12 +110,10 @@ impl RunnerService {
                 notify();
             };
             let cancel = task_shared.cancel.clone();
-            let result = run_validated(request, options, cancel, publish).await;
-            if let Ok(run) = result {
-                task_shared.publish(run);
+            match run_validated(request, options, cancel, publish).await {
+                Ok(run) => finish.complete(run),
+                Err(error) => finish.fail_with(format!("Internal runner error: {error}")),
             }
-            task_shared.finished.store(true, Ordering::Release);
-            notify();
         });
         Ok(RunHandle { shared })
     }
@@ -149,14 +163,88 @@ impl Drop for RunnerService {
 /// State shared between a run task and its handle.
 #[derive(Default)]
 struct Shared {
-    latest: Mutex<Option<RunResult>>,
+    latest: Mutex<Snapshot>,
     cancel: CancellationToken,
     finished: AtomicBool,
 }
 
+/// Retain the last redacted snapshot even after the UI consumes its notification.
+#[derive(Default)]
+struct Snapshot {
+    report: Option<RunResult>,
+    unread: bool,
+}
+
 impl Shared {
     fn publish(&self, run: RunResult) {
-        *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(run);
+        let mut slot = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        slot.report = Some(run);
+        slot.unread = true;
+    }
+
+    fn publish_terminal_failure(&self, mut fallback: RunResult) {
+        let now = rfc3339_millis(SystemTime::now());
+        let mut slot = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        match slot.report.as_mut() {
+            Some(existing) if existing.status == RunStatus::Running => {
+                existing.status = RunStatus::Failed;
+                existing.finished_at.get_or_insert(now);
+                existing.error = fallback.error;
+            }
+            None => {
+                fallback.finished_at.get_or_insert(now);
+                slot.report = Some(fallback);
+            }
+            Some(_) => {}
+        }
+        slot.unread = true;
+    }
+}
+
+/// Ensures `finished` is marked and a terminal `RunResult` is published even if the
+/// background worker task unwinds on a panic or is aborted.
+struct FinishGuard {
+    shared: Arc<Shared>,
+    notify: Notify,
+    fallback: Option<RunResult>,
+}
+
+impl FinishGuard {
+    fn new(shared: Arc<Shared>, notify: Notify, fallback: RunResult) -> Self {
+        Self {
+            shared,
+            notify,
+            fallback: Some(fallback),
+        }
+    }
+
+    fn complete(mut self, run: RunResult) {
+        self.fallback = None;
+        self.shared.publish(run);
+        self.shared.finished.store(true, Ordering::Release);
+        (self.notify)();
+    }
+
+    fn fail_with(mut self, message: String) {
+        if let Some(mut fallback) = self.fallback.take() {
+            fallback.error = Some(message);
+            self.shared.publish_terminal_failure(fallback);
+        }
+        self.shared.finished.store(true, Ordering::Release);
+        (self.notify)();
+    }
+}
+
+impl Drop for FinishGuard {
+    fn drop(&mut self) {
+        if let Some(mut fallback) = self.fallback.take() {
+            if std::thread::panicking() {
+                fallback.error = Some("Internal runner error: worker task panicked.".to_owned());
+            }
+            self.shared.publish_terminal_failure(fallback);
+            self.shared.finished.store(true, Ordering::Release);
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (self.notify)()));
+        }
     }
 }
 
@@ -177,11 +265,15 @@ pub struct RunHandle {
 impl RunHandle {
     /// The newest redacted snapshot, if one arrived since the previous call.
     pub fn latest(&self) -> Option<RunResult> {
-        self.shared
+        let mut slot = self
+            .shared
             .latest
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !std::mem::take(&mut slot.unread) {
+            return None;
+        }
+        slot.report.clone()
     }
 
     /// Requests cancellation of the main phase; cleanup still runs.
@@ -193,5 +285,98 @@ impl RunHandle {
     /// [`RunHandle::latest`] once this is true (unless it was already taken).
     pub fn is_finished(&self) -> bool {
         self.shared.finished.load(Ordering::Acquire)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apiforge_core::run::RunMode;
+
+    #[test]
+    fn finish_guard_marks_run_failed_and_notifies_on_panic() {
+        let shared = Arc::new(Shared::default());
+        let notified = Arc::new(AtomicBool::new(false));
+        let notified_clone = Arc::clone(&notified);
+        let notify: Notify = Arc::new(move || {
+            notified_clone.store(true, Ordering::SeqCst);
+        });
+        let fallback = RunResult {
+            id: "run-1".into(),
+            scenario_id: "scen-1".into(),
+            mode: RunMode::Simulation,
+            started_at: "2026-10-20T00:00:00.000Z".into(),
+            finished_at: None,
+            status: RunStatus::Failed,
+            steps: Vec::new(),
+            diagnostic: false,
+            snapshot: None,
+            error: Some("Internal runner error".into()),
+            notice: None,
+        };
+        let shared_for_panic = Arc::clone(&shared);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _finish = FinishGuard::new(shared_for_panic, notify, fallback);
+            panic!("simulated worker panic");
+        }));
+        assert!(result.is_err());
+        let handle = RunHandle { shared };
+        assert!(handle.is_finished());
+        assert!(notified.load(Ordering::SeqCst));
+        let report = handle
+            .latest()
+            .expect("terminal failure report is published");
+        assert_eq!(report.status, RunStatus::Failed);
+        assert!(
+            report
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("panicked")
+        );
+    }
+    #[test]
+    fn worker_panic_after_ui_poll_preserves_run_identity_and_releases_slot() {
+        use std::sync::mpsc;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let first = AtomicBool::new(true);
+        let notify: Notify = Arc::new(move || {
+            if first.swap(false, Ordering::SeqCst) {
+                entered_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                panic!("injected worker observer panic");
+            }
+        });
+        let service = RunnerService::new(notify).unwrap();
+        let project = apiforge_core::demos::shop_project();
+        let request = RunRequest::new(
+            project.clone(),
+            project.scenarios[0].id.clone(),
+            RunMode::Simulation,
+        );
+        let handle = service.start(request).unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let first = handle.latest().unwrap();
+        assert_eq!(first.status, RunStatus::Running);
+        assert!(handle.latest().is_none());
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !handle.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(handle.is_finished());
+        let failed = handle.latest().unwrap();
+        assert_eq!(failed.id, first.id);
+        assert!(!failed.id.is_empty());
+        assert_eq!(failed.status, RunStatus::Failed);
+        assert!(failed.finished_at.is_some());
+        assert!(failed.error.unwrap().contains("panicked"));
+        service.shutdown(Duration::from_secs(1));
     }
 }

@@ -230,6 +230,9 @@ impl eframe::App for Window {
     }
 }
 
+/// Minimum logical window size: 1920×1080 at 200 % scaling (G6).
+const MIN_WINDOW_SIZE: [f32; 2] = [960.0, 540.0];
+
 fn run_window(source: app::Source, probe: Probe) -> ExitCode {
     let automated = !matches!(probe, Probe::None);
     let completed = Arc::new(AtomicBool::new(!automated));
@@ -239,7 +242,7 @@ fn run_window(source: app::Source, probe: Probe) -> ExitCode {
             .with_title("API Forge")
             .with_app_id("apiforge")
             .with_inner_size([1600.0, 1000.0])
-            .with_min_inner_size([1100.0, 680.0]),
+            .with_min_inner_size(MIN_WINDOW_SIZE),
         ..Default::default()
     };
     let started = eframe::run_native(

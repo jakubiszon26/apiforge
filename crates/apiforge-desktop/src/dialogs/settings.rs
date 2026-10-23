@@ -7,7 +7,11 @@
 
 use super::{Chrome, Outcome, autofocus, json_text, parse_json};
 use crate::widgets;
-use apiforge_core::{format::Contract, js, model::ErrorPolicy};
+use apiforge_core::{
+    format::{Contract, Project},
+    js,
+    model::ErrorPolicy,
+};
 use eframe::egui::{self, Ui};
 use indexmap::IndexMap;
 use serde_json::Value;
@@ -22,6 +26,67 @@ pub struct SettingsChange {
     pub error_policy: ErrorPolicy,
     pub parameters: IndexMap<String, Value>,
     pub contracts: Vec<Contract>,
+}
+
+impl SettingsChange {
+    /// Remove only assignments to contracts explicitly deleted in this edit.
+    pub fn apply(self, project: &mut Project) {
+        let removed: std::collections::HashSet<_> = project
+            .contracts
+            .iter()
+            .filter(|old| !self.contracts.iter().any(|new| new.id == old.id))
+            .map(|old| old.id.clone())
+            .collect();
+        let clear = |id: &mut Option<String>| {
+            if id.as_ref().is_some_and(|id| removed.contains(id)) {
+                *id = None;
+            }
+        };
+        let clear_graph = |graph: &mut apiforge_core::format::Graph| {
+            for node in &mut graph.nodes {
+                clear(&mut node.config.contract_id);
+                for ports in [
+                    &mut node.config.input_ports,
+                    &mut node.config.template_inputs,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    for port in ports {
+                        clear(&mut port.contract_id);
+                    }
+                }
+            }
+        };
+        for scenario in &mut project.scenarios {
+            clear_graph(&mut scenario.graph);
+            clear_graph(&mut scenario.cleanup);
+        }
+        for component in &mut project.components {
+            clear_graph(&mut component.graph);
+            for port in &mut component.inputs {
+                clear(&mut port.contract_id);
+            }
+            for port in &mut component.outputs {
+                clear(&mut port.contract_id);
+            }
+            if let Some(action) = &mut component.action {
+                clear(&mut action.contract_id);
+            }
+        }
+        project.name = self.project_name;
+        project.contracts = self.contracts;
+        if let Some(scenario) = project
+            .scenarios
+            .iter_mut()
+            .find(|s| s.id == self.scenario_id)
+        {
+            scenario.name = self.scenario_name;
+            scenario.description = self.description;
+            scenario.error_policy = self.error_policy;
+            scenario.parameters = self.parameters;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +135,16 @@ impl Problems {
 }
 
 fn required_name(name: &str) -> Option<&'static str> {
-    js::trim(name).is_empty().then_some("Enter a name.")
+    let trimmed = js::trim(name);
+    if trimmed.is_empty() {
+        Some("Enter a name.")
+    } else if super::RESERVED_NAMES.contains(&trimmed) {
+        Some("This name is reserved. Choose another one.")
+    } else if js::utf16_len(trimmed) > super::NAME_LIMIT {
+        Some("Use at most 200 characters.")
+    } else {
+        None
+    }
 }
 
 /// Scenario parameters: a JSON object whose keys the runner can use.
@@ -141,7 +215,22 @@ impl SettingsDialog {
             contracts: self
                 .contracts
                 .iter()
-                .map(|row| (required_name(&row.name), parse_json(&row.sample).err()))
+                .map(|row| {
+                    let duplicate = self
+                        .contracts
+                        .iter()
+                        .filter(|other| {
+                            js::trim(&other.name).to_lowercase()
+                                == js::trim(&row.name).to_lowercase()
+                        })
+                        .count()
+                        > 1;
+                    (
+                        required_name(&row.name)
+                            .or(duplicate.then_some("This name is already used.")),
+                        parse_json(&row.sample).err(),
+                    )
+                })
                 .collect(),
         }
     }
@@ -269,20 +358,39 @@ impl SettingsDialog {
             ui.add_space(4.0);
             widgets::hint(ui, "No contracts yet.");
         }
+        widgets::hint(
+            ui,
+            "Deleting a contract clears its assignments from steps and components.",
+        );
+        let mut remove = None;
         for (index, row) in self.contracts.iter_mut().enumerate() {
             let (name_error, sample_error) =
                 problems.contracts.get(index).cloned().unwrap_or_default();
             ui.push_id(("contract", row.id.as_str()), |ui| {
                 ui.add_space(6.0);
                 ui.separator();
+                ui.horizontal(|ui| {
+                    widgets::hint(ui, format!("ID: {}", row.id));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(widgets::icon_button("✕"))
+                            .on_hover_text("Remove contract")
+                            .clicked()
+                        {
+                            remove = Some(index);
+                        }
+                    });
+                });
                 super::labelled_field(ui, "Contract name", &mut row.name, "e.g. Cart", name_error);
-                widgets::hint(ui, format!("ID: {}", row.id));
                 widgets::field_label(ui, "Sample structure");
                 super::json_field(ui, &mut row.sample, 4, sample_error.is_some());
                 if let Some(error) = sample_error {
                     widgets::field_error(ui, error);
                 }
             });
+        }
+        if let Some(index) = remove {
+            self.contracts.remove(index);
         }
         ui.add_space(8.0);
         if ui.button("+ Add contract").clicked() {
@@ -329,7 +437,7 @@ mod tests {
         dialog.error_policy = ErrorPolicy::Stop;
         dialog.contracts.push(ContractRow {
             id: "contract-new".into(),
-            name: " Cart ".into(),
+            name: " New cart ".into(),
             sample: "{\"total\": 0}".into(),
         });
         let change = dialog.result().expect("valid");
@@ -340,7 +448,7 @@ mod tests {
         let added = change.contracts.last().unwrap();
         assert_eq!(
             (added.name.as_str(), &added.sample),
-            ("Cart", &json!({"total": 0}))
+            ("New cart", &json!({"total": 0}))
         );
         assert_eq!(change.contracts.len(), project.contracts.len() + 1);
     }
@@ -363,6 +471,42 @@ mod tests {
     }
 
     #[test]
+    fn reserved_and_overlong_contract_names_are_rejected_and_contracts_can_be_removed() {
+        let project = demos::shop_project();
+        let mut dialog = SettingsDialog::new(&project, &project.scenarios[0].id);
+        let initial_len = dialog.contracts.len();
+        assert!(initial_len >= 1);
+        dialog.contracts.push(ContractRow {
+            id: "contract-reserved".into(),
+            name: "  __proto__  ".into(),
+            sample: "{}".into(),
+        });
+        let problems = dialog.problems();
+        assert!(problems.contracts_invalid());
+        assert_eq!(
+            problems.contracts.last().unwrap().0,
+            Some("This name is reserved. Choose another one.")
+        );
+        assert!(dialog.result().is_none());
+
+        dialog.contracts.last_mut().unwrap().name = "x".repeat(201);
+        let problems = dialog.problems();
+        assert_eq!(
+            problems.contracts.last().unwrap().0,
+            Some("Use at most 200 characters.")
+        );
+        assert!(dialog.result().is_none());
+
+        // Removing the invalid contract restores validity; removing an existing contract shrinks the list.
+        dialog.contracts.pop();
+        dialog.contracts.remove(0);
+        let change = dialog
+            .result()
+            .expect("valid after removing invalid contract");
+        assert_eq!(change.contracts.len(), initial_len - 1);
+    }
+
+    #[test]
     fn an_unchanged_dialog_applies_the_current_settings() {
         for project in demos::demo_projects() {
             let mut dialog = SettingsDialog::new(&project, &project.scenarios[0].id);
@@ -380,5 +524,67 @@ mod tests {
             outcome = dialog.show(ctx);
         });
         assert_eq!(outcome, Outcome::Cancelled);
+    }
+    #[test]
+    fn contract_names_reject_case_and_whitespace_duplicates() {
+        let project = demos::shop_project();
+        let mut dialog = SettingsDialog::new(&project, &project.scenarios[0].id);
+        let mut duplicate = dialog.contracts[0].clone();
+        duplicate.id = "duplicate-contract".into();
+        duplicate.name = format!("  {}  ", duplicate.name.to_uppercase());
+        dialog.contracts.push(duplicate);
+        assert!(dialog.problems().contracts_invalid());
+        assert!(dialog.result().is_none());
+    }
+
+    #[test]
+    fn removing_a_contract_clears_assignments_in_all_graphs_and_component_ports() {
+        let mut project = demos::shop_project();
+        let removed = project.contracts[0].id.clone();
+        for scenario in &mut project.scenarios {
+            for graph in [&mut scenario.graph, &mut scenario.cleanup] {
+                for node in &mut graph.nodes {
+                    node.config.contract_id = Some(removed.clone());
+                }
+            }
+        }
+        for component in &mut project.components {
+            for node in &mut component.graph.nodes {
+                node.config.contract_id = Some(removed.clone());
+            }
+            for port in &mut component.inputs {
+                port.contract_id = Some(removed.clone());
+            }
+            for port in &mut component.outputs {
+                port.contract_id = Some(removed.clone());
+            }
+            if let Some(action) = &mut component.action {
+                action.contract_id = Some(removed.clone());
+            }
+        }
+        let mut dialog = SettingsDialog::new(&project, &project.scenarios[0].id);
+        dialog.contracts.remove(0);
+        dialog.result().unwrap().apply(&mut project);
+        fn check(value: &Value, removed: &str) {
+            match value {
+                Value::Object(fields) => {
+                    assert_ne!(
+                        fields.get("contractId").and_then(Value::as_str),
+                        Some(removed)
+                    );
+                    for value in fields.values() {
+                        check(value, removed);
+                    }
+                }
+                Value::Array(items) => {
+                    for item in items {
+                        check(item, removed);
+                    }
+                }
+                _ => {}
+            }
+        }
+        check(&serde_json::to_value(&project).unwrap(), &removed);
+        apiforge_core::validate_project(&project).unwrap();
     }
 }

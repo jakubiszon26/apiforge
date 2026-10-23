@@ -209,13 +209,14 @@ impl EnvironmentDialog {
         self.variable_rows(ui, &problems.variables);
         self.add_row(ui, Entry::Variable);
 
-        ui.add_space(4.0);
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            widgets::section(ui, "Session secrets");
+            widgets::section_inline(ui, "Session secrets");
             ui.add_space(4.0);
             widgets::pill(ui, "IN MEMORY ONLY", theme::WARNING)
                 .on_hover_text("Values are never saved to disk or exported");
         });
+        ui.add_space(2.0);
         widgets::hint(
             ui,
             "The project keeps only the names. Values last until you close the app \

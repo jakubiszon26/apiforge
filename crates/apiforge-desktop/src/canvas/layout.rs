@@ -20,6 +20,163 @@ const OUTPUT_ROW: f32 = 22.0;
 const FOOTER: f32 = 36.0;
 const CONTROL: f32 = 28.0;
 
+pub const OVERLAY_PADDING_LEFT: f32 = 18.0;
+pub const OVERLAY_PADDING_RIGHT: f32 = 14.0;
+pub const OVERLAY_PADDING_Y: f32 = 8.0;
+pub const OVERLAY_GAP: f32 = 12.0;
+pub const MIN_BANNER_SIDE_BY_SIDE: f32 = 220.0;
+pub const FOOTER_BAND_HEIGHT: f32 = 36.0;
+pub const MINIMAP_MIN_BOARD_WIDTH: f32 = 560.0;
+pub const MINIMAP_MIN_BOARD_HEIGHT: f32 = 300.0;
+pub const MINIMAP_SIZE: Vec2 = vec2(136.0, 88.0);
+pub const FOCUS_MARGIN: f32 = 24.0;
+
+/// How the keyboard/mouse shortcut hint is shown in the footer band.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HintPlacement {
+    /// Full one-line shortcut text rendered inline inside this rect.
+    Inline(Rect),
+    /// Compact "Shortcuts" affordance with the full text in a hover tooltip.
+    Tooltip(Rect),
+}
+
+/// Measured widget/text sizes used to compute the board overlay geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct OverlayMeasures {
+    pub banner_height: f32,
+    pub toolbar_size: Vec2,
+    pub zoom_size: Vec2,
+    pub hint_width: f32,
+    pub shortcuts_badge_width: f32,
+    pub error_size: Option<Vec2>,
+}
+
+/// Disjoint regions of the canvas viewport.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoardOverlays {
+    pub header: Rect,
+    pub banner: Rect,
+    pub banner_wrap_width: f32,
+    pub toolbar: Rect,
+    pub footer: Rect,
+    pub zoom_controls: Rect,
+    pub hint: HintPlacement,
+    pub board: Rect,
+    pub minimap: Option<Rect>,
+    pub error_banner: Option<Rect>,
+    pub focus: Rect,
+}
+
+/// Computes the wrap width available for the top-left mode banner.
+pub fn banner_wrap_width(viewport_width: f32, toolbar_width: f32) -> f32 {
+    let side_by_side =
+        viewport_width - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT - toolbar_width - OVERLAY_GAP;
+    if side_by_side >= MIN_BANNER_SIDE_BY_SIDE {
+        side_by_side
+    } else {
+        (viewport_width - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT).max(80.0)
+    }
+}
+
+/// Pure layout function placing header, footer, board, minimap and camera focus rects.
+pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverlays {
+    let side_by_side = viewport.width()
+        - OVERLAY_PADDING_LEFT
+        - OVERLAY_PADDING_RIGHT
+        - measures.toolbar_size.x
+        - OVERLAY_GAP;
+    let wrap_width = banner_wrap_width(viewport.width(), measures.toolbar_size.x);
+    let banner_h = measures.banner_height.max(30.0);
+    let banner = Rect::from_min_size(
+        pos2(
+            viewport.left() + OVERLAY_PADDING_LEFT,
+            viewport.top() + OVERLAY_PADDING_Y,
+        ),
+        vec2(wrap_width, banner_h),
+    );
+    let toolbar = if side_by_side >= MIN_BANNER_SIDE_BY_SIDE {
+        Rect::from_min_size(
+            pos2(
+                viewport.right() - OVERLAY_PADDING_RIGHT - measures.toolbar_size.x,
+                viewport.top() + OVERLAY_PADDING_Y,
+            ),
+            measures.toolbar_size,
+        )
+    } else {
+        let x = (viewport.right() - OVERLAY_PADDING_RIGHT - measures.toolbar_size.x)
+            .max(viewport.left() + OVERLAY_PADDING_LEFT);
+        Rect::from_min_size(pos2(x, banner.bottom() + 6.0), measures.toolbar_size)
+    };
+    let header_bottom =
+        (banner.bottom().max(toolbar.bottom()) + OVERLAY_PADDING_Y).min(viewport.bottom());
+    let header = Rect::from_min_max(viewport.min, pos2(viewport.right(), header_bottom));
+
+    let footer_top = (viewport.bottom() - FOOTER_BAND_HEIGHT).max(header.bottom());
+    let footer = Rect::from_min_max(pos2(viewport.left(), footer_top), viewport.max);
+    let zoom_y = (footer.center().y - measures.zoom_size.y / 2.0).max(footer.top() + 2.0);
+    let zoom_controls = Rect::from_min_size(
+        pos2(footer.left() + OVERLAY_PADDING_RIGHT, zoom_y),
+        measures.zoom_size,
+    );
+    let avail_for_hint =
+        footer.right() - OVERLAY_PADDING_RIGHT - (zoom_controls.right() + OVERLAY_GAP);
+    let hint = if measures.hint_width <= avail_for_hint {
+        HintPlacement::Inline(Rect::from_min_size(
+            pos2(zoom_controls.right() + OVERLAY_GAP, footer.top() + 4.0),
+            vec2(measures.hint_width, (footer.height() - 8.0).max(16.0)),
+        ))
+    } else {
+        let badge_w = measures.shortcuts_badge_width.max(76.0);
+        let badge_x =
+            (footer.right() - OVERLAY_PADDING_RIGHT - badge_w).max(zoom_controls.right() + 6.0);
+        HintPlacement::Tooltip(Rect::from_min_size(
+            pos2(badge_x, (footer.center().y - 11.0).max(footer.top() + 2.0)),
+            vec2(badge_w, 22.0),
+        ))
+    };
+
+    let board = Rect::from_min_max(
+        pos2(viewport.left(), header.bottom()),
+        pos2(viewport.right(), footer.top()),
+    );
+    let minimap =
+        if board.width() >= MINIMAP_MIN_BOARD_WIDTH && board.height() >= MINIMAP_MIN_BOARD_HEIGHT {
+            Some(Rect::from_min_size(
+                board.right_bottom() - MINIMAP_SIZE - vec2(14.0, 14.0),
+                MINIMAP_SIZE,
+            ))
+        } else {
+            None
+        };
+    let error_banner = measures.error_size.map(|size| {
+        Rect::from_center_size(
+            pos2(board.center().x, board.top() + 10.0 + size.y / 2.0),
+            size,
+        )
+    });
+    let focus_right = minimap.map_or(board.right(), |mm| {
+        (mm.left() - OVERLAY_GAP).max(board.left() + 80.0)
+    });
+    let focus_raw = Rect::from_min_max(board.min, pos2(focus_right, board.bottom()));
+    let shrink_x = FOCUS_MARGIN.min(focus_raw.width() * 0.15);
+    let shrink_y = FOCUS_MARGIN.min(focus_raw.height() * 0.15);
+    let focus = focus_raw.shrink2(vec2(shrink_x, shrink_y));
+
+    BoardOverlays {
+        header,
+        banner,
+        banner_wrap_width: wrap_width,
+        toolbar,
+        footer,
+        zoom_controls,
+        hint,
+        board,
+        minimap,
+        error_banner,
+        focus,
+    }
+}
+
 /// How an input row shows its value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RowValue {
@@ -416,5 +573,46 @@ mod tests {
         assert_eq!(parse_inline("123", ValueType::String), Ok(json!("123")));
         assert!(parse_inline("1", ValueType::Boolean).is_err());
         assert_eq!(parse_inline("{}", ValueType::Object), Ok(json!({})));
+    }
+
+    #[test]
+    fn board_overlays_are_disjoint_and_respect_thresholds_across_viewport_sizes() {
+        let sizes = [
+            vec2(525.0, 220.0),
+            vec2(525.0, 400.0),
+            vec2(705.0, 300.0),
+            vec2(865.0, 420.0),
+            vec2(1345.0, 600.0),
+        ];
+        for size in sizes {
+            let viewport = Rect::from_min_size(pos2(235.0, 160.0), size);
+            let measures = OverlayMeasures {
+                banner_height: 36.0,
+                toolbar_size: vec2(204.0, 30.0),
+                zoom_size: vec2(88.0, 26.0),
+                hint_width: 440.0,
+                shortcuts_badge_width: 78.0,
+                error_size: Some(vec2(300.0, 30.0)),
+            };
+            let out = board_overlays(viewport, &measures);
+            assert!(viewport.contains_rect(out.header));
+            assert!(viewport.contains_rect(out.footer));
+            assert!(viewport.contains_rect(out.board));
+            assert!(!out.banner.intersects(out.toolbar));
+            assert!(!out.header.intersects(out.board.shrink(0.5)));
+            assert!(!out.footer.intersects(out.board.shrink(0.5)));
+            let hint_rect = match out.hint {
+                HintPlacement::Inline(r) | HintPlacement::Tooltip(r) => r,
+            };
+            assert!(!out.zoom_controls.intersects(hint_rect));
+            if out.board.width() < MINIMAP_MIN_BOARD_WIDTH
+                || out.board.height() < MINIMAP_MIN_BOARD_HEIGHT
+            {
+                assert!(out.minimap.is_none());
+            } else {
+                let mm = out.minimap.expect("minimap shown on large board");
+                assert!(!mm.intersects(out.focus));
+            }
+        }
     }
 }

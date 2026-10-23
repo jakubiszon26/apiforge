@@ -112,9 +112,30 @@ pub enum DetailTab {
     Request,
 }
 
+const MIN_REPORT_HEIGHT: f32 = 160.0;
+const MAX_REPORT_HEIGHT: f32 = 560.0;
+const KEYBOARD_RESIZE_STEP: f32 = 32.0;
+
+/// Computes the next report panel height for a keyboard resize key.
+pub(crate) fn keyboard_height(current: f32, key: egui::Key, min: f32, max: f32) -> Option<f32> {
+    let low = min.min(max);
+    let high = max.max(low);
+    match key {
+        egui::Key::ArrowUp => Some((current + KEYBOARD_RESIZE_STEP).clamp(low, high)),
+        egui::Key::ArrowDown => Some((current - KEYBOARD_RESIZE_STEP).clamp(low, high)),
+        egui::Key::Home => Some(low),
+        egui::Key::End => Some(high),
+        _ => None,
+    }
+}
+
 pub struct ReportPanel {
     pub open: bool,
     height: f32,
+    compact_height: f32,
+    size_epoch: u64,
+    #[cfg(test)]
+    last_handle: Option<(egui::Id, egui::Rect, f32)>,
     last_run_id: Option<String>,
     last_selected_node_id: Option<String>,
     selected_key: Option<String>,
@@ -127,6 +148,10 @@ impl Default for ReportPanel {
         Self {
             open: false,
             height: 320.0,
+            compact_height: 180.0,
+            size_epoch: 0,
+            #[cfg(test)]
+            last_handle: None,
             last_run_id: None,
             last_selected_node_id: None,
             selected_key: None,
@@ -137,51 +162,145 @@ impl Default for ReportPanel {
 }
 
 impl ReportPanel {
+    #[cfg(test)]
+    pub(crate) fn debug_resize_handle(&self) -> (egui::Id, egui::Rect, f32) {
+        self.last_handle.unwrap()
+    }
+
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
 
         let was_open = self.open;
-        let maximum = (ui.available_height() - 220.0).clamp(160.0, 560.0);
-        // Separate layout memories preserve the expanded size across collapse.
-        let response = egui::Panel::bottom(if was_open {
-            "report-expanded"
+        let compact = ui.available_height() < 460.0;
+        let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
+        let maximum = (ui.available_height() - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
+        let height = if compact {
+            self.compact_height
         } else {
-            "report-collapsed"
-        })
-        .resizable(self.open)
-        .default_size(if self.open { self.height } else { 44.0 })
-        .size_range(if self.open {
-            160.0..=maximum
+            self.height
+        }
+        .clamp(min_height, maximum);
+        let panel_id = if was_open {
+            egui::Id::new(("report-expanded", compact, self.size_epoch))
         } else {
-            44.0..=44.0
-        })
-        .frame(
-            egui::Frame::new()
-                .fill(theme::WHITE)
-                .inner_margin(egui::Margin::symmetric(24, 8)),
-        )
-        .show(ui, |ui| {
-            // An empty report must still fill the user's requested height.
-            ui.set_min_height(ui.available_height());
-            self.toggle_bar(ui, context, &mut actions);
-            if was_open {
-                ui.separator();
-                match context.run {
-                    None => empty_state(ui),
-                    Some(run) => self.run_contents(ui, run, context, &mut actions),
+            egui::Id::new("report-collapsed")
+        };
+        let response = egui::Panel::bottom(panel_id)
+            .resizable(self.open)
+            .default_size(if self.open { height } else { 40.0 })
+            .size_range(if self.open {
+                min_height..=maximum
+            } else {
+                40.0..=40.0
+            })
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::WHITE)
+                    .inner_margin(egui::Margin::symmetric(24, 8)),
+            )
+            .show(ui, |ui| {
+                ui.set_min_height(ui.available_height());
+                self.toggle_bar(ui, context, &mut actions);
+                if was_open {
+                    ui.separator();
+                    match context.run {
+                        None => empty_state(ui),
+                        Some(run) => self.run_contents(ui, run, context, &mut actions),
+                    }
                 }
-            }
-        });
+            });
         if was_open {
-            self.height = response.response.rect.height().clamp(160.0, maximum);
-            let center = response.response.rect.center_top() + egui::vec2(0.0, 3.0);
+            let actual_height = response.response.rect.height().clamp(min_height, maximum);
+            if compact {
+                self.compact_height = actual_height;
+            } else {
+                self.height = actual_height;
+            }
+            let center = response.response.rect.center_top() + egui::vec2(0.0, 8.0);
+            let handle_rect = egui::Rect::from_center_size(center, egui::vec2(80.0, 14.0));
+            let handle_id = ui.id().with("report-resize-handle");
+            let handle = ui
+                .interact(handle_rect, handle_id, Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+                .on_hover_text("Resize run report (↑/↓, Home, End)");
+            let current_height = actual_height;
+            handle.widget_info(move || {
+                let mut info =
+                    egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Resize run report");
+                info.value = Some(f64::from(current_height.round()));
+                info
+            });
+            #[cfg(test)]
+            {
+                self.last_handle = Some((handle_id, handle_rect, actual_height));
+            }
+            if handle.clicked() || handle.drag_started() {
+                handle.request_focus();
+            }
+            if handle.dragged() {
+                let next = (actual_height - handle.drag_delta().y).clamp(min_height, maximum);
+                if compact {
+                    self.compact_height = next;
+                } else {
+                    self.height = next;
+                }
+                self.size_epoch = self.size_epoch.wrapping_add(1);
+                ui.ctx().request_repaint();
+            }
+            if handle.has_focus() {
+                let keys = [
+                    egui::Key::ArrowUp,
+                    egui::Key::ArrowDown,
+                    egui::Key::Home,
+                    egui::Key::End,
+                ];
+                let mut updated = None;
+                ui.input_mut(|input| {
+                    for key in keys {
+                        if input.consume_key(egui::Modifiers::NONE, key)
+                            && let Some(next) = keyboard_height(
+                                updated.unwrap_or(actual_height),
+                                key,
+                                min_height,
+                                maximum,
+                            )
+                        {
+                            updated = Some(next);
+                        }
+                    }
+                });
+                if let Some(next) = updated
+                    && (next - actual_height).abs() > f32::EPSILON
+                {
+                    if compact {
+                        self.compact_height = next;
+                    } else {
+                        self.height = next;
+                    }
+                    ui.ctx().request_repaint();
+                    self.size_epoch = self.size_epoch.wrapping_add(1);
+                }
+                ui.painter().rect_stroke(
+                    handle_rect,
+                    4.0,
+                    Stroke::new(1.5, theme::ACCENT),
+                    egui::StrokeKind::Outside,
+                );
+            }
             ui.painter().line_segment(
                 [
                     center - egui::vec2(18.0, 0.0),
                     center + egui::vec2(18.0, 0.0),
                 ],
-                Stroke::new(2.0, theme::BORDER),
+                Stroke::new(
+                    2.0,
+                    if handle.has_focus() {
+                        theme::ACCENT
+                    } else {
+                        theme::BORDER
+                    },
+                ),
             );
         }
         actions
@@ -657,7 +776,18 @@ impl ReportPanel {
             }
         });
 
-        if !expandable || !is_open || depth >= 10 {
+        if !expandable || !is_open {
+            return;
+        }
+        if depth >= 10 {
+            ui.horizontal(|ui| {
+                ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
+                ui.label(
+                    RichText::new("Nested deeper than 10 levels (truncated).")
+                        .size(11.0)
+                        .color(theme::MUTED),
+                );
+            });
             return;
         }
         match value {
@@ -678,6 +808,19 @@ impl ReportPanel {
                         actions,
                     );
                 }
+                if items.len() > 100 {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "Showing the first 100 of {} items.",
+                                items.len()
+                            ))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                        );
+                    });
+                }
             }
             Value::Object(fields) => {
                 for (field, child) in fields.iter().take(100) {
@@ -695,6 +838,19 @@ impl ReportPanel {
                         interactive,
                         actions,
                     );
+                }
+                if fields.len() > 100 {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "Showing the first 100 of {} fields.",
+                                fields.len()
+                            ))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                        );
+                    });
                 }
             }
             _ => {}
@@ -897,6 +1053,15 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
         egui::FontId::monospace(10.5),
         theme::MUTED,
     );
+    let a11y_label = format!(
+        "{} · {} · {} ms",
+        row.step.name,
+        row.step.status.label(),
+        row.step.duration_ms
+    );
+    response.widget_info(move || {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+    });
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(&row.step.name)
@@ -1089,6 +1254,35 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_height_adjusts_and_clamps_within_bounds() {
+        assert_eq!(
+            keyboard_height(320.0, egui::Key::ArrowUp, 160.0, 560.0),
+            Some(352.0)
+        );
+        assert_eq!(
+            keyboard_height(320.0, egui::Key::ArrowDown, 160.0, 560.0),
+            Some(288.0)
+        );
+        assert_eq!(
+            keyboard_height(550.0, egui::Key::ArrowUp, 160.0, 560.0),
+            Some(560.0)
+        );
+        assert_eq!(
+            keyboard_height(170.0, egui::Key::ArrowDown, 160.0, 560.0),
+            Some(160.0)
+        );
+        assert_eq!(
+            keyboard_height(320.0, egui::Key::Home, 160.0, 560.0),
+            Some(160.0)
+        );
+        assert_eq!(
+            keyboard_height(320.0, egui::Key::End, 160.0, 560.0),
+            Some(560.0)
+        );
+        assert_eq!(keyboard_height(320.0, egui::Key::Enter, 160.0, 560.0), None);
+    }
+
+    #[test]
     fn flatten_steps_preserves_component_children_and_root_id() {
         let run = sample_run();
         let rows = flatten_steps(&run.steps);
@@ -1160,6 +1354,87 @@ mod tests {
                 let _ = panel.show(ui, &populated);
             });
             out.textures_delta.clear();
+        }
+    }
+    #[test]
+    fn resize_handle_receives_pointer_focus_and_keyboard_in_both_layouts() {
+        for screen_height in [900.0, 400.0] {
+            let context = egui::Context::default();
+            crate::theme::apply(&context);
+            let mut panel = ReportPanel {
+                open: true,
+                ..Default::default()
+            };
+            let report_context = Context {
+                run: None,
+                selected_node_id: None,
+                error_policy: ErrorPolicy::Continue,
+                running: false,
+                stale: false,
+                files_busy: false,
+            };
+            let draw = |panel: &mut ReportPanel, events| {
+                let mut id = egui::Id::NULL;
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1200.0, screen_height),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        id = ui.id().with("report-resize-handle");
+                        panel.show(ui, &report_context);
+                    },
+                );
+                output.textures_delta.clear();
+                id
+            };
+            draw(&mut panel, vec![]);
+            let id = draw(&mut panel, vec![]);
+            let rect = context.read_response(id).unwrap().rect;
+            let click = |pressed| egui::Event::PointerButton {
+                pos: rect.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            draw(
+                &mut panel,
+                vec![egui::Event::PointerMoved(rect.center()), click(true)],
+            );
+            draw(&mut panel, vec![click(false)]);
+            assert!(
+                context.memory(|memory| memory.has_focus(id)),
+                "resize grip did not get focus at {screen_height}"
+            );
+            let before = if screen_height < 460.0 {
+                panel.compact_height
+            } else {
+                panel.height
+            };
+            draw(
+                &mut panel,
+                vec![egui::Event::Key {
+                    key: egui::Key::ArrowUp,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            draw(&mut panel, vec![]);
+            let after = if screen_height < 460.0 {
+                panel.compact_height
+            } else {
+                panel.height
+            };
+            assert!(
+                after > before,
+                "keyboard resize had no effect at {screen_height}: {before} -> {after}"
+            );
         }
     }
 }

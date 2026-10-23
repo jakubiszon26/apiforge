@@ -64,7 +64,7 @@ impl HttpTransport {
         let response = builder
             .send()
             .await
-            .map_err(|error| HttpError::Transport(error_chain(&error.without_url())))?;
+            .map_err(|error| HttpError::Transport(transport_error_detail(error)))?;
         if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
             return Err(HttpError::Redirect(response.status()));
         }
@@ -161,7 +161,7 @@ pub(crate) async fn read_body(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| HttpError::Transport(error_chain(&error.without_url())))?
+        .map_err(|error| HttpError::Transport(transport_error_detail(error)))?
     {
         if body.len() + chunk.len() > limit {
             return Err(HttpError::TooLarge(limit));
@@ -213,6 +213,30 @@ fn normalize(value: Value, depth: usize, max_depth: usize) -> Result<Value, Http
         ),
         other => other,
     })
+}
+
+/// Formats a `reqwest::Error` with an explicit failure category prefix (`timeout`,
+/// `connect`, `body`, `decode`, or `request`) followed by its full cause chain.
+fn transport_error_detail(error: reqwest::Error) -> String {
+    let category = if error.is_timeout() {
+        Some("timeout")
+    } else if error.is_connect() {
+        Some("connect")
+    } else if error.is_body() {
+        Some("body")
+    } else if error.is_decode() {
+        Some("decode")
+    } else if error.is_request() {
+        Some("request")
+    } else {
+        None
+    };
+    let chain = error_chain(&error.without_url());
+    let lower = chain.to_ascii_lowercase();
+    match category {
+        Some(prefix) if !lower.starts_with(prefix) => format!("{prefix}: {chain}"),
+        _ => chain,
+    }
 }
 
 /// An error with its causes, e.g. `error sending request: connection refused`.
