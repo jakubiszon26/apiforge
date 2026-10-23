@@ -5,10 +5,10 @@ use eframe::egui::{self, Color32, FontId, Stroke, TextStyle};
 pub const BG: Color32 = Color32::from_rgb(248, 247, 244);
 pub const WHITE: Color32 = Color32::WHITE;
 pub const TEXT: Color32 = Color32::from_rgb(57, 54, 47);
-pub const MUTED: Color32 = Color32::from_rgb(143, 137, 126);
+pub const MUTED: Color32 = Color32::from_rgb(116, 111, 102);
 pub const BORDER: Color32 = Color32::from_rgb(232, 228, 220);
 pub const ACCENT: Color32 = Color32::from_rgb(216, 91, 44);
-pub const LINK: Color32 = Color32::from_rgb(96, 129, 163);
+pub const LINK: Color32 = Color32::from_rgb(70, 106, 145);
 pub const FIELD: Color32 = Color32::from_rgb(249, 248, 245);
 pub const GRID: Color32 = Color32::from_rgb(214, 210, 203);
 pub const SOCKET: Color32 = Color32::from_rgb(172, 165, 154);
@@ -65,19 +65,19 @@ pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style_of(egui::Theme::Light)).clone();
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::proportional(13.0));
+        .insert(TextStyle::Body, FontId::proportional(14.0));
     style
         .text_styles
-        .insert(TextStyle::Button, FontId::proportional(12.0));
+        .insert(TextStyle::Button, FontId::proportional(13.0));
     style
         .text_styles
-        .insert(TextStyle::Small, FontId::proportional(11.0));
+        .insert(TextStyle::Small, FontId::proportional(12.0));
     style
         .text_styles
         .insert(TextStyle::Heading, FontId::proportional(20.0));
     style
         .text_styles
-        .insert(TextStyle::Monospace, FontId::monospace(11.0));
+        .insert(TextStyle::Monospace, FontId::monospace(12.0));
     style.spacing.item_spacing = egui::vec2(8.0, 7.0);
     style.spacing.button_padding = egui::vec2(10.0, 7.0);
     style.spacing.interact_size = egui::vec2(32.0, 28.0);

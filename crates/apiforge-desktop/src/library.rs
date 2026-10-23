@@ -43,7 +43,16 @@ const BUILTIN: [NodeKind; 8] = [
     NodeKind::Condition,
 ];
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Section {
+    #[default]
+    Blocks,
+    Variables,
+    Operators,
+}
+
 pub struct Library {
+    section: Section,
     pub search: String,
     open_groups: Vec<OperatorGroup>,
 }
@@ -52,6 +61,7 @@ impl Default for Library {
     fn default() -> Self {
         Self {
             search: String::new(),
+            section: Section::Blocks,
             open_groups: vec![OperatorGroup::Comparison, OperatorGroup::Logic],
         }
     }
@@ -134,143 +144,167 @@ impl Library {
                     .color(theme::MUTED),
             );
         });
-        ui.add(
+        ui.add_sized(
+            [ui.available_width(), 30.0],
             egui::TextEdit::singleline(&mut self.search)
-                .hint_text("🔍  Search blocks…")
+                .hint_text("Search blocks…")
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            ui.spacing_mut().button_padding.x = 6.0;
+            ui.selectable_value(&mut self.section, Section::Blocks, "Blocks");
+            ui.selectable_value(&mut self.section, Section::Variables, "Variables");
+            ui.selectable_value(&mut self.section, Section::Operators, "Operators");
+        });
         let query = self.search.to_lowercase();
+        // Search spans categories, so an operator can be discovered from any tab.
+        let all_sections = !query.is_empty();
+        let show_blocks = all_sections || self.section == Section::Blocks;
+        let show_variables = all_sections || self.section == Section::Variables;
+        let show_operators = all_sections || self.section == Section::Operators;
         let matches = |text: &str| query.is_empty() || text.to_lowercase().contains(&query);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .max_height(ui.available_height() - 74.0)
             .show(ui, |ui| {
-                if !context.editing_component {
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.small_button("Example: ordering and IF").clicked() {
+                if show_blocks && !context.editing_component {
+                    ui.menu_button("Example scenarios", |ui| {
+                        if ui.button("Ordering and IF / ELSE").clicked() {
                             actions.push(Action::OpenExample(Example::Workflow));
+                            ui.close();
                         }
-                        if ui.small_button("Example: operator blocks").clicked() {
+                        if ui.button("Operator blocks").clicked() {
                             actions.push(Action::OpenExample(Example::OperatorBlocks));
+                            ui.close();
                         }
                     });
                     ui.add_space(4.0);
                 }
-                widgets::subcaption(ui, "BASIC STEPS");
-                for kind in BUILTIN {
-                    if matches(&format!("{} {}", kind.label(), kind.description())) {
-                        let payload = Payload::Node {
-                            kind,
-                            component: None,
-                        };
-                        if library_item(ui, kind, kind.label(), kind.description(), payload)
-                            .clicked()
-                        {
-                            actions.push(Action::AddNode {
+                if show_blocks {
+                    widgets::subcaption(ui, "BASIC STEPS");
+                    for kind in BUILTIN {
+                        if matches(&format!("{} {}", kind.label(), kind.description())) {
+                            let payload = Payload::Node {
                                 kind,
                                 component: None,
+                            };
+                            if library_item(ui, kind, kind.label(), kind.description(), payload)
+                                .clicked()
+                            {
+                                actions.push(Action::AddNode {
+                                    kind,
+                                    component: None,
+                                });
+                            }
+                        }
+                    }
+                }
+                if show_variables {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        widgets::subcaption(ui, "VARIABLES");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(egui::Button::new("+").small().frame(false))
+                                .on_hover_text("Add a variable block")
+                                .clicked()
+                            {
+                                actions.push(Action::AddVariable);
+                            }
+                        });
+                    });
+                    self.variables(ui, context, &matches, &mut actions);
+                }
+
+                ui.add_space(6.0);
+                if show_operators {
+                    widgets::subcaption(ui, "OPERATORS");
+                    for group in OperatorGroup::ALL {
+                        let operators: Vec<Operator> = Operator::ALL
+                            .into_iter()
+                            .filter(|operator| {
+                                operator.spec().group == group && matches(operator.label())
+                            })
+                            .collect();
+                        if operators.is_empty() {
+                            continue;
+                        }
+                        let open = !query.is_empty() || self.open_groups.contains(&group);
+                        let header = ui.add(widgets::Disclosure::new(
+                            group.label(),
+                            open,
+                            operators.len(),
+                        ));
+                        if header.clicked() {
+                            if let Some(index) =
+                                self.open_groups.iter().position(|item| *item == group)
+                            {
+                                self.open_groups.remove(index);
+                            } else {
+                                self.open_groups.push(group);
+                            }
+                        }
+                        if open {
+                            ui.horizontal_wrapped(|ui| {
+                                for operator in operators {
+                                    if operator_chip(ui, operator).clicked() {
+                                        actions.push(Action::AddOperator(operator));
+                                    }
+                                }
                             });
                         }
                     }
                 }
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    widgets::subcaption(ui, "VARIABLES");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(egui::Button::new("+").small().frame(false))
-                            .on_hover_text("Add a variable block")
-                            .clicked()
-                        {
-                            actions.push(Action::AddVariable);
-                        }
+                if show_blocks {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        widgets::subcaption(ui, "PROJECT COMPONENTS");
+                        ui.label(
+                            RichText::new(components.len().to_string())
+                                .size(10.0)
+                                .color(theme::MUTED),
+                        );
                     });
-                });
-                self.variables(ui, context, &matches, &mut actions);
-
-                ui.add_space(6.0);
-                widgets::subcaption(ui, "OPERATORS");
-                for group in OperatorGroup::ALL {
-                    let operators: Vec<Operator> = Operator::ALL
-                        .into_iter()
-                        .filter(|operator| {
-                            operator.spec().group == group && matches(operator.label())
-                        })
-                        .collect();
-                    if operators.is_empty() {
-                        continue;
-                    }
-                    let open = !query.is_empty() || self.open_groups.contains(&group);
-                    let header = ui.add(widgets::Disclosure::new(
-                        group.label(),
-                        open,
-                        operators.len(),
-                    ));
-                    if header.clicked() {
-                        if let Some(index) = self.open_groups.iter().position(|item| *item == group)
-                        {
-                            self.open_groups.remove(index);
-                        } else {
-                            self.open_groups.push(group);
-                        }
-                    }
-                    if open {
-                        ui.horizontal_wrapped(|ui| {
-                            for operator in operators {
-                                if operator_chip(ui, operator).clicked() {
-                                    actions.push(Action::AddOperator(operator));
-                                }
-                            }
-                        });
-                    }
-                }
-
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    widgets::subcaption(ui, "PROJECT COMPONENTS");
-                    ui.label(
-                        RichText::new(components.len().to_string())
-                            .size(10.0)
-                            .color(theme::MUTED),
-                    );
-                });
-                if components.is_empty() {
-                    ui.label(
-                        RichText::new("Select steps on the board and save them as a component.")
+                    if components.is_empty() {
+                        ui.label(
+                            RichText::new(
+                                "Select steps on the board and save them as a component.",
+                            )
                             .size(11.0)
                             .color(theme::MUTED),
-                    );
-                }
-                for component in components {
-                    let description = if component.description.is_empty() {
-                        format!("Component · r{}", component.revision)
-                    } else {
-                        component.description.clone()
-                    };
-                    if !matches(&format!("{} {description}", component.name)) {
-                        continue;
+                        );
                     }
-                    let pinned = Some((component.id.clone(), component.revision));
-                    let payload = Payload::Node {
-                        kind: NodeKind::Component,
-                        component: pinned.clone(),
-                    };
-                    if library_item(
-                        ui,
-                        NodeKind::Component,
-                        &component.name,
-                        &description,
-                        payload,
-                    )
-                    .clicked()
-                    {
-                        actions.push(Action::AddNode {
+                    for component in components {
+                        let description = if component.description.is_empty() {
+                            format!("Component · r{}", component.revision)
+                        } else {
+                            component.description.clone()
+                        };
+                        if !matches(&format!("{} {description}", component.name)) {
+                            continue;
+                        }
+                        let pinned = Some((component.id.clone(), component.revision));
+                        let payload = Payload::Node {
                             kind: NodeKind::Component,
-                            component: pinned,
-                        });
+                            component: pinned.clone(),
+                        };
+                        if library_item(
+                            ui,
+                            NodeKind::Component,
+                            &component.name,
+                            &description,
+                            payload,
+                        )
+                        .clicked()
+                        {
+                            actions.push(Action::AddNode {
+                                kind: NodeKind::Component,
+                                component: pinned,
+                            });
+                        }
                     }
                 }
             });
@@ -387,7 +421,7 @@ fn library_item(
 ) -> egui::Response {
     let id = ui.id().with(("library", title, kind as u8));
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 46.0),
+        egui::vec2(ui.available_width(), 40.0),
         Sense::click_and_drag(),
     );
     response.dnd_set_drag_payload(payload);
@@ -401,20 +435,20 @@ fn library_item(
             egui::StrokeKind::Inside,
         );
     }
-    let icon = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 8.0), egui::vec2(30.0, 30.0));
+    let icon = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 5.0), egui::vec2(28.0, 28.0));
     let color = theme::kind_color(kind);
     ui.painter()
         .rect_filled(icon, 7.0, color.gamma_multiply(0.12));
     theme::kind_icon(ui.painter(), icon, kind, color);
     ui.painter().text(
-        rect.min + egui::vec2(46.0, 15.0),
+        rect.min + egui::vec2(40.0, 12.0),
         egui::Align2::LEFT_CENTER,
         widgets::ellipsis(title, 30),
         egui::FontId::new(12.5, theme::bold_family()),
         theme::TEXT,
     );
     ui.painter().text(
-        rect.min + egui::vec2(46.0, 31.0),
+        rect.min + egui::vec2(40.0, 28.0),
         egui::Align2::LEFT_CENTER,
         widgets::ellipsis(description, 34),
         egui::FontId::proportional(10.5),

@@ -22,12 +22,19 @@ pub enum Outcome {
     Cancelled,
 }
 
-#[derive(Default)]
 pub struct Files {
     pending: Option<Receiver<Outcome>>,
+    repaint: eframe::egui::Context,
 }
 
 impl Files {
+    pub fn new(repaint: eframe::egui::Context) -> Self {
+        Self {
+            pending: None,
+            repaint,
+        }
+    }
+
     pub fn busy(&self) -> bool {
         self.pending.is_some()
     }
@@ -100,10 +107,28 @@ impl Files {
             return;
         }
         let (sender, receiver) = mpsc::sync_channel(1);
+        let repaint = self.repaint.clone();
         let started = std::thread::Builder::new()
             .name("file-dialog".into())
             .spawn(move || {
-                let _ = sender.send(work());
+                // Wake the event-driven UI even if the operation panics. Polling
+                // then reports a disconnected worker instead of staying busy.
+                struct WakeOnDrop {
+                    context: eframe::egui::Context,
+                    sender: Option<mpsc::SyncSender<Outcome>>,
+                }
+                impl Drop for WakeOnDrop {
+                    fn drop(&mut self) {
+                        // Close the channel before waking the UI on panic.
+                        self.sender.take();
+                        self.context.request_repaint();
+                    }
+                }
+                let wake = WakeOnDrop {
+                    context: repaint,
+                    sender: Some(sender),
+                };
+                let _ = wake.sender.as_ref().unwrap().send(work());
             });
         self.pending = match started {
             Ok(_) => Some(receiver),
@@ -151,5 +176,33 @@ fn write_json_bytes(path: &Path, serialized: serde_json::Result<Vec<u8>>) -> Out
     match result {
         Ok(()) => Outcome::Exported(path.to_path_buf()),
         Err(message) => Outcome::Failed(format!("Export failed: {message}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn completed_operation_wakes_an_idle_ui_without_user_input() {
+        let context = eframe::egui::Context::default();
+        // Settle initial font/layout repaints so the context is idle.
+        for _ in 0..4 {
+            let mut output = context.run_ui(Default::default(), |_| {});
+            output.textures_delta.clear();
+        }
+        let (sender, notified) = mpsc::channel();
+        context.set_request_repaint_callback(move |_| {
+            let _ = sender.send(());
+        });
+        let mut files = Files::new(context);
+        files.spawn(|| Outcome::Cancelled);
+
+        notified
+            .recv_timeout(Duration::from_secs(2))
+            .expect("the completed worker must request a UI frame");
+        assert!(matches!(files.poll(), Some(Outcome::Cancelled)));
+        assert!(!files.busy());
     }
 }

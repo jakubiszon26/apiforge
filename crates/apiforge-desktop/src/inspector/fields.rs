@@ -219,19 +219,10 @@ pub fn string_map(
     for (key, value) in next.iter_mut() {
         ui.horizontal(|ui| {
             ui.add_sized(
-                [96.0, 22.0],
+                [ui.available_width() - 30.0, 22.0],
                 egui::Label::new(RichText::new(key).monospace()).truncate(),
             )
             .on_hover_text(key);
-            let field_width = ui.available_width() - 28.0;
-            ui.allocate_ui(egui::vec2(field_width, 24.0), |ui| {
-                let event =
-                    variable_text(ui, id.with(("value", key)), value, "Value or {{argument}}");
-                changed |= event.changed;
-                if let Some((variable, start, end)) = event.dropped {
-                    dropped = Some((key.clone(), variable, start, end));
-                }
-            });
             if ui
                 .small_button("✕")
                 .on_hover_text(format!("Remove {key}"))
@@ -240,6 +231,12 @@ pub fn string_map(
                 remove = Some(key.clone());
             }
         });
+        let event = variable_text(ui, id.with(("value", key)), value, "Value or {{argument}}");
+        changed |= event.changed;
+        if let Some((variable, start, end)) = event.dropped {
+            dropped = Some((key.clone(), variable, start, end));
+        }
+        ui.add_space(3.0);
     }
     if let Some(key) = remove {
         next.shift_remove(&key);
@@ -309,7 +306,7 @@ fn tree_row(
         scalar => crate::labels::truncate(&json_stringify(scalar), 60),
     };
     ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
+        ui.add_space(depth.min(4) as f32 * 8.0);
         let label = if text.is_empty() {
             "$".to_owned()
         } else {
@@ -331,11 +328,19 @@ fn tree_row(
             });
         }
         let field = field.on_hover_text(format!(
-            "{} · drag onto an argument",
+            "{label}\n{} · drag onto an argument",
             type_name(Some(value))
         ));
         let _ = field;
-        ui.label(RichText::new(preview).size(11.0).color(theme::MUTED));
+    });
+    ui.horizontal(|ui| {
+        // Actions have a fixed budget; a long value gets ellipsised rather than
+        // pushing the buttons outside the inspector.
+        ui.add_sized(
+            [(ui.available_width() - 142.0).max(24.0), 22.0],
+            egui::Label::new(RichText::new(&preview).size(11.0).color(theme::MUTED)).truncate(),
+        )
+        .on_hover_text(&preview);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_enabled(supported, egui::Button::new("To variable").small())
@@ -360,6 +365,7 @@ fn tree_row(
             }
         });
     });
+    ui.add_space(3.0);
     if depth >= 10 {
         return;
     }

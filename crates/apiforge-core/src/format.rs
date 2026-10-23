@@ -461,6 +461,8 @@ impl Default for ImportLimits {
 }
 #[derive(Debug, Error)]
 pub enum ImportError {
+    #[error("Unsupported document version")]
+    UnsupportedVersion,
     #[error("Document exceeds the {limit}-byte import limit")]
     TooLarge { limit: usize },
     // Never include raw input fragments (which may contain credentials) in diagnostics.
@@ -520,10 +522,7 @@ pub fn import_document(
         .map_err(parse_error)?
         .0;
     if value.get("version").and_then(Value::as_u64) != Some(1) {
-        return Err(ImportError::invalid(
-            "version",
-            "Unsupported document version",
-        ));
+        return Err(ImportError::UnsupportedVersion);
     }
     let standalone = value.get("projects").is_none();
     let workspace = if standalone {

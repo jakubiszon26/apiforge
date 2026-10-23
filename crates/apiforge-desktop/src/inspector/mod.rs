@@ -131,11 +131,11 @@ impl Inspector {
     ) {
         let id = Id::new(("inspector", &context.node.id));
         widgets::field_label(ui, "Block name");
-        ui.add(egui::TextEdit::singleline(&mut node.name).desired_width(f32::INFINITY));
-
-        if node.kind != NodeKind::Trigger || !context.board.nodes.is_empty() {
-            flow_connections(ui, context, actions);
-        }
+        ui.add(
+            egui::TextEdit::singleline(&mut node.name)
+                .id(id.with("name"))
+                .desired_width(f32::INFINITY),
+        );
 
         match node.kind {
             NodeKind::Trigger => widgets::hint(
@@ -253,6 +253,11 @@ impl Inspector {
         }
 
         self.arguments(ui, id, context, node);
+        // Keep the values being configured near the top; ordering remains
+        // available below them as a keyboard alternative to canvas wires.
+        if node.kind != NodeKind::Trigger || !context.board.nodes.is_empty() {
+            flow_connections(ui, context, actions);
+        }
         if node.kind == NodeKind::Condition {
             condition_predicates(ui, id, context, node);
         }
@@ -518,7 +523,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
         .corner_radius(8)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
-            ui.label(RichText::new(format!("{} → next step", node.name)).strong());
+            ui.label(RichText::new("Execution order").family(theme::bold_family()));
             let ports: &[(&str, &str)] = if node.kind == NodeKind::If {
                 &[(TRUE_PORT, "Yes"), (FALSE_PORT, "No")]
             } else {
@@ -880,23 +885,21 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
             .corner_radius(6)
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    name_combo(ui, row.with("input"), &mut condition.input, &ports);
-                    let mut predicate = condition.predicate;
-                    egui::ComboBox::from_id_salt(row.with("predicate"))
-                        .selected_text(predicate_label(predicate))
-                        .show_ui(ui, |ui| {
-                            for option in Predicate::ALL {
-                                ui.selectable_value(
-                                    &mut predicate,
-                                    option,
-                                    predicate_label(option),
-                                );
-                            }
-                        });
-                    condition.predicate = predicate;
-                    name_combo(ui, row.with("expected"), &mut condition.expected, &ports);
-                });
+                widgets::field_label(ui, "Actual argument");
+                name_combo(ui, row.with("input"), &mut condition.input, &ports);
+                widgets::field_label(ui, "Comparison");
+                let mut predicate = condition.predicate;
+                egui::ComboBox::from_id_salt(row.with("predicate"))
+                    .selected_text(predicate_label(predicate))
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for option in Predicate::ALL {
+                            ui.selectable_value(&mut predicate, option, predicate_label(option));
+                        }
+                    });
+                condition.predicate = predicate;
+                widgets::field_label(ui, "Expected argument");
+                name_combo(ui, row.with("expected"), &mut condition.expected, &ports);
                 let mut field = condition.path.clone().unwrap_or_default();
                 if ui
                     .add(
@@ -936,7 +939,7 @@ fn condition_predicates(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut N
 fn name_combo(ui: &mut Ui, id: Id, value: &mut String, names: &[String]) {
     egui::ComboBox::from_id_salt(id)
         .selected_text(value.as_str())
-        .width(90.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for name in names {
                 ui.selectable_value(value, name.clone(), name);

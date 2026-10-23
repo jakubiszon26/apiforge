@@ -134,6 +134,7 @@ pub struct Canvas {
     camera: Camera,
     context: String,
     fit_pending: bool,
+    reveal_pending: Option<String>,
     last_size: Vec2,
     drag: Option<Drag>,
     menu: Option<ActionMenu>,
@@ -151,6 +152,7 @@ impl Default for Canvas {
             },
             context: String::new(),
             fit_pending: true,
+            reveal_pending: None,
             last_size: Vec2::ZERO,
             drag: None,
             menu: None,
@@ -162,6 +164,11 @@ impl Default for Canvas {
 }
 
 impl Canvas {
+    /// Bring an explicitly located block into view without editing its position.
+    pub fn reveal(&mut self, node_id: String) {
+        self.reveal_pending = Some(node_id);
+    }
+
     /// Shows an error banner on the board, e.g. a rejected connection.
     pub fn set_error(&mut self, message: impl Into<String>) {
         self.error = Some(message.into());
@@ -206,6 +213,13 @@ impl Canvas {
             self.fit(viewport, &cards);
         }
         self.last_size = viewport.size();
+        if let Some(id) = self.reveal_pending.take()
+            && let Some(card) = cards.iter().find(|card| card.id == id)
+        {
+            self.camera.zoom = self.camera.zoom.max(0.85);
+            self.camera.pan =
+                viewport.size() / 2.0 - card.rect().center().to_vec2() * self.camera.zoom;
+        }
         let origin_offset = viewport.min.to_vec2();
         // Cards are laid out in world space; the camera maps them into the viewport.
         let camera = Camera {
@@ -542,7 +556,7 @@ impl Canvas {
                         field.shrink2(vec2(2.0, 1.0)),
                         egui::TextEdit::singleline(&mut buffer)
                             .id(ui.id().with(("inline", &card.id, &row.name)))
-                            .font(FontId::proportional(11.0 * zoom))
+                            .font(FontId::proportional((12.0 * zoom).max(11.0)))
                             .frame(egui::Frame::NONE)
                             .hint_text(if row.required { "Required" } else { "Optional" })
                             .text_color(if invalid.is_some() {
@@ -858,6 +872,7 @@ impl Canvas {
         egui::Area::new(ui.id().with("board-toolbar"))
             .fixed_pos(anchor)
             .pivot(Align2::RIGHT_TOP)
+            .fade_in(false)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
                     .fill(theme::WHITE)
@@ -875,44 +890,58 @@ impl Canvas {
                                 let camera = self.screen_camera(viewport);
                                 self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
                             }
-                            ui.separator();
-                            let tool = |ui: &mut egui::Ui, enabled: bool, text: &str, tip: &str| {
-                                ui.add_enabled(enabled, egui::Button::new(text).frame(false))
-                                    .on_hover_text(tip)
+                            if input.can_paste
+                                && ui
+                                    .button("Paste")
+                                    .on_hover_text("Paste copied steps (Ctrl+V)")
                                     .clicked()
-                            };
-                            if tool(
-                                ui,
-                                has_selection,
-                                "Component",
-                                "Save the selected steps as a component",
-                            ) {
-                                commands.push(Command::SaveSelectionAsComponent);
-                            }
-                            if tool(ui, has_selection, "Copy", "Copy the selection (Ctrl+C)") {
-                                commands.push(Command::Copy);
-                            }
-                            if tool(ui, input.can_paste, "Paste", "Paste copied steps (Ctrl+V)") {
+                            {
                                 commands.push(Command::Paste);
                             }
-                            if tool(
-                                ui,
-                                has_selection,
-                                "Duplicate",
-                                "Duplicate the selection (Ctrl+D)",
-                            ) {
-                                commands.push(Command::Duplicate);
-                            }
-                            if tool(
-                                ui,
-                                has_selection || !self.selected_wires.is_empty(),
-                                "Delete",
-                                "Delete the selected steps and connections (Delete)",
-                            ) {
-                                commands.push(Command::Delete {
-                                    nodes: input.selection.to_vec(),
-                                    wires: std::mem::take(&mut self.selected_wires),
-                                });
+                            // Keep infrequent selection actions in one menu rather
+                            // than covering the board with disabled commands.
+                            if has_selection || !self.selected_wires.is_empty() {
+                                ui.menu_button(
+                                    format!("Selection ({})", input.selection.len()),
+                                    |ui| {
+                                        let items = [
+                                            ("Copy", "Ctrl+C", Command::Copy),
+                                            ("Duplicate", "Ctrl+D", Command::Duplicate),
+                                            (
+                                                "Save as component",
+                                                "",
+                                                Command::SaveSelectionAsComponent,
+                                            ),
+                                        ];
+                                        for (label, shortcut, command) in items {
+                                            if ui
+                                                .add_enabled(
+                                                    has_selection,
+                                                    egui::Button::new(label)
+                                                        .shortcut_text(shortcut),
+                                                )
+                                                .clicked()
+                                            {
+                                                commands.push(command);
+                                                ui.close();
+                                            }
+                                        }
+                                        ui.separator();
+                                        if ui
+                                            .button(
+                                                egui::RichText::new("Delete selection")
+                                                    .color(theme::DANGER),
+                                            )
+                                            .clicked()
+                                        {
+                                            commands.push(Command::Delete {
+                                                nodes: input.selection.to_vec(),
+                                                wires: std::mem::take(&mut self.selected_wires),
+                                            });
+                                            ui.close();
+                                        }
+                                    },
+                                );
                             }
                         });
                     });
@@ -930,6 +959,7 @@ impl Canvas {
         egui::Area::new(ui.id().with("board-zoom"))
             .fixed_pos(viewport.left_bottom() + vec2(14.0, -14.0))
             .pivot(Align2::LEFT_BOTTOM)
+            .fade_in(false)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
                     .fill(theme::WHITE)

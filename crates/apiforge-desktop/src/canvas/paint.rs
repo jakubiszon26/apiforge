@@ -161,7 +161,7 @@ pub fn card(
         local(56.0, 21.0),
         Align2::LEFT_CENTER,
         &card.caption,
-        FontId::proportional(9.5 * z),
+        FontId::proportional((11.0 * z).max(10.0)),
         theme::MUTED,
     );
     clipped
@@ -173,7 +173,7 @@ pub fn card(
             local(56.0, 40.0),
             Align2::LEFT_CENTER,
             &card.name,
-            FontId::new(13.5 * z, theme::bold_family()),
+            FontId::new((15.0 * z).max(13.0), theme::bold_family()),
             theme::TEXT,
         );
     if card.kind == NodeKind::Component {
@@ -203,7 +203,7 @@ pub fn card(
                 at,
                 Align2::LEFT_CENTER,
                 subtitle,
-                FontId::monospace(10.5 * z),
+                FontId::proportional((12.0 * z).max(11.0)),
                 theme::LINK,
             );
     }
@@ -219,7 +219,7 @@ pub fn card(
             local(14.0, top + 10.0),
             Align2::LEFT_CENTER,
             label,
-            FontId::proportional(10.0 * z),
+            FontId::proportional((11.5 * z).max(10.5)),
             theme::MUTED,
         );
         let field = camera.rect(card.input_field(index));
@@ -250,7 +250,7 @@ pub fn card(
                     field.left_center() + vec2(6.0 * z, 0.0),
                     Align2::LEFT_CENTER,
                     text,
-                    FontId::proportional(10.5 * z),
+                    FontId::proportional((12.0 * z).max(11.0)),
                     text_color,
                 );
         }
@@ -269,7 +269,7 @@ pub fn card(
         let type_width = clipped
             .layout_no_wrap(
                 row.type_label.clone(),
-                FontId::proportional(9.0 * z),
+                FontId::proportional((10.5 * z).max(9.5)),
                 theme::MUTED,
             )
             .size()
@@ -278,14 +278,14 @@ pub fn card(
             local(WIDTH - 16.0, y),
             Align2::RIGHT_CENTER,
             &row.type_label,
-            FontId::proportional(9.0 * z),
+            FontId::proportional((10.5 * z).max(9.5)),
             theme::MUTED,
         );
         clipped.text(
             local(WIDTH - 16.0, y) - vec2(type_width + 8.0 * z, 0.0),
             Align2::RIGHT_CENTER,
             &row.label,
-            FontId::proportional(10.0 * z),
+            FontId::proportional((11.5 * z).max(10.5)),
             theme::TEXT,
         );
         if let Some(anchor) = card.output_anchor(&row.name) {
@@ -304,7 +304,7 @@ pub fn card(
                 footer.left_center() + vec2(14.0 * z, 0.0),
                 Align2::LEFT_CENTER,
                 format!("● {}  {} ms", step.status.label(), step.duration_ms),
-                FontId::proportional(10.0 * z),
+                FontId::proportional((11.5 * z).max(10.5)),
                 status_color(step.status),
             );
         }
@@ -313,7 +313,7 @@ pub fn card(
                 footer.left_center() + vec2(14.0 * z, 0.0),
                 Align2::LEFT_CENTER,
                 "Ready",
-                FontId::proportional(9.5 * z),
+                FontId::proportional((11.0 * z).max(10.0)),
                 theme::MUTED,
             );
         }
@@ -329,7 +329,7 @@ pub fn card(
         action.center(),
         Align2::CENTER_CENTER,
         "+ Action",
-        FontId::proportional(10.0 * z),
+        FontId::proportional((11.5 * z).max(10.5)),
         theme::TEXT,
     );
 
@@ -348,7 +348,7 @@ pub fn card(
             button.center() - vec2(0.0, 2.0 * z),
             Align2::CENTER_CENTER,
             *label,
-            FontId::proportional(10.0 * z),
+            FontId::proportional((11.5 * z).max(10.5)),
             color,
         );
         if let Some(anchor) = card.output_anchor(port) {

@@ -74,6 +74,13 @@ impl Card {
         let inline_allowed = node.kind != NodeKind::Component && ports.len() <= 3;
         let inputs = ports
             .iter()
+            .filter(|port| {
+                // Unary comparisons have no second operand. Keep the document
+                // binding intact when hidden, so changing the predicate is safe.
+                port.name != "expected"
+                    || !matches!(node.kind, NodeKind::Assert | NodeKind::If)
+                    || predicate(node).takes_expected()
+            })
             .map(|port| {
                 let binding = node.inputs.get(&port.name);
                 let value = row_value(node, port, binding, inline_allowed, reference_graph);
@@ -128,6 +135,7 @@ impl Card {
                     .to_owned(),
             ),
             NodeKind::Formula => Some(formula_operator(node).label().to_owned()),
+            NodeKind::Assert | NodeKind::If => Some(predicate(node).label().to_owned()),
             _ => None,
         };
         let controls = match node.kind {
@@ -377,6 +385,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn unary_comparison_shows_its_predicate_and_only_one_operand() {
+        let project = apiforge_core::demos::empty_project();
+        let graph = &project.scenarios[0].graph;
+        let mut node = apiforge_core::graph::create_node(
+            NodeKind::Assert,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        node.config.predicate = Some(Predicate::NotEmpty);
+        let card = Card::build(&node, graph, &project);
+        assert_eq!(card.subtitle.as_deref(), Some("is not empty"));
+        assert!(card.inputs.iter().any(|row| row.name == "actual"));
+        assert!(!card.inputs.iter().any(|row| row.name == "expected"));
+        node.config.predicate = Some(Predicate::Equals);
+        let card = Card::build(&node, graph, &project);
+        assert!(card.inputs.iter().any(|row| row.name == "expected"));
     }
 
     #[test]

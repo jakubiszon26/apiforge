@@ -1,13 +1,15 @@
 # API Forge: migration to Rust + egui
 
-Status (19 October 2026): R0/R1 are under way and R2 has started. `apiforge-core` imports
-and validates v1 documents and implements expression semantics (JSON paths, the 37
-operators) verified against a corpus generated from the TypeScript reference.
-`apiforge-desktop` is a native graph viewer. Editing, the runner and persistence remain to
-be ported. There is no production release yet. This document supersedes the technology
-assumptions of the earlier PoC plans; the TypeScript application remains the reference
-implementation.
+Status (19 October 2026): the core, serial runner, persistence and native editor
+have implementations covering R1–R8. The desktop supports graph editing, variables,
+components, diagnostic runs and resizable reports. These stages still need product
+acceptance; R0's Windows verification and R9/R10 release gates remain open. There is
+no production release yet. The TypeScript application remains the comparison reference.
 
+The latest integration and durability checks are recorded in
+[the integration review](docs/migration/integration-review.md). Native CI probes are
+configured for both platforms, but configuration is not evidence that hosted Windows
+checks have run.
 **Current priority:** feature parity with the TypeScript prototype first, refinement and
 release hardening afterwards. Everything in the native application — code, documentation
 and the user interface — is in English.

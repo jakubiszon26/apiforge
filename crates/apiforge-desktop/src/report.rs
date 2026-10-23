@@ -12,7 +12,7 @@ use apiforge_core::{
     path::JsonPath,
     run::{Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
-use eframe::egui::{self, Color32, Id, RichText, Sense, Stroke, Ui};
+use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 
@@ -125,8 +125,8 @@ pub struct ReportPanel {
 impl Default for ReportPanel {
     fn default() -> Self {
         Self {
-            open: true,
-            height: 260.0,
+            open: false,
+            height: 320.0,
             last_run_id: None,
             last_selected_node_id: None,
             selected_key: None,
@@ -141,30 +141,49 @@ impl ReportPanel {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
 
-        egui::Panel::bottom("report")
-            .resizable(self.open)
-            .default_size(if self.open { self.height } else { 40.0 })
-            .size_range(if self.open {
-                160.0..=560.0
-            } else {
-                40.0..=40.0
-            })
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(24, 8)),
-            )
-            .show(ui, |ui| {
-                self.toggle_bar(ui, context, &mut actions);
-                if self.open {
-                    self.height = (ui.available_height() + 40.0).clamp(160.0, 560.0);
-                    ui.separator();
-                    match context.run {
-                        None => empty_state(ui),
-                        Some(run) => self.run_contents(ui, run, context, &mut actions),
-                    }
+        let was_open = self.open;
+        let maximum = (ui.available_height() - 220.0).clamp(160.0, 560.0);
+        // Separate layout memories preserve the expanded size across collapse.
+        let response = egui::Panel::bottom(if was_open {
+            "report-expanded"
+        } else {
+            "report-collapsed"
+        })
+        .resizable(self.open)
+        .default_size(if self.open { self.height } else { 44.0 })
+        .size_range(if self.open {
+            160.0..=maximum
+        } else {
+            44.0..=44.0
+        })
+        .frame(
+            egui::Frame::new()
+                .fill(theme::WHITE)
+                .inner_margin(egui::Margin::symmetric(24, 8)),
+        )
+        .show(ui, |ui| {
+            // An empty report must still fill the user's requested height.
+            ui.set_min_height(ui.available_height());
+            self.toggle_bar(ui, context, &mut actions);
+            if was_open {
+                ui.separator();
+                match context.run {
+                    None => empty_state(ui),
+                    Some(run) => self.run_contents(ui, run, context, &mut actions),
                 }
-            });
+            }
+        });
+        if was_open {
+            self.height = response.response.rect.height().clamp(160.0, maximum);
+            let center = response.response.rect.center_top() + egui::vec2(0.0, 3.0);
+            ui.painter().line_segment(
+                [
+                    center - egui::vec2(18.0, 0.0),
+                    center + egui::vec2(18.0, 0.0),
+                ],
+                Stroke::new(2.0, theme::BORDER),
+            );
+        }
         actions
     }
 
@@ -184,6 +203,15 @@ impl ReportPanel {
             && let (Some(run), Some(node_id)) = (run, selected_node_id)
         {
             let rows = flatten_steps(&run.steps);
+            // Clicking a component child selects its parent on the board. Keep
+            // the explicit child row while that matching board selection settles.
+            if !run_changed
+                && rows.iter().any(|row| {
+                    Some(row.key.as_str()) == self.selected_key.as_deref() && row.root_id == node_id
+                })
+            {
+                return;
+            }
             if let Some(item) = rows
                 .iter()
                 .find(|row| row.depth == 0 && row.step.node_id == node_id)
@@ -196,9 +224,13 @@ impl ReportPanel {
     fn toggle_bar(&mut self, ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         ui.horizontal(|ui| {
             let arrow = if self.open { "▾" } else { "▸" };
-            let verb = if self.open { "Hide" } else { "Show" };
             if ui
-                .add(egui::Button::new(format!("{arrow}  {verb} run")).frame(false))
+                .add(
+                    egui::Button::new(
+                        RichText::new(format!("{arrow}  Run results")).family(theme::bold_family()),
+                    )
+                    .frame(false),
+                )
                 .clicked()
             {
                 self.open = !self.open;
@@ -232,14 +264,10 @@ impl ReportPanel {
                 ui.add_space(8.0);
                 if context.stale {
                     ui.label(
-                        RichText::new(
-                            "The graph changed after this run — the report shows an earlier version",
-                        )
-                        .size(11.0)
-                        .color(theme::WARNING),
+                        RichText::new("Graph changed · results from an earlier version")
+                            .size(11.0)
+                            .color(theme::WARNING),
                     );
-                } else {
-                    widgets::hint(ui, "Results and data of every step");
                 }
             });
         });
@@ -253,7 +281,15 @@ impl ReportPanel {
         actions: &mut Vec<Action>,
     ) {
         header_row(ui, run, context.files_busy, actions);
-        meta_row(ui, run);
+        if run.diagnostic {
+            ui.label(
+                RichText::new(
+                    "Diagnostic run · may use saved inputs · does not pass the full test",
+                )
+                .size(11.5)
+                .color(theme::WARNING),
+            );
+        }
         if let Some(notice) = &run.notice {
             egui::Frame::new()
                 .fill(theme::ACCENT_SOFT)
@@ -287,7 +323,7 @@ impl ReportPanel {
         let height = ui.available_height().max(80.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(280.0, height),
+                egui::vec2(300.0, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     self.step_list(ui, &rows, selected.as_ref(), actions);
@@ -298,7 +334,13 @@ impl ReportPanel {
                 egui::vec2(ui.available_width(), height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    self.step_details(ui, &run.id, selected.as_ref(), actions);
+                    // Keep messages and comparison details accessible even in a short panel.
+                    egui::ScrollArea::vertical()
+                        .id_salt("report-step-details")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            self.step_details(ui, &run.id, selected.as_ref(), actions);
+                        });
                 },
             );
         });
@@ -404,10 +446,9 @@ impl ReportPanel {
         });
         ui.separator();
 
-        egui::ScrollArea::vertical()
-            .id_salt(("report-detail", run_id, &selected.key, self.tab as u8))
-            .auto_shrink([false, false])
-            .show(ui, |ui| match self.tab {
+        ui.push_id(
+            ("report-detail", run_id, &selected.key, self.tab as u8),
+            |ui| match self.tab {
                 DetailTab::Request => {
                     if let Some(request) = &step.request {
                         ui.horizontal(|ui| {
@@ -454,7 +495,8 @@ impl ReportPanel {
                         self.value_tree(ui, &branch, port, value, target, actions);
                     }
                 }
-            });
+            },
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -541,7 +583,7 @@ impl ReportPanel {
                 Sense::hover()
             };
             let key_response = ui.add(
-                egui::Label::new(RichText::new(label).monospace().color(key_color))
+                egui::Label::new(RichText::new(label).monospace().size(12.0).color(key_color))
                     .sense(sense)
                     .truncate(),
             );
@@ -571,7 +613,7 @@ impl ReportPanel {
                 egui::Label::new(
                     RichText::new(labels::truncate(&summary, 72))
                         .monospace()
-                        .size(11.0)
+                        .size(12.0)
                         .color(theme::MUTED),
                 )
                 .truncate(),
@@ -694,11 +736,6 @@ fn empty_state(ui: &mut Ui) {
 
 fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("Test run")
-                .size(13.0)
-                .family(theme::bold_family()),
-        );
         match run.mode {
             RunMode::Simulation => {
                 widgets::pill(ui, "SIMULATION", theme::LINK);
@@ -706,6 +743,19 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
             RunMode::Live => {
                 widgets::pill(ui, "LIVE API", theme::ACCENT);
             }
+        }
+        let started = short_time(&run.started_at);
+        let timing = total_duration_ms(run)
+            .map(|ms| format!("{started} · {ms} ms"))
+            .unwrap_or_else(|| started.to_owned());
+        ui.label(RichText::new(timing).size(12.0).color(theme::MUTED));
+        if run.mode == RunMode::Simulation {
+            ui.label(
+                RichText::new("Sample responses")
+                    .size(12.0)
+                    .color(theme::MUTED),
+            )
+            .on_hover_text("No HTTP requests are sent in simulation mode.");
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
@@ -740,44 +790,6 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
                     .color(theme::SUCCESS),
             );
         });
-    });
-}
-
-fn meta_row(ui: &mut Ui, run: &RunResult) {
-    ui.horizontal_wrapped(|ui| {
-        let time = short_time(&run.started_at);
-        let timing = match total_duration_ms(run) {
-            Some(ms) => format!("{time} · {ms} ms"),
-            None => time.to_owned(),
-        };
-        ui.label(RichText::new(timing).size(11.0).color(theme::MUTED));
-        ui.label(RichText::new("·").size(11.0).color(theme::MUTED));
-        let summary = match run.status {
-            RunStatus::Running => "Running…",
-            RunStatus::Passed => "Finished — all checks passed",
-            RunStatus::Cancelled => "Cancelled",
-            RunStatus::Failed => "Finished with errors",
-        };
-        ui.label(RichText::new(summary).size(11.0).color(theme::MUTED));
-        if run.diagnostic {
-            ui.label(RichText::new("·").size(11.0).color(theme::MUTED));
-            ui.label(
-                RichText::new(
-                    "Diagnostic run · may use saved inputs · does not pass the full test",
-                )
-                .size(11.0)
-                .strong()
-                .color(theme::WARNING),
-            );
-        }
-        if run.mode == RunMode::Simulation {
-            ui.label(RichText::new("·").size(11.0).color(theme::MUTED));
-            ui.label(
-                RichText::new("Sample responses — no requests sent")
-                    .size(11.0)
-                    .color(theme::MUTED),
-            );
-        }
     });
 }
 
@@ -834,7 +846,7 @@ fn compact_json(value: &Value) -> String {
 fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Response {
     let indent = row.depth as f32 * 14.0;
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 36.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 42.0), Sense::click());
     let painter = ui.painter();
     if active {
         painter.rect_filled(rect, 6.0, theme::ACCENT_SOFT);
@@ -855,23 +867,27 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
 
     let text_left = rect.left() + 28.0 + indent;
     let name_color = if active { theme::ACCENT } else { theme::TEXT };
-    painter.text(
-        egui::pos2(text_left, rect.top() + 11.0),
-        egui::Align2::LEFT_CENTER,
-        widgets::ellipsis(&row.step.name, 26),
-        egui::FontId::new(12.0, theme::bold_family()),
+    // Reserve the duration column by width, rather than truncating every name
+    // at a fixed character count (which lets wider names overlap the duration).
+    let mut name = egui::text::LayoutJob::simple_singleline(
+        row.step.name.clone(),
+        egui::FontId::new(12.5, theme::bold_family()),
         name_color,
     );
+    name.wrap.max_width = (rect.right() - text_left - 76.0).max(16.0);
+    name.wrap.max_rows = 1;
+    let galley = painter.layout_job(name);
+    painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
     let sub = if row.depth > 0 {
         format!("Inside component · {}", row.step.status.label())
     } else {
         row.step.status.label().to_owned()
     };
     painter.text(
-        egui::pos2(text_left, rect.top() + 25.0),
+        egui::pos2(text_left, rect.top() + 29.0),
         egui::Align2::LEFT_CENTER,
         sub,
-        egui::FontId::proportional(10.0),
+        egui::FontId::proportional(11.0),
         theme::MUTED,
     );
     painter.text(
@@ -881,8 +897,9 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
         egui::FontId::monospace(10.5),
         theme::MUTED,
     );
-    let _ = Id::new(&row.key);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(&row.step.name)
 }
 
 fn run_pill(status: RunStatus) -> (&'static str, Color32) {
@@ -1011,6 +1028,67 @@ mod tests {
     }
 
     #[test]
+    fn selecting_a_child_keeps_its_details_when_the_board_selects_its_parent() {
+        let run = sample_run();
+        let mut panel = ReportPanel::default();
+        panel.sync_selection(Some(&run), None);
+        let child_key = flatten_steps(&run.steps)[1].key.clone();
+        panel.selected_key = Some(child_key.clone());
+        panel.sync_selection(Some(&run), Some("comp-1"));
+        assert_eq!(panel.selected_key.as_deref(), Some(child_key.as_str()));
+        panel.sync_selection(Some(&run), Some("assert-1"));
+        let rows = flatten_steps(&run.steps);
+        assert_eq!(
+            resolve_selected(&rows, panel.selected_key.as_deref(), None)
+                .unwrap()
+                .step
+                .node_id,
+            "assert-1"
+        );
+    }
+
+    #[test]
+    fn collapsing_the_report_preserves_its_expanded_height() {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let mut panel = ReportPanel {
+            open: true,
+            height: 330.0,
+            ..Default::default()
+        };
+        let context = Context {
+            run: None,
+            selected_node_id: None,
+            error_policy: ErrorPolicy::Continue,
+            running: false,
+            stale: false,
+            files_busy: false,
+        };
+        let draw = |panel: &mut ReportPanel| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                panel.show(ui, &context);
+            });
+            output.textures_delta.clear();
+        };
+        draw(&mut panel);
+        let expanded = panel.height;
+        assert!((expanded - 330.0).abs() < 2.0);
+        panel.open = false;
+        draw(&mut panel);
+        assert_eq!(panel.height, expanded);
+        panel.open = true;
+        draw(&mut panel);
+        assert!((panel.height - expanded).abs() < 2.0);
+    }
+
+    #[test]
     fn flatten_steps_preserves_component_children_and_root_id() {
         let run = sample_run();
         let rows = flatten_steps(&run.steps);
@@ -1048,7 +1126,10 @@ mod tests {
 
     #[test]
     fn report_panel_renders_empty_and_populated_states_headlessly() {
-        let mut panel = ReportPanel::default();
+        let mut panel = ReportPanel {
+            open: true,
+            ..Default::default()
+        };
         let run = sample_run();
         let ctx = egui::Context::default();
         crate::theme::apply(&ctx);

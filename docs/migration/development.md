@@ -48,6 +48,27 @@ Changing the port means editing the base URL in the demo project's environment.
 Tests and the desktop application can run it in-process with
 `apiforge_demo_api::spawn(addr)`; dropping the returned handle stops the server.
 
+## Finding steps and saving safely
+
+Use **Find step…** or **Ctrl+K** to search the current board by name or block type.
+Arrow keys choose a result, Enter opens its configuration and brings it into view,
+and Escape dismisses the search. Text-field paste remains separate from block paste.
+
+Autosave keeps only the latest waiting workspace while an earlier write is in
+progress. The saved status acknowledges that generation only. Closing flushes pending
+edits and waits for the result; a failed save keeps the window open with **Retry save**.
+After fixing the underlying storage problem, retry saves the current document.
+
+If the saved workspace cannot be loaded, the application opens a temporary session
+with autosave disabled and offers normal JSON export. Existing files remain untouched.
+A workspace from a newer format version is never replaced with an older backup.
+Truncated documents can still recover from a validated backup.
+
+On Unix, successful writes include file and directory sync, including newly created
+parent directories; sync failures are surfaced. Windows uses flushed files and atomic
+replacement, but power-loss durability of directory metadata remains an explicit
+platform limitation pending native release verification.
+
 ## Verification
 
 ```bash

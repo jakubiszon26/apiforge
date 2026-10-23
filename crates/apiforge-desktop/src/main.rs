@@ -12,6 +12,7 @@ mod files;
 mod inspector;
 mod labels;
 mod library;
+mod navigator;
 mod persistence;
 mod report;
 mod theme;
@@ -27,6 +28,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, PartialEq)]
@@ -177,11 +179,35 @@ struct Window {
     smoke: bool,
     frames: u8,
     completed: Arc<AtomicBool>,
+    closing_since: Option<Instant>,
 }
+
+/// Cleanup has a bounded runner budget. Leave a little time for its final report
+/// without allowing an unresponsive endpoint to keep the window open forever.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
-        self.app.ui(ui);
+        if ui.ctx().input(|input| input.viewport().close_requested()) {
+            self.closing_since.get_or_insert_with(Instant::now);
+        }
+        if let Some(started) = self.closing_since {
+            let ready = self.app.prepare_close();
+            if let Some(error) = self.app.close_save_error() {
+                self.app.abort_close_after_save_error(error);
+                self.closing_since = None;
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::CancelClose);
+            } else if ready || (started.elapsed() >= CLOSE_TIMEOUT && !self.app.save_pending()) {
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
+            } else {
+                ui.ctx()
+                    .send_viewport_cmd(eframe::egui::ViewportCommand::CancelClose);
+                ui.ctx().request_repaint_after(Duration::from_millis(16));
+            }
+        }
+        ui.add_enabled_ui(self.closing_since.is_none(), |ui| self.app.ui(ui));
         if let Some(capture) = &mut self.capture {
             if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
                 if let Err(message) = &result {
@@ -237,6 +263,7 @@ fn run_window(source: app::Source, probe: Probe) -> ExitCode {
                 smoke,
                 frames: 0,
                 completed,
+                closing_since: None,
             }))
         }),
     );

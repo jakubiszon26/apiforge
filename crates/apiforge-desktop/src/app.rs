@@ -7,6 +7,7 @@ use crate::{
     files,
     inspector::{self, Inspector},
     library::{self, Library},
+    navigator::Navigator,
     persistence::{SaveStatus, Saver},
     report::{self, ReportPanel},
     theme, widgets,
@@ -53,6 +54,7 @@ pub struct App {
     saved_revision: u64,
     canvas: Canvas,
     library: Library,
+    navigator: Navigator,
     inspector: Inspector,
     report: ReportPanel,
     runner: Option<RunnerService>,
@@ -64,6 +66,7 @@ pub struct App {
     secrets: dialogs::SessionSecrets,
     dialog: Option<Dialog>,
     files: files::Files,
+    closing: bool,
 }
 
 impl App {
@@ -73,23 +76,27 @@ impl App {
         let (workspace, saver) = match source {
             Source::Session(workspace) => (workspace, None),
             Source::Storage(store) => {
-                let workspace = match store.load() {
+                let (workspace, writable) = match store.load() {
                     Ok(Some(loaded)) => {
                         notice = loaded.recovered;
-                        loaded.workspace
+                        (loaded.workspace, true)
                     }
-                    Ok(None) => default_workspace(),
+                    Ok(None) => (default_workspace(), true),
                     Err(error) => {
                         notice = Some(format!(
-                            "{error}. A new workspace was opened; the unreadable file is kept until you save changes."
+                            "{error}. A temporary workspace was opened with autosave disabled to protect the existing files. Use Export to keep changes from this session."
                         ));
-                        default_workspace()
+                        (default_workspace(), false)
                     }
                 };
                 let repaint = context.clone();
-                let saver = Saver::spawn(store, move || repaint.request_repaint())
-                    .map_err(|error| notice = Some(format!("Cannot start saving: {error}")))
-                    .ok();
+                let saver = writable
+                    .then(|| {
+                        Saver::spawn(store, move || repaint.request_repaint())
+                            .map_err(|error| notice = Some(format!("Cannot start saving: {error}")))
+                            .ok()
+                    })
+                    .flatten();
                 (workspace, saver)
             }
         };
@@ -107,6 +114,7 @@ impl App {
             saved_revision: 0,
             canvas: Canvas::default(),
             library: Library::default(),
+            navigator: Navigator::default(),
             inspector: Inspector::default(),
             report: ReportPanel::default(),
             runner,
@@ -117,7 +125,8 @@ impl App {
             mode: RunMode::Simulation,
             secrets: dialogs::SessionSecrets::new(),
             dialog: None,
-            files: files::Files::default(),
+            files: files::Files::new(context.clone()),
+            closing: false,
         }
     }
 
@@ -136,6 +145,62 @@ impl App {
 
     pub fn has_document(&self) -> bool {
         !self.files.busy()
+    }
+
+    /// Requests cancellation once, then keeps polling until cleanup finishes.
+    /// The window owns the overall close deadline; this method never waits.
+    pub fn prepare_close(&mut self) -> bool {
+        if !self.closing {
+            self.save_if_changed();
+            self.closing = true;
+            self.cancel_run();
+            if let Some(saver) = &self.saver {
+                saver.flush();
+            }
+            if self.run_handle.is_some() {
+                self.notice = Some("Closing after the active test finishes cleanup…".into());
+            }
+        }
+        self.poll_run();
+        self.run_handle.is_none()
+            && !self.files.busy()
+            && !self.save_pending()
+            && self.close_save_error().is_none()
+            && self
+                .runner
+                .as_ref()
+                .is_none_or(|runner| runner.active_runs() == 0)
+    }
+
+    pub fn save_pending(&self) -> bool {
+        self.saver
+            .as_ref()
+            .is_some_and(|saver| saver.status() == SaveStatus::Pending)
+    }
+
+    pub fn close_save_error(&self) -> Option<String> {
+        if !self.closing {
+            return None;
+        }
+        match self.saver.as_ref().map(Saver::status) {
+            Some(SaveStatus::Failed(error)) => Some(error),
+            _ => None,
+        }
+    }
+
+    pub fn abort_close_after_save_error(&mut self, error: String) {
+        self.closing = false;
+        self.notice = Some(format!(
+            "Your latest changes could not be saved: {error}. The window is staying open. Fix the storage problem and choose Retry save."
+        ));
+    }
+
+    fn retry_save(&mut self) {
+        if let Some(saver) = &self.saver {
+            saver.save(self.editor.workspace());
+            saver.flush();
+            self.notice = None;
+        }
     }
 
     fn is_running(&self) -> bool {
@@ -176,7 +241,7 @@ impl App {
     }
 
     fn start_run(&mut self, kind: RunKind) {
-        if self.is_running() || self.editor.draft().is_some() {
+        if self.closing || self.is_running() || self.editor.draft().is_some() {
             return;
         }
         let selected = (self.editor.phase() == Phase::Main)
@@ -263,7 +328,7 @@ impl App {
         self.shortcuts(ui.ctx());
 
         egui::Panel::left("sidebar")
-            .exact_size(268.0)
+            .exact_size(235.0)
             .resizable(false)
             .frame(
                 egui::Frame::new()
@@ -272,7 +337,7 @@ impl App {
             )
             .show(ui, |ui| self.sidebar(ui));
         egui::Panel::top("topbar")
-            .exact_size(48.0)
+            .exact_size(52.0)
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
@@ -286,8 +351,8 @@ impl App {
                     .inner_margin(egui::Margin {
                         left: 24,
                         right: 24,
-                        top: 14,
-                        bottom: 12,
+                        top: 18,
+                        bottom: 18,
                     }),
             )
             .show(ui, |ui| self.scenario_header(ui));
@@ -313,6 +378,10 @@ impl App {
             .frame(egui::Frame::NONE)
             .show(ui, |ui| self.board(ui));
         self.dialogs(ui.ctx());
+        if let Some(id) = self.navigator.show(ui.ctx(), self.editor.graph()) {
+            self.editor.selection = vec![id.clone()];
+            self.canvas.reveal(id);
+        }
         self.save_if_changed();
     }
 
@@ -347,6 +416,9 @@ impl App {
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             let status = self.saver.as_ref().map(Saver::status);
+            if matches!(&status, Some(SaveStatus::Failed(_))) && ui.button("Retry save").clicked() {
+                self.retry_save();
+            }
             let (text, color) = match &status {
                 None => ("Session only — not saved".to_owned(), theme::MUTED),
                 Some(SaveStatus::Failed(error)) => (format!("Save failed: {error}"), theme::DANGER),
@@ -522,6 +594,9 @@ impl App {
                 egui::vec2(width, 70.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    // Reserve the title column even when its text is short, so
+                    // run controls stay aligned at the right edge.
+                    ui.set_min_width(width);
                     let eyebrow = match &draft {
                         Some(draft) => format!(
                             "COMPONENT · REVISION {} · WORKING COPY   ·   {} steps",
@@ -538,7 +613,12 @@ impl App {
                     let title = draft.as_ref().map_or(scenario.name.as_str(), |draft| {
                         draft.definition.name.as_str()
                     });
-                    ui.label(RichText::new(title).size(22.0).family(theme::bold_family()));
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(title).size(24.0).family(theme::bold_family()),
+                        )
+                        .truncate(),
+                    );
                     let description = draft
                         .as_ref()
                         .map_or(scenario.description.as_str(), |draft| {
@@ -681,6 +761,13 @@ impl App {
                 {
                     self.editor.set_phase(Phase::Cleanup);
                 }
+            }
+            if ui
+                .button("Find step…")
+                .on_hover_text("Find a block and open its configuration (Ctrl+K)")
+                .clicked()
+            {
+                self.navigator.open();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -1029,7 +1116,21 @@ impl App {
                 if selected.is_empty() {
                     return;
                 }
-                match edit::duplicate_selection(self.editor.graph(), &selected) {
+                // Cleanup bindings may read main-graph outputs. Preserve those
+                // references exactly as a regular paste does.
+                let fragment = edit::copy_selection(self.editor.graph(), &selected);
+                let reference = self.editor.reference_graph().into_owned();
+                let external: Vec<&str> = reference
+                    .nodes
+                    .iter()
+                    .map(|node| node.id.as_str())
+                    .collect();
+                match edit::paste_selection(
+                    self.editor.graph(),
+                    &fragment,
+                    &edit::PASTE_OFFSET,
+                    &external,
+                ) {
                     Ok(pasted) => self.insert_pasted(pasted),
                     Err(error) => self.canvas.set_error(error.to_string()),
                 }
@@ -1177,7 +1278,16 @@ impl App {
     // ----- Shortcuts, dialogs and files ------------------------------------------
 
     fn shortcuts(&mut self, context: &egui::Context) {
-        if context.egui_wants_keyboard_input() || self.dialog.is_some() {
+        if self.dialog.is_some() || self.navigator.is_open() || self.closing {
+            return;
+        }
+        if context.input_mut(|input| {
+            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::K))
+        }) {
+            self.navigator.open();
+            return;
+        }
+        if context.egui_wants_keyboard_input() {
             return;
         }
         let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
@@ -1460,6 +1570,271 @@ mod tests {
             app.poll_run();
         }
         app.poll_run();
+    }
+
+    fn draw_frame(app: &mut App, context: &egui::Context, events: Vec<egui::Event>) {
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 1000.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.ui(ui),
+        );
+        output.textures_delta.clear();
+    }
+
+    fn command_key(key: Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn keyboard_navigation_duplicate_and_undo_work_through_the_window() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let target = app.editor.graph().nodes[1].clone();
+        let original = app.editor.graph().clone();
+        draw_frame(&mut app, &context, vec![]);
+        draw_frame(&mut app, &context, vec![command_key(Key::K)]);
+        assert!(app.navigator.is_open());
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Text(target.name.clone())],
+        );
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Key {
+                key: Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert_eq!(app.editor.selection, vec![target.id]);
+        assert_eq!(
+            app.editor.graph(),
+            &original,
+            "navigation must not edit the document"
+        );
+        draw_frame(&mut app, &context, vec![]);
+        draw_frame(&mut app, &context, vec![]);
+        draw_frame(&mut app, &context, vec![command_key(Key::D)]);
+        assert_eq!(app.editor.graph().nodes.len(), original.nodes.len() + 1);
+        draw_frame(&mut app, &context, vec![command_key(Key::Z)]);
+        assert_eq!(app.editor.graph(), &original);
+    }
+
+    #[test]
+    fn pasting_into_an_inspector_text_field_does_not_paste_blocks() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let id = app.editor.graph().nodes[1].id.clone();
+        app.select_node(&id);
+        app.board_command(Command::Copy);
+        let count = app.editor.graph().nodes.len();
+        draw_frame(&mut app, &context, vec![]);
+        let field_id = egui::Id::new(("inspector", &id)).with("name");
+        let rect = context
+            .read_response(field_id)
+            .expect("name field is rendered")
+            .rect;
+        let click = |pressed| egui::Event::PointerButton {
+            pos: rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::PointerMoved(rect.center()), click(true)],
+        );
+        draw_frame(&mut app, &context, vec![click(false)]);
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Paste(" changed ".into())],
+        );
+        assert_eq!(app.editor.graph().nodes.len(), count);
+        assert!(
+            app.editor
+                .selected_node()
+                .unwrap()
+                .name
+                .contains(" changed ")
+        );
+    }
+
+    #[test]
+    fn unreadable_startup_documents_are_protected_from_autosave() {
+        for bytes in [b"{ truncated".as_slice(), br#"{"version":2}"#.as_slice()] {
+            let directory = tempfile::tempdir().unwrap();
+            let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+            std::fs::write(store.path(), bytes).unwrap();
+            let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
+            assert!(app.saver.is_none());
+            assert!(app.notice.as_deref().unwrap().contains("autosave disabled"));
+            app.editor
+                .change_project(|project| project.name = "Temporary edits".into());
+            app.save_if_changed();
+            drop(app);
+            assert_eq!(std::fs::read(store.path()).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn close_keeps_unsaved_changes_open_and_retry_persists_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocker = directory.path().join("blocked-parent");
+        let store = WorkspaceStore::at(blocker.join("workspace.json"));
+        store.save(&default_workspace()).unwrap();
+        let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
+        std::fs::remove_file(store.path()).unwrap();
+        std::fs::remove_dir(&blocker).unwrap();
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        app.editor
+            .change_project(|project| project.name = "Must survive close".into());
+        assert!(!app.prepare_close());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.save_pending() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!app.prepare_close());
+        let error = app.close_save_error().expect("failed I/O must block close");
+        app.abort_close_after_save_error(error);
+        assert!(!app.closing);
+        assert!(app.notice.as_deref().unwrap().contains("staying open"));
+        assert_eq!(app.editor.project().name, "Must survive close");
+
+        std::fs::remove_file(&blocker).unwrap();
+        app.retry_save();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.prepare_close() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(app.prepare_close());
+        assert_eq!(
+            store.load().unwrap().unwrap().workspace.projects[0].name,
+            "Must survive close"
+        );
+    }
+
+    #[test]
+    fn duplicating_cleanup_preserves_main_references_and_can_be_undone() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Source::Session(default_workspace()));
+        app.editor.set_phase(Phase::Cleanup);
+        let original = app.editor.graph().clone();
+        let node = original
+            .nodes
+            .iter()
+            .find(|node| {
+                node.inputs
+                    .values()
+                    .flat_map(Binding::references)
+                    .any(|reference| {
+                        app.editor
+                            .scenario()
+                            .graph
+                            .nodes
+                            .iter()
+                            .any(|main| main.id == reference.node_id)
+                    })
+            })
+            .expect("shop cleanup reads a main-graph response");
+        let inputs = node.inputs.clone();
+        app.editor.selection = vec![node.id.clone()];
+
+        app.board_command(Command::Duplicate);
+
+        assert_eq!(app.editor.graph().nodes.len(), original.nodes.len() + 1);
+        let duplicate = app.editor.selected_node().unwrap();
+        assert_ne!(duplicate.id, node.id);
+        assert_eq!(duplicate.inputs, inputs);
+        app.editor.undo();
+        assert_eq!(app.editor.graph(), &original);
+        app.editor.redo();
+        assert_eq!(app.editor.graph().nodes.len(), original.nodes.len() + 1);
+    }
+
+    #[test]
+    fn preparing_close_waits_for_active_cleanup_without_blocking() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::mpsc,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (entered, cleanup_started) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 2048];
+            assert!(stream.read(&mut request).unwrap() > 0);
+            entered.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(5)).unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+        });
+
+        let mut project = apiforge_core::demos::empty_project();
+        project.environment.base_url = format!("http://{address}");
+        let mut cleanup =
+            apiforge_core::graph::create_node(NodeKind::Request, Position { x: 0.0, y: 0.0 }, None);
+        cleanup.config.url = Some("/cleanup".into());
+        project.scenarios[0].cleanup.nodes.push(cleanup);
+        let workspace = Workspace {
+            version: 1,
+            active_id: project.id.clone(),
+            projects: vec![project],
+        };
+        let mut app = App::new(&egui::Context::default(), Source::Session(workspace));
+        app.mode = RunMode::Live;
+        app.start_run(RunKind::Full);
+        cleanup_started
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+
+        assert!(
+            !app.prepare_close(),
+            "an active cleanup must keep the window open"
+        );
+        // Repeated frames cannot abort cleanup or start another run.
+        assert!(!app.prepare_close());
+        app.start_run(RunKind::Full);
+        release.send(()).unwrap();
+        wait_until_finished(&mut app);
+        assert!(app.prepare_close());
+        assert!(
+            app.run
+                .as_ref()
+                .unwrap()
+                .steps
+                .iter()
+                .any(|step| step.phase == Phase::Cleanup
+                    && step.status == apiforge_core::run::StepStatus::Passed)
+        );
+        server.join().unwrap();
     }
 
     #[test]

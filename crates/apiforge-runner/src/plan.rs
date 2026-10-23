@@ -64,18 +64,26 @@ fn reachable_from<'a>(
         }
     }
     let mut reachable = HashSet::from([start]);
+    let mut active = HashSet::from([start]);
     let mut queue = VecDeque::from([start]);
     while let Some(id) = queue.pop_front() {
-        let next = successors.get(id).into_iter().flatten().copied();
-        let arguments = dependencies
-            .get(id)
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|source| kinds.get(source).is_some_and(|kind| kind.is_pure_value()));
-        for candidate in next.chain(arguments) {
-            if reachable.insert(candidate) {
+        for candidate in successors.get(id).into_iter().flatten().copied() {
+            reachable.insert(candidate);
+            if active.insert(candidate) {
                 queue.push_back(candidate);
+            }
+        }
+        // Arguments are required values, not new control roots. Walk their pure
+        // prerequisites without visiting their other consumers: a shared variable
+        // must not silently enable a disconnected HTTP request.
+        let mut arguments = vec![id];
+        while let Some(argument) = arguments.pop() {
+            for source in dependencies.get(argument).into_iter().flatten().copied() {
+                if kinds.get(source).is_some_and(|kind| kind.is_pure_value())
+                    && reachable.insert(source)
+                {
+                    arguments.push(source);
+                }
             }
         }
     }
@@ -159,9 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn a_shared_pure_argument_extends_reachability_to_its_consumers() {
-        // Reference behaviour, recorded in the core audit as a weakness: a pure value
-        // pulled in by the active path makes its other consumers reachable too.
+    fn a_shared_pure_argument_does_not_enable_its_other_consumers() {
         let graph = Graph {
             nodes: vec![
                 node("start", NodeKind::Trigger),
@@ -173,7 +179,20 @@ mod tests {
         };
         let plan = ExecutionPlan::new(&graph);
         assert!(plan.is_reachable("shared"));
-        assert!(plan.is_reachable("side-effect"));
+        assert!(!plan.is_reachable("side-effect"));
+    }
+
+    #[test]
+    fn an_explicitly_sequenced_value_still_activates_its_consumers() {
+        let graph = Graph {
+            nodes: vec![
+                node("start", NodeKind::Trigger),
+                node("value", NodeKind::Variable),
+                with_input(node("consumer", NodeKind::Request), "value"),
+            ],
+            edges: vec![edge("start", "value")],
+        };
+        assert!(ExecutionPlan::new(&graph).is_reachable("consumer"));
     }
 
     #[test]

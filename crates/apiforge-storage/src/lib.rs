@@ -93,7 +93,8 @@ impl WorkspaceStore {
     ///
     /// When the main file is corrupt, the backup is used and the reason is reported
     /// in [`Loaded::recovered`]. When both are unusable, the main file's error is
-    /// returned and no file is modified.
+    /// returned and no file is modified. Unsupported versions and oversized main
+    /// files are preserved as errors, since falling back could discard newer data.
     pub fn load(&self) -> Result<Option<Loaded>, StorageError> {
         let main = match read_workspace(&self.path) {
             Ok(Some(workspace)) => {
@@ -103,6 +104,14 @@ impl WorkspaceStore {
                 }));
             }
             Ok(None) => None,
+            // A newer or oversized document is not known to be corrupt. Using
+            // an older backup could silently overwrite data we cannot interpret.
+            Err(
+                error @ StorageError::Invalid {
+                    source: ImportError::UnsupportedVersion | ImportError::TooLarge { .. },
+                    ..
+                },
+            ) => return Err(error),
             Err(error) => Some(error),
         };
         match (main, read_workspace(&self.backup_path())) {
@@ -130,13 +139,41 @@ impl WorkspaceStore {
             source,
         })?;
         let bytes = serde_json::to_vec_pretty(&public)?;
-        if self.path.exists() {
+        // Semantic validation alone does not enforce the importer's byte limit.
+        // Never acknowledge a save that the next application launch cannot open.
+        import_document(&bytes, &ImportLimits::default()).map_err(|source| {
+            StorageError::Invalid {
+                path: self.path.clone(),
+                source,
+            }
+        })?;
+        match read_workspace(&self.path) {
             // Only a readable document becomes the backup; a corrupt main file must
             // not overwrite the last good copy.
-            if read_workspace(&self.path).is_ok_and(|workspace| workspace.is_some()) {
-                fs::copy(&self.path, self.backup_path())
-                    .map_err(|source| StorageError::io(&self.backup_path(), source))?;
+            Ok(Some(previous)) => {
+                // Backups need the same atomic replacement and durability as the
+                // main file; copying in place could destroy the only recovery copy.
+                // Compact encoding avoids inflating an imported document beyond
+                // the size limit while retaining it as a recovery workspace.
+                let previous = serde_json::to_vec(&public_workspace(&previous))?;
+                import_document(&previous, &ImportLimits::default()).map_err(|source| {
+                    StorageError::Invalid {
+                        path: self.backup_path(),
+                        source,
+                    }
+                })?;
+                write_atomic(&self.backup_path(), &previous)?;
             }
+            Err(
+                error @ StorageError::Invalid {
+                    source: ImportError::UnsupportedVersion | ImportError::TooLarge { .. },
+                    ..
+                },
+            ) => return Err(error),
+            Ok(None) | Err(StorageError::Invalid { .. }) => {}
+            // A corrupt document may be replaced after recovery, but an I/O
+            // failure is not proof of corruption. Preserve the existing file.
+            Err(error) => return Err(error),
         }
         write_atomic(&self.path, &bytes)
     }
@@ -183,10 +220,35 @@ fn read_workspace(path: &Path) -> Result<Option<Workspace>, StorageError> {
 /// Writes `bytes` to `path` through a synced temporary file in the same directory
 /// and an atomic rename, creating the directory if needed.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
+    write_atomic_with_sync(path, bytes, sync_directory)
+}
+
+fn write_atomic_with_sync(
+    path: &Path,
+    bytes: &[u8],
+    mut sync_directory: impl FnMut(&Path) -> io::Result<()>,
+) -> Result<(), StorageError> {
     let directory = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+    // A first save may create the application data directory. Flushing only that
+    // directory would leave its name in the parent uncommitted after power loss.
+    let mut created_parents = Vec::new();
+    let mut candidate = Some(directory);
+    while let Some(path) = candidate {
+        match fs::metadata(path) {
+            Ok(_) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let parent = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty());
+                created_parents.push(parent.unwrap_or(Path::new(".")).to_owned());
+                candidate = parent;
+            }
+            Err(source) => return Err(StorageError::io(path, source)),
+        }
+    }
     fs::create_dir_all(directory).map_err(|source| StorageError::io(directory, source))?;
     let mut temporary = tempfile::NamedTempFile::new_in(directory)
         .map_err(|source| StorageError::io(directory, source))?;
@@ -197,20 +259,28 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), StorageError> {
     temporary
         .persist(path)
         .map_err(|error| StorageError::io(path, error.error))?;
-    sync_directory(directory);
+    // A failed directory flush means the replacement may not survive power loss.
+    // The new document can already be visible, but it must not be reported saved.
+    sync_directory(directory).map_err(|source| StorageError::io(directory, source))?;
+    for parent in created_parents {
+        sync_directory(&parent).map_err(|source| StorageError::io(&parent, source))?;
+    }
     Ok(())
 }
 
 /// Makes the rename durable where the platform supports syncing directories.
-fn sync_directory(directory: &Path) {
+fn sync_directory(directory: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    if let Ok(handle) = File::open(directory) {
-        // Best effort: the data itself is already synced, and a failure here only
-        // widens the window in which a power loss could revert to the old file.
-        let _ = handle.sync_all();
+    {
+        File::open(directory)?.sync_all()
     }
     #[cfg(not(unix))]
-    let _ = directory;
+    {
+        // std does not expose a directory flush on Windows. The temporary file is
+        // still flushed before replacement; power-loss durability is platform-bound.
+        let _ = directory;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -303,5 +373,148 @@ mod tests {
         fs::write(store.path(), b"[]").unwrap();
         assert!(matches!(store.load(), Err(StorageError::Invalid { .. })));
         assert_eq!(fs::read(store.path()).unwrap(), b"[]");
+    }
+
+    #[test]
+    fn failed_backup_replacement_preserves_the_main_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let mut original = workspace();
+        store.save(&original).unwrap();
+        let saved = fs::read(store.path()).unwrap();
+        // A directory cannot be replaced with a regular file, on either target OS.
+        fs::create_dir(store.backup_path()).unwrap();
+        original.projects[0].name = "Not committed".into();
+        assert!(store.save(&original).is_err());
+        assert_eq!(fs::read(store.path()).unwrap(), saved);
+    }
+
+    #[test]
+    fn directory_flush_failure_is_not_acknowledged_as_a_successful_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("document.json");
+        let result = write_atomic_with_sync(&path, b"new complete document", |_| {
+            Err(io::Error::other("injected directory flush failure"))
+        });
+        assert!(matches!(result, Err(StorageError::Io { .. })));
+        // Rename has happened before the flush fails: callers must treat the result
+        // as unconfirmed, while the visible file must still be complete.
+        assert_eq!(fs::read(path).unwrap(), b"new complete document");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_first_save_flushes_new_directory_entries_up_to_the_existing_parent() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("application").join("data");
+        let mut flushed = Vec::new();
+        write_atomic_with_sync(&nested.join("document.json"), b"complete", |path| {
+            flushed.push(path.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            flushed,
+            [
+                nested,
+                directory.path().join("application"),
+                directory.path().to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn oversized_serialised_document_does_not_replace_a_reopenable_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let mut original = workspace();
+        store.save(&original).unwrap();
+        let saved = fs::read(store.path()).unwrap();
+        // Each field is semantically valid, but their combined bytes exceed the
+        // import limit. This used to save successfully and fail on the next launch.
+        for index in 0..170 {
+            original.projects[0]
+                .environment
+                .variables
+                .insert(format!("large_{index}"), "x".repeat(100_000));
+        }
+        apiforge_core::validate_workspace(&original).unwrap();
+        assert!(matches!(
+            store.save(&original),
+            Err(StorageError::Invalid { .. })
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), saved);
+        assert!(!store.backup_path().exists());
+    }
+
+    #[test]
+    fn a_missing_main_file_recovers_the_last_durable_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let original = workspace();
+        store.save(&original).unwrap();
+        store.save(&original).unwrap();
+        fs::remove_file(store.path()).unwrap();
+        let recovered = store.load().unwrap().unwrap();
+        assert_eq!(recovered.workspace, original);
+        assert!(recovered.recovered.is_some());
+    }
+
+    #[test]
+    fn newer_workspace_is_neither_replaced_by_backup_nor_overwritten_by_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let original = workspace();
+        store.save(&original).unwrap();
+        store.save(&original).unwrap();
+        let backup = fs::read(store.backup_path()).unwrap();
+        let mut newer = original.clone();
+        newer.version = 2;
+        let main = serde_json::to_vec(&newer).unwrap();
+        fs::write(store.path(), &main).unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(StorageError::Invalid {
+                source: ImportError::UnsupportedVersion,
+                ..
+            })
+        ));
+        assert!(matches!(
+            store.save(&original),
+            Err(StorageError::Invalid {
+                source: ImportError::UnsupportedVersion,
+                ..
+            })
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), main);
+        assert_eq!(fs::read(store.backup_path()).unwrap(), backup);
+    }
+
+    #[test]
+    fn oversized_main_is_preserved_instead_of_silently_rolling_back_to_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = WorkspaceStore::at(directory.path().join(WORKSPACE_FILE));
+        let original = workspace();
+        store.save(&original).unwrap();
+        store.save(&original).unwrap();
+        let backup = fs::read(store.backup_path()).unwrap();
+        let oversized = vec![b' '; ImportLimits::default().max_bytes + 1];
+        fs::write(store.path(), &oversized).unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(StorageError::Invalid {
+                source: ImportError::TooLarge { .. },
+                ..
+            })
+        ));
+        assert!(matches!(
+            store.save(&original),
+            Err(StorageError::Invalid {
+                source: ImportError::TooLarge { .. },
+                ..
+            })
+        ));
+        assert_eq!(fs::read(store.path()).unwrap(), oversized);
+        assert_eq!(fs::read(store.backup_path()).unwrap(), backup);
     }
 }

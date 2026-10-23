@@ -295,6 +295,9 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         {
             self.run.error = Some(error.to_string());
         }
+        // Freeze the main phase verdict before cleanup starts. Cleanup has an
+        // independent deadline and must not turn a successful main phase into a timeout.
+        let main_budget_exceeded = Instant::now() >= main_deadline;
         // Cleanup gets its own budget, unaffected by cancellation of the main phase.
         context.phase = Phase::Cleanup;
         context.signal = Signal {
@@ -311,7 +314,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 None => cleanup,
             });
         }
-        if Instant::now() >= main_deadline {
+        if main_budget_exceeded {
             self.run.error = Some(format!(
                 "The run exceeded the {} time limit.",
                 duration_label(self.limits.main_budget)
@@ -1052,6 +1055,119 @@ fn milliseconds(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_shared_argument_does_not_send_disconnected_http_requests() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let received = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = [0; 4096];
+                let _ = stream.read(&mut buffer).await;
+                received.fetch_add(1, Ordering::SeqCst);
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+        let mut project: Project = serde_json::from_slice(include_bytes!(
+            "../../../fixtures/compatibility/projects/shop.json"
+        ))
+        .unwrap();
+        project.scenarios.truncate(1);
+        let scenario = &mut project.scenarios[0];
+        scenario.graph = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                {"id": "start", "kind": "trigger", "name": "Start", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
+                {"id": "active", "kind": "request", "name": "Active", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}},
+                {"id": "shared", "kind": "variable", "name": "Shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
+                {"id": "disconnected", "kind": "request", "name": "Disconnected", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}}
+            ],
+            "edges": [{"id": "start-active", "source": "start", "target": "active"}]
+        })).unwrap();
+        scenario.cleanup = Graph {
+            nodes: vec![],
+            edges: vec![],
+        };
+        let scenario_id = scenario.id.clone();
+        let result = run_scenario(
+            RunRequest::new(project, scenario_id, apiforge_core::run::RunMode::Live),
+            RunOptions::new(http::HttpTransport::new().unwrap()),
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        server.abort();
+        assert_eq!(result.status, RunStatus::Passed);
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            result
+                .steps
+                .iter()
+                .find(|step| step.node_id == "disconnected")
+                .unwrap()
+                .status,
+            StepStatus::Skipped
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_time_does_not_consume_the_main_phase_budget() {
+        let mut project: Project = serde_json::from_slice(include_bytes!(
+            "../../../fixtures/compatibility/projects/shop.json"
+        ))
+        .unwrap();
+        project.scenarios.truncate(1);
+        let scenario = &mut project.scenarios[0];
+        scenario.graph = Graph {
+            nodes: vec![],
+            edges: vec![],
+        };
+        scenario.cleanup = Graph {
+            nodes: vec![
+                serde_json::from_value(serde_json::json!({
+                    "id": "cleanup-start", "kind": "trigger", "name": "Cleanup",
+                    "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}
+                }))
+                .unwrap(),
+            ],
+            edges: vec![],
+        };
+        let scenario_id = scenario.id.clone();
+        let request = RunRequest::new(
+            project,
+            scenario_id,
+            apiforge_core::run::RunMode::Simulation,
+        );
+        let mut options = RunOptions::new(http::HttpTransport::new().unwrap());
+        options.limits.main_budget = Duration::from_millis(200);
+        options.limits.cleanup_budget = Duration::from_secs(2);
+        let mut waited = false;
+        let result = run_scenario(request, options, CancellationToken::new(), |report| {
+            if !waited && report.steps.iter().any(|step| step.phase == Phase::Cleanup) {
+                // Deterministically cross the main deadline while publishing cleanup,
+                // without depending on a live server or scheduler timing.
+                std::thread::sleep(Duration::from_millis(250));
+                waited = true;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(waited);
+        assert_eq!(result.status, RunStatus::Passed);
+        assert_eq!(result.error, None);
+    }
 
     #[test]
     fn search_params_are_set_like_url_search_params() {

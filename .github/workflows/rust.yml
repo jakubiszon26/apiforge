@@ -54,7 +54,11 @@ jobs:
             libx11-dev \
             libxcursor-dev \
             libxrandr-dev \
-            libxi-dev
+            libxi-dev \
+            xvfb \
+            xauth \
+            mesa-vulkan-drivers \
+            libvulkan1
 
       # Pin Rust toolchain to match rust-toolchain.toml with formatting and linting components
       - name: Install Rust toolchain
@@ -78,6 +82,82 @@ jobs:
       - name: Validate workspace using the native release binary
         shell: bash
         run: ./${{ matrix.binary_path }} --check fixtures/compatibility/workspace-v1.json
+
+      # Exercise the actual event loop and renderer, not only the document importer.
+      # Lavapipe makes this independent of a physical GPU on the Linux runner.
+      - name: Open native window and capture it (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        env:
+          WGPU_BACKEND: vulkan
+          WINIT_UNIX_BACKEND: x11
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Mesa packages use both suffixed and unsuffixed ICD filenames.
+          for icd in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+            if test -f "$icd"; then
+              export VK_DRIVER_FILES="$icd"
+              break
+            fi
+          done
+          test -n "${VK_DRIVER_FILES:-}"
+          mkdir -p test-results
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
+          xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+            timeout --kill-after=5s 45s ./${{ matrix.binary_path }} \
+            --smoke-test fixtures/compatibility/workspace-v1.json
+          xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+            timeout --kill-after=5s 45s ./${{ matrix.binary_path }} \
+            --screenshot test-results/native-window.png \
+            --project fixtures/compatibility/workspace-v1.json \
+            --select 'Cena po promocji'
+          test -s test-results/native-window.png
+
+      # Start-Process -Wait alone has no timeout. Wait with a deadline
+      # and fail explicitly on nonzero exit, including renderer startup failures.
+      - name: Open native window and capture it (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        env:
+          WGPU_BACKEND: dx12
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force test-results | Out-Null
+          function Invoke-NativeProbe([string[]] $ProbeArguments) {
+            $process = Start-Process -FilePath './${{ matrix.binary_path }}' `
+              -ArgumentList $ProbeArguments -NoNewWindow -PassThru
+            # Keep the process handle so ExitCode remains available after exit.
+            $null = $process.Handle
+            if (-not $process.WaitForExit(45000)) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+              throw 'Native window probe exceeded 45 seconds.'
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "Native window probe failed with exit code $($process.ExitCode)."
+            }
+          }
+          Invoke-NativeProbe -ProbeArguments @('--smoke-test', 'fixtures/compatibility/workspace-v1.json')
+          Invoke-NativeProbe -ProbeArguments @(
+            '--screenshot', 'test-results/native-window.png',
+            '--project', 'fixtures/compatibility/workspace-v1.json'
+          )
+          if (-not (Test-Path 'test-results/native-window.png' -PathType Leaf)) {
+            throw 'Native screenshot was not created.'
+          }
+          if ((Get-Item 'test-results/native-window.png').Length -eq 0) {
+            throw 'Native screenshot is empty.'
+          }
+
+      - name: Upload native window capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-window-${{ matrix.os }}
+          path: test-results/native-window.png
+          if-no-files-found: warn
 
       # These binaries are build artifacts, not signed production installers.
       # Upload only the compiled release binary per OS; fail if binary is missing

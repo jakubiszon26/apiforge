@@ -101,16 +101,19 @@ pub fn editor(
                 } else {
                     port.display_name().to_owned()
                 };
-                ui.label(RichText::new(label).strong());
-                ui.label(
-                    RichText::new(port.value_type.as_str())
-                        .size(10.5)
-                        .color(theme::MUTED),
-                );
+                ui.label(RichText::new(label).family(theme::bold_family()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    changed |= kind_combo(ui, context, port, value, depth, id);
+                    ui.label(
+                        RichText::new(fields::value_type_label(port.value_type))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
                 });
             });
+            // Give source selection its own line: long argument names must not
+            // compete with a dropdown in a narrow inspector or nested operator.
+            changed |= kind_combo(ui, context, port, value, depth, id);
+            ui.add_space(3.0);
             changed |= body(ui, context, port, value, depth, id);
             if value.is_none() && port.is_required() {
                 ui.colored_label(
@@ -172,7 +175,7 @@ fn kind_combo(
     let available_sources = sources(context);
     egui::ComboBox::from_id_salt(id.with("kind"))
         .selected_text(current.label())
-        .width(170.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for kind in [
                 Kind::Unset,
@@ -547,6 +550,9 @@ fn reference_editor(
                 }
             });
     });
+    // Resolve again after the selection: output choices and response fields
+    // must describe the source chosen in this frame, not the previous one.
+    let source = context.graph.nodes.iter().find(|node| &node.id == node_id);
     let outputs = source
         .map(|source| output_ports(source, context.project))
         .unwrap_or_default();
@@ -576,7 +582,7 @@ fn reference_editor(
             .and_then(|value| path::resolve(value, field).map(|value| value.into_owned()));
         let button = egui::Button::new(
             RichText::new(format!(
-                "Field:  {}   ▾",
+                "{}   ▾",
                 if field.is_empty() {
                     format!("whole {output}")
                 } else {
@@ -585,13 +591,18 @@ fn reference_editor(
             ))
             .monospace(),
         )
+        .truncate()
         .min_size(egui::vec2(ui.available_width(), 26.0));
+        widgets::field_label(ui, "Response field");
         if ui
             .add(button)
-            .on_hover_text("Choose a field from the response")
+            .on_hover_text(format!("{field}\nChoose a field from the response"))
             .clicked()
         {
-            ui.data_mut(|memory| memory.insert_temp(id.with("picker"), String::new()));
+            ui.data_mut(|memory| {
+                memory.insert_temp(id.with("picker"), String::new());
+                memory.insert_temp(id.with("picker").with("focus-search"), true);
+            });
         }
         let preview = selected
             .as_ref()
@@ -609,17 +620,18 @@ fn reference_editor(
             changed = true;
         }
     }
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Path").size(11.0).color(theme::MUTED));
-        changed |= ui
-            .add(
-                egui::TextEdit::singleline(field)
-                    .hint_text("e.g. data.items[0].name; empty = whole value")
-                    .font(egui::TextStyle::Monospace)
-                    .desired_width(f32::INFINITY),
-            )
-            .changed();
-    });
+    egui::CollapsingHeader::new(RichText::new("Edit path manually").size(11.0))
+        .id_salt(id.with("manual-path"))
+        .show(ui, |ui| {
+            changed |= ui
+                .add(
+                    egui::TextEdit::singleline(field)
+                        .hint_text("e.g. data.items[0].name; empty = whole value")
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+        });
     if field.is_empty()
         && let Some(output_port) = outputs.iter().find(|candidate| &candidate.name == output)
         && !compatible(output_port, port)
@@ -647,7 +659,7 @@ fn field_picker(
     let mut close = false;
     let fields = response::fields(source.value.as_ref());
     egui::Modal::new(id.with("modal")).show(ctx, |ui| {
-        ui.set_width(520.0);
+        ui.set_width(520.0_f32.min(ctx.content_rect().width() - 48.0));
         ui.label(
             RichText::new("Choose a response field")
                 .size(16.0)
@@ -659,7 +671,9 @@ fn field_picker(
                 .hint_text("Search names, paths or values…")
                 .desired_width(f32::INFINITY),
         );
-        field.request_focus();
+        if ctx.data_mut(|data| data.remove_temp::<bool>(id.with("focus-search"))) == Some(true) {
+            field.request_focus();
+        }
         let query = search.to_lowercase();
         let visible: Vec<_> = fields
             .iter()
@@ -679,7 +693,7 @@ fn field_picker(
             .show(ui, |ui| {
                 for field in &visible {
                     let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 26.0),
+                        egui::vec2(ui.available_width(), 46.0),
                         egui::Sense::click(),
                     );
                     if response.hovered() {
@@ -690,28 +704,29 @@ fn field_picker(
                     } else {
                         field.path.clone()
                     };
-                    ui.painter().text(
-                        rect.left_center()
-                            + egui::vec2(6.0 + field.depth.min(6) as f32 * 10.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        crate::labels::truncate(&label, 40),
-                        egui::FontId::monospace(11.5),
+                    let inset = 8.0 + field.depth.min(6) as f32 * 8.0;
+                    // Two lines keep long JSON paths separate from their type
+                    // and value. Each row is clipped to its own hit target.
+                    let painter = ui.painter().with_clip_rect(rect.shrink(4.0));
+                    painter.text(
+                        rect.left_top() + egui::vec2(inset, 5.0),
+                        egui::Align2::LEFT_TOP,
+                        &label,
+                        egui::FontId::monospace(12.0),
                         theme::LINK,
                     );
-                    ui.painter().text(
-                        rect.left_center() + egui::vec2(300.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        response::type_label(field.value_type),
-                        egui::FontId::proportional(10.5),
+                    painter.text(
+                        rect.left_top() + egui::vec2(inset, 25.0),
+                        egui::Align2::LEFT_TOP,
+                        format!(
+                            "{} · {}",
+                            response::type_label(field.value_type),
+                            field.preview
+                        ),
+                        egui::FontId::proportional(11.5),
                         theme::MUTED,
                     );
-                    ui.painter().with_clip_rect(rect).text(
-                        rect.left_center() + egui::vec2(370.0, 0.0),
-                        egui::Align2::LEFT_CENTER,
-                        &field.preview,
-                        egui::FontId::proportional(10.5),
-                        theme::TEXT,
-                    );
+                    let response = response.on_hover_text(format!("{label}\n{}", field.preview));
                     if response.clicked() {
                         chosen = Some(field.path.clone());
                     }
@@ -728,14 +743,9 @@ fn field_picker(
                 }
             });
         ui.separator();
+        widgets::hint(ui, "The chosen field is read again on each run.");
         ui.horizontal(|ui| {
-            widgets::hint(
-                ui,
-                format!(
-                    "{} fields · choosing a field sets the binding, not an expected value.",
-                    visible.len()
-                ),
-            );
+            widgets::hint(ui, format!("{} fields", visible.len()));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Cancel").clicked() {
                     close = true;
@@ -781,4 +791,69 @@ fn name_editor(ui: &mut Ui, id: Id, name: &mut String, suggestions: &[String], h
     });
     widgets::hint(ui, hint);
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_editor_fits_a_narrow_panel_without_changing_the_binding() {
+        let workspace = apiforge_core::import_document(
+            include_bytes!("../../../../fixtures/compatibility/workspace-v1.json"),
+            &apiforge_core::ImportLimits::default(),
+        )
+        .unwrap()
+        .into_workspace();
+        let project = &workspace.projects[0];
+        let graph = &project.scenarios[0].graph;
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| node.kind.is_check())
+            .unwrap();
+        let port = Port::new("actual", ValueType::Any)
+            .labelled("Actual value")
+            .required(true);
+        let original = node.inputs.get("actual").cloned();
+        let mut value = original.clone();
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let bindings = Context {
+            node,
+            graph,
+            project,
+            parameters: &[],
+            run: None,
+        };
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let right = ui.max_rect().right();
+                    assert!(!editor(
+                        ui,
+                        &bindings,
+                        &port,
+                        &mut value,
+                        0,
+                        Id::new("narrow")
+                    ));
+                    assert!(
+                        ui.min_rect().right() <= right + 1.0,
+                        "argument editor overflows the panel: {:?}",
+                        ui.min_rect()
+                    );
+                });
+            },
+        );
+        output.textures_delta.clear();
+        assert_eq!(value, original);
+    }
 }
