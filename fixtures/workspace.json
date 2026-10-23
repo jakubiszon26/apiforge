@@ -59,24 +59,28 @@
                 "id": "expected",
                 "handle": "oczekiwana_cena",
                 "label": "Oczekiwana cena",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 360.0,
                   "y": 290.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 80
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 1
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 80
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
               },
               {
                 "id": "cart",
@@ -335,7 +339,7 @@
                 "id": "active",
                 "handle": "aktywnosc_promocji",
                 "label": "Aktywność promocji",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 80.0,
                   "y": 80.0
@@ -343,12 +347,11 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "product"
+                    "name": "product",
+                    "path": "promotion.active"
                   }
                 },
-                "config": {
-                  "path": "promotion.active"
-                }
+                "config": {}
               },
               {
                 "id": "check",
@@ -425,7 +428,7 @@
                 "id": "id",
                 "handle": "id_produktu",
                 "label": "ID produktu",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 50.0,
                   "y": 90.0
@@ -433,37 +436,39 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "product"
+                    "name": "product",
+                    "path": "id"
                   }
                 },
-                "config": {
-                  "path": "id"
-                }
+                "config": {}
               },
               {
                 "id": "body",
                 "handle": "pozycja_koszyka",
                 "label": "Pozycja koszyka",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 350.0,
                   "y": 90.0
                 },
                 "inputs": {
-                  "productId": {
-                    "kind": "reference",
-                    "nodeId": "id",
-                    "port": "value",
-                    "path": ""
-                  },
-                  "quantity": {
-                    "kind": "parameter",
-                    "name": "quantity"
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "productId": {
+                        "kind": "reference",
+                        "nodeId": "id",
+                        "port": "value",
+                        "path": ""
+                      },
+                      "quantity": {
+                        "kind": "parameter",
+                        "name": "quantity"
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "create",
@@ -768,7 +773,7 @@
                 "id": "status",
                 "handle": "odczytaj_status",
                 "label": "Odczytaj status",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 60.0,
                   "y": 60.0
@@ -776,12 +781,11 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "ticket"
+                    "name": "ticket",
+                    "path": "status"
                   }
                 },
-                "config": {
-                  "path": "status"
-                }
+                "config": {}
               },
               {
                 "id": "check",
@@ -1148,26 +1152,29 @@
                 "id": "flow-body",
                 "handle": "produkty_do_dodania",
                 "label": "Produkty do dodania",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 1050.0,
                   "y": 540.0
                 },
                 "inputs": {
-                  "productId": {
-                    "kind": "reference",
-                    "nodeId": "flow-prices",
-                    "port": "body",
-                    "path": "id"
-                  },
-                  "quantity": {
-                    "kind": "literal",
-                    "value": 2
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "productId": {
+                        "kind": "reference",
+                        "nodeId": "flow-prices",
+                        "port": "body",
+                        "path": "id"
+                      },
+                      "quantity": {
+                        "kind": "literal",
+                        "value": 2
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "flow-add",

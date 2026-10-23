@@ -114,26 +114,29 @@
                 "id": "flow-body",
                 "handle": "produkty_do_dodania",
                 "label": "Produkty do dodania",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 1050.0,
                   "y": 540.0
                 },
                 "inputs": {
-                  "productId": {
-                    "kind": "reference",
-                    "nodeId": "flow-prices",
-                    "port": "body",
-                    "path": "id"
-                  },
-                  "quantity": {
-                    "kind": "literal",
-                    "value": 2
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "productId": {
+                        "kind": "reference",
+                        "nodeId": "flow-prices",
+                        "port": "body",
+                        "path": "id"
+                      },
+                      "quantity": {
+                        "kind": "literal",
+                        "value": 2
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "flow-add",
@@ -436,12 +439,14 @@
         "nodeId": "flow-body",
         "handle": "produkty_do_dodania",
         "label": "Produkty do dodania",
-        "kind": "build",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "productId": 123,
-          "quantity": 2
+          "value": {
+            "productId": 123,
+            "quantity": 2
+          }
         },
         "outputs": {
           "value": {

@@ -10,8 +10,8 @@ use crate::{
         Project,
     },
     ids::new_id,
-    model::{Branch, BuildType, HttpMethod, NodeKind, Predicate, ValueType},
-    operator::Operator,
+    model::{Branch, HttpMethod, NodeKind, Predicate, ValueType},
+    operator::{OperandSpec, Operator},
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{Value, json};
@@ -22,18 +22,15 @@ pub const ORDER_PORT: &str = "__order";
 pub const TRUE_PORT: &str = "__true";
 pub const FALSE_PORT: &str = "__false";
 
-/// Operator a formula node uses when its configuration names none.
-pub const DEFAULT_FORMULA_OPERATOR: Operator = Operator::Multiply;
+/// The input of a Value block holding its expression.
+pub const VALUE_INPUT: &str = "value";
 
 impl NodeKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 7] = [
         Self::Trigger,
         Self::If,
-        Self::Variable,
         Self::Request,
-        Self::Select,
-        Self::Build,
-        Self::Formula,
+        Self::Value,
         Self::Assert,
         Self::Condition,
         Self::Component,
@@ -44,11 +41,8 @@ impl NodeKind {
         match self {
             Self::Trigger => "Start",
             Self::If => "IF / ELSE",
-            Self::Variable => "Variable",
             Self::Request => "HTTP request",
-            Self::Select => "Select data",
-            Self::Build => "Build data",
-            Self::Formula => "Operator",
+            Self::Value => "Value",
             Self::Assert => "Comparison",
             Self::Condition => "Data condition",
             Self::Component => "Component",
@@ -59,11 +53,8 @@ impl NodeKind {
         match self {
             Self::Trigger => "Runs when you start the test",
             Self::If => "Choose a branch: yes or no",
-            Self::Variable => "A named value to use in fields",
             Self::Request => "Any REST API endpoint",
-            Self::Select => "Pick a field from a response",
-            Self::Build => "Prepare an object or a list",
-            Self::Formula => "Maths, logic, text and data",
+            Self::Value => "Data, a selected field or a calculation",
             Self::Assert => "Check the received result",
             Self::Condition => "Check scenario conditions",
             Self::Component => "Your own set of steps",
@@ -75,11 +66,8 @@ impl NodeKind {
         match self {
             Self::Trigger => "begin",
             Self::If => "branch",
-            Self::Variable => "variable",
             Self::Request => "request",
-            Self::Select => "selection",
-            Self::Build => "data",
-            Self::Formula => "result",
+            Self::Value => "value",
             Self::Assert => "check",
             Self::Condition => "guard",
             Self::Component => "component_step",
@@ -89,10 +77,7 @@ impl NodeKind {
     /// Nodes that only compute values. Reaching a consumer from Start also activates
     /// these producers, but never a request or component.
     pub fn is_pure_value(self) -> bool {
-        matches!(
-            self,
-            Self::Variable | Self::Select | Self::Build | Self::Formula
-        )
+        self == Self::Value
     }
 
     /// Kinds whose `actual`/`expected` inputs are compared by a predicate.
@@ -175,10 +160,6 @@ pub fn latest_components(project: &Project) -> Vec<&Component> {
     latest.into_values().collect()
 }
 
-pub fn formula_operator(node: &Node) -> Operator {
-    node.config.operation.unwrap_or(DEFAULT_FORMULA_OPERATOR)
-}
-
 pub fn predicate(node: &Node) -> Predicate {
     node.config.predicate.unwrap_or_default()
 }
@@ -199,10 +180,11 @@ pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
 fn builtin_input_ports(node: &Node, project: &Project) -> Vec<Port> {
     match node.kind {
         NodeKind::Trigger => vec![],
-        NodeKind::Variable => {
-            let mut port = Port::new("value", ValueType::Any)
-                .labelled("Variable value")
-                .required(true);
+        NodeKind::Value => {
+            // A missing result is not an error: dependants report their own input.
+            let mut port = Port::new(VALUE_INPUT, ValueType::Any)
+                .labelled("Value")
+                .required(false);
             port.exposed = Some(true);
             vec![port]
         }
@@ -216,30 +198,6 @@ fn builtin_input_ports(node: &Node, project: &Project) -> Vec<Port> {
             }
             ports
         }
-        NodeKind::Select => vec![
-            Port::new("value", ValueType::Any)
-                .labelled("Data")
-                .required(true),
-        ],
-        NodeKind::Build => node
-            .inputs
-            .keys()
-            .map(|name| Port::new(name.clone(), ValueType::Any).required(true))
-            .collect(),
-        NodeKind::Formula => formula_operator(node)
-            .spec()
-            .operands
-            .iter()
-            .map(|operand| {
-                let mut port = Port::new(operand.name, operand.value_type)
-                    .labelled(operand.label)
-                    .required(operand.required);
-                if let Some(default) = operand.default {
-                    port.default_value = OptionalJson::Present(default.to_value());
-                }
-                port
-            })
-            .collect(),
         NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
             let expected_required =
                 !matches!(predicate(node), Predicate::Exists | Predicate::NotEmpty);
@@ -281,16 +239,112 @@ pub fn output_ports(node: &Node, project: &Project) -> Vec<Port> {
             Port::new("value", ValueType::Any),
             Port::new("passed", ValueType::Boolean),
         ],
-        NodeKind::Formula => vec![Port::new("value", formula_operator(node).spec().output)],
-        NodeKind::Build => vec![Port::new(
+        NodeKind::Value => vec![Port::new(
             "value",
-            match node.config.build_type.unwrap_or_default() {
-                BuildType::Array => ValueType::Array,
-                BuildType::Object => ValueType::Object,
-            },
+            node.inputs
+                .get(VALUE_INPUT)
+                .map_or(ValueType::Any, binding_type),
         )],
-        NodeKind::Select | NodeKind::Variable => vec![Port::new("value", ValueType::Any)],
     }
+}
+
+/// The type a binding is known to produce without running it.
+pub fn binding_type(binding: &Binding) -> ValueType {
+    match binding {
+        Binding::Expression { operator, .. } => operator.spec().output,
+        Binding::Literal { value } => match value {
+            Value::Bool(_) => ValueType::Boolean,
+            Value::Number(_) => ValueType::Number,
+            Value::String(_) => ValueType::String,
+            Value::Array(_) => ValueType::Array,
+            Value::Object(_) => ValueType::Object,
+            Value::Null => ValueType::Any,
+        },
+        Binding::Object { .. } => ValueType::Object,
+        Binding::Array { .. } => ValueType::Array,
+        Binding::Template { .. } => ValueType::String,
+        Binding::Reference { .. } | Binding::Parameter { .. } | Binding::Environment { .. } => {
+            ValueType::Any
+        }
+    }
+}
+
+/// The port describing one operand of an operator.
+pub fn operand_port(operand: &OperandSpec) -> Port {
+    let mut port = Port::new(operand.name, operand.value_type)
+        .labelled(operand.label)
+        .required(operand.required);
+    if let Some(default) = operand.default {
+        port.default_value = OptionalJson::Present(default.to_value());
+    }
+    port
+}
+
+/// A place in a node's inputs that a wire or an inline field can fill: a whole
+/// input, or a direct child of a Value's expression, object or list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slot {
+    pub input: String,
+    /// Path inside the input's binding (see [`Binding::at`]); empty for the input.
+    pub path: Vec<String>,
+    pub port: Port,
+}
+
+impl Slot {
+    /// Whether a reference at `path` inside `input` belongs to this slot.
+    pub fn contains(&self, input: &str, path: &[String]) -> bool {
+        self.input == input && path.starts_with(&self.path)
+    }
+}
+
+/// The slots of a node, in display order.
+///
+/// A Value whose expression is an operator, object or list shows one slot per
+/// operand, field or item, so each can be wired and edited on its own. Every other
+/// node shows one slot per input port.
+pub fn input_slots(node: &Node, project: &Project) -> Vec<Slot> {
+    let whole = |port: Port| Slot {
+        input: port.name.clone(),
+        path: Vec::new(),
+        port,
+    };
+    if node.kind != NodeKind::Value {
+        return input_ports(node, project).into_iter().map(whole).collect();
+    }
+    let slot = |segment: String, port: Port| Slot {
+        input: VALUE_INPUT.to_owned(),
+        path: vec![segment],
+        port,
+    };
+    match node.inputs.get(VALUE_INPUT) {
+        Some(Binding::Expression { operator, .. }) => operator
+            .spec()
+            .operands
+            .iter()
+            .map(|operand| slot(operand.name.to_owned(), operand_port(operand)))
+            .collect(),
+        Some(Binding::Object { fields }) => fields
+            .keys()
+            .map(|name| slot(name.clone(), Port::new(name.clone(), ValueType::Any)))
+            .collect(),
+        Some(Binding::Array { items }) => (0..items.len())
+            .map(|index| {
+                let port = Port::new(index.to_string(), ValueType::Any)
+                    .labelled(format!("Item {}", index + 1));
+                slot(index.to_string(), port)
+            })
+            .collect(),
+        _ => input_ports(node, project).into_iter().map(whole).collect(),
+    }
+}
+
+/// The slot that shows a reference at `path` inside `input`: the deepest slot
+/// containing it.
+pub fn slot_of<'a>(slots: &'a [Slot], input: &str, path: &[String]) -> Option<&'a Slot> {
+    slots
+        .iter()
+        .filter(|slot| slot.contains(input, path))
+        .max_by_key(|slot| slot.path.len())
 }
 
 /// Whether a value from `source` may feed `target`. A named contract on the target
@@ -507,21 +561,8 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
                 ..NodeConfig::default()
             };
         }
-        NodeKind::Variable => {
-            node.inputs.insert("value".into(), literal(json!("")));
-        }
-        NodeKind::Select => {
-            node.inputs.insert("value".into(), literal(json!({})));
-            node.config.path = Some(String::new());
-        }
-        NodeKind::Build => {
-            node.config.build_type = Some(BuildType::Object);
-            node.inputs.insert("field".into(), literal(json!("")));
-        }
-        NodeKind::Formula => {
-            node.config.operation = Some(DEFAULT_FORMULA_OPERATOR);
-            node.inputs.insert("left".into(), literal(json!(0)));
-            node.inputs.insert("right".into(), literal(json!(1)));
+        NodeKind::Value => {
+            node.inputs.insert(VALUE_INPUT.into(), literal(json!("")));
         }
         NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
             node.config.predicate = Some(Predicate::Equals);
@@ -547,14 +588,17 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
     node
 }
 
-/// A formula node computing `operator`, with the operator's default operands.
+/// A Value block computing `binding`.
+pub fn create_value_node(binding: Binding, position: Position) -> Node {
+    let mut node = create_node(NodeKind::Value, position, None);
+    node.inputs.insert(VALUE_INPUT.into(), binding);
+    node
+}
+
+/// A Value block computing `operator`, with the operator's default operands.
 pub fn create_operator_node(operator: Operator, position: Position) -> Node {
-    let mut node = create_node(NodeKind::Formula, position, None);
+    let mut node = create_value_node(Binding::expression(operator), position);
     node.handle = crate::handle::handle_base(operator.label());
-    node.config.operation = Some(operator);
-    if let Binding::Expression { inputs, .. } = Binding::expression(operator) {
-        node.inputs = inputs;
-    }
     node
 }
 
@@ -608,7 +652,10 @@ mod tests {
         assert_eq!(check.inputs["actual"], Binding::literal(Value::Null));
         let operator = create_operator_node(Operator::Round, Position { x: 0.0, y: 0.0 });
         assert_eq!(operator.handle, "round");
-        assert_eq!(operator.inputs["right"], Binding::literal(json!(0)));
+        assert_eq!(
+            operator.inputs[VALUE_INPUT].at(&["right".into()]),
+            Some(&Binding::literal(json!(0)))
+        );
     }
 
     #[test]
@@ -628,18 +675,68 @@ mod tests {
             .collect();
         assert_eq!(names, ["body", "alias"]);
 
-        let mut build = node("b", NodeKind::Build);
-        build.config.build_type = Some(BuildType::Array);
+        let value_type = |binding: Binding| {
+            let value = create_value_node(binding, Position { x: 0.0, y: 0.0 });
+            output_ports(&value, &project)[0].value_type
+        };
         assert_eq!(
-            output_ports(&build, &project)[0].value_type,
+            value_type(Binding::Array { items: vec![] }),
             ValueType::Array
         );
-        let mut formula = node("f", NodeKind::Formula);
-        formula.config.operation = Some(Operator::Equals);
         assert_eq!(
-            output_ports(&formula, &project)[0].value_type,
+            value_type(Binding::expression(Operator::Equals)),
             ValueType::Boolean
         );
+        assert_eq!(value_type(Binding::literal(json!("x"))), ValueType::String);
+        assert_eq!(value_type(Binding::parameter("p")), ValueType::Any);
+    }
+
+    #[test]
+    fn values_show_one_slot_per_operand_field_or_item() {
+        let project = project();
+        let slots = |binding: Binding| -> Vec<(String, Vec<String>)> {
+            let value = create_value_node(binding, Position { x: 0.0, y: 0.0 });
+            input_slots(&value, &project)
+                .into_iter()
+                .map(|slot| (slot.input, slot.path))
+                .collect()
+        };
+        let path = |segment: &str| vec![segment.to_owned()];
+        assert_eq!(
+            slots(Binding::expression(Operator::Multiply)),
+            [
+                ("value".into(), path("left")),
+                ("value".into(), path("right"))
+            ]
+        );
+        let object = Binding::Object {
+            fields: IndexMap::from([("id".to_owned(), Binding::literal(json!(1)))]),
+        };
+        assert_eq!(slots(object), [("value".into(), path("id"))]);
+        assert_eq!(
+            slots(Binding::reference("a", "body", "")),
+            [("value".into(), vec![])]
+        );
+        let request = node("r", NodeKind::Request);
+        let all = input_slots(&request, &project);
+        assert!(all.iter().all(|slot| slot.path.is_empty()));
+        let nested = Slot {
+            input: "value".into(),
+            path: path("left"),
+            port: Port::new("left", ValueType::Any),
+        };
+        let whole = Slot {
+            path: vec![],
+            ..nested.clone()
+        };
+        let both = [whole, nested];
+        let deep = ["left".to_owned(), "right".to_owned()];
+        assert_eq!(slot_of(&both, "value", &deep).unwrap().path, path("left"));
+        assert_eq!(
+            slot_of(&both, "value", &[]).unwrap().path,
+            Vec::<String>::new()
+        );
+        assert!(slot_of(&both, "other", &[]).is_none());
     }
 
     #[test]
@@ -664,7 +761,7 @@ mod tests {
     #[test]
     fn cycles_combine_ordering_and_data_dependencies() {
         let mut graph = Graph {
-            nodes: vec![node("a", NodeKind::Variable), node("b", NodeKind::Variable)],
+            nodes: vec![node("a", NodeKind::Value), node("b", NodeKind::Value)],
             edges: vec![edge("a", "b")],
         };
         assert!(!has_cycle(&graph));
@@ -677,7 +774,7 @@ mod tests {
     #[test]
     fn deleting_nodes_removes_dependent_inputs_and_edges() {
         let mut graph = Graph {
-            nodes: vec![node("a", NodeKind::Request), node("b", NodeKind::Variable)],
+            nodes: vec![node("a", NodeKind::Request), node("b", NodeKind::Value)],
             edges: vec![edge("a", "b")],
         };
         graph.nodes[1]
@@ -694,7 +791,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![
                 node("a", NodeKind::Request),
-                node("b", NodeKind::Variable),
+                node("b", NodeKind::Value),
                 node("c", NodeKind::Assert),
                 node("d", NodeKind::Request),
             ],

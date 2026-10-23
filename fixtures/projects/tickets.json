@@ -189,7 +189,7 @@
             "id": "status",
             "handle": "odczytaj_status",
             "label": "Odczytaj status",
-            "kind": "select",
+            "kind": "value",
             "position": {
               "x": 60.0,
               "y": 60.0
@@ -197,12 +197,11 @@
             "inputs": {
               "value": {
                 "kind": "parameter",
-                "name": "ticket"
+                "name": "ticket",
+                "path": "status"
               }
             },
-            "config": {
-              "path": "status"
-            }
+            "config": {}
           },
           {
             "id": "check",

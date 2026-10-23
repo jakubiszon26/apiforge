@@ -151,7 +151,6 @@ pub fn prune_template_inputs(node: &Node) -> Node {
     let texts = config
         .url
         .iter()
-        .chain(&config.path)
         .chain(config.headers.iter().flat_map(|headers| headers.values()))
         .chain(config.query.iter().flat_map(|query| query.values()))
         .chain(
@@ -211,7 +210,7 @@ mod tests {
 
     #[test]
     fn dropped_variables_reuse_bindings_avoid_collisions_and_are_pruned() {
-        let mut source = node(NodeKind::Variable);
+        let mut source = node(NodeKind::Value);
         source.label = Some("code".into());
         source
             .inputs
@@ -322,7 +321,7 @@ mod tests {
         assert_eq!(alias_base("_id"), "_id");
         assert_eq!(alias_base(&"ą".repeat(100)), "a".repeat(60));
         assert_eq!(alias_base(&format!("{}😀", "x".repeat(59))).len(), 60);
-        let mut target = node(NodeKind::Formula);
+        let mut target = node(NodeKind::Value);
         target.config.template_inputs = Some(vec![Port::new("value_2", ValueType::Any)]);
         let block = VariableBlock {
             label: "value".into(),

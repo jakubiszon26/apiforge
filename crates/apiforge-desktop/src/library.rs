@@ -3,9 +3,9 @@
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
+    block::Block,
     format::{Binding, Project},
     graph::latest_components,
-    model::NodeKind,
     operator::{Operator, OperatorGroup},
 };
 use eframe::egui::{self, RichText, Sense, Stroke};
@@ -18,11 +18,10 @@ pub enum Action {
     SwitchScenario(String),
     NewScenario,
     AddNode {
-        kind: NodeKind,
+        block: Block,
         component: Option<(String, u32)>,
     },
     AddOperator(Operator),
-    AddVariable,
     SelectNode(String),
     OpenExample(Example),
 }
@@ -33,16 +32,7 @@ pub enum Example {
     OperatorBlocks,
 }
 
-const BUILTIN: [NodeKind; 8] = [
-    NodeKind::Trigger,
-    NodeKind::If,
-    NodeKind::Request,
-    NodeKind::Select,
-    NodeKind::Build,
-    NodeKind::Formula,
-    NodeKind::Assert,
-    NodeKind::Condition,
-];
+const BUILTIN: [Block; 7] = Block::BUILTIN;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Section {
@@ -227,17 +217,17 @@ impl Library {
                 }
                 if show_blocks {
                     widgets::subcaption(ui, "BASIC STEPS");
-                    for kind in BUILTIN {
-                        if matches(&format!("{} {}", kind.label(), kind.description())) {
+                    for block in BUILTIN {
+                        if matches(&format!("{} {}", block.label(), block.description())) {
                             let payload = Payload::Node {
-                                kind,
+                                block,
                                 component: None,
                             };
-                            if library_item(ui, kind, kind.label(), kind.description(), payload)
+                            if library_item(ui, block, block.label(), block.description(), payload)
                                 .clicked()
                             {
                                 actions.push(Action::AddNode {
-                                    kind,
+                                    block,
                                     component: None,
                                 });
                             }
@@ -253,7 +243,10 @@ impl Library {
                                 .add(widgets::icon_button(Icon::Plus, "Add variable").compact())
                                 .clicked()
                             {
-                                actions.push(Action::AddVariable);
+                                actions.push(Action::AddNode {
+                                    block: Block::Variable,
+                                    component: None,
+                                });
                             }
                         });
                     });
@@ -329,12 +322,12 @@ impl Library {
                         }
                         let pinned = Some((component.id.clone(), component.revision));
                         let payload = Payload::Node {
-                            kind: NodeKind::Component,
+                            block: Block::Component,
                             component: pinned.clone(),
                         };
                         if library_item(
                             ui,
-                            NodeKind::Component,
+                            Block::Component,
                             &component.name,
                             &description,
                             payload,
@@ -342,7 +335,7 @@ impl Library {
                         .clicked()
                         {
                             actions.push(Action::AddNode {
-                                kind: NodeKind::Component,
+                                block: Block::Component,
                                 component: pinned,
                             });
                         }
@@ -444,7 +437,7 @@ fn brand(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), Sense::hover());
         ui.painter().rect_filled(rect, 8.0, theme::ACCENT);
-        theme::kind_icon(ui.painter(), rect.shrink(3.0), NodeKind::If, theme::WHITE);
+        theme::block_icon(ui.painter(), rect.shrink(3.0), Block::Branch, theme::WHITE);
         ui.label(
             RichText::new("apiforge")
                 .size(20.0)
@@ -455,12 +448,12 @@ fn brand(ui: &mut egui::Ui) {
 
 fn library_item(
     ui: &mut egui::Ui,
-    kind: NodeKind,
+    block: Block,
     title: &str,
     description: &str,
     payload: Payload,
 ) -> egui::Response {
-    let id = ui.id().with(("library", title, kind as u8));
+    let id = ui.id().with(("library", title, block));
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 48.0),
         Sense::click_and_drag(),
@@ -477,10 +470,10 @@ fn library_item(
         );
     }
     let icon = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 10.0), egui::vec2(28.0, 28.0));
-    let color = theme::kind_color(kind);
+    let color = theme::block_color(block);
     ui.painter()
         .rect_filled(icon, 7.0, color.gamma_multiply(0.12));
-    theme::kind_icon(ui.painter(), icon, kind, color);
+    theme::block_icon(ui.painter(), icon, block, color);
     let right = rect.right() - if hovered { 22.0 } else { 8.0 };
     widgets::paint_label(
         ui.painter(),

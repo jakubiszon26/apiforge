@@ -30,7 +30,7 @@ fn project(nodes: Value) -> Project {
 }
 
 fn variable(id: &str, value: Value) -> Value {
-    json!({"id": id, "kind": "variable", "handle": id, "position": {"x": 0, "y": 0},
+    json!({"id": id, "kind": "value", "handle": id, "position": {"x": 0, "y": 0},
            "inputs": {"value": value}, "config": {}})
 }
 

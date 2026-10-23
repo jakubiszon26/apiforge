@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn contexts_have_separate_history_and_selection() {
         let mut editor = editor();
-        let node = create_node(NodeKind::Variable, Position { x: 0.0, y: 0.0 }, None);
+        let node = create_node(NodeKind::Value, Position { x: 0.0, y: 0.0 }, None);
         let mut graph = editor.graph().clone();
         graph.nodes.push(node.clone());
         editor.apply_graph(graph, Instant::now()).unwrap();

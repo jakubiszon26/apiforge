@@ -68,27 +68,30 @@
               {
                 "id": "blocked",
                 "handle": "blocked",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "field": {
-                    "kind": "reference",
-                    "nodeId": "gate",
-                    "port": "passed",
-                    "path": ""
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "field": {
+                        "kind": "reference",
+                        "nodeId": "gate",
+                        "port": "passed",
+                        "path": ""
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "independent",
                 "handle": "independent",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -98,12 +101,10 @@
                     "kind": "reference",
                     "nodeId": "read",
                     "port": "body",
-                    "path": ""
+                    "path": "meta.kind"
                   }
                 },
-                "config": {
-                  "path": "meta.kind"
-                }
+                "config": {}
               },
               {
                 "id": "listed",
@@ -247,26 +248,30 @@
                 "id": "after-list",
                 "handle": "after_list",
                 "label": "after-list",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "reference",
-                    "nodeId": "listed",
-                    "port": "value",
-                    "path": "price"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 2
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "reference",
+                        "nodeId": "listed",
+                        "port": "value",
+                        "path": "price"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 2
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
               },
               {
                 "id": "exists-null",
@@ -495,7 +500,7 @@
       {
         "nodeId": "blocked",
         "handle": "blocked",
-        "kind": "build",
+        "kind": "value",
         "status": "blocked",
         "phase": "main",
         "inputs": {},
@@ -504,20 +509,11 @@
       {
         "nodeId": "independent",
         "handle": "independent",
-        "kind": "select",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "value": {
-            "price": 100,
-            "meta": {
-              "kind": "book"
-            },
-            "tags": [
-              "a"
-            ],
-            "empty": null
-          }
+          "value": "book"
         },
         "outputs": {
           "value": "book"
@@ -644,12 +640,11 @@
         "nodeId": "after-list",
         "handle": "after_list",
         "label": "after-list",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 100,
-          "right": 2
+          "value": 200
         },
         "outputs": {
           "value": 200

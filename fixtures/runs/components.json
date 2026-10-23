@@ -90,7 +90,7 @@
               {
                 "id": "next",
                 "handle": "next",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -103,9 +103,7 @@
                     "path": ""
                   }
                 },
-                "config": {
-                  "path": ""
-                }
+                "config": {}
               },
               {
                 "id": "branching",
@@ -235,24 +233,28 @@
               {
                 "id": "calc",
                 "handle": "calc",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "parameter",
-                    "name": "amount"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 2
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "parameter",
+                        "name": "amount"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 2
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
               }
             ],
             "edges": []
@@ -287,24 +289,28 @@
               {
                 "id": "calc",
                 "handle": "calc",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "parameter",
-                    "name": "amount"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 10
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "parameter",
+                        "name": "amount"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 10
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
               }
             ],
             "edges": []
@@ -369,24 +375,28 @@
               {
                 "id": "broken",
                 "handle": "broken",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 1
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 0
+                  "value": {
+                    "kind": "expression",
+                    "operator": "divide",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 1
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 0
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "divide"
-                }
+                "config": {}
               }
             ],
             "edges": []
@@ -590,12 +600,11 @@
           {
             "nodeId": "calc",
             "handle": "calc",
-            "kind": "formula",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "left": 3,
-              "right": 2
+              "value": 6
             },
             "outputs": {
               "value": 6
@@ -620,12 +629,11 @@
           {
             "nodeId": "calc",
             "handle": "calc",
-            "kind": "formula",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "left": 3,
-              "right": 10
+              "value": 30
             },
             "outputs": {
               "value": 30
@@ -685,13 +693,10 @@
           {
             "nodeId": "broken",
             "handle": "broken",
-            "kind": "formula",
+            "kind": "value",
             "status": "error",
             "phase": "main",
-            "inputs": {
-              "left": 1,
-              "right": 0
-            },
+            "inputs": {},
             "outputs": {}
           }
         ]
@@ -699,7 +704,7 @@
       {
         "nodeId": "next",
         "handle": "next",
-        "kind": "select",
+        "kind": "value",
         "status": "blocked",
         "phase": "main",
         "inputs": {},

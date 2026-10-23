@@ -13,6 +13,7 @@ pub use layout::{Card, parse_inline};
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
+    block::Block,
     format::{Binding, Graph, Position, Project},
     graph::{ORDER_PORT, WireKind, wires},
     model::{Branch, NodeKind},
@@ -44,9 +45,11 @@ pub enum Command {
         source_port: String,
         target: String,
         target_input: String,
+        /// Slot path inside the target input; empty for the whole input.
+        target_path: Vec<String>,
     },
     AddNode {
-        kind: NodeKind,
+        block: Block,
         component: Option<(String, u32)>,
         position: Position,
         source: Option<(String, String)>,
@@ -58,11 +61,13 @@ pub enum Command {
     SetLiteral {
         node: String,
         input: String,
+        path: Vec<String>,
         value: serde_json::Value,
     },
     Bind {
         node: String,
         input: String,
+        path: Vec<String>,
         binding: Binding,
     },
     Delete {
@@ -127,6 +132,7 @@ enum Drag {
 struct InlineEdit {
     node: String,
     input: String,
+    path: Vec<String>,
     text: String,
     error: Option<String>,
 }
@@ -311,9 +317,10 @@ impl Canvas {
                 continue;
             };
             let (output, inp) = wire_ports(wire);
-            let (Some(start), Some(end)) =
-                (source.output_anchor(&output), target.input_anchor(&inp))
-            else {
+            let (Some(start), Some(end)) = (
+                source.output_anchor(&output),
+                target.input_anchor(&inp, &wire.operand_path),
+            ) else {
                 continue;
             };
             paint::wire(
@@ -709,16 +716,15 @@ impl Canvas {
             let field = camera.rect(card.input_field(index));
             match &row.value {
                 RowValue::Inline { text, value_type } => {
-                    let editing = self
-                        .inline
-                        .as_ref()
-                        .filter(|edit| edit.node == card.id && edit.input == row.name);
+                    let editing = self.inline.as_ref().filter(|edit| {
+                        edit.node == card.id && edit.input == row.name && edit.path == row.path
+                    });
                     let mut buffer = editing.map_or_else(|| text.clone(), |edit| edit.text.clone());
                     let invalid = editing.and_then(|edit| edit.error.clone());
                     let response = ui.put(
                         field.shrink2(vec2(6.0 * zoom, 2.0 * zoom)),
                         egui::TextEdit::singleline(&mut buffer)
-                            .id(ui.id().with(("inline", &card.id, &row.name)))
+                            .id(ui.id().with(("inline", &card.id, &row.name, &row.path)))
                             .font(FontId::proportional(13.0 * zoom))
                             .margin(egui::Margin::ZERO)
                             .frame(egui::Frame::NONE)
@@ -737,6 +743,7 @@ impl Canvas {
                         self.inline = Some(InlineEdit {
                             node: card.id.clone(),
                             input: row.name.clone(),
+                            path: row.path.clone(),
                             text: buffer.clone(),
                             error: invalid.clone(),
                         });
@@ -748,6 +755,7 @@ impl Canvas {
                                     commands.push(Command::SetLiteral {
                                         node: card.id.clone(),
                                         input: row.name.clone(),
+                                        path: row.path.clone(),
                                         value,
                                     });
                                     self.inline = None;
@@ -756,6 +764,7 @@ impl Canvas {
                                     self.inline = Some(InlineEdit {
                                         node: card.id.clone(),
                                         input: row.name.clone(),
+                                        path: row.path.clone(),
                                         text: buffer,
                                         error: Some(message),
                                     });
@@ -767,7 +776,7 @@ impl Canvas {
                     }
                 }
                 RowValue::TypeChoice(current) => {
-                    let id = ui.id().with(("type", &card.id, &row.name));
+                    let id = ui.id().with(("type", &card.id, &row.name, &row.path));
                     let mut selected = current.clone();
                     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
                         ui.spacing_mut().button_padding = vec2(6.0 * zoom, 2.0 * zoom);
@@ -794,6 +803,7 @@ impl Canvas {
                         commands.push(Command::SetLiteral {
                             node: card.id.clone(),
                             input: row.name.clone(),
+                            path: row.path.clone(),
                             value: serde_json::Value::String(selected),
                         });
                     }
@@ -824,20 +834,28 @@ impl Canvas {
             .iter()
             .filter(|card| &card.id != source)
             .flat_map(|card| {
-                let names: Vec<String> = if control {
-                    vec![ORDER_PORT.to_owned()]
+                let slots: Vec<(String, Vec<String>, Pos2)> = if control {
+                    card.input_anchor(ORDER_PORT, &[])
+                        .map(|anchor| (ORDER_PORT.to_owned(), Vec::new(), anchor))
+                        .into_iter()
+                        .collect()
                 } else {
-                    card.inputs.iter().map(|row| row.name.clone()).collect()
+                    card.inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(index, row)| {
+                            (row.name.clone(), row.path.clone(), card.row_anchor(index))
+                        })
+                        .collect()
                 };
-                names.into_iter().filter_map(move |name| {
-                    let anchor = camera.to_screen(card.input_anchor(&name)?);
-                    Some((card.id.clone(), name, anchor))
+                slots.into_iter().map(move |(name, path, anchor)| {
+                    (card.id.clone(), name, path, camera.to_screen(anchor))
                 })
             })
-            .min_by(|a, b| a.2.distance(pointer).total_cmp(&b.2.distance(pointer)))
-            .filter(|(_, _, anchor)| anchor.distance(pointer) <= SOCKET_HIT * 2.0);
+            .min_by(|a, b| a.3.distance(pointer).total_cmp(&b.3.distance(pointer)))
+            .filter(|(.., anchor)| anchor.distance(pointer) <= SOCKET_HIT * 2.0);
 
-        let end = target.as_ref().map_or(pointer, |(_, _, anchor)| *anchor);
+        let end = target.as_ref().map_or(pointer, |(.., anchor)| *anchor);
         let painter = ui.painter();
         paint::wire(
             painter,
@@ -853,11 +871,12 @@ impl Canvas {
             let (source, port) = (source.clone(), port.clone());
             self.drag = None;
             match target {
-                Some((target, input_name, _)) => commands.push(Command::Connect {
+                Some((target, input_name, path, _)) => commands.push(Command::Connect {
                     source,
                     source_port: port,
                     target,
                     target_input: input_name,
+                    target_path: path,
                 }),
                 None if cards
                     .iter()
@@ -954,13 +973,14 @@ impl Canvas {
                         (
                             card.id.clone(),
                             card.inputs[index].name.clone(),
+                            card.inputs[index].path.clone(),
                             camera.rect(card.input_row(index)),
                         )
                     })
             })
         };
         if let Payload::Variable { .. } = payload.as_ref()
-            && let Some((_, _, rect)) = row_under(cards)
+            && let Some((.., rect)) = row_under(cards)
         {
             ui.painter().rect_stroke(
                 rect.shrink(2.0),
@@ -981,8 +1001,8 @@ impl Canvas {
             y: f64::from(world.y).round(),
         };
         match payload.as_ref() {
-            Payload::Node { kind, component } => commands.push(Command::AddNode {
-                kind: *kind,
+            Payload::Node { block, component } => commands.push(Command::AddNode {
+                block: *block,
                 component: component.clone(),
                 position,
                 source: None,
@@ -992,9 +1012,10 @@ impl Canvas {
                 position,
             }),
             Payload::Variable { binding, .. } => match row_under(cards) {
-                Some((node, input, _)) => commands.push(Command::Bind {
+                Some((node, input, path, _)) => commands.push(Command::Bind {
                     node,
                     input,
+                    path,
                     binding: binding.clone(),
                 }),
                 None => self.error = Some("Drop a variable on an argument of a step.".into()),
@@ -1233,7 +1254,7 @@ impl Canvas {
                     .clicked()
                 {
                     commands.push(Command::AddNode {
-                        kind: NodeKind::Request,
+                        block: Block::Request,
                         component: None,
                         position: Position { x: 100.0, y: 100.0 },
                         source: None,
@@ -1335,7 +1356,7 @@ fn hit_wire(
             let target = cards.iter().find(|card| card.id == wire.target)?;
             let (output, input) = wire_ports(wire);
             let start = camera.to_screen(source.output_anchor(&output)?);
-            let end = camera.to_screen(target.input_anchor(&input)?);
+            let end = camera.to_screen(target.input_anchor(&input, &wire.operand_path)?);
             let points = paint::wire_points(start, end, wire.kind == WireKind::Order, camera.zoom);
             let distance = (0..=24)
                 .map(|step| paint::bezier(points, step as f32 / 24.0).distance(pointer))

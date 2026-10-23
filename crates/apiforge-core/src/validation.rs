@@ -352,8 +352,9 @@ fn binding(
                 "Reference source or output does not exist",
             )
         }
-        Binding::Parameter { name } => {
+        Binding::Parameter { name, path: field } => {
             id(name, path)?;
+            text(field, path)?;
             require(
                 parameters.contains(name.as_str()),
                 path,
@@ -532,7 +533,7 @@ fn graph(
 }
 fn config(node: &Node, project: &Project, path: &str) -> Result {
     let c = &node.config;
-    for value in [&c.url, &c.path, &c.contract_id, &c.component_id]
+    for value in [&c.url, &c.contract_id, &c.component_id]
         .into_iter()
         .flatten()
     {

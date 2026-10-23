@@ -62,7 +62,12 @@ pub fn node(kind: NodeKind) -> Node {
     create_node(kind, Position { x: 100.0, y: 100.0 }, None)
 }
 
-/// A request, a formula and a comparison without connections.
+/// The path of the first operand inside a Value's expression.
+pub fn left() -> Vec<String> {
+    vec!["left".to_owned()]
+}
+
+/// A request, a multiplication Value and a comparison without connections.
 pub struct Trio {
     pub graph: Graph,
     pub request: String,
@@ -72,7 +77,10 @@ pub struct Trio {
 
 pub fn trio() -> Trio {
     let request = node(NodeKind::Request);
-    let formula = node(NodeKind::Formula);
+    let formula = crate::graph::create_operator_node(
+        crate::operator::Operator::Multiply,
+        Position { x: 100.0, y: 100.0 },
+    );
     let assertion = node(NodeKind::Assert);
     Trio {
         request: request.id.clone(),

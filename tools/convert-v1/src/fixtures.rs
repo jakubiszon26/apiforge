@@ -3,7 +3,8 @@
 use crate::{convert, v1};
 use apiforge_core::{
     format::{Graph, Project, Scenario},
-    graph::component_definition,
+    graph::{VALUE_INPUT, component_definition},
+    model::NodeKind,
 };
 use serde_json::{Map, Value};
 use std::{
@@ -110,6 +111,16 @@ fn convert_report(
                 } else {
                     next.insert(key, value);
                 }
+            }
+            if node.kind == NodeKind::Value {
+                // A Value's only input is its expression, whose result it outputs.
+                next.insert("kind".into(), Value::String("value".into()));
+                let inputs = next
+                    .get("outputs")
+                    .and_then(|outputs| outputs.get(VALUE_INPUT))
+                    .map(|value| Map::from_iter([(VALUE_INPUT.to_owned(), value.clone())]))
+                    .unwrap_or_default();
+                next.insert("inputs".into(), Value::Object(inputs));
             }
             if let Some(Value::Array(children)) = next.get_mut("children") {
                 let definition = component_definition(project, node)

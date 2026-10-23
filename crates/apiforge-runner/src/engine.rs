@@ -19,9 +19,9 @@ use crate::{
 use apiforge_core::{
     binding::Reference,
     format::{Binding, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
-    graph::{ancestors_and_self, component_definition, input_ports, predicate},
+    graph::{VALUE_INPUT, ancestors_and_self, component_definition, input_ports, predicate},
     js::{self, js_key_order},
-    model::{Branch, BuildType, HttpMethod, Match, NodeKind, ValueType},
+    model::{Branch, HttpMethod, Match, NodeKind, ValueType},
     operator::{Operator, OperatorError, RandomSource},
     path,
     predicate::PredicateError,
@@ -129,8 +129,6 @@ enum StepError {
     /// An error inside an expression binding, prefixed with the operator.
     #[error("{operator}: {message}")]
     Expression { operator: String, message: String },
-    #[error("Missing value to build data.")]
-    IncompleteBuild,
     /// A field, item or template value of a composite binding resolved to nothing.
     #[error("Missing value for {0}.")]
     MissingValue(String),
@@ -570,7 +568,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         // their declared inputs.
         if !matches!(
             node.kind,
-            NodeKind::Assert | NodeKind::Condition | NodeKind::If | NodeKind::Select
+            NodeKind::Assert | NodeKind::Condition | NodeKind::If
         ) {
             for port in &ports {
                 match values.get(&port.name).and_then(Option::as_ref) {
@@ -590,38 +588,8 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         let input = |name: &str| values.get(name).cloned().flatten();
         match node.kind {
             NodeKind::Trigger => {}
-            NodeKind::Variable => step.outputs = single_output(input("value")),
+            NodeKind::Value => step.outputs = single_output(input(VALUE_INPUT)),
             NodeKind::Request => self.request(node, &values, step, context).await?,
-            NodeKind::Select => {
-                let lookup = template_lookup(&values, &self.env);
-                let field = template::expand(node.config.path.as_deref().unwrap_or(""), &lookup)?;
-                let selected = values
-                    .get("value")
-                    .and_then(Option::as_ref)
-                    .and_then(|value| path::resolve(value, &field))
-                    .map(|value| value.into_owned());
-                step.outputs = single_output(selected);
-            }
-            NodeKind::Build => {
-                if values.values().any(Option::is_none) {
-                    return Err(StepError::IncompleteBuild);
-                }
-                let fields = compact(&values);
-                let built = match node.config.build_type.unwrap_or_default() {
-                    BuildType::Array => Value::Array(fields.into_values().collect()),
-                    BuildType::Object => Value::Object(fields.into_iter().collect()),
-                };
-                step.outputs.insert("value".into(), built);
-            }
-            NodeKind::Formula => {
-                let operator = apiforge_core::graph::formula_operator(node);
-                let value = operator.evaluate(
-                    input("left").as_ref(),
-                    input("right").as_ref(),
-                    self.random.as_mut(),
-                )?;
-                step.outputs = single_output(value);
-            }
             NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
                 self.check(node, &values, step)?
             }
@@ -892,7 +860,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 message: error.to_string(),
             })?,
             Binding::Literal { value } => Some(value.clone()),
-            Binding::Parameter { name } => context.parameters.get(name).cloned().flatten(),
+            Binding::Parameter { name, path: field } => context
+                .parameters
+                .get(name)
+                .cloned()
+                .flatten()
+                .and_then(|value| path::resolve(&value, field).map(|value| value.into_owned())),
             Binding::Environment { name } => self.env.get(name).cloned(),
             Binding::Reference {
                 node_id,
@@ -1141,7 +1114,7 @@ mod tests {
             "nodes": [
                 {"id": "start", "kind": "trigger", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
                 {"id": "active", "kind": "request", "handle": "active", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}},
-                {"id": "shared", "kind": "variable", "handle": "shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
+                {"id": "shared", "kind": "value", "handle": "shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
                 {"id": "disconnected", "kind": "request", "handle": "disconnected", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}}
             ],
             "edges": [{"id": "start-active", "source": "start", "target": "active"}]

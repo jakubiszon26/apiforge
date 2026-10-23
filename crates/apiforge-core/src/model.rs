@@ -12,13 +12,13 @@ pub use crate::operator::Operator;
 #[serde(rename_all = "camelCase")]
 pub enum NodeKind {
     Request,
-    Select,
-    Build,
-    Formula,
+    /// A named value: data, a selection or a calculation ([ADR 0004]).
+    ///
+    /// [ADR 0004]: ../../../docs/decisions/0004-document-format-v2.md
+    Value,
     Assert,
     Condition,
     Component,
-    Variable,
     Trigger,
     If,
 }
@@ -78,13 +78,6 @@ pub enum HttpMethod {
     Patch,
     Delete,
     Options,
-}
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum BuildType {
-    #[default]
-    Object,
-    Array,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

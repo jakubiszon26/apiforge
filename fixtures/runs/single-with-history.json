@@ -117,7 +117,7 @@
                 "id": "price-variable",
                 "handle": "price_variable",
                 "label": "price-variable",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -130,7 +130,9 @@
                     "path": "price"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               },
               {
                 "id": "via-variable",
@@ -370,7 +372,7 @@
               "id": "price-variable",
               "handle": "price_variable",
               "label": "price-variable",
-              "kind": "variable",
+              "kind": "value",
               "position": {
                 "x": 0.0,
                 "y": 0.0
@@ -383,7 +385,9 @@
                   "path": "price"
                 }
               },
-              "config": {}
+              "config": {
+                "variable": true
+              }
             },
             {
               "id": "via-variable",

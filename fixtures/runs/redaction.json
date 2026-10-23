@@ -100,7 +100,7 @@
               {
                 "id": "session",
                 "handle": "session",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -111,7 +111,9 @@
                     "name": "API_KEY"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               },
               {
                 "id": "compare",
@@ -289,7 +291,7 @@
       {
         "nodeId": "session",
         "handle": "session",
-        "kind": "variable",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {

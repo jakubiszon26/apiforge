@@ -122,7 +122,7 @@
                 "id": "reads-failed",
                 "handle": "reads_failed",
                 "label": "reads-failed",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -135,9 +135,7 @@
                     "path": ""
                   }
                 },
-                "config": {
-                  "path": ""
-                }
+                "config": {}
               }
             ],
             "edges": [
@@ -294,7 +292,7 @@
         "nodeId": "reads-failed",
         "handle": "reads_failed",
         "label": "reads-failed",
-        "kind": "select",
+        "kind": "value",
         "status": "skipped",
         "phase": "main",
         "inputs": {},

@@ -285,13 +285,26 @@ fn body(
             port: output,
             path,
         }) => reference_editor(ui, context, port, node_id, output, path, id),
-        Some(Binding::Parameter { name }) => name_editor(
-            ui,
-            id,
-            name,
-            context.parameters,
-            "A scenario parameter or a component argument.",
-        ),
+        Some(Binding::Parameter { name, path }) => {
+            let mut changed = name_editor(
+                ui,
+                id,
+                name,
+                context.parameters,
+                "A scenario parameter or a component argument.",
+            );
+            widgets::field_label(ui, "Field (optional)");
+            changed |= ui
+                .add(
+                    crate::widgets::text_edit(path)
+                        .id(id.with("parameter-path"))
+                        .hint_text("e.g. items[0].id; empty = whole value")
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+            changed
+        }
         Some(Binding::Object { fields }) => object_editor(ui, context, fields, depth, id),
         Some(Binding::Array { items }) => list_editor(ui, context, items, depth, id),
         Some(Binding::Template { parts }) => {

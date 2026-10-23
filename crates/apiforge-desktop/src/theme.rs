@@ -1,5 +1,5 @@
 //! Visual tokens shared by panels and the board, and the egui style built from them.
-use apiforge_core::model::NodeKind;
+use apiforge_core::block::Block;
 use eframe::egui::{self, Color32, FontId, Stroke, TextStyle};
 
 pub const BG: Color32 = Color32::from_rgb(247, 247, 247);
@@ -147,24 +147,24 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_style_of(egui::Theme::Light, style);
 }
 
-pub fn kind_color(kind: NodeKind) -> Color32 {
-    match kind {
-        NodeKind::Request | NodeKind::Select => Color32::from_rgb(100, 118, 184),
-        NodeKind::Assert | NodeKind::Condition | NodeKind::Trigger | NodeKind::If => {
+pub fn block_color(block: Block) -> Color32 {
+    match block {
+        Block::Request => Color32::from_rgb(100, 118, 184),
+        Block::Comparison | Block::Condition | Block::Start | Block::Branch => {
             Color32::from_rgb(77, 138, 97)
         }
-        NodeKind::Formula | NodeKind::Build => Color32::from_rgb(152, 110, 177),
-        NodeKind::Component | NodeKind::Variable => Color32::from_rgb(188, 105, 59),
+        Block::Value | Block::Object => Color32::from_rgb(152, 110, 177),
+        Block::Component | Block::Variable => Color32::from_rgb(188, 105, 59),
     }
 }
 
 /// Code-native icons avoid platform-specific symbol-font substitutions.
-pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, color: Color32) {
+pub fn block_icon(painter: &egui::Painter, rect: egui::Rect, block: Block, color: Color32) {
     let center = rect.center();
     let radius = rect.width() * 0.25;
     let stroke = Stroke::new((rect.width() / 24.0).max(0.9), color);
-    match kind {
-        NodeKind::Request => {
+    match block {
+        Block::Request => {
             painter.circle_stroke(center, radius, stroke);
             painter.line_segment(
                 [
@@ -183,7 +183,7 @@ pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, colo
                 stroke,
             ));
         }
-        NodeKind::Component => {
+        Block::Component => {
             let points: Vec<_> = (0..6)
                 .map(|index| {
                     let angle = std::f32::consts::TAU * index as f32 / 6.0;
@@ -195,7 +195,7 @@ pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, colo
                 painter.line_segment([center, points[index]], stroke);
             }
         }
-        NodeKind::Assert => {
+        Block::Comparison => {
             painter.line_segment(
                 [
                     center + egui::vec2(-radius, 0.0),
@@ -211,7 +211,7 @@ pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, colo
                 stroke,
             );
         }
-        NodeKind::If | NodeKind::Condition => {
+        Block::Branch | Block::Condition => {
             for sign in [-1.0, 1.0] {
                 painter.line_segment([center + egui::vec2(0.0, radius), center], stroke);
                 painter.line_segment(
@@ -225,7 +225,7 @@ pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, colo
                 );
             }
         }
-        NodeKind::Trigger => {
+        Block::Start => {
             painter.circle_stroke(center, radius, stroke);
             painter.add(egui::Shape::convex_polygon(
                 vec![
@@ -237,28 +237,14 @@ pub fn kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: NodeKind, colo
                 Stroke::NONE,
             ));
         }
-        NodeKind::Select => {
-            painter.add(egui::Shape::line(
-                vec![
-                    center + egui::vec2(-radius, -radius),
-                    center + egui::vec2(radius, -radius),
-                    center + egui::vec2(0.2 * radius, 0.0),
-                    center + egui::vec2(0.2 * radius, radius),
-                    center + egui::vec2(-0.2 * radius, radius),
-                    center + egui::vec2(-0.2 * radius, 0.0),
-                    center + egui::vec2(-radius, -radius),
-                ],
-                stroke,
-            ));
-        }
-        _ => {
+        Block::Value | Block::Object | Block::Variable => {
             painter.text(
                 center,
                 egui::Align2::CENTER_CENTER,
-                if kind == NodeKind::Formula {
-                    "ƒ"
-                } else {
-                    "{}"
+                match block {
+                    Block::Value => "ƒ",
+                    Block::Object => "{}",
+                    _ => "$",
                 },
                 egui::FontId::proportional(rect.width() * 0.55),
                 color,

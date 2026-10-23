@@ -38,7 +38,18 @@ impl Binding {
     }
 
     pub fn parameter(name: impl Into<String>) -> Self {
-        Self::Parameter { name: name.into() }
+        Self::Parameter {
+            name: name.into(),
+            path: String::new(),
+        }
+    }
+
+    /// A field of a parameter, e.g. `id` of a `product` input.
+    pub fn parameter_field(name: impl Into<String>, path: impl Into<String>) -> Self {
+        Self::Parameter {
+            name: name.into(),
+            path: path.into(),
+        }
     }
 
     pub fn environment(name: impl Into<String>) -> Self {

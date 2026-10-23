@@ -6,7 +6,7 @@
 
 use super::{Chrome, Outcome, autofocus, submitted};
 use crate::widgets;
-use apiforge_core::{format::Graph, js, model::NodeKind};
+use apiforge_core::{format::Graph, js};
 use eframe::egui::{self, Ui};
 
 const DEFAULT_NAME: &str = "Response value";
@@ -61,7 +61,7 @@ impl AssignVariableDialog {
             variables: graph
                 .nodes
                 .iter()
-                .filter(|node| node.kind == NodeKind::Variable)
+                .filter(|node| node.is_variable())
                 .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             target: None,
@@ -186,7 +186,7 @@ mod tests {
         let source = graph
             .nodes
             .iter()
-            .find(|node| node.kind != NodeKind::Trigger)
+            .find(|node| node.kind != apiforge_core::model::NodeKind::Trigger)
             .unwrap();
         let mut dialog = AssignVariableDialog::new(graph, &source.id, "body", "cart.id");
         assert_eq!(dialog.name, "id");

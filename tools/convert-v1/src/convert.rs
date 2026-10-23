@@ -2,10 +2,15 @@
 
 use crate::v1;
 use apiforge_core::{
-    format as current,
+    format::{self as current, TemplatePart},
+    graph::VALUE_INPUT,
     handle::{handle_base, unique_handle},
-    model::NodeKind,
+    js::js_key_order,
+    model::{NodeKind, Operator},
+    path::JsonPath,
+    template,
 };
+use serde_json::Value;
 use std::collections::HashSet;
 
 pub fn workspace(source: &v1::Workspace) -> current::Workspace {
@@ -122,6 +127,19 @@ fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
     };
     let handle = unique_handle(&base, |handle| handles.contains(handle));
     handles.insert(handle.clone());
+    let (inputs, config) = match value_binding(source) {
+        Some(value) => {
+            let config = current::NodeConfig {
+                variable: (source.kind == v1::NodeKind::Variable).then_some(true),
+                ..current::NodeConfig::default()
+            };
+            let inputs = value
+                .map(|value| current::Bindings::from([(VALUE_INPUT.to_owned(), value)]))
+                .unwrap_or_default();
+            (inputs, config)
+        }
+        None => (bindings(&source.inputs), config(&source.config)),
+    };
     current::Node {
         id: source.id.clone(),
         // The default name of Start is no label: new Start blocks have none.
@@ -135,21 +153,147 @@ fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
             x: source.position.x,
             y: source.position.y,
         },
-        inputs: bindings(&source.inputs),
-        config: config(&source.config),
+        inputs,
+        config,
     }
+}
+
+/// The expression of a Value replacing a Variable, Select, Build or Formula node:
+/// `Some(None)` for a value without an expression, `None` for other kinds.
+fn value_binding(source: &v1::Node) -> Option<Option<current::Binding>> {
+    let input = |name: &str| source.inputs.get(name).map(binding);
+    match source.kind {
+        v1::NodeKind::Variable => Some(input("value")),
+        v1::NodeKind::Select => Some(selection(source)),
+        v1::NodeKind::Build => {
+            // A JavaScript object orders integer keys first; the reference built
+            // objects and lists in that order.
+            let entries = js_key_order(
+                source
+                    .inputs
+                    .iter()
+                    .map(|(name, value)| (name, binding(value))),
+            );
+            Some(Some(match source.config.build_type.unwrap_or_default() {
+                v1::BuildType::Object => current::Binding::Object {
+                    fields: entries
+                        .into_iter()
+                        .map(|(name, value)| (name.clone(), value))
+                        .collect(),
+                },
+                v1::BuildType::Array => current::Binding::Array {
+                    items: entries.into_iter().map(|(_, value)| value).collect(),
+                },
+            }))
+        }
+        v1::NodeKind::Formula => {
+            let operator = source.config.operation.unwrap_or(Operator::Multiply);
+            // Operands keep their catalogue order; missing ones take the default
+            // the formula's port supplied.
+            let inputs = operator
+                .spec()
+                .operands
+                .iter()
+                .filter_map(|operand| {
+                    let value = input(operand.name).or_else(|| {
+                        operand
+                            .default
+                            .map(|default| current::Binding::literal(default.to_value()))
+                    })?;
+                    Some((operand.name.to_owned(), value))
+                })
+                .collect();
+            Some(Some(current::Binding::Expression { operator, inputs }))
+        }
+        _ => None,
+    }
+}
+
+/// A Select node as one binding. A static path on a reference or parameter extends
+/// its path; any other selection becomes the `field` operator, whose path
+/// is a template when it contains `{{name}}` tokens. Tokens name the node's
+/// inputs, or else environment variables, as the reference runner resolved them.
+fn selection(source: &v1::Node) -> Option<current::Binding> {
+    let value = source.inputs.get("value").map(binding);
+    let path = source.config.path.clone().unwrap_or_default();
+    let tokens = template::tokens(&path);
+    if tokens.is_empty() {
+        if path.is_empty() {
+            return value;
+        }
+        let join = |base: &str| {
+            let (mut joined, field) = (JsonPath::parse(base).ok()?, JsonPath::parse(&path).ok()?);
+            for segment in field.segments() {
+                joined.push_key(segment.clone());
+            }
+            Some(joined.to_string())
+        };
+        match &value {
+            Some(current::Binding::Reference {
+                node_id,
+                port,
+                path: base,
+            }) => {
+                if let Some(joined) = join(base) {
+                    return Some(current::Binding::reference(node_id, port, joined));
+                }
+            }
+            Some(current::Binding::Parameter { name, path: base }) => {
+                if let Some(joined) = join(base) {
+                    return Some(current::Binding::parameter_field(name, joined));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut parts = Vec::new();
+    let mut last = 0;
+    for token in &tokens {
+        if token.range.start > last {
+            parts.push(TemplatePart::Text {
+                text: path[last..token.range.start].to_owned(),
+            });
+        }
+        let value = source
+            .inputs
+            .get(token.key)
+            .map(binding)
+            .unwrap_or_else(|| current::Binding::environment(token.key));
+        parts.push(TemplatePart::Value { binding: value });
+        last = token.range.end;
+    }
+    if last < path.len() {
+        parts.push(TemplatePart::Text {
+            text: path[last..].to_owned(),
+        });
+    }
+    let path = if tokens.is_empty() {
+        current::Binding::literal(Value::String(path))
+    } else {
+        current::Binding::Template { parts }
+    };
+    Some(current::Binding::Expression {
+        operator: Operator::Field,
+        inputs: current::Bindings::from([
+            (
+                "left".to_owned(),
+                value.unwrap_or_else(|| current::Binding::literal(Value::Null)),
+            ),
+            ("right".to_owned(), path),
+        ]),
+    })
 }
 
 fn kind(source: v1::NodeKind) -> NodeKind {
     match source {
         v1::NodeKind::Request => NodeKind::Request,
-        v1::NodeKind::Select => NodeKind::Select,
-        v1::NodeKind::Build => NodeKind::Build,
-        v1::NodeKind::Formula => NodeKind::Formula,
+        v1::NodeKind::Select
+        | v1::NodeKind::Build
+        | v1::NodeKind::Formula
+        | v1::NodeKind::Variable => NodeKind::Value,
         v1::NodeKind::Assert => NodeKind::Assert,
         v1::NodeKind::Condition => NodeKind::Condition,
         v1::NodeKind::Component => NodeKind::Component,
-        v1::NodeKind::Variable => NodeKind::Variable,
         v1::NodeKind::Trigger => NodeKind::Trigger,
         v1::NodeKind::If => NodeKind::If,
     }
@@ -165,14 +309,9 @@ fn config(source: &v1::NodeConfig) -> current::NodeConfig {
         sample_response: optional_json(&source.sample_response),
         sample_status: source.sample_status,
         contract_id: source.contract_id.clone(),
-        path: source.path.clone(),
-        operation: source.operation,
         predicate: source.predicate,
         tolerance: source.tolerance,
-        build_type: source.build_type.map(|build| match build {
-            v1::BuildType::Object => apiforge_core::model::BuildType::Object,
-            v1::BuildType::Array => apiforge_core::model::BuildType::Array,
-        }),
+        variable: None,
         component_id: source.component_id.clone(),
         revision: source.revision,
         input_ports: source

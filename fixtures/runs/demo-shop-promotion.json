@@ -59,24 +59,28 @@
                 "id": "expected",
                 "handle": "oczekiwana_cena",
                 "label": "Oczekiwana cena",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 360.0,
                   "y": 290.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 80
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 1
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 80
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
               },
               {
                 "id": "cart",
@@ -335,7 +339,7 @@
                 "id": "active",
                 "handle": "aktywnosc_promocji",
                 "label": "Aktywność promocji",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 80.0,
                   "y": 80.0
@@ -343,12 +347,11 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "product"
+                    "name": "product",
+                    "path": "promotion.active"
                   }
                 },
-                "config": {
-                  "path": "promotion.active"
-                }
+                "config": {}
               },
               {
                 "id": "check",
@@ -425,7 +428,7 @@
                 "id": "id",
                 "handle": "id_produktu",
                 "label": "ID produktu",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 50.0,
                   "y": 90.0
@@ -433,37 +436,39 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "product"
+                    "name": "product",
+                    "path": "id"
                   }
                 },
-                "config": {
-                  "path": "id"
-                }
+                "config": {}
               },
               {
                 "id": "body",
                 "handle": "pozycja_koszyka",
                 "label": "Pozycja koszyka",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 350.0,
                   "y": 90.0
                 },
                 "inputs": {
-                  "productId": {
-                    "kind": "reference",
-                    "nodeId": "id",
-                    "port": "value",
-                    "path": ""
-                  },
-                  "quantity": {
-                    "kind": "parameter",
-                    "name": "quantity"
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "productId": {
+                        "kind": "reference",
+                        "nodeId": "id",
+                        "port": "value",
+                        "path": ""
+                      },
+                      "quantity": {
+                        "kind": "parameter",
+                        "name": "quantity"
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "create",
@@ -681,21 +686,11 @@
             "nodeId": "active",
             "handle": "aktywnosc_promocji",
             "label": "Aktywność promocji",
-            "kind": "select",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "value": {
-                "id": 123,
-                "name": "Kawa ziarnista",
-                "price": 100,
-                "promotion": {
-                  "type": "fixed_price",
-                  "active": true,
-                  "price": 80,
-                  "inna_nazwa": "Oferta jesienna"
-                }
-              }
+              "value": true
             },
             "outputs": {
               "value": true
@@ -725,12 +720,11 @@
         "nodeId": "expected",
         "handle": "oczekiwana_cena",
         "label": "Oczekiwana cena",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 80,
-          "right": 1
+          "value": 80
         },
         "outputs": {
           "value": 80
@@ -770,21 +764,11 @@
             "nodeId": "id",
             "handle": "id_produktu",
             "label": "ID produktu",
-            "kind": "select",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "value": {
-                "id": 123,
-                "name": "Kawa ziarnista",
-                "price": 100,
-                "promotion": {
-                  "type": "fixed_price",
-                  "active": true,
-                  "price": 80,
-                  "inna_nazwa": "Oferta jesienna"
-                }
-              }
+              "value": 123
             },
             "outputs": {
               "value": 123
@@ -794,12 +778,14 @@
             "nodeId": "body",
             "handle": "pozycja_koszyka",
             "label": "Pozycja koszyka",
-            "kind": "build",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "productId": 123,
-              "quantity": 1
+              "value": {
+                "productId": 123,
+                "quantity": 1
+              }
             },
             "outputs": {
               "value": {

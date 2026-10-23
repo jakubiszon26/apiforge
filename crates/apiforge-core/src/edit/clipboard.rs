@@ -148,7 +148,7 @@ mod tests {
     use crate::{
         edit::{
             connect,
-            test_support::{at, empty_project, node, trio},
+            test_support::{at, empty_project, left, node, trio},
         },
         format::Port,
         graph::{ORDER_PORT, dependencies, wires},
@@ -161,7 +161,16 @@ mod tests {
     fn duplicate_remaps_internal_links_and_keeps_external_references() {
         let project = empty_project();
         let f = trio();
-        let first = connect(&f.graph, &project, &f.request, "status", &f.formula, "left").unwrap();
+        let first = connect(
+            &f.graph,
+            &project,
+            &f.request,
+            "status",
+            &f.formula,
+            "value",
+            &left(),
+        )
+        .unwrap();
         let second = connect(
             &first,
             &project,
@@ -169,6 +178,7 @@ mod tests {
             "value",
             &f.assertion,
             "actual",
+            &[],
         )
         .unwrap();
         let ordered = connect(
@@ -178,6 +188,7 @@ mod tests {
             ORDER_PORT,
             &f.assertion,
             ORDER_PORT,
+            &[],
         )
         .unwrap();
         let copy = duplicate_selection(
@@ -189,8 +200,8 @@ mod tests {
         let find = |id: &str| copy.graph.nodes.iter().find(|node| node.id == id).unwrap();
         let (formula, assertion) = (find(&copy.ids[0]), find(&copy.ids[1]));
         assert_eq!(
-            formula.inputs["left"],
-            Binding::reference(&f.request, "status", "")
+            formula.inputs["value"].at(&left()),
+            Some(&Binding::reference(&f.request, "status", ""))
         );
         assert_eq!(
             assertion.inputs["actual"],
@@ -257,7 +268,7 @@ mod tests {
 
     #[test]
     fn pasting_a_group_rewires_nested_data_and_branches() {
-        let external = node(NodeKind::Variable);
+        let external = node(NodeKind::Value);
         let branch = node(NodeKind::If);
         let mut target = node(NodeKind::Request);
         let body = Binding::expression(Operator::Add)

@@ -5,9 +5,10 @@ use super::Command;
 use crate::icons::Icon;
 use crate::theme;
 use apiforge_core::{
+    block::Block,
     format::{Graph, Port, Position, Project},
     graph::{ORDER_PORT, TRUE_PORT, compatible, latest_components, output_ports},
-    model::{NodeKind, ValueType},
+    model::NodeKind,
 };
 use eframe::egui::{self, Key, Pos2, RichText, Stroke};
 
@@ -41,7 +42,7 @@ pub fn default_source(graph: &Graph, project: &Project, node_id: &str) -> Option
 }
 
 struct Action {
-    kind: NodeKind,
+    block: Block,
     name: String,
     description: String,
     component: Option<(String, u32)>,
@@ -65,42 +66,34 @@ impl ActionMenu {
                 .into_iter()
                 .find(|candidate| &candidate.name == port)
         });
-        let kinds: &[NodeKind] = if self.source.is_some() {
+        let blocks: &[Block] = if self.source.is_some() {
             &[
-                NodeKind::Request,
-                NodeKind::If,
-                NodeKind::Select,
-                NodeKind::Assert,
-                NodeKind::Condition,
-                NodeKind::Formula,
-                NodeKind::Build,
+                Block::Request,
+                Block::Branch,
+                Block::Value,
+                Block::Comparison,
+                Block::Condition,
+                Block::Object,
+                Block::Variable,
             ]
         } else {
             &[
-                NodeKind::Trigger,
-                NodeKind::If,
-                NodeKind::Request,
-                NodeKind::Select,
-                NodeKind::Build,
-                NodeKind::Formula,
-                NodeKind::Assert,
-                NodeKind::Condition,
-                NodeKind::Variable,
+                Block::Start,
+                Block::Branch,
+                Block::Request,
+                Block::Value,
+                Block::Object,
+                Block::Comparison,
+                Block::Condition,
+                Block::Variable,
             ]
         };
-        let numeric = Port::new("left", ValueType::Number);
-        let mut actions: Vec<Action> = kinds
+        let mut actions: Vec<Action> = blocks
             .iter()
-            .filter(|kind| {
-                **kind != NodeKind::Formula
-                    || source_port
-                        .as_ref()
-                        .is_none_or(|port| compatible(port, &numeric))
-            })
-            .map(|kind| Action {
-                kind: *kind,
-                name: kind.label().to_owned(),
-                description: kind.description().to_owned(),
+            .map(|block| Action {
+                block: *block,
+                name: block.label().to_owned(),
+                description: block.description().to_owned(),
                 component: None,
             })
             .collect();
@@ -124,7 +117,7 @@ impl ActionMenu {
                 }
             }
             actions.push(Action {
-                kind: NodeKind::Component,
+                block: Block::Component,
                 name: component.name.clone(),
                 description: if component.description.is_empty() {
                     format!("Component · revision {}", component.revision)
@@ -245,7 +238,7 @@ impl ActionMenu {
                                             },
                                         );
                                         outcome = Outcome::Add(Command::AddNode {
-                                            kind: action.kind,
+                                            block: action.block,
                                             component: action.component.clone(),
                                             position,
                                             source: self.source.clone(),
@@ -278,10 +271,10 @@ fn action_row(ui: &mut egui::Ui, action: &Action) -> egui::Response {
         ui.painter().rect_filled(rect, 6.0, theme::BG);
     }
     let icon = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 8.0), egui::vec2(28.0, 28.0));
-    let color = theme::kind_color(action.kind);
+    let color = theme::block_color(action.block);
     ui.painter()
         .rect_filled(icon, 6.0, color.gamma_multiply(0.12));
-    theme::kind_icon(ui.painter(), icon, action.kind, color);
+    theme::block_icon(ui.painter(), icon, action.block, color);
     ui.painter().text(
         rect.min + egui::vec2(44.0, 14.0),
         egui::Align2::LEFT_CENTER,

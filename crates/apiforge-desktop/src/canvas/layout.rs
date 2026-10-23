@@ -4,10 +4,9 @@
 
 use crate::labels;
 use apiforge_core::{
+    block::Block,
     format::{Binding, Graph, Node, Port, Project},
-    graph::{
-        FALSE_PORT, ORDER_PORT, TRUE_PORT, formula_operator, input_ports, output_ports, predicate,
-    },
+    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, VALUE_INPUT, input_slots, output_ports, predicate},
     model::{NodeKind, Predicate, ValueType},
 };
 use eframe::egui::{Pos2, Rect, Vec2, pos2, vec2};
@@ -216,9 +215,13 @@ pub enum RowValue {
     Optional,
 }
 
+/// One slot of the card: a whole input, or an operand, field or item of a Value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputRow {
+    /// The input the slot belongs to.
     pub name: String,
+    /// Path of the slot inside the input's binding; empty for the whole input.
+    pub path: Vec<String>,
     pub label: String,
     pub required: bool,
     pub value: RowValue,
@@ -236,6 +239,7 @@ pub struct OutputRow {
 pub struct Card {
     pub id: String,
     pub kind: NodeKind,
+    pub block: Block,
     pub name: String,
     pub caption: String,
     pub subtitle: Option<String>,
@@ -248,26 +252,30 @@ pub struct Card {
 
 impl Card {
     pub fn build(node: &Node, reference_graph: &Graph, project: &Project) -> Self {
-        let ports = input_ports(node, project);
-        let inline_allowed = node.kind != NodeKind::Component && ports.len() <= 3;
-        let inputs = ports
-            .iter()
-            .filter(|port| {
+        let slots = input_slots(node, project);
+        let inline_allowed = node.kind != NodeKind::Component && slots.len() <= 3;
+        let inputs = slots
+            .into_iter()
+            .filter(|slot| {
                 // Unary comparisons have no second operand. Keep the document
                 // binding intact when hidden, so changing the predicate is safe.
-                port.name != "expected"
+                slot.input != "expected"
                     || !matches!(node.kind, NodeKind::Assert | NodeKind::If)
                     || predicate(node).takes_expected()
             })
-            .map(|port| {
-                let binding = node.inputs.get(&port.name);
-                let value = row_value(node, port, binding, inline_allowed, reference_graph);
+            .map(|slot| {
+                let binding = node
+                    .inputs
+                    .get(&slot.input)
+                    .and_then(|binding| binding.at(&slot.path));
+                let value = row_value(node, &slot.port, binding, inline_allowed, reference_graph);
                 InputRow {
-                    name: port.name.clone(),
-                    label: port.display_name().to_owned(),
-                    required: port.is_required(),
+                    name: slot.input,
+                    path: slot.path,
+                    label: slot.port.display_name().to_owned(),
+                    required: slot.port.is_required(),
                     value,
-                    port: port.clone(),
+                    port: slot.port,
                 }
             })
             .collect();
@@ -304,15 +312,7 @@ impl Card {
                     .filter(|url| !url.is_empty())
                     .unwrap_or("/endpoint")
             )),
-            NodeKind::Select => Some(
-                node.config
-                    .path
-                    .as_deref()
-                    .filter(|path| !path.is_empty())
-                    .unwrap_or("Whole value")
-                    .to_owned(),
-            ),
-            NodeKind::Formula => Some(formula_operator(node).label().to_owned()),
+            NodeKind::Value => value_subtitle(node),
             NodeKind::Assert | NodeKind::If => Some(predicate(node).label().to_owned()),
             _ => None,
         };
@@ -323,6 +323,7 @@ impl Card {
         Self {
             id: node.id.clone(),
             kind: node.kind,
+            block: Block::of(node),
             name: node.display_name().to_owned(),
             caption,
             subtitle,
@@ -410,13 +411,25 @@ impl Card {
         )
     }
 
-    /// Anchor of a data input, or of the ordering input for [`ORDER_PORT`].
-    pub fn input_anchor(&self, name: &str) -> Option<Pos2> {
+    /// Anchor of the slot showing a reference at `path` inside input `name` (the
+    /// deepest row containing it), or of the ordering input for [`ORDER_PORT`].
+    pub fn input_anchor(&self, name: &str, path: &[String]) -> Option<Pos2> {
         if name == ORDER_PORT {
             return (self.kind != NodeKind::Trigger).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
         }
-        let index = self.inputs.iter().position(|row| row.name == name)?;
-        Some(self.origin + vec2(0.0, self.input_row_top(index) + 30.0))
+        let index = self
+            .inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.name == name && path.starts_with(&row.path))
+            .max_by_key(|(_, row)| row.path.len())?
+            .0;
+        Some(self.row_anchor(index))
+    }
+
+    /// Anchor of the input row at `index`.
+    pub fn row_anchor(&self, index: usize) -> Pos2 {
+        self.origin + vec2(0.0, self.input_row_top(index) + 30.0)
     }
 
     /// Anchor of a data output or a control pseudo-port.
@@ -434,6 +447,22 @@ impl Card {
         card.origin += offset;
         card
     }
+}
+
+/// What a Value computes, in a few words: its operator, the field it selects or
+/// the shape of its data.
+fn value_subtitle(node: &Node) -> Option<String> {
+    let text = match node.inputs.get(VALUE_INPUT)? {
+        Binding::Expression { operator, .. } => operator.label().to_owned(),
+        Binding::Reference { path, .. } | Binding::Parameter { path, .. } if !path.is_empty() => {
+            path.clone()
+        }
+        Binding::Object { .. } => "Object".to_owned(),
+        Binding::Array { .. } => "List".to_owned(),
+        Binding::Template { .. } => "Text with values".to_owned(),
+        _ => return node.is_variable().then(|| "Variable".to_owned()),
+    };
+    Some(text)
 }
 
 fn row_value(
@@ -551,7 +580,7 @@ mod tests {
                             source.name
                         );
                         assert!(
-                            target.input_anchor(input).is_some(),
+                            target.input_anchor(input, &wire.operand_path).is_some(),
                             "{} {input}",
                             target.name
                         );

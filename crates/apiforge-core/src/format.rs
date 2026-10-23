@@ -33,8 +33,11 @@ pub enum Binding {
         port: String,
         path: String,
     },
+    /// A scenario parameter or a component input, optionally a field inside it.
     Parameter {
         name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        path: String,
     },
     Environment {
         name: String,
@@ -172,18 +175,6 @@ pub struct NodeConfig {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub path: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub operation: Option<Operator>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub predicate: Option<Predicate>,
     #[serde(
         default,
@@ -191,12 +182,13 @@ pub struct NodeConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub tolerance: Option<f64>,
+    /// A Value listed in the Variables panel, which can be placed as a proxy.
     #[serde(
         default,
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub build_type: Option<BuildType>,
+    pub variable: Option<bool>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -420,15 +412,7 @@ pub enum Operation {
         url: String,
         timeout_ms: f64,
     },
-    Select {
-        path: String,
-    },
-    Build {
-        kind: BuildType,
-    },
-    Formula {
-        operator: Operator,
-    },
+    Value,
     Assert {
         predicate: Predicate,
     },
@@ -442,9 +426,13 @@ pub enum Operation {
         id: String,
         revision: u32,
     },
-    Variable,
 }
 impl Node {
+    /// Whether the node is a Value marked as a variable.
+    pub fn is_variable(&self) -> bool {
+        self.kind == NodeKind::Value && self.config.variable == Some(true)
+    }
+
     /// The label, or the handle for a block without one.
     pub fn display_name(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.handle)
@@ -460,15 +448,7 @@ impl Node {
                 url: c.url.clone().unwrap_or_default(),
                 timeout_ms: c.timeout_ms.unwrap_or(10_000.0),
             },
-            NodeKind::Select => Operation::Select {
-                path: c.path.clone().unwrap_or_default(),
-            },
-            NodeKind::Build => Operation::Build {
-                kind: c.build_type.unwrap_or_default(),
-            },
-            NodeKind::Formula => Operation::Formula {
-                operator: c.operation.unwrap_or(Operator::Multiply),
-            },
+            NodeKind::Value => Operation::Value,
             NodeKind::Assert => Operation::Assert {
                 predicate: c.predicate.unwrap_or_default(),
             },
@@ -482,7 +462,6 @@ impl Node {
                 id: c.component_id.clone()?,
                 revision: c.revision?,
             },
-            NodeKind::Variable => Operation::Variable,
         })
     }
 }

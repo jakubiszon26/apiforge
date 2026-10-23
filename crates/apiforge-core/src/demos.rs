@@ -14,7 +14,7 @@ use crate::{
     graph::create_node,
     handle::handle_base,
     ids::new_id,
-    model::{Branch, BuildType, ErrorPolicy, HttpMethod, NodeKind, Predicate, ValueType},
+    model::{Branch, ErrorPolicy, HttpMethod, NodeKind, Predicate, ValueType},
     operator::Operator,
 };
 use indexmap::IndexMap;
@@ -120,16 +120,11 @@ pub fn shop_project() -> Project {
             parameter("product"),
         )],
         graph: graph(vec![
-            node(
+            value(
                 "active",
-                NodeKind::Select,
                 "Promotion status",
                 at(80.0, 80.0),
-                vec![("value", parameter("product"))],
-                NodeConfig {
-                    path: Some("promotion.active".into()),
-                    ..NodeConfig::default()
-                },
+                Binding::parameter_field("product", "promotion.active"),
             ),
             node(
                 "check",
@@ -169,27 +164,20 @@ pub fn shop_project() -> Project {
             reference("read", "body", ""),
         )],
         graph: graph(vec![
-            node(
+            value(
                 "id",
-                NodeKind::Select,
                 "Product ID",
                 at(50.0, 90.0),
-                vec![("value", parameter("product"))],
-                NodeConfig {
-                    path: Some("id".into()),
-                    ..NodeConfig::default()
-                },
+                Binding::parameter_field("product", "id"),
             ),
-            node(
+            value(
                 "body",
-                NodeKind::Build,
                 "Cart item",
                 at(350.0, 90.0),
-                vec![
+                object(vec![
                     ("productId", reference("id", "value", "")),
                     ("quantity", parameter("quantity")),
-                ],
-                build(BuildType::Object),
+                ]),
             ),
             request(
                 "create",
@@ -228,16 +216,15 @@ pub fn shop_project() -> Project {
             at(360.0, 30.0),
             vec![("product", reference("product", "product", ""))],
         ),
-        node(
+        value(
             "expected",
-            NodeKind::Formula,
             "Expected price",
             at(360.0, 290.0),
-            vec![("left", literal(json!(80))), ("right", literal(json!(1)))],
-            NodeConfig {
-                operation: Some(Operator::Multiply),
-                ..NodeConfig::default()
-            },
+            op(
+                Operator::Multiply,
+                literal(json!(80)),
+                Some(literal(json!(1))),
+            ),
         ),
         component_node(
             "cart",
@@ -369,16 +356,11 @@ pub fn tickets_project() -> Project {
             reference("check", "passed", ""),
         )],
         graph: graph(vec![
-            node(
+            value(
                 "status",
-                NodeKind::Select,
                 "Read status",
                 at(60.0, 60.0),
-                vec![("value", parameter("ticket"))],
-                NodeConfig {
-                    path: Some("status".into()),
-                    ..NodeConfig::default()
-                },
+                Binding::parameter_field("ticket", "status"),
             ),
             node(
                 "check",
@@ -566,16 +548,15 @@ pub fn workflow_project() -> Project {
         at(1050.0, 20.0),
     );
     cart.config.sample_status = Some(201);
-    let body = Node {
-        id: "flow-body".into(),
-        handle: handle_base("Products to add"),
-        label: Some("Products to add".into()),
-        inputs: bindings(vec![
+    let body = value(
+        "flow-body",
+        "Products to add",
+        at(1050.0, 540.0),
+        object(vec![
             ("productId", reference(&prices.id, "body", "id")),
             ("quantity", literal(json!(2))),
         ]),
-        ..create_node(NodeKind::Build, at(1050.0, 540.0), None)
-    };
+    );
     let mut add = request(
         "flow-add",
         "Add products to the cart",
@@ -753,10 +734,21 @@ fn predicate(predicate: Predicate) -> NodeConfig {
     }
 }
 
-fn build(kind: BuildType) -> NodeConfig {
-    NodeConfig {
-        build_type: Some(kind),
-        ..NodeConfig::default()
+/// A Value block computing `binding`.
+fn value(id: &str, name: &str, position: Position, binding: Binding) -> Node {
+    node(
+        id,
+        NodeKind::Value,
+        name,
+        position,
+        vec![("value", binding)],
+        NodeConfig::default(),
+    )
+}
+
+fn object(fields: Vec<(&str, Binding)>) -> Binding {
+    Binding::Object {
+        fields: bindings(fields),
     }
 }
 

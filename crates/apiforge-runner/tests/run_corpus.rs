@@ -54,6 +54,17 @@ const MASKED_LEAKS: &[(&str, &str, &str)] = &[(
     "my+session+secret",
 )];
 
+/// Deliberate divergences in individual steps: (fixture, node id, report field,
+/// value the port reports as JSON). Each one is a decision of an ADR.
+const STEP_DIVERGENCES: &[(&str, &str, &str, &str)] = &[
+    // ADR 0004: a Value's expression is evaluated like any nested expression, so an
+    // operand that resolves to a missing value is an error. A version-one formula
+    // block substituted the operand's default (0) instead.
+    ("values", "missing-left", "status", r#""error""#),
+    ("values", "missing-left", "inputs", "{}"),
+    ("values", "missing-left", "outputs", "{}"),
+];
+
 /// Fixtures the reference runs but the port rejects before running, with the reason.
 const REJECTED: &[(&str, &str)] = &[(
     // The core validator limits component nesting to 16 levels at import; the
@@ -189,6 +200,18 @@ async fn simulation_runs_match_the_reference() {
                 );
                 *field = Value::String(text.replace(leaked, "[REDACTED]"));
             }
+        }
+        for (fixture_slug, node_id, field, value) in STEP_DIVERGENCES {
+            if *fixture_slug != slug {
+                continue;
+            }
+            let step = expected["steps"]
+                .as_array_mut()
+                .and_then(|steps| steps.iter_mut().find(|step| step["nodeId"] == *node_id))
+                .unwrap_or_else(|| panic!("{slug}: no step {node_id}"));
+            let value: Value = serde_json::from_str(value).expect("divergence JSON");
+            assert_ne!(step[*field], value, "{slug}: divergence no longer present");
+            step[*field] = value;
         }
         let actual = normalize_run(&run, single);
         if !strict_equals(Some(&actual), Some(&expected)) {

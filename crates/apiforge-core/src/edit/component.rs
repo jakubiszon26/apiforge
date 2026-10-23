@@ -196,12 +196,12 @@ pub fn initialize_inputs(
                     _ => {}
                 }
                 let parameter = match original {
-                    Some(Binding::Parameter { name }) => Some(name.as_str()),
+                    Some(Binding::Parameter { name, .. }) => Some(name.as_str()),
                     _ => None,
                 };
                 if let Some(parameter) = parameter
                     && let Some(existing) = rows.iter_mut().find(|row| {
-                        matches!(&row.original, Some(Binding::Parameter { name }) if name == parameter)
+                        matches!(&row.original, Some(Binding::Parameter { name, .. }) if name == parameter)
                     })
                 {
                     existing.targets.push(target);
@@ -230,7 +230,12 @@ pub fn initialize_inputs(
                 };
                 let mut label = format!("{} → {}", node.display_name(), port.display_name());
                 for name in &path {
-                    label.push_str(if name == "left" { " → A" } else { " → B" });
+                    label.push_str(" → ");
+                    label.push_str(match name.as_str() {
+                        "left" => "A",
+                        "right" => "B",
+                        other => other,
+                    });
                 }
                 let default_value = match (public.and_then(Port::default), original) {
                     (Some(default), _) => Some(default.clone()),
@@ -258,7 +263,11 @@ pub fn initialize_inputs(
                         .and_then(|public| public.required)
                         .or(leaf_port.required)
                         .unwrap_or(true),
-                    original: original.cloned(),
+                    // An argument takes the whole parameter; each use keeps its field.
+                    original: match original {
+                        Some(Binding::Parameter { name, .. }) => Some(Binding::parameter(name)),
+                        other => other.cloned(),
+                    },
                     targets: vec![target],
                     default_value,
                 });
@@ -272,7 +281,7 @@ pub fn initialize_inputs(
         .unwrap_or_default()
     {
         let covered = rows.iter().any(
-            |row| matches!(&row.original, Some(Binding::Parameter { name }) if *name == port.name),
+            |row| matches!(&row.original, Some(Binding::Parameter { name, .. }) if *name == port.name),
         );
         if covered {
             continue;
@@ -462,12 +471,21 @@ pub fn materialize_component(
     for node in selected_nodes(graph, selected) {
         let mut node = node.clone();
         for row in &inputs {
-            let parameter = Binding::parameter(js::trim(&row.name));
+            let name = js::trim(&row.name);
             for target in row
                 .targets
                 .iter()
                 .filter(|target| target.node_id == node.id)
             {
+                // A parameter use keeps the field it selects.
+                let parameter = match node
+                    .inputs
+                    .get(&target.input)
+                    .and_then(|binding| binding.at(&target.path))
+                {
+                    Some(Binding::Parameter { path, .. }) => Binding::parameter_field(name, path),
+                    _ => Binding::parameter(name),
+                };
                 let binding = if target.path.is_empty() {
                     parameter.clone()
                 } else {
@@ -485,7 +503,7 @@ pub fn materialize_component(
     let renamed: HashMap<&str, &str> = inputs
         .iter()
         .filter_map(|row| match &row.original {
-            Some(Binding::Parameter { name }) => Some((name.as_str(), js::trim(&row.name))),
+            Some(Binding::Parameter { name, .. }) => Some((name.as_str(), js::trim(&row.name))),
             _ => None,
         })
         .collect();
@@ -498,9 +516,12 @@ pub fn materialize_component(
             let binding = binding
                 .map_leaves(&mut |leaf, _| {
                     Some(match leaf {
-                        Binding::Parameter { name } => renamed
-                            .get(name.as_str())
-                            .map_or_else(|| leaf.clone(), |name| Binding::parameter(*name)),
+                        Binding::Parameter { name, path } => {
+                            renamed.get(name.as_str()).map_or_else(
+                                || leaf.clone(),
+                                |name| Binding::parameter_field(*name, path),
+                            )
+                        }
                         other => other.clone(),
                     })
                 })

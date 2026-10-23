@@ -48,7 +48,8 @@ pub fn binding(binding: &Binding, graph: &Graph) -> String {
                 format!("{name} → {port}.{path}")
             }
         }
-        Binding::Parameter { name } => format!("Argument → {name}"),
+        Binding::Parameter { name, path } if path.is_empty() => format!("Argument → {name}"),
+        Binding::Parameter { name, path } => format!("Argument → {name}.{path}"),
         Binding::Environment { name } => format!("Environment → {name}"),
         Binding::Literal { value } => literal_summary(value),
         Binding::Object { fields } => format!("{{ {} fields }}", fields.len()),

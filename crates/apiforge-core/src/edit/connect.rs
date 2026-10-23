@@ -3,7 +3,7 @@ use super::{EditError, unique_id};
 use crate::{
     binding::data_edge_id,
     format::{Binding, Graph, OrderEdge, Project},
-    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, compatible, has_cycle, input_ports, output_ports},
+    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, compatible, has_cycle, input_slots, output_ports},
     model::{Branch, NodeKind},
 };
 use std::collections::HashSet;
@@ -33,13 +33,14 @@ pub(super) fn order_edge(
     }
 }
 
-/// Connects `source`'s output to `target`'s input.
+/// Connects `source`'s output to a slot of `target` (see [`input_slots`]): an
+/// input, or with a non-empty `target_path` an operand, field or item of a Value.
 ///
 /// A control pseudo-port (`__order`, `__true`, `__false`) wired to the `__order`
 /// input adds an ordering edge; IF blocks must use a branch port and other blocks
-/// must not. Any other pair binds the whole input to a reference to the output,
-/// provided the ports are compatible and the input has no reference yet. A
-/// connection that would make the graph cyclic is rejected.
+/// must not. Any other pair binds the slot to a reference to the output, provided
+/// the ports are compatible and the slot has no reference yet. A connection that
+/// would make the graph cyclic is rejected.
 pub fn connect(
     graph: &Graph,
     project: &Project,
@@ -47,6 +48,7 @@ pub fn connect(
     source_port: &str,
     target: &str,
     target_input: &str,
+    target_path: &[String],
 ) -> Result<Graph, EditError> {
     if source == target {
         return Err(EditError::SelfConnection);
@@ -78,25 +80,30 @@ pub fn connect(
             let output = output_ports(from, project)
                 .into_iter()
                 .find(|port| port.name == source_port);
-            let input = input_ports(to, project)
+            let input = input_slots(to, project)
                 .into_iter()
-                .find(|port| port.name == target_input);
+                .find(|slot| slot.input == target_input && slot.path == target_path);
             match (output, input) {
-                (Some(output), Some(input)) if compatible(&output, &input) => {}
+                (Some(output), Some(input)) if compatible(&output, &input.port) => {}
                 _ => return Err(EditError::IncompatiblePorts),
             }
-            if to
-                .inputs
-                .get(target_input)
+            let current = to.inputs.get(target_input);
+            if current
+                .and_then(|binding| binding.at(target_path))
                 .is_some_and(|binding| !binding.references().is_empty())
             {
                 return Err(EditError::InputAlreadyBound);
             }
+            let reference = Binding::reference(source, source_port, "");
+            let binding = match current {
+                Some(current) => current
+                    .replace_at(target_path, reference)
+                    .ok_or(EditError::InvalidOperandPath)?,
+                None if target_path.is_empty() => reference,
+                None => return Err(EditError::InvalidOperandPath),
+            };
             if let Some(node) = next.nodes.iter_mut().find(|node| node.id == target) {
-                node.inputs.insert(
-                    target_input.to_owned(),
-                    Binding::reference(source, source_port, ""),
-                );
+                node.inputs.insert(target_input.to_owned(), binding);
             }
         }
     }
@@ -145,7 +152,7 @@ pub fn remove_connections(graph: &Graph, wire_ids: &HashSet<&str>) -> Graph {
 mod tests {
     use super::*;
     use crate::{
-        edit::test_support::{at, empty_project, node, trio},
+        edit::test_support::{at, empty_project, left, node, trio},
         graph::{WireKind, wires},
     };
     use serde_json::json;
@@ -154,21 +161,38 @@ mod tests {
     fn connections_carry_reference_data_and_occupied_inputs_are_kept() {
         let project = empty_project();
         let f = trio();
-        let connected = connect(&f.graph, &project, &f.request, "status", &f.formula, "left")
-            .expect("compatible ports connect");
+        let connected = connect(
+            &f.graph,
+            &project,
+            &f.request,
+            "status",
+            &f.formula,
+            "value",
+            &left(),
+        )
+        .expect("compatible ports connect");
         assert_eq!(
-            connected.nodes[1].inputs["left"],
-            Binding::reference(&f.request, "status", "")
+            connected.nodes[1].inputs["value"].at(&left()),
+            Some(&Binding::reference(&f.request, "status", ""))
         );
         assert!(connected.edges.is_empty());
         assert_eq!(wires(&connected).len(), 1);
         let error = connect(
-            &connected, &project, &f.request, "duration", &f.formula, "left",
+            &connected,
+            &project,
+            &f.request,
+            "duration",
+            &f.formula,
+            "value",
+            &left(),
         )
         .unwrap_err();
         assert!(matches!(error, EditError::InputAlreadyBound));
         assert!(error.to_string().contains("already has a source"));
-        assert_eq!(f.graph.nodes[1].inputs["left"], Binding::literal(json!(0)));
+        assert_eq!(
+            f.graph.nodes[1].inputs["value"].at(&left()),
+            Some(&Binding::literal(json!(0)))
+        );
     }
 
     #[test]
@@ -177,24 +201,60 @@ mod tests {
         let f = trio();
         assert!(matches!(
             connect(
-                &f.graph, &project, &f.request, "headers", &f.formula, "left"
+                &f.graph,
+                &project,
+                &f.request,
+                "headers",
+                &f.formula,
+                "value",
+                &left()
             ),
             Err(EditError::IncompatiblePorts)
         ));
-        let forward =
-            connect(&f.graph, &project, &f.request, "status", &f.formula, "left").unwrap();
+        let forward = connect(
+            &f.graph,
+            &project,
+            &f.request,
+            "status",
+            &f.formula,
+            "value",
+            &left(),
+        )
+        .unwrap();
         let error = connect(
-            &forward, &project, &f.formula, ORDER_PORT, &f.request, ORDER_PORT,
+            &forward,
+            &project,
+            &f.formula,
+            ORDER_PORT,
+            &f.request,
+            ORDER_PORT,
+            &[],
         )
         .unwrap_err();
         assert!(matches!(error, EditError::ConnectionCycle));
         assert!(error.to_string().contains("cycle"));
         assert!(matches!(
-            connect(&f.graph, &project, &f.formula, "value", &f.formula, "left"),
+            connect(
+                &f.graph,
+                &project,
+                &f.formula,
+                "value",
+                &f.formula,
+                "value",
+                &left()
+            ),
             Err(EditError::SelfConnection)
         ));
         assert!(matches!(
-            connect(&f.graph, &project, "missing", "value", &f.formula, "left"),
+            connect(
+                &f.graph,
+                &project,
+                "missing",
+                "value",
+                &f.formula,
+                "value",
+                &left()
+            ),
             Err(EditError::NodeNotFound)
         ));
     }
@@ -210,7 +270,7 @@ mod tests {
             edges: vec![],
         };
         let connect_order = |graph: &Graph, source: &str, port: &str, target: &str| {
-            connect(graph, &project, source, port, target, ORDER_PORT)
+            connect(graph, &project, source, port, target, ORDER_PORT, &[])
         };
         assert!(matches!(
             connect_order(&graph, &request.id, ORDER_PORT, &start.id),
@@ -237,26 +297,44 @@ mod tests {
         assert_eq!(both.edges[2].branch, Some(Branch::False));
         // A control port wired to a data input is not a valid data connection.
         assert!(matches!(
-            connect(&graph, &project, &start.id, ORDER_PORT, &request.id, "body"),
+            connect(
+                &graph,
+                &project,
+                &start.id,
+                ORDER_PORT,
+                &request.id,
+                "body",
+                &[]
+            ),
             Err(EditError::IncompatiblePorts)
         ));
     }
 
     #[test]
-    fn removing_a_data_wire_clears_only_that_input() {
+    fn removing_a_data_wire_clears_only_that_operand() {
         let project = empty_project();
         let f = trio();
-        let first = connect(&f.graph, &project, &f.request, "status", &f.formula, "left").unwrap();
-        let second = connect(
-            &first, &project, &f.request, "duration", &f.formula, "right",
+        let first = connect(
+            &f.graph,
+            &project,
+            &f.request,
+            "status",
+            &f.formula,
+            "value",
+            &left(),
         )
         .unwrap();
-        let id = format!("data:{}:left", f.formula);
+        let right = ["right".to_owned()];
+        let second = connect(
+            &first, &project, &f.request, "duration", &f.formula, "value", &right,
+        )
+        .unwrap();
+        let id = format!("data:{}:value:left", f.formula);
         let result = remove_connections(&second, &HashSet::from([id.as_str()]));
-        assert!(!result.nodes[1].inputs.contains_key("left"));
+        assert_eq!(result.nodes[1].inputs["value"].at(&left()), None);
         assert!(matches!(
-            result.nodes[1].inputs["right"],
-            Binding::Reference { .. }
+            result.nodes[1].inputs["value"].at(&right),
+            Some(Binding::Reference { .. })
         ));
     }
 

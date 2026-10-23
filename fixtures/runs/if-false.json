@@ -213,7 +213,7 @@
                 "id": "no-side",
                 "handle": "no_side",
                 "label": "no-side",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -226,12 +226,14 @@
                     "path": "side"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               },
               {
                 "id": "mixed",
                 "handle": "mixed",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -241,12 +243,10 @@
                     "kind": "reference",
                     "nodeId": "yes",
                     "port": "body",
-                    "path": ""
+                    "path": "side"
                   }
                 },
-                "config": {
-                  "path": "side"
-                }
+                "config": {}
               }
             ],
             "edges": [
@@ -455,7 +455,7 @@
         "nodeId": "no-side",
         "handle": "no_side",
         "label": "no-side",
-        "kind": "variable",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
@@ -468,7 +468,7 @@
       {
         "nodeId": "mixed",
         "handle": "mixed",
-        "kind": "select",
+        "kind": "value",
         "status": "blocked",
         "phase": "main",
         "inputs": {},

@@ -110,7 +110,7 @@
               {
                 "id": "parameter",
                 "handle": "parameter",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -121,7 +121,9 @@
                     "name": "limit"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               }
             ],
             "edges": [
@@ -245,7 +247,7 @@
       {
         "nodeId": "parameter",
         "handle": "parameter",
-        "kind": "variable",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {

@@ -167,7 +167,7 @@ pub fn card(
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
-    let color = theme::kind_color(card.kind);
+    let color = theme::block_color(card.block);
 
     if detail == CardDetail::Overview {
         // At 25% this is a small diagram tile, not a miniature form. Its one
@@ -189,7 +189,7 @@ pub fn card(
         let full = detail == CardDetail::Full;
         let icon = Rect::from_min_size(local(CARD_PADDING, 16.0), Vec2::splat(28.0 * z));
         clipped.rect_filled(icon, 7.0 * z, color.gamma_multiply(0.10));
-        theme::kind_icon(&clipped, icon, card.kind, color);
+        theme::block_icon(&clipped, icon, card.block, color);
         let title_right = if full && card.kind == NodeKind::Component {
             WIDTH - 48.0
         } else {
@@ -382,10 +382,8 @@ pub fn card(
     }
 
     // Connections remain visible and usable at every detail level.
-    for row in &card.inputs {
-        if let Some(anchor) = card.input_anchor(&row.name) {
-            socket(painter, camera.to_screen(anchor), false, z);
-        }
+    for index in 0..card.inputs.len() {
+        socket(painter, camera.to_screen(card.row_anchor(index)), false, z);
     }
     for row in &card.outputs {
         if let Some(anchor) = card.output_anchor(&row.name) {
@@ -397,7 +395,7 @@ pub fn card(
             socket(painter, camera.to_screen(anchor), true, z);
         }
     }
-    if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT) {
+    if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(painter, camera.to_screen(anchor), true, z);
     }
 }

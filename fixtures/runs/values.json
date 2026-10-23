@@ -45,7 +45,7 @@
               {
                 "id": "variable",
                 "handle": "variable",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -58,38 +58,60 @@
                     "path": "items[0]"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               },
               {
                 "id": "templated-select",
                 "handle": "templated_select",
                 "label": "templated-select",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
                   "value": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": ""
-                  },
-                  "index": {
-                    "kind": "literal",
-                    "value": 0
+                    "kind": "expression",
+                    "operator": "field",
+                    "inputs": {
+                      "left": {
+                        "kind": "reference",
+                        "nodeId": "source",
+                        "port": "body",
+                        "path": ""
+                      },
+                      "right": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "text",
+                            "text": "items["
+                          },
+                          {
+                            "kind": "value",
+                            "binding": {
+                              "kind": "literal",
+                              "value": 0
+                            }
+                          },
+                          {
+                            "kind": "text",
+                            "text": "].price"
+                          }
+                        ]
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "path": "items[{{index}}].price"
-                }
+                "config": {}
               },
               {
                 "id": "missing-select",
                 "handle": "missing_select",
                 "label": "missing-select",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -99,309 +121,352 @@
                     "kind": "reference",
                     "nodeId": "source",
                     "port": "body",
-                    "path": ""
+                    "path": "absent.deeper"
                   }
                 },
-                "config": {
-                  "path": "absent.deeper"
-                }
+                "config": {}
               },
               {
                 "id": "array",
                 "handle": "array",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "2": {
-                    "kind": "literal",
-                    "value": 2
-                  },
-                  "10": {
-                    "kind": "literal",
-                    "value": 10
-                  },
-                  "b": {
-                    "kind": "literal",
-                    "value": "b"
-                  },
-                  "a": {
-                    "kind": "literal",
-                    "value": "a"
+                  "value": {
+                    "kind": "array",
+                    "items": [
+                      {
+                        "kind": "literal",
+                        "value": 2
+                      },
+                      {
+                        "kind": "literal",
+                        "value": 10
+                      },
+                      {
+                        "kind": "literal",
+                        "value": "b"
+                      },
+                      {
+                        "kind": "literal",
+                        "value": "a"
+                      }
+                    ]
                   }
                 },
-                "config": {
-                  "buildType": "array"
-                }
+                "config": {}
               },
               {
                 "id": "object",
                 "handle": "object",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "1": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "n"
-                  },
-                  "z": {
-                    "kind": "literal",
-                    "value": 1
-                  },
-                  "y": {
-                    "kind": "literal",
-                    "value": null
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "1": {
+                        "kind": "reference",
+                        "nodeId": "source",
+                        "port": "body",
+                        "path": "n"
+                      },
+                      "z": {
+                        "kind": "literal",
+                        "value": 1
+                      },
+                      "y": {
+                        "kind": "literal",
+                        "value": null
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "incomplete",
                 "handle": "incomplete",
-                "kind": "build",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "a": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "absent"
+                  "value": {
+                    "kind": "object",
+                    "fields": {
+                      "a": {
+                        "kind": "reference",
+                        "nodeId": "source",
+                        "port": "body",
+                        "path": "absent"
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "buildType": "object"
-                }
+                "config": {}
               },
               {
                 "id": "random",
                 "handle": "random",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 1
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 6
+                  "value": {
+                    "kind": "expression",
+                    "operator": "random",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 1
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 6
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "random"
-                }
+                "config": {}
               },
               {
                 "id": "random-real",
                 "handle": "random_real",
                 "label": "random-real",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 0.5
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 1.5
+                  "value": {
+                    "kind": "expression",
+                    "operator": "random",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 0.5
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1.5
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "random"
-                }
+                "config": {}
               },
               {
                 "id": "rounded",
                 "handle": "rounded",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 2.5
+                  "value": {
+                    "kind": "expression",
+                    "operator": "round",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 2.5
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 0
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "round"
-                }
+                "config": {}
               },
               {
                 "id": "missing-left",
                 "handle": "missing_left",
                 "label": "missing-left",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "absent"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 1
-                  }
-                },
-                "config": {
-                  "operation": "add"
-                }
-              },
-              {
-                "id": "wrong-type",
-                "handle": "wrong_type",
-                "label": "wrong-type",
-                "kind": "formula",
-                "position": {
-                  "x": 0.0,
-                  "y": 0.0
-                },
-                "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": "1"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 1
-                  }
-                },
-                "config": {
-                  "operation": "add"
-                }
-              },
-              {
-                "id": "null-operand",
-                "handle": "null_operand",
-                "label": "null-operand",
-                "kind": "formula",
-                "position": {
-                  "x": 0.0,
-                  "y": 0.0
-                },
-                "inputs": {
-                  "left": {
-                    "kind": "reference",
-                    "nodeId": "source",
-                    "port": "body",
-                    "path": "items[0].optional"
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 2
-                  }
-                },
-                "config": {
-                  "operation": "multiply"
-                }
-              },
-              {
-                "id": "nested",
-                "handle": "nested",
-                "kind": "formula",
-                "position": {
-                  "x": 0.0,
-                  "y": 0.0
-                },
-                "inputs": {
-                  "left": {
+                  "value": {
                     "kind": "expression",
                     "operator": "add",
                     "inputs": {
                       "left": {
-                        "kind": "expression",
-                        "operator": "length",
-                        "inputs": {
-                          "left": {
-                            "kind": "reference",
-                            "nodeId": "source",
-                            "port": "body",
-                            "path": "name"
-                          }
-                        }
-                      },
-                      "right": {
-                        "kind": "parameter",
-                        "name": "bonus"
-                      }
-                    }
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 3
-                  }
-                },
-                "config": {
-                  "operation": "multiply"
-                }
-              },
-              {
-                "id": "nested-error",
-                "handle": "nested_error",
-                "label": "nested-error",
-                "kind": "formula",
-                "position": {
-                  "x": 0.0,
-                  "y": 0.0
-                },
-                "inputs": {
-                  "left": {
-                    "kind": "expression",
-                    "operator": "add",
-                    "inputs": {
-                      "left": {
-                        "kind": "expression",
-                        "operator": "divide",
-                        "inputs": {
-                          "left": {
-                            "kind": "literal",
-                            "value": 1
-                          },
-                          "right": {
-                            "kind": "literal",
-                            "value": 0
-                          }
-                        }
+                        "kind": "reference",
+                        "nodeId": "source",
+                        "port": "body",
+                        "path": "absent"
                       },
                       "right": {
                         "kind": "literal",
                         "value": 1
                       }
                     }
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 3
                   }
                 },
-                "config": {
-                  "operation": "multiply"
-                }
+                "config": {}
+              },
+              {
+                "id": "wrong-type",
+                "handle": "wrong_type",
+                "label": "wrong-type",
+                "kind": "value",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "expression",
+                    "operator": "add",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": "1"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 1
+                      }
+                    }
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "null-operand",
+                "handle": "null_operand",
+                "label": "null-operand",
+                "kind": "value",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "reference",
+                        "nodeId": "source",
+                        "port": "body",
+                        "path": "items[0].optional"
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 2
+                      }
+                    }
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "nested",
+                "handle": "nested",
+                "kind": "value",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "expression",
+                        "operator": "add",
+                        "inputs": {
+                          "left": {
+                            "kind": "expression",
+                            "operator": "length",
+                            "inputs": {
+                              "left": {
+                                "kind": "reference",
+                                "nodeId": "source",
+                                "port": "body",
+                                "path": "name"
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "parameter",
+                            "name": "bonus"
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 3
+                      }
+                    }
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "nested-error",
+                "handle": "nested_error",
+                "label": "nested-error",
+                "kind": "value",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "expression",
+                    "operator": "multiply",
+                    "inputs": {
+                      "left": {
+                        "kind": "expression",
+                        "operator": "add",
+                        "inputs": {
+                          "left": {
+                            "kind": "expression",
+                            "operator": "divide",
+                            "inputs": {
+                              "left": {
+                                "kind": "literal",
+                                "value": 1
+                              },
+                              "right": {
+                                "kind": "literal",
+                                "value": 0
+                              }
+                            }
+                          },
+                          "right": {
+                            "kind": "literal",
+                            "value": 1
+                          }
+                        }
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 3
+                      }
+                    }
+                  }
+                },
+                "config": {}
               },
               {
                 "id": "get-with-body",
@@ -770,7 +835,7 @@
       {
         "nodeId": "variable",
         "handle": "variable",
-        "kind": "variable",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
@@ -792,22 +857,11 @@
         "nodeId": "templated-select",
         "handle": "templated_select",
         "label": "templated-select",
-        "kind": "select",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "value": {
-            "items": [
-              {
-                "price": 0,
-                "flag": false,
-                "optional": null
-              }
-            ],
-            "name": "Zażółć",
-            "n": 7
-          },
-          "index": 0
+          "value": 0
         },
         "outputs": {
           "value": 0
@@ -817,35 +871,25 @@
         "nodeId": "missing-select",
         "handle": "missing_select",
         "label": "missing-select",
-        "kind": "select",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
-        "inputs": {
-          "value": {
-            "items": [
-              {
-                "price": 0,
-                "flag": false,
-                "optional": null
-              }
-            ],
-            "name": "Zażółć",
-            "n": 7
-          }
-        },
+        "inputs": {},
         "outputs": {}
       },
       {
         "nodeId": "array",
         "handle": "array",
-        "kind": "build",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "2": 2,
-          "10": 10,
-          "b": "b",
-          "a": "a"
+          "value": [
+            2,
+            10,
+            "b",
+            "a"
+          ]
         },
         "outputs": {
           "value": [
@@ -859,13 +903,15 @@
       {
         "nodeId": "object",
         "handle": "object",
-        "kind": "build",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "1": 7,
-          "z": 1,
-          "y": null
+          "value": {
+            "1": 7,
+            "z": 1,
+            "y": null
+          }
         },
         "outputs": {
           "value": {
@@ -878,7 +924,7 @@
       {
         "nodeId": "incomplete",
         "handle": "incomplete",
-        "kind": "build",
+        "kind": "value",
         "status": "error",
         "phase": "main",
         "inputs": {},
@@ -887,12 +933,11 @@
       {
         "nodeId": "random",
         "handle": "random",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 1,
-          "right": 6
+          "value": 2
         },
         "outputs": {
           "value": 2
@@ -902,12 +947,11 @@
         "nodeId": "random-real",
         "handle": "random_real",
         "label": "random-real",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 0.5,
-          "right": 1.5
+          "value": 0.5881250454112887
         },
         "outputs": {
           "value": 0.5881250454112887
@@ -916,12 +960,11 @@
       {
         "nodeId": "rounded",
         "handle": "rounded",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 2.5,
-          "right": 0
+          "value": 3
         },
         "outputs": {
           "value": 3
@@ -931,12 +974,11 @@
         "nodeId": "missing-left",
         "handle": "missing_left",
         "label": "missing-left",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 0,
-          "right": 1
+          "value": 1
         },
         "outputs": {
           "value": 1
@@ -946,37 +988,30 @@
         "nodeId": "wrong-type",
         "handle": "wrong_type",
         "label": "wrong-type",
-        "kind": "formula",
+        "kind": "value",
         "status": "error",
         "phase": "main",
-        "inputs": {
-          "left": "1",
-          "right": 1
-        },
+        "inputs": {},
         "outputs": {}
       },
       {
         "nodeId": "null-operand",
         "handle": "null_operand",
         "label": "null-operand",
-        "kind": "formula",
+        "kind": "value",
         "status": "error",
         "phase": "main",
-        "inputs": {
-          "left": null,
-          "right": 2
-        },
+        "inputs": {},
         "outputs": {}
       },
       {
         "nodeId": "nested",
         "handle": "nested",
-        "kind": "formula",
+        "kind": "value",
         "status": "passed",
         "phase": "main",
         "inputs": {
-          "left": 7,
-          "right": 3
+          "value": 21
         },
         "outputs": {
           "value": 21
@@ -986,7 +1021,7 @@
         "nodeId": "nested-error",
         "handle": "nested_error",
         "label": "nested-error",
-        "kind": "formula",
+        "kind": "value",
         "status": "error",
         "phase": "main",
         "inputs": {},

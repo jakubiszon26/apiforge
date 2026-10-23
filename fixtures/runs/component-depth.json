@@ -51,7 +51,7 @@
               {
                 "id": "leaf",
                 "handle": "leaf",
-                "kind": "variable",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -62,7 +62,9 @@
                     "value": "deep"
                   }
                 },
-                "config": {}
+                "config": {
+                  "variable": true
+                }
               }
             ],
             "edges": []

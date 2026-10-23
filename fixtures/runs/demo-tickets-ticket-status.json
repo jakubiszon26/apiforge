@@ -193,7 +193,7 @@
                 "id": "status",
                 "handle": "odczytaj_status",
                 "label": "Odczytaj status",
-                "kind": "select",
+                "kind": "value",
                 "position": {
                   "x": 60.0,
                   "y": 60.0
@@ -201,12 +201,11 @@
                 "inputs": {
                   "value": {
                     "kind": "parameter",
-                    "name": "ticket"
+                    "name": "ticket",
+                    "path": "status"
                   }
                 },
-                "config": {
-                  "path": "status"
-                }
+                "config": {}
               },
               {
                 "id": "check",
@@ -340,16 +339,11 @@
             "nodeId": "status",
             "handle": "odczytaj_status",
             "label": "Odczytaj status",
-            "kind": "select",
+            "kind": "value",
             "status": "passed",
             "phase": "main",
             "inputs": {
-              "value": {
-                "id": 7,
-                "title": "Problem z logowaniem",
-                "status": "open",
-                "priority": "high"
-              }
+              "value": "open"
             },
             "outputs": {
               "value": "open"

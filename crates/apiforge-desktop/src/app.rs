@@ -14,10 +14,10 @@ use crate::{
     theme, widgets,
 };
 use apiforge_core::{
+    block::Block,
     edit,
     format::{Binding, Graph, Position, Project, Workspace},
     graph::{create_operator_node, delete_nodes, position_after},
-    model::NodeKind,
     run::{Phase, RunMode, RunResult, RunStatus, StepResult},
 };
 use apiforge_runner::{RunHandle, RunRequest, RunnerService};
@@ -442,7 +442,7 @@ impl App {
             variables: graph
                 .nodes
                 .iter()
-                .filter(|node| node.kind == NodeKind::Variable)
+                .filter(|node| node.is_variable())
                 .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             parameters: self.editor.parameter_names(),
@@ -529,17 +529,13 @@ impl App {
                     self.dialog = Some(Dialog::NewScenario(String::new()));
                 }
             }
-            library::Action::AddNode { kind, component } => {
+            library::Action::AddNode { block, component } => {
                 let position = position_after(self.editor.graph(), 100.0);
-                self.add_node(kind, component, position, None);
+                self.add_node(block, component, position, None);
             }
             library::Action::AddOperator(operator) => {
                 let node = create_operator_node(operator, self.canvas.visible_center());
                 self.push_node(node);
-            }
-            library::Action::AddVariable => {
-                let position = position_after(self.editor.graph(), 100.0);
-                self.add_node(NodeKind::Variable, None, position, None);
             }
             library::Action::SelectNode(id) => self.editor.selection = vec![id],
             library::Action::OpenExample(example) => self.open_example(example),
@@ -1117,22 +1113,26 @@ impl App {
                 self.apply_graph(graph);
             }
             Command::AddNode {
-                kind,
+                block,
                 component,
                 position,
                 source,
-            } => self.add_node(kind, component, position, source),
+            } => self.add_node(block, component, position, source),
             Command::AddOperator { operator, position } => {
                 self.push_node(create_operator_node(operator, position))
             }
-            Command::SetLiteral { node, input, value } => {
-                self.set_input(&node, &input, Binding::literal(value))
-            }
+            Command::SetLiteral {
+                node,
+                input,
+                path,
+                value,
+            } => self.set_input(&node, &input, &path, Binding::literal(value)),
             Command::Bind {
                 node,
                 input,
+                path,
                 binding,
-            } => self.set_input(&node, &input, binding),
+            } => self.set_input(&node, &input, &path, binding),
             Command::Delete { nodes, wires } => {
                 let ids: HashSet<&str> = nodes.iter().map(String::as_str).collect();
                 let wire_ids: HashSet<&str> = wires.iter().map(String::as_str).collect();
@@ -1149,6 +1149,7 @@ impl App {
                 source_port,
                 target,
                 target_input,
+                target_path,
             } => {
                 let result = edit::connect(
                     self.editor.graph(),
@@ -1157,6 +1158,7 @@ impl App {
                     &source_port,
                     &target,
                     &target_input,
+                    &target_path,
                 );
                 match result {
                     Ok(graph) => self.apply_graph(graph),
@@ -1259,21 +1261,34 @@ impl App {
         self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
     }
 
-    fn set_input(&mut self, node: &str, input: &str, binding: Binding) {
+    /// Sets a slot of a node: a whole input, or the binding at `path` inside it.
+    fn set_input(&mut self, node: &str, input: &str, path: &[String], binding: Binding) {
         let mut graph = self.editor.graph().clone();
-        if let Some(target) = graph
+        let Some(target) = graph
             .nodes
             .iter_mut()
             .find(|candidate| candidate.id == node)
-        {
-            target.inputs.insert(input.to_owned(), binding);
-            self.apply_graph(graph);
+        else {
+            return;
+        };
+        let next = match target.inputs.get(input) {
+            Some(current) => current.replace_at(path, binding),
+            None => path.is_empty().then_some(binding),
+        };
+        match next {
+            Some(next) => {
+                target.inputs.insert(input.to_owned(), next);
+                self.apply_graph(graph);
+            }
+            None => self
+                .canvas
+                .set_error(edit::EditError::InvalidOperandPath.to_string()),
         }
     }
 
     fn add_node(
         &mut self,
-        kind: NodeKind,
+        block: Block,
         component: Option<(String, u32)>,
         position: Position,
         source: Option<(String, String)>,
@@ -1291,7 +1306,7 @@ impl App {
             .map(|(node_id, port)| edit::OutputRef { node_id, port });
         match edit::add_node(
             self.editor.graph(),
-            kind,
+            block,
             position,
             definition.as_ref(),
             source,
@@ -1844,8 +1859,11 @@ mod tests {
 
         let mut project = apiforge_core::demos::empty_project();
         project.environment.base_url = format!("http://{address}");
-        let mut cleanup =
-            apiforge_core::graph::create_node(NodeKind::Request, Position { x: 0.0, y: 0.0 }, None);
+        let mut cleanup = apiforge_core::graph::create_node(
+            apiforge_core::model::NodeKind::Request,
+            Position { x: 0.0, y: 0.0 },
+            None,
+        );
         cleanup.config.url = Some("/cleanup".into());
         project.scenarios[0].cleanup.nodes.push(cleanup);
         let workspace = Workspace {
@@ -2086,17 +2104,15 @@ mod tests {
                 project.scenarios[0].description =
                     "A long description belongs in settings and the title tooltip. ".repeat(100);
                 for index in 0..12 {
-                    project.scenarios[0]
-                        .graph
-                        .nodes
-                        .push(apiforge_core::graph::create_node(
-                            NodeKind::Variable,
-                            Position {
-                                x: index as f64 * 320.0,
-                                y: 800.0,
-                            },
-                            None,
-                        ));
+                    let mut node = Block::Variable.create(
+                        Position {
+                            x: index as f64 * 320.0,
+                            y: 800.0,
+                        },
+                        None,
+                    );
+                    node.handle = format!("variable_{index}");
+                    project.scenarios[0].graph.nodes.push(node);
                 }
             });
             app.editor.selection = vec![app.editor.graph().nodes[0].id.clone()];

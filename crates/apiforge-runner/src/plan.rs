@@ -150,8 +150,8 @@ mod tests {
                     ),
                     "component",
                 ),
-                with_input(node("value", NodeKind::Formula), "nested"),
-                node("nested", NodeKind::Variable),
+                with_input(node("value", NodeKind::Value), "nested"),
+                node("nested", NodeKind::Value),
                 node("other", NodeKind::Request),
                 node("component", NodeKind::Component),
                 node("disconnected", NodeKind::Request),
@@ -174,7 +174,7 @@ mod tests {
             nodes: vec![
                 node("start", NodeKind::Trigger),
                 with_input(node("active", NodeKind::Request), "shared"),
-                node("shared", NodeKind::Variable),
+                node("shared", NodeKind::Value),
                 with_input(node("side-effect", NodeKind::Request), "shared"),
             ],
             edges: vec![edge("start", "active")],
@@ -189,7 +189,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![
                 node("start", NodeKind::Trigger),
-                node("value", NodeKind::Variable),
+                node("value", NodeKind::Value),
                 with_input(node("consumer", NodeKind::Request), "value"),
             ],
             edges: vec![edge("start", "value")],

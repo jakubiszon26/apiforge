@@ -68,24 +68,28 @@
               {
                 "id": "broken",
                 "handle": "broken",
-                "kind": "formula",
+                "kind": "value",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
                 },
                 "inputs": {
-                  "left": {
-                    "kind": "literal",
-                    "value": 1
-                  },
-                  "right": {
-                    "kind": "literal",
-                    "value": 0
+                  "value": {
+                    "kind": "expression",
+                    "operator": "divide",
+                    "inputs": {
+                      "left": {
+                        "kind": "literal",
+                        "value": 1
+                      },
+                      "right": {
+                        "kind": "literal",
+                        "value": 0
+                      }
+                    }
                   }
                 },
-                "config": {
-                  "operation": "divide"
-                }
+                "config": {}
               },
               {
                 "id": "gate",
@@ -434,13 +438,10 @@
       {
         "nodeId": "broken",
         "handle": "broken",
-        "kind": "formula",
+        "kind": "value",
         "status": "error",
         "phase": "main",
-        "inputs": {
-          "left": 1,
-          "right": 0
-        },
+        "inputs": {},
         "outputs": {}
       },
       {

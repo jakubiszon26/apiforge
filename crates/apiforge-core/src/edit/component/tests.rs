@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     edit::test_support::at,
     format::{Environment, Node, NodeConfig, OrderEdge, Position, Scenario},
-    graph::create_node,
+    graph::{create_node, create_value_node},
     model::{ErrorPolicy, HttpMethod, NodeKind},
     operator::Operator,
 };
@@ -117,12 +117,11 @@ fn edge(id: &str, source: &str, target: &str) -> OrderEdge {
 
 #[test]
 fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
-    let mut select = create_node(NodeKind::Select, Position { x: 0.0, y: 0.0 }, None);
+    let mut select = create_value_node(
+        Binding::reference("get", "body", "data.id"),
+        Position { x: 0.0, y: 0.0 },
+    );
     select.id = "select".into();
-    select.config.path = Some("data.id".into());
-    select
-        .inputs
-        .insert("value".into(), Binding::reference("get", "body", ""));
     let graph = Graph {
         nodes: vec![
             plain_request("source"),
@@ -163,7 +162,7 @@ fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
     );
     assert_eq!(
         result.graph.nodes[1].inputs["value"],
-        Binding::reference("get", "body", "")
+        Binding::reference("get", "body", "data.id")
     );
     assert_eq!(result.graph.edges, vec![edge("order", "get", "select")]);
     assert_eq!(
@@ -518,17 +517,22 @@ fn extraction_maps_expression_leaves_and_keeps_the_operator_tree() {
 fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
     let mut project = at("blocks.json");
     let source = project.scenarios[0].graph.nodes[0].clone();
-    let mut calculation = create_node(NodeKind::Formula, Position { x: 0.0, y: 0.0 }, None);
     let length = Binding::expression(Operator::Length)
         .replace_at(
             &["left".into()],
             Binding::reference(&source.id, "body", "name"),
         )
         .unwrap();
-    calculation.inputs = IndexMap::from([
-        ("left".into(), length),
-        ("right".into(), Binding::literal(json!(2))),
-    ]);
+    let calculation = create_value_node(
+        Binding::Expression {
+            operator: Operator::Multiply,
+            inputs: IndexMap::from([
+                ("left".into(), length),
+                ("right".into(), Binding::literal(json!(2))),
+            ]),
+        },
+        Position { x: 0.0, y: 0.0 },
+    );
     let graph = Graph {
         nodes: vec![source.clone(), calculation.clone()],
         edges: vec![],
@@ -540,7 +544,7 @@ fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
         .find(|row| matches!(row.original, Some(Binding::Reference { .. })))
         .unwrap();
     assert_eq!(reference.value_type, ValueType::Any);
-    assert_eq!(reference.name, "left_left");
+    assert_eq!(reference.name, "value_left_left");
     let draft = ComponentDraft {
         name: "Length times two".into(),
         ..draft(&graph, &ids, &project, None)

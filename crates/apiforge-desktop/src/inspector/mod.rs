@@ -15,12 +15,11 @@ use apiforge_core::{
     edit::{self, bind_variable_text, prune_template_inputs},
     format::{Binding, ConditionPredicate, Graph, Node, OptionalJson, Port, Project},
     graph::{
-        FALSE_PORT, ORDER_PORT, TRUE_PORT, component_definition, formula_operator, input_ports,
-        output_ports, predicate,
+        FALSE_PORT, ORDER_PORT, TRUE_PORT, component_definition, input_ports, output_ports,
+        predicate,
     },
     handle::is_valid_handle,
-    model::{Branch, BuildType, Match, NodeKind, Predicate, ValueType},
-    path,
+    model::{Branch, Match, NodeKind, Predicate, ValueType},
     run::{RunResult, StepResult},
 };
 use eframe::egui::{self, Id, RichText, Ui};
@@ -164,11 +163,19 @@ impl Inspector {
                 ui,
                 "The comparison chooses the Yes or No output. False is not a test failure. Connect both branches.",
             ),
-            NodeKind::Variable => {
+            NodeKind::Value => {
                 ui.add_space(6.0);
+                let mut variable = node.is_variable();
+                if ui
+                    .checkbox(&mut variable, "Variable")
+                    .on_hover_text("List this value with the variables, so it can be used anywhere")
+                    .changed()
+                {
+                    node.config.variable = variable.then_some(true);
+                }
                 if ui
                     .add(widgets::action(Icon::Variable, "Use a response value").quiet())
-                    .on_hover_text("Bind this variable to a field of a request's response")
+                    .on_hover_text("Take this value from a field of a request's response")
                     .clicked()
                 {
                     let (source_id, port) = initial_response_choice(context);
@@ -181,51 +188,10 @@ impl Inspector {
                 }
                 widgets::hint(
                     ui,
-                    "Choose a request and a response field. The variable reads the current value on every run.",
+                    "A value can be data, a field of another step's result or a calculation. It is computed again on every run.",
                 );
             }
             NodeKind::Request => request(ui, id, context, node),
-            NodeKind::Select => select(ui, id, context, node),
-            NodeKind::Build => {
-                widgets::field_label(ui, "Create");
-                let mut build = node.config.build_type.unwrap_or_default();
-                egui::ComboBox::from_id_salt(id.with("build"))
-                    .selected_text(match build {
-                        BuildType::Object => "An object of named fields",
-                        BuildType::Array => "A list of the values in order",
-                    })
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut build,
-                            BuildType::Object,
-                            "An object of named fields",
-                        );
-                        ui.selectable_value(
-                            &mut build,
-                            BuildType::Array,
-                            "A list of the values in order",
-                        );
-                    });
-                node.config.build_type = Some(build);
-            }
-            NodeKind::Formula => {
-                widgets::field_label(ui, "Operation");
-                let current = formula_operator(node);
-                let mut chosen = current;
-                binding::operator_combo(ui, id.with("formula"), &mut chosen);
-                if chosen != current {
-                    let rebuilt = Binding::Expression {
-                        operator: current,
-                        inputs: node.inputs.clone(),
-                    }
-                    .with_operator(chosen);
-                    if let Binding::Expression { inputs, .. } = rebuilt {
-                        node.inputs = inputs;
-                    }
-                    node.config.operation = Some(chosen);
-                }
-            }
             NodeKind::Assert | NodeKind::Condition => check(ui, id, node),
             NodeKind::Component => {
                 let definition = component_definition(context.project, node);
@@ -298,12 +264,7 @@ impl Inspector {
 
     fn arguments(&mut self, ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         let ports = input_ports(node, context.project);
-        if ports.is_empty()
-            && !matches!(
-                node.kind,
-                NodeKind::Request | NodeKind::Build | NodeKind::Condition
-            )
-        {
+        if ports.is_empty() && !matches!(node.kind, NodeKind::Request | NodeKind::Condition) {
             return;
         }
         ui.add_space(10.0);
@@ -343,21 +304,10 @@ impl Inspector {
                     }
                 }
             }
-            if node.kind == NodeKind::Request && port.name != "body" {
-                if let Some(true) =
+            if node.kind == NodeKind::Request
+                && port.name != "body"
+                && let Some(true) =
                     argument_settings(ui, id.with(("settings", &port.name)), node, &port.name)
-                {
-                    remove = Some(port.name.clone());
-                }
-            } else if node.kind == NodeKind::Build
-                && ui
-                    .add(
-                        widgets::action(Icon::Trash, "Remove field")
-                            .compact()
-                            .danger(),
-                    )
-                    .on_hover_text("Remove this field from the built data")
-                    .clicked()
             {
                 remove = Some(port.name.clone());
             }
@@ -369,16 +319,9 @@ impl Inspector {
                 ports.retain(|port| port.name != name);
             }
         }
-        if matches!(
-            node.kind,
-            NodeKind::Request | NodeKind::Build | NodeKind::Condition
-        ) {
+        if matches!(node.kind, NodeKind::Request | NodeKind::Condition) {
             ui.horizontal(|ui| {
-                let hint = if node.kind == NodeKind::Build {
-                    "Field name"
-                } else {
-                    "Argument name"
-                };
+                let hint = "Argument name";
                 let field = ui.add(
                     crate::widgets::text_edit(&mut self.new_input)
                         .hint_text(hint)
@@ -587,6 +530,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                                         port,
                                         &target.id,
                                         ORDER_PORT,
+                                        &[],
                                     ) {
                                         Ok(graph) => actions.push(Action::UpdateGraph(graph)),
                                         Err(error) => {
@@ -761,78 +705,6 @@ fn argument_settings(ui: &mut Ui, id: Id, node: &mut Node, name: &str) -> Option
             }
         });
     Some(remove)
-}
-
-fn select(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
-    ui.add_space(6.0);
-    widgets::field_label(ui, "Path to the field");
-    let mut field = node.config.path.clone().unwrap_or_default();
-    let event = fields::variable_text(
-        ui,
-        id.with("path"),
-        &mut field,
-        "e.g. items[0].name; empty = whole value",
-    );
-    if event.changed {
-        node.config.path = Some(field.clone());
-    }
-    if let Some((variable, start, end)) = event.dropped {
-        *node = bind_variable_text(
-            node,
-            &variable,
-            &fields::selection(&field, start, end),
-            |mut next, text| {
-                next.config.path = Some(text);
-                next
-            },
-        );
-    }
-    // Suggest paths from the bound source's sample.
-    if let Some(Binding::Reference {
-        node_id,
-        port,
-        path: within,
-    }) = node.inputs.get("value")
-        && let Some(source) = context
-            .graph
-            .nodes
-            .iter()
-            .find(|candidate| &candidate.id == node_id)
-    {
-        let sample = response::sample_output(source, port, context.project)
-            .and_then(|value| path::resolve(&value, within).map(|value| value.into_owned()));
-        let paths = edit::sample_paths(sample.as_ref());
-        if !paths.is_empty() {
-            let current = node.config.path.clone().unwrap_or_default();
-            egui::ComboBox::from_id_salt(id.with("sample-paths"))
-                .selected_text(if current.is_empty() {
-                    "Whole value".to_owned()
-                } else {
-                    current.clone()
-                })
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(current.is_empty(), "Whole value")
-                        .clicked()
-                    {
-                        node.config.path = Some(String::new());
-                    }
-                    for candidate in paths {
-                        if ui
-                            .selectable_label(candidate == current, &candidate)
-                            .clicked()
-                        {
-                            node.config.path = Some(candidate);
-                        }
-                    }
-                });
-            widgets::hint(
-                ui,
-                "Structure from the sample — a suggestion, not a guarantee.",
-            );
-        }
-    }
 }
 
 fn check(ui: &mut Ui, id: Id, node: &mut Node) {

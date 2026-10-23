@@ -314,7 +314,9 @@ impl Redactor {
                 self.redact_str(port),
                 self.redact_str(path),
             ),
-            Binding::Parameter { name } => Binding::parameter(self.redact_str(name)),
+            Binding::Parameter { name, path } => {
+                Binding::parameter_field(self.redact_str(name), self.redact_str(path))
+            }
             Binding::Environment { name } => Binding::environment(self.redact_str(name)),
             Binding::Object { fields } => Binding::Object {
                 fields: self.redact_bindings(fields),
@@ -364,7 +366,6 @@ impl Redactor {
             query: config.query.as_ref().map(|map| self.redact_texts(map)),
             sample_response: self.redact_optional(&config.sample_response),
             contract_id: text(&config.contract_id),
-            path: text(&config.path),
             component_id: text(&config.component_id),
             input_ports: ports(&config.input_ports),
             template_inputs: ports(&config.template_inputs),
