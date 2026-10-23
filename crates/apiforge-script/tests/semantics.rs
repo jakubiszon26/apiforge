@@ -609,3 +609,35 @@ fn replacing_a_request_by_a_different_one_does_not_transfer_identity() {
         assert_eq!(reader.id, "old-reader");
     }
 }
+
+#[test]
+fn exact_config_never_silently_overrides_visible_settings() {
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    let ok = |source: &str| !lower(&parse(source), &LowerContext::new(project)).has_errors();
+    // Printed form: @config keeps sampleStatus absent, the rest agrees.
+    let printed = r#"scenario "C" {
+  @config({ method: "DELETE", timeoutMs: 10000.0, sampleResponse: { deleted: true } })
+  r = DELETE "/carts" {
+    timeout 10s
+    sample 200 { deleted: true }
+  }
+}"#;
+    assert!(ok(printed));
+    for (from, to) in [
+        ("timeout 10s", "timeout 3s"),
+        ("r = DELETE", "r = POST"),
+        ("sample 200", "sample 201"),
+        ("{ deleted: true }\n", "{ deleted: false }\n"),
+    ] {
+        let edited = printed.replacen(from, to, 1);
+        assert_ne!(edited, printed);
+        assert!(!ok(&edited), "{to}");
+    }
+    assert!(!ok(
+        "scenario \"C\" { @config({ method: \"GET\" }) r = POST \"/\" }"
+    ));
+    assert!(!ok(
+        "scenario \"C\" { @config({ predicate: \"notEquals\" }) a = assert 1 == 1 }"
+    ));
+}

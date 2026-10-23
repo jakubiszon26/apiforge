@@ -240,6 +240,12 @@ them without writing internal identities or layout:
   `componentId` and `revision` (which come only from the component call). This is
   literal JSON with the document's field names. Unknown fields are errors. It is
   emitted only when the shorthand would change configuration presence or values.
+  It never silently overrides the statement: every setting the shorthand writes
+  (method, timeout, sample, predicate, tolerance, body format, `var`, export type,
+  condition mode, contract) must appear in `@config` with the same value, or be
+  absent there while the shorthand writes its default. Otherwise lowering
+  reports an error at `@config`, so editing `timeout 10s` beside it cannot be
+  ignored.
 - `@inputs({ name: expression, ... })` replaces the complete input map when the
   block shorthand cannot carry all its slots. Bindings use ordinary expressions,
   never raw node IDs. It does not bypass document validation.

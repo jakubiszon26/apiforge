@@ -2,7 +2,7 @@
 //! reconciliation allocates persistent identities and positions.
 use crate::ast::*;
 use apiforge_core::{format::*, graph, model::*, operator::Operator, path::JsonPath};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
@@ -128,6 +128,36 @@ struct Lower<'a> {
     slot_ranges: HashMap<(String, String, Vec<String>), Range<usize>>,
     /// Handle of the statement being lowered.
     handle: String,
+}
+
+/// `@config` replaces the whole configuration, so it must not silently override
+/// what the statement itself says. Every setting written by the shorthand has
+/// to be in `@config` with the same value, or be absent there while the
+/// shorthand writes its default (the absent-versus-default case that `@config`
+/// exists to preserve).
+fn config_agrees(shorthand: &NodeConfig, exact: &NodeConfig) -> bool {
+    let (Ok(Value::Object(shorthand)), Ok(Value::Object(exact))) =
+        (serde_json::to_value(shorthand), serde_json::to_value(exact))
+    else {
+        return false;
+    };
+    let default = |key: &str| match key {
+        "method" => Some(json!("GET")),
+        "predicate" => serde_json::to_value(Predicate::default()).ok(),
+        "tolerance" => Some(json!(0.0)),
+        "sampleStatus" => Some(json!(200)),
+        "type" => Some(json!("any")),
+        "bodyFormat" => Some(json!("json")),
+        "match" => Some(json!("all")),
+        _ => None,
+    };
+    shorthand
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "componentId" | "revision"))
+        .all(|(key, value)| match exact.get(key) {
+            Some(exact) => exact == value,
+            None => default(key).as_ref() == Some(value),
+        })
 }
 
 /// The statement behind a validation path such as `….graph.edges[3].target`.
@@ -550,6 +580,12 @@ impl Lower<'_> {
                             && let Ok(config) = serde_json::from_value::<NodeConfig>(value)
                         {
                             let identity = (node.config.component_id.clone(), node.config.revision);
+                            if !config_agrees(&node.config, &config) {
+                                self.error(
+                                    attribute.range.clone(),
+                                    "@config disagrees with this statement's settings; edit the value in @config or remove it",
+                                );
+                            }
                             node.config = config;
                             node.config.component_id = identity.0;
                             node.config.revision = identity.1;
