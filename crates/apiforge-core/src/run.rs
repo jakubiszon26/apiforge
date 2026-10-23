@@ -1,7 +1,7 @@
 //! Run reports shared by the runner and the interface.
 //!
-//! Field names follow the reference implementation's report JSON, so exported
-//! reports stay comparable.
+//! Field names are part of the exported report JSON and stay stable, so reports
+//! from different releases remain comparable.
 
 use crate::{
     format::{Graph, Node, OptionalJson},

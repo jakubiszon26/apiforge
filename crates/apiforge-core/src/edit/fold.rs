@@ -1,8 +1,8 @@
 //! ASCII folding of Latin letters for generated identifiers.
 //!
-//! The reference implementation applied Unicode NFKD normalisation, removed the
-//! combining diacritical marks U+0300..U+036F and replaced every remaining UTF-16
-//! unit outside `[A-Za-z0-9_]` with `_`. Full normalisation tables are not needed
+//! The result equals Unicode NFKD normalisation, removal of the combining
+//! diacritical marks U+0300..U+036F and replacement of every remaining UTF-16
+//! unit outside `[A-Za-z0-9_]` with `_`, as existing documents expect. Full normalisation tables are not needed
 //! for that: only characters whose decomposition contributes ASCII letters or
 //! digits, or changes the number of UTF-16 units, produce a different result.
 

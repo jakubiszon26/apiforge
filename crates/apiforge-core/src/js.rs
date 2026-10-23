@@ -1,6 +1,6 @@
-//! JSON value semantics compatible with the TypeScript reference implementation.
+//! JSON value semantics compatible with JavaScript.
 //!
-//! Version-one projects were evaluated by a JavaScript engine: every number is an
+//! Documents are JSON and expressions follow JavaScript value semantics: every number is an
 //! IEEE-754 double, `1` and `1.0` are the same value, and text conversion follows
 //! `String(value)`. Relying on Rust or serde defaults here would silently change the
 //! outcome of existing formulas and assertions, so these rules are spelled out once.
@@ -286,8 +286,8 @@ pub fn array_index_key(key: &str) -> Option<u32> {
 /// Reorders object entries the way a JavaScript object enumerates its own keys:
 /// array index keys in ascending numeric order, then the others in insertion order.
 ///
-/// Objects built by the reference implementation from arbitrary names (node inputs,
-/// headers, parsed responses) follow this order, which `Object.values` exposes.
+/// Objects built from arbitrary names (node inputs, headers, parsed responses)
+/// follow this order, which `Object.values` exposes.
 pub fn js_key_order<K: AsRef<str>, V>(entries: impl IntoIterator<Item = (K, V)>) -> Vec<(K, V)> {
     let (mut indices, names): (Vec<_>, Vec<_>) = entries
         .into_iter()

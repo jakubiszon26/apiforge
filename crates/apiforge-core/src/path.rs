@@ -16,8 +16,8 @@ use serde_json::Value;
 use std::{borrow::Cow, fmt};
 use thiserror::Error;
 
-/// Keys the reference implementation refused to read, since they address the
-/// prototype chain in JavaScript. They stay unreadable for compatibility.
+/// Keys that address the prototype chain in JavaScript. Documents may be
+/// processed by JavaScript tooling, so paths never read them.
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
 /// A parsed path. Every segment is a property key, exactly as JavaScript would use it.

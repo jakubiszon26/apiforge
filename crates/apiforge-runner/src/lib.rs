@@ -1,7 +1,6 @@
 //! Execution engine: runs a scenario of a validated project and reports each step.
 //!
-//! Semantics follow the TypeScript reference runner: serial execution in dependency
-//! order, Start reachability, IF branches, components, an independent cleanup phase,
+//! Semantics: serial execution in dependency order, Start reachability, IF branches, components, an independent cleanup phase,
 //! diagnostics (up to a node, a single step) and redaction of everything published.
 //! Requests are sent with [`HttpTransport`] in live mode; simulation mode uses the
 //! saved sample responses and sends nothing.

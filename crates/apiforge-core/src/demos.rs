@@ -1,10 +1,8 @@
 //! Built-in demo projects and empty documents for new work.
 //!
-//! The demos mirror the reference implementation's demo projects node for node:
-//! the same kinds, bindings, ordering edges, components and contracts, with English
-//! texts. Their requests target the local demo API (`apiforge-demo-api`) on
-//! `127.0.0.1:4318`. Structural drift from the reference is caught by tests against
-//! the compatibility fixtures.
+//! The demos match the project fixtures node for node: the same kinds, bindings,
+//! ordering edges, components and contracts, with English texts. Their requests target the local demo API (`apiforge-demo-api`) on
+//! `127.0.0.1:4318`. Structural drift is caught by tests against the fixtures.
 
 use crate::{
     format::{
@@ -504,7 +502,7 @@ pub fn blocks_project() -> Project {
     Project {
         version: crate::format::FORMAT_VERSION,
         id: "blocks-poc".into(),
-        name: "Operator blocks · PoC".into(),
+        name: "Operator blocks".into(),
         components: vec![],
         contracts: vec![],
         environment: environment(SHOP_BASE_URL),

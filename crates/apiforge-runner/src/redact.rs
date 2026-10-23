@@ -66,7 +66,7 @@ impl Redactor {
                     url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
                 // A secret inserted raw into a query string is decoded as form data
                 // and re-serialised when another parameter is set, so `a+b c` is
-                // published as `a+b+c`. The reference implementation leaks this form.
+                // published as `a+b+c`. Mask this form too.
                 let reparsed: String =
                     url::form_urlencoded::byte_serialize(&decode_form(secret)).collect();
                 [secret.clone(), encode_uri_component(secret), form, reparsed]
