@@ -36,7 +36,7 @@ pub fn default_source(graph: &Graph, project: &Project, node_id: &str) -> Option
         NodeKind::If => TRUE_PORT.to_owned(),
         _ => output_ports(node, project)
             .first()
-            .map_or_else(|| "value".to_owned(), |port| port.name.clone()),
+            .map_or_else(|| ORDER_PORT.to_owned(), |port| port.name.clone()),
     };
     Some((node.id.clone(), port))
 }
@@ -295,6 +295,21 @@ fn action_row(ui: &mut egui::Ui, action: &Action) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exports_offer_control_ordering_instead_of_a_fabricated_data_port() {
+        let project = apiforge_core::demos::shop_project();
+        let export = Block::Export.create(Position { x: 0.0, y: 0.0 }, None);
+        let id = export.id.clone();
+        let graph = Graph {
+            nodes: vec![export],
+            edges: vec![],
+        };
+        assert_eq!(
+            default_source(&graph, &project, &id),
+            Some((id, ORDER_PORT.into()))
+        );
+    }
 
     #[test]
     fn opening_click_keeps_step_menu_open_but_a_later_outside_click_closes_it() {

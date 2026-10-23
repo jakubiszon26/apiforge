@@ -11,8 +11,10 @@ not a statement that every issue remains open or that every proposed fix shipped
 ## Current priorities
 
 The active feature work is the [scenario code and canvas plan](../plans/code-and-canvas.md).
-Its milestone order takes storage safety (item 4, STOR-01) as milestone S1 directly
-after the format change (M1), before anything else extends what is stored. Items
+M1 (format v2) and S1 (storage safety) are implemented and locally verified on
+Linux. The next feature milestone is M4, scenario language and CLI; M2 layout/routing
+can follow independently. Its milestone order puts storage safety before anything
+else extends what is stored. Items
 5 and 6 and Windows evidence stay release gates and are scheduled between the
 plan's milestones. UI polish (item 1) continues only where a milestone touches the
 screen.
@@ -51,6 +53,11 @@ executable controller plan. Windows execution, release packaging/signing and
 assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
+
+The final M1 Export follow-up passes all 281 workspace tests, formatting, Clippy,
+both fixture checks and the workspace build. Native KWin editing and revision-save
+evidence, the pre-fix regression failure and the new nested/conditional/error Export
+tests are recorded in [M1 acceptance](format-v2-acceptance.md).
 
 S1 passes all 273 workspace tests, formatting, Clippy with warnings as errors,
 both fixture checks and a workspace debug build. One ignored helper test is

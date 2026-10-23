@@ -57,6 +57,8 @@ pub struct InputRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutputRow {
     pub key: String,
+    /// Identity of an Export already present on the edited board.
+    pub export_id: Option<String>,
     pub enabled: bool,
     pub name: String,
     pub value_type: ValueType,
@@ -250,7 +252,10 @@ pub fn initialize_inputs(
                     node_id: node.id.clone(),
                     input: port.name.clone(),
                     label,
-                    enabled: mandatory || (path.is_empty() && port.exposed.unwrap_or(false)),
+                    enabled: mandatory
+                        || (node.kind != NodeKind::Export
+                            && path.is_empty()
+                            && port.exposed.unwrap_or(false)),
                     mandatory,
                     name: proposed,
                     value_type: public.map_or(leaf_port.value_type, |public| public.value_type),
@@ -310,7 +315,7 @@ pub fn initialize_inputs(
     rows
 }
 
-/// Proposes outputs: the Export blocks of the revised definition, or every output
+/// Proposes outputs: the selected Export blocks of the current board, or every output
 /// port of the selection with only the first port of the last selected block
 /// enabled.
 pub fn initialize_outputs(
@@ -319,11 +324,10 @@ pub fn initialize_outputs(
     project: &Project,
     initial: Option<&Component>,
 ) -> Vec<OutputRow> {
-    if let Some(initial) = initial {
-        return initial
-            .graph
-            .nodes
-            .iter()
+    if initial.is_some()
+        || selected_nodes(graph, selected).any(|node| node.kind == NodeKind::Export)
+    {
+        return selected_nodes(graph, selected)
             .filter(|node| node.kind == NodeKind::Export)
             .map(|export| {
                 let value = export.inputs.get(VALUE_INPUT);
@@ -337,6 +341,7 @@ pub fn initialize_outputs(
                 };
                 OutputRow {
                     key: export.id.clone(),
+                    export_id: Some(export.id.clone()),
                     enabled: true,
                     name: export.handle.clone(),
                     label: export.label.clone(),
@@ -363,6 +368,7 @@ pub fn initialize_outputs(
                 .enumerate()
                 .map(move |(position, port)| OutputRow {
                     key: format!("{}:{}", node.id, port.name),
+                    export_id: None,
                     enabled: index == last && position == 0,
                     name: port.name.clone(),
                     label: port.label.clone(),
@@ -472,9 +478,8 @@ pub fn materialize_component(
     let inputs: Vec<&InputRow> = draft.inputs.iter().filter(|row| row.enabled).collect();
     let outputs = draft.outputs.iter().filter(|row| row.enabled);
 
-    let mut nodes = Vec::new();
-    // Export blocks are rebuilt from the output rows below.
-    for node in selected_nodes(graph, selected).filter(|node| node.kind != NodeKind::Export) {
+    let mut prepared = Vec::new();
+    for node in selected_nodes(graph, selected) {
         let mut node = node.clone();
         for row in &inputs {
             let name = js::trim(&row.name);
@@ -503,8 +508,18 @@ pub fn materialize_component(
                 node.inputs.insert(target.input.clone(), binding);
             }
         }
-        nodes.push(node);
+        prepared.push(node);
     }
+    let existing_exports: HashMap<&str, &Node> = prepared
+        .iter()
+        .filter(|node| node.kind == NodeKind::Export)
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut nodes: Vec<Node> = prepared
+        .iter()
+        .filter(|node| node.kind != NodeKind::Export)
+        .cloned()
+        .collect();
 
     let renamed: HashMap<&str, &str> = inputs
         .iter()
@@ -525,12 +540,41 @@ pub fn materialize_component(
         }
         handles.insert(node.handle.clone());
     }
+    let mut used_ids: HashSet<String> = prepared.iter().map(|node| node.id.clone()).collect();
     let exports: Vec<Node> = outputs
         .enumerate()
         .map(|(index, row)| {
+            let existing = row
+                .export_id
+                .as_deref()
+                .and_then(|id| existing_exports.get(id))
+                .copied();
+            let source_unchanged = match &row.original_binding {
+                Some(Binding::Reference {
+                    node_id,
+                    port,
+                    path,
+                }) => node_id == &row.node_id && port == &row.port && path == &row.path,
+                Some(_) => true,
+                None => false,
+            };
             let binding = match &row.original_binding {
                 Some(binding) if !matches!(binding, Binding::Reference { .. }) => binding.clone(),
                 _ => Binding::reference(&row.node_id, &row.port, &row.path),
+            };
+            // Exposing an Export's input as a public argument applies to that
+            // Export too. An explicit source change in the builder takes priority.
+            let binding = if source_unchanged {
+                existing
+                    .and_then(|export| {
+                        let before = graph.nodes.iter().find(|node| node.id == export.id)?;
+                        (before.inputs.get(VALUE_INPUT) != export.inputs.get(VALUE_INPUT))
+                            .then(|| export.inputs.get(VALUE_INPUT).cloned())
+                            .flatten()
+                    })
+                    .unwrap_or(binding)
+            } else {
+                binding
             };
             let binding = binding
                 .map_leaves(&mut |leaf, _| {
@@ -545,18 +589,35 @@ pub fn materialize_component(
                     })
                 })
                 .unwrap_or(binding);
-            let mut export = create_node(NodeKind::Export, export_position(&nodes, index), None);
-            export.id = unique_id("node", |id| nodes.iter().any(|node| node.id == id));
+            let mut export = existing.cloned().unwrap_or_else(|| {
+                let mut export =
+                    create_node(NodeKind::Export, export_position(&nodes, index), None);
+                export.id = unique_id("node", |id| used_ids.contains(id));
+                used_ids.insert(export.id.clone());
+                export
+            });
             export.handle = js::trim(&row.name).to_owned();
             export.label = row.label.clone();
-            export.config.output_type =
-                (row.value_type != ValueType::Any).then_some(row.value_type);
+            if export.config.output_type.unwrap_or(ValueType::Any) != row.value_type {
+                export.config.output_type =
+                    (row.value_type != ValueType::Any).then_some(row.value_type);
+            }
             export.config.contract_id = non_empty(&row.contract_id);
             export.inputs.insert(VALUE_INPUT.to_owned(), binding);
             export
         })
         .collect();
     nodes.extend(exports);
+    // Existing Export positions in graph order determine the public port order.
+    // Newly generated outputs follow them, without changing existing identities.
+    let order: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, node)| (node.id.as_str(), i))
+        .collect();
+    nodes.sort_by_key(|node| order.get(node.id.as_str()).copied().unwrap_or(usize::MAX));
+    let kept_ids: HashSet<String> = nodes.iter().map(|node| node.id.clone()).collect();
 
     let action = draft.action.as_ref().and_then(|action| {
         inputs
@@ -601,8 +662,8 @@ pub fn materialize_component(
                 .edges
                 .iter()
                 .filter(|edge| {
-                    selected.contains(edge.source.as_str())
-                        && selected.contains(edge.target.as_str())
+                    kept_ids.contains(edge.source.as_str())
+                        && kept_ids.contains(edge.target.as_str())
                 })
                 .cloned()
                 .collect(),

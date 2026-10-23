@@ -1917,6 +1917,64 @@ mod tests {
     }
 
     #[test]
+    fn saving_a_component_revision_keeps_the_export_added_on_its_board() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let initial = app.editor.project().components[0].clone();
+        app.editor.enter_component(initial.clone());
+        let mut graph = app.editor.graph().clone();
+        let mut export = Block::Export.create(Position { x: 900.0, y: 300.0 }, None);
+        export.handle = "additional_output".into();
+        export.note = Some("Added on the component board".into());
+        export
+            .inputs
+            .insert("value".into(), Binding::literal(json!(99)));
+        let export_id = export.id.clone();
+        graph.nodes.push(export);
+        app.apply_graph(graph);
+        let graph = app.editor.graph();
+        let ids = graph
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>();
+        app.dialog = Some(Dialog::Component(Box::new(dialogs::ComponentDialog::new(
+            graph,
+            &ids,
+            app.editor.project(),
+            Some(&initial),
+        ))));
+        for _ in 0..3 {
+            draw_frame(&mut app, &context, vec![]);
+        }
+        draw_frame(&mut app, &context, vec![command_key(Key::Enter)]);
+        assert!(app.dialog.is_none());
+        let saved = app
+            .editor
+            .project()
+            .components
+            .iter()
+            .find(|component| {
+                component.id == initial.id && component.revision == initial.revision + 1
+            })
+            .unwrap();
+        let exported = saved
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == "additional_output")
+            .unwrap();
+        assert_eq!(exported.id, export_id);
+        assert_eq!(exported.inputs["value"], Binding::literal(json!(99)));
+        assert_eq!(
+            exported.note.as_deref(),
+            Some("Added on the component board")
+        );
+        assert!(app.editor.project().components.contains(&initial));
+        assert!(app.editor.draft().is_none());
+    }
+
+    #[test]
     fn startup_restores_a_backup_only_after_clicking_the_restore_button() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("workspace.json");

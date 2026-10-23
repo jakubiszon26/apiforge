@@ -153,6 +153,9 @@ fn workspace_recovery_requires_confirmation_and_preserves_the_good_backup() {
         }
         let preview = store.load().unwrap().unwrap();
         assert!(preview.recovered.is_some());
+        if missing {
+            assert!(!store.archive_legacy_workspace().unwrap());
+        }
         assert!(matches!(
             store.save(&preview.workspace),
             Err(StorageError::RecoveryRequired { .. })

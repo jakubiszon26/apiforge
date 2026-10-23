@@ -334,6 +334,7 @@ impl ComponentDialog {
             self.extra_outputs += 1;
             self.draft.outputs.push(OutputRow {
                 key: format!("extra-output-{}", self.extra_outputs),
+                export_id: None,
                 enabled: true,
                 name: format!("output_{}", self.draft.outputs.len() + 1),
                 value_type: port.value_type,

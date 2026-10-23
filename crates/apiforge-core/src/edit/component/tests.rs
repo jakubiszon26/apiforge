@@ -106,6 +106,179 @@ fn exports(component: &Component) -> Vec<&Node> {
         .collect()
 }
 
+#[test]
+fn saving_a_revision_uses_exports_edited_on_the_board_and_keeps_their_identity() {
+    let initial = with_outputs(
+        component(
+            "reusable",
+            1,
+            Graph {
+                nodes: vec![plain_request("read")],
+                edges: vec![],
+            },
+        ),
+        vec![output(
+            "result",
+            ValueType::Any,
+            Binding::reference("read", "body", ""),
+        )],
+    );
+    let mut edited = initial.graph.clone();
+    let existing = edited.nodes.last_mut().unwrap();
+    existing.handle = "renamed_result".into();
+    existing
+        .inputs
+        .insert("value".into(), Binding::literal(json!(42)));
+    existing.note = Some("Export edited on the board".into());
+    existing.position = Position { x: 830.0, y: 240.0 };
+    existing.auto_placed = true;
+    let mut extra = output("extra", ValueType::String, Binding::literal(json!("added")));
+    extra.note = Some("A new public output".into());
+    edited
+        .edges
+        .push(edge("export-order", "read", &existing.id));
+    edited.nodes.push(extra);
+    let ids = edited.nodes.iter().map(|n| n.id.as_str()).collect();
+    let project = project(
+        Graph {
+            nodes: vec![],
+            edges: vec![],
+        },
+        vec![initial.clone()],
+    );
+    let draft = draft(&edited, &ids, &project, Some(&initial));
+    assert_eq!(
+        draft
+            .outputs
+            .iter()
+            .map(|o| o.name.as_str())
+            .collect::<Vec<_>>(),
+        ["renamed_result", "extra"]
+    );
+    let result = materialize_component(&edited, &ids, &draft, Some(&initial)).unwrap();
+    assert_eq!(
+        result.graph, edited,
+        "saving must preserve export layout, notes, identities and ordering"
+    );
+    assert_eq!(initial.graph.nodes.last().unwrap().handle, "result");
+}
+
+#[test]
+fn deleted_or_disabled_exports_are_not_resurrected_and_leave_no_dangling_edges() {
+    let initial = with_outputs(
+        component(
+            "reusable",
+            1,
+            Graph {
+                nodes: vec![plain_request("read")],
+                edges: vec![],
+            },
+        ),
+        vec![
+            output(
+                "first",
+                ValueType::Any,
+                Binding::reference("read", "body", ""),
+            ),
+            output(
+                "second",
+                ValueType::Any,
+                Binding::reference("read", "status", ""),
+            ),
+        ],
+    );
+    let project = project(
+        Graph {
+            nodes: vec![],
+            edges: vec![],
+        },
+        vec![initial.clone()],
+    );
+    for deleted_on_board in [false, true] {
+        let mut graph = initial.graph.clone();
+        if deleted_on_board {
+            graph.nodes.retain(|node| node.handle != "first");
+        } else {
+            graph.edges.push(edge("to-first", "read", "export-first"));
+        }
+        graph.edges.push(edge("to-second", "read", "export-second"));
+        let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
+        let mut draft = draft(&graph, &ids, &project, Some(&initial));
+        if !deleted_on_board {
+            draft.outputs[0].enabled = false;
+        }
+        let result = materialize_component(&graph, &ids, &draft, Some(&initial)).unwrap();
+        assert_eq!(
+            exports(&result)
+                .iter()
+                .map(|n| n.handle.as_str())
+                .collect::<Vec<_>>(),
+            ["second"]
+        );
+        assert_eq!(
+            result.graph.edges,
+            [edge("to-second", "read", "export-second")]
+        );
+        crate::validate_project(&Project {
+            components: vec![result],
+            ..project.clone()
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn export_ordering_branches_and_explicit_public_arguments_survive_revision() {
+    let mut branch = create_node(NodeKind::If, Position { x: 0.0, y: 0.0 }, None);
+    branch.id = "branch".into();
+    branch.handle = "choice".into();
+    let mut yes = output("yes", ValueType::Boolean, Binding::literal(json!(true)));
+    yes.note = Some("Only the true branch publishes this".into());
+    let mut order = edge("true-order", "branch", &yes.id);
+    order.branch = Some(crate::model::Branch::True);
+    let initial = component(
+        "reusable",
+        1,
+        Graph {
+            nodes: vec![branch, yes],
+            edges: vec![order],
+        },
+    );
+    let graph = &initial.graph;
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
+    let project = project(
+        Graph {
+            nodes: vec![],
+            edges: vec![],
+        },
+        vec![initial.clone()],
+    );
+    let mut draft = draft(graph, &ids, &project, Some(&initial));
+    let output_value = draft
+        .inputs
+        .iter_mut()
+        .find(|row| row.node_id == "export-yes")
+        .unwrap();
+    assert!(
+        !output_value.enabled,
+        "literal exports must not become arguments automatically"
+    );
+    output_value.enabled = true;
+    output_value.name = "published".into();
+    let result = materialize_component(graph, &ids, &draft, Some(&initial)).unwrap();
+    assert_eq!(
+        exports(&result)[0].inputs["value"],
+        Binding::parameter("published")
+    );
+    assert_eq!(exports(&result)[0].note, exports(&initial)[0].note);
+    assert_eq!(result.graph.edges, initial.graph.edges);
+    crate::validate_project(&Project {
+        components: vec![result],
+        ..project
+    })
+    .unwrap();
+}
+
 fn component(id: &str, revision: u32, graph: Graph) -> Component {
     Component {
         id: id.into(),
@@ -215,7 +388,8 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
         },
         vec![record],
     );
-    let ids = HashSet::from(["one", "two"]);
+    let graph = initial.graph.clone();
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
     let p = project(graph.clone(), vec![initial.clone()]);
     let mut d = draft(&graph, &ids, &p, Some(&initial));
     assert_eq!(d.inputs.iter().filter(|row| row.enabled).count(), 1);
@@ -270,7 +444,8 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
             ),
         ],
     );
-    let ids = HashSet::from(["request"]);
+    let graph = initial.graph.clone();
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
     let p = project(graph.clone(), vec![initial.clone()]);
     let mut d = draft(&graph, &ids, &p, Some(&initial));
     let row = d
@@ -278,8 +453,12 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
         .iter_mut()
         .find(|row| row.name == "context")
         .unwrap();
-    assert_eq!(row.key, "public:context");
-    assert_eq!(row.label, "Public argument → context");
+    assert_eq!(
+        row.targets.len(),
+        1,
+        "the parameter is used directly by an Export"
+    );
+    assert_eq!(row.targets[0].node_id, "export-context");
     row.name = "metadata".into();
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
     assert_eq!(
@@ -432,7 +611,8 @@ fn existing_output_aliases_keep_literal_environment_and_nested_bindings() {
             ),
         ],
     );
-    let ids = HashSet::from(["read"]);
+    let graph = initial.graph.clone();
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
     let p = project(graph.clone(), vec![initial.clone()]);
     let d = draft(&graph, &ids, &p, Some(&initial));
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
@@ -470,7 +650,8 @@ fn project_validation_rejects_a_recursive_definition() {
         edges: vec![],
     };
     let p = project(empty, vec![initial.clone()]);
-    let ids = HashSet::from(["self"]);
+    let graph = initial.graph.clone();
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
     let d = draft(&graph, &ids, &p, Some(&initial));
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
     let recursive = Project {

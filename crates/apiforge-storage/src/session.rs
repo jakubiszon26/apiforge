@@ -261,8 +261,10 @@ impl WorkspaceStore {
             check(self.path(), expected)?;
         }
         let archived = self.file.archive_legacy_workspace()?;
-        state.workspace.expected = Some(snapshot(self.path())?);
-        state.workspace.recovery_required = false;
+        if archived {
+            state.workspace.expected = Some(snapshot(self.path())?);
+            state.workspace.recovery_required = false;
+        }
         Ok(archived)
     }
 
