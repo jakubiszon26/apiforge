@@ -275,6 +275,7 @@ pub enum TreeAction {
 /// names can be dragged onto arguments as a reference to `node`'s `port`.
 pub fn json_tree(ui: &mut Ui, node: &str, port: &str, value: &Value) -> Option<TreeAction> {
     let mut action = None;
+    let mut budget = JSON_ROWS_PER_FRAME;
     tree_row(
         ui,
         node,
@@ -284,8 +285,23 @@ pub fn json_tree(ui: &mut Ui, node: &str, port: &str, value: &Value) -> Option<T
         0,
         true,
         &mut action,
+        &mut budget,
     );
+    if budget == 0 {
+        widgets::hint(
+            ui,
+            "Field display limit reached. Collapse a branch to inspect other fields.",
+        );
+    }
     action
+}
+
+const JSON_ROWS_PER_FRAME: usize = 400;
+const JSON_PAGE_SIZE: usize = 100;
+
+fn page_range(total: usize, page: usize) -> std::ops::Range<usize> {
+    let start = page.min(total.saturating_sub(1) / JSON_PAGE_SIZE) * JSON_PAGE_SIZE;
+    start..(start + JSON_PAGE_SIZE).min(total)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -298,15 +314,44 @@ fn tree_row(
     depth: usize,
     supported: bool,
     action: &mut Option<TreeAction>,
+    budget: &mut usize,
 ) {
+    if *budget == 0 {
+        return;
+    }
+    *budget -= 1;
     let text = path.to_string();
     let preview = match value {
         Value::Array(items) => format!("List · {}", items.len()),
         Value::Object(fields) => format!("Object · {}", fields.len()),
         scalar => crate::labels::truncate(&json_stringify(scalar), 60),
     };
+    let child_count = match value {
+        Value::Array(items) => items.len(),
+        Value::Object(fields) => fields.len(),
+        _ => 0,
+    };
+    let state_id = ui.id().with(("json-branch", node, port, &text));
+    let mut open = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(state_id))
+        .unwrap_or(depth == 0);
     ui.horizontal(|ui| {
         ui.add_space(depth.min(4) as f32 * 8.0);
+        if child_count > 0
+            && ui
+                .small_button(if open { "▾" } else { "▸" })
+                .on_hover_text(if open {
+                    "Collapse field"
+                } else {
+                    "Expand field"
+                })
+                .clicked()
+        {
+            open = !open;
+            ui.ctx().data_mut(|data| data.insert_temp(state_id, open));
+        }
+
         let label = if text.is_empty() {
             "$".to_owned()
         } else {
@@ -366,6 +411,9 @@ fn tree_row(
         });
     });
     ui.add_space(3.0);
+    if !open || child_count == 0 {
+        return;
+    }
     if depth >= 10 {
         if matches!(value, Value::Array(items) if !items.is_empty())
             || matches!(value, Value::Object(fields) if !fields.is_empty())
@@ -374,20 +422,65 @@ fn tree_row(
         }
         return;
     }
+    let page_key = state_id.with("page");
+    let mut page = ui
+        .ctx()
+        .data(|data| data.get_temp::<usize>(page_key))
+        .unwrap_or(0);
+    let range = page_range(child_count, page);
+    // A newer response may be shorter than the previous page selection.
+    page = range.start / JSON_PAGE_SIZE;
+    if child_count > JSON_PAGE_SIZE {
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(range.start > 0, egui::Button::new("Previous 100").small())
+                .clicked()
+            {
+                page = page.saturating_sub(1);
+            }
+            widgets::hint(
+                ui,
+                format!("{}–{} of {}", range.start + 1, range.end, child_count),
+            );
+            if ui
+                .add_enabled(
+                    range.end < child_count,
+                    egui::Button::new("Next 100").small(),
+                )
+                .clicked()
+            {
+                page += 1;
+            }
+        });
+        ui.ctx().data_mut(|data| data.insert_temp(page_key, page));
+    }
     let reserved = |key: &str| ["__proto__", "constructor", "prototype"].contains(&key);
     match value {
         Value::Array(items) => {
-            for (index, item) in items.iter().take(100).enumerate() {
+            for (index, item) in items.iter().enumerate().take(range.end).skip(range.start) {
+                if *budget == 0 {
+                    break;
+                }
                 let mut child = path.clone();
                 child.push_index(index);
-                tree_row(ui, node, port, item, &child, depth + 1, supported, action);
-            }
-            if items.len() > 100 {
-                widgets::hint(ui, "Showing the first 100 items.");
+                tree_row(
+                    ui,
+                    node,
+                    port,
+                    item,
+                    &child,
+                    depth + 1,
+                    supported,
+                    action,
+                    budget,
+                );
             }
         }
         Value::Object(fields) => {
-            for (key, item) in fields.iter().take(100) {
+            for (key, item) in fields.iter().take(range.end).skip(range.start) {
+                if *budget == 0 {
+                    break;
+                }
                 let mut child = path.clone();
                 child.push_key(key.clone());
                 tree_row(
@@ -399,10 +492,8 @@ fn tree_row(
                     depth + 1,
                     supported && !reserved(key),
                     action,
+                    budget,
                 );
-            }
-            if fields.len() > 100 {
-                widgets::hint(ui, "Showing the first 100 fields.");
             }
         }
         _ => {}
@@ -420,5 +511,62 @@ mod tests {
             assert_eq!(literal_type(&empty_literal(value_type)), value_type);
         }
         assert_eq!(literal_type(&json!(null)), ValueType::Any);
+    }
+}
+
+#[cfg(test)]
+mod tree_tests {
+    use super::*;
+
+    #[test]
+    fn pagination_covers_the_tail_and_clamps_after_the_source_shrinks() {
+        assert_eq!(page_range(250, 0), 0..100);
+        assert_eq!(page_range(250, 1), 100..200);
+        assert_eq!(page_range(250, 2), 200..250);
+        assert_eq!(page_range(20, 100), 0..20);
+        assert_eq!(page_range(0, 0), 0..0);
+    }
+
+    #[test]
+    fn json_tree_only_visits_open_branches_and_honors_its_frame_budget() {
+        let context = egui::Context::default();
+        let value = serde_json::json!({"nested": vec![serde_json::json!({"x": [1,2,3]}); 1000]});
+        let mut visited = 0;
+        let mut limited = 0;
+        let mut output = context.run_ui(Default::default(), |ui| {
+            let mut budget = JSON_ROWS_PER_FRAME;
+            let mut action = None;
+            tree_row(
+                ui,
+                "n",
+                "body",
+                &value,
+                &JsonPath::root(),
+                0,
+                true,
+                &mut action,
+                &mut budget,
+            );
+            visited = JSON_ROWS_PER_FRAME - budget;
+            let mut budget = 1;
+            tree_row(
+                ui,
+                "n",
+                "body",
+                &value,
+                &JsonPath::root(),
+                0,
+                true,
+                &mut action,
+                &mut budget,
+            );
+            limited = budget;
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            visited, 2,
+            "root and nested summary, without visiting the closed subtree"
+        );
+        assert_eq!(limited, 0);
     }
 }

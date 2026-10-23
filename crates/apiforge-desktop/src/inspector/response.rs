@@ -2,7 +2,7 @@
 //! otherwise the step's saved sample.
 
 use apiforge_core::{
-    edit::{ResponseField, collect_response_fields},
+    edit::{ResponseFields, collect_response_fields_bounded},
     format::{Binding, Node, OptionalJson, Project},
     graph::component_definition,
     model::NodeKind,
@@ -98,8 +98,8 @@ pub fn source(node: &Node, port: &str, project: &Project, run: Option<&RunResult
 }
 
 /// Fields of a source, with the whole value first.
-pub fn fields(value: Option<&Value>) -> Vec<ResponseField> {
-    collect_response_fields(value)
+pub fn fields(value: Option<&Value>) -> ResponseFields {
+    collect_response_fields_bounded(value)
 }
 
 pub fn type_label(name: &str) -> &'static str {
@@ -132,6 +132,6 @@ mod tests {
         let output = &component.outputs[0].name;
         assert!(sample_output(node, output, &project).is_some());
         assert_eq!(type_label("array"), "List");
-        assert_eq!(fields(Some(&json!({"a": 1}))).len(), 2);
+        assert_eq!(fields(Some(&json!({"a": 1}))).fields.len(), 2);
     }
 }

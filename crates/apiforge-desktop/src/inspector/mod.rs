@@ -461,11 +461,12 @@ impl Inspector {
                     ui,
                     &mut state.search,
                     focus_search,
-                    &fields,
+                    &fields.fields,
                     data.value.is_some(),
                     &state.port,
                     (ctx.content_rect().height() - 280.0).clamp(60.0, 320.0),
                 );
+                if fields.truncated { widgets::hint(ui, "Some fields are omitted by the 1000-field / 12-level limit. You can enter a reference path in the argument editor."); }
                 visible_count = Some(count);
                 if let Some(path) = picked {
                     chosen = Some(Binding::reference(

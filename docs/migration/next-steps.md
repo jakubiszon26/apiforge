@@ -10,10 +10,11 @@ not a statement that every issue remains open or that every proposed fix shipped
 
 ## Current priorities
 
-1. **JSON performance (PERF-01):** virtualise picker rows and make inspector trees
-   lazy with a per-frame budget and accessible pagination. The core collector
-   already has a 1000-field/depth-12 cap; cache invalidation and explicit collector
-   truncation metadata can follow separately.
+1. **JSON performance (PERF-01):** picker rows are now virtualised and inspector
+   branches are lazy, paginated by 100 fields and bounded to 400 rows per rendered
+   output tree. The core collector preserves its 1000-field/depth-12 cap and now
+   reports real truncation explicitly in both pickers. Remaining follow-ups are
+   picker caching and pagination/budgeting in the report's separate JSON view.
 2. **Built-in demo API (FUNC-07):** review the preserved unfinished implementation
    in `.gui-qa/history/unfinished-M01.patch`, especially shutdown blocking, before
    reuse. The desktop still needs a separate demo API executable for Live mode.
@@ -33,3 +34,13 @@ size explicitly; 800×600 is still below the supported minimum width.
 `claude-backlog.json` retains older implementation detail as reference, not an
 executable controller plan. Windows execution, release packaging/signing and
 assistive-technology acceptance still require independent evidence.
+
+## Local follow-up validation
+
+The JSON follow-up passes 236 workspace tests, formatting, Clippy with warnings
+as errors, compatibility fixture verification and a workspace debug build. The
+repository remains local; no push is part of this workflow.
+
+Focused Gemini GUI regression also passed on the corrected local build, including
+report keyboard resizing, duplicate contracts, the 960×540 modal and JSON tree
+interactions. Exact scope and evidence are in [the review](argon-code-review.md).

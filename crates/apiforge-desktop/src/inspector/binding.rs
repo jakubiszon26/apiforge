@@ -692,8 +692,8 @@ pub(crate) fn searchable_field_list(
     let visible_count = visible.len();
     egui::ScrollArea::vertical()
         .max_height(max_height)
-        .show(ui, |ui| {
-            for field in &visible {
+        .show_rows(ui, 46.0, visible_count, |ui, range| {
+            for field in &visible[range] {
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), 46.0),
                     egui::Sense::click(),
@@ -738,17 +738,17 @@ pub(crate) fn searchable_field_list(
                     chosen = Some(field.path.clone());
                 }
             }
-            if visible.is_empty() {
-                widgets::hint(
-                    ui,
-                    if !has_source_value {
-                        "Run the request or add a sample response. You can also type a path."
-                    } else {
-                        "No matching field. Change the search or type a path."
-                    },
-                );
-            }
         });
+    if visible.is_empty() {
+        widgets::hint(
+            ui,
+            if !has_source_value {
+                "Run the request or add a sample response. You can also type a path."
+            } else {
+                "No matching field. Change the search or type a path."
+            },
+        );
+    }
     (chosen, visible_count)
 }
 
@@ -777,11 +777,12 @@ fn field_picker(
             ui,
             &mut search,
             focus_search,
-            &fields,
+            &fields.fields,
             source.value.is_some(),
             port,
             (ctx.content_rect().height() - 220.0).clamp(60.0, 380.0),
         );
+        if fields.truncated { widgets::hint(ui, "Some fields are omitted by the 1000-field / 12-level limit. Type a path to select another field."); }
         chosen = picked;
         ui.separator();
         widgets::hint(ui, "The chosen field is read again on each run.");
@@ -908,19 +909,22 @@ mod tests {
             }
         });
         let fields = response::fields(Some(&sample));
-        assert_eq!(filter_response_fields(&fields, "").len(), fields.len());
-        let price_matches = filter_response_fields(&fields, "PRICE");
+        assert_eq!(
+            filter_response_fields(&fields.fields, "").len(),
+            fields.fields.len()
+        );
+        let price_matches = filter_response_fields(&fields.fields, "PRICE");
         assert!(
             price_matches
                 .iter()
                 .any(|field| field.path == "product.price")
         );
-        let bool_matches = filter_response_fields(&fields, "yes / no");
+        let bool_matches = filter_response_fields(&fields.fields, "yes / no");
         assert!(
             bool_matches
                 .iter()
                 .any(|field| field.path == "product.active")
         );
-        assert!(filter_response_fields(&fields, "zzzz-missing").is_empty());
+        assert!(filter_response_fields(&fields.fields, "zzzz-missing").is_empty());
     }
 }

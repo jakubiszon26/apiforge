@@ -79,31 +79,49 @@ fn preview(value: &Value) -> String {
 /// Lists at most [`RESPONSE_FIELD_LIMIT`] fields and does not descend below
 /// [`RESPONSE_FIELD_DEPTH`]. A missing response has no fields.
 pub fn collect_response_fields(value: Option<&Value>) -> Vec<ResponseField> {
-    fn visit(value: &Value, path: &JsonPath, depth: usize, fields: &mut Vec<ResponseField>) {
-        if fields.len() >= RESPONSE_FIELD_LIMIT {
+    collect_response_fields_bounded(value).fields
+}
+
+/// A bounded picker list, including whether any readable fields were omitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResponseFields {
+    pub fields: Vec<ResponseField>,
+    pub truncated: bool,
+}
+
+pub fn collect_response_fields_bounded(value: Option<&Value>) -> ResponseFields {
+    fn visit(value: &Value, path: &JsonPath, depth: usize, out: &mut ResponseFields) {
+        if out.fields.len() >= RESPONSE_FIELD_LIMIT {
+            out.truncated = true;
             return;
         }
-        fields.push(ResponseField {
+        out.fields.push(ResponseField {
             path: path.to_string(),
             value_type: js::type_name(Some(value)),
             preview: preview(value),
             depth,
         });
+        let mut children = children(value, path);
         if depth >= RESPONSE_FIELD_DEPTH {
+            out.truncated |= children.next().is_some();
             return;
         }
-        for (child_path, child) in children(value, path) {
-            if fields.len() >= RESPONSE_FIELD_LIMIT {
+        for (child_path, child) in children {
+            if out.fields.len() >= RESPONSE_FIELD_LIMIT {
+                out.truncated = true;
                 break;
             }
-            visit(child, &child_path, depth + 1, fields);
+            visit(child, &child_path, depth + 1, out);
         }
     }
-    let mut fields = Vec::new();
+    let mut out = ResponseFields {
+        fields: Vec::new(),
+        truncated: false,
+    };
     if let Some(value) = value {
-        visit(value, &JsonPath::root(), 0, &mut fields);
+        visit(value, &JsonPath::root(), 0, &mut out);
     }
-    fields
+    out
 }
 
 /// Paths suggested for a sample value, depth first, without the root.
@@ -275,5 +293,30 @@ mod tests {
         let fields = collect_response_fields(Some(&deep));
         assert_eq!(fields.len(), 13);
         assert_eq!(fields.last().unwrap().depth, 12);
+    }
+    #[test]
+    fn bounded_collection_reports_real_truncation_without_false_positives() {
+        let exact = Value::Array(vec![Value::Null; RESPONSE_FIELD_LIMIT - 1]);
+        let list = collect_response_fields_bounded(Some(&exact));
+        assert_eq!(list.fields.len(), RESPONSE_FIELD_LIMIT);
+        assert!(!list.truncated);
+        let larger = Value::Array(vec![Value::Null; RESPONSE_FIELD_LIMIT]);
+        let list = collect_response_fields_bounded(Some(&larger));
+        assert_eq!(list.fields.len(), RESPONSE_FIELD_LIMIT);
+        assert!(list.truncated);
+        assert!(!collect_response_fields_bounded(None).truncated);
+    }
+
+    #[test]
+    fn bounded_collection_reports_depth_truncation_but_not_reserved_keys() {
+        let mut value = Value::Null;
+        for _ in 0..RESPONSE_FIELD_DEPTH {
+            value = serde_json::json!({"next":value});
+        }
+        assert!(!collect_response_fields_bounded(Some(&value)).truncated);
+        value = serde_json::json!({"next":value});
+        assert!(collect_response_fields_bounded(Some(&value)).truncated);
+        let reserved = serde_json::json!({"__proto__":{"hidden":1}});
+        assert!(!collect_response_fields_bounded(Some(&reserved)).truncated);
     }
 }
