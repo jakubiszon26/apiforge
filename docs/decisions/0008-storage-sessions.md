@@ -3,7 +3,7 @@
 - Status: accepted; Linux verified, native Windows verification pending
 - Date: 2026-10-23
 - Scope: `apiforge-storage`, desktop persistence, future CLI and code drafts
-- Milestone: S1 of the [code and canvas plan](../plans/code-and-canvas.md)
+- Milestone: S1 of the [code and canvas plan](../roadmap.md)
 
 ## Decision
 
@@ -70,14 +70,9 @@ being killed, clone lifetime, read-only mutations, equal-length edits, file
 creation/deletion, backup replacement, confirmation races, draft validation,
 queued saves during conflicts and the desktop recovery/reload decisions.
 
-Native KWin tests used an isolated HOME and fixture-only data directory. Evidence
-is retained locally in `.gui-qa/runs/storage-safety/`: `actions.json`,
-`read-only.png`, `external-conflict.png`, `after-reload.png`,
-`recovery-confirmation.png`, `recovery-960.png` and `after-recovery-960.png`.
-The observed minimum client size was 960×540 (960×576 including decorations).
-The session was stopped after testing. No host workspace or live API was used.
-The final camera-reset correction was rechecked in
-`.gui-qa/runs/storage-safety-final/after-reload.png` with its own `actions.json`.
+The read-only secondary window, an external-change conflict with reload and
+deliberate backup recovery were also exercised in the native application on Linux,
+with an isolated home and fixture data, at 1600 × 1000 and at the 960 × 540 minimum.
 
 Windows uses the same standard-library locking API, with a writable handle for
 file flushing. Native Windows process/GUI execution and power-loss durability

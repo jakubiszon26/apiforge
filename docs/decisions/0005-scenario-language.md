@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-10-23
 - Scope: new crate `apiforge-script`, `apiforge-cli`, the desktop code panel
-- Plan: [scenario code and canvas](../plans/code-and-canvas.md)
+- Plan: [scenario code and canvas](../roadmap.md)
 
 ## Context
 

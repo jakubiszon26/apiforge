@@ -6,10 +6,10 @@
 
 ## Context
 
-Version-one projects were evaluated by the TypeScript reference implementation, so
-every expression result was produced by a JavaScript engine (V8 in Node). Existing
-assertions compare those results, often by exact equality. The native port must keep
-them passing, and it must give identical results on Linux and Windows.
+Documents are JSON, and expressions follow JavaScript value semantics: version-one
+projects were evaluated by a JavaScript engine (V8), and existing assertions compare
+those results, often by exact equality. The application must keep them passing, and it
+must give identical results on Linux and Windows.
 
 Rust and serde defaults differ from JavaScript in ways that would silently change
 results:
@@ -42,8 +42,7 @@ results:
 
 ## Accepted divergence
 
-The differential corpus (`fixtures/compatibility/semantics/`, generated from the
-TypeScript sources) shows that `libm` and V8 disagree by exactly one ULP for a small
+The semantic corpus (`fixtures/semantics/`, recorded with V8) shows that `libm` and V8 disagree by exactly one ULP for a small
 fraction of inputs to `exp`, `log` (base 10) and `power10`. Checked against 60-digit
 decimal arithmetic:
 
@@ -68,6 +67,5 @@ which the `round` operator supports.
 - Replacing `libm` with a correctly rounded implementation would remove the `exp` and
   `power10` differences and keep `log` correct; the corpus would then only need the
   tolerance for V8's `log10`.
-- The corpus must be regenerated with
-  `node --import tsx scripts/export-compatibility-fixtures.ts` whenever the reference
-  semantics change, and is checked in CI.
+- The corpus is frozen and replayed in CI. A deliberate change of these semantics
+  updates it together with a new ADR.

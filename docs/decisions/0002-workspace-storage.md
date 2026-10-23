@@ -6,12 +6,9 @@
 
 ## Context
 
-The prototype kept the whole workspace in browser `localStorage` as a version-one
-workspace JSON document, saved 350 ms after the last edit. The earlier migration plan
-proposed SQLite for the native application. The current priority is feature parity with
-the prototype, without losing the durability guarantees of release gate G1 (no
-truncated or half-written document after a crash, a recoverable last good copy, no
-secrets on disk).
+The application needs durable local storage for the workspace: no truncated or
+half-written document after a crash, a recoverable last good copy and no secrets on
+disk. SQLite was considered.
 
 The workspace is small (import limit 16 MiB, typically kilobytes), edited by one user in
 one process, and always loaded and saved as a whole. Run history is session-only.
