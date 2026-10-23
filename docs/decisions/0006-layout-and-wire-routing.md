@@ -155,6 +155,21 @@ that shape and no scenario has it; the number is recorded so the limit is known
 rather than assumed. `cargo run -p apiforge-layout --example bench --release`
 prints all of it.
 
+## Evidence
+
+Generated boards check the guarantees: no final route reaches into a card that is
+not its own, after nudging and after smoothing; the documented exception holds on
+boards where cards are piled up; bridges appear at every crossing and nowhere
+else; layout and routing repeat exactly; a new card never lands on another and
+moves nothing; and a tidied selection keeps clear of the cards outside it. The
+fixtures' own boards are routed through the desktop's conversion in its tests, so
+the guarantee covers the cards the application really draws.
+
+Both wire styles were also reviewed in the native application on Linux, at
+1600 × 1000, through the screenshot probe against the demo workspace, with the
+style taken from a preferences file — which is how the setting is reached in a
+real session.
+
 ## Consequences
 
 - Wire appearance no longer depends only on the endpoints, so screenshots and the
