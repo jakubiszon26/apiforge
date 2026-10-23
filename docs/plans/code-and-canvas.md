@@ -291,7 +291,12 @@ correction, nested Export execution and native GUI editing/save evidence. See
 S1 is implemented and verified on Linux: directory locking, external-change
 fingerprints, deliberate recovery and draft storage are recorded in
 [ADR 0008](../decisions/0008-storage-sessions.md). Native Windows execution remains
-a release gate. The next feature milestone is M4; M2 can follow independently.
+a release gate. M4 is in progress on `feat/script-language`: the lossless lexer,
+recovering parser, syntax diagnostics, canonical syntax formatter and `fmt` CLI
+are implemented. Lowering, reconciliation, the document printer, graph equivalence
+tests and `check/print/apply` remain before M4 can merge. See the
+[implementation and validation notes](../migration/scenario-language.md).
+M2 can follow independently.
 
 **Open release work outside this plan** keeps its place in the
 [migration next steps](../migration/next-steps.md) and is scheduled between

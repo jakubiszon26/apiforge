@@ -1,0 +1,20 @@
+[package]
+name = "apiforge-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "apiforge"
+path = "src/main.rs"
+
+[dependencies]
+apiforge-storage.workspace = true
+apiforge-script = { path = "../apiforge-script" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

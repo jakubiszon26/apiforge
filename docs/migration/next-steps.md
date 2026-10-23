@@ -12,8 +12,11 @@ not a statement that every issue remains open or that every proposed fix shipped
 
 The active feature work is the [scenario code and canvas plan](../plans/code-and-canvas.md).
 M1 (format v2) and S1 (storage safety) are implemented and locally verified on
-Linux. The next feature milestone is M4, scenario language and CLI; M2 layout/routing
-can follow independently. Its milestone order puts storage safety before anything
+Linux. M4, scenario language and CLI, is in progress on `feat/script-language`.
+The lexer, recovering parser, syntax formatter and `apiforge fmt` are implemented;
+lowering, identity reconciliation, document printing and `check/print/apply` are
+next. See the [implementation notes](scenario-language.md). M2 layout/routing
+can follow independently. The milestone order puts storage safety before anything
 else extends what is stored. Items
 5 and 6 and Windows evidence stay release gates and are scheduled between the
 plan's milestones. UI polish (item 1) continues only where a milestone touches the
@@ -36,7 +39,7 @@ screen.
    external-change checks, read-only secondary windows, deliberate backup recovery
    and the draft storage API are implemented and verified on Linux. See
    [ADR 0008](../decisions/0008-storage-sessions.md). Native Windows execution
-   remains a release gate. The next feature milestone is M4, the scenario language.
+   remains a release gate. M4, the scenario language, is in progress.
 5. **Interrupted Live run journal (RUN-02):** record uncertain effects after a crash.
    Distinguish DNS/TLS failures beyond the current broad reqwest prefixes.
 6. **Accessibility (A11Y-01):** verify that AccessKit labels reach AT-SPI and test
@@ -53,6 +56,13 @@ executable controller plan. Windows execution, release packaging/signing and
 assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
+
+The M4 syntax checkpoint passes 302 workspace tests, formatting, Clippy with
+warnings as errors, both fixture checks and the workspace debug build. It includes
+syntax property tests and a sustained mutational fuzz harness; exact scope and
+remaining M4 work are in the [language implementation notes](scenario-language.md).
+It remains on `feat/script-language` until M4's document round trips,
+reconciliation and workspace-aware CLI are complete.
 
 The final M1 Export follow-up passes all 281 workspace tests, formatting, Clippy,
 both fixture checks and the workspace build. Native KWin editing and revision-save

@@ -175,6 +175,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "apiforge-cli"
+version = "0.1.0"
+dependencies = [
+ "apiforge-script",
+ "apiforge-storage",
+ "tempfile",
+]
+
+[[package]]
 name = "apiforge-convert-v1"
 version = "0.1.0"
 dependencies = [
@@ -236,6 +245,14 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "apiforge-script"
+version = "0.1.0"
+dependencies = [
+ "apiforge-core",
+ "serde_json",
 ]
 
 [[package]]

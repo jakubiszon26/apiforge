@@ -71,13 +71,13 @@ file       = scenario | component ;
 scenario   = "scenario" STRING "{" scenario_item* "}" ;
 scenario_item = "description" STRING
            | "on_error" ("stop" | "continue")
-           | "param" IDENT "=" literal
+           | "param" key "=" literal
            | statement
            | "cleanup" "{" statement* "}" ;
 component  = "component" IDENT STRING "{" component_item* "}" ;
 component_item = "description" STRING
-           | attribute* "input" IDENT ":" type ("=" literal)?
-           | "action" IDENT
+           | attribute* "input" key ":" type ("=" literal)?
+           | "action" key
            | statement ;
 type       = "any" | "string" | "number" | "boolean" | "object" | "array" ;
 ```
@@ -101,7 +101,7 @@ form       = "start"
            | "assert" check
            | "condition" ("all" | "any") "{" check ("," check)* ","? "}" ( "with" expr )?
            | "if" check "{" statement* "}" ( "else" "{" statement* "}" )?
-           | IDENT "(" ( IDENT ":" expr ("," IDENT ":" expr)* ","? )? ")"
+           | IDENT ("@" REVISION)? "(" ( key ":" expr ("," key ":" expr)* ","? )? ")"
            | expr ;
 request_block = "{" request_item* "}" ;
 request_item  = "headers" object
@@ -148,15 +148,17 @@ sum      = product ( ( "+" | "-" ) product )* ;
 product  = unary ( ( "*" | "/" | "%" ) unary )* ;
 unary    = "!" unary | postfix ;
 postfix  = primary ( "." IDENT | "[" ( NUMBER | STRING ) "]" )* ;
-primary  = literal | STRING | IDENT | IDENT "(" ( expr ( "," expr )* )? ")"
+primary  = literal | STRING | IDENT | call | "?"
          | "env" "." IDENT | "env" "[" STRING "]"
-         | "param" "." IDENT
+         | "param" "." IDENT | "param" "[" STRING "]"
          | "{" ( key ":" expr ( "," key ":" expr )* ","? )? "}"
          | "[" ( expr ( "," expr )* ","? )? "]"
          | "(" expr ")" ;
 literal  = NUMBER | "-" NUMBER | STRING_WITHOUT_INTERPOLATION | "true" | "false" | "null"
          | object or array of literals ;
 key      = IDENT | STRING ;
+call     = (IDENT | "op" "." IDENT) ("@" REVISION)? "(" arguments? ")" ;
+arguments = expr ("," expr)* ","? | key ":" expr ("," key ":" expr)* ","? ;
 ```
 
 | Syntax | Binding |
@@ -170,7 +172,17 @@ key      = IDENT | STRING ;
 | `handle.path` | `reference` |
 
 Unary minus applies only to number literals, because no operator negates a value.
-Parentheses are printed only where precedence needs them.
+The syntax formatter preserves explicit parentheses. The document printer adds
+parentheses where precedence needs them.
+
+Parameter and component input names may be quoted to represent existing document
+keys that are not identifiers. The same applies to named call arguments. `?`
+represents an unconnected binding slot, distinct from a literal `null`; lowering
+may only omit it in a position that the document model permits to be absent.
+`op.add(left: value)` explicitly names an operator and its input slots, including
+incomplete operators. Ordinary function calls may use positional arguments;
+positional and named arguments cannot be mixed. Component revisions are positive
+integers. Revision qualifiers on operators are rejected during lowering.
 
 **References.** The identifier is a handle in scope. If the node has a single
 output port, the following segments are the path into it, so `first.price` reads

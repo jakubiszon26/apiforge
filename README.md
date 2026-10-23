@@ -30,6 +30,17 @@ node --import tsx scripts/export-compatibility-fixtures.ts --check
 
 Design decisions are recorded in [docs/decisions](docs/decisions).
 
+The scenario language's syntax formatter is available separately:
+
+```bash
+cargo run -p apiforge-cli --locked -- fmt fixtures/scripts/checkout.afs --check
+cargo run -p apiforge-cli --locked -- fmt path/to/scenario.afs
+```
+
+`fmt` checks syntax and formats in place; it does not resolve references or run
+requests. M4's document conversion and `check`, `print`, `apply` commands are still
+in progress. See [the language implementation notes](docs/migration/scenario-language.md).
+
 ## TypeScript prototype
 
 ```bash
