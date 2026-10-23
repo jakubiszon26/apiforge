@@ -574,3 +574,38 @@ fn type_mismatches_the_board_would_refuse_are_located_warnings() {
         ]
     );
 }
+
+#[test]
+fn replacing_a_request_by_a_different_one_does_not_transfer_identity() {
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    let mut old = lowered(
+        "scenario \"Replace\" { r = GET \"/a\" { timeout 5s } s = r.status }",
+        project,
+    );
+    let Document::Scenario(scenario) = &mut old else {
+        panic!()
+    };
+    scenario.graph.nodes[0].id = "old-request".into();
+    scenario.graph.nodes[1].id = "old-reader".into();
+    for source in [
+        // A different request under a new handle, read by the same statement.
+        "scenario \"Replace\" { q = POST \"/b\" s = q.status }",
+        // The same request moved to a new handle while its reader changed too.
+        "scenario \"Replace\" { q = GET \"/a\" { timeout 5s } s = q.body }",
+    ] {
+        let result = reconcile(&old, &lower(&parse(source), &LowerContext::new(project))).unwrap();
+        let Document::Scenario(new) = result.document else {
+            panic!()
+        };
+        let request = new.graph.nodes.iter().find(|n| n.handle == "q").unwrap();
+        assert_ne!(request.id, "old-request", "{source}");
+        assert_eq!(
+            result.unpositioned,
+            std::slice::from_ref(&request.id),
+            "{source}"
+        );
+        let reader = new.graph.nodes.iter().find(|n| n.handle == "s").unwrap();
+        assert_eq!(reader.id, "old-reader");
+    }
+}
