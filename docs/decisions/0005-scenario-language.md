@@ -77,7 +77,7 @@ scenario_item = "description" STRING
 component  = "component" IDENT STRING "{" component_item* "}" ;
 component_item = "description" STRING
            | attribute* "input" key ":" type ("=" literal)?
-           | "action" key
+           | "action" key ( ":" type ("contract" STRING)? )?
            | statement ;
 type       = "any" | "string" | "number" | "boolean" | "object" | "array" ;
 ```
@@ -104,7 +104,8 @@ form       = "start"
            | IDENT ("@" REVISION)? "(" ( key ":" expr ("," key ":" expr)* ","? )? ")"
            | expr ;
 request_block = "{" request_item* "}" ;
-request_item  = "headers" object
+request_item  = "argument" key "=" expr
+           | "headers" object
            | "query" object
            | "body" ( "text" )? expr
            | "timeout" DURATION
@@ -151,6 +152,7 @@ postfix  = primary ( "." IDENT | "[" ( NUMBER | STRING ) "]" )* ;
 primary  = literal | STRING | IDENT | call | "?"
          | "env" "." IDENT | "env" "[" STRING "]"
          | "param" "." IDENT | "param" "[" STRING "]"
+         | "input" "." IDENT | "input" "[" STRING "]"
          | "{" ( key ":" expr ( "," key ":" expr )* ","? )? "}"
          | "[" ( expr ( "," expr )* ","? )? "]"
          | "(" expr ")" ;
@@ -169,6 +171,7 @@ arguments = expr ("," expr)* ","? | key ":" expr ("," key ":" expr)* ","? ;
 | `{ a: x }`, `[x, y]` | always `object` / `array`, also when every leaf is a literal |
 | `env.name` | `environment` |
 | `param.name` | `parameter` |
+| `input.name.path` | local request `argument` |
 | `handle.path` | `reference` |
 
 Unary minus applies only to number literals, because no operator negates a value.
@@ -224,6 +227,39 @@ Consecutive `//` lines directly above a statement, and a comment at the end of
 its line, become the node's `note`. The printer writes notes back as line comments
 above the statement. Any other comment produces a warning that the formatter will
 drop it. `@label("…")` sets the display label.
+
+### Exact document metadata
+
+The first semantic implementation exposed fields that the shorthand could not
+retain: absent versus explicitly default configuration values, optional input
+flags, action metadata independent of the input, whitespace in notes and extra
+input bindings permitted by the document model. The following spellings preserve
+them without writing internal identities or layout:
+
+- `@config({ ... })` replaces a block's complete `NodeConfig`, excluding
+  `componentId` and `revision` (which come only from the component call). This is
+  literal JSON with the document's field names. Unknown fields are errors. It is
+  emitted only when the shorthand would change configuration presence or values.
+- `@inputs({ name: expression, ... })` replaces the complete input map when the
+  block shorthand cannot carry all its slots. Bindings use ordinary expressions,
+  never raw node IDs. It does not bypass document validation.
+- `@note("...")` preserves an exact note that trimmed line comments cannot carry.
+- Component inputs support `@required(true|false)` and `@exposed(true|false)`;
+  `@optional` and `@hidden` remain the short forms for false.
+- `action key: type contract "id"` specifies action metadata independently of the
+  input's type/contract. Without a type, the action inherits the input metadata.
+  An explicit type without `contract` means an absent action contract.
+
+Named request arguments are declared with `argument key = expression` inside a
+request block. They are used as `input.key` in expressions and templates; each
+request has its own scope. HTTP field names are reserved. Dependencies among
+arguments are acyclic; declaration order has no meaning. See
+[ADR 0004's follow-up](0004-document-format-v2.md#named-request-arguments-follow-up-23-october-2026).
+
+Printing an existing editor document can retain an intentionally unresolved
+environment name. `LowerContext::document` supports this projection;
+`LowerContext::new` and CLI `check`/`apply` require workspace name resolution.
+No environment or secret values are substituted into source.
 
 ### Identity during edits
 

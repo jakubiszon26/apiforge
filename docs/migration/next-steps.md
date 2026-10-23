@@ -13,9 +13,11 @@ not a statement that every issue remains open or that every proposed fix shipped
 The active feature work is the [scenario code and canvas plan](../plans/code-and-canvas.md).
 M1 (format v2) and S1 (storage safety) are implemented and locally verified on
 Linux. M4, scenario language and CLI, is in progress on `feat/script-language`.
-The lexer, recovering parser, syntax formatter and `apiforge fmt` are implemented;
-lowering, identity reconciliation, document printing and `check/print/apply` are
-next. See the [implementation notes](scenario-language.md). M2 layout/routing
+The lexer, recovering parser, lowering, identity reconciliation, document printer
+and `apiforge fmt/check/print/apply` are implemented. Broader semantic graph/fuzz
+coverage, detailed static type diagnostics and the acceptance review remain.
+The named request argument regression is fixed across inspector, bindings, runner
+and source projection. See the [implementation notes](scenario-language.md). M2 layout/routing
 can follow independently. The milestone order puts storage safety before anything
 else extends what is stored. Items
 5 and 6 and Windows evidence stay release gates and are scheduled between the

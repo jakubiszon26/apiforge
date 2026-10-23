@@ -58,7 +58,7 @@ must not be reserved words of the language.
 | Kind | Inputs | Config | Outputs |
 | --- | --- | --- | --- |
 | `start` | — | — | — |
-| `request` | `url` (required), `headers`, `query`, `body` | `method`, `timeoutMs`, `bodyFormat` (`json` \| `text`), `sampleResponse`, `sampleStatus`, `contractId` | `body`, `status`, `headers`, `duration` |
+| `request` | `url` (required), `headers`, `query`, `body`, user-defined named arguments | `method`, `timeoutMs`, `bodyFormat` (`json` \| `text`), `sampleResponse`, `sampleStatus`, `contractId` | `body`, `status`, `headers`, `duration` |
 | `value` | `value` | `variable: bool` | `value` |
 | `assert`, `if` | `actual`, `expected` | `predicate`, `tolerance` | `value`, `passed` |
 | `condition` | `value` (optional), `actual1`, `expected1`, … | `predicates`, `match`, `tolerance` | `value`, `passed` |
@@ -122,6 +122,39 @@ template { parts: Vec<TemplatePart> }   // TemplatePart = text { text } | value 
 Parameter bindings name scenario parameters, or component inputs inside a
 component. Environment bindings name environment variables. Nothing falls back to
 the environment implicitly any more.
+
+### Named request arguments (follow-up, 23 October 2026)
+
+The user reported that removing named request inputs was a regression and
+explicitly requested their restoration. Requests retain user-defined entries in
+`inputs`, alongside `url`, `headers`, `query` and `body`. Their ports use type
+`any`; their binding controls the actual value. They can be wired from earlier
+steps or set to literals, parameters, environment values and expressions.
+
+A new leaf `argument { name, path }` reads an input of the same request. Its field
+syntax is `input.name.path`, including `input["quoted name"]`. URL, query and
+header templates use `{{input.name}}`. Bodies use this binding directly to keep
+JSON types. This explicit namespace does not restore `templateInputs`, declared
+`inputPorts`, colon substitution or implicit environment fallback.
+
+Only user-defined inputs can be referenced locally. HTTP field names are reserved.
+Local argument dependencies form a DAG and are resolved once in dependency order
+before HTTP fields, independently of insertion order. Missing names, local cycles
+and argument leaves outside a request fail import/validation. Scope is reset for
+every step and component invocation. Ordinary reference leaves inside an argument
+still contribute graph data dependencies. Removing a used argument is disabled
+until its uses are removed. Existing version-two files require no conversion.
+
+The request inspector also projects JSON/text bodies into a multiline editor.
+`{"productId": "{{input.productId}}"}` and the unquoted value variant create a
+local argument binding; a full placeholder preserves number, boolean, null,
+object and array values. Partial interpolation is text. Text bodies accept the
+same templates. Literal braces are escaped in this projection; opening the editor
+never activates previously literal data. Advanced expressions remain available
+under **Body value source**. Invalid edits stay as a UI draft, preserving the last
+valid binding. This is an editing conversion, not a second runtime substitution
+pass. Nested binding controls exclude only the owning request input from source
+choices, so a body field and request argument may have the same name.
 
 ### Components
 
