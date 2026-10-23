@@ -509,13 +509,19 @@ impl Printer<'_> {
                 let definition = graph::component_definition(self.project, node);
                 expected_config.component_id = node.config.component_id.clone();
                 expected_config.revision = node.config.revision;
-                represented.extend(node.inputs.keys().cloned());
+                // Call arguments name declared inputs only. Extra bindings, which
+                // the document model permits, are carried by `@inputs`.
+                let declared = |name: &String| {
+                    definition.is_some_and(|c| c.inputs.iter().any(|p| p.name == *name))
+                };
+                represented.extend(node.inputs.keys().filter(|n| declared(n)).cloned());
                 Form::Value(expr(ExprKind::Call {
                     name: definition.map_or("Unknown", |c| c.handle.as_str()).into(),
                     revision: node.config.revision,
                     arguments: node
                         .inputs
                         .iter()
+                        .filter(|(name, _)| declared(name))
                         .map(|(name, v)| Argument {
                             name: Some(name.clone()),
                             value: self.binding(v),

@@ -479,3 +479,23 @@ fn printing_is_a_fixed_point_when_a_branch_reads_a_later_statement() {
         "{first}"
     );
 }
+
+#[test]
+fn extra_component_instance_inputs_print_as_exact_metadata() {
+    // Found by fuzz_semantics: the call shorthand accepts declared inputs only.
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    let Document::Scenario(scenario) = lowered(
+        "scenario \"Extra\" { a = 1 @inputs({ value: a, id: 5 }) p = produkt(id: 1) }",
+        project,
+    ) else {
+        panic!()
+    };
+    let text = print_scenario(project, &scenario).unwrap();
+    assert!(text.contains("@inputs"), "{text}");
+    let document = lowered(&text, project);
+    assert_eq!(
+        semantic(&document, project),
+        semantic(&Document::Scenario(scenario), project)
+    );
+}
