@@ -320,29 +320,81 @@ impl Printer<'_> {
             _ => None,
         }
     }
+    /// The same rule as `parent`, for every node of a graph at once.
+    fn parents<'g>(&self, graph: &'g Graph) -> HashMap<&'g str, (&'g str, Branch)> {
+        let mut incoming: HashMap<&str, Vec<&OrderEdge>> = HashMap::new();
+        for edge in &graph.edges {
+            incoming.entry(edge.target.as_str()).or_default().push(edge);
+        }
+        incoming
+            .into_iter()
+            .filter_map(|(target, edges)| match edges.as_slice() {
+                [edge]
+                    if self
+                        .nodes
+                        .get(edge.source.as_str())
+                        .is_some_and(|n| n.kind == NodeKind::If) =>
+                {
+                    edge.branch
+                        .map(|branch| (target, (edge.source.as_str(), branch)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
     fn statements(&self, graph: &Graph, parent: Option<(&str, Branch)>) -> Vec<Statement> {
-        // Stable topological order includes both data and ordering dependencies.
-        let mut remaining: Vec<_> = graph.nodes.iter().collect();
-        let mut ordered = vec![];
-        let mut done = HashSet::new();
-        while !remaining.is_empty() {
-            let index = remaining
-                .iter()
-                .position(|n| {
-                    graph::dependencies(graph, &n.id)
-                        .iter()
-                        .all(|id| done.contains(id) || !graph.nodes.iter().any(|n| n.id == *id))
-                })
-                .unwrap_or(0);
-            let node = remaining.remove(index);
-            done.insert(node.id.as_str());
-            ordered.push(node);
+        // Each block is ordered on its own: a member depends on another when
+        // anything nested in it does. A global order filtered per block is not
+        // enough, because a nested statement may depend on a later outer one.
+        // Lowering keeps text order, and this greedy choice reproduces an order
+        // it produced, so print -> lower -> print is a fixed point. Dependency
+        // cycles between blocks fall back to document order.
+        let parents = self.parents(graph);
+        let members: Vec<&Node> = graph
+            .nodes
+            .iter()
+            .filter(|n| parents.get(n.id.as_str()).copied() == parent)
+            .collect();
+        let position: HashMap<&str, usize> = members
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.id.as_str(), index))
+            .collect();
+        // The member whose block contains a node, possibly through nested IFs.
+        let owner = |id| {
+            let mut current: &str = id;
+            for _ in 0..=graph.nodes.len() {
+                if let Some(&index) = position.get(current) {
+                    return Some(index);
+                }
+                current = parents.get(current)?.0;
+            }
+            None
+        };
+        let mut requires = vec![HashSet::new(); members.len()];
+        for (id, dependencies) in graph::dependency_index(graph) {
+            let Some(member) = owner(id) else { continue };
+            for dependency in dependencies {
+                if let Some(other) = owner(dependency)
+                    && other != member
+                {
+                    requires[member].insert(other);
+                }
+            }
+        }
+        let mut done = vec![false; members.len()];
+        let mut ordered = Vec::with_capacity(members.len());
+        while ordered.len() < members.len() {
+            let mut remaining = (0..members.len()).filter(|&index| !done[index]);
+            let next = remaining
+                .clone()
+                .find(|&index| requires[index].iter().all(|&other| done[other]))
+                .or_else(|| remaining.next())
+                .expect("a member remains");
+            done[next] = true;
+            ordered.push(self.statement(members[next], graph));
         }
         ordered
-            .into_iter()
-            .filter(|node| self.parent(graph, node) == parent)
-            .map(|node| self.statement(node, graph))
-            .collect()
     }
     fn statement(&self, node: &Node, graph: &Graph) -> Statement {
         let mut attributes = vec![];

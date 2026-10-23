@@ -456,3 +456,26 @@ fn printing_a_historical_component_keeps_latest_instances_bound_to_their_exports
         );
     }
 }
+
+#[test]
+fn printing_is_a_fixed_point_when_a_branch_reads_a_later_statement() {
+    // `b` sits in the ELSE block but reads `later`, which follows the IF. A global
+    // order filtered per block swapped `b` and `c` on every second print.
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    let Document::Scenario(scenario) = lowered(
+        "scenario \"Order\" { later = x.value x = if true { a = 1 } else { b = later + 1 c = 2 } }",
+        project,
+    ) else {
+        panic!()
+    };
+    let first = print_scenario(project, &scenario).unwrap();
+    let Document::Scenario(again) = lowered(&first, project) else {
+        panic!()
+    };
+    assert_eq!(print_scenario(project, &again).unwrap(), first);
+    assert!(
+        first.find("b = ").unwrap() < first.find("c = ").unwrap(),
+        "{first}"
+    );
+}
