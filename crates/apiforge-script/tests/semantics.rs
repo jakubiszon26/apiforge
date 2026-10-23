@@ -499,3 +499,28 @@ fn extra_component_instance_inputs_print_as_exact_metadata() {
         semantic(&Document::Scenario(scenario), project)
     );
 }
+
+#[test]
+fn document_validation_errors_point_at_their_statement() {
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    for (source, statement) in [
+        (
+            "scenario \"Located\" {\n  a = 1\n  x = if a == 1 {\n    b = start\n  }\n}",
+            "b = start",
+        ),
+        (
+            "scenario \"Located\" {\n  x = if true {\n  }\n  @after(x)\n  y = 2\n}",
+            "@after(x)\n  y = 2",
+        ),
+    ] {
+        let result = lower(&parse(source), &LowerContext::new(project));
+        let errors: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == apiforge_script::Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{:?}", result.diagnostics);
+        assert_eq!(&source[errors[0].range.clone()], statement);
+    }
+}

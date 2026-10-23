@@ -69,6 +69,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         arguments: None,
         allow_unresolved_environment: context.allow_unresolved_environment,
         component: context.component,
+        ranges: HashMap::new(),
     };
     let document = tree.file.as_ref().map(|file| lower.file(file));
     // Run the same structural, cycle and size validation as document imports.
@@ -92,11 +93,13 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
             }
         }
         if let Err(error) = apiforge_core::validate_project(&project) {
-            let message = match error {
-                ImportError::InvalidDocument { message, .. } => message,
-                _ => "Invalid lowered document",
+            let (range, message) = match &error {
+                ImportError::InvalidDocument { path, message } => {
+                    (located(path, document, &project, &lower.ranges), *message)
+                }
+                _ => (None, "Invalid lowered document"),
             };
-            lower.error(0..tree.source.len(), message);
+            lower.error(range.unwrap_or(0..tree.source.len()), message);
         }
     }
     Lowered {
@@ -114,6 +117,42 @@ struct Lower<'a> {
     arguments: Option<HashSet<String>>,
     allow_unresolved_environment: bool,
     component: Option<&'a Component>,
+    /// Statement ranges by lowered node ID, to locate document validation errors.
+    ranges: HashMap<String, Range<usize>>,
+}
+
+/// The statement behind a validation path such as `….graph.edges[3].target`.
+/// An edge is reported at its target, whose statement declares the ordering.
+fn located(
+    path: &str,
+    document: &Document,
+    project: &Project,
+    ranges: &HashMap<String, Range<usize>>,
+) -> Option<Range<usize>> {
+    let (graph, rest) = match document {
+        Document::Scenario(scenario) => {
+            if let Some((_, rest)) = path.split_once("scenarios[0].graph.") {
+                (&scenario.graph, rest)
+            } else {
+                (
+                    &scenario.cleanup,
+                    path.split_once("scenarios[0].cleanup.")?.1,
+                )
+            }
+        }
+        Document::Component(component) => {
+            let prefix = format!("components[{}].", project.components.len() - 1);
+            (&component.graph, path.split_once(prefix.as_str())?.1)
+        }
+    };
+    let (collection, rest) = rest.split_once('[')?;
+    let index: usize = rest.split_once(']')?.0.parse().ok()?;
+    let id = match collection {
+        "nodes" => &graph.nodes.get(index)?.id,
+        "edges" => &graph.edges.get(index)?.target,
+        _ => return None,
+    };
+    ranges.get(id).cloned()
 }
 impl Lower<'_> {
     fn error(&mut self, range: Range<usize>, message: &'static str) {
@@ -535,6 +574,7 @@ impl Lower<'_> {
             {
                 graph.edges.truncate(edge_start);
             } else {
+                self.ranges.insert(node.id.clone(), statement.range.clone());
                 graph.nodes.push(node);
             }
             if let Form::If {
