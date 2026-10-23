@@ -49,6 +49,12 @@ enum RunKind {
     SingleSelected,
 }
 
+#[derive(Clone, Debug)]
+enum StoragePrompt {
+    Recovery(String),
+    Conflict(String),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LayoutMode {
     Standard,
@@ -83,25 +89,44 @@ pub struct App {
     dialog: Option<Dialog>,
     files: files::Files,
     closing: bool,
+    storage_message: Option<String>,
+    storage_prompt: Option<StoragePrompt>,
+    storage_busy: bool,
 }
 
 impl App {
     pub fn new(context: &egui::Context, source: Source) -> Self {
         theme::apply(context);
         let mut notice = None;
+        let mut storage_prompt = None;
+        let mut storage_message = None;
         let (workspace, saver) = match source {
             Source::Session(workspace) => (workspace, None),
             Source::Storage(store) => {
+                let read_only = store.is_read_only();
+                if read_only {
+                    storage_message = Some("This workspace is open in another API Forge window. Changes here are not saved.".into());
+                }
                 let (workspace, writable) = match store.load() {
                     Ok(Some(loaded)) => {
-                        notice = loaded.recovered;
-                        (loaded.workspace, true)
+                        if let Some(reason) = loaded.recovered {
+                            if read_only {
+                                notice = Some("A workspace backup is available. Close the other API Forge window and reopen this one to restore it.".into());
+                            } else {
+                                storage_prompt = Some(StoragePrompt::Recovery(reason));
+                            }
+                            (default_workspace(), !read_only)
+                        } else {
+                            (loaded.workspace, !read_only)
+                        }
                     }
-                    Ok(None) => (default_workspace(), true),
-                    Err(apiforge_storage::StorageError::Invalid {
-                        source: apiforge_core::ImportError::LegacyVersion,
-                        ..
-                    }) => match store.archive_legacy_workspace() {
+                    Ok(None) => (default_workspace(), !read_only),
+                    Err(apiforge_storage::StorageError::Document(
+                        apiforge_storage::DocumentError::Invalid {
+                            source: apiforge_core::ImportError::LegacyVersion,
+                            ..
+                        },
+                    )) => match store.archive_legacy_workspace() {
                         Ok(true) => {
                             notice = Some(
                                 "Your format version 1 workspace and any backup were preserved as workspace.v1.json and workspace.v1.json.bak. Convert the archived workspace with apiforge-convert-v1 to import it. A new demo workspace was opened.".into(),
@@ -126,6 +151,9 @@ impl App {
                         (default_workspace(), false)
                     }
                 };
+                if !writable && storage_message.is_none() {
+                    storage_message = Some("Temporary workspace — autosave is disabled. Export to keep changes from this session.".into());
+                }
                 let repaint = context.clone();
                 let saver = writable
                     .then(|| {
@@ -165,6 +193,9 @@ impl App {
             dialog: None,
             files: files::Files::new(context.clone()),
             closing: false,
+            storage_message,
+            storage_prompt,
+            storage_busy: false,
         }
     }
 
@@ -186,6 +217,10 @@ impl App {
     /// Requests cancellation once, then keeps polling until cleanup finishes.
     /// The window owns the overall close deadline; this method never waits.
     pub fn prepare_close(&mut self) -> bool {
+        self.poll_storage();
+        if self.storage_prompt.is_some() || self.storage_busy {
+            return false;
+        }
         if !self.closing {
             self.save_if_changed();
             self.closing = true;
@@ -215,27 +250,143 @@ impl App {
     }
 
     pub fn close_save_error(&self) -> Option<String> {
+        if self.storage_prompt.is_some() {
+            return Some(
+                "Resolve the workspace file change or choose a temporary session before closing."
+                    .into(),
+            );
+        }
         if !self.closing {
             return None;
         }
         match self.saver.as_ref().map(Saver::status) {
-            Some(SaveStatus::Failed(error)) => Some(error),
+            Some(SaveStatus::Failed(error) | SaveStatus::Conflict(error)) => Some(error),
             _ => None,
         }
     }
 
     pub fn abort_close_after_save_error(&mut self, error: String) {
         self.closing = false;
+        if self.storage_prompt.is_some() {
+            self.notice = Some(error);
+            return;
+        }
         self.notice = Some(format!(
             "Your latest changes could not be saved: {error}. The window is staying open. Fix the storage problem and choose Retry save."
         ));
     }
 
     fn retry_save(&mut self) {
+        if self.storage_prompt.is_some() || self.storage_busy {
+            return;
+        }
         if let Some(saver) = &self.saver {
             saver.save(self.editor.workspace());
             saver.flush();
             self.notice = None;
+        }
+    }
+
+    fn poll_storage(&mut self) {
+        let loaded = self.saver.as_ref().and_then(Saver::take_loaded);
+        if let Some(result) = loaded {
+            self.storage_busy = false;
+            match result {
+                Ok(Some(loaded)) if loaded.recovered.is_some() => {
+                    self.storage_prompt = Some(StoragePrompt::Recovery(loaded.recovered.unwrap()));
+                }
+                Ok(loaded) => {
+                    self.clear_run();
+                    self.editor =
+                        Editor::new(loaded.map_or_else(default_workspace, |l| l.workspace));
+                    self.canvas = Canvas::default();
+                    self.inspector = Inspector::default();
+                    self.inspector_collapsed = false;
+                    self.navigator = Navigator::default();
+                    self.saved_revision = self.editor.revision();
+                    self.storage_prompt = None;
+                    self.storage_message = None;
+                    self.notice = Some("Workspace reloaded from disk.".into());
+                    self.dialog = None;
+                    self.secrets = dialogs::SessionSecrets::new();
+                }
+                Err(message) => self.storage_prompt = Some(StoragePrompt::Conflict(message)),
+            }
+        }
+        if self.storage_prompt.is_none()
+            && !self.storage_busy
+            && let Some(SaveStatus::Conflict(message)) = self.saver.as_ref().map(Saver::status)
+        {
+            self.storage_message = Some(
+                "Saving is paused because the workspace file changed outside this window.".into(),
+            );
+            self.storage_prompt = Some(StoragePrompt::Conflict(message));
+        }
+    }
+
+    fn reload_storage(&mut self, restore: bool) {
+        if self.storage_busy || self.is_running() {
+            return;
+        }
+        if let Some(saver) = &self.saver {
+            self.storage_busy = true;
+            self.notice = None;
+            saver.reload(restore);
+        }
+    }
+
+    fn use_temporary_workspace(&mut self) {
+        if self.storage_busy {
+            return;
+        }
+        self.saver = None;
+        self.storage_prompt = None;
+        self.closing = false;
+        self.storage_message = Some(
+            "Temporary workspace — changes here are not saved. Export to keep your work.".into(),
+        );
+    }
+
+    fn storage_dialog(&mut self, context: &egui::Context) {
+        let Some(prompt) = self.storage_prompt.clone() else {
+            return;
+        };
+        let recovery = matches!(prompt, StoragePrompt::Recovery(_));
+        let (StoragePrompt::Recovery(message) | StoragePrompt::Conflict(message)) = prompt;
+        let mut reload = false;
+        let mut temporary = false;
+        let response = dialogs::centered_modal(egui::Id::new("storage-decision"), context)
+            .show(context, |ui| {
+                ui.set_width((context.content_rect().width() - 80.0).clamp(320.0, 520.0));
+                ui.heading(if recovery { "Restore workspace backup?" } else { "The workspace file changed outside this window" });
+                ui.add_space(8.0);
+                ui.label(message);
+                ui.label(if recovery {
+                    "The original file is untouched. Restore the last valid backup, or open a temporary workspace."
+                } else {
+                    "Saving has stopped. Reloading discards your local changes. You can keep editing in a temporary session and export your work."
+                });
+                ui.add_space(12.0);
+                if self.storage_busy {
+                    ui.spinner();
+                    ui.label("Reading workspace…");
+                } else {
+                    reload = ui.add_enabled(self.saver.is_some() && !self.is_running(),
+                        widgets::primary_button(if recovery { "Restore backup" } else { "Reload and discard local changes" })).clicked();
+                    temporary = ui.button("Continue without saving").clicked();
+                    if self.is_running() { ui.label("Wait for the active run to finish before reloading."); }
+                }
+            });
+        if !self.storage_busy
+            && response.is_top_modal
+            && context.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            temporary = true;
+        }
+        if reload {
+            self.reload_storage(recovery);
+        } else if temporary {
+            self.use_temporary_workspace();
         }
     }
 
@@ -277,7 +428,12 @@ impl App {
     }
 
     fn start_run(&mut self, kind: RunKind) {
-        if self.closing || self.is_running() || self.editor.draft().is_some() {
+        if self.closing
+            || self.is_running()
+            || self.editor.draft().is_some()
+            || self.storage_prompt.is_some()
+            || self.storage_busy
+        {
             return;
         }
         let selected = (self.editor.phase() == Phase::Main)
@@ -342,6 +498,9 @@ impl App {
     }
 
     fn save_if_changed(&mut self) {
+        if self.storage_prompt.is_some() || self.storage_busy {
+            return;
+        }
         if self.editor.revision() != self.saved_revision {
             self.saved_revision = self.editor.revision();
             if let Some(saver) = &self.saver {
@@ -358,6 +517,10 @@ impl App {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll_run();
+        self.poll_storage();
+        if self.storage_prompt.is_some() || self.storage_busy {
+            ui.disable();
+        }
         if let Some(result) = self.files.poll() {
             self.file_result(result);
         }
@@ -441,6 +604,7 @@ impl App {
             self.inspector_collapsed = false;
             self.canvas.reveal(id);
         }
+        self.storage_dialog(ui.ctx());
         self.save_if_changed();
     }
 
@@ -781,6 +945,10 @@ impl App {
                 });
             });
         });
+        if let Some(message) = &self.storage_message {
+            ui.add_space(6.0);
+            ui.label(RichText::new(message).size(12.0).color(theme::DANGER));
+        }
         if let Some(notice) = self.notice.clone() {
             ui.add_space(6.0);
             egui::Frame::new()
@@ -1369,7 +1537,12 @@ impl App {
     // ----- Shortcuts, dialogs and files ------------------------------------------
 
     fn shortcuts(&mut self, context: &egui::Context) {
-        if self.dialog.is_some() || self.navigator.is_open() || self.closing {
+        if self.dialog.is_some()
+            || self.navigator.is_open()
+            || self.closing
+            || self.storage_prompt.is_some()
+            || self.storage_busy
+        {
             return;
         }
         if context.input_mut(|input| {
@@ -1654,6 +1827,14 @@ mod tests {
     }
 
     fn draw_frame(app: &mut App, context: &egui::Context, events: Vec<egui::Event>) {
+        let _ = draw_output(app, context, events);
+    }
+
+    fn draw_output(
+        app: &mut App,
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
         let mut output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1666,6 +1847,172 @@ mod tests {
             |ui| app.ui(ui),
         );
         output.textures_delta.clear();
+        output
+    }
+
+    fn click_storage_button(app: &mut App, context: &egui::Context, label: &str) {
+        for _ in 0..3 {
+            draw_frame(app, context, vec![]);
+        }
+        let output = draw_output(app, context, vec![]);
+        let point = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("button text not rendered: {label}"));
+        let click = |pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        draw_frame(
+            app,
+            context,
+            vec![egui::Event::PointerMoved(point), click(true)],
+        );
+        draw_frame(app, context, vec![click(false)]);
+    }
+
+    fn wait_for_storage(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while (app.save_pending() || app.storage_busy) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            app.poll_storage();
+        }
+        app.poll_storage();
+        assert!(!app.storage_busy && !app.save_pending());
+    }
+
+    #[test]
+    fn a_second_window_stays_read_only_and_displays_a_persistent_warning() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let writer = WorkspaceStore::open_exclusive(&path).unwrap();
+        writer.save(&default_workspace()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let context = egui::Context::default();
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_read_only(&path).unwrap()),
+        );
+        assert!(app.saver.is_none());
+        app.notice = None;
+        app.editor
+            .change_project(|project| project.name = "Local only".into());
+        draw_frame(&mut app, &context, vec![]);
+        assert!(
+            app.storage_message
+                .as_deref()
+                .unwrap()
+                .contains("Changes here are not saved")
+        );
+        drop(app);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn startup_restores_a_backup_only_after_clicking_the_restore_button() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let store = WorkspaceStore::open_exclusive(&path).unwrap();
+        let mut original = default_workspace();
+        original.projects[0].name = "Recovered project".into();
+        store.save(&original).unwrap();
+        store.save(&original).unwrap();
+        std::fs::write(&path, b"{ broken").unwrap();
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Storage(store.clone()));
+        assert!(matches!(
+            app.storage_prompt,
+            Some(StoragePrompt::Recovery(_))
+        ));
+        assert_ne!(app.editor.project().name, "Recovered project");
+        draw_frame(&mut app, &context, vec![]);
+        assert_eq!(std::fs::read(&path).unwrap(), b"{ broken");
+        click_storage_button(&mut app, &context, "Restore backup");
+        assert!(app.storage_busy);
+        wait_for_storage(&mut app);
+        assert!(app.storage_prompt.is_none());
+        assert_eq!(app.editor.project().name, "Recovered project");
+        assert!(store.load().unwrap().unwrap().recovered.is_none());
+    }
+
+    #[test]
+    fn escape_declines_recovery_without_touching_either_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let store = WorkspaceStore::open_exclusive(&path).unwrap();
+        store.save(&default_workspace()).unwrap();
+        store.save(&default_workspace()).unwrap();
+        let backup_path = directory.path().join("workspace.json.bak");
+        let backup = std::fs::read(&backup_path).unwrap();
+        std::fs::write(&path, b"{ broken").unwrap();
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Storage(store));
+        draw_frame(&mut app, &context, vec![]);
+        draw_frame(
+            &mut app,
+            &context,
+            vec![egui::Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert!(app.storage_prompt.is_none());
+        assert!(app.saver.is_none());
+        assert!(app.storage_message.is_some());
+        assert!(app.prepare_close());
+        drop(app);
+        assert_eq!(std::fs::read(path).unwrap(), b"{ broken");
+        assert_eq!(std::fs::read(backup_path).unwrap(), backup);
+    }
+
+    #[test]
+    fn external_changes_show_a_conflict_and_reload_discards_only_local_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let store = WorkspaceStore::open_exclusive(&path).unwrap();
+        store.save(&default_workspace()).unwrap();
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Storage(store.clone()));
+        let mut external = default_workspace();
+        external.projects[0].name = "Changed on disk".into();
+        let bytes = serde_json::to_vec(&external).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        app.editor
+            .change_project(|project| project.name = "Local edit".into());
+        app.save_if_changed();
+        app.saver.as_ref().unwrap().flush();
+        wait_for_storage(&mut app);
+        assert!(matches!(
+            app.storage_prompt,
+            Some(StoragePrompt::Conflict(_))
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(!app.prepare_close());
+        assert!(app.close_save_error().is_some());
+        click_storage_button(&mut app, &context, "Reload and discard local changes");
+        wait_for_storage(&mut app);
+        assert!(app.storage_prompt.is_none());
+        assert_eq!(app.editor.project().name, "Changed on disk");
+        app.editor
+            .change_project(|project| project.name = "New edit after reload".into());
+        app.save_if_changed();
+        app.saver.as_ref().unwrap().flush();
+        wait_for_storage(&mut app);
+        assert_eq!(
+            store.load().unwrap().unwrap().workspace.projects[0].name,
+            "New edit after reload"
+        );
     }
 
     fn command_key(key: Key) -> egui::Event {
@@ -1766,7 +2113,8 @@ mod tests {
     fn unreadable_startup_documents_are_protected_from_autosave() {
         for bytes in [b"{ truncated".as_slice(), br#"{"version":2}"#.as_slice()] {
             let directory = tempfile::tempdir().unwrap();
-            let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+            let store =
+                WorkspaceStore::open_exclusive(directory.path().join("workspace.json")).unwrap();
             std::fs::write(store.path(), bytes).unwrap();
             let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
             assert!(app.saver.is_none());
@@ -1782,7 +2130,8 @@ mod tests {
     #[test]
     fn legacy_startup_archives_originals_and_allows_saving_a_fresh_workspace() {
         let directory = tempfile::tempdir().unwrap();
-        let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+        let store =
+            WorkspaceStore::open_exclusive(directory.path().join("workspace.json")).unwrap();
         let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
         std::fs::write(store.path(), legacy).unwrap();
         std::fs::write(directory.path().join("workspace.json.bak"), legacy).unwrap();
@@ -1811,7 +2160,8 @@ mod tests {
     #[test]
     fn a_legacy_archive_conflict_disables_autosave_and_keeps_the_original() {
         let directory = tempfile::tempdir().unwrap();
-        let store = WorkspaceStore::at(directory.path().join("workspace.json"));
+        let store =
+            WorkspaceStore::open_exclusive(directory.path().join("workspace.json")).unwrap();
         let legacy = include_bytes!("../../../tools/convert-v1/sources/workspace-v1.json");
         std::fs::write(store.path(), legacy).unwrap();
         let archive = directory.path().join("workspace.v1.json");
@@ -1830,13 +2180,12 @@ mod tests {
     #[test]
     fn close_keeps_unsaved_changes_open_and_retry_persists_them() {
         let directory = tempfile::tempdir().unwrap();
-        let blocker = directory.path().join("blocked-parent");
-        let store = WorkspaceStore::at(blocker.join("workspace.json"));
+        let blocker = directory.path().join("workspace.json.bak");
+        let store =
+            WorkspaceStore::open_exclusive(directory.path().join("workspace.json")).unwrap();
         store.save(&default_workspace()).unwrap();
         let mut app = App::new(&egui::Context::default(), Source::Storage(store.clone()));
-        std::fs::remove_file(store.path()).unwrap();
-        std::fs::remove_dir(&blocker).unwrap();
-        std::fs::write(&blocker, b"not a directory").unwrap();
+        std::fs::create_dir(&blocker).unwrap();
         app.editor
             .change_project(|project| project.name = "Must survive close".into());
         assert!(!app.prepare_close());
@@ -1851,7 +2200,7 @@ mod tests {
         assert!(app.notice.as_deref().unwrap().contains("staying open"));
         assert_eq!(app.editor.project().name, "Must survive close");
 
-        std::fs::remove_file(&blocker).unwrap();
+        std::fs::remove_dir(&blocker).unwrap();
         app.retry_save();
         let deadline = Instant::now() + Duration::from_secs(5);
         while !app.prepare_close() && Instant::now() < deadline {

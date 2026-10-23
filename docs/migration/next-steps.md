@@ -30,8 +30,11 @@ screen.
 3. **Built-in demo API (FUNC-07):** review the preserved unfinished implementation
    in `.gui-qa/history/unfinished-M01.patch`, especially shutdown blocking, before
    reuse. The desktop still needs a separate demo API executable for Live mode.
-4. **Storage (STOR-01):** prevent concurrent writers, detect external changes and
-   provide deliberate backup recovery. Existing atomic writes do not cover these.
+4. **Storage (STOR-01 / S1):** directory-level single-writer sessions, SHA-256
+   external-change checks, read-only secondary windows, deliberate backup recovery
+   and the draft storage API are implemented and verified on Linux. See
+   [ADR 0008](../decisions/0008-storage-sessions.md). Native Windows execution
+   remains a release gate. The next feature milestone is M4, the scenario language.
 5. **Interrupted Live run journal (RUN-02):** record uncertain effects after a crash.
    Distinguish DNS/TLS failures beyond the current broad reqwest prefixes.
 6. **Accessibility (A11Y-01):** verify that AccessKit labels reach AT-SPI and test
@@ -48,6 +51,14 @@ executable controller plan. Windows execution, release packaging/signing and
 assistive-technology acceptance still require independent evidence.
 
 ## Local follow-up validation
+
+S1 passes all 273 workspace tests, formatting, Clippy with warnings as errors,
+both fixture checks and a workspace debug build. One ignored helper test is
+launched and killed by its parent process-lock test; it is not an untested case.
+Native KWin evidence covers secondary-window read-only state, an external-change
+conflict and reload, and explicit backup recovery at 1600×1000 and 960×540 client
+sizes. Details and local screenshots are listed in
+[ADR 0008](../decisions/0008-storage-sessions.md).
 
 The format-v2 follow-up on `feat/format-v2` now protects version-one workspaces
 from backup fallback and ordinary saves. Startup archives the original and any

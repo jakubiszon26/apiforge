@@ -18,7 +18,8 @@ one process, and always loaded and saved as a whole. Run history is session-only
 
 ## Decision
 
-The workspace is stored as a single version-one workspace document at
+The workspace is stored as a single workspace document (currently version 2,
+[ADR 0004](0004-document-format-v2.md)) at
 `<data dir>/apiforge/workspace.json` (`~/.local/share/apiforge` on Linux,
 `%APPDATA%\apiforge` on Windows):
 
@@ -28,17 +29,16 @@ The workspace is stored as a single version-one workspace document at
    On Unix the directory is synced as well.
 3. Before a save, the previous file is copied to `workspace.json.bak`, but only when it
    is a readable document, so a corrupt file never replaces the last good backup.
-4. Loading falls back to the backup when the main file is unreadable and tells the user;
-   the corrupt main file stays on disk until the next successful save.
+4. Loading offers a backup candidate when the main file is corrupt or missing.
+   Restoring it requires explicit confirmation; see [ADR 0008](0008-storage-sessions.md).
 5. Values of variables listed in `environment.secretNames` are never written.
 
 ## Consequences
 
 - Storage, export and import share one format and one validator; a saved workspace can
   always be opened with File → Import.
-- No schema migrations are needed while the document format stays at version one; a
-  future format version needs an explicit migration with a backup, as for imports.
-- Conflicts between two running instances are not detected yet (gate G1, item 5). A
-  lock file or revision check must be added before release.
+- Format changes require an explicit preservation/migration policy, as for imports.
+- [ADR 0008](0008-storage-sessions.md) adds a single-writer lock and content
+  fingerprints. Native Windows execution remains a release gate.
 - SQLite remains an option if run history or large workspaces need incremental
   persistence; this decision does not preclude it.

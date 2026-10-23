@@ -59,10 +59,20 @@ progress. The saved status acknowledges that generation only. Closing flushes pe
 edits and waits for the result; a failed save keeps the window open with **Retry save**.
 After fixing the underlying storage problem, retry saves the current document.
 
-If the saved workspace cannot be loaded, the application opens a temporary session
-with autosave disabled and offers normal JSON export. Existing files remain untouched.
-A workspace from a newer format version is never replaced with an older backup.
-Truncated documents can still recover from a validated backup.
+Only one application window can save a workspace directory. Another window opens
+read-only, with a persistent warning; its edits can be exported but are not autosaved.
+Do not delete `workspace.lock`: the OS releases its lock when the writer exits.
+
+Changes made outside the window stop autosave before the next write. Choose
+**Reload and discard local changes**, or **Continue without saving** to keep editing
+and export the local document. Reloading discards queued saves and resets history.
+
+If the saved workspace cannot be loaded, a valid backup is offered for deliberate
+recovery with **Restore backup**. Until confirmation, neither file is changed and
+the backup is not applied to the editor. Escape opens a temporary session without
+saving. A workspace from a newer format version is never replaced with an older backup.
+If no usable backup exists, the application opens a temporary session with autosave
+disabled and offers normal JSON export.
 
 The native application uses format version 2. Importing version 1 reports a converter
 hint; it never falls back to a different workspace or overwrites the source. At startup,
@@ -70,7 +80,8 @@ an existing version-one workspace and its backup are preserved byte for byte as
 `workspace.v1.json` and `workspace.v1.json.bak` before a fresh demo workspace is opened.
 If either archive name is already taken or archiving fails, autosave stays disabled
 and the originals are preserved. Filesystems without hard-link support take this safe
-temporary-session path. Multiple writers and external edits remain S1 work.
+temporary-session path. See [ADR 0008](../decisions/0008-storage-sessions.md) for
+session locking, fingerprint checks and future code draft storage.
 
 To convert an old document during development, write to a new output path and import it:
 

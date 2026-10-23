@@ -285,6 +285,11 @@ file format and ADR 0007 adds a second file. M4 and M2 are independent and can r
 in parallel worktrees after S1. Proxies (M3) and visual polish wait until the code
 path works end to end.
 
+S1 is implemented and verified on Linux: directory locking, external-change
+fingerprints, deliberate recovery and draft storage are recorded in
+[ADR 0008](../decisions/0008-storage-sessions.md). Native Windows execution remains
+a release gate. The next feature milestone is M4; M2 can follow independently.
+
 **Open release work outside this plan** keeps its place in the
 [migration next steps](../migration/next-steps.md) and is scheduled between
 milestones, not dropped: the interrupted Live run journal (RUN-02) after M4,
