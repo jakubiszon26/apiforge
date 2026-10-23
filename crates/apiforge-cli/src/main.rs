@@ -1,3 +1,4 @@
+mod document;
 use std::{env, ffi::OsString, fs::File, io::Read, path::Path, process::ExitCode};
 
 fn source(path: &Path) -> Result<String, String> {
@@ -28,8 +29,15 @@ fn arguments(args: &[OsString]) -> Option<(&Path, bool)> {
 fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().skip(1).collect();
     if args.len() == 1 && matches!(args[0].to_str(), Some("--help" | "-h")) {
-        println!("apiforge fmt <file.afs> [--check]");
+        println!("apiforge fmt <file.afs> [--check]\n{}", document::USAGE);
         return ExitCode::SUCCESS;
+    }
+    if args
+        .first()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| matches!(s, "check" | "print" | "apply"))
+    {
+        return ExitCode::from(document::run(&args));
     }
     let Some((path, check)) = arguments(&args) else {
         eprintln!("Usage: apiforge fmt <file.afs> [--check]");
@@ -48,12 +56,7 @@ fn main() -> ExitCode {
         Ok(_) => &tree.diagnostics,
         Err(diagnostics) => diagnostics,
     };
-    for diagnostic in diagnostics {
-        eprintln!(
-            "{:?} {}..{}: {}",
-            diagnostic.severity, diagnostic.range.start, diagnostic.range.end, diagnostic.message
-        );
-    }
+    self::diagnostics(diagnostics);
     match formatted {
         Ok(formatted) if check => {
             if text == formatted {
@@ -72,5 +75,14 @@ fn main() -> ExitCode {
             }
         },
         Err(_) => ExitCode::FAILURE,
+    }
+}
+
+fn diagnostics(diagnostics: &[apiforge_script::Diagnostic]) {
+    for diagnostic in diagnostics {
+        eprintln!(
+            "{:?} {}..{}: {}",
+            diagnostic.severity, diagnostic.range.start, diagnostic.range.end, diagnostic.message
+        );
     }
 }
