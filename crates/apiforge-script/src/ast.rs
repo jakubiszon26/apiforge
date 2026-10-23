@@ -66,6 +66,8 @@ pub struct File {
     pub parameters: Vec<(String, Expr)>,
     pub inputs: Vec<Input>,
     pub action: Option<String>,
+    pub action_type: Option<String>,
+    pub action_contract: Option<String>,
     pub statements: Vec<Statement>,
     pub cleanup: Option<Vec<Statement>>,
     pub range: Range<usize>,
@@ -125,6 +127,7 @@ pub enum Form {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RequestItem {
+    Argument { name: String, value: Expr },
     Headers(Expr),
     Query(Expr),
     Body { text: bool, value: Expr },

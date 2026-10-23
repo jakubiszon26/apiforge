@@ -189,6 +189,8 @@ impl<'a> Parser<'a> {
             parameters: vec![],
             inputs: vec![],
             action: None,
+            action_type: None,
+            action_contract: None,
             statements: vec![],
             cleanup: None,
             range: start..start,
@@ -246,6 +248,12 @@ impl<'a> Parser<'a> {
             "action" if !scenario && !self.next_is("=") => {
                 self.bump();
                 let name = self.name()?;
+                if self.eat(":") {
+                    file.action_type = Some(self.value_type()?);
+                }
+                if self.eat("contract") {
+                    file.action_contract = Some(self.plain_string()?);
+                }
                 if file.action.replace(name).is_some() {
                     self.error("Duplicate action argument");
                 }
@@ -471,10 +479,21 @@ impl<'a> Parser<'a> {
                 if self.eat("{") {
                     while !matches!(self.peek(), "}" | "") {
                         let item = self.peek();
-                        if !seen.insert(item.to_owned()) {
+                        if item != "argument" && !seen.insert(item.to_owned()) {
                             self.error("Duplicate request field");
                         }
                         let value = match self.bump() {
+                            "argument" => {
+                                let name = self.name()?;
+                                if !seen.insert(format!("argument:{name}")) {
+                                    self.error("Duplicate request argument");
+                                }
+                                self.expect("=")?;
+                                RequestItem::Argument {
+                                    name,
+                                    value: self.expr(0)?,
+                                }
+                            }
                             "headers" => RequestItem::Headers(self.object()?),
                             "query" => RequestItem::Query(self.object()?),
                             "body" => {

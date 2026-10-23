@@ -73,7 +73,19 @@ pub(crate) fn print_file(file: &File) -> String {
         );
     }
     if let Some(action) = &file.action {
-        line(&mut out, 1, &format!("action {}", key(action)));
+        let value_type = file
+            .action_type
+            .as_ref()
+            .map_or(String::new(), |t| format!(": {t}"));
+        let contract = file
+            .action_contract
+            .as_ref()
+            .map_or(String::new(), |c| format!(" contract {}", quote(c)));
+        line(
+            &mut out,
+            1,
+            &format!("action {}{value_type}{contract}", key(action)),
+        );
     }
     statements(&mut out, &file.statements, 1);
     if let Some(cleanup) = &file.cleanup {
@@ -175,6 +187,9 @@ fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
                 line(out, depth, &format!("{start} {{"));
                 for item in items {
                     let text = match item {
+                        RequestItem::Argument { name, value } => {
+                            format!("argument {} = {}", key(name), expression(value))
+                        }
                         RequestItem::Headers(value) => format!("headers {}", expression(value)),
                         RequestItem::Query(value) => format!("query {}", expression(value)),
                         RequestItem::Body { text, value } => format!(
