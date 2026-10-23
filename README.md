@@ -14,7 +14,9 @@ the first release targets.
 
 - **Graph editor.** Requests, Values (literals, operators, objects, arrays,
   templates and variables), assertions, data conditions, IF/ELSE branches, component
-  instances and Export blocks, wired by data and by explicit ordering.
+  instances and Export blocks, wired by data and by explicit ordering. Blocks are
+  arranged by automatic layout, and wires go around the blocks rather than through
+  them, with right angles or curves.
 - **Components.** A selection becomes a reusable, revisioned component with typed
   inputs, Export outputs and an optional business action.
 - **Runs.** Simulation mode uses saved sample responses; live mode sends real requests.
@@ -82,6 +84,7 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 | `crates/apiforge-runner` | Execution engine, HTTP transport, redaction and the background run service |
 | `crates/apiforge-storage` | Workspace files, atomic saves, backups and single-writer sessions |
 | `crates/apiforge-script` | Scenario language: lexer, parser, formatter, lowering, printer and reconciliation |
+| `crates/apiforge-layout` | Layered automatic layout and orthogonal wire routing, as pure geometry |
 | `crates/apiforge-cli` | The `apiforge` command-line tool |
 | `crates/apiforge-desktop` | The egui application |
 | `crates/apiforge-demo-api` | Local HTTP API used by the demo projects |

@@ -3,6 +3,7 @@
 use super::{
     Camera,
     layout::{Card, RowValue, WIDTH},
+    routing::Routed,
 };
 use crate::{icons::Icon, theme, widgets::paint_label as label};
 use apiforge_core::{
@@ -12,7 +13,7 @@ use apiforge_core::{
 };
 use eframe::egui::{
     self, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2,
-    epaint::CubicBezierShape, vec2,
+    epaint::CubicBezierShape, pos2, vec2,
 };
 use std::collections::HashSet;
 
@@ -121,6 +122,211 @@ pub fn wire(
             FontId::proportional(10.0 * zoom),
             color,
         );
+    }
+}
+
+/// Draws a routed wire: its polyline or rounded corners, the bridges where it
+/// crosses a wire routed before it, the arrowhead, and a branch label.
+///
+/// A bridge is a gap in the line with a small semicircle over it, so a crossing
+/// reads as one wire passing above the other instead of a junction.
+pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected: bool) {
+    let mut color = wire_color(selected, routed.control, routed.branch);
+    if !routed.routed {
+        // A wire drawn directly during a drag is lighter, so the board shows that
+        // the route is provisional until the next idle frame.
+        color = color.gamma_multiply(0.55);
+    }
+    let width = if selected { 2.4 } else { 1.6 };
+    let zoom = camera.zoom;
+    let line: Vec<Pos2> = if routed.pieces.is_empty() {
+        // A direct curve: the wire has no route, or the board is mid-drag.
+        let [start, end] = [
+            routed.points.first().copied().unwrap_or_default(),
+            routed.points.last().copied().unwrap_or_default(),
+        ]
+        .map(|point| camera.to_screen(point));
+        let points = wire_points(start, end, routed.control, zoom);
+        (0..=32)
+            .map(|step| bezier(points, step as f32 / 32.0))
+            .collect()
+    } else {
+        flatten(&routed.pieces, camera)
+    };
+    if line.len() < 2 {
+        return;
+    }
+    let hops: Vec<Pos2> = routed
+        .bridges
+        .iter()
+        .map(|(at, _)| camera.to_screen(*at))
+        .collect();
+    let radius = (5.0 * zoom).clamp(2.0, 7.0);
+    let stroke = Stroke::new(width, color);
+    for run in split_at_bridges(&line, &hops, radius) {
+        match run {
+            Run::Line(points) if routed.control => dashes(painter, &points, stroke, zoom),
+            Run::Line(points) => {
+                painter.add(Shape::line(points, stroke));
+            }
+            Run::Hop { at, direction } => {
+                let normal = vec2(-direction.y, direction.x);
+                let arc: Vec<Pos2> = (0..=8)
+                    .map(|step| {
+                        let angle = std::f32::consts::PI * step as f32 / 8.0;
+                        at - direction * radius * angle.cos() + normal * radius * angle.sin()
+                    })
+                    .collect();
+                painter.add(Shape::line(arc, stroke));
+            }
+        }
+    }
+    let end = line[line.len() - 1];
+    let direction = (end - line[line.len() - 2]).normalized();
+    arrowhead(painter, end, direction, color, zoom);
+    if routed.control
+        && zoom >= 0.6
+        && let Some(branch) = routed.branch
+    {
+        let middle = line[line.len() / 2];
+        painter.text(
+            middle + vec2(6.0, 0.0),
+            Align2::LEFT_CENTER,
+            match branch {
+                Branch::True => "yes",
+                Branch::False => "no",
+            },
+            FontId::proportional(10.0 * zoom),
+            color,
+        );
+    }
+}
+
+fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
+    match (selected, control, branch) {
+        (true, ..) => theme::ACCENT,
+        (_, true, Some(Branch::False)) => theme::BRANCH_NO,
+        (_, true, Some(Branch::True)) => theme::BRANCH_YES,
+        (_, true, None) => theme::CONTROL_WIRE,
+        (_, false, _) => theme::DATA_WIRE,
+    }
+}
+
+fn arrowhead(painter: &Painter, end: Pos2, direction: Vec2, color: Color32, zoom: f32) {
+    let normal = vec2(-direction.y, direction.x);
+    let size = 6.0 * zoom.max(0.6);
+    painter.add(Shape::convex_polygon(
+        vec![
+            end,
+            end - direction * size + normal * size * 0.5,
+            end - direction * size - normal * size * 0.5,
+        ],
+        color,
+        Stroke::NONE,
+    ));
+}
+
+/// A route's pieces as one screen-space polyline; curves are sampled.
+fn flatten(pieces: &[apiforge_layout::Piece], camera: Camera) -> Vec<Pos2> {
+    let point = |p: apiforge_layout::Point| camera.to_screen(pos2(p.x, p.y));
+    let mut line: Vec<Pos2> = Vec::with_capacity(pieces.len() * 4);
+    for piece in pieces {
+        let start = point(piece.from());
+        if line.last().is_none_or(|last| last.distance(start) > 0.01) {
+            line.push(start);
+        }
+        match piece {
+            apiforge_layout::Piece::Line { to, .. } => line.push(point(*to)),
+            apiforge_layout::Piece::Curve {
+                from,
+                control1,
+                control2,
+                to,
+            } => {
+                let control = [*from, *control1, *control2, *to].map(point);
+                line.extend((1..=6).map(|step| bezier(control, step as f32 / 6.0)));
+            }
+        }
+    }
+    line
+}
+
+/// A piece of a drawn wire: a run of line, or a bridge over a crossing.
+enum Run {
+    Line(Vec<Pos2>),
+    Hop { at: Pos2, direction: Vec2 },
+}
+
+/// Splits a polyline where a bridge sits, leaving a gap of `radius` on each side.
+fn split_at_bridges(line: &[Pos2], hops: &[Pos2], radius: f32) -> Vec<Run> {
+    let mut runs = Vec::new();
+    let mut pending: Vec<Pos2> = Vec::new();
+    for pair in line.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let length = from.distance(to);
+        if length <= f32::EPSILON {
+            continue;
+        }
+        let direction = (to - from) / length;
+        let mut on_segment: Vec<(f32, Pos2)> = hops
+            .iter()
+            .filter_map(|hop| {
+                let along = (*hop - from).dot(direction);
+                let across = (*hop - (from + direction * along)).length();
+                (across < 0.5 && along > radius && along < length - radius).then_some((along, *hop))
+            })
+            .collect();
+        on_segment.sort_by(|left, right| left.0.total_cmp(&right.0));
+        pending.push(from);
+        for (along, hop) in on_segment {
+            pending.push(from + direction * (along - radius));
+            runs.push(Run::Line(std::mem::take(&mut pending)));
+            runs.push(Run::Hop { at: hop, direction });
+            pending.push(from + direction * (along + radius));
+        }
+        pending.push(to);
+        // Keep the run going into the next segment, so a corner stays joined.
+        pending.dedup_by(|left, right| left.distance(*right) < 0.01);
+    }
+    if pending.len() > 1 {
+        runs.push(Run::Line(pending));
+    }
+    runs
+}
+
+/// Draws a polyline as dashes, which is how an ordering wire is shown.
+fn dashes(painter: &Painter, line: &[Pos2], stroke: Stroke, zoom: f32) {
+    let on = 7.0 * zoom.max(0.5);
+    let off = 5.0 * zoom.max(0.5);
+    let mut travelled = 0.0;
+    for pair in line.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let length = from.distance(to);
+        if length <= f32::EPSILON {
+            continue;
+        }
+        let direction = (to - from) / length;
+        let mut position = 0.0;
+        while position < length {
+            let phase = (travelled + position) % (on + off);
+            let remaining = if phase < on {
+                on - phase
+            } else {
+                on + off - phase
+            };
+            let step = remaining.min(length - position);
+            if phase < on {
+                painter.line_segment(
+                    [
+                        from + direction * position,
+                        from + direction * (position + step),
+                    ],
+                    stroke,
+                );
+            }
+            position += step.max(0.5);
+        }
+        travelled += length;
     }
 }
 

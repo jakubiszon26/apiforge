@@ -223,15 +223,22 @@ name = "apiforge-desktop"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-layout",
  "apiforge-runner",
  "apiforge-storage",
+ "dirs",
  "eframe",
  "image",
  "indexmap",
  "rfd",
+ "serde",
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "apiforge-layout"
+version = "0.1.0"
 
 [[package]]
 name = "apiforge-runner"

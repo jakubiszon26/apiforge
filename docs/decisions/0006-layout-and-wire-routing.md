@@ -1,6 +1,7 @@
 # ADR 0006: Automatic layout and wire routing
 
-- Status: accepted
+- Status: accepted and implemented, with the deviations recorded under
+  *As implemented*
 - Date: 2026-10-23
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
@@ -105,6 +106,69 @@ in CI with a regression margin.
 
 *Wire style* (orthogonal / spline, default orthogonal) and *Bridges at crossings*
 (default on) live in application settings, not in the document.
+
+## As implemented
+
+The decisions above hold, with these corrections found while building it:
+
+- **Coordinates.** Brandes–Köpf's four alignments were not needed: rows are
+  assigned in the order crossing reduction produced and then pulled towards the
+  average row of the cards feeding them, within the gap to their neighbours. The
+  result is deterministic and keeps the row order; the balancing is what the
+  method's last step does. A layer's cards are centred in its column.
+- **Dummy nodes.** They exist for crossing counting, as decided, and they do not
+  reserve space in the coordinate phase. A long edge is routed around the cards
+  anyway, so a reserved channel bought nothing.
+- **The search window.** A route is searched over a window around its two ports,
+  not over the whole board, and the window widens when no route is found. A card
+  outside the window cannot be met by a route inside it, so this changes nothing
+  about the guarantees, and it is what makes the budget reachable. A search is
+  also capped at 160 000 grid cells, far above a readable board.
+- **The clearance is not the guarantee.** Where cards leave less than the 12 px
+  margin, the last attempt searches with no margin at all: the wire then hugs the
+  cards instead of crossing them. Dropping a cosmetic clearance is always better
+  than crossing a card.
+- **Stubs.** A port inside another card gets a stub long enough to leave it, which
+  is the exception the guarantee names. A port merely *beside* a card gets a
+  shorter stub, down to nothing, instead of one that ends inside its neighbour.
+- **Enclosed ports.** When cards enclose a port completely no route exists. Such a
+  wire is marked incomplete and drawn as a plain corner, lighter, and the
+  guarantee does not apply to it. The *frame route* of the original decision was
+  dropped: a frame route out of an enclosed pocket would have to cross a card, so
+  it was a worse answer than saying so.
+- **Crossing counts.** The cost of crossing an earlier wire is paid per grid edge,
+  marked once per search, rather than measured per candidate segment.
+
+**Measured** on the reference machine, release build, 200 cards and 400 wires
+whose ports are a layer or so apart, as a scenario's are:
+
+| Operation | Budget | Measured |
+| --- | --- | --- |
+| Full routing | ≤ 30 ms | 20 ms |
+| Reroute while dragging | ≤ 8 ms per frame | 0.2 ms |
+| Layered layout | ≤ 20 ms | 0.4 ms |
+| Smoothing every route | — | 0.3 ms |
+
+The same board wired at random instead of between neighbours — every wire
+spanning the whole board — takes about 700 ms to route in full. No budget covers
+that shape and no scenario has it; the number is recorded so the limit is known
+rather than assumed. `cargo run -p apiforge-layout --example bench --release`
+prints all of it.
+
+## Evidence
+
+Generated boards check the guarantees: no final route reaches into a card that is
+not its own, after nudging and after smoothing; the documented exception holds on
+boards where cards are piled up; bridges appear at every crossing and nowhere
+else; layout and routing repeat exactly; a new card never lands on another and
+moves nothing; and a tidied selection keeps clear of the cards outside it. The
+fixtures' own boards are routed through the desktop's conversion in its tests, so
+the guarantee covers the cards the application really draws.
+
+Both wire styles were also reviewed in the native application on Linux, at
+1600 × 1000, through the screenshot probe against the demo workspace, with the
+style taken from a preferences file — which is how the setting is reached in a
+real session.
 
 ## Consequences
 
