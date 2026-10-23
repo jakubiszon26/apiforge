@@ -98,15 +98,15 @@ impl Inspector {
 
         ui.label(
             RichText::new(context.node.kind.label().to_uppercase())
-                .size(10.0)
+                .size(11.0)
                 .color(theme::MUTED),
         );
         ui.label(
             RichText::new(&context.node.name)
-                .size(19.0)
+                .size(theme::FONT_PANEL_TITLE)
                 .family(theme::bold_family()),
         );
-        ui.add_space(4.0);
+        ui.add_space(theme::SPACE_SM);
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Configuration, "Configuration");
             ui.selectable_value(&mut self.tab, Tab::Outputs, "Output data");
@@ -116,7 +116,7 @@ impl Inspector {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_width(ui.available_width() - 6.0);
+                ui.set_width((ui.available_width() - theme::SPACE_SM).max(0.0));
                 match self.tab {
                     Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
                     Tab::Outputs => outputs(ui, context, &mut actions),
@@ -140,7 +140,7 @@ impl Inspector {
         let id = Id::new(("inspector", &context.node.id));
         widgets::field_label(ui, "Block name");
         ui.add(
-            egui::TextEdit::singleline(&mut node.name)
+            crate::widgets::text_edit(&mut node.name)
                 .id(id.with("name"))
                 .desired_width(f32::INFINITY),
         );
@@ -360,7 +360,7 @@ impl Inspector {
                     "Argument name"
                 };
                 let field = ui.add(
-                    egui::TextEdit::singleline(&mut self.new_input)
+                    crate::widgets::text_edit(&mut self.new_input)
                         .hint_text(hint)
                         .desired_width(ui.available_width() - 56.0),
                 );
@@ -547,7 +547,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
             };
             for (port, label) in ports {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(*label).size(11.5));
+                    ui.label(RichText::new(*label).size(12.0));
                     egui::ComboBox::from_id_salt(("flow", &node.id, *port))
                         .selected_text("Connect to…")
                         .width(ui.available_width())
@@ -588,7 +588,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                         .map_or("Missing step", |node| node.name.as_str());
                     ui.label(
                         RichText::new(format!("{label} → {target}"))
-                            .size(11.5)
+                            .size(12.0)
                             .color(theme::LINK),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

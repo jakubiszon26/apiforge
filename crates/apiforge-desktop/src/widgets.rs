@@ -5,37 +5,103 @@ use eframe::egui::{
     self, Align2, FontId, Response, RichText, Sense, Stroke, StrokeKind, Ui, Widget, vec2,
 };
 
+/// Unscaled form controls share a baseline, inset and target height.
+pub fn text_edit(text: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text)
+        .min_size(vec2(0.0, theme::CONTROL_HEIGHT))
+        .margin(egui::Margin::symmetric(10, 6))
+        .vertical_align(egui::Align::Center)
+}
+
+pub fn text_area(text: &mut String) -> egui::TextEdit<'_> {
+    egui::TextEdit::multiline(text).margin(egui::Margin::symmetric(10, 8))
+}
+
+/// A single line laid out to its own cell, rather than clipping oversized text
+/// against the whole card. Every label has a width budget and an ellipsis.
+pub fn paint_label(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    font: FontId,
+    color: egui::Color32,
+    align: egui::Align,
+) {
+    if rect.width() < 2.0 || rect.height() < 2.0 {
+        return;
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap.max_width = rect.width();
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = painter.layout_job(job);
+    let x = match align {
+        egui::Align::Min => rect.left(),
+        egui::Align::Center => rect.center().x - galley.size().x / 2.0,
+        egui::Align::Max => rect.right() - galley.size().x,
+    };
+    let at = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+    painter
+        .with_clip_rect(rect.intersect(painter.clip_rect()))
+        .galley(at, galley, color);
+}
+
 /// An uppercase panel caption.
 pub fn caption(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(10.0).strong().color(theme::MUTED));
+    ui.label(
+        RichText::new(text)
+            .size(theme::FONT_META)
+            .family(theme::bold_family())
+            .color(theme::MUTED),
+    );
 }
 
 /// A smaller caption inside a section.
 pub fn subcaption(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(9.5).color(theme::MUTED));
+    ui.label(
+        RichText::new(text)
+            .size(theme::FONT_META)
+            .color(theme::MUTED),
+    );
 }
 
 /// A muted explanatory line.
 pub fn hint(ui: &mut Ui, text: impl Into<String>) {
-    ui.label(RichText::new(text.into()).size(11.0).color(theme::MUTED));
+    ui.label(
+        RichText::new(text.into())
+            .size(theme::FONT_LABEL)
+            .color(theme::MUTED),
+    );
 }
 
 /// The label above a form field.
 pub fn field_label(ui: &mut Ui, text: &str) {
-    ui.add_space(4.0);
-    ui.label(RichText::new(text).size(11.5).color(theme::MUTED));
+    ui.add_space(theme::SPACE_SM);
+    ui.label(
+        RichText::new(text)
+            .size(theme::FONT_LABEL)
+            .color(theme::MUTED),
+    );
 }
 
 /// A titled block of a form.
 pub fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(10.0);
-    ui.label(RichText::new(title).size(12.5).family(theme::bold_family()));
-    ui.add_space(2.0);
+    ui.add_space(theme::SPACE_LG);
+    ui.label(
+        RichText::new(title)
+            .size(theme::FONT_BODY)
+            .family(theme::bold_family()),
+    );
+    ui.add_space(4.0);
 }
 
 /// A section title rendered inside a horizontal row (without adding horizontal pre-spacing).
 pub fn section_inline(ui: &mut Ui, title: &str) {
-    ui.label(RichText::new(title).size(12.5).family(theme::bold_family()));
+    ui.label(
+        RichText::new(title)
+            .size(theme::FONT_BODY)
+            .family(theme::bold_family()),
+    );
 }
 
 pub fn ellipsis(text: &str, limit: usize) -> String {
@@ -71,12 +137,16 @@ impl Widget for NavItem<'_> {
         } else {
             theme::TEXT
         };
-        painter.with_clip_rect(rect.shrink(4.0)).text(
-            rect.left_center() + vec2(10.0, 0.0),
-            Align2::LEFT_CENTER,
+        paint_label(
+            painter,
+            egui::Rect::from_min_max(
+                rect.left_top() + vec2(10.0, 4.0),
+                rect.right_bottom() - vec2(24.0, 4.0),
+            ),
             self.text,
-            FontId::proportional(12.5),
+            FontId::proportional(theme::FONT_BODY),
             color,
+            egui::Align::Min,
         );
         if self.active {
             painter.circle_filled(rect.right_center() - vec2(12.0, 0.0), 3.0, theme::ACCENT);
@@ -133,7 +203,11 @@ impl Widget for Disclosure<'_> {
 
 /// A draggable variable source; `kind` is a short label such as "parameter".
 pub fn variable_chip(ui: &mut Ui, label: &str, kind: &str, payload: Payload) -> Response {
-    let text = egui::WidgetText::from(RichText::new(label).size(11.0).color(theme::VARIABLE));
+    let text = egui::WidgetText::from(
+        RichText::new(label)
+            .size(theme::FONT_LABEL)
+            .color(theme::VARIABLE),
+    );
     let galley = text.into_galley(
         ui,
         Some(egui::TextWrapMode::Truncate),
@@ -171,22 +245,38 @@ pub fn pill(ui: &mut Ui, text: &str, color: egui::Color32) -> Response {
         .corner_radius(10)
         .inner_margin(egui::Margin::symmetric(8, 2))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).size(10.0).strong().color(color))
+            ui.label(
+                RichText::new(text)
+                    .size(theme::FONT_META)
+                    .strong()
+                    .color(color),
+            )
         })
         .response
 }
 
 /// The main call-to-action button.
 pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text.to_owned()).color(theme::WHITE).strong())
-        .fill(theme::ACCENT)
-        .stroke(Stroke::NONE)
-        .min_size(vec2(0.0, 34.0))
+    egui::Button::new(
+        RichText::new(text.to_owned())
+            .color(theme::WHITE)
+            .family(theme::bold_family()),
+    )
+    .fill(theme::ACCENT)
+    .stroke(Stroke::NONE)
+    .min_size(vec2(0.0, theme::CONTROL_HEIGHT))
 }
 
 /// A validation message shown directly below the field it describes.
 pub fn field_error(ui: &mut Ui, text: impl Into<String>) {
-    ui.add(egui::Label::new(RichText::new(text.into()).size(11.0).color(theme::DANGER)).wrap());
+    ui.add(
+        egui::Label::new(
+            RichText::new(text.into())
+                .size(theme::FONT_LABEL)
+                .color(theme::DANGER),
+        )
+        .wrap(),
+    );
 }
 
 /// Draws `add_contents` with a red outline on its fields when `invalid`.
@@ -218,7 +308,12 @@ pub fn error_box(ui: &mut Ui, messages: &[String]) {
             ui.set_width(ui.available_width());
             for message in messages {
                 ui.add(
-                    egui::Label::new(RichText::new(message).size(11.5).color(theme::DANGER)).wrap(),
+                    egui::Label::new(
+                        RichText::new(message)
+                            .size(theme::FONT_LABEL)
+                            .color(theme::DANGER),
+                    )
+                    .wrap(),
                 );
             }
         });

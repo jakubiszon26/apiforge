@@ -2,27 +2,41 @@
 use apiforge_core::model::NodeKind;
 use eframe::egui::{self, Color32, FontId, Stroke, TextStyle};
 
-pub const BG: Color32 = Color32::from_rgb(248, 247, 244);
+pub const BG: Color32 = Color32::from_rgb(246, 248, 251);
 pub const WHITE: Color32 = Color32::WHITE;
-pub const TEXT: Color32 = Color32::from_rgb(57, 54, 47);
-pub const MUTED: Color32 = Color32::from_rgb(116, 111, 102);
-pub const BORDER: Color32 = Color32::from_rgb(232, 228, 220);
+pub const PANEL: Color32 = Color32::from_rgb(251, 252, 254);
+pub const TEXT: Color32 = Color32::from_rgb(32, 39, 51);
+pub const MUTED: Color32 = Color32::from_rgb(108, 117, 132);
+pub const BORDER: Color32 = Color32::from_rgb(225, 230, 237);
 pub const ACCENT: Color32 = Color32::from_rgb(216, 91, 44);
 pub const LINK: Color32 = Color32::from_rgb(70, 106, 145);
-pub const FIELD: Color32 = Color32::from_rgb(249, 248, 245);
-pub const GRID: Color32 = Color32::from_rgb(214, 210, 203);
-pub const SOCKET: Color32 = Color32::from_rgb(172, 165, 154);
-pub const MINIMAP: Color32 = Color32::from_rgb(224, 219, 211);
+pub const FIELD: Color32 = Color32::from_rgb(246, 248, 251);
+pub const GRID: Color32 = Color32::from_rgb(207, 215, 226);
+pub const SOCKET: Color32 = Color32::from_rgb(166, 176, 190);
+pub const MINIMAP: Color32 = Color32::from_rgb(222, 228, 237);
 pub const SUCCESS: Color32 = Color32::from_rgb(61, 140, 92);
 pub const DANGER: Color32 = Color32::from_rgb(196, 64, 48);
 pub const WARNING: Color32 = Color32::from_rgb(196, 134, 32);
-pub const DATA_WIRE: Color32 = Color32::from_rgb(184, 179, 171);
-pub const CONTROL_WIRE: Color32 = Color32::from_rgb(140, 160, 170);
+pub const DATA_WIRE: Color32 = Color32::from_rgb(167, 178, 193);
+pub const CONTROL_WIRE: Color32 = Color32::from_rgb(143, 157, 177);
 pub const BRANCH_YES: Color32 = Color32::from_rgb(77, 138, 97);
 pub const BRANCH_NO: Color32 = Color32::from_rgb(181, 112, 76);
 pub const OPERATOR: Color32 = Color32::from_rgb(58, 138, 96);
 pub const VARIABLE: Color32 = Color32::from_rgb(188, 105, 59);
 pub const ACCENT_SOFT: Color32 = Color32::from_rgb(251, 233, 221);
+
+pub const SPACE_SM: f32 = 8.0;
+pub const SPACE_MD: f32 = 12.0;
+pub const SPACE_LG: f32 = 16.0;
+pub const SPACE_XL: f32 = 24.0;
+pub const FONT_META: f32 = 11.0;
+pub const FONT_LABEL: f32 = 12.0;
+pub const FONT_BODY: f32 = 13.0;
+pub const FONT_TITLE: f32 = 20.0;
+pub const FONT_PANEL_TITLE: f32 = 20.0;
+pub const CONTROL_HEIGHT: f32 = 32.0;
+pub const SIDEBAR_WIDTH: f32 = 256.0;
+pub const COMPACT_SIDEBAR_WIDTH: f32 = 220.0;
 
 pub fn bold_family() -> egui::FontFamily {
     egui::FontFamily::Name("api-forge-bold".into())
@@ -34,14 +48,24 @@ pub fn apply(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "api-forge-regular".into(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/LiberationSans-Regular.ttf"))
+        egui::FontData::from_static(include_bytes!("../assets/fonts/APIFORGE-Sans-Regular.ttf"))
             .into(),
     );
     fonts.font_data.insert(
         "api-forge-bold".into(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/LiberationSans-Bold.ttf"))
+        egui::FontData::from_static(include_bytes!("../assets/fonts/APIFORGE-Sans-Semibold.ttf"))
             .into(),
     );
+    fonts.font_data.insert(
+        "api-forge-mono".into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/AdwaitaMono-Regular.ttf"))
+            .into(),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "api-forge-mono".into());
     fonts.font_data.insert(
         "api-forge-symbols".into(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/DejaVuSans.ttf")).into(),
@@ -65,23 +89,24 @@ pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style_of(egui::Theme::Light)).clone();
     style
         .text_styles
-        .insert(TextStyle::Body, FontId::proportional(14.0));
+        .insert(TextStyle::Body, FontId::proportional(FONT_BODY));
     style
         .text_styles
-        .insert(TextStyle::Button, FontId::proportional(13.0));
+        .insert(TextStyle::Button, FontId::proportional(FONT_BODY));
     style
         .text_styles
-        .insert(TextStyle::Small, FontId::proportional(12.0));
+        .insert(TextStyle::Small, FontId::proportional(FONT_META));
     style
         .text_styles
-        .insert(TextStyle::Heading, FontId::proportional(20.0));
+        .insert(TextStyle::Heading, FontId::proportional(FONT_PANEL_TITLE));
     style
         .text_styles
         .insert(TextStyle::Monospace, FontId::monospace(12.0));
-    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
-    style.spacing.button_padding = egui::vec2(10.0, 7.0);
-    style.spacing.interact_size = egui::vec2(32.0, 28.0);
-    style.spacing.window_margin = egui::Margin::same(14);
+    style.spacing.item_spacing = egui::vec2(SPACE_SM, 6.0);
+    style.spacing.button_padding = egui::vec2(SPACE_SM, 6.0);
+    style.spacing.interact_size = egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT);
+    style.spacing.window_margin = egui::Margin::same(SPACE_LG as i8);
+    style.spacing.menu_margin = egui::Margin::same(SPACE_MD as i8);
     let visuals = &mut style.visuals;
     *visuals = egui::Visuals::light();
     visuals.override_text_color = Some(TEXT);
@@ -113,7 +138,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.inactive.weak_bg_fill = WHITE;
     visuals.widgets.hovered.bg_fill = BG;
     visuals.widgets.hovered.weak_bg_fill = BG;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(205, 191, 172));
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(184, 194, 208));
     visuals.widgets.active.bg_fill = Color32::from_rgb(251, 233, 221);
     visuals.widgets.active.weak_bg_fill = visuals.widgets.active.bg_fill;
     visuals.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);

@@ -181,6 +181,7 @@ impl ReportPanel {
             self.height
         }
         .clamp(min_height, maximum);
+        let collapsed_height = if compact { 44.0 } else { 48.0 };
         let panel_id = if was_open {
             egui::Id::new(("report-expanded", compact, self.size_epoch))
         } else {
@@ -188,16 +189,19 @@ impl ReportPanel {
         };
         let response = egui::Panel::bottom(panel_id)
             .resizable(self.open)
-            .default_size(if self.open { height } else { 40.0 })
+            .default_size(if self.open { height } else { collapsed_height })
             .size_range(if self.open {
                 min_height..=maximum
             } else {
-                40.0..=40.0
+                collapsed_height..=collapsed_height
             })
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(24, 8)),
+                    .inner_margin(egui::Margin::symmetric(
+                        if compact { 16 } else { 24 },
+                        if compact { 6 } else { 8 },
+                    )),
             )
             .show(ui, |ui| {
                 ui.set_min_height(ui.available_height());
@@ -405,7 +409,7 @@ impl ReportPanel {
                 RichText::new(
                     "Diagnostic run · may use saved inputs · does not pass the full test",
                 )
-                .size(11.5)
+                .size(12.0)
                 .color(theme::WARNING),
             );
         }
@@ -416,7 +420,7 @@ impl ReportPanel {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(notice).size(11.5).color(theme::TEXT));
+                    ui.label(RichText::new(notice).size(12.0).color(theme::TEXT));
                 });
         }
         if let Some(error) = &run.error {
@@ -535,7 +539,7 @@ impl ReportPanel {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(message).size(11.5).color(theme::TEXT));
+                    ui.label(RichText::new(message).size(12.0).color(theme::TEXT));
                 });
         }
 
@@ -572,7 +576,7 @@ impl ReportPanel {
                     if let Some(request) = &step.request {
                         ui.horizontal(|ui| {
                             widgets::pill(ui, &request.method, theme::ACCENT);
-                            ui.label(RichText::new(&request.url).monospace().size(11.5));
+                            ui.label(RichText::new(&request.url).monospace().size(12.0));
                         });
                         ui.add_space(4.0);
                         let headers = Value::Object(
@@ -770,7 +774,7 @@ impl ReportPanel {
                         });
                     }
                 } else {
-                    ui.label(RichText::new("custom key").size(10.5).color(theme::MUTED))
+                    ui.label(RichText::new("custom key").size(11.0).color(theme::MUTED))
                         .on_hover_text("Reserved field name. Select the parent object instead.");
                 }
             }
@@ -884,7 +888,7 @@ fn empty_state(ui: &mut Ui) {
             RichText::new(
                 "Run a simulation or the live API. Each step's data and comparison results will appear here.",
             )
-            .size(11.5)
+            .size(12.0)
             .color(theme::MUTED),
         );
     });
@@ -934,14 +938,14 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
             if failed > 0 {
                 ui.label(
                     RichText::new(format!("{failed} failed"))
-                        .size(11.5)
+                        .size(12.0)
                         .strong()
                         .color(theme::DANGER),
                 );
             }
             ui.label(
                 RichText::new(format!("{passed} passed"))
-                    .size(11.5)
+                    .size(12.0)
                     .strong()
                     .color(theme::SUCCESS),
             );
@@ -1017,7 +1021,7 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
         badge_center,
         egui::Align2::CENTER_CENTER,
         status_mark(row.step.status),
-        egui::FontId::proportional(10.5),
+        egui::FontId::proportional(11.0),
         status_color,
     );
 

@@ -170,7 +170,7 @@ impl Chrome<'_> {
                     }
                     ui.label(
                         RichText::new(self.title)
-                            .size(17.0)
+                            .size(18.0)
                             .family(theme::bold_family()),
                     );
                 });
@@ -261,7 +261,7 @@ fn text_field(
 ) -> egui::Response {
     widgets::validated(ui, invalid, |ui| {
         ui.add(
-            egui::TextEdit::singleline(text)
+            crate::widgets::text_edit(text)
                 .hint_text(hint)
                 .desired_width(width),
         )
@@ -288,7 +288,7 @@ fn labelled_field(
 fn json_field(ui: &mut Ui, text: &mut String, rows: usize, invalid: bool) -> egui::Response {
     widgets::validated(ui, invalid, |ui| {
         ui.add(
-            egui::TextEdit::multiline(text)
+            crate::widgets::text_area(text)
                 .code_editor()
                 .desired_rows(rows)
                 .desired_width(f32::INFINITY),

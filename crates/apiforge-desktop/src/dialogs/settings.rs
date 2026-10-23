@@ -323,7 +323,7 @@ impl SettingsDialog {
         );
         widgets::field_label(ui, "Description");
         ui.add(
-            egui::TextEdit::multiline(&mut self.description)
+            crate::widgets::text_area(&mut self.description)
                 .hint_text("What does this scenario check?")
                 .desired_rows(3)
                 .desired_width(f32::INFINITY),

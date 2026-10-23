@@ -278,7 +278,7 @@ impl EnvironmentDialog {
                         .on_hover_text("Secret name");
                     let width = ui.available_width() - 90.0;
                     ui.add(
-                        egui::TextEdit::singleline(&mut secret.value)
+                        crate::widgets::text_edit(&mut secret.value)
                             .password(!secret.revealed)
                             .hint_text("Value for this session")
                             .desired_width(width),

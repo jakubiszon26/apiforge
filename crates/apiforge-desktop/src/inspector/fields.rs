@@ -114,7 +114,7 @@ pub fn json_editor(ui: &mut Ui, id: Id, value: &Value, rows: usize) -> Option<Va
         };
     }
     let response = ui.add(
-        egui::TextEdit::multiline(&mut draft.text)
+        crate::widgets::text_area(&mut draft.text)
             .id(id.with("text"))
             .code_editor()
             .desired_rows(rows)
@@ -155,7 +155,7 @@ pub struct TextEvent {
 /// A single-line text field; dropping a variable inserts a `{{token}}` at the caret.
 pub fn variable_text(ui: &mut Ui, id: Id, text: &mut String, hint: &str) -> TextEvent {
     let mut event = TextEvent::default();
-    let output = egui::TextEdit::singleline(text)
+    let output = crate::widgets::text_edit(text)
         .id(id)
         .hint_text(hint)
         .desired_width(f32::INFINITY)
@@ -248,7 +248,7 @@ pub fn string_map(
         .unwrap_or_default();
     ui.horizontal(|ui| {
         let field = ui.add(
-            egui::TextEdit::singleline(&mut name)
+            crate::widgets::text_edit(&mut name)
                 .hint_text("Name")
                 .desired_width(ui.available_width() - 60.0),
         );

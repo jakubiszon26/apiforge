@@ -29,7 +29,7 @@ use std::collections::HashSet;
 const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
-const INLINE_EDIT_ZOOM: f32 = 0.6;
+const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
 
 /// A change requested on the board.
@@ -170,6 +170,11 @@ impl Default for Canvas {
 }
 
 impl Canvas {
+    #[cfg(test)]
+    pub(crate) fn debug_viewport(&self) -> Rect {
+        self.last_viewport
+    }
+
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);
@@ -214,7 +219,7 @@ impl Canvas {
         let painter = ui.painter().with_clip_rect(viewport);
         painter.rect_filled(viewport, 0.0, theme::BG);
 
-        let measures = self.measure_overlays(ui, viewport, input);
+        let measures = self.measure_overlays(ui, input);
         let overlays = layout::board_overlays(viewport, &measures);
 
         let mut cards: Vec<Card> = input
@@ -340,7 +345,16 @@ impl Canvas {
             }
             let clipped_card_rect = rect.intersect(overlays.board);
             let id = board_ui.id().with(("card", &card.id));
-            let response = board_ui.interact(clipped_card_rect, id, Sense::click_and_drag());
+            let mut response = board_ui.interact(clipped_card_rect, id, Sense::click_and_drag());
+            let title_rect = camera.rect(Rect::from_min_max(
+                card.origin + vec2(56.0, 8.0),
+                card.origin + vec2(layout::WIDTH - 48.0, 60.0),
+            ));
+            if layout::CardDetail::at_zoom(camera.zoom) != layout::CardDetail::Full
+                || pointer.is_some_and(|pos| title_rect.contains(pos))
+            {
+                response = response.on_hover_text(format!("{}\n{}", card.name, card.caption));
+            }
             let a11y_label = format!("{} ({})", card.name, card.caption);
             response.widget_info(move || {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
@@ -452,6 +466,12 @@ impl Canvas {
         self.handle_keys(ui, input, &mut commands);
 
         paint::overlay_chrome(&painter, &overlays, input.graph);
+        ui.interact(
+            overlays.banner,
+            ui.id().with("execution-mode-hint"),
+            Sense::hover(),
+        )
+        .on_hover_text(paint::mode_line_text(input.graph));
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
         self.zoom_controls(ui, viewport, &overlays, &cards);
         if let Some((mm_inner, bounds, scale)) = paint::minimap(
@@ -498,12 +518,7 @@ impl Canvas {
         commands
     }
 
-    fn measure_overlays(
-        &self,
-        ui: &egui::Ui,
-        viewport: Rect,
-        input: &Input<'_>,
-    ) -> OverlayMeasures {
+    fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
         let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
         let toolbar_width = 96.0
             + if input.can_paste { 56.0 } else { 0.0 }
@@ -519,21 +534,12 @@ impl Canvas {
                 )))
             })
             .unwrap_or(vec2(toolbar_width, 30.0));
-        let wrap_width = layout::banner_wrap_width(viewport.width(), toolbar_size.x);
-        let mut job = egui::text::LayoutJob::simple(
-            paint::mode_line_text(input.graph).to_owned(),
-            FontId::proportional(10.0),
-            theme::MUTED,
-            wrap_width,
-        );
-        job.wrap.break_anywhere = false;
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        let banner_height = 17.0 + galley.size().y;
+        let banner_height = toolbar_size.y.max(26.0);
 
         let hint_galley = ui.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 paint::SHORTCUT_HINT_TEXT.to_owned(),
-                FontId::proportional(10.0),
+                FontId::proportional(theme::FONT_META),
                 theme::MUTED,
             )
         });
@@ -541,7 +547,7 @@ impl Canvas {
         OverlayMeasures {
             banner_height,
             toolbar_size,
-            zoom_size: vec2(88.0, 26.0),
+            zoom_size: vec2(180.0, 36.0),
             hint_width: hint_galley.size().x,
             shortcuts_badge_width: 78.0,
             error_size,
@@ -626,7 +632,8 @@ impl Canvas {
         }));
         for (port, anchor) in outputs {
             let center = camera.to_screen(anchor);
-            let rect = Rect::from_center_size(center, Vec2::splat(SOCKET_HIT * 2.0));
+            let rect =
+                Rect::from_center_size(center, Vec2::splat((SOCKET_HIT * zoom).max(3.0) * 2.0));
             let response = ui
                 .interact(
                     rect,
@@ -641,6 +648,10 @@ impl Canvas {
                     from: center,
                 });
             }
+        }
+
+        if layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full {
+            return;
         }
 
         // Footer buttons.
@@ -704,10 +715,11 @@ impl Canvas {
                     let mut buffer = editing.map_or_else(|| text.clone(), |edit| edit.text.clone());
                     let invalid = editing.and_then(|edit| edit.error.clone());
                     let response = ui.put(
-                        field.shrink2(vec2(2.0, 1.0)),
+                        field.shrink2(vec2(6.0 * zoom, 2.0 * zoom)),
                         egui::TextEdit::singleline(&mut buffer)
                             .id(ui.id().with(("inline", &card.id, &row.name)))
-                            .font(FontId::proportional((12.0 * zoom).max(11.0)))
+                            .font(FontId::proportional(13.0 * zoom))
+                            .margin(egui::Margin::ZERO)
                             .frame(egui::Frame::NONE)
                             .hint_text(if row.required { "Required" } else { "Optional" })
                             .text_color(if invalid.is_some() {
@@ -757,13 +769,18 @@ impl Canvas {
                     let id = ui.id().with(("type", &card.id, &row.name));
                     let mut selected = current.clone();
                     ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| {
+                        ui.spacing_mut().button_padding = vec2(6.0 * zoom, 2.0 * zoom);
+                        ui.spacing_mut().interact_size.y = field.height() - 4.0 * zoom;
                         egui::ComboBox::from_id_salt(id)
-                            .width(field.width() - 8.0)
-                            .selected_text(if selected.is_empty() {
-                                "Choose a type"
-                            } else {
-                                &selected
-                            })
+                            .width(field.width() - 8.0 * zoom)
+                            .selected_text(
+                                egui::RichText::new(if selected.is_empty() {
+                                    "Choose a type"
+                                } else {
+                                    &selected
+                                })
+                                .size(13.0 * zoom),
+                            )
                             .show_ui(ui, |ui| {
                                 for name in
                                     ["string", "number", "boolean", "object", "array", "null"]
@@ -1019,6 +1036,8 @@ impl Canvas {
             .pivot(Align2::RIGHT_TOP)
             .fade_in(false)
             .show(ui.ctx(), |ui| {
+                ui.spacing_mut().interact_size.y = 26.0;
+                ui.spacing_mut().button_padding.y = 4.0;
                 egui::Frame::new()
                     .fill(theme::WHITE)
                     .stroke(Stroke::new(1.0, theme::BORDER))
@@ -1130,23 +1149,41 @@ impl Canvas {
                     .inner_margin(egui::Margin::symmetric(4, 2))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.spacing_mut().button_padding = vec2(6.0, 3.0);
+                            ui.spacing_mut().interact_size = vec2(24.0, 26.0);
                             let center = overlays.focus.center();
                             if ui
-                                .add(egui::Button::new("−").frame(false))
+                                .add_sized([28.0, 28.0], egui::Button::new("−").frame(false))
                                 .on_hover_text("Zoom out")
                                 .clicked()
                             {
                                 self.zoom_at(viewport, center, 1.0 / 1.2);
                             }
+                            ui.add_sized(
+                                [44.0, 26.0],
+                                egui::Label::new(
+                                    egui::RichText::new(format!(
+                                        "{}%",
+                                        (self.camera.zoom * 100.0).round() as u32
+                                    ))
+                                    .size(11.0)
+                                    .color(theme::TEXT),
+                                ),
+                            );
                             if ui
-                                .add(egui::Button::new("+").frame(false))
+                                .add_sized([28.0, 28.0], egui::Button::new("+").frame(false))
                                 .on_hover_text("Zoom in")
                                 .clicked()
                             {
                                 self.zoom_at(viewport, center, 1.2);
                             }
+                            ui.separator();
                             if ui
-                                .add(egui::Button::new("⛶").frame(false))
+                                .add(
+                                    egui::Button::new(egui::RichText::new("Fit").size(11.0))
+                                        .frame(false),
+                                )
                                 .on_hover_text("Fit the view")
                                 .clicked()
                             {
@@ -1164,7 +1201,7 @@ impl Canvas {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new("Shortcuts")
-                                .size(10.0)
+                                .size(11.0)
                                 .color(theme::MUTED),
                         )
                         .sense(Sense::hover()),

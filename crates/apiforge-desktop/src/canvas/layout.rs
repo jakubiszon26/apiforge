@@ -12,24 +12,45 @@ use apiforge_core::{
 };
 use eframe::egui::{Pos2, Rect, Vec2, pos2, vec2};
 
-pub const WIDTH: f32 = 260.0;
-const HEADER: f32 = 62.0;
+pub const WIDTH: f32 = 280.0;
+pub const CARD_PADDING: f32 = 16.0;
+const HEADER: f32 = 64.0;
 const SUBTITLE: f32 = 24.0;
-const INPUT_ROW: f32 = 46.0;
-const OUTPUT_ROW: f32 = 22.0;
+const INPUT_ROW: f32 = 52.0;
+const OUTPUT_ROW: f32 = 28.0;
 const FOOTER: f32 = 36.0;
 const CONTROL: f32 = 28.0;
 
 pub const OVERLAY_PADDING_LEFT: f32 = 18.0;
 pub const OVERLAY_PADDING_RIGHT: f32 = 14.0;
-pub const OVERLAY_PADDING_Y: f32 = 8.0;
+pub const OVERLAY_PADDING_Y: f32 = 4.0;
 pub const OVERLAY_GAP: f32 = 12.0;
-pub const MIN_BANNER_SIDE_BY_SIDE: f32 = 220.0;
-pub const FOOTER_BAND_HEIGHT: f32 = 36.0;
+pub const MIN_BANNER_SIDE_BY_SIDE: f32 = 140.0;
+pub const FOOTER_BAND_HEIGHT: f32 = 44.0;
 pub const MINIMAP_MIN_BOARD_WIDTH: f32 = 560.0;
 pub const MINIMAP_MIN_BOARD_HEIGHT: f32 = 300.0;
 pub const MINIMAP_SIZE: Vec2 = vec2(136.0, 88.0);
 pub const FOCUS_MARGIN: f32 = 24.0;
+
+/// Keep the same graph geometry while reducing visual detail at distant zooms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardDetail {
+    Overview,
+    Compact,
+    Full,
+}
+
+impl CardDetail {
+    pub fn at_zoom(zoom: f32) -> Self {
+        if zoom < 0.45 {
+            Self::Overview
+        } else if zoom < 0.75 {
+            Self::Compact
+        } else {
+            Self::Full
+        }
+    }
+}
 
 /// How the keyboard/mouse shortcut hint is shown in the footer band.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,7 +107,7 @@ pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverla
         - measures.toolbar_size.x
         - OVERLAY_GAP;
     let wrap_width = banner_wrap_width(viewport.width(), measures.toolbar_size.x);
-    let banner_h = measures.banner_height.max(30.0);
+    let banner_h = measures.banner_height.max(26.0);
     let banner = Rect::from_min_size(
         pos2(
             viewport.left() + OVERLAY_PADDING_LEFT,
@@ -337,10 +358,6 @@ impl Card {
         Rect::from_min_size(self.origin, vec2(WIDTH, self.height()))
     }
 
-    pub fn subtitle_center(&self) -> Pos2 {
-        self.origin + vec2(14.0, HEADER + SUBTITLE / 2.0 - 4.0)
-    }
-
     pub fn input_row_top(&self, index: usize) -> f32 {
         self.header_height() + index as f32 * INPUT_ROW
     }
@@ -349,8 +366,8 @@ impl Card {
     pub fn input_field(&self, index: usize) -> Rect {
         let top = self.input_row_top(index);
         Rect::from_min_max(
-            self.origin + vec2(14.0, top + 19.0),
-            self.origin + vec2(WIDTH - 14.0, top + 41.0),
+            self.origin + vec2(CARD_PADDING, top + 22.0),
+            self.origin + vec2(WIDTH - CARD_PADDING, top + 46.0),
         )
     }
 

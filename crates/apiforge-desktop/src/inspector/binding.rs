@@ -316,7 +316,7 @@ fn literal_editor(
         Value::String(text) => {
             changed |= ui
                 .add(
-                    egui::TextEdit::singleline(text)
+                    crate::widgets::text_edit(text)
                         .id(id.with("text"))
                         .desired_width(f32::INFINITY),
                 )
@@ -330,7 +330,7 @@ fn literal_editor(
                 .data_mut(|data| data.get_temp(key))
                 .unwrap_or_else(|| shown.clone());
             let field = ui.add(
-                egui::TextEdit::singleline(&mut text)
+                crate::widgets::text_edit(&mut text)
                     .id(key)
                     .desired_width(f32::INFINITY),
             );
@@ -413,12 +413,12 @@ fn expression_editor(
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(spec.group.label().to_uppercase())
-                        .size(9.5)
+                        .size(11.0)
                         .color(theme::OPERATOR),
                 );
                 ui.label(
                     RichText::new(if boolean { "condition" } else { "value" })
-                        .size(9.5)
+                        .size(11.0)
                         .color(theme::MUTED),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -502,7 +502,7 @@ pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
             for group in OperatorGroup::ALL {
                 ui.label(
                     RichText::new(group.label().to_uppercase())
-                        .size(9.5)
+                        .size(11.0)
                         .color(theme::MUTED),
                 );
                 for operator in Operator::ALL
@@ -625,7 +625,7 @@ fn reference_editor(
         .show(ui, |ui| {
             changed |= ui
                 .add(
-                    egui::TextEdit::singleline(field)
+                    crate::widgets::text_edit(field)
                         .hint_text("e.g. data.items[0].name; empty = whole value")
                         .font(egui::TextStyle::Monospace)
                         .desired_width(f32::INFINITY),
@@ -681,7 +681,7 @@ pub(crate) fn searchable_field_list(
 ) -> (Option<String>, usize) {
     let mut chosen = None;
     let field = ui.add(
-        egui::TextEdit::singleline(search)
+        crate::widgets::text_edit(search)
             .hint_text("Search names, paths or values…")
             .desired_width(f32::INFINITY),
     );
@@ -730,7 +730,7 @@ pub(crate) fn searchable_field_list(
                     rect.left_top() + egui::vec2(inset, 25.0),
                     egui::Align2::LEFT_TOP,
                     &summary,
-                    egui::FontId::proportional(11.5),
+                    egui::FontId::proportional(12.0),
                     theme::MUTED,
                 );
                 let response = response.on_hover_text(format!("{label}\n{}", field.preview));
@@ -811,7 +811,7 @@ fn name_editor(ui: &mut Ui, id: Id, name: &mut String, suggestions: &[String], h
     ui.horizontal(|ui| {
         changed |= ui
             .add(
-                egui::TextEdit::singleline(name)
+                crate::widgets::text_edit(name)
                     .id(id.with("name"))
                     .desired_width(ui.available_width() - 34.0),
             )

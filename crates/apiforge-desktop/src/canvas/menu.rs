@@ -207,7 +207,7 @@ impl ActionMenu {
                             });
                         }
                         let search = ui.add(
-                            egui::TextEdit::singleline(&mut self.search)
+                            crate::widgets::text_edit(&mut self.search)
                                 .hint_text("Find an action…")
                                 .desired_width(f32::INFINITY),
                         );

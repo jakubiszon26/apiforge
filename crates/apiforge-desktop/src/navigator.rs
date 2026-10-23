@@ -43,7 +43,7 @@ impl Navigator {
                         .family(theme::bold_family()),
                 );
                 let field = ui.add(
-                    egui::TextEdit::singleline(&mut self.query)
+                    crate::widgets::text_edit(&mut self.query)
                         .hint_text("Search by name or block type…")
                         .desired_width(f32::INFINITY),
                 );

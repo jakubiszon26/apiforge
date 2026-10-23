@@ -349,53 +349,45 @@ impl App {
         } else {
             "sidebar"
         })
-        .exact_size(if compact { 196.0 } else { 235.0 })
+        .exact_size(if compact {
+            theme::COMPACT_SIDEBAR_WIDTH
+        } else {
+            theme::SIDEBAR_WIDTH
+        })
         .resizable(false)
         .frame(
             egui::Frame::new()
-                .fill(theme::WHITE)
+                .fill(theme::PANEL)
                 .inner_margin(if compact {
                     egui::Margin::symmetric(12, 10)
                 } else {
-                    egui::Margin::symmetric(16, 14)
+                    egui::Margin::symmetric(16, 16)
                 }),
         )
         .show(ui, |ui| self.sidebar(ui));
-        egui::Panel::top("topbar")
-            .exact_size(if compact { 44.0 } else { 52.0 })
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 24 }, 8)),
-            )
-            .show(ui, |ui| self.topbar(ui));
         egui::Panel::top("scenario-header")
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(if compact {
-                        egui::Margin {
-                            left: 16,
-                            right: 16,
-                            top: 10,
-                            bottom: 10,
-                        }
-                    } else {
-                        egui::Margin {
-                            left: 24,
-                            right: 24,
-                            top: 18,
-                            bottom: 18,
-                        }
-                    }),
+                    .inner_margin(egui::Margin::symmetric(
+                        if compact { 16 } else { 24 },
+                        if compact { 6 } else { 8 },
+                    )),
             )
             .show(ui, |ui| self.scenario_header(ui));
         egui::Panel::top("editor-bar")
-            .exact_size(40.0)
+            .exact_size(44.0)
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(egui::Margin::symmetric(if compact { 16 } else { 24 }, 6)),
+                    .inner_margin(egui::Margin::symmetric(
+                        if compact {
+                            theme::SPACE_LG as i8
+                        } else {
+                            theme::SPACE_XL as i8
+                        },
+                        6,
+                    )),
             )
             .show(ui, |ui| self.editor_bar(ui));
         if self.editor.draft().is_none() {
@@ -407,16 +399,16 @@ impl App {
             } else {
                 "inspector"
             })
-            .default_size(if compact { 256.0 } else { 340.0 })
+            .default_size(if compact { 272.0 } else { 360.0 })
             .size_range(if compact {
-                220.0..=340.0
+                248.0..=340.0
             } else {
-                300.0..=520.0
+                320.0..=520.0
             })
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
-                    .inner_margin(if compact { 12 } else { 18 }),
+                    .inner_margin(if compact { 12 } else { 16 }),
             )
             .show(ui, |ui| self.inspector(ui));
         }
@@ -471,7 +463,7 @@ impl App {
                 Some(SaveStatus::Failed(error)) => (format!("Save failed: {error}"), theme::DANGER),
                 Some(status) => (status.label().to_owned(), theme::MUTED),
             };
-            ui.label(RichText::new(format!("●  {text}")).size(10.5).color(color));
+            ui.label(RichText::new(format!("●  {text}")).size(11.0).color(color));
             ui.add_space(4.0);
             let base = &self.editor.project().environment.base_url;
             let host = base.split_once("://").map_or(base.as_str(), |(_, rest)| {
@@ -479,7 +471,7 @@ impl App {
             });
             let environment = egui::Button::new(
                 RichText::new(format!(
-                    "ENVIRONMENT\n{}",
+                    "Environment\n{}",
                     if host.is_empty() {
                         "Configure the environment"
                     } else {
@@ -585,99 +577,94 @@ impl App {
         self.notice = Some(notice.into());
     }
 
-    fn topbar(&mut self, ui: &mut egui::Ui) {
+    fn project_menu(&mut self, ui: &mut egui::Ui) {
         let running = self.is_running();
-        ui.horizontal_centered(|ui| {
-            let project = &self.editor.project().name;
-            let location = if self.editor.draft().is_some() {
-                "Component editor"
-            } else {
-                "Scenarios"
-            };
-            ui.label(
-                RichText::new(format!("{project}   ›   "))
-                    .size(11.5)
-                    .color(theme::MUTED),
-            );
-            ui.label(RichText::new(location).size(11.5).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button("Settings")
-                    .on_hover_text("Project and scenario settings")
-                    .clicked()
-                {
-                    self.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
-                        self.editor.project(),
-                        &self.editor.scenario().id,
-                    )));
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(!self.files.busy(), egui::Button::new("Export"))
-                    .on_hover_text("Export the project as JSON (without secret values)")
-                    .clicked()
-                {
-                    let project = apiforge_storage::public_project(self.editor.project());
-                    self.files.export(project);
-                }
-                if ui
-                    .add_enabled(!self.files.busy() && !running, egui::Button::new("Import"))
-                    .on_hover_text("Import a project or workspace JSON file")
-                    .clicked()
-                {
-                    self.files.import();
-                }
-            });
+        let menu = ui.menu_button("⋯", |ui| {
+            ui.set_min_width(180.0);
+            if ui
+                .add_enabled(
+                    !self.files.busy() && !running,
+                    egui::Button::new("Import project…"),
+                )
+                .clicked()
+            {
+                self.files.import();
+                ui.close();
+            }
+            if ui
+                .add_enabled(!self.files.busy(), egui::Button::new("Export project…"))
+                .clicked()
+            {
+                self.files
+                    .export(apiforge_storage::public_project(self.editor.project()));
+                ui.close();
+            }
         });
+        menu.response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Project file actions")
+        });
+        menu.response.on_hover_text("Import or export projects");
+        if ui
+            .button("Settings")
+            .on_hover_text("Project and scenario settings")
+            .clicked()
+        {
+            self.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
+                self.editor.project(),
+                &self.editor.scenario().id,
+            )));
+        }
+        ui.add_space(4.0);
     }
 
     fn scenario_header(&mut self, ui: &mut egui::Ui) {
         let draft = self.editor.draft().cloned();
         let scenario = self.editor.scenario().clone();
         let running = self.is_running();
+        let compact = layout_mode(ui.ctx().content_rect().size()) == LayoutMode::Compact;
+        let project_name = self.editor.project().name.clone();
         ui.horizontal(|ui| {
-            let width = (ui.available_width() - 320.0).max(160.0);
-            ui.vertical(|ui| {
-                ui.set_width(width);
-                // Reserve the title column even when its text is short, so
-                // run controls stay aligned at the right edge.
-                ui.set_min_width(width);
-                let eyebrow = match &draft {
-                    Some(draft) => format!(
-                        "COMPONENT · REVISION {} · WORKING COPY   ·   {} steps",
-                        draft.definition.revision,
-                        draft.graph.nodes.len()
-                    ),
-                    None => format!(
-                        "API REGRESSION TEST   ·   {} steps · {} after test",
-                        scenario.graph.nodes.len(),
-                        scenario.cleanup.nodes.len()
-                    ),
-                };
-                ui.label(RichText::new(eyebrow).size(10.0).color(theme::MUTED));
-                let title = draft.as_ref().map_or(scenario.name.as_str(), |draft| {
-                    draft.definition.name.as_str()
-                });
-                ui.add(
-                    egui::Label::new(RichText::new(title).size(22.0).family(theme::bold_family()))
-                        .truncate(),
-                );
-                let description = draft
-                    .as_ref()
-                    .map_or(scenario.description.as_str(), |draft| {
-                        draft.definition.description.as_str()
+            let width = (ui.available_width() - 428.0 - ui.spacing().item_spacing.x).max(140.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 40.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let title = draft.as_ref().map_or(scenario.name.as_str(), |draft| {
+                        draft.definition.name.as_str()
                     });
-                let description = if description.is_empty() {
-                    "Build the scenario from requests, data and checks."
-                } else {
-                    description
-                };
-                ui.add(
-                    egui::Label::new(RichText::new(description).size(11.5).color(theme::MUTED))
+                    let description = draft
+                        .as_ref()
+                        .map_or(scenario.description.as_str(), |draft| {
+                            draft.definition.description.as_str()
+                        });
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(title)
+                                .size(if compact { 18.0 } else { theme::FONT_TITLE })
+                                .family(theme::bold_family()),
+                        )
                         .truncate(),
-                );
-            });
+                    )
+                    .on_hover_text(format!("{title}\n{description}"));
+                    let context = if draft.is_some() {
+                        "Component editor"
+                    } else {
+                        "Scenarios"
+                    };
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("{project_name}  /  {context}"))
+                                .size(theme::FONT_META)
+                                .color(theme::MUTED),
+                        )
+                        .truncate(),
+                    );
+                },
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.project_menu(ui);
                 if let Some(draft) = &draft {
                     if ui
                         .add(widgets::primary_button("Save revision"))
@@ -840,14 +827,6 @@ impl App {
                 {
                     self.editor.undo();
                 }
-                ui.label(
-                    RichText::new(match self.mode {
-                        RunMode::Simulation => "Sample data · no requests",
-                        RunMode::Live => "Live requests to the API",
-                    })
-                    .size(11.0)
-                    .color(theme::MUTED),
-                );
             });
         });
     }
@@ -1498,7 +1477,7 @@ impl App {
             ui.add_space(8.0);
             ui.label("Name");
             let field = ui.add(
-                egui::TextEdit::singleline(name)
+                crate::widgets::text_edit(name)
                     .hint_text(placeholder)
                     .desired_width(f32::INFINITY),
             );
@@ -2068,5 +2047,51 @@ mod tests {
             app.report.debug_resize_handle().2 > after_key,
             "dragging the actual grip must resize the panel"
         );
+    }
+    #[test]
+    fn compact_header_preserves_workspace_height_even_with_a_long_scenario() {
+        for size in [
+            egui::vec2(960.0, 540.0),
+            egui::vec2(1280.0, 800.0),
+            egui::vec2(1600.0, 1000.0),
+        ] {
+            let context = egui::Context::default();
+            let mut app = App::new(&context, Source::Session(default_workspace()));
+            app.editor.change_project(|project| {
+                project.scenarios[0].name =
+                    "Nowy scenariusz – a deliberately long scenario title".repeat(3);
+                project.scenarios[0].description =
+                    "A long description belongs in settings and the title tooltip. ".repeat(100);
+                for index in 0..12 {
+                    project.scenarios[0]
+                        .graph
+                        .nodes
+                        .push(apiforge_core::graph::create_node(
+                            NodeKind::Variable,
+                            Position {
+                                x: index as f64 * 320.0,
+                                y: 800.0,
+                            },
+                            None,
+                        ));
+                }
+            });
+            app.editor.selection = vec![app.editor.graph().nodes[0].id.clone()];
+            for _ in 0..4 {
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ui| app.ui(ui),
+                );
+                output.textures_delta.clear();
+            }
+            assert!(
+                app.canvas.debug_viewport().top() <= 104.0,
+                "Header took too much workspace at {size:?}: {:?}",
+                app.canvas.debug_viewport()
+            );
+        }
     }
 }

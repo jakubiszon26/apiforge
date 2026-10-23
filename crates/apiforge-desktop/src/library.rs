@@ -140,24 +140,51 @@ impl Library {
             widgets::caption(ui, "BLOCK LIBRARY");
             ui.label(
                 RichText::new((BUILTIN.len() + components.len()).to_string())
-                    .size(10.0)
+                    .size(11.0)
                     .color(theme::MUTED),
             );
         });
         ui.add_sized(
-            [ui.available_width(), 30.0],
-            egui::TextEdit::singleline(&mut self.search)
+            [ui.available_width(), theme::CONTROL_HEIGHT],
+            crate::widgets::text_edit(&mut self.search)
                 .hint_text("Search blocks…")
                 .desired_width(f32::INFINITY),
         );
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
-            ui.spacing_mut().button_padding.x = 6.0;
-            ui.selectable_value(&mut self.section, Section::Blocks, "Blocks");
-            ui.selectable_value(&mut self.section, Section::Variables, "Variables");
-            ui.selectable_value(&mut self.section, Section::Operators, "Operators");
-        });
+        egui::Frame::new()
+            .fill(theme::FIELD)
+            .corner_radius(7)
+            .inner_margin(3)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().button_padding.x = 4.0;
+                let width = (ui.available_width() - 8.0) / 3.0;
+                ui.horizontal(|ui| {
+                    for (section, title) in [
+                        (Section::Blocks, "Blocks"),
+                        (Section::Variables, "Variables"),
+                        (Section::Operators, "Operators"),
+                    ] {
+                        let active = self.section == section;
+                        let mut button = egui::Button::new(
+                            RichText::new(title)
+                                .size(theme::FONT_LABEL)
+                                .color(if active { theme::TEXT } else { theme::MUTED }),
+                        )
+                        .selected(active)
+                        .frame(active)
+                        .corner_radius(5);
+                        if active {
+                            button = button
+                                .fill(theme::WHITE)
+                                .stroke(Stroke::new(1.0, theme::BORDER));
+                        }
+                        if ui.add_sized([width, 28.0], button).clicked() {
+                            self.section = section;
+                        }
+                    }
+                });
+            });
         let query = self.search.to_lowercase();
         // Search spans categories, so an operator can be discovered from any tab.
         let all_sections = !query.is_empty();
@@ -264,7 +291,7 @@ impl Library {
                         widgets::subcaption(ui, "PROJECT COMPONENTS");
                         ui.label(
                             RichText::new(components.len().to_string())
-                                .size(10.0)
+                                .size(11.0)
                                 .color(theme::MUTED),
                         );
                     });
@@ -372,7 +399,7 @@ impl Library {
         }
         ui.label(
             RichText::new("Drag onto an argument, or into a URL, query, header or path.")
-                .size(10.5)
+                .size(11.0)
                 .color(theme::MUTED),
         );
         ui.horizontal_wrapped(|ui| {
@@ -421,7 +448,7 @@ fn library_item(
 ) -> egui::Response {
     let id = ui.id().with(("library", title, kind as u8));
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 40.0),
+        egui::vec2(ui.available_width(), 48.0),
         Sense::click_and_drag(),
     );
     response.dnd_set_drag_payload(payload);
@@ -435,24 +462,33 @@ fn library_item(
             egui::StrokeKind::Inside,
         );
     }
-    let icon = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 5.0), egui::vec2(28.0, 28.0));
+    let icon = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 10.0), egui::vec2(28.0, 28.0));
     let color = theme::kind_color(kind);
     ui.painter()
         .rect_filled(icon, 7.0, color.gamma_multiply(0.12));
     theme::kind_icon(ui.painter(), icon, kind, color);
-    ui.painter().text(
-        rect.min + egui::vec2(40.0, 12.0),
-        egui::Align2::LEFT_CENTER,
-        widgets::ellipsis(title, 30),
-        egui::FontId::new(12.5, theme::bold_family()),
+    let right = rect.right() - if hovered { 22.0 } else { 8.0 };
+    widgets::paint_label(
+        ui.painter(),
+        egui::Rect::from_min_max(
+            rect.min + egui::vec2(44.0, 5.0),
+            egui::pos2(right, rect.top() + 24.0),
+        ),
+        title,
+        egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
         theme::TEXT,
+        egui::Align::Min,
     );
-    ui.painter().text(
-        rect.min + egui::vec2(40.0, 28.0),
-        egui::Align2::LEFT_CENTER,
-        widgets::ellipsis(description, 34),
-        egui::FontId::proportional(10.5),
+    widgets::paint_label(
+        ui.painter(),
+        egui::Rect::from_min_max(
+            rect.min + egui::vec2(44.0, 25.0),
+            egui::pos2(right, rect.top() + 43.0),
+        ),
+        description,
+        egui::FontId::proportional(theme::FONT_META),
         theme::MUTED,
+        egui::Align::Min,
     );
     if hovered {
         ui.painter().text(
