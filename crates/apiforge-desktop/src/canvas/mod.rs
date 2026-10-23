@@ -7,8 +7,10 @@
 mod layout;
 mod menu;
 mod paint;
+mod routing;
 
 pub use layout::{Card, parse_inline};
+pub use routing::WireStyle;
 
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
@@ -79,6 +81,11 @@ pub enum Command {
     Copy,
     Paste,
     Duplicate,
+    /// Lay out the selection, or the whole board when nothing is selected.
+    TidyUp(Vec<String>),
+    /// Change how wires are drawn. A user setting, not a document edit.
+    SetWireStyle(WireStyle),
+    SetBridges(bool),
 }
 
 /// Everything the board needs to draw one frame.
@@ -151,6 +158,11 @@ pub struct Canvas {
     selected_wires: Vec<String>,
     inline: Option<InlineEdit>,
     error: Option<String>,
+    router: routing::Router,
+    /// How wires are drawn, from the user's settings.
+    pub wire_style: WireStyle,
+    /// Whether a crossing is drawn as a bridge, from the user's settings.
+    pub bridges: bool,
 }
 
 impl Default for Canvas {
@@ -167,6 +179,9 @@ impl Default for Canvas {
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
+            router: routing::Router::default(),
+            wire_style: WireStyle::default(),
+            bridges: true,
             drag: None,
             menu: None,
             selected_wires: Vec::new(),
@@ -307,31 +322,32 @@ impl Canvas {
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);
 
-        // Wires go under the cards.
+        // Wires go under the cards. They are routed around the cards, so what is
+        // drawn is also what hit testing uses.
         let graph_wires = wires(input.graph);
-        for wire in &graph_wires {
-            let (Some(source), Some(target)) = (
-                cards.iter().find(|card| card.id == wire.source),
-                cards.iter().find(|card| card.id == wire.target),
-            ) else {
-                continue;
-            };
-            let (output, inp) = wire_ports(wire);
-            let (Some(start), Some(end)) = (
-                source.output_anchor(&output),
-                target.input_anchor(&inp, &wire.operand_path),
-            ) else {
-                continue;
-            };
-            paint::wire(
-                &board_painter,
-                camera.to_screen(start),
-                camera.to_screen(end),
-                wire.kind == WireKind::Order,
-                wire.branch,
-                self.selected_wires.contains(&wire.id),
-                camera.zoom,
-            );
+        let moving: HashSet<String> = match &self.drag {
+            Some(Drag::Nodes { ids, .. }) => ids.iter().cloned().collect(),
+            _ => HashSet::new(),
+        };
+        let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
+        let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(graph_wires.len());
+        {
+            let routed = self.router.routes(&routing::Request {
+                cards: &cards,
+                wires: &graph_wires,
+                moving: &moving,
+                style: self.wire_style,
+                bridges: self.bridges,
+            });
+            for wire in routed {
+                paint::routed_wire(
+                    &board_painter,
+                    wire,
+                    camera,
+                    selected_wires.contains(&wire.id),
+                );
+                drawn.push((wire.id.clone(), wire.points.clone()));
+            }
         }
 
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
@@ -446,7 +462,7 @@ impl Canvas {
         if background.clicked() && !clicked_card {
             self.menu = None;
             self.inline = None;
-            let hit = pointer.and_then(|pointer| hit_wire(&graph_wires, &cards, camera, pointer));
+            let hit = pointer.and_then(|pointer| hit_wire(&drawn, camera, pointer));
             match hit {
                 Some(wire) => {
                     if modifiers.command {
@@ -1034,6 +1050,14 @@ impl Canvas {
             self.menu = None;
             self.drag = None;
         }
+        if ui.input_mut(|state| {
+            state.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                Key::L,
+            ))
+        }) {
+            commands.push(Command::TidyUp(input.selection.to_vec()));
+        }
         let delete =
             ui.input(|state| state.key_pressed(Key::Delete) || state.key_pressed(Key::Backspace));
         if delete && (!input.selection.is_empty() || !self.selected_wires.is_empty()) {
@@ -1089,6 +1113,63 @@ impl Canvas {
                             {
                                 commands.push(Command::Paste);
                             }
+                            if ui
+                                .add(widgets::icon_button(Icon::Layout, "Tidy up").compact())
+                                .on_hover_text(if has_selection {
+                                    "Lay out the selected steps (Ctrl+Shift+L)"
+                                } else {
+                                    "Lay out the whole board (Ctrl+Shift+L)"
+                                })
+                                .clicked()
+                            {
+                                commands.push(Command::TidyUp(input.selection.to_vec()));
+                            }
+                            widgets::action_menu(
+                                ui,
+                                widgets::icon_button(Icon::Wire, "Wire style").compact(),
+                                |ui| {
+                                    for (style, label) in [
+                                        (WireStyle::Orthogonal, "Right angles"),
+                                        (WireStyle::Spline, "Curves"),
+                                    ] {
+                                        if ui
+                                            .add(
+                                                widgets::action(
+                                                    if self.wire_style == style {
+                                                        Icon::Check
+                                                    } else {
+                                                        Icon::Wire
+                                                    },
+                                                    label,
+                                                )
+                                                .quiet(),
+                                            )
+                                            .clicked()
+                                        {
+                                            commands.push(Command::SetWireStyle(style));
+                                            ui.close();
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui
+                                        .add(
+                                            widgets::action(
+                                                if self.bridges {
+                                                    Icon::Check
+                                                } else {
+                                                    Icon::Wire
+                                                },
+                                                "Bridges at crossings",
+                                            )
+                                            .quiet(),
+                                        )
+                                        .clicked()
+                                    {
+                                        commands.push(Command::SetBridges(!self.bridges));
+                                        ui.close();
+                                    }
+                                },
+                            );
                             // Keep infrequent selection actions in one menu rather
                             // than covering the board with disabled commands.
                             if has_selection || !self.selected_wires.is_empty() {
@@ -1342,26 +1423,22 @@ fn wire_ports(wire: &apiforge_core::graph::Wire) -> (String, String) {
     }
 }
 
-/// The wire under the pointer, within a few pixels of its curve.
-fn hit_wire(
-    graph_wires: &[apiforge_core::graph::Wire],
-    cards: &[Card],
-    camera: Camera,
-    pointer: Pos2,
-) -> Option<String> {
-    graph_wires
+/// The wire under the pointer, within a few pixels of the route that was drawn.
+fn hit_wire(drawn: &[(String, Vec<Pos2>)], camera: Camera, pointer: Pos2) -> Option<String> {
+    drawn
         .iter()
-        .filter_map(|wire| {
-            let source = cards.iter().find(|card| card.id == wire.source)?;
-            let target = cards.iter().find(|card| card.id == wire.target)?;
-            let (output, input) = wire_ports(wire);
-            let start = camera.to_screen(source.output_anchor(&output)?);
-            let end = camera.to_screen(target.input_anchor(&input, &wire.operand_path)?);
-            let points = paint::wire_points(start, end, wire.kind == WireKind::Order, camera.zoom);
-            let distance = (0..=24)
-                .map(|step| paint::bezier(points, step as f32 / 24.0).distance(pointer))
+        .filter_map(|(id, points)| {
+            let distance = points
+                .windows(2)
+                .map(|pair| {
+                    routing::distance_to_segment(
+                        pointer,
+                        camera.to_screen(pair[0]),
+                        camera.to_screen(pair[1]),
+                    )
+                })
                 .fold(f32::INFINITY, f32::min);
-            (distance <= 6.0).then(|| (distance, wire.id.clone()))
+            (distance <= 6.0).then(|| (distance, id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, id)| id)

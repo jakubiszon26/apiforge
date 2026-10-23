@@ -57,6 +57,16 @@ cargo test --workspace --all-targets --locked
 cargo run -p apiforge-convert-v1 --locked -- --fixtures --check
 ```
 
+Changes to the layout or the wire router also run the budgets of
+[ADR 0006](decisions/0006-layout-and-wire-routing.md), in release mode:
+
+```bash
+cargo run -p apiforge-layout --example bench --release --locked [-- --strict]
+```
+
+It prints each measurement against its budget. `--strict` makes an exceeded budget
+an error, which only makes sense on a machine whose speed is known.
+
 Changes to the scenario language also run both fuzzers for a sustained period. They
 are dependency-free mutational smoke fuzzers, not coverage-guided fuzzing:
 

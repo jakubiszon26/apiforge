@@ -127,6 +127,15 @@ fn wires(board: &Board, blocks: &[Block], seed: u64) -> Vec<Wire> {
     wires
 }
 
+/// The same board with nothing pinned, which is what a whole-board tidy up gets.
+fn unpinned(board: &Board) -> Vec<Block> {
+    board
+        .blocks
+        .iter()
+        .map(|block| Block::new(block.size, block.position))
+        .collect()
+}
+
 fn rectangles(positions: &[Point], blocks: &[Block]) -> Vec<Rect> {
     positions
         .iter()
@@ -170,13 +179,14 @@ fn laid_out_boards_have_no_overlapping_cards_and_no_route_through_a_card() {
         let count = 3 + (seed as usize * 7) % 18;
         let dense = seed % 3 == 0;
         let board = board(seed, count, dense);
-        let graph = Graph::new(&board.blocks, &board.edges);
+        let blocks = unpinned(&board);
+        let graph = Graph::new(&blocks, &board.edges);
         let positions = tidy(&graph);
         assert!(
-            !any_overlap(&positions, &board.blocks),
+            !any_overlap(&positions, &blocks),
             "seed {seed}: tidy up left cards overlapping"
         );
-        let cards = rectangles(&positions, &board.blocks);
+        let cards = rectangles(&positions, &blocks);
         let wires = wires(&board, &board.blocks, seed);
         let routes = route(&cards, &wires, &routing);
         assert_orthogonal_and_anchored(&routes, &wires, &cards, seed);
@@ -227,10 +237,11 @@ fn smoothing_a_generated_board_keeps_every_route_off_the_cards() {
     for seed in 1..=40u64 {
         let count = 4 + (seed as usize * 3) % 14;
         let board = board(seed, count, seed % 2 == 0);
-        let graph = Graph::new(&board.blocks, &board.edges);
+        let blocks = unpinned(&board);
+        let graph = Graph::new(&blocks, &board.edges);
         let positions = tidy(&graph);
-        let cards = rectangles(&positions, &board.blocks);
-        let wires = wires(&board, &board.blocks, seed);
+        let cards = rectangles(&positions, &blocks);
+        let wires = wires(&board, &blocks, seed);
         let routes = route(&cards, &wires, &routing);
         for (index, routed) in routes.iter().enumerate() {
             let wire = wires[index];
@@ -277,10 +288,11 @@ fn a_bridge_sits_on_its_own_wire_and_only_where_wires_cross() {
     for seed in 1..=40u64 {
         let count = 5 + (seed as usize * 11) % 12;
         let board = board(seed, count, true);
-        let graph = Graph::new(&board.blocks, &board.edges);
+        let blocks = unpinned(&board);
+        let graph = Graph::new(&blocks, &board.edges);
         let positions = tidy(&graph);
-        let cards = rectangles(&positions, &board.blocks);
-        let wires = wires(&board, &board.blocks, seed);
+        let cards = rectangles(&positions, &blocks);
+        let wires = wires(&board, &blocks, seed);
         let routes = route(&cards, &wires, &routing);
         for (index, routed) in routes.iter().enumerate() {
             for bridge in &routed.bridges {
@@ -335,11 +347,12 @@ fn layout_and_routing_are_reproducible() {
     let routing = Routing::default();
     for seed in 1..=20u64 {
         let board = board(seed, 4 + (seed as usize % 9), seed % 2 == 0);
-        let graph = Graph::new(&board.blocks, &board.edges);
+        let blocks = unpinned(&board);
+        let graph = Graph::new(&blocks, &board.edges);
         assert_eq!(tidy(&graph), tidy(&graph), "seed {seed}: tidy up differs");
         let positions = tidy(&graph);
-        let cards = rectangles(&positions, &board.blocks);
-        let wires = wires(&board, &board.blocks, seed);
+        let cards = rectangles(&positions, &blocks);
+        let wires = wires(&board, &blocks, seed);
         assert_eq!(
             route(&cards, &wires, &routing),
             route(&cards, &wires, &routing),
@@ -414,4 +427,42 @@ fn degenerate_boards_are_handled_without_a_panic() {
     assert_eq!(route(&flat, &flat_wire, &routing).len(), 1);
     assert!(smooth(&Route::default(), 24.0, &[]).is_empty());
     let _: Vec<Piece> = smooth(&routes[0], 24.0, &[]);
+}
+
+/// Tidying a selection: everything outside it is pinned, so it must stay exactly
+/// where it is and the laid-out cards must not land on it.
+#[test]
+fn tidying_a_selection_keeps_off_the_cards_outside_it() {
+    for seed in 1..=40u64 {
+        let count = 5 + (seed as usize * 7) % 12;
+        let mut board = board(seed, count, true);
+        // Spread the pinned cards out, as a board the user has arranged.
+        for (index, block) in board.blocks.iter_mut().enumerate() {
+            block.pinned = index % 3 == 0;
+            if block.pinned {
+                block.position = Point::new(index as f32 * 520.0, (index % 4) as f32 * 300.0);
+            }
+        }
+        let graph = Graph::new(&board.blocks, &board.edges);
+        let positions = tidy(&graph);
+        let cards = rectangles(&positions, &board.blocks);
+        for (index, block) in board.blocks.iter().enumerate() {
+            if block.pinned {
+                assert_eq!(
+                    positions[index], block.position,
+                    "seed {seed}: pinned card {index} moved"
+                );
+            }
+        }
+        for (index, card) in cards.iter().enumerate() {
+            for (other, pinned) in cards.iter().enumerate() {
+                if other != index && board.blocks[other].pinned {
+                    assert!(
+                        !card.overlaps(pinned),
+                        "seed {seed}: card {index} landed on pinned card {other}"
+                    );
+                }
+            }
+        }
+    }
 }

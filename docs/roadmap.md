@@ -1,6 +1,7 @@
 # Roadmap: scenario code, Export, variables and wire routing
 
-- Status: in progress; M0, M1, S1, M4 and the run journal are complete; M2 is next
+- Status: in progress; M0, M1, S1, M4, the run journal and M2 are complete; M5 is
+  next
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
@@ -291,7 +292,7 @@ path works end to end.
 | M1 | Complete: format version 2, Value and Export blocks, structured bindings, converted fixtures |
 | S1 | Complete: single-writer sessions, external-change detection, deliberate recovery, draft storage ([ADR 0008](decisions/0008-storage-sessions.md)) |
 | M4 | Complete: parser, formatter, lowering, printer, reconciliation, located diagnostics and type warnings, `fmt/check/print/apply`; generated-topology property tests and sustained syntax and semantic fuzzing |
-| M2 | Next milestone |
+| M2 | Complete: `apiforge-layout`, *Tidy up*, pinning, routed wires with bridges and spline mode, wire settings, benchmarks |
 | M5, M6, M3, M7 | Planned |
 
 The run journal gate is closed: live requests are recorded before they are sent and

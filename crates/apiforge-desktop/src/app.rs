@@ -10,6 +10,7 @@ use crate::{
     library::{self, Library},
     navigator::Navigator,
     persistence::{SaveStatus, Saver},
+    preferences::Preferences,
     report::{self, ReportPanel},
     theme, widgets,
 };
@@ -98,6 +99,7 @@ pub struct App {
     journal: Option<Arc<JournalStore>>,
     /// Live runs a previous process left unfinished, until the user has seen them.
     interrupted: Option<Vec<JournalRun>>,
+    preferences: Preferences,
 }
 
 impl App {
@@ -194,6 +196,10 @@ impl App {
                 (workspace, saver)
             }
         };
+        let preferences = Preferences::load();
+        let mut canvas = Canvas::default();
+        canvas.wire_style = preferences.wire_style;
+        canvas.bridges = preferences.bridges;
         let repaint = context.clone();
         let runner = RunnerService::new(Arc::new(move || repaint.request_repaint()))
             .map_err(|error| {
@@ -210,7 +216,7 @@ impl App {
             editor: Editor::new(workspace),
             saver,
             saved_revision: 0,
-            canvas: Canvas::default(),
+            canvas,
             library: Library::default(),
             navigator: Navigator::default(),
             inspector: Inspector::default(),
@@ -231,6 +237,7 @@ impl App {
             storage_busy: false,
             journal,
             interrupted,
+            preferences,
         }
     }
 
@@ -525,6 +532,58 @@ impl App {
         } else if dismiss {
             self.interrupted = None;
         }
+    }
+
+    /// Lays out the selection, or the whole board when nothing is selected.
+    ///
+    /// One undo step, and it clears the pins of everything it moves: after a tidy
+    /// up the layout owns those positions again. Blocks outside the selection are
+    /// pinned for the layout, so the tidied blocks keep clear of them.
+    fn tidy_up(&mut self, selection: &[String]) {
+        let graph = self.editor.graph().clone();
+        let reference = self.editor.reference_graph().into_owned();
+        let project = self.editor.project().clone();
+        let moving = |node: &apiforge_core::format::Node| {
+            selection.is_empty() || selection.contains(&node.id)
+        };
+        if graph.nodes.iter().filter(|node| moving(node)).count() < 2 {
+            return;
+        }
+        let blocks: Vec<apiforge_layout::Block> = graph
+            .nodes
+            .iter()
+            .map(|node| {
+                let rect = canvas::Card::build(node, &reference, &project).rect();
+                let block = apiforge_layout::Block::new(
+                    apiforge_layout::Size::new(rect.width(), rect.height()),
+                    apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
+                );
+                if moving(node) { block } else { block.pinned() }
+            })
+            .collect();
+        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
+            .iter()
+            .filter_map(|wire| {
+                Some(apiforge_layout::Edge::new(
+                    index_of(&wire.source)?,
+                    index_of(&wire.target)?,
+                ))
+            })
+            .collect();
+        let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(&blocks, &edges));
+        let mut tidied = graph;
+        for (node, position) in tidied.nodes.iter_mut().zip(placed) {
+            if !(selection.is_empty() || selection.contains(&node.id)) {
+                continue;
+            }
+            node.position = Position {
+                x: f64::from(position.x),
+                y: f64::from(position.y),
+            };
+            node.auto_placed = true;
+        }
+        self.apply_graph(tidied);
     }
 
     fn is_running(&self) -> bool {
@@ -1449,9 +1508,23 @@ impl App {
                 for (id, position) in positions {
                     if let Some(node) = graph.nodes.iter_mut().find(|node| node.id == id) {
                         node.position = position;
+                        // A block placed by hand is pinned: automatic layout treats
+                        // it as an obstacle until the next tidy up.
+                        node.auto_placed = false;
                     }
                 }
                 self.apply_graph(graph);
+            }
+            Command::TidyUp(selection) => self.tidy_up(&selection),
+            Command::SetWireStyle(style) => {
+                self.canvas.wire_style = style;
+                self.preferences.wire_style = style;
+                self.preferences.save();
+            }
+            Command::SetBridges(bridges) => {
+                self.canvas.bridges = bridges;
+                self.preferences.bridges = bridges;
+                self.preferences.save();
             }
             Command::AddNode {
                 block,
@@ -1653,7 +1726,8 @@ impl App {
             source,
         ) {
             Ok(added) => {
-                self.apply_graph(added.graph);
+                let graph = self.free_slot_for(added.graph, &added.node_id);
+                self.apply_graph(graph);
                 self.editor.selection = vec![added.node_id];
             }
             Err(error) => self.canvas.set_error(error.to_string()),
@@ -1664,8 +1738,65 @@ impl App {
         let id = node.id.clone();
         let mut graph = self.editor.graph().clone();
         graph.nodes.push(node);
+        let graph = self.free_slot_for(graph, &id);
         self.apply_graph(graph);
         self.editor.selection = vec![id];
+    }
+
+    /// Moves a freshly added block to the nearest free slot when the position it
+    /// was given is already occupied, and leaves everything else where it is.
+    ///
+    /// A block that keeps its requested position stays pinned, because that
+    /// position is the one the user pointed at; a block the layout had to move is
+    /// marked as automatically placed, so a later tidy up owns it.
+    fn free_slot_for(&self, mut graph: Graph, node_id: &str) -> Graph {
+        let reference = self.editor.reference_graph().into_owned();
+        let project = self.editor.project().clone();
+        let Some(fresh) = graph.nodes.iter().position(|node| node.id == node_id) else {
+            return graph;
+        };
+        let blocks: Vec<apiforge_layout::Block> = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let rect = canvas::Card::build(node, &reference, &project).rect();
+                let block = apiforge_layout::Block::new(
+                    apiforge_layout::Size::new(rect.width(), rect.height()),
+                    apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
+                );
+                if index == fresh {
+                    block
+                } else {
+                    block.pinned()
+                }
+            })
+            .collect();
+        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
+            .iter()
+            .filter_map(|wire| {
+                Some(apiforge_layout::Edge::new(
+                    index_of(&wire.source)?,
+                    index_of(&wire.target)?,
+                ))
+            })
+            .collect();
+        let placed =
+            apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &[fresh]);
+        if let Some(position) = placed.first() {
+            let node = &mut graph.nodes[fresh];
+            let moved = (position.x - node.position.x as f32).abs() > 0.5
+                || (position.y - node.position.y as f32).abs() > 0.5;
+            if moved {
+                node.position = Position {
+                    x: f64::from(position.x),
+                    y: f64::from(position.y),
+                };
+                node.auto_placed = true;
+            }
+        }
+        graph
     }
 
     fn edit_component(&mut self, node_id: &str) {
@@ -2163,6 +2294,199 @@ mod tests {
             "{:?}",
             app.notice
         );
+    }
+
+    #[test]
+    fn tidy_up_lays_out_the_board_in_one_undo_step_and_clears_the_pins() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        // Pile the blocks of the scenario onto one spot and pin them all.
+        app.editor.change_project(|project| {
+            for node in &mut project.scenarios[0].graph.nodes {
+                node.position = Position { x: 400.0, y: 300.0 };
+                node.auto_placed = false;
+            }
+        });
+        let before = app.editor.graph().clone();
+        assert!(before.nodes.len() >= 3, "the demo scenario has blocks");
+        let revision = app.editor.revision();
+
+        app.board_command(Command::TidyUp(vec![]));
+        let after = app.editor.graph().clone();
+        assert!(
+            after.nodes.iter().all(|node| node.auto_placed),
+            "tidy up owns the positions it chose"
+        );
+        let columns: std::collections::BTreeSet<i64> = after
+            .nodes
+            .iter()
+            .map(|node| node.position.x.round() as i64)
+            .collect();
+        assert!(columns.len() > 1, "the flow is laid out in columns");
+        // The board keeps its place: the layout starts where the blocks were.
+        let left = after
+            .nodes
+            .iter()
+            .map(|node| node.position.x)
+            .fold(f64::INFINITY, f64::min);
+        assert_eq!(left, 400.0);
+        let places: std::collections::BTreeSet<(i64, i64)> = after
+            .nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.position.x.round() as i64,
+                    node.position.y.round() as i64,
+                )
+            })
+            .collect();
+        assert_eq!(
+            places.len(),
+            after.nodes.len(),
+            "no two blocks share a position any more"
+        );
+
+        // One undo step brings every block back.
+        assert_ne!(app.editor.revision(), revision);
+        app.editor.undo();
+        let restored = app.editor.graph().clone();
+        for (node, original) in restored.nodes.iter().zip(&before.nodes) {
+            assert_eq!(node.position, original.position);
+            assert!(!node.auto_placed);
+        }
+    }
+
+    #[test]
+    fn tidy_up_with_a_selection_moves_only_the_selected_blocks() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.editor.change_project(|project| {
+            for node in &mut project.scenarios[0].graph.nodes {
+                node.position = Position { x: 400.0, y: 300.0 };
+            }
+        });
+        let ids: Vec<String> = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect();
+        let selected = ids[..2].to_vec();
+        // Put the unselected blocks somewhere definite, so landing on one shows.
+        app.editor.change_project(|project| {
+            for (index, node) in project.scenarios[0].graph.nodes.iter_mut().enumerate() {
+                if index >= 2 {
+                    node.position = Position {
+                        x: 900.0,
+                        y: index as f64 * 40.0,
+                    };
+                }
+            }
+        });
+        app.board_command(Command::TidyUp(selected.clone()));
+        let graph = app.editor.graph().clone();
+        for (index, node) in graph.nodes.iter().enumerate() {
+            if selected.contains(&node.id) {
+                continue;
+            }
+            assert_eq!(
+                node.position,
+                Position {
+                    x: 900.0,
+                    y: index as f64 * 40.0
+                },
+                "an unselected block stayed where it was"
+            );
+        }
+        // The tidied blocks keep clear of the ones outside the selection.
+        let reference = app.editor.reference_graph().into_owned();
+        let project = app.editor.project().clone();
+        let rect = |node: &apiforge_core::format::Node| {
+            canvas::Card::build(node, &reference, &project).rect()
+        };
+        for node in graph
+            .nodes
+            .iter()
+            .filter(|node| selected.contains(&node.id))
+        {
+            for other in graph
+                .nodes
+                .iter()
+                .filter(|other| !selected.contains(&other.id))
+            {
+                assert!(
+                    !rect(node).intersects(rect(other)),
+                    "a tidied block landed on an unselected one"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_a_block_by_hand_pins_it() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let id = app.editor.graph().nodes[0].id.clone();
+        app.editor.change_project(|project| {
+            project.scenarios[0].graph.nodes[0].auto_placed = true;
+        });
+        app.board_command(Command::Move(vec![(
+            id.clone(),
+            Position { x: 120.0, y: 90.0 },
+        )]));
+        let node = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .unwrap();
+        assert_eq!(node.position, Position { x: 120.0, y: 90.0 });
+        assert!(!node.auto_placed, "a block moved by hand is pinned");
+    }
+
+    #[test]
+    fn a_new_block_lands_beside_an_occupied_position_rather_than_on_it() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let occupied = app.editor.graph().nodes[0].position.clone();
+        let before = app.editor.graph().nodes.len();
+        app.board_command(Command::AddNode {
+            block: Block::Variable,
+            component: None,
+            position: occupied.clone(),
+            source: None,
+        });
+        let graph = app.editor.graph().clone();
+        assert_eq!(graph.nodes.len(), before + 1);
+        let added = graph.nodes.last().unwrap();
+        assert_ne!(
+            (added.position.x, added.position.y),
+            (occupied.x, occupied.y),
+            "the new block was moved out of the way"
+        );
+        assert!(added.auto_placed, "a block the layout moved is not pinned");
+        // Nothing else moved.
+        assert_eq!(graph.nodes[0].position, occupied);
+    }
+
+    #[test]
+    fn the_wire_style_is_remembered_for_the_next_session() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let directory = tempfile::tempdir().unwrap();
+        // Keep the user's own preferences file out of the test.
+        let path = directory.path().join("preferences.json");
+        app.preferences = crate::preferences::Preferences::at(Some(path.clone()));
+        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Orthogonal);
+        app.board_command(Command::SetWireStyle(canvas::WireStyle::Spline));
+        app.board_command(Command::SetBridges(false));
+        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Spline);
+        assert!(!app.canvas.bridges);
+        let stored = crate::preferences::Preferences::at(Some(path));
+        assert_eq!(stored.wire_style, canvas::WireStyle::Spline);
+        assert!(!stored.bridges);
     }
 
     #[test]

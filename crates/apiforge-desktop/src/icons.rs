@@ -31,6 +31,10 @@ pub enum Icon {
     Refresh,
     Eye,
     EyeOff,
+    /// Cards arranged in columns, for automatic layout.
+    Layout,
+    /// A wire turning a corner, for the wire style.
+    Wire,
 }
 
 impl Icon {
@@ -239,6 +243,16 @@ impl Icon {
                     stroke,
                 ));
                 path(&[(21.0, 3.0), (21.0, 9.0), (15.0, 9.0)]);
+            }
+            Self::Layout => {
+                outline(3.0, 4.0, 10.0, 11.0);
+                outline(3.0, 14.0, 10.0, 20.0);
+                outline(14.0, 7.0, 21.0, 17.0);
+            }
+            Self::Wire => {
+                path(&[(3.0, 6.0), (12.0, 6.0), (12.0, 18.0), (21.0, 18.0)]);
+                painter.circle_stroke(p(3.5, 6.0), size * 1.5 / 24.0, stroke);
+                painter.circle_stroke(p(20.5, 18.0), size * 1.5 / 24.0, stroke);
             }
             Self::Eye | Self::EyeOff => {
                 let points = [

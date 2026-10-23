@@ -15,6 +15,7 @@ mod labels;
 mod library;
 mod navigator;
 mod persistence;
+mod preferences;
 mod report;
 mod theme;
 mod widgets;

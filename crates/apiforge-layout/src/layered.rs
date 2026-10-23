@@ -78,11 +78,16 @@ impl<'a> Graph<'a> {
     }
 }
 
-/// Lays out every card, ignoring pins, and returns one position per block.
+/// Lays out the cards and returns one position per block.
 ///
-/// The result is anchored so that its top-left corner stays where the current
-/// bounding box of the cards begins; a tidy-up therefore does not send the board
-/// off to the origin.
+/// A pinned block keeps its coordinates and becomes an obstacle: that is how a
+/// *tidy up* of a selection works, with everything outside the selection pinned.
+/// The laid-out blocks are then moved to the nearest free slot where they would
+/// otherwise land on a pinned one. With nothing pinned the whole board is laid out,
+/// which is the ordinary case.
+///
+/// The result is anchored so that the top-left corner of the blocks being laid out
+/// stays where it is now; a tidy-up does not send the board off to the origin.
 pub fn tidy(graph: &Graph<'_>) -> Vec<Point> {
     if graph.blocks.is_empty() {
         return Vec::new();
@@ -91,21 +96,54 @@ pub fn tidy(graph: &Graph<'_>) -> Vec<Point> {
     let layers = layer_assignment(graph.blocks.len(), &edges);
     let order = order_within_layers(graph.blocks.len(), &edges, &layers);
     let mut positions = coordinates(graph, &layers, &order);
-    let anchor = Rect::bounding(graph.blocks.iter().map(Block::rect))
+    // Pinned blocks take no part in the result: they are where the user put them.
+    let moving: Vec<usize> = (0..graph.blocks.len())
+        .filter(|index| !graph.blocks[*index].pinned)
+        .collect();
+    if moving.is_empty() {
+        return graph.blocks.iter().map(|block| block.position).collect();
+    }
+    let anchor = Rect::bounding(moving.iter().map(|index| graph.blocks[*index].rect()))
         .map(|bounds| bounds.min)
         .unwrap_or_default();
     let laid_out = Rect::bounding(
-        positions
+        moving
             .iter()
-            .zip(graph.blocks)
-            .map(|(position, block)| Rect::from_size(*position, block.size)),
+            .map(|index| Rect::from_size(positions[*index], graph.blocks[*index].size)),
     )
     .map(|bounds| bounds.min)
     .unwrap_or_default();
     let shift = Point::new(anchor.x - laid_out.x, anchor.y - laid_out.y);
-    for position in &mut positions {
-        position.x += shift.x;
-        position.y += shift.y;
+    for index in &moving {
+        positions[*index].x += shift.x;
+        positions[*index].y += shift.y;
+    }
+    let mut obstacles: Vec<Rect> = graph
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| block.pinned)
+        .map(|(index, block)| {
+            positions[index] = block.position;
+            block.rect().inflate(graph.spacing.clearance)
+        })
+        .collect();
+    if !obstacles.is_empty() {
+        // The layout knows nothing about the pinned cards, so a laid-out card can
+        // land on one. Each then takes the nearest free slot, in document order so
+        // that the result does not depend on the layer walk.
+        for index in &moving {
+            let block = &graph.blocks[*index];
+            positions[*index] = free_slot(
+                positions[*index],
+                block.size,
+                &obstacles,
+                graph.spacing.slot_step,
+            );
+            obstacles.push(
+                Rect::from_size(positions[*index], block.size).inflate(graph.spacing.clearance),
+            );
+        }
     }
     positions
 }
