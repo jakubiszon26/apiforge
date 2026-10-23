@@ -106,8 +106,11 @@ template { parts: Vec<TemplatePart> }   // TemplatePart = text { text } | value 
   Wire identifiers extend the version-one form with field names and indexes, e.g.
   `data:n:body:fields/items/0`.
 - **Canonical form**, enforced by validation and kept by editing helpers:
-  - an object or array whose leaves are all literals is a single `literal`;
-  - a template with no value parts is a `literal` string;
+  - a `literal` holds a scalar (string, number, boolean or null); objects and
+    arrays are always `object` and `array` bindings, even when every leaf is a
+    literal (JSON samples, contracts and port defaults are plain JSON, not
+    bindings);
+  - a template has at least one value part; text alone is a `literal` string;
   - adjacent text parts are merged and empty text parts are dropped;
   - reference paths are in the canonical `JsonPath` form (`a.b[0]["x y"]`).
 
