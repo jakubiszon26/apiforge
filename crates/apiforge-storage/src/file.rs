@@ -193,12 +193,32 @@ impl WorkspaceFile {
     /// The document is validated first, so storage never holds a workspace the
     /// importer would reject.
     pub fn save(&self, workspace: &Workspace) -> Result<(), StorageError> {
+        self.save_envelope(workspace, false)
+    }
+
+    /// Keeps a standalone project file standalone, including its backup.
+    pub fn save_project(&self, project: &Project) -> Result<(), StorageError> {
+        self.save_envelope(
+            &Workspace {
+                version: project.version,
+                active_id: project.id.clone(),
+                projects: vec![project.clone()],
+            },
+            true,
+        )
+    }
+
+    fn save_envelope(&self, workspace: &Workspace, standalone: bool) -> Result<(), StorageError> {
         let public = public_workspace(workspace);
         apiforge_core::validate_workspace(&public).map_err(|source| StorageError::Invalid {
             path: self.path.clone(),
             source,
         })?;
-        let bytes = serde_json::to_vec_pretty(&public)?;
+        let bytes = if standalone {
+            serde_json::to_vec_pretty(&public.projects[0])?
+        } else {
+            serde_json::to_vec_pretty(&public)?
+        };
         // Semantic validation alone does not enforce the importer's byte limit.
         // Never acknowledge a save that the next application launch cannot open.
         import_document(&bytes, &ImportLimits::default()).map_err(|source| {
@@ -207,7 +227,7 @@ impl WorkspaceFile {
                 source,
             }
         })?;
-        match read_workspace(&self.path) {
+        match read_document(&self.path) {
             // Only a readable document becomes the backup; a corrupt main file must
             // not overwrite the last good copy.
             Ok(Some(previous)) => {
@@ -215,7 +235,12 @@ impl WorkspaceFile {
                 // main file; copying in place could destroy the only recovery copy.
                 // Compact encoding avoids inflating an imported document beyond
                 // the size limit while retaining it as a recovery workspace.
-                let previous = serde_json::to_vec(&public_workspace(&previous))?;
+                let public = public_workspace(previous.workspace());
+                let previous = if previous.is_standalone_project() {
+                    serde_json::to_vec(&public.projects[0])?
+                } else {
+                    serde_json::to_vec(&public)?
+                };
                 import_document(&previous, &ImportLimits::default()).map_err(|source| {
                     StorageError::Invalid {
                         path: self.backup_path(),
@@ -262,6 +287,10 @@ fn public_workspace(workspace: &Workspace) -> Workspace {
 }
 
 fn read_workspace(path: &Path) -> Result<Option<Workspace>, StorageError> {
+    Ok(read_document(path)?.map(|doc| doc.into_workspace()))
+}
+
+fn read_document(path: &Path) -> Result<Option<apiforge_core::ValidatedDocument>, StorageError> {
     let limits = ImportLimits::default();
     let file = match File::open(path) {
         Ok(file) => file,
@@ -277,7 +306,7 @@ fn read_workspace(path: &Path) -> Result<Option<Workspace>, StorageError> {
         path: path.to_owned(),
         source,
     })?;
-    Ok(Some(document.into_workspace()))
+    Ok(Some(document))
 }
 
 /// Writes `bytes` to `path` through a synced temporary file in the same directory
