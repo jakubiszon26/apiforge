@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "read",
+                "handle": "read",
                 "kind": "request",
-                "name": "read",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -43,8 +43,8 @@
               },
               {
                 "id": "gate",
+                "handle": "gate",
                 "kind": "condition",
-                "name": "gate",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -67,8 +67,8 @@
               },
               {
                 "id": "blocked",
+                "handle": "blocked",
                 "kind": "build",
-                "name": "blocked",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -87,8 +87,8 @@
               },
               {
                 "id": "independent",
+                "handle": "independent",
                 "kind": "select",
-                "name": "independent",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -107,8 +107,8 @@
               },
               {
                 "id": "listed",
+                "handle": "listed",
                 "kind": "condition",
-                "name": "listed",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -164,8 +164,9 @@
               },
               {
                 "id": "any-of",
+                "handle": "any_of",
+                "label": "any-of",
                 "kind": "condition",
-                "name": "any-of",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -207,8 +208,9 @@
               },
               {
                 "id": "broken-list",
+                "handle": "broken_list",
+                "label": "broken-list",
                 "kind": "condition",
-                "name": "broken-list",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -243,8 +245,9 @@
               },
               {
                 "id": "after-list",
+                "handle": "after_list",
+                "label": "after-list",
                 "kind": "formula",
-                "name": "after-list",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -267,8 +270,9 @@
               },
               {
                 "id": "exists-null",
+                "handle": "exists_null",
+                "label": "exists-null",
                 "kind": "assert",
-                "name": "exists-null",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -291,8 +295,8 @@
               },
               {
                 "id": "missing",
+                "handle": "missing",
                 "kind": "assert",
-                "name": "missing",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -315,8 +319,9 @@
               },
               {
                 "id": "not-empty",
+                "handle": "not_empty",
+                "label": "not-empty",
                 "kind": "assert",
-                "name": "not-empty",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -339,8 +344,8 @@
               },
               {
                 "id": "type",
+                "handle": "type",
                 "kind": "assert",
-                "name": "type",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -363,8 +368,9 @@
               },
               {
                 "id": "contains",
+                "handle": "contains_step",
+                "label": "contains",
                 "kind": "assert",
-                "name": "contains",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -387,8 +393,9 @@
               },
               {
                 "id": "not-a-number",
+                "handle": "not_a_number",
+                "label": "not-a-number",
                 "kind": "assert",
-                "name": "not-a-number",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -442,7 +449,7 @@
     "steps": [
       {
         "nodeId": "read",
-        "name": "read",
+        "handle": "read",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -470,7 +477,7 @@
       },
       {
         "nodeId": "gate",
-        "name": "gate",
+        "handle": "gate",
         "kind": "condition",
         "status": "blocked",
         "phase": "main",
@@ -487,7 +494,7 @@
       },
       {
         "nodeId": "blocked",
-        "name": "blocked",
+        "handle": "blocked",
         "kind": "build",
         "status": "blocked",
         "phase": "main",
@@ -496,7 +503,7 @@
       },
       {
         "nodeId": "independent",
-        "name": "independent",
+        "handle": "independent",
         "kind": "select",
         "status": "passed",
         "phase": "main",
@@ -518,7 +525,7 @@
       },
       {
         "nodeId": "listed",
-        "name": "listed",
+        "handle": "listed",
         "kind": "condition",
         "status": "passed",
         "phase": "main",
@@ -566,7 +573,8 @@
       },
       {
         "nodeId": "any-of",
-        "name": "any-of",
+        "handle": "any_of",
+        "label": "any-of",
         "kind": "condition",
         "status": "passed",
         "phase": "main",
@@ -611,7 +619,8 @@
       },
       {
         "nodeId": "broken-list",
-        "name": "broken-list",
+        "handle": "broken_list",
+        "label": "broken-list",
         "kind": "condition",
         "status": "error",
         "phase": "main",
@@ -633,7 +642,8 @@
       },
       {
         "nodeId": "after-list",
-        "name": "after-list",
+        "handle": "after_list",
+        "label": "after-list",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -647,7 +657,8 @@
       },
       {
         "nodeId": "exists-null",
-        "name": "exists-null",
+        "handle": "exists_null",
+        "label": "exists-null",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -664,7 +675,7 @@
       },
       {
         "nodeId": "missing",
-        "name": "missing",
+        "handle": "missing",
         "kind": "assert",
         "status": "failed",
         "phase": "main",
@@ -678,7 +689,8 @@
       },
       {
         "nodeId": "not-empty",
-        "name": "not-empty",
+        "handle": "not_empty",
+        "label": "not-empty",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -701,7 +713,7 @@
       },
       {
         "nodeId": "type",
-        "name": "type",
+        "handle": "type",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -724,7 +736,8 @@
       },
       {
         "nodeId": "contains",
-        "name": "contains",
+        "handle": "contains_step",
+        "label": "contains",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -747,7 +760,8 @@
       },
       {
         "nodeId": "not-a-number",
-        "name": "not-a-number",
+        "handle": "not_a_number",
+        "label": "not-a-number",
         "kind": "assert",
         "status": "error",
         "phase": "main",

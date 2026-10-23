@@ -100,7 +100,9 @@ mod tests {
         Node {
             id: id.into(),
             kind,
-            name: id.into(),
+            handle: id.into(),
+            label: None,
+            note: None,
             position: Position { x: 0.0, y: 0.0 },
             inputs: IndexMap::new(),
             config: NodeConfig::default(),

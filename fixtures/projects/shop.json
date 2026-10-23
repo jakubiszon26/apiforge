@@ -11,8 +11,9 @@
         "nodes": [
           {
             "id": "product",
+            "handle": "produkt",
+            "label": "Produkt",
             "kind": "component",
-            "name": "Produkt",
             "position": {
               "x": 40.0,
               "y": 160.0
@@ -30,8 +31,9 @@
           },
           {
             "id": "active",
+            "handle": "aktywna_promocja",
+            "label": "Aktywna promocja",
             "kind": "component",
-            "name": "Aktywna promocja",
             "position": {
               "x": 360.0,
               "y": 30.0
@@ -51,8 +53,9 @@
           },
           {
             "id": "expected",
+            "handle": "oczekiwana_cena",
+            "label": "Oczekiwana cena",
             "kind": "formula",
-            "name": "Oczekiwana cena",
             "position": {
               "x": 360.0,
               "y": 290.0
@@ -73,8 +76,9 @@
           },
           {
             "id": "cart",
+            "handle": "dodaj_do_koszyka",
+            "label": "Dodaj do koszyka",
             "kind": "component",
-            "name": "Dodaj do koszyka",
             "position": {
               "x": 680.0,
               "y": 30.0
@@ -98,8 +102,9 @@
           },
           {
             "id": "price",
+            "handle": "cena_po_promocji",
+            "label": "Cena po promocji",
             "kind": "assert",
-            "name": "Cena po promocji",
             "position": {
               "x": 1000.0,
               "y": 160.0
@@ -125,8 +130,9 @@
           },
           {
             "id": "field",
+            "handle": "pole_inna_nazwa",
+            "label": "Pole inna_nazwa",
             "kind": "assert",
-            "name": "Pole inna_nazwa",
             "position": {
               "x": 680.0,
               "y": 290.0
@@ -150,8 +156,9 @@
         "nodes": [
           {
             "id": "delete-cart",
+            "handle": "usun_koszyk",
+            "label": "Usuń koszyk",
             "kind": "request",
-            "name": "Usuń koszyk",
             "position": {
               "x": 80.0,
               "y": 80.0
@@ -185,8 +192,9 @@
           },
           {
             "id": "verify-cleanup",
+            "handle": "koszyk_zostal_usuniety",
+            "label": "Koszyk został usunięty",
             "kind": "assert",
-            "name": "Koszyk został usunięty",
             "position": {
               "x": 400.0,
               "y": 80.0
@@ -248,8 +256,9 @@
         "nodes": [
           {
             "id": "fetch",
+            "handle": "pobierz_produkt",
+            "label": "Pobierz produkt",
             "kind": "request",
-            "name": "Pobierz produkt",
             "position": {
               "x": 80.0,
               "y": 80.0
@@ -320,8 +329,9 @@
         "nodes": [
           {
             "id": "active",
+            "handle": "aktywnosc_promocji",
+            "label": "Aktywność promocji",
             "kind": "select",
-            "name": "Aktywność promocji",
             "position": {
               "x": 80.0,
               "y": 80.0
@@ -338,8 +348,9 @@
           },
           {
             "id": "check",
+            "handle": "promocja_musi_byc_aktywna",
+            "label": "Promocja musi być aktywna",
             "kind": "condition",
-            "name": "Promocja musi być aktywna",
             "position": {
               "x": 400.0,
               "y": 80.0
@@ -408,8 +419,9 @@
         "nodes": [
           {
             "id": "id",
+            "handle": "id_produktu",
+            "label": "ID produktu",
             "kind": "select",
-            "name": "ID produktu",
             "position": {
               "x": 50.0,
               "y": 90.0
@@ -426,8 +438,9 @@
           },
           {
             "id": "body",
+            "handle": "pozycja_koszyka",
+            "label": "Pozycja koszyka",
             "kind": "build",
-            "name": "Pozycja koszyka",
             "position": {
               "x": 350.0,
               "y": 90.0
@@ -450,8 +463,9 @@
           },
           {
             "id": "create",
+            "handle": "utworz_koszyk",
+            "label": "Utwórz koszyk",
             "kind": "request",
-            "name": "Utwórz koszyk",
             "position": {
               "x": 650.0,
               "y": 90.0
@@ -481,8 +495,9 @@
           },
           {
             "id": "read",
+            "handle": "pobierz_koszyk",
+            "label": "Pobierz koszyk",
             "kind": "request",
-            "name": "Pobierz koszyk",
             "position": {
               "x": 950.0,
               "y": 90.0

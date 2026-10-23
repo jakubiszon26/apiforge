@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "source",
+                "handle": "source",
                 "kind": "request",
-                "name": "source",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -44,8 +44,8 @@
               },
               {
                 "id": "variable",
+                "handle": "variable",
                 "kind": "variable",
-                "name": "variable",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -62,8 +62,9 @@
               },
               {
                 "id": "templated-select",
+                "handle": "templated_select",
+                "label": "templated-select",
                 "kind": "select",
-                "name": "templated-select",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -86,8 +87,9 @@
               },
               {
                 "id": "missing-select",
+                "handle": "missing_select",
+                "label": "missing-select",
                 "kind": "select",
-                "name": "missing-select",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -106,8 +108,8 @@
               },
               {
                 "id": "array",
+                "handle": "array",
                 "kind": "build",
-                "name": "array",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -136,8 +138,8 @@
               },
               {
                 "id": "object",
+                "handle": "object",
                 "kind": "build",
-                "name": "object",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -164,8 +166,8 @@
               },
               {
                 "id": "incomplete",
+                "handle": "incomplete",
                 "kind": "build",
-                "name": "incomplete",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -184,8 +186,8 @@
               },
               {
                 "id": "random",
+                "handle": "random",
                 "kind": "formula",
-                "name": "random",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -206,8 +208,9 @@
               },
               {
                 "id": "random-real",
+                "handle": "random_real",
+                "label": "random-real",
                 "kind": "formula",
-                "name": "random-real",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -228,8 +231,8 @@
               },
               {
                 "id": "rounded",
+                "handle": "rounded",
                 "kind": "formula",
-                "name": "rounded",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -246,8 +249,9 @@
               },
               {
                 "id": "missing-left",
+                "handle": "missing_left",
+                "label": "missing-left",
                 "kind": "formula",
-                "name": "missing-left",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -270,8 +274,9 @@
               },
               {
                 "id": "wrong-type",
+                "handle": "wrong_type",
+                "label": "wrong-type",
                 "kind": "formula",
-                "name": "wrong-type",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -292,8 +297,9 @@
               },
               {
                 "id": "null-operand",
+                "handle": "null_operand",
+                "label": "null-operand",
                 "kind": "formula",
-                "name": "null-operand",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -316,8 +322,8 @@
               },
               {
                 "id": "nested",
+                "handle": "nested",
                 "kind": "formula",
-                "name": "nested",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -356,8 +362,9 @@
               },
               {
                 "id": "nested-error",
+                "handle": "nested_error",
+                "label": "nested-error",
                 "kind": "formula",
-                "name": "nested-error",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -398,8 +405,9 @@
               },
               {
                 "id": "get-with-body",
+                "handle": "get_with_body",
+                "label": "get-with-body",
                 "kind": "request",
-                "name": "get-with-body",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -424,8 +432,9 @@
               },
               {
                 "id": "no-sample",
+                "handle": "no_sample",
+                "label": "no-sample",
                 "kind": "request",
-                "name": "no-sample",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -442,8 +451,9 @@
               },
               {
                 "id": "missing-template",
+                "handle": "missing_template",
+                "label": "missing-template",
                 "kind": "request",
-                "name": "missing-template",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -463,8 +473,9 @@
               },
               {
                 "id": "missing-path-argument",
+                "handle": "missing_path_argument",
+                "label": "missing-path-argument",
                 "kind": "request",
-                "name": "missing-path-argument",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -484,8 +495,9 @@
               },
               {
                 "id": "typed-body",
+                "handle": "typed_body",
+                "label": "typed-body",
                 "kind": "request",
-                "name": "typed-body",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -534,8 +546,8 @@
               },
               {
                 "id": "absolute",
+                "handle": "absolute",
                 "kind": "request",
-                "name": "absolute",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -555,8 +567,8 @@
               },
               {
                 "id": "ftp",
+                "handle": "ftp",
                 "kind": "request",
-                "name": "ftp",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -576,8 +588,9 @@
               },
               {
                 "id": "invalid-url",
+                "handle": "invalid_url",
+                "label": "invalid-url",
                 "kind": "request",
-                "name": "invalid-url",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -597,8 +610,9 @@
               },
               {
                 "id": "required-port",
+                "handle": "required_port",
+                "label": "required-port",
                 "kind": "request",
-                "name": "required-port",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -641,8 +655,8 @@
               },
               {
                 "id": "approximately",
+                "handle": "approximately",
                 "kind": "assert",
-                "name": "approximately",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -664,8 +678,9 @@
               },
               {
                 "id": "not-equals",
+                "handle": "not_equals",
+                "label": "not-equals",
                 "kind": "assert",
-                "name": "not-equals",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -725,7 +740,7 @@
     "steps": [
       {
         "nodeId": "source",
-        "name": "source",
+        "handle": "source",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -754,7 +769,7 @@
       },
       {
         "nodeId": "variable",
-        "name": "variable",
+        "handle": "variable",
         "kind": "variable",
         "status": "passed",
         "phase": "main",
@@ -775,7 +790,8 @@
       },
       {
         "nodeId": "templated-select",
-        "name": "templated-select",
+        "handle": "templated_select",
+        "label": "templated-select",
         "kind": "select",
         "status": "passed",
         "phase": "main",
@@ -799,7 +815,8 @@
       },
       {
         "nodeId": "missing-select",
-        "name": "missing-select",
+        "handle": "missing_select",
+        "label": "missing-select",
         "kind": "select",
         "status": "passed",
         "phase": "main",
@@ -820,7 +837,7 @@
       },
       {
         "nodeId": "array",
-        "name": "array",
+        "handle": "array",
         "kind": "build",
         "status": "passed",
         "phase": "main",
@@ -841,7 +858,7 @@
       },
       {
         "nodeId": "object",
-        "name": "object",
+        "handle": "object",
         "kind": "build",
         "status": "passed",
         "phase": "main",
@@ -860,7 +877,7 @@
       },
       {
         "nodeId": "incomplete",
-        "name": "incomplete",
+        "handle": "incomplete",
         "kind": "build",
         "status": "error",
         "phase": "main",
@@ -869,7 +886,7 @@
       },
       {
         "nodeId": "random",
-        "name": "random",
+        "handle": "random",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -883,7 +900,8 @@
       },
       {
         "nodeId": "random-real",
-        "name": "random-real",
+        "handle": "random_real",
+        "label": "random-real",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -897,7 +915,7 @@
       },
       {
         "nodeId": "rounded",
-        "name": "rounded",
+        "handle": "rounded",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -911,7 +929,8 @@
       },
       {
         "nodeId": "missing-left",
-        "name": "missing-left",
+        "handle": "missing_left",
+        "label": "missing-left",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -925,7 +944,8 @@
       },
       {
         "nodeId": "wrong-type",
-        "name": "wrong-type",
+        "handle": "wrong_type",
+        "label": "wrong-type",
         "kind": "formula",
         "status": "error",
         "phase": "main",
@@ -937,7 +957,8 @@
       },
       {
         "nodeId": "null-operand",
-        "name": "null-operand",
+        "handle": "null_operand",
+        "label": "null-operand",
         "kind": "formula",
         "status": "error",
         "phase": "main",
@@ -949,7 +970,7 @@
       },
       {
         "nodeId": "nested",
-        "name": "nested",
+        "handle": "nested",
         "kind": "formula",
         "status": "passed",
         "phase": "main",
@@ -963,7 +984,8 @@
       },
       {
         "nodeId": "nested-error",
-        "name": "nested-error",
+        "handle": "nested_error",
+        "label": "nested-error",
         "kind": "formula",
         "status": "error",
         "phase": "main",
@@ -972,7 +994,8 @@
       },
       {
         "nodeId": "get-with-body",
-        "name": "get-with-body",
+        "handle": "get_with_body",
+        "label": "get-with-body",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -983,7 +1006,8 @@
       },
       {
         "nodeId": "no-sample",
-        "name": "no-sample",
+        "handle": "no_sample",
+        "label": "no-sample",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -997,7 +1021,8 @@
       },
       {
         "nodeId": "missing-template",
-        "name": "missing-template",
+        "handle": "missing_template",
+        "label": "missing-template",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -1006,7 +1031,8 @@
       },
       {
         "nodeId": "missing-path-argument",
-        "name": "missing-path-argument",
+        "handle": "missing_path_argument",
+        "label": "missing-path-argument",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -1015,7 +1041,8 @@
       },
       {
         "nodeId": "typed-body",
-        "name": "typed-body",
+        "handle": "typed_body",
+        "label": "typed-body",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -1062,7 +1089,7 @@
       },
       {
         "nodeId": "absolute",
-        "name": "absolute",
+        "handle": "absolute",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -1083,7 +1110,7 @@
       },
       {
         "nodeId": "ftp",
-        "name": "ftp",
+        "handle": "ftp",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -1104,7 +1131,8 @@
       },
       {
         "nodeId": "invalid-url",
-        "name": "invalid-url",
+        "handle": "invalid_url",
+        "label": "invalid-url",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -1113,7 +1141,8 @@
       },
       {
         "nodeId": "required-port",
-        "name": "required-port",
+        "handle": "required_port",
+        "label": "required-port",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -1139,7 +1168,7 @@
       },
       {
         "nodeId": "approximately",
-        "name": "approximately",
+        "handle": "approximately",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -1156,7 +1185,8 @@
       },
       {
         "nodeId": "not-equals",
-        "name": "not-equals",
+        "handle": "not_equals",
+        "label": "not-equals",
         "kind": "assert",
         "status": "failed",
         "phase": "main",

@@ -74,8 +74,8 @@ fn lcg(seed: u32) -> impl FnMut() -> f64 + Send {
 fn normalize_step(step: &Value) -> Value {
     let mut output = Map::new();
     for key in [
-        "nodeId", "name", "kind", "status", "phase", "inputs", "outputs", "actual", "expected",
-        "request",
+        "nodeId", "handle", "label", "kind", "status", "phase", "inputs", "outputs", "actual",
+        "expected", "request",
     ] {
         if let Some(value) = step.get(key) {
             output.insert(key.to_owned(), value.clone());

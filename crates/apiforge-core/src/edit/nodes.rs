@@ -7,6 +7,7 @@ use super::{
 use crate::{
     format::{Binding, Component, Graph, Node, Position, Project},
     graph::{create_node, has_cycle, output_ports, position_after},
+    handle::{handle_base, unique_handle},
     js,
     model::NodeKind,
 };
@@ -50,7 +51,7 @@ fn default_input(kind: NodeKind) -> Option<&'static str> {
 /// - Without a source, a request or component gets an ordering edge from Start
 ///   when Start has no outgoing edge yet, so the first step is visibly connected.
 ///
-/// New variables are numbered (`Variable 3`). A board can hold only one Start.
+/// Handles are numbered when taken (`request_2`). A board can hold only one Start.
 pub fn add_node(
     graph: &Graph,
     kind: NodeKind,
@@ -72,14 +73,9 @@ pub fn add_node(
     }
     let mut node = create_node(kind, position, component);
     node.id = unique_id("node", |id| graph.nodes.iter().any(|node| node.id == id));
-    if kind == NodeKind::Variable {
-        let count = graph
-            .nodes
-            .iter()
-            .filter(|node| node.kind == NodeKind::Variable)
-            .count();
-        node.name = format!("Variable {}", count + 1);
-    }
+    node.handle = unique_handle(&node.handle, |handle| {
+        graph.nodes.iter().any(|node| node.handle == handle)
+    });
 
     let mut next = graph.clone();
     match source {
@@ -127,6 +123,9 @@ pub fn add_node(
 
 /// A comparison of one output field with an expected value, placed next to `source`.
 ///
+/// Its handle is derived from the field and may collide with existing handles; the
+/// caller adds it with [`crate::handle::unique_handle`] or `dedupe_handles`.
+///
 /// The actual value stays a reference, so the check reads the field on every run;
 /// the same binding is used for sample responses and run results.
 pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> Node {
@@ -135,7 +134,9 @@ pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> 
         y: source.position.y + 70.0,
     };
     let mut node = create_node(NodeKind::Assert, position, None);
-    node.name = format!("Check {}", if path.is_empty() { port } else { path });
+    let subject = if path.is_empty() { port } else { path };
+    node.handle = handle_base(&format!("check {subject}"));
+    node.label = Some(format!("Check {subject}"));
     node.inputs.clear();
     node.inputs
         .insert("actual".into(), Binding::reference(&source.id, port, path));
@@ -199,7 +200,12 @@ pub fn assign_response_variable(
     if variable.kind != NodeKind::Variable {
         return Err(EditError::VariableNotFound);
     }
-    variable.name = name.to_owned();
+    variable.label = Some(name.to_owned());
+    if target_id.is_none() {
+        variable.handle = unique_handle(&handle_base(name), |handle| {
+            graph.nodes.iter().any(|node| node.handle == handle)
+        });
+    }
     variable
         .inputs
         .insert("value".into(), Binding::reference(&source.id, port, path));
@@ -265,7 +271,8 @@ mod tests {
             let check = field_assertion(&source, "body", "arbitrary", &value);
             assert_eq!(check.kind, NodeKind::Assert);
             assert_eq!(check.config.predicate, Some(Predicate::Equals));
-            assert_eq!(check.name, "Check arbitrary");
+            assert_eq!(check.label.as_deref(), Some("Check arbitrary"));
+            assert_eq!(check.handle, "check_arbitrary");
             assert_eq!(
                 check.inputs["actual"],
                 Binding::reference(&source.id, "body", "arbitrary")
@@ -275,8 +282,8 @@ mod tests {
         }
         let source = node(NodeKind::Request);
         assert_eq!(
-            field_assertion(&source, "status", "", &json!(200)).name,
-            "Check status"
+            field_assertion(&source, "status", "", &json!(200)).handle,
+            "check_status"
         );
     }
 
@@ -305,7 +312,8 @@ mod tests {
                 .iter()
                 .find(|node| node.id == result.variable_id)
                 .unwrap();
-            assert_eq!(variable.name, name);
+            assert_eq!(variable.label.as_deref(), Some(name));
+            assert_eq!(variable.handle, crate::handle::handle_base(name));
             assert_eq!(
                 variable.inputs["value"],
                 Binding::reference(&source.id, "body", path)
@@ -337,7 +345,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(captured.graph.nodes.len(), 2);
-        assert_eq!(captured.graph.nodes[1].name, "price");
+        assert_eq!(captured.graph.nodes[1].label.as_deref(), Some("price"));
         assert_eq!(
             captured.graph.nodes[1].inputs["value"],
             Binding::reference(&source.id, "body", "data.price")
@@ -480,7 +488,7 @@ mod tests {
         let with_action = latest.iter().find(|c| c.action.is_some()).unwrap();
         let added = add_node(&graph, NodeKind::Component, AT, Some(with_action), from).unwrap();
         let node = added.graph.nodes.last().unwrap();
-        assert_eq!(node.name, with_action.name);
+        assert_eq!(node.handle, crate::handle::handle_base(&with_action.name));
         assert_eq!(
             node.inputs[with_action.action.as_ref().unwrap().input.as_str()],
             Binding::reference(&request.id, "status", "")
@@ -505,11 +513,11 @@ mod tests {
     }
 
     #[test]
-    fn new_variables_are_numbered() {
+    fn new_handles_are_numbered() {
         let (graph, _) = start_graph();
         let first = add_node(&graph, NodeKind::Variable, AT, None, None).unwrap();
         let second = add_node(&first.graph, NodeKind::Variable, AT, None, None).unwrap();
-        let names: Vec<_> = second.graph.nodes.iter().map(|node| &node.name).collect();
-        assert_eq!(names, ["Start", "Variable 1", "Variable 2"]);
+        let handles: Vec<_> = second.graph.nodes.iter().map(|node| &node.handle).collect();
+        assert_eq!(handles, ["begin", "variable", "variable_2"]);
     }
 }

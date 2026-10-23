@@ -15,8 +15,9 @@
             "nodes": [
               {
                 "id": "response",
+                "handle": "odczytaj_dane_api",
+                "label": "Odczytaj dane API",
                 "kind": "request",
-                "name": "Odczytaj dane API",
                 "position": {
                   "x": 60.0,
                   "y": 170.0
@@ -56,8 +57,9 @@
               },
               {
                 "id": "name-check",
+                "handle": "nazwa_jest_niepustym_tekstem",
+                "label": "Nazwa jest niepustym tekstem",
                 "kind": "assert",
-                "name": "Nazwa jest niepustym tekstem",
                 "position": {
                   "x": 470.0,
                   "y": 30.0
@@ -124,8 +126,9 @@
               },
               {
                 "id": "discount-check",
+                "handle": "aktywna_promocja_daje_minimum_10",
+                "label": "Aktywna promocja daje minimum 10%",
                 "kind": "assert",
-                "name": "Aktywna promocja daje minimum 10%",
                 "position": {
                   "x": 470.0,
                   "y": 350.0
@@ -209,7 +212,8 @@
     "steps": [
       {
         "nodeId": "response",
-        "name": "Odczytaj dane API",
+        "handle": "odczytaj_dane_api",
+        "label": "Odczytaj dane API",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -240,7 +244,8 @@
       },
       {
         "nodeId": "name-check",
-        "name": "Nazwa jest niepustym tekstem",
+        "handle": "nazwa_jest_niepustym_tekstem",
+        "label": "Nazwa jest niepustym tekstem",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -257,7 +262,8 @@
       },
       {
         "nodeId": "discount-check",
-        "name": "Aktywna promocja daje minimum 10%",
+        "handle": "aktywna_promocja_daje_minimum_10",
+        "label": "Aktywna promocja daje minimum 10%",
         "kind": "assert",
         "status": "passed",
         "phase": "main",

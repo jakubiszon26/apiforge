@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "join",
+                "handle": "join",
                 "kind": "request",
-                "name": "join",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -36,8 +36,9 @@
               },
               {
                 "id": "yes-next",
+                "handle": "yes_next",
+                "label": "yes-next",
                 "kind": "request",
-                "name": "yes-next",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -57,8 +58,9 @@
               },
               {
                 "id": "no-next",
+                "handle": "no_next",
+                "label": "no-next",
                 "kind": "request",
-                "name": "no-next",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -78,8 +80,8 @@
               },
               {
                 "id": "yes",
+                "handle": "yes",
                 "kind": "request",
-                "name": "yes",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -99,8 +101,8 @@
               },
               {
                 "id": "no",
+                "handle": "no",
                 "kind": "request",
-                "name": "no",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -120,8 +122,9 @@
               },
               {
                 "id": "if",
+                "handle": "if_step",
+                "label": "if",
                 "kind": "if",
-                "name": "if",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -142,8 +145,9 @@
               },
               {
                 "id": "start",
+                "handle": "begin",
+                "label": "start",
                 "kind": "trigger",
-                "name": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -153,8 +157,9 @@
               },
               {
                 "id": "uses-yes",
+                "handle": "uses_yes",
+                "label": "uses-yes",
                 "kind": "request",
-                "name": "uses-yes",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -181,8 +186,9 @@
               },
               {
                 "id": "checks-yes",
+                "handle": "checks_yes",
+                "label": "checks-yes",
                 "kind": "assert",
-                "name": "checks-yes",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -205,8 +211,9 @@
               },
               {
                 "id": "no-side",
+                "handle": "no_side",
+                "label": "no-side",
                 "kind": "variable",
-                "name": "no-side",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -223,8 +230,8 @@
               },
               {
                 "id": "mixed",
+                "handle": "mixed",
                 "kind": "select",
-                "name": "mixed",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -315,7 +322,8 @@
     "steps": [
       {
         "nodeId": "start",
-        "name": "start",
+        "handle": "begin",
+        "label": "start",
         "kind": "trigger",
         "status": "passed",
         "phase": "main",
@@ -324,7 +332,8 @@
       },
       {
         "nodeId": "if",
-        "name": "if",
+        "handle": "if_step",
+        "label": "if",
         "kind": "if",
         "status": "passed",
         "phase": "main",
@@ -341,7 +350,7 @@
       },
       {
         "nodeId": "yes",
-        "name": "yes",
+        "handle": "yes",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -362,7 +371,8 @@
       },
       {
         "nodeId": "yes-next",
-        "name": "yes-next",
+        "handle": "yes_next",
+        "label": "yes-next",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -383,7 +393,7 @@
       },
       {
         "nodeId": "no",
-        "name": "no",
+        "handle": "no",
         "kind": "request",
         "status": "skipped",
         "phase": "main",
@@ -392,7 +402,8 @@
       },
       {
         "nodeId": "no-next",
-        "name": "no-next",
+        "handle": "no_next",
+        "label": "no-next",
         "kind": "request",
         "status": "skipped",
         "phase": "main",
@@ -401,7 +412,7 @@
       },
       {
         "nodeId": "join",
-        "name": "join",
+        "handle": "join",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -422,7 +433,8 @@
       },
       {
         "nodeId": "uses-yes",
-        "name": "uses-yes",
+        "handle": "uses_yes",
+        "label": "uses-yes",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -452,7 +464,8 @@
       },
       {
         "nodeId": "checks-yes",
-        "name": "checks-yes",
+        "handle": "checks_yes",
+        "label": "checks-yes",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -469,7 +482,8 @@
       },
       {
         "nodeId": "no-side",
-        "name": "no-side",
+        "handle": "no_side",
+        "label": "no-side",
         "kind": "variable",
         "status": "skipped",
         "phase": "main",
@@ -478,7 +492,7 @@
       },
       {
         "nodeId": "mixed",
-        "name": "mixed",
+        "handle": "mixed",
         "kind": "select",
         "status": "skipped",
         "phase": "main",

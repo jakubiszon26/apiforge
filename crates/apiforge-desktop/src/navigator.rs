@@ -59,7 +59,8 @@ impl Navigator {
                     .nodes
                     .iter()
                     .filter(|node| {
-                        node.name.to_lowercase().contains(&query)
+                        (node.display_name().to_lowercase().contains(&query)
+                            || node.handle.to_lowercase().contains(&query))
                             || node.kind.label().to_lowercase().contains(&query)
                     })
                     .collect();
@@ -95,7 +96,7 @@ impl Navigator {
                                 [ui.available_width(), 32.0],
                                 egui::Button::selectable(
                                     index == self.selected,
-                                    format!("{}   ·   {}", node.name, node.kind.label()),
+                                    format!("{}   ·   {}", node.display_name(), node.kind.label()),
                                 ),
                             );
                             if response.clicked() {
@@ -173,7 +174,7 @@ mod tests {
             &mut navigator,
             &context,
             graph,
-            vec![egui::Event::Text(target.name.clone())],
+            vec![egui::Event::Text(target.display_name().to_owned())],
         );
         assert_eq!(
             frame(&mut navigator, &context, graph, vec![key(Key::Enter)]),

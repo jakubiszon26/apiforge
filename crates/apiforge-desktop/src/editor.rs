@@ -7,6 +7,7 @@
 use apiforge_core::{
     format::{Binding, Component, Graph, Project, Scenario, Workspace},
     graph::has_cycle,
+    handle::{dedupe_handles, graph_handles},
     run::Phase,
 };
 use std::{
@@ -185,6 +186,19 @@ impl Editor {
         }
     }
 
+    /// Handles a block of the current board must not take: those of the other graph
+    /// of the scenario (main or cleanup). A component graph has its own namespace.
+    pub fn sibling_handles(&self) -> HashSet<String> {
+        if !self.drafts.is_empty() {
+            return HashSet::new();
+        }
+        let scenario = self.scenario();
+        graph_handles(match self.phase {
+            Phase::Main => &scenario.cleanup,
+            Phase::Cleanup => &scenario.graph,
+        })
+    }
+
     pub fn selected_node(&self) -> Option<&apiforge_core::format::Node> {
         let id = self.selection.first()?;
         self.graph().nodes.iter().find(|node| &node.id == id)
@@ -285,6 +299,12 @@ impl Editor {
         }
         if has_cycle(&next) {
             return Err("This change creates a dependency cycle and was not applied.".into());
+        }
+        // New blocks never take a handle of the sibling graph or of another block.
+        let next = dedupe_handles(&next, &self.sibling_handles());
+        let current = self.graph();
+        if next == *current {
+            return Ok(());
         }
         let merge_key = single_node_change(current, &next);
         let mergeable = merge_key.is_some()
@@ -585,7 +605,7 @@ mod tests {
         let definition = editor.project().components[0].clone();
         editor.enter_component(definition.clone());
         let mut graph = editor.graph().clone();
-        graph.nodes[0].name = "Changed".into();
+        graph.nodes[0].label = Some("Changed".into());
         editor.apply_graph(graph, Instant::now()).unwrap();
         assert_eq!(editor.project().components[0], definition);
         editor.leave_component();

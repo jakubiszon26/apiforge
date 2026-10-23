@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "create",
+                "handle": "create",
                 "kind": "request",
-                "name": "create",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -43,8 +43,8 @@
               },
               {
                 "id": "fails",
+                "handle": "fails",
                 "kind": "assert",
-                "name": "fails",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -67,8 +67,8 @@
               },
               {
                 "id": "broken",
+                "handle": "broken",
                 "kind": "formula",
-                "name": "broken",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -89,8 +89,8 @@
               },
               {
                 "id": "gate",
+                "handle": "gate",
                 "kind": "condition",
-                "name": "gate",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -111,8 +111,8 @@
               },
               {
                 "id": "read",
+                "handle": "read",
                 "kind": "request",
-                "name": "read",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -143,8 +143,8 @@
             "nodes": [
               {
                 "id": "delete",
+                "handle": "delete",
                 "kind": "request",
-                "name": "delete",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -171,8 +171,9 @@
               },
               {
                 "id": "delete-missing",
+                "handle": "delete_missing",
+                "label": "delete-missing",
                 "kind": "request",
-                "name": "delete-missing",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -199,8 +200,9 @@
               },
               {
                 "id": "get-with-body",
+                "handle": "get_with_body",
+                "label": "get-with-body",
                 "kind": "request",
-                "name": "get-with-body",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -227,8 +229,9 @@
               },
               {
                 "id": "after-error",
+                "handle": "after_error",
+                "label": "after-error",
                 "kind": "request",
-                "name": "after-error",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -248,8 +251,9 @@
               },
               {
                 "id": "uses-error",
+                "handle": "uses_error",
+                "label": "uses-error",
                 "kind": "request",
-                "name": "uses-error",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -276,8 +280,9 @@
               },
               {
                 "id": "uses-blocked",
+                "handle": "uses_blocked",
+                "label": "uses-blocked",
                 "kind": "request",
-                "name": "uses-blocked",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -304,8 +309,9 @@
               },
               {
                 "id": "no-sample",
+                "handle": "no_sample",
+                "label": "no-sample",
                 "kind": "request",
-                "name": "no-sample",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -358,7 +364,7 @@
     "steps": [
       {
         "nodeId": "create",
-        "name": "create",
+        "handle": "create",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -388,7 +394,7 @@
       },
       {
         "nodeId": "fails",
-        "name": "fails",
+        "handle": "fails",
         "kind": "assert",
         "status": "failed",
         "phase": "main",
@@ -405,7 +411,7 @@
       },
       {
         "nodeId": "broken",
-        "name": "broken",
+        "handle": "broken",
         "kind": "formula",
         "status": "error",
         "phase": "main",
@@ -417,7 +423,7 @@
       },
       {
         "nodeId": "gate",
-        "name": "gate",
+        "handle": "gate",
         "kind": "condition",
         "status": "blocked",
         "phase": "main",
@@ -434,7 +440,7 @@
       },
       {
         "nodeId": "read",
-        "name": "read",
+        "handle": "read",
         "kind": "request",
         "status": "blocked",
         "phase": "main",
@@ -443,7 +449,7 @@
       },
       {
         "nodeId": "delete",
-        "name": "delete",
+        "handle": "delete",
         "kind": "request",
         "status": "passed",
         "phase": "cleanup",
@@ -466,7 +472,8 @@
       },
       {
         "nodeId": "delete-missing",
-        "name": "delete-missing",
+        "handle": "delete_missing",
+        "label": "delete-missing",
         "kind": "request",
         "status": "skipped",
         "phase": "cleanup",
@@ -475,7 +482,8 @@
       },
       {
         "nodeId": "get-with-body",
-        "name": "get-with-body",
+        "handle": "get_with_body",
+        "label": "get-with-body",
         "kind": "request",
         "status": "error",
         "phase": "cleanup",
@@ -488,7 +496,8 @@
       },
       {
         "nodeId": "after-error",
-        "name": "after-error",
+        "handle": "after_error",
+        "label": "after-error",
         "kind": "request",
         "status": "passed",
         "phase": "cleanup",
@@ -509,7 +518,8 @@
       },
       {
         "nodeId": "uses-error",
-        "name": "uses-error",
+        "handle": "uses_error",
+        "label": "uses-error",
         "kind": "request",
         "status": "skipped",
         "phase": "cleanup",
@@ -518,7 +528,8 @@
       },
       {
         "nodeId": "uses-blocked",
-        "name": "uses-blocked",
+        "handle": "uses_blocked",
+        "label": "uses-blocked",
         "kind": "request",
         "status": "skipped",
         "phase": "cleanup",
@@ -527,7 +538,8 @@
       },
       {
         "nodeId": "no-sample",
-        "name": "no-sample",
+        "handle": "no_sample",
+        "label": "no-sample",
         "kind": "request",
         "status": "error",
         "phase": "cleanup",

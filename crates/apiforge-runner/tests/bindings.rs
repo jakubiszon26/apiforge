@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 /// A one-scenario project whose graph holds a request with a sample and `nodes`.
 fn project(nodes: Value) -> Project {
     let mut all = vec![json!({
-        "id": "source", "kind": "request", "name": "Source",
+        "id": "source", "kind": "request", "handle": "source",
         "position": {"x": 0, "y": 0}, "inputs": {},
         "config": {"method": "GET", "url": "/source",
                    "sampleResponse": {"id": 7, "name": "Zażółć", "tags": ["a", "b"]}}
@@ -30,7 +30,7 @@ fn project(nodes: Value) -> Project {
 }
 
 fn variable(id: &str, value: Value) -> Value {
-    json!({"id": id, "kind": "variable", "name": id, "position": {"x": 0, "y": 0},
+    json!({"id": id, "kind": "variable", "handle": id, "position": {"x": 0, "y": 0},
            "inputs": {"value": value}, "config": {}})
 }
 

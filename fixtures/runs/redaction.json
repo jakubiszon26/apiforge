@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "post",
+                "handle": "post",
                 "kind": "request",
-                "name": "post",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -56,8 +56,8 @@
               },
               {
                 "id": "echo",
+                "handle": "echo",
                 "kind": "request",
-                "name": "echo",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -78,8 +78,8 @@
               },
               {
                 "id": "credentials",
+                "handle": "credentials",
                 "kind": "request",
-                "name": "credentials",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -99,8 +99,8 @@
               },
               {
                 "id": "session",
+                "handle": "session",
                 "kind": "variable",
-                "name": "session",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -115,8 +115,8 @@
               },
               {
                 "id": "compare",
+                "handle": "compare",
                 "kind": "assert",
-                "name": "compare",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -139,8 +139,8 @@
               },
               {
                 "id": "hardcoded",
+                "handle": "hardcoded",
                 "kind": "request",
-                "name": "hardcoded",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -160,8 +160,9 @@
               },
               {
                 "id": "reads-token",
+                "handle": "reads_token",
+                "label": "reads-token",
                 "kind": "assert",
-                "name": "reads-token",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -218,7 +219,7 @@
     "steps": [
       {
         "nodeId": "post",
-        "name": "post",
+        "handle": "post",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -256,7 +257,7 @@
       },
       {
         "nodeId": "echo",
-        "name": "echo",
+        "handle": "echo",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -278,7 +279,7 @@
       },
       {
         "nodeId": "credentials",
-        "name": "credentials",
+        "handle": "credentials",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -287,7 +288,7 @@
       },
       {
         "nodeId": "session",
-        "name": "session",
+        "handle": "session",
         "kind": "variable",
         "status": "passed",
         "phase": "main",
@@ -300,7 +301,7 @@
       },
       {
         "nodeId": "compare",
-        "name": "compare",
+        "handle": "compare",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -317,7 +318,7 @@
       },
       {
         "nodeId": "hardcoded",
-        "name": "hardcoded",
+        "handle": "hardcoded",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -338,7 +339,8 @@
       },
       {
         "nodeId": "reads-token",
-        "name": "reads-token",
+        "handle": "reads_token",
+        "label": "reads-token",
         "kind": "assert",
         "status": "passed",
         "phase": "main",

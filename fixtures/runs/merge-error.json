@@ -15,8 +15,9 @@
             "nodes": [
               {
                 "id": "start",
+                "handle": "begin",
+                "label": "start",
                 "kind": "trigger",
-                "name": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -26,8 +27,8 @@
               },
               {
                 "id": "broken",
+                "handle": "broken",
                 "kind": "request",
-                "name": "broken",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -47,8 +48,8 @@
               },
               {
                 "id": "good",
+                "handle": "good",
                 "kind": "request",
-                "name": "good",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -68,8 +69,8 @@
               },
               {
                 "id": "join",
+                "handle": "join",
                 "kind": "request",
-                "name": "join",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -89,8 +90,8 @@
               },
               {
                 "id": "decide",
+                "handle": "decide",
                 "kind": "if",
-                "name": "decide",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -111,8 +112,9 @@
               },
               {
                 "id": "skipped-alternative",
+                "handle": "skipped_alternative",
+                "label": "skipped-alternative",
                 "kind": "request",
-                "name": "skipped-alternative",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -132,8 +134,9 @@
               },
               {
                 "id": "after-alternatives",
+                "handle": "after_alternatives",
+                "label": "after-alternatives",
                 "kind": "request",
-                "name": "after-alternatives",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -224,7 +227,8 @@
     "steps": [
       {
         "nodeId": "start",
-        "name": "start",
+        "handle": "begin",
+        "label": "start",
         "kind": "trigger",
         "status": "passed",
         "phase": "main",
@@ -233,7 +237,7 @@
       },
       {
         "nodeId": "broken",
-        "name": "broken",
+        "handle": "broken",
         "kind": "request",
         "status": "error",
         "phase": "main",
@@ -242,7 +246,7 @@
       },
       {
         "nodeId": "good",
-        "name": "good",
+        "handle": "good",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -263,7 +267,7 @@
       },
       {
         "nodeId": "join",
-        "name": "join",
+        "handle": "join",
         "kind": "request",
         "status": "blocked",
         "phase": "main",
@@ -272,7 +276,7 @@
       },
       {
         "nodeId": "decide",
-        "name": "decide",
+        "handle": "decide",
         "kind": "if",
         "status": "passed",
         "phase": "main",
@@ -289,7 +293,8 @@
       },
       {
         "nodeId": "skipped-alternative",
-        "name": "skipped-alternative",
+        "handle": "skipped_alternative",
+        "label": "skipped-alternative",
         "kind": "request",
         "status": "skipped",
         "phase": "main",
@@ -298,7 +303,8 @@
       },
       {
         "nodeId": "after-alternatives",
-        "name": "after-alternatives",
+        "handle": "after_alternatives",
+        "label": "after-alternatives",
         "kind": "request",
         "status": "passed",
         "phase": "main",

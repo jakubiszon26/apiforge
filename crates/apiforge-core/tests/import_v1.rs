@@ -184,7 +184,7 @@ fn validates_component_identity_recursion_and_depth_even_when_subgraphs_are_cach
     let component = |id: &str, next: Option<&str>| {
         json!({
             "id":id,"revision":1,"name":id,"description":"","inputs":[],"outputs":[],
-            "graph":{"nodes":next.map(|next| vec![json!({"id":"child","kind":"component","name":"child","position":{"x":0,"y":0},"inputs":{},"config":{"componentId":next,"revision":1}})]).unwrap_or_default(),"edges":[]}
+            "graph":{"nodes":next.map(|next| vec![json!({"id":"child","kind":"component","handle":"child","position":{"x":0,"y":0},"inputs":{},"config":{"componentId":next,"revision":1}})]).unwrap_or_default(),"edges":[]}
         })
     };
     let mut value = workflow();

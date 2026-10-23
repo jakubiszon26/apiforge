@@ -1,7 +1,11 @@
 //! Native fixtures generated from the frozen version-one sources.
 
 use crate::{convert, v1};
-use serde_json::Value;
+use apiforge_core::{
+    format::{Graph, Project, Scenario},
+    graph::component_definition,
+};
+use serde_json::{Map, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -43,9 +47,95 @@ fn convert_run(bytes: &[u8]) -> Result<String, String> {
         .ok_or("run fixture without a request")?;
     let source: v1::Project = serde_json::from_value(request["project"].take())
         .map_err(|error| format!("request.project: {error}"))?;
-    request["project"] =
-        serde_json::to_value(convert::project(&source)).map_err(|error| error.to_string())?;
+    let project = convert::project(&source);
+    let scenario_id = request["scenarioId"]
+        .as_str()
+        .ok_or("run fixture without a scenario")?
+        .to_owned();
+    let scenario = project
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.id == scenario_id)
+        .ok_or("the fixture's scenario does not exist")?;
+    if let Some(previous) = request.get_mut("previousRun") {
+        convert_report(previous, &project, scenario)?;
+    }
+    request["project"] = serde_json::to_value(&project).map_err(|error| error.to_string())?;
+    convert_report(&mut fixture["expected"], &project, scenario)?;
     Ok(json_text(&fixture))
+}
+
+/// Adapts a recorded report: each step's `name` becomes its node's handle and label.
+/// Steps are looked up in the graph they ran in: main, cleanup, or the component
+/// definition of the step that contains them.
+fn convert_report(
+    report: &mut Value,
+    project: &Project,
+    scenario: &Scenario,
+) -> Result<(), String> {
+    fn convert_steps(
+        steps: &mut [Value],
+        graph: Option<&Graph>,
+        project: &Project,
+        scenario: &Scenario,
+    ) -> Result<(), String> {
+        for step in steps {
+            let Value::Object(fields) = step else {
+                return Err("a step is not an object".into());
+            };
+            let id = fields
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .ok_or("a step without a node identifier")?
+                .to_owned();
+            let graph = match graph {
+                Some(graph) => graph,
+                None if fields.get("phase").and_then(Value::as_str) == Some("cleanup") => {
+                    &scenario.cleanup
+                }
+                None => &scenario.graph,
+            };
+            let node = graph
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .ok_or_else(|| format!("a step of unknown node {id}"))?;
+            let mut next = Map::new();
+            for (key, value) in std::mem::take(fields) {
+                if key == "name" {
+                    next.insert("handle".into(), Value::String(node.handle.clone()));
+                    if let Some(label) = &node.label {
+                        next.insert("label".into(), Value::String(label.clone()));
+                    }
+                } else {
+                    next.insert(key, value);
+                }
+            }
+            if let Some(Value::Array(children)) = next.get_mut("children") {
+                let definition = component_definition(project, node)
+                    .ok_or_else(|| format!("children of {id} without a component"))?;
+                convert_steps(children, Some(&definition.graph), project, scenario)?;
+            }
+            *fields = next;
+        }
+        Ok(())
+    }
+    // A snapshot holds the scenario's graphs as they ran.
+    if let Some(snapshot) = report.get_mut("snapshot") {
+        let graph = |value: &mut Value| -> Result<v1::Graph, String> {
+            serde_json::from_value(value.take()).map_err(|error| format!("snapshot: {error}"))
+        };
+        let (main, cleanup) = convert::scenario_graphs(
+            &graph(&mut snapshot["graph"])?,
+            &graph(&mut snapshot["cleanup"])?,
+        );
+        snapshot["graph"] = serde_json::to_value(main).map_err(|error| error.to_string())?;
+        snapshot["cleanup"] = serde_json::to_value(cleanup).map_err(|error| error.to_string())?;
+    }
+    match report.get_mut("steps") {
+        Some(Value::Array(list)) => convert_steps(list, None, project, scenario),
+        _ => Ok(()),
+    }
 }
 
 fn json_text(value: &Value) -> String {

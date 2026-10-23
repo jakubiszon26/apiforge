@@ -258,8 +258,23 @@ pub struct Position {
 #[serde(deny_unknown_fields)]
 pub struct Node {
     pub id: String,
+    /// The block's name in scenario code, unique within its scenario or component.
+    pub handle: String,
+    /// Display text; the handle is shown when absent.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub label: Option<String>,
+    /// A comment attached to the block, written above its statement in code.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub note: Option<String>,
     pub kind: NodeKind,
-    pub name: String,
     pub position: Position,
     pub inputs: Bindings,
     pub config: NodeConfig,
@@ -430,6 +445,11 @@ pub enum Operation {
     Variable,
 }
 impl Node {
+    /// The label, or the handle for a block without one.
+    pub fn display_name(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.handle)
+    }
+
     /// Only use after import validation; missing component identity is an error.
     pub fn operation(&self) -> Option<Operation> {
         let c = &self.config;

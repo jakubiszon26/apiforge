@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "verify",
+                "handle": "verify",
                 "kind": "assert",
-                "name": "verify",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -39,8 +39,8 @@
               },
               {
                 "id": "second",
+                "handle": "second",
                 "kind": "request",
-                "name": "second",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -67,8 +67,8 @@
               },
               {
                 "id": "first",
+                "handle": "first",
                 "kind": "request",
-                "name": "first",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -88,8 +88,8 @@
               },
               {
                 "id": "independent",
+                "handle": "independent",
                 "kind": "request",
-                "name": "independent",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -109,8 +109,8 @@
               },
               {
                 "id": "parameter",
+                "handle": "parameter",
                 "kind": "variable",
-                "name": "parameter",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -162,7 +162,7 @@
     "steps": [
       {
         "nodeId": "first",
-        "name": "first",
+        "handle": "first",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -183,7 +183,7 @@
       },
       {
         "nodeId": "second",
-        "name": "second",
+        "handle": "second",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -206,7 +206,7 @@
       },
       {
         "nodeId": "verify",
-        "name": "verify",
+        "handle": "verify",
         "kind": "assert",
         "status": "passed",
         "phase": "main",
@@ -223,7 +223,7 @@
       },
       {
         "nodeId": "independent",
-        "name": "independent",
+        "handle": "independent",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -244,7 +244,7 @@
       },
       {
         "nodeId": "parameter",
-        "name": "parameter",
+        "handle": "parameter",
         "kind": "variable",
         "status": "passed",
         "phase": "main",

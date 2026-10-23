@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn dropped_variables_reuse_bindings_avoid_collisions_and_are_pruned() {
         let mut source = node(NodeKind::Variable);
-        source.name = "code".into();
+        source.label = Some("code".into());
         source
             .inputs
             .insert("value".into(), Binding::literal(json!(123)));

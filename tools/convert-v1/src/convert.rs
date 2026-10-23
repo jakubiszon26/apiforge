@@ -1,7 +1,12 @@
 //! Mapping of version-one documents onto the current document model.
 
 use crate::v1;
-use apiforge_core::{format as current, model::NodeKind};
+use apiforge_core::{
+    format as current,
+    handle::{handle_base, unique_handle},
+    model::NodeKind,
+};
+use std::collections::HashSet;
 
 pub fn workspace(source: &v1::Workspace) -> current::Workspace {
     current::Workspace {
@@ -35,13 +40,21 @@ pub fn project(source: &v1::Project) -> current::Project {
     }
 }
 
+/// The main and cleanup graphs of a scenario, which share one handle namespace.
+pub fn scenario_graphs(main: &v1::Graph, cleanup: &v1::Graph) -> (current::Graph, current::Graph) {
+    let mut handles = HashSet::new();
+    let main = graph(main, &mut handles);
+    (main, graph(cleanup, &mut handles))
+}
+
 fn scenario(source: &v1::Scenario) -> current::Scenario {
+    let (graph, cleanup) = scenario_graphs(&source.graph, &source.cleanup);
     current::Scenario {
         id: source.id.clone(),
         name: source.name.clone(),
         description: source.description.clone(),
-        graph: graph(&source.graph),
-        cleanup: graph(&source.cleanup),
+        graph,
+        cleanup,
         parameters: source.parameters.clone(),
         error_policy: source.error_policy,
     }
@@ -68,7 +81,7 @@ fn component(source: &v1::Component) -> current::Component {
                 binding: binding(&output.binding),
             })
             .collect(),
-        graph: graph(&source.graph),
+        graph: graph(&source.graph, &mut HashSet::new()),
         action: source
             .action
             .as_ref()
@@ -80,9 +93,13 @@ fn component(source: &v1::Component) -> current::Component {
     }
 }
 
-fn graph(source: &v1::Graph) -> current::Graph {
+fn graph(source: &v1::Graph, handles: &mut HashSet<String>) -> current::Graph {
     current::Graph {
-        nodes: source.nodes.iter().map(node).collect(),
+        nodes: source
+            .nodes
+            .iter()
+            .map(|source| node(source, handles))
+            .collect(),
         edges: source
             .edges
             .iter()
@@ -96,11 +113,24 @@ fn graph(source: &v1::Graph) -> current::Graph {
     }
 }
 
-fn node(source: &v1::Node) -> current::Node {
+/// Handles derive from version-one names (`Cena po promocji` → `cena_po_promocji`),
+/// numbered on collision; the name stays as the label. Start is always `begin`.
+fn node(source: &v1::Node, handles: &mut HashSet<String>) -> current::Node {
+    let base = match source.kind {
+        v1::NodeKind::Trigger => "begin".to_owned(),
+        _ => handle_base(&source.name),
+    };
+    let handle = unique_handle(&base, |handle| handles.contains(handle));
+    handles.insert(handle.clone());
     current::Node {
         id: source.id.clone(),
+        // The default name of Start is no label: new Start blocks have none.
+        label: (source.name != handle
+            && !(source.kind == v1::NodeKind::Trigger && source.name == "Start"))
+            .then(|| source.name.clone()),
+        handle,
+        note: None,
         kind: kind(source.kind),
-        name: source.name.clone(),
         position: current::Position {
             x: source.position.x,
             y: source.position.y,

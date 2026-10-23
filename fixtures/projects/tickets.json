@@ -11,8 +11,9 @@
         "nodes": [
           {
             "id": "ticket",
+            "handle": "zgloszenie",
+            "label": "Zgłoszenie",
             "kind": "component",
-            "name": "Zgłoszenie",
             "position": {
               "x": 60.0,
               "y": 160.0
@@ -30,8 +31,9 @@
           },
           {
             "id": "open",
+            "handle": "sprawdz_otwarte_zgloszenie",
+            "label": "Sprawdź otwarte zgłoszenie",
             "kind": "component",
-            "name": "Sprawdź otwarte zgłoszenie",
             "position": {
               "x": 410.0,
               "y": 60.0
@@ -51,8 +53,9 @@
           },
           {
             "id": "priority",
+            "handle": "priorytet_wysoki",
+            "label": "Priorytet wysoki",
             "kind": "assert",
-            "name": "Priorytet wysoki",
             "position": {
               "x": 410.0,
               "y": 310.0
@@ -116,8 +119,9 @@
         "nodes": [
           {
             "id": "fetch",
+            "handle": "pobierz_zgloszenie",
+            "label": "Pobierz zgłoszenie",
             "kind": "request",
-            "name": "Pobierz zgłoszenie",
             "position": {
               "x": 80.0,
               "y": 80.0
@@ -183,8 +187,9 @@
         "nodes": [
           {
             "id": "status",
+            "handle": "odczytaj_status",
+            "label": "Odczytaj status",
             "kind": "select",
-            "name": "Odczytaj status",
             "position": {
               "x": 60.0,
               "y": 60.0
@@ -201,8 +206,9 @@
           },
           {
             "id": "check",
+            "handle": "status_otwarty",
+            "label": "Status otwarty",
             "kind": "assert",
-            "name": "Status otwarty",
             "position": {
               "x": 380.0,
               "y": 60.0

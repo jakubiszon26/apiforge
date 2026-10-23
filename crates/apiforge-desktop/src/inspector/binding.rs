@@ -813,12 +813,12 @@ fn reference_editor(
     ui.horizontal(|ui| {
         ui.label(RichText::new("Step").size(11.0).color(theme::MUTED));
         egui::ComboBox::from_id_salt(id.with("source"))
-            .selected_text(source.map_or("Unavailable source", |node| node.name.as_str()))
+            .selected_text(source.map_or("Unavailable source", |node| node.display_name()))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
                 for candidate in &candidates {
                     if ui
-                        .selectable_label(&candidate.id == node_id, &candidate.name)
+                        .selectable_label(&candidate.id == node_id, candidate.display_name())
                         .clicked()
                         && &candidate.id != node_id
                     {

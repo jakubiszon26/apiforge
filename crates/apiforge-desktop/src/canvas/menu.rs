@@ -164,7 +164,7 @@ impl ActionMenu {
                                 ui.label(
                                     RichText::new(match source_node {
                                         Some(node) => {
-                                            format!("AFTER: {}", node.name.to_uppercase())
+                                            format!("AFTER: {}", node.display_name().to_uppercase())
                                         }
                                         None => "STEP LIBRARY".into(),
                                     })

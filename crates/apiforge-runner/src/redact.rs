@@ -225,7 +225,8 @@ impl Redactor {
     pub fn redact_step(&self, step: &StepResult) -> StepResult {
         StepResult {
             node_id: self.redact_str(&step.node_id),
-            name: self.redact_str(&step.name),
+            handle: self.redact_str(&step.handle),
+            label: step.label.as_deref().map(|text| self.redact_str(text)),
             kind: step.kind,
             status: step.status,
             phase: step.phase,
@@ -273,7 +274,9 @@ impl Redactor {
         Node {
             id: self.redact_str(&node.id),
             kind: node.kind,
-            name: self.redact_str(&node.name),
+            handle: self.redact_str(&node.handle),
+            label: node.label.as_deref().map(|text| self.redact_str(text)),
+            note: node.note.as_deref().map(|text| self.redact_str(text)),
             position: node.position.clone(),
             inputs: self.redact_bindings(&node.inputs),
             config: self.redact_config(&node.config),

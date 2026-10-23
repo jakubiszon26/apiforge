@@ -18,6 +18,7 @@ use apiforge_core::{
         FALSE_PORT, ORDER_PORT, TRUE_PORT, component_definition, formula_operator, input_ports,
         output_ports, predicate,
     },
+    handle::is_valid_handle,
     model::{Branch, BuildType, Match, NodeKind, Predicate, ValueType},
     path,
     run::{RunResult, StepResult},
@@ -103,7 +104,7 @@ impl Inspector {
                 .color(theme::MUTED),
         );
         ui.label(
-            RichText::new(&context.node.name)
+            RichText::new(context.node.display_name())
                 .size(theme::FONT_PANEL_TITLE)
                 .family(theme::bold_family()),
         );
@@ -140,11 +141,19 @@ impl Inspector {
     ) {
         let id = Id::new(("inspector", &context.node.id));
         widgets::field_label(ui, "Block name");
-        ui.add(
-            crate::widgets::text_edit(&mut node.name)
-                .id(id.with("name"))
-                .desired_width(f32::INFINITY),
-        );
+        let mut label = node.label.clone().unwrap_or_default();
+        if ui
+            .add(
+                crate::widgets::text_edit(&mut label)
+                    .id(id.with("name"))
+                    .hint_text(node.handle.as_str())
+                    .desired_width(f32::INFINITY),
+            )
+            .changed()
+        {
+            node.label = (!label.trim().is_empty()).then_some(label);
+        }
+        handle_field(ui, id.with("handle"), context, node);
 
         match node.kind {
             NodeKind::Trigger => widgets::hint(
@@ -434,12 +443,12 @@ impl Inspector {
                 .find(|candidate| candidate.id == state.source_id);
             widgets::field_label(ui, "Request or component");
             egui::ComboBox::from_id_salt("variable-response-source")
-                .selected_text(source.map_or("No request available", |node| node.name.as_str()))
+                .selected_text(source.map_or("No request available", |node| node.display_name()))
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
                     for candidate in &sources {
                         if ui
-                            .selectable_label(candidate.id == state.source_id, &candidate.name)
+                            .selectable_label(candidate.id == state.source_id, candidate.display_name())
                             .clicked()
                         {
                             state.source_id = candidate.id.clone();
@@ -570,7 +579,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                             for target in board.nodes.iter().filter(|target| {
                                 target.id != node.id && target.kind != NodeKind::Trigger
                             }) {
-                                if ui.selectable_label(false, &target.name).clicked() {
+                                if ui.selectable_label(false, target.display_name()).clicked() {
                                     match edit::connect(
                                         board,
                                         context.project,
@@ -600,7 +609,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                         .nodes
                         .iter()
                         .find(|candidate| candidate.id == edge.target)
-                        .map_or("Missing step", |node| node.name.as_str());
+                        .map_or("Missing step", |node| node.display_name());
                     ui.label(
                         RichText::new(format!("{label} → {target}"))
                             .size(12.0)
@@ -1080,5 +1089,47 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             ui,
             "Run the step to see its data. A request can also have a sample response.",
         );
+    }
+}
+
+/// Edits the block's handle, its name in scenario code. An invalid or taken handle
+/// stays a draft in the field and is not applied.
+fn handle_field(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
+    widgets::field_label(ui, "Name in code");
+    let mut draft: String = ui
+        .data_mut(|data| data.get_temp(id))
+        .unwrap_or_else(|| node.handle.clone());
+    let field = ui.add(
+        crate::widgets::text_edit(&mut draft)
+            .id(id.with("field"))
+            .font(egui::TextStyle::Monospace)
+            .desired_width(f32::INFINITY),
+    );
+    let taken = |handle: &str| {
+        context
+            .graph
+            .nodes
+            .iter()
+            .chain(&context.board.nodes)
+            .any(|other| other.id != node.id && other.handle == handle)
+    };
+    let problem = if !is_valid_handle(&draft) {
+        Some("Use letters, digits and _, starting with a letter or _; not a reserved word.")
+    } else if taken(&draft) {
+        Some("Another block already uses this name.")
+    } else {
+        None
+    };
+    match problem {
+        Some(message) => {
+            ui.colored_label(theme::DANGER, RichText::new(message).size(11.0));
+        }
+        None if field.changed() => node.handle = draft.clone(),
+        None => {}
+    }
+    if field.has_focus() || problem.is_some() {
+        ui.data_mut(|data| data.insert_temp(id, draft));
+    } else {
+        ui.data_mut(|data| data.remove::<String>(id));
     }
 }

@@ -32,6 +32,8 @@ pub use variables::{
     TextSelection, VariableBlock, bind_variable_text, insert_variable_token, prune_template_inputs,
 };
 
+pub(crate) use fold::push_identifier_part;
+
 use crate::{ImportError, ids::new_id};
 use thiserror::Error;
 

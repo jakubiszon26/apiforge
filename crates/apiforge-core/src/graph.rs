@@ -70,6 +70,22 @@ impl NodeKind {
         }
     }
 
+    /// Handle of a new block before de-duplication, e.g. `request` or `check_2`.
+    pub fn handle_base(self) -> &'static str {
+        match self {
+            Self::Trigger => "begin",
+            Self::If => "branch",
+            Self::Variable => "variable",
+            Self::Request => "request",
+            Self::Select => "selection",
+            Self::Build => "data",
+            Self::Formula => "result",
+            Self::Assert => "check",
+            Self::Condition => "guard",
+            Self::Component => "component_step",
+        }
+    }
+
     /// Nodes that only compute values. Reaching a consumer from Start also activates
     /// these producers, but never a request or component.
     pub fn is_pure_value(self) -> bool {
@@ -470,8 +486,10 @@ pub fn delete_nodes(graph: &Graph, ids: &HashSet<&str>) -> Graph {
 pub fn create_node(kind: NodeKind, position: Position, component: Option<&Component>) -> Node {
     let mut node = Node {
         id: new_id("node"),
+        handle: kind.handle_base().to_owned(),
+        label: None,
+        note: None,
         kind,
-        name: kind.label().to_owned(),
         position,
         inputs: IndexMap::new(),
         config: NodeConfig::default(),
@@ -513,7 +531,7 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
         NodeKind::Trigger | NodeKind::Component => {}
     }
     if let Some(component) = component {
-        node.name = component.name.clone();
+        node.handle = crate::handle::handle_base(&component.name);
         node.config = NodeConfig {
             component_id: Some(component.id.clone()),
             revision: Some(component.revision),
@@ -532,7 +550,7 @@ pub fn create_node(kind: NodeKind, position: Position, component: Option<&Compon
 /// A formula node computing `operator`, with the operator's default operands.
 pub fn create_operator_node(operator: Operator, position: Position) -> Node {
     let mut node = create_node(NodeKind::Formula, position, None);
-    node.name = operator.label().to_owned();
+    node.handle = crate::handle::handle_base(operator.label());
     node.config.operation = Some(operator);
     if let Binding::Expression { inputs, .. } = Binding::expression(operator) {
         node.inputs = inputs;
@@ -589,7 +607,7 @@ mod tests {
         let check = create_node(NodeKind::If, Position { x: 0.0, y: 0.0 }, None);
         assert_eq!(check.inputs["actual"], Binding::literal(Value::Null));
         let operator = create_operator_node(Operator::Round, Position { x: 0.0, y: 0.0 });
-        assert_eq!(operator.name, "Round");
+        assert_eq!(operator.handle, "round");
         assert_eq!(operator.inputs["right"], Binding::literal(json!(0)));
     }
 

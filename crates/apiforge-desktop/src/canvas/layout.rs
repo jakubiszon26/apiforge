@@ -323,7 +323,7 @@ impl Card {
         Self {
             id: node.id.clone(),
             kind: node.kind,
-            name: node.name.clone(),
+            name: node.display_name().to_owned(),
             caption,
             subtitle,
             inputs,

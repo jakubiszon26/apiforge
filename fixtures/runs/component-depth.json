@@ -15,8 +15,8 @@
             "nodes": [
               {
                 "id": "top",
+                "handle": "top",
                 "kind": "component",
-                "name": "top",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -50,8 +50,8 @@
             "nodes": [
               {
                 "id": "leaf",
+                "handle": "leaf",
                 "kind": "variable",
-                "name": "leaf",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -79,8 +79,9 @@
             "nodes": [
               {
                 "id": "level-17",
+                "handle": "level_17",
+                "label": "level-17",
                 "kind": "component",
-                "name": "level-17",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -106,8 +107,9 @@
             "nodes": [
               {
                 "id": "level-16",
+                "handle": "level_16",
+                "label": "level-16",
                 "kind": "component",
-                "name": "level-16",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -133,8 +135,9 @@
             "nodes": [
               {
                 "id": "level-15",
+                "handle": "level_15",
+                "label": "level-15",
                 "kind": "component",
-                "name": "level-15",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -160,8 +163,9 @@
             "nodes": [
               {
                 "id": "level-14",
+                "handle": "level_14",
+                "label": "level-14",
                 "kind": "component",
-                "name": "level-14",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -187,8 +191,9 @@
             "nodes": [
               {
                 "id": "level-13",
+                "handle": "level_13",
+                "label": "level-13",
                 "kind": "component",
-                "name": "level-13",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -214,8 +219,9 @@
             "nodes": [
               {
                 "id": "level-12",
+                "handle": "level_12",
+                "label": "level-12",
                 "kind": "component",
-                "name": "level-12",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -241,8 +247,9 @@
             "nodes": [
               {
                 "id": "level-11",
+                "handle": "level_11",
+                "label": "level-11",
                 "kind": "component",
-                "name": "level-11",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -268,8 +275,9 @@
             "nodes": [
               {
                 "id": "level-10",
+                "handle": "level_10",
+                "label": "level-10",
                 "kind": "component",
-                "name": "level-10",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -295,8 +303,9 @@
             "nodes": [
               {
                 "id": "level-9",
+                "handle": "level_9",
+                "label": "level-9",
                 "kind": "component",
-                "name": "level-9",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -322,8 +331,9 @@
             "nodes": [
               {
                 "id": "level-8",
+                "handle": "level_8",
+                "label": "level-8",
                 "kind": "component",
-                "name": "level-8",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -349,8 +359,9 @@
             "nodes": [
               {
                 "id": "level-7",
+                "handle": "level_7",
+                "label": "level-7",
                 "kind": "component",
-                "name": "level-7",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -376,8 +387,9 @@
             "nodes": [
               {
                 "id": "level-6",
+                "handle": "level_6",
+                "label": "level-6",
                 "kind": "component",
-                "name": "level-6",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -403,8 +415,9 @@
             "nodes": [
               {
                 "id": "level-5",
+                "handle": "level_5",
+                "label": "level-5",
                 "kind": "component",
-                "name": "level-5",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -430,8 +443,9 @@
             "nodes": [
               {
                 "id": "level-4",
+                "handle": "level_4",
+                "label": "level-4",
                 "kind": "component",
-                "name": "level-4",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -457,8 +471,9 @@
             "nodes": [
               {
                 "id": "level-3",
+                "handle": "level_3",
+                "label": "level-3",
                 "kind": "component",
-                "name": "level-3",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -484,8 +499,9 @@
             "nodes": [
               {
                 "id": "level-2",
+                "handle": "level_2",
+                "label": "level-2",
                 "kind": "component",
-                "name": "level-2",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -520,7 +536,7 @@
     "steps": [
       {
         "nodeId": "top",
-        "name": "top",
+        "handle": "top",
         "kind": "component",
         "status": "error",
         "phase": "main",
@@ -529,7 +545,8 @@
         "children": [
           {
             "nodeId": "level-2",
-            "name": "level-2",
+            "handle": "level_2",
+            "label": "level-2",
             "kind": "component",
             "status": "error",
             "phase": "main",
@@ -538,7 +555,8 @@
             "children": [
               {
                 "nodeId": "level-3",
-                "name": "level-3",
+                "handle": "level_3",
+                "label": "level-3",
                 "kind": "component",
                 "status": "error",
                 "phase": "main",
@@ -547,7 +565,8 @@
                 "children": [
                   {
                     "nodeId": "level-4",
-                    "name": "level-4",
+                    "handle": "level_4",
+                    "label": "level-4",
                     "kind": "component",
                     "status": "error",
                     "phase": "main",
@@ -556,7 +575,8 @@
                     "children": [
                       {
                         "nodeId": "level-5",
-                        "name": "level-5",
+                        "handle": "level_5",
+                        "label": "level-5",
                         "kind": "component",
                         "status": "error",
                         "phase": "main",
@@ -565,7 +585,8 @@
                         "children": [
                           {
                             "nodeId": "level-6",
-                            "name": "level-6",
+                            "handle": "level_6",
+                            "label": "level-6",
                             "kind": "component",
                             "status": "error",
                             "phase": "main",
@@ -574,7 +595,8 @@
                             "children": [
                               {
                                 "nodeId": "level-7",
-                                "name": "level-7",
+                                "handle": "level_7",
+                                "label": "level-7",
                                 "kind": "component",
                                 "status": "error",
                                 "phase": "main",
@@ -583,7 +605,8 @@
                                 "children": [
                                   {
                                     "nodeId": "level-8",
-                                    "name": "level-8",
+                                    "handle": "level_8",
+                                    "label": "level-8",
                                     "kind": "component",
                                     "status": "error",
                                     "phase": "main",
@@ -592,7 +615,8 @@
                                     "children": [
                                       {
                                         "nodeId": "level-9",
-                                        "name": "level-9",
+                                        "handle": "level_9",
+                                        "label": "level-9",
                                         "kind": "component",
                                         "status": "error",
                                         "phase": "main",
@@ -601,7 +625,8 @@
                                         "children": [
                                           {
                                             "nodeId": "level-10",
-                                            "name": "level-10",
+                                            "handle": "level_10",
+                                            "label": "level-10",
                                             "kind": "component",
                                             "status": "error",
                                             "phase": "main",
@@ -610,7 +635,8 @@
                                             "children": [
                                               {
                                                 "nodeId": "level-11",
-                                                "name": "level-11",
+                                                "handle": "level_11",
+                                                "label": "level-11",
                                                 "kind": "component",
                                                 "status": "error",
                                                 "phase": "main",
@@ -619,7 +645,8 @@
                                                 "children": [
                                                   {
                                                     "nodeId": "level-12",
-                                                    "name": "level-12",
+                                                    "handle": "level_12",
+                                                    "label": "level-12",
                                                     "kind": "component",
                                                     "status": "error",
                                                     "phase": "main",
@@ -628,7 +655,8 @@
                                                     "children": [
                                                       {
                                                         "nodeId": "level-13",
-                                                        "name": "level-13",
+                                                        "handle": "level_13",
+                                                        "label": "level-13",
                                                         "kind": "component",
                                                         "status": "error",
                                                         "phase": "main",
@@ -637,7 +665,8 @@
                                                         "children": [
                                                           {
                                                             "nodeId": "level-14",
-                                                            "name": "level-14",
+                                                            "handle": "level_14",
+                                                            "label": "level-14",
                                                             "kind": "component",
                                                             "status": "error",
                                                             "phase": "main",
@@ -646,7 +675,8 @@
                                                             "children": [
                                                               {
                                                                 "nodeId": "level-15",
-                                                                "name": "level-15",
+                                                                "handle": "level_15",
+                                                                "label": "level-15",
                                                                 "kind": "component",
                                                                 "status": "error",
                                                                 "phase": "main",
@@ -655,7 +685,8 @@
                                                                 "children": [
                                                                   {
                                                                     "nodeId": "level-16",
-                                                                    "name": "level-16",
+                                                                    "handle": "level_16",
+                                                                    "label": "level-16",
                                                                     "kind": "component",
                                                                     "status": "error",
                                                                     "phase": "main",
@@ -664,7 +695,8 @@
                                                                     "children": [
                                                                       {
                                                                         "nodeId": "level-17",
-                                                                        "name": "level-17",
+                                                                        "handle": "level_17",
+                                                                        "label": "level-17",
                                                                         "kind": "component",
                                                                         "status": "error",
                                                                         "phase": "main",

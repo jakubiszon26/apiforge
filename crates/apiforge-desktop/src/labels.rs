@@ -41,7 +41,7 @@ pub fn binding(binding: &Binding, graph: &Graph) -> String {
                 .nodes
                 .iter()
                 .find(|node| &node.id == node_id)
-                .map_or("Missing step", |node| node.name.as_str());
+                .map_or("Missing step", |node| node.display_name());
             if path.is_empty() {
                 format!("{name} → {port}")
             } else {

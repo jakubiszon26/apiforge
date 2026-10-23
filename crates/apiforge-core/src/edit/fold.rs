@@ -8,7 +8,7 @@
 
 /// Writes the identifier characters `character` contributes: ASCII letters, digits
 /// and `_`, with one `_` for every other UTF-16 unit of its decomposition.
-pub(super) fn push_identifier_part(character: char, output: &mut String) {
+pub(crate) fn push_identifier_part(character: char, output: &mut String) {
     let code = u32::from(character);
     if matches!(code, 0x0300..=0x036F) {
         return;

@@ -2,6 +2,7 @@
 use super::{EditError, unique_id};
 use crate::{
     format::{Binding, Graph, OrderEdge, Position},
+    handle::unique_handle,
     model::NodeKind,
 };
 use std::collections::{HashMap, HashSet};
@@ -88,7 +89,9 @@ pub fn paste_selection(
     for node in &fragment.nodes {
         let mut copy = node.clone();
         copy.id = mapping[node.id.as_str()].clone();
-        copy.name = format!("{} — copy", node.name);
+        copy.handle = unique_handle(&node.handle, |handle| {
+            next.nodes.iter().any(|node| node.handle == handle)
+        });
         copy.position = Position {
             x: node.position.x + offset.x,
             y: node.position.y + offset.y,
@@ -193,7 +196,17 @@ mod tests {
             assertion.inputs["actual"],
             Binding::reference(&formula.id, "value", "")
         );
-        assert_eq!(formula.name, "Operator — copy");
+        let original = ordered
+            .nodes
+            .iter()
+            .find(|node| node.id == f.formula)
+            .unwrap();
+        assert_eq!(
+            formula.handle,
+            format!("{}_2", original.handle),
+            "numbered handle"
+        );
+        assert_eq!(formula.label, original.label);
         assert!(
             copy.graph
                 .edges

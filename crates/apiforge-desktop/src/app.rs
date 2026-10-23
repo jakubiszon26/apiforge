@@ -147,14 +147,12 @@ impl App {
         }
     }
 
-    /// Selects a node of the current board by id or name (used by screenshots).
+    /// Selects a node of the current board by id, handle or label (used by screenshots).
     pub fn select_node(&mut self, key: &str) {
-        if let Some(node) = self
-            .editor
-            .graph()
-            .nodes
-            .iter()
-            .find(|node| node.id == key || node.name == key)
+        if let Some(node) =
+            self.editor.graph().nodes.iter().find(|node| {
+                node.id == key || node.handle == key || node.label.as_deref() == Some(key)
+            })
         {
             self.editor.selection = vec![node.id.clone()];
         }
@@ -445,7 +443,7 @@ impl App {
                 .nodes
                 .iter()
                 .filter(|node| node.kind == NodeKind::Variable)
-                .map(|node| (node.id.clone(), node.name.clone()))
+                .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             parameters: self.editor.parameter_names(),
             editing_component: self.editor.draft().is_some(),
@@ -1660,7 +1658,7 @@ mod tests {
         draw_frame(
             &mut app,
             &context,
-            vec![egui::Event::Text(target.name.clone())],
+            vec![egui::Event::Text(target.display_name().to_owned())],
         );
         draw_frame(
             &mut app,
@@ -1723,7 +1721,7 @@ mod tests {
             app.editor
                 .selected_node()
                 .unwrap()
-                .name
+                .display_name()
                 .contains(" changed ")
         );
     }
@@ -1912,7 +1910,7 @@ mod tests {
 
         // Editing the graph marks the report as stale and blocks stale assertions/single-step reuse.
         let mut graph = app.editor.graph().clone();
-        graph.nodes[0].name = "Edited name".into();
+        graph.nodes[0].label = Some("Edited name".into());
         app.apply_graph(graph);
         assert!(app.is_run_stale());
 

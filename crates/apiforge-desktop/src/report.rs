@@ -517,7 +517,7 @@ impl ReportPanel {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new(&step.name)
+                    RichText::new(step.display_name())
                         .size(14.0)
                         .family(theme::bold_family()),
                 );
@@ -1039,7 +1039,7 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     // Reserve the duration column by width, rather than truncating every name
     // at a fixed character count (which lets wider names overlap the duration).
     let mut name = egui::text::LayoutJob::simple_singleline(
-        row.step.name.clone(),
+        row.step.display_name().to_owned(),
         egui::FontId::new(12.5, theme::bold_family()),
         name_color,
     );
@@ -1068,7 +1068,7 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     );
     let a11y_label = format!(
         "{} · {} · {} ms",
-        row.step.name,
+        row.step.display_name(),
         row.step.status.label(),
         row.step.duration_ms
     );
@@ -1077,7 +1077,7 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     });
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(&row.step.name)
+        .on_hover_text(row.step.display_name())
 }
 
 fn run_pill(status: RunStatus) -> (&'static str, Color32) {
@@ -1162,13 +1162,24 @@ mod tests {
     use indexmap::IndexMap;
     use serde_json::json;
 
+    /// A passed step of a node with the given identifier, label and kind.
+    fn step(id: &str, label: &str, kind: NodeKind, phase: Phase) -> StepResult {
+        let mut node = apiforge_core::graph::create_node(
+            kind,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        node.id = id.to_owned();
+        node.handle = apiforge_core::handle::handle_base(label);
+        node.label = Some(label.to_owned());
+        StepResult::new(&node, phase)
+    }
+
     fn sample_run() -> RunResult {
-        let mut child =
-            StepResult::new("inner-req", "Inner request", NodeKind::Request, Phase::Main);
+        let mut child = step("inner-req", "Inner request", NodeKind::Request, Phase::Main);
         child.outputs.insert("status".into(), json!(200));
 
-        let mut comp =
-            StepResult::new("comp-1", "Auth component", NodeKind::Component, Phase::Main);
+        let mut comp = step("comp-1", "Auth component", NodeKind::Component, Phase::Main);
         comp.duration_ms = 12;
         comp.outputs.insert(
             "token".into(),
@@ -1176,7 +1187,7 @@ mod tests {
         );
         comp.children = Some(vec![child]);
 
-        let mut check = StepResult::new("assert-1", "Check status", NodeKind::Assert, Phase::Main);
+        let mut check = step("assert-1", "Check status", NodeKind::Assert, Phase::Main);
         check.status = StepStatus::Failed;
         check.message = Some("Expected 200, got 500".into());
         check.expected = OptionalJson::Present(json!(200));
@@ -1188,7 +1199,7 @@ mod tests {
             body: OptionalJson::Present(json!({"sku": "A1"})),
         });
 
-        let cleanup = StepResult::new("clean-1", "Delete order", NodeKind::Request, Phase::Cleanup);
+        let cleanup = step("clean-1", "Delete order", NodeKind::Request, Phase::Cleanup);
 
         RunResult {
             id: "run-1".into(),

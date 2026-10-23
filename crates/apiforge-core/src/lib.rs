@@ -7,6 +7,7 @@ pub mod demos;
 pub mod edit;
 pub mod format;
 pub mod graph;
+pub mod handle;
 pub mod ids;
 pub mod js;
 pub mod model;

@@ -4,7 +4,7 @@
 //! reports stay comparable.
 
 use crate::{
-    format::{Graph, OptionalJson},
+    format::{Graph, Node, OptionalJson},
     model::NodeKind,
 };
 use indexmap::IndexMap;
@@ -103,7 +103,9 @@ pub struct RequestSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct StepResult {
     pub node_id: String,
-    pub name: String,
+    pub handle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub kind: NodeKind,
     pub status: StepStatus,
     pub phase: Phase,
@@ -125,11 +127,18 @@ pub struct StepResult {
 }
 
 impl StepResult {
-    pub fn new(node_id: &str, name: &str, kind: NodeKind, phase: Phase) -> Self {
+    /// The label, or the handle of a node without one.
+    pub fn display_name(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.handle)
+    }
+
+    /// A passed step of `node` without inputs or outputs yet.
+    pub fn new(node: &Node, phase: Phase) -> Self {
         Self {
-            node_id: node_id.to_owned(),
-            name: name.to_owned(),
-            kind,
+            node_id: node.id.clone(),
+            handle: node.handle.clone(),
+            label: node.label.clone(),
+            kind: node.kind,
             status: StepStatus::Passed,
             phase,
             inputs: IndexMap::new(),

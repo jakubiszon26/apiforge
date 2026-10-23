@@ -15,8 +15,9 @@
             "nodes": [
               {
                 "id": "double-1",
+                "handle": "double_1",
+                "label": "double-1",
                 "kind": "component",
-                "name": "double-1",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -34,8 +35,9 @@
               },
               {
                 "id": "double-2",
+                "handle": "double_2",
+                "label": "double-2",
                 "kind": "component",
-                "name": "double-2",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -53,8 +55,9 @@
               },
               {
                 "id": "wrong-type",
+                "handle": "wrong_type",
+                "label": "wrong-type",
                 "kind": "component",
-                "name": "wrong-type",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -72,8 +75,8 @@
               },
               {
                 "id": "creator",
+                "handle": "creator",
                 "kind": "component",
-                "name": "creator",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -86,8 +89,8 @@
               },
               {
                 "id": "next",
+                "handle": "next",
                 "kind": "select",
-                "name": "next",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -106,8 +109,8 @@
               },
               {
                 "id": "branching",
+                "handle": "branching",
                 "kind": "component",
-                "name": "branching",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -120,8 +123,8 @@
               },
               {
                 "id": "failing",
+                "handle": "failing",
                 "kind": "component",
-                "name": "failing",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -139,8 +142,9 @@
             "nodes": [
               {
                 "id": "cleanup",
+                "handle": "cleanup_step",
+                "label": "cleanup",
                 "kind": "request",
-                "name": "cleanup",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -167,8 +171,9 @@
               },
               {
                 "id": "cleanup-missing",
+                "handle": "cleanup_missing",
+                "label": "cleanup-missing",
                 "kind": "request",
-                "name": "cleanup-missing",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -229,8 +234,8 @@
             "nodes": [
               {
                 "id": "calc",
+                "handle": "calc",
                 "kind": "formula",
-                "name": "calc",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -281,8 +286,8 @@
             "nodes": [
               {
                 "id": "calc",
+                "handle": "calc",
                 "kind": "formula",
-                "name": "calc",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -337,8 +342,8 @@
             "nodes": [
               {
                 "id": "create",
+                "handle": "create",
                 "kind": "request",
-                "name": "create",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -363,8 +368,8 @@
               },
               {
                 "id": "broken",
+                "handle": "broken",
                 "kind": "formula",
-                "name": "broken",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -415,8 +420,9 @@
             "nodes": [
               {
                 "id": "inner-start",
+                "handle": "begin",
+                "label": "inner-start",
                 "kind": "trigger",
-                "name": "inner-start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -426,8 +432,9 @@
               },
               {
                 "id": "inner-if",
+                "handle": "inner_if",
+                "label": "inner-if",
                 "kind": "if",
-                "name": "inner-if",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -448,8 +455,9 @@
               },
               {
                 "id": "inner-yes",
+                "handle": "inner_yes",
+                "label": "inner-yes",
                 "kind": "request",
-                "name": "inner-yes",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -469,8 +477,9 @@
               },
               {
                 "id": "inner-no",
+                "handle": "inner_no",
+                "label": "inner-no",
                 "kind": "request",
-                "name": "inner-no",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -521,8 +530,9 @@
             "nodes": [
               {
                 "id": "inner-check",
+                "handle": "inner_check",
+                "label": "inner-check",
                 "kind": "assert",
-                "name": "inner-check",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -565,7 +575,8 @@
     "steps": [
       {
         "nodeId": "double-1",
-        "name": "double-1",
+        "handle": "double_1",
+        "label": "double-1",
         "kind": "component",
         "status": "passed",
         "phase": "main",
@@ -578,7 +589,7 @@
         "children": [
           {
             "nodeId": "calc",
-            "name": "calc",
+            "handle": "calc",
             "kind": "formula",
             "status": "passed",
             "phase": "main",
@@ -594,7 +605,8 @@
       },
       {
         "nodeId": "double-2",
-        "name": "double-2",
+        "handle": "double_2",
+        "label": "double-2",
         "kind": "component",
         "status": "passed",
         "phase": "main",
@@ -607,7 +619,7 @@
         "children": [
           {
             "nodeId": "calc",
-            "name": "calc",
+            "handle": "calc",
             "kind": "formula",
             "status": "passed",
             "phase": "main",
@@ -623,7 +635,8 @@
       },
       {
         "nodeId": "wrong-type",
-        "name": "wrong-type",
+        "handle": "wrong_type",
+        "label": "wrong-type",
         "kind": "component",
         "status": "error",
         "phase": "main",
@@ -634,7 +647,7 @@
       },
       {
         "nodeId": "creator",
-        "name": "creator",
+        "handle": "creator",
         "kind": "component",
         "status": "error",
         "phase": "main",
@@ -645,7 +658,7 @@
         "children": [
           {
             "nodeId": "create",
-            "name": "create",
+            "handle": "create",
             "kind": "request",
             "status": "passed",
             "phase": "main",
@@ -671,7 +684,7 @@
           },
           {
             "nodeId": "broken",
-            "name": "broken",
+            "handle": "broken",
             "kind": "formula",
             "status": "error",
             "phase": "main",
@@ -685,7 +698,7 @@
       },
       {
         "nodeId": "next",
-        "name": "next",
+        "handle": "next",
         "kind": "select",
         "status": "blocked",
         "phase": "main",
@@ -694,7 +707,7 @@
       },
       {
         "nodeId": "branching",
-        "name": "branching",
+        "handle": "branching",
         "kind": "component",
         "status": "passed",
         "phase": "main",
@@ -707,7 +720,8 @@
         "children": [
           {
             "nodeId": "inner-start",
-            "name": "inner-start",
+            "handle": "begin",
+            "label": "inner-start",
             "kind": "trigger",
             "status": "passed",
             "phase": "main",
@@ -716,7 +730,8 @@
           },
           {
             "nodeId": "inner-if",
-            "name": "inner-if",
+            "handle": "inner_if",
+            "label": "inner-if",
             "kind": "if",
             "status": "passed",
             "phase": "main",
@@ -733,7 +748,8 @@
           },
           {
             "nodeId": "inner-yes",
-            "name": "inner-yes",
+            "handle": "inner_yes",
+            "label": "inner-yes",
             "kind": "request",
             "status": "skipped",
             "phase": "main",
@@ -742,7 +758,8 @@
           },
           {
             "nodeId": "inner-no",
-            "name": "inner-no",
+            "handle": "inner_no",
+            "label": "inner-no",
             "kind": "request",
             "status": "passed",
             "phase": "main",
@@ -765,7 +782,7 @@
       },
       {
         "nodeId": "failing",
-        "name": "failing",
+        "handle": "failing",
         "kind": "component",
         "status": "failed",
         "phase": "main",
@@ -774,7 +791,8 @@
         "children": [
           {
             "nodeId": "inner-check",
-            "name": "inner-check",
+            "handle": "inner_check",
+            "label": "inner-check",
             "kind": "assert",
             "status": "failed",
             "phase": "main",
@@ -793,7 +811,8 @@
       },
       {
         "nodeId": "cleanup",
-        "name": "cleanup",
+        "handle": "cleanup_step",
+        "label": "cleanup",
         "kind": "request",
         "status": "passed",
         "phase": "cleanup",
@@ -816,7 +835,8 @@
       },
       {
         "nodeId": "cleanup-missing",
-        "name": "cleanup-missing",
+        "handle": "cleanup_missing",
+        "label": "cleanup-missing",
         "kind": "request",
         "status": "skipped",
         "phase": "cleanup",

@@ -15,8 +15,9 @@
             "nodes": [
               {
                 "id": "start",
+                "handle": "begin",
+                "label": "start",
                 "kind": "trigger",
-                "name": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -26,8 +27,8 @@
               },
               {
                 "id": "first",
+                "handle": "first",
                 "kind": "request",
-                "name": "first",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -48,8 +49,8 @@
               },
               {
                 "id": "verify",
+                "handle": "verify",
                 "kind": "assert",
-                "name": "verify",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -72,8 +73,8 @@
               },
               {
                 "id": "unrelated",
+                "handle": "unrelated",
                 "kind": "request",
-                "name": "unrelated",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -93,8 +94,8 @@
               },
               {
                 "id": "disconnected",
+                "handle": "disconnected",
                 "kind": "request",
-                "name": "disconnected",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -114,8 +115,9 @@
               },
               {
                 "id": "price-variable",
+                "handle": "price_variable",
+                "label": "price-variable",
                 "kind": "variable",
-                "name": "price-variable",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -132,8 +134,9 @@
               },
               {
                 "id": "via-variable",
+                "handle": "via_variable",
+                "label": "via-variable",
                 "kind": "assert",
-                "name": "via-variable",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -206,7 +209,7 @@
     "steps": [
       {
         "nodeId": "disconnected",
-        "name": "disconnected",
+        "handle": "disconnected",
         "kind": "request",
         "status": "passed",
         "phase": "main",

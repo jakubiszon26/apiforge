@@ -61,7 +61,7 @@ impl ComponentDialog {
             .collect();
         let name = initial.map_or_else(
             || match nodes.as_slice() {
-                [node] => node.name.clone(),
+                [node] => node.display_name().to_owned(),
                 _ => "New component".to_owned(),
             },
             |initial| initial.name.clone(),
@@ -171,7 +171,10 @@ impl ComponentDialog {
             .nodes
             .iter()
             .find(|node| node.id == id)
-            .map_or_else(|| "Removed step".to_owned(), |node| node.name.clone())
+            .map_or_else(
+                || "Removed step".to_owned(),
+                |node| node.display_name().to_owned(),
+            )
     }
 
     fn body(&mut self, ui: &mut Ui, project: &Project) {
@@ -458,7 +461,7 @@ fn output_source(
             output_ports(node, project).into_iter().map(|port| {
                 let label = format!(
                     "{} → {}",
-                    node.name,
+                    node.display_name(),
                     port.label.as_deref().unwrap_or(&port.name)
                 );
                 (node.id.clone(), port.name, label)
@@ -575,7 +578,7 @@ mod tests {
                 .iter()
                 .find(|n| n.id == selected[0])
                 .unwrap()
-                .name
+                .display_name()
         );
         run_frames(2, |ctx| {
             assert_eq!(dialog.show(ctx, &project), Outcome::Open)

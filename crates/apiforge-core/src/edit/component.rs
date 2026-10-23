@@ -228,7 +228,7 @@ pub fn initialize_inputs(
                     None => port.is_required(),
                     _ => false,
                 };
-                let mut label = format!("{} → {}", node.name, port.display_name());
+                let mut label = format!("{} → {}", node.display_name(), port.display_name());
                 for name in &path {
                     label.push_str(if name == "left" { " → A" } else { " → B" });
                 }

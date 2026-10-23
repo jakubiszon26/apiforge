@@ -12,6 +12,7 @@ use crate::{
         OptionalJson, OrderEdge, OutputPort, Port, Position, Project, Scenario,
     },
     graph::create_node,
+    handle::handle_base,
     ids::new_id,
     model::{Branch, BuildType, ErrorPolicy, HttpMethod, NodeKind, Predicate, ValueType},
     operator::Operator,
@@ -547,7 +548,8 @@ pub fn workflow_project() -> Project {
     );
     let branch = Node {
         id: "flow-if".into(),
-        name: "IF response = 200".into(),
+        handle: handle_base("IF response = 200"),
+        label: Some("IF response = 200".into()),
         inputs: bindings(vec![
             ("actual", reference(&prices.id, "status", "")),
             ("expected", literal(json!(200))),
@@ -566,7 +568,8 @@ pub fn workflow_project() -> Project {
     cart.config.sample_status = Some(201);
     let body = Node {
         id: "flow-body".into(),
-        name: "Products to add".into(),
+        handle: handle_base("Products to add"),
+        label: Some("Products to add".into()),
         inputs: bindings(vec![
             ("productId", reference(&prices.id, "body", "id")),
             ("quantity", literal(json!(2))),
@@ -594,7 +597,8 @@ pub fn workflow_project() -> Project {
         .insert("body".into(), reference(&body.id, "value", ""));
     let check = Node {
         id: "flow-check".into(),
-        name: "Compare the total with the fetched price".into(),
+        handle: handle_base("Compare the total with the fetched price"),
+        label: Some("Compare the total with the fetched price".into()),
         inputs: bindings(vec![
             ("actual", reference(&add.id, "body", "total")),
             (
@@ -610,7 +614,8 @@ pub fn workflow_project() -> Project {
     };
     let otherwise = Node {
         id: "flow-else".into(),
-        name: "Report missing prices without creating a cart".into(),
+        handle: handle_base("Report missing prices without creating a cart"),
+        label: Some("Report missing prices without creating a cart".into()),
         inputs: bindings(vec![
             ("actual", reference(&prices.id, "status", "")),
             ("expected", literal(json!(200))),
@@ -765,8 +770,10 @@ fn node(
 ) -> Node {
     Node {
         id: id.into(),
+        handle: handle_base(name),
+        label: Some(name.into()),
+        note: None,
         kind,
-        name: name.into(),
         position,
         inputs: bindings(inputs),
         config,
@@ -906,7 +913,8 @@ mod tests {
                     let entity = map.contains_key("id") && !in_sample;
                     for (key, child) in map.iter_mut() {
                         match key.as_str() {
-                            "description" | "label" => *child = Value::Null,
+                            // Handles derive from the translated labels.
+                            "description" | "label" | "handle" => *child = Value::Null,
                             "name" if entity => *child = Value::Null,
                             "sample" | "sampleResponse" => strip(child, true),
                             _ => strip(child, in_sample),

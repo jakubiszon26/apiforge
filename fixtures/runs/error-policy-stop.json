@@ -15,8 +15,9 @@
             "nodes": [
               {
                 "id": "start",
+                "handle": "begin",
+                "label": "start",
                 "kind": "trigger",
-                "name": "start",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -26,8 +27,8 @@
               },
               {
                 "id": "create",
+                "handle": "create",
                 "kind": "request",
-                "name": "create",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -53,8 +54,8 @@
               },
               {
                 "id": "price",
+                "handle": "price",
                 "kind": "assert",
-                "name": "price",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -77,8 +78,8 @@
               },
               {
                 "id": "after",
+                "handle": "after",
                 "kind": "request",
-                "name": "after",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -98,8 +99,8 @@
               },
               {
                 "id": "independent",
+                "handle": "independent",
                 "kind": "request",
-                "name": "independent",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -119,8 +120,9 @@
               },
               {
                 "id": "reads-failed",
+                "handle": "reads_failed",
+                "label": "reads-failed",
                 "kind": "select",
-                "name": "reads-failed",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -165,8 +167,8 @@
             "nodes": [
               {
                 "id": "delete",
+                "handle": "delete",
                 "kind": "request",
-                "name": "delete",
                 "position": {
                   "x": 0.0,
                   "y": 0.0
@@ -218,7 +220,8 @@
     "steps": [
       {
         "nodeId": "start",
-        "name": "start",
+        "handle": "begin",
+        "label": "start",
         "kind": "trigger",
         "status": "passed",
         "phase": "main",
@@ -227,7 +230,7 @@
       },
       {
         "nodeId": "create",
-        "name": "create",
+        "handle": "create",
         "kind": "request",
         "status": "passed",
         "phase": "main",
@@ -254,7 +257,7 @@
       },
       {
         "nodeId": "price",
-        "name": "price",
+        "handle": "price",
         "kind": "assert",
         "status": "failed",
         "phase": "main",
@@ -271,7 +274,7 @@
       },
       {
         "nodeId": "after",
-        "name": "after",
+        "handle": "after",
         "kind": "request",
         "status": "skipped",
         "phase": "main",
@@ -280,7 +283,7 @@
       },
       {
         "nodeId": "independent",
-        "name": "independent",
+        "handle": "independent",
         "kind": "request",
         "status": "skipped",
         "phase": "main",
@@ -289,7 +292,8 @@
       },
       {
         "nodeId": "reads-failed",
-        "name": "reads-failed",
+        "handle": "reads_failed",
+        "label": "reads-failed",
         "kind": "select",
         "status": "skipped",
         "phase": "main",
@@ -298,7 +302,7 @@
       },
       {
         "nodeId": "delete",
-        "name": "delete",
+        "handle": "delete",
         "kind": "request",
         "status": "passed",
         "phase": "cleanup",

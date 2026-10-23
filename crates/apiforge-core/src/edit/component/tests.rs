@@ -15,7 +15,9 @@ fn request(id: &str, inputs: &[(&str, Binding)]) -> Node {
     Node {
         id: id.into(),
         kind: NodeKind::Request,
-        name: id.into(),
+        handle: id.into(),
+        label: None,
+        note: None,
         position: Position { x: 0.0, y: 0.0 },
         inputs: inputs
             .iter()

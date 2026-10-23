@@ -49,7 +49,10 @@ impl AssignVariableDialog {
             .nodes
             .iter()
             .find(|node| node.id == source_id)
-            .map_or_else(|| source_id.to_owned(), |node| node.name.clone());
+            .map_or_else(
+                || source_id.to_owned(),
+                |node| node.display_name().to_owned(),
+            );
         Self {
             source_id: source_id.to_owned(),
             port: port.to_owned(),
@@ -59,7 +62,7 @@ impl AssignVariableDialog {
                 .nodes
                 .iter()
                 .filter(|node| node.kind == NodeKind::Variable)
-                .map(|node| (node.id.clone(), node.name.clone()))
+                .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             target: None,
             name: suggested_name(path).to_owned(),

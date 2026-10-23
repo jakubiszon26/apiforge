@@ -384,8 +384,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 };
                 let step = match status {
                     Some(status) => {
-                        let mut step =
-                            StepResult::new(&node.id, &node.name, node.kind, context.phase);
+                        let mut step = StepResult::new(node, context.phase);
                         step.status = status;
                         step.message = Some(
                             if gate.inactive {
@@ -513,7 +512,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
     /// Executes one node. Failures become the step's status and message.
     async fn execute(&mut self, node: &'a Node, context: &mut Context) -> StepResult {
         let started = Instant::now();
-        let mut step = StepResult::new(&node.id, &node.name, node.kind, context.phase);
+        let mut step = StepResult::new(node, context.phase);
         if let Err(error) = self.operate(node, context, &mut step).await {
             step.status = if context.signal.is_aborted() {
                 StepStatus::Cancelled
@@ -1140,10 +1139,10 @@ mod tests {
         let scenario = &mut project.scenarios[0];
         scenario.graph = serde_json::from_value(serde_json::json!({
             "nodes": [
-                {"id": "start", "kind": "trigger", "name": "Start", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
-                {"id": "active", "kind": "request", "name": "Active", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}},
-                {"id": "shared", "kind": "variable", "name": "Shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
-                {"id": "disconnected", "kind": "request", "name": "Disconnected", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}}
+                {"id": "start", "kind": "trigger", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
+                {"id": "active", "kind": "request", "handle": "active", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}},
+                {"id": "shared", "kind": "variable", "handle": "shared", "position": {"x": 0, "y": 0}, "inputs": {"value": {"kind": "literal", "value": 1}}, "config": {}},
+                {"id": "disconnected", "kind": "request", "handle": "disconnected", "position": {"x": 0, "y": 0}, "inputs": {"arg": {"kind": "reference", "nodeId": "shared", "port": "value", "path": ""}}, "config": {"url": url}}
             ],
             "edges": [{"id": "start-active", "source": "start", "target": "active"}]
         })).unwrap();
@@ -1187,7 +1186,7 @@ mod tests {
         scenario.cleanup = Graph {
             nodes: vec![
                 serde_json::from_value(serde_json::json!({
-                    "id": "cleanup-start", "kind": "trigger", "name": "Cleanup",
+                    "id": "cleanup-start", "kind": "trigger", "handle": "cleanup_start",
                     "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}
                 }))
                 .unwrap(),

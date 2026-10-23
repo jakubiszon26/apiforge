@@ -416,6 +416,14 @@ fn graph(
         path,
     )?;
     unique(graph.edges.iter().map(|edge| edge.id.as_str()), path)?;
+    let mut handles = HashSet::new();
+    for node in graph.nodes.iter().chain(external) {
+        require(
+            handles.insert(node.handle.as_str()),
+            path,
+            "Duplicate handle",
+        )?;
+    }
     require(
         graph
             .nodes
@@ -437,7 +445,14 @@ fn graph(
         local.iter().map(|id| (*id, HashSet::new())).collect();
     for (index, node) in graph.nodes.iter().enumerate() {
         let node_path = format!("{path}.nodes[{index}]");
-        text(&node.name, &node_path)?;
+        require(
+            crate::handle::is_valid_handle(&node.handle),
+            &node_path,
+            "Invalid handle",
+        )?;
+        for value in [&node.label, &node.note].into_iter().flatten() {
+            text(value, &node_path)?;
+        }
         require(
             node.position.x.is_finite() && node.position.y.is_finite(),
             &node_path,
