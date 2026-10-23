@@ -9,15 +9,13 @@ use indexmap::IndexMap;
 /// A compatibility fixture project, e.g. `blocks.json`.
 pub fn at(name: &str) -> Project {
     let bytes = match name {
-        "blocks.json" => {
-            include_bytes!("../../../../fixtures/compatibility/projects/blocks.json").as_slice()
-        }
-        "shop.json" => include_bytes!("../../../../fixtures/compatibility/projects/shop.json"),
+        "blocks.json" => include_bytes!("../../../../fixtures/projects/blocks.json").as_slice(),
+        "shop.json" => include_bytes!("../../../../fixtures/projects/shop.json"),
         "tickets.json" => {
-            include_bytes!("../../../../fixtures/compatibility/projects/tickets.json")
+            include_bytes!("../../../../fixtures/projects/tickets.json")
         }
         "workflow.json" => {
-            include_bytes!("../../../../fixtures/compatibility/projects/workflow.json")
+            include_bytes!("../../../../fixtures/projects/workflow.json")
         }
         other => panic!("unknown fixture {other}"),
     };

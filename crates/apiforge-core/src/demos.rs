@@ -878,19 +878,19 @@ mod tests {
     const FIXTURES: [(&str, &[u8]); 4] = [
         (
             "shop",
-            include_bytes!("../../../fixtures/compatibility/projects/shop.json"),
+            include_bytes!("../../../fixtures/projects/shop.json"),
         ),
         (
             "tickets",
-            include_bytes!("../../../fixtures/compatibility/projects/tickets.json"),
+            include_bytes!("../../../fixtures/projects/tickets.json"),
         ),
         (
             "blocks",
-            include_bytes!("../../../fixtures/compatibility/projects/blocks.json"),
+            include_bytes!("../../../fixtures/projects/blocks.json"),
         ),
         (
             "workflow",
-            include_bytes!("../../../fixtures/compatibility/projects/workflow.json"),
+            include_bytes!("../../../fixtures/projects/workflow.json"),
         ),
     ];
 

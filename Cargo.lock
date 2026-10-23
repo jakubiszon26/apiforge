@@ -175,6 +175,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apiforge-convert-v1"
+version = "0.1.0"
+dependencies = [
+ "apiforge-core",
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "apiforge-core"
 version = "0.1.0"
 dependencies = [

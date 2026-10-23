@@ -1,0 +1,16 @@
+[package]
+name = "apiforge-convert-v1"
+description = "Development tool converting version-one documents and fixtures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+apiforge-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+
+[lints]
+workspace = true

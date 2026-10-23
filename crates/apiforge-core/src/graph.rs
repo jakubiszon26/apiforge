@@ -558,7 +558,7 @@ mod tests {
 
     fn project() -> Project {
         let document = crate::import_document(
-            include_bytes!("../../../fixtures/compatibility/projects/blocks.json"),
+            include_bytes!("../../../fixtures/projects/blocks.json"),
             &crate::ImportLimits::default(),
         )
         .expect("fixture imports");

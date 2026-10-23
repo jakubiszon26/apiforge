@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "id": "workflow-poc",
+  "name": "Przepływ: ceny i koszyk",
+  "scenarios": [
+    {
+      "id": "workflow-cart",
+      "name": "Ceny → koszyk → produkty",
+      "description": "Ręczny Start, kolejność requestów i IF / ELSE. Zmień endpoint produktu na /products/999, aby sprawdzić gałąź Nie.",
+      "graph": {
+        "nodes": [
+          {
+            "id": "flow-start",
+            "kind": "trigger",
+            "name": "Start",
+            "position": {
+              "x": 40.0,
+              "y": 100.0
+            },
+            "inputs": {},
+            "config": {}
+          },
+          {
+            "id": "flow-prices",
+            "kind": "request",
+            "name": "Pobierz ceny produktów",
+            "position": {
+              "x": 370.0,
+              "y": 100.0
+            },
+            "inputs": {},
+            "config": {
+              "method": "GET",
+              "url": "/products/123",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000.0,
+              "sampleResponse": {
+                "id": 123,
+                "name": "Kawa ziarnista",
+                "price": 100,
+                "promotion": {
+                  "type": "fixed_price",
+                  "active": true,
+                  "price": 80,
+                  "inna_nazwa": "Oferta jesienna"
+                }
+              },
+              "inputPorts": []
+            }
+          },
+          {
+            "id": "flow-if",
+            "kind": "if",
+            "name": "IF response = 200",
+            "position": {
+              "x": 710.0,
+              "y": 100.0
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "flow-prices",
+                "port": "status",
+                "path": ""
+              },
+              "expected": {
+                "kind": "literal",
+                "value": 200
+              }
+            },
+            "config": {
+              "predicate": "equals"
+            }
+          },
+          {
+            "id": "flow-cart",
+            "kind": "request",
+            "name": "Utwórz pusty koszyk",
+            "position": {
+              "x": 1050.0,
+              "y": 20.0
+            },
+            "inputs": {
+              "body": {
+                "kind": "literal",
+                "value": {}
+              }
+            },
+            "config": {
+              "method": "POST",
+              "url": "/carts",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000.0,
+              "sampleResponse": {
+                "id": "demo-cart",
+                "total": 0,
+                "quantity": 0,
+                "items": []
+              },
+              "sampleStatus": 201,
+              "inputPorts": []
+            }
+          },
+          {
+            "id": "flow-body",
+            "kind": "build",
+            "name": "Produkty do dodania",
+            "position": {
+              "x": 1050.0,
+              "y": 540.0
+            },
+            "inputs": {
+              "productId": {
+                "kind": "reference",
+                "nodeId": "flow-prices",
+                "port": "body",
+                "path": "id"
+              },
+              "quantity": {
+                "kind": "literal",
+                "value": 2
+              }
+            },
+            "config": {
+              "buildType": "object"
+            }
+          },
+          {
+            "id": "flow-add",
+            "kind": "request",
+            "name": "Dodaj produkty do koszyka",
+            "position": {
+              "x": 1390.0,
+              "y": 20.0
+            },
+            "inputs": {
+              "cartId": {
+                "kind": "reference",
+                "nodeId": "flow-cart",
+                "port": "body",
+                "path": "id"
+              },
+              "body": {
+                "kind": "reference",
+                "nodeId": "flow-body",
+                "port": "value",
+                "path": ""
+              }
+            },
+            "config": {
+              "method": "POST",
+              "url": "/carts/{{cartId}}/items",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000.0,
+              "sampleResponse": {
+                "id": "demo-cart",
+                "total": 160,
+                "quantity": 2,
+                "items": [
+                  {
+                    "productId": 123,
+                    "quantity": 2,
+                    "price": 80
+                  }
+                ]
+              },
+              "inputPorts": [
+                {
+                  "name": "cartId",
+                  "type": "any",
+                  "required": true,
+                  "exposed": true
+                }
+              ]
+            }
+          },
+          {
+            "id": "flow-check",
+            "kind": "assert",
+            "name": "Porównaj sumę z pobraną ceną",
+            "position": {
+              "x": 1730.0,
+              "y": 20.0
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "flow-add",
+                "port": "body",
+                "path": "total"
+              },
+              "expected": {
+                "kind": "expression",
+                "operator": "multiply",
+                "inputs": {
+                  "left": {
+                    "kind": "reference",
+                    "nodeId": "flow-prices",
+                    "port": "body",
+                    "path": "promotion.price"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                }
+              }
+            },
+            "config": {
+              "predicate": "equals"
+            }
+          },
+          {
+            "id": "flow-else",
+            "kind": "assert",
+            "name": "Zgłoś brak cen — bez tworzenia koszyka",
+            "position": {
+              "x": 1050.0,
+              "y": 920.0
+            },
+            "inputs": {
+              "actual": {
+                "kind": "reference",
+                "nodeId": "flow-prices",
+                "port": "status",
+                "path": ""
+              },
+              "expected": {
+                "kind": "literal",
+                "value": 200
+              }
+            },
+            "config": {
+              "predicate": "equals"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "order-00000001",
+            "source": "flow-start",
+            "target": "flow-prices"
+          },
+          {
+            "id": "order-00000002",
+            "source": "flow-prices",
+            "target": "flow-if"
+          },
+          {
+            "id": "order-00000003",
+            "source": "flow-cart",
+            "target": "flow-add"
+          },
+          {
+            "id": "order-00000004",
+            "source": "flow-add",
+            "target": "flow-check"
+          },
+          {
+            "id": "flow-yes",
+            "source": "flow-if",
+            "target": "flow-cart",
+            "branch": "true"
+          },
+          {
+            "id": "flow-no",
+            "source": "flow-if",
+            "target": "flow-else",
+            "branch": "false"
+          }
+        ]
+      },
+      "cleanup": {
+        "nodes": [
+          {
+            "id": "flow-cleanup",
+            "kind": "request",
+            "name": "Usuń utworzony koszyk",
+            "position": {
+              "x": 80.0,
+              "y": 80.0
+            },
+            "inputs": {
+              "cartId": {
+                "kind": "reference",
+                "nodeId": "flow-cart",
+                "port": "body",
+                "path": "id"
+              }
+            },
+            "config": {
+              "method": "DELETE",
+              "url": "/carts/{{cartId}}",
+              "headers": {},
+              "query": {},
+              "timeoutMs": 10000.0,
+              "sampleResponse": {
+                "deleted": true
+              },
+              "inputPorts": [
+                {
+                  "name": "cartId",
+                  "type": "any",
+                  "required": true,
+                  "exposed": true
+                }
+              ]
+            }
+          }
+        ],
+        "edges": []
+      },
+      "parameters": {},
+      "errorPolicy": "continue"
+    }
+  ],
+  "components": [],
+  "contracts": [],
+  "environment": {
+    "baseUrl": "http://127.0.0.1:4318/demo/shop",
+    "variables": {},
+    "secretNames": []
+  }
+}

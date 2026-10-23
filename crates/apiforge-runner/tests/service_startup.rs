@@ -21,7 +21,7 @@ fn service_starts_outside_an_async_runtime() {
 #[test]
 fn imported_workflow_finishes_through_the_gui_service() {
     let document = import_document(
-        include_bytes!("../../../fixtures/compatibility/projects/workflow.json"),
+        include_bytes!("../../../fixtures/projects/workflow.json"),
         &ImportLimits::default(),
     )
     .expect("the React export must import");

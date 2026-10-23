@@ -1,0 +1,708 @@
+{
+  "description": "Component nesting deeper than 16 levels is an error.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "component-depth",
+      "name": "component-depth",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "top",
+                "kind": "component",
+                "name": "top",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-1",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          },
+          "parameters": {},
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [
+        {
+          "id": "level-17",
+          "revision": 1,
+          "name": "Level 17",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "leaf",
+                "kind": "variable",
+                "name": "leaf",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "literal",
+                    "value": "deep"
+                  }
+                },
+                "config": {}
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-16",
+          "revision": 1,
+          "name": "Level 16",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-17",
+                "kind": "component",
+                "name": "level-17",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-17",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-15",
+          "revision": 1,
+          "name": "Level 15",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-16",
+                "kind": "component",
+                "name": "level-16",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-16",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-14",
+          "revision": 1,
+          "name": "Level 14",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-15",
+                "kind": "component",
+                "name": "level-15",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-15",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-13",
+          "revision": 1,
+          "name": "Level 13",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-14",
+                "kind": "component",
+                "name": "level-14",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-14",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-12",
+          "revision": 1,
+          "name": "Level 12",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-13",
+                "kind": "component",
+                "name": "level-13",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-13",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-11",
+          "revision": 1,
+          "name": "Level 11",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-12",
+                "kind": "component",
+                "name": "level-12",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-12",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-10",
+          "revision": 1,
+          "name": "Level 10",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-11",
+                "kind": "component",
+                "name": "level-11",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-11",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-9",
+          "revision": 1,
+          "name": "Level 9",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-10",
+                "kind": "component",
+                "name": "level-10",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-10",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-8",
+          "revision": 1,
+          "name": "Level 8",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-9",
+                "kind": "component",
+                "name": "level-9",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-9",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-7",
+          "revision": 1,
+          "name": "Level 7",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-8",
+                "kind": "component",
+                "name": "level-8",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-8",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-6",
+          "revision": 1,
+          "name": "Level 6",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-7",
+                "kind": "component",
+                "name": "level-7",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-7",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-5",
+          "revision": 1,
+          "name": "Level 5",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-6",
+                "kind": "component",
+                "name": "level-6",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-6",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-4",
+          "revision": 1,
+          "name": "Level 4",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-5",
+                "kind": "component",
+                "name": "level-5",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-5",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-3",
+          "revision": 1,
+          "name": "Level 3",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-4",
+                "kind": "component",
+                "name": "level-4",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-4",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-2",
+          "revision": 1,
+          "name": "Level 2",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-3",
+                "kind": "component",
+                "name": "level-3",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-3",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "level-1",
+          "revision": 1,
+          "name": "Level 1",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "level-2",
+                "kind": "component",
+                "name": "level-2",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "level-2",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          }
+        }
+      ],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "top",
+        "name": "top",
+        "kind": "component",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {},
+        "children": [
+          {
+            "nodeId": "level-2",
+            "name": "level-2",
+            "kind": "component",
+            "status": "error",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {},
+            "children": [
+              {
+                "nodeId": "level-3",
+                "name": "level-3",
+                "kind": "component",
+                "status": "error",
+                "phase": "main",
+                "inputs": {},
+                "outputs": {},
+                "children": [
+                  {
+                    "nodeId": "level-4",
+                    "name": "level-4",
+                    "kind": "component",
+                    "status": "error",
+                    "phase": "main",
+                    "inputs": {},
+                    "outputs": {},
+                    "children": [
+                      {
+                        "nodeId": "level-5",
+                        "name": "level-5",
+                        "kind": "component",
+                        "status": "error",
+                        "phase": "main",
+                        "inputs": {},
+                        "outputs": {},
+                        "children": [
+                          {
+                            "nodeId": "level-6",
+                            "name": "level-6",
+                            "kind": "component",
+                            "status": "error",
+                            "phase": "main",
+                            "inputs": {},
+                            "outputs": {},
+                            "children": [
+                              {
+                                "nodeId": "level-7",
+                                "name": "level-7",
+                                "kind": "component",
+                                "status": "error",
+                                "phase": "main",
+                                "inputs": {},
+                                "outputs": {},
+                                "children": [
+                                  {
+                                    "nodeId": "level-8",
+                                    "name": "level-8",
+                                    "kind": "component",
+                                    "status": "error",
+                                    "phase": "main",
+                                    "inputs": {},
+                                    "outputs": {},
+                                    "children": [
+                                      {
+                                        "nodeId": "level-9",
+                                        "name": "level-9",
+                                        "kind": "component",
+                                        "status": "error",
+                                        "phase": "main",
+                                        "inputs": {},
+                                        "outputs": {},
+                                        "children": [
+                                          {
+                                            "nodeId": "level-10",
+                                            "name": "level-10",
+                                            "kind": "component",
+                                            "status": "error",
+                                            "phase": "main",
+                                            "inputs": {},
+                                            "outputs": {},
+                                            "children": [
+                                              {
+                                                "nodeId": "level-11",
+                                                "name": "level-11",
+                                                "kind": "component",
+                                                "status": "error",
+                                                "phase": "main",
+                                                "inputs": {},
+                                                "outputs": {},
+                                                "children": [
+                                                  {
+                                                    "nodeId": "level-12",
+                                                    "name": "level-12",
+                                                    "kind": "component",
+                                                    "status": "error",
+                                                    "phase": "main",
+                                                    "inputs": {},
+                                                    "outputs": {},
+                                                    "children": [
+                                                      {
+                                                        "nodeId": "level-13",
+                                                        "name": "level-13",
+                                                        "kind": "component",
+                                                        "status": "error",
+                                                        "phase": "main",
+                                                        "inputs": {},
+                                                        "outputs": {},
+                                                        "children": [
+                                                          {
+                                                            "nodeId": "level-14",
+                                                            "name": "level-14",
+                                                            "kind": "component",
+                                                            "status": "error",
+                                                            "phase": "main",
+                                                            "inputs": {},
+                                                            "outputs": {},
+                                                            "children": [
+                                                              {
+                                                                "nodeId": "level-15",
+                                                                "name": "level-15",
+                                                                "kind": "component",
+                                                                "status": "error",
+                                                                "phase": "main",
+                                                                "inputs": {},
+                                                                "outputs": {},
+                                                                "children": [
+                                                                  {
+                                                                    "nodeId": "level-16",
+                                                                    "name": "level-16",
+                                                                    "kind": "component",
+                                                                    "status": "error",
+                                                                    "phase": "main",
+                                                                    "inputs": {},
+                                                                    "outputs": {},
+                                                                    "children": [
+                                                                      {
+                                                                        "nodeId": "level-17",
+                                                                        "name": "level-17",
+                                                                        "kind": "component",
+                                                                        "status": "error",
+                                                                        "phase": "main",
+                                                                        "inputs": {},
+                                                                        "outputs": {}
+                                                                      }
+                                                                    ]
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

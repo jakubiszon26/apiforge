@@ -1,0 +1,828 @@
+{
+  "description": "Pinned revisions, nested IF, failures and exported IDs used by cleanup.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "components",
+      "name": "components",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "double-1",
+                "kind": "component",
+                "name": "double-1",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "amount": {
+                    "kind": "literal",
+                    "value": 3
+                  }
+                },
+                "config": {
+                  "componentId": "double",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "double-2",
+                "kind": "component",
+                "name": "double-2",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "amount": {
+                    "kind": "literal",
+                    "value": 3
+                  }
+                },
+                "config": {
+                  "componentId": "double",
+                  "revision": 2
+                }
+              },
+              {
+                "id": "wrong-type",
+                "kind": "component",
+                "name": "wrong-type",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "amount": {
+                    "kind": "literal",
+                    "value": "3"
+                  }
+                },
+                "config": {
+                  "componentId": "double",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "creator",
+                "kind": "component",
+                "name": "creator",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "create-then-fail",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "next",
+                "kind": "select",
+                "name": "next",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "creator",
+                    "port": "id",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "path": ""
+                }
+              },
+              {
+                "id": "branching",
+                "kind": "component",
+                "name": "branching",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "branching",
+                  "revision": 1
+                }
+              },
+              {
+                "id": "failing",
+                "kind": "component",
+                "name": "failing",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "componentId": "failing",
+                  "revision": 1
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [
+              {
+                "id": "cleanup",
+                "kind": "request",
+                "name": "cleanup",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "creator",
+                    "port": "id",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "method": "DELETE",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "deleted": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "cleanup-missing",
+                "kind": "request",
+                "name": "cleanup-missing",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "creator",
+                    "port": "missing",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "method": "DELETE",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "deleted": true
+                  },
+                  "inputPorts": []
+                }
+              }
+            ],
+            "edges": []
+          },
+          "parameters": {},
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [
+        {
+          "id": "double",
+          "revision": 1,
+          "name": "Double",
+          "description": "",
+          "inputs": [
+            {
+              "name": "amount",
+              "type": "number",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "type": "number",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "calc",
+                "port": "value",
+                "path": ""
+              }
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {
+                "id": "calc",
+                "kind": "formula",
+                "name": "calc",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "parameter",
+                    "name": "amount"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "double",
+          "revision": 2,
+          "name": "Double",
+          "description": "",
+          "inputs": [
+            {
+              "name": "amount",
+              "type": "number",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "type": "number",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "calc",
+                "port": "value",
+                "path": ""
+              }
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {
+                "id": "calc",
+                "kind": "formula",
+                "name": "calc",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "parameter",
+                    "name": "amount"
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 10
+                  }
+                },
+                "config": {
+                  "operation": "multiply"
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "create-then-fail",
+          "revision": 1,
+          "name": "Create then fail",
+          "description": "",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "id",
+              "type": "string",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "create",
+                "port": "body",
+                "path": "id"
+              }
+            },
+            {
+              "name": "missing",
+              "type": "any",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "broken",
+                "port": "value",
+                "path": ""
+              }
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {
+                "id": "create",
+                "kind": "request",
+                "name": "create",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "literal",
+                    "value": {}
+                  }
+                },
+                "config": {
+                  "method": "POST",
+                  "url": "/items",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "id": "new"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "broken",
+                "kind": "formula",
+                "name": "broken",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                "config": {
+                  "operation": "divide"
+                }
+              }
+            ],
+            "edges": []
+          }
+        },
+        {
+          "id": "branching",
+          "revision": 1,
+          "name": "Branching",
+          "description": "",
+          "inputs": [
+            {
+              "name": "flag",
+              "type": "boolean",
+              "defaultValue": false
+            }
+          ],
+          "outputs": [
+            {
+              "name": "side",
+              "type": "any",
+              "binding": {
+                "kind": "reference",
+                "nodeId": "inner-no",
+                "port": "body",
+                "path": "side"
+              }
+            }
+          ],
+          "graph": {
+            "nodes": [
+              {
+                "id": "inner-start",
+                "kind": "trigger",
+                "name": "inner-start",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "inner-if",
+                "kind": "if",
+                "name": "inner-if",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "parameter",
+                    "name": "flag"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "inner-yes",
+                "kind": "request",
+                "name": "inner-yes",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/inner/yes",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "side": "yes"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "inner-no",
+                "kind": "request",
+                "name": "inner-no",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/inner/no",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "side": "no"
+                  },
+                  "inputPorts": []
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner-start->inner-if",
+                "source": "inner-start",
+                "target": "inner-if"
+              },
+              {
+                "id": "inner-if->inner-yes",
+                "source": "inner-if",
+                "target": "inner-yes",
+                "branch": "true"
+              },
+              {
+                "id": "inner-if->inner-no",
+                "source": "inner-if",
+                "target": "inner-no",
+                "branch": "false"
+              }
+            ]
+          }
+        },
+        {
+          "id": "failing",
+          "revision": 1,
+          "name": "Failing",
+          "description": "",
+          "inputs": [],
+          "outputs": [],
+          "graph": {
+            "nodes": [
+              {
+                "id": "inner-check",
+                "kind": "assert",
+                "name": "inner-check",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": []
+          }
+        }
+      ],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "double-1",
+        "name": "double-1",
+        "kind": "component",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "amount": 3
+        },
+        "outputs": {
+          "result": 6
+        },
+        "children": [
+          {
+            "nodeId": "calc",
+            "name": "calc",
+            "kind": "formula",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "left": 3,
+              "right": 2
+            },
+            "outputs": {
+              "value": 6
+            }
+          }
+        ]
+      },
+      {
+        "nodeId": "double-2",
+        "name": "double-2",
+        "kind": "component",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "amount": 3
+        },
+        "outputs": {
+          "result": 30
+        },
+        "children": [
+          {
+            "nodeId": "calc",
+            "name": "calc",
+            "kind": "formula",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "left": 3,
+              "right": 10
+            },
+            "outputs": {
+              "value": 30
+            }
+          }
+        ]
+      },
+      {
+        "nodeId": "wrong-type",
+        "name": "wrong-type",
+        "kind": "component",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "amount": "3"
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "creator",
+        "name": "creator",
+        "kind": "component",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "id": "new"
+        },
+        "children": [
+          {
+            "nodeId": "create",
+            "name": "create",
+            "kind": "request",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "body": {}
+            },
+            "outputs": {
+              "body": {
+                "id": "new"
+              },
+              "status": 200,
+              "headers": {},
+              "duration": 0
+            },
+            "request": {
+              "method": "POST",
+              "url": "https://api.example.test/v1/items",
+              "headers": {
+                "Content-Type": "application/json"
+              },
+              "body": {}
+            }
+          },
+          {
+            "nodeId": "broken",
+            "name": "broken",
+            "kind": "formula",
+            "status": "error",
+            "phase": "main",
+            "inputs": {
+              "left": 1,
+              "right": 0
+            },
+            "outputs": {}
+          }
+        ]
+      },
+      {
+        "nodeId": "next",
+        "name": "next",
+        "kind": "select",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "branching",
+        "name": "branching",
+        "kind": "component",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "flag": false
+        },
+        "outputs": {
+          "side": "no"
+        },
+        "children": [
+          {
+            "nodeId": "inner-start",
+            "name": "inner-start",
+            "kind": "trigger",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "nodeId": "inner-if",
+            "name": "inner-if",
+            "kind": "if",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {
+              "actual": false,
+              "expected": true
+            },
+            "outputs": {
+              "value": false,
+              "passed": false
+            },
+            "actual": false,
+            "expected": true
+          },
+          {
+            "nodeId": "inner-yes",
+            "name": "inner-yes",
+            "kind": "request",
+            "status": "skipped",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "nodeId": "inner-no",
+            "name": "inner-no",
+            "kind": "request",
+            "status": "passed",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {
+              "body": {
+                "side": "no"
+              },
+              "status": 200,
+              "headers": {},
+              "duration": 0
+            },
+            "request": {
+              "method": "GET",
+              "url": "https://api.example.test/v1/inner/no",
+              "headers": {}
+            }
+          }
+        ]
+      },
+      {
+        "nodeId": "failing",
+        "name": "failing",
+        "kind": "component",
+        "status": "failed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {},
+        "children": [
+          {
+            "nodeId": "inner-check",
+            "name": "inner-check",
+            "kind": "assert",
+            "status": "failed",
+            "phase": "main",
+            "inputs": {
+              "actual": 1,
+              "expected": 2
+            },
+            "outputs": {
+              "value": 1,
+              "passed": false
+            },
+            "actual": 1,
+            "expected": 2
+          }
+        ]
+      },
+      {
+        "nodeId": "cleanup",
+        "name": "cleanup",
+        "kind": "request",
+        "status": "passed",
+        "phase": "cleanup",
+        "inputs": {
+          "id": "new"
+        },
+        "outputs": {
+          "body": {
+            "deleted": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "DELETE",
+          "url": "https://api.example.test/v1/items/new",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "cleanup-missing",
+        "name": "cleanup-missing",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      }
+    ]
+  }
+}

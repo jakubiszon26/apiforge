@@ -5,6 +5,7 @@ members = [
     "crates/apiforge-desktop",
     "crates/apiforge-runner",
     "crates/apiforge-storage",
+    "tools/convert-v1",
 ]
 resolver = "3"
 

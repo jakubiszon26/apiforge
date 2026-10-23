@@ -208,7 +208,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let store = WorkspaceStore::at(directory.path().join("workspace.json"));
         let mut workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn an_old_save_completion_does_not_acknowledge_a_newer_edit() {
         let workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn failed_save_is_visible_and_a_later_edit_can_be_saved() {
         let workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn flush_bypasses_debounce_reports_failure_and_keeps_the_worker_alive() {
         let workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn edits_during_blocked_io_coalesce_to_the_latest_workspace() {
         let mut workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()

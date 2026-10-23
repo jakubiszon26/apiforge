@@ -468,7 +468,7 @@ mod tests {
 
     fn editor() -> Editor {
         let workspace = import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()

@@ -1,14 +1,14 @@
 use apiforge_core::{ImportError, ImportLimits, import_document};
 use serde_json::{Value, json};
 
-const SHOP: &[u8] = include_bytes!("../../../fixtures/compatibility/projects/shop.json");
-const WORKFLOW: &[u8] = include_bytes!("../../../fixtures/compatibility/projects/workflow.json");
+const SHOP: &[u8] = include_bytes!("../../../fixtures/projects/shop.json");
+const WORKFLOW: &[u8] = include_bytes!("../../../fixtures/projects/workflow.json");
 const CORPUS: &[&[u8]] = &[
     SHOP,
     WORKFLOW,
-    include_bytes!("../../../fixtures/compatibility/projects/tickets.json"),
-    include_bytes!("../../../fixtures/compatibility/projects/blocks.json"),
-    include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+    include_bytes!("../../../fixtures/projects/tickets.json"),
+    include_bytes!("../../../fixtures/projects/blocks.json"),
+    include_bytes!("../../../fixtures/workspace.json"),
 ];
 fn parse(value: &Value) -> Result<apiforge_core::ValidatedDocument, ImportError> {
     import_document(

@@ -289,7 +289,7 @@ mod tests {
 
     fn workspace() -> Workspace {
         import_document(
-            include_bytes!("../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .expect("fixture imports")

@@ -1,0 +1,260 @@
+{
+  "description": "A graph without Start runs every root in dependency order.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "legacy",
+      "name": "legacy",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "verify",
+                "kind": "assert",
+                "name": "verify",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "second",
+                    "port": "body",
+                    "path": "n"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "second",
+                "kind": "request",
+                "name": "second",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "first",
+                    "port": "body",
+                    "path": "id"
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/second/{{id}}",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "n": 2
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "first",
+                "kind": "request",
+                "name": "first",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/first",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "id": "x/1"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "independent",
+                "kind": "request",
+                "name": "independent",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/independent",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "parameter",
+                "kind": "variable",
+                "name": "parameter",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "parameter",
+                    "name": "limit"
+                  }
+                },
+                "config": {}
+              }
+            ],
+            "edges": [
+              {
+                "id": "first->second",
+                "source": "first",
+                "target": "second"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          },
+          "parameters": {
+            "limit": 0
+          },
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "passed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "first",
+        "name": "first",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "id": "x/1"
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/first",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "second",
+        "name": "second",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "id": "x/1"
+        },
+        "outputs": {
+          "body": {
+            "n": 2
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/second/x/1",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "verify",
+        "name": "verify",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": 2,
+          "expected": 2
+        },
+        "outputs": {
+          "value": 2,
+          "passed": true
+        },
+        "actual": 2,
+        "expected": 2
+      },
+      {
+        "nodeId": "independent",
+        "name": "independent",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/independent",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "parameter",
+        "name": "parameter",
+        "kind": "variable",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 0
+        },
+        "outputs": {
+          "value": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,358 @@
+{
+  "description": "Secrets are masked in every published field.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "redaction",
+      "name": "redaction",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "post",
+                "kind": "request",
+                "name": "post",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "key": {
+                    "kind": "environment",
+                    "name": "API_KEY"
+                  },
+                  "body": {
+                    "kind": "literal",
+                    "value": {
+                      "secret": "body {{key}}",
+                      "plain": "uses {{key}}",
+                      "note": "visible"
+                    }
+                  }
+                },
+                "config": {
+                  "method": "POST",
+                  "url": "/items?key={{API_KEY}}",
+                  "headers": {
+                    "Authorization": "Bearer {{API_KEY}}",
+                    "X-Trace": "trace-{{key}}"
+                  },
+                  "query": {
+                    "api_key": "{{key}}",
+                    "page": "2"
+                  },
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "id": "new",
+                    "token": "response-token-value"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "echo",
+                "kind": "request",
+                "name": "echo",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/echo",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "echoed": "my+session secret",
+                    "encoded": "my%2Bsession%20secret"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "credentials",
+                "kind": "request",
+                "name": "credentials",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "https://user:pa%20ss@api.example.test/",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "never": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "session",
+                "kind": "variable",
+                "name": "session",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "environment",
+                    "name": "API_KEY"
+                  }
+                },
+                "config": {}
+              },
+              {
+                "id": "compare",
+                "kind": "assert",
+                "name": "compare",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "session",
+                    "port": "value",
+                    "path": ""
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "my+session secret"
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "hardcoded",
+                "kind": "request",
+                "name": "hardcoded",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/?api-key=hardcoded+query+secret&x=1",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "reads-token",
+                "kind": "assert",
+                "name": "reads-token",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "post",
+                    "port": "body",
+                    "path": "token"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "response-token-value"
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              }
+            ],
+            "edges": []
+          },
+          "cleanup": {
+            "nodes": [],
+            "edges": []
+          },
+          "parameters": {},
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test",
+        "variables": {
+          "PUBLIC": "public"
+        },
+        "secretNames": [
+          "API_KEY"
+        ]
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation",
+    "secrets": {
+      "API_KEY": "my+session secret"
+    }
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "post",
+        "name": "post",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "key": "[REDACTED]",
+          "body": {
+            "secret": "[REDACTED]",
+            "plain": "uses [REDACTED]",
+            "note": "visible"
+          }
+        },
+        "outputs": {
+          "body": {
+            "id": "new",
+            "token": "[REDACTED]"
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "POST",
+          "url": "https://api.example.test/items?key=my+session+secret&api_key=[REDACTED]&page=2",
+          "headers": {
+            "Authorization": "[REDACTED]",
+            "X-Trace": "trace-[REDACTED]",
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "secret": "[REDACTED]",
+            "plain": "uses [REDACTED]",
+            "note": "visible"
+          }
+        }
+      },
+      {
+        "nodeId": "echo",
+        "name": "echo",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "echoed": "[REDACTED]",
+            "encoded": "[REDACTED]"
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/echo",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "credentials",
+        "name": "credentials",
+        "kind": "request",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "session",
+        "name": "session",
+        "kind": "variable",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]"
+        }
+      },
+      {
+        "nodeId": "compare",
+        "name": "compare",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "[REDACTED]",
+          "expected": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]",
+          "passed": true
+        },
+        "actual": "[REDACTED]",
+        "expected": "[REDACTED]"
+      },
+      {
+        "nodeId": "hardcoded",
+        "name": "hardcoded",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/?api-key=[REDACTED]&x=1",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "reads-token",
+        "name": "reads-token",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "[REDACTED]",
+          "expected": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]",
+          "passed": true
+        },
+        "actual": "[REDACTED]",
+        "expected": "[REDACTED]"
+      }
+    ]
+  }
+}

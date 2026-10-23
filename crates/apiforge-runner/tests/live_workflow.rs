@@ -164,10 +164,8 @@ async fn serve(
 }
 
 async fn run(shop: &Shop, cancel: CancellationToken) -> RunResult {
-    let mut project: Project = serde_json::from_slice(include_bytes!(
-        "../../../fixtures/compatibility/projects/workflow.json"
-    ))
-    .unwrap();
+    let mut project: Project =
+        serde_json::from_slice(include_bytes!("../../../fixtures/projects/workflow.json")).unwrap();
     project.environment.base_url.clone_from(&shop.base_url);
     let request = RunRequest::new(project, "workflow-cart", RunMode::Live);
     timeout(

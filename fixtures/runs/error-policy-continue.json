@@ -1,0 +1,352 @@
+{
+  "description": "Continue keeps a failed assertion usable.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "policy-continue",
+      "name": "policy-continue",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "start",
+                "kind": "trigger",
+                "name": "start",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "create",
+                "kind": "request",
+                "name": "create",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "literal",
+                    "value": {}
+                  }
+                },
+                "config": {
+                  "method": "POST",
+                  "url": "/items",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "id": "item-1",
+                    "price": 100
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "price",
+                "kind": "assert",
+                "name": "price",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "price"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 80
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "after",
+                "kind": "request",
+                "name": "after",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/after",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "independent",
+                "kind": "request",
+                "name": "independent",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/independent",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "reads-failed",
+                "kind": "select",
+                "name": "reads-failed",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "price",
+                    "port": "value",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "path": ""
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "start->create",
+                "source": "start",
+                "target": "create"
+              },
+              {
+                "id": "create->price",
+                "source": "create",
+                "target": "price"
+              },
+              {
+                "id": "price->after",
+                "source": "price",
+                "target": "after"
+              },
+              {
+                "id": "start->independent",
+                "source": "start",
+                "target": "independent"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [
+              {
+                "id": "delete",
+                "kind": "request",
+                "name": "delete",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "id"
+                  }
+                },
+                "config": {
+                  "method": "DELETE",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "deleted": true
+                  },
+                  "inputPorts": []
+                }
+              }
+            ],
+            "edges": []
+          },
+          "parameters": {},
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "start",
+        "name": "start",
+        "kind": "trigger",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "create",
+        "name": "create",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "body": {}
+        },
+        "outputs": {
+          "body": {
+            "id": "item-1",
+            "price": 100
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "POST",
+          "url": "https://api.example.test/v1/items",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {}
+        }
+      },
+      {
+        "nodeId": "price",
+        "name": "price",
+        "kind": "assert",
+        "status": "failed",
+        "phase": "main",
+        "inputs": {
+          "actual": 100,
+          "expected": 80
+        },
+        "outputs": {
+          "value": 100,
+          "passed": false
+        },
+        "actual": 100,
+        "expected": 80
+      },
+      {
+        "nodeId": "after",
+        "name": "after",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/after",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "independent",
+        "name": "independent",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/independent",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "reads-failed",
+        "name": "reads-failed",
+        "kind": "select",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 100
+        },
+        "outputs": {
+          "value": 100
+        }
+      },
+      {
+        "nodeId": "delete",
+        "name": "delete",
+        "kind": "request",
+        "status": "passed",
+        "phase": "cleanup",
+        "inputs": {
+          "id": "item-1"
+        },
+        "outputs": {
+          "body": {
+            "deleted": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "DELETE",
+          "url": "https://api.example.test/v1/items/item-1",
+          "headers": {}
+        }
+      }
+    ]
+  }
+}

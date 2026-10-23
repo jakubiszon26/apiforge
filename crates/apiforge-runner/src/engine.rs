@@ -1134,10 +1134,8 @@ mod tests {
                     .await;
             }
         });
-        let mut project: Project = serde_json::from_slice(include_bytes!(
-            "../../../fixtures/compatibility/projects/shop.json"
-        ))
-        .unwrap();
+        let mut project: Project =
+            serde_json::from_slice(include_bytes!("../../../fixtures/projects/shop.json")).unwrap();
         project.scenarios.truncate(1);
         let scenario = &mut project.scenarios[0];
         scenario.graph = serde_json::from_value(serde_json::json!({
@@ -1178,10 +1176,8 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_time_does_not_consume_the_main_phase_budget() {
-        let mut project: Project = serde_json::from_slice(include_bytes!(
-            "../../../fixtures/compatibility/projects/shop.json"
-        ))
-        .unwrap();
+        let mut project: Project =
+            serde_json::from_slice(include_bytes!("../../../fixtures/projects/shop.json")).unwrap();
         project.scenarios.truncate(1);
         let scenario = &mut project.scenarios[0];
         scenario.graph = Graph {

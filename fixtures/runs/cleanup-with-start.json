@@ -1,0 +1,569 @@
+{
+  "description": "Start reachability inside the cleanup graph.",
+  "randomSeed": 42,
+  "request": {
+    "project": {
+      "version": 1,
+      "id": "cleanup-with-start",
+      "name": "cleanup-with-start",
+      "scenarios": [
+        {
+          "id": "main",
+          "name": "main",
+          "description": "",
+          "graph": {
+            "nodes": [
+              {
+                "id": "create",
+                "kind": "request",
+                "name": "create",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "literal",
+                    "value": {
+                      "n": 1
+                    }
+                  }
+                },
+                "config": {
+                  "method": "POST",
+                  "url": "/items",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "id": "item-7"
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "fails",
+                "kind": "assert",
+                "name": "fails",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "id"
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": "other"
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "broken",
+                "kind": "formula",
+                "name": "broken",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "left": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "right": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                "config": {
+                  "operation": "divide"
+                }
+              },
+              {
+                "id": "gate",
+                "kind": "condition",
+                "name": "gate",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "actual": {
+                    "kind": "literal",
+                    "value": 1
+                  },
+                  "expected": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                "config": {
+                  "predicate": "equals"
+                }
+              },
+              {
+                "id": "read",
+                "kind": "request",
+                "name": "read",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/read",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "gate->read",
+                "source": "gate",
+                "target": "read"
+              }
+            ]
+          },
+          "cleanup": {
+            "nodes": [
+              {
+                "id": "cleanup-start",
+                "kind": "trigger",
+                "name": "cleanup-start",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {}
+              },
+              {
+                "id": "delete",
+                "kind": "request",
+                "name": "delete",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "id"
+                  }
+                },
+                "config": {
+                  "method": "DELETE",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "deleted": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "delete-missing",
+                "kind": "request",
+                "name": "delete-missing",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "id": {
+                    "kind": "reference",
+                    "nodeId": "create",
+                    "port": "body",
+                    "path": "absent"
+                  }
+                },
+                "config": {
+                  "method": "DELETE",
+                  "url": "/items/:id",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "deleted": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "get-with-body",
+                "kind": "request",
+                "name": "get-with-body",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "literal",
+                    "value": {
+                      "a": 1
+                    }
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/broken",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "never": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "after-error",
+                "kind": "request",
+                "name": "after-error",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/after",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "uses-error",
+                "kind": "request",
+                "name": "uses-error",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "value": {
+                    "kind": "reference",
+                    "nodeId": "broken",
+                    "port": "value",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/errors/:value",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "uses-blocked",
+                "kind": "request",
+                "name": "uses-blocked",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {
+                  "body": {
+                    "kind": "reference",
+                    "nodeId": "read",
+                    "port": "body",
+                    "path": ""
+                  }
+                },
+                "config": {
+                  "method": "GET",
+                  "url": "/blocked",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "sampleResponse": {
+                    "ok": true
+                  },
+                  "inputPorts": []
+                }
+              },
+              {
+                "id": "no-sample",
+                "kind": "request",
+                "name": "no-sample",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "inputs": {},
+                "config": {
+                  "method": "GET",
+                  "url": "/no-sample",
+                  "headers": {},
+                  "query": {},
+                  "timeoutMs": 10000.0,
+                  "inputPorts": []
+                }
+              }
+            ],
+            "edges": [
+              {
+                "id": "get-with-body->after-error",
+                "source": "get-with-body",
+                "target": "after-error"
+              },
+              {
+                "id": "delete->uses-blocked",
+                "source": "delete",
+                "target": "uses-blocked"
+              },
+              {
+                "id": "cleanup-start->delete",
+                "source": "cleanup-start",
+                "target": "delete"
+              },
+              {
+                "id": "cleanup-start->get-with-body",
+                "source": "cleanup-start",
+                "target": "get-with-body"
+              }
+            ]
+          },
+          "parameters": {},
+          "errorPolicy": "continue"
+        }
+      ],
+      "components": [],
+      "contracts": [],
+      "environment": {
+        "baseUrl": "https://api.example.test/v1/",
+        "variables": {
+          "region": "eu"
+        },
+        "secretNames": []
+      }
+    },
+    "scenarioId": "main",
+    "mode": "simulation"
+  },
+  "expected": {
+    "status": "failed",
+    "diagnostic": false,
+    "hasError": false,
+    "steps": [
+      {
+        "nodeId": "create",
+        "name": "create",
+        "kind": "request",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "body": {
+            "n": 1
+          }
+        },
+        "outputs": {
+          "body": {
+            "id": "item-7"
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "POST",
+          "url": "https://api.example.test/v1/items",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "n": 1
+          }
+        }
+      },
+      {
+        "nodeId": "fails",
+        "name": "fails",
+        "kind": "assert",
+        "status": "failed",
+        "phase": "main",
+        "inputs": {
+          "actual": "item-7",
+          "expected": "other"
+        },
+        "outputs": {
+          "value": "item-7",
+          "passed": false
+        },
+        "actual": "item-7",
+        "expected": "other"
+      },
+      {
+        "nodeId": "broken",
+        "name": "broken",
+        "kind": "formula",
+        "status": "error",
+        "phase": "main",
+        "inputs": {
+          "left": 1,
+          "right": 0
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "gate",
+        "name": "gate",
+        "kind": "condition",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {
+          "actual": 1,
+          "expected": 2
+        },
+        "outputs": {
+          "value": 1,
+          "passed": false
+        },
+        "actual": 1,
+        "expected": 2
+      },
+      {
+        "nodeId": "read",
+        "name": "read",
+        "kind": "request",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "cleanup-start",
+        "name": "cleanup-start",
+        "kind": "trigger",
+        "status": "passed",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "delete",
+        "name": "delete",
+        "kind": "request",
+        "status": "passed",
+        "phase": "cleanup",
+        "inputs": {
+          "id": "item-7"
+        },
+        "outputs": {
+          "body": {
+            "deleted": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "DELETE",
+          "url": "https://api.example.test/v1/items/item-7",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "delete-missing",
+        "name": "delete-missing",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "get-with-body",
+        "name": "get-with-body",
+        "kind": "request",
+        "status": "error",
+        "phase": "cleanup",
+        "inputs": {
+          "body": {
+            "a": 1
+          }
+        },
+        "outputs": {}
+      },
+      {
+        "nodeId": "after-error",
+        "name": "after-error",
+        "kind": "request",
+        "status": "passed",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {
+          "body": {
+            "ok": true
+          },
+          "status": 200,
+          "headers": {},
+          "duration": 0
+        },
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.test/v1/after",
+          "headers": {}
+        }
+      },
+      {
+        "nodeId": "uses-error",
+        "name": "uses-error",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "uses-blocked",
+        "name": "uses-blocked",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "no-sample",
+        "name": "no-sample",
+        "kind": "request",
+        "status": "skipped",
+        "phase": "cleanup",
+        "inputs": {},
+        "outputs": {}
+      }
+    ]
+  }
+}

@@ -1124,7 +1124,7 @@ mod tests {
     #[test]
     fn reference_editor_fits_a_narrow_panel_without_changing_the_binding() {
         let workspace = apiforge_core::import_document(
-            include_bytes!("../../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../../fixtures/workspace.json"),
             &apiforge_core::ImportLimits::default(),
         )
         .unwrap()

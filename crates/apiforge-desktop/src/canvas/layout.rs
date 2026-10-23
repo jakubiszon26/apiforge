@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn every_fixture_card_has_anchors_for_its_wires() {
         let workspace = import_document(
-            include_bytes!("../../../../fixtures/compatibility/workspace-v1.json"),
+            include_bytes!("../../../../fixtures/workspace.json"),
             &ImportLimits::default(),
         )
         .unwrap()

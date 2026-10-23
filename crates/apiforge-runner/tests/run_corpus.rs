@@ -1,10 +1,10 @@
 //! Differential tests against run reports recorded from the TypeScript reference.
 //!
-//! The corpus is produced by `scripts/export-compatibility-fixtures.ts` (see
-//! `scripts/run-fixtures.ts`). Every run uses simulation mode and a seeded random
-//! source shared with the generator. A mismatch means the port changed observable
-//! behaviour; fix the port or record the divergence below with its reason. Never
-//! edit the corpus by hand.
+//! The reports were recorded by the prototype and are converted to the current
+//! format by `apiforge-convert-v1` (see `fixtures/README.md`). Every run uses
+//! simulation mode and a seeded random source shared with the recording. A mismatch
+//! means the port changed observable behaviour; fix the port or record the
+//! divergence below with its reason. Never edit the corpus by hand.
 
 use apiforge_core::{
     format::Project,
@@ -108,8 +108,7 @@ fn normalize_run(run: &RunResult, single: bool) -> Value {
 }
 
 fn fixtures() -> Vec<(String, Fixture)> {
-    let directory =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/compatibility/runs");
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/runs");
     let mut entries: Vec<_> = fs::read_dir(&directory)
         .expect("run corpus exists")
         .map(|entry| entry.expect("readable directory").path())
