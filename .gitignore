@@ -1,13 +1,5 @@
-.DS_Store
-.env
-/node_modules/
-
-# React Router
-/.react-router/
-/build/
-/test-results/
-/playwright-report/
-
-# Rust workspace
 /target/
 
+# Local editor, tooling and QA artefacts
+.DS_Store
+.env
