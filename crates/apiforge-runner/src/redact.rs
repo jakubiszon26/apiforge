@@ -9,7 +9,7 @@
 //! safety net behind explicit secret declarations.
 
 use apiforge_core::{
-    format::{Binding, Graph, Node, NodeConfig, OptionalJson, Port},
+    format::{Binding, Graph, Node, NodeConfig, OptionalJson, Port, TemplatePart},
     js::utf16_len,
     run::{RequestSnapshot, RunResult, RunSnapshot, StepResult},
     template::encode_uri_component,
@@ -313,6 +313,25 @@ impl Redactor {
             ),
             Binding::Parameter { name } => Binding::parameter(self.redact_str(name)),
             Binding::Environment { name } => Binding::environment(self.redact_str(name)),
+            Binding::Object { fields } => Binding::Object {
+                fields: self.redact_bindings(fields),
+            },
+            Binding::Array { items } => Binding::Array {
+                items: items.iter().map(|item| self.redact_binding(item)).collect(),
+            },
+            Binding::Template { parts } => Binding::Template {
+                parts: parts
+                    .iter()
+                    .map(|part| match part {
+                        TemplatePart::Text { text } => TemplatePart::Text {
+                            text: self.redact_str(text),
+                        },
+                        TemplatePart::Value { binding } => TemplatePart::Value {
+                            binding: self.redact_binding(binding),
+                        },
+                    })
+                    .collect(),
+            },
         }
     }
 

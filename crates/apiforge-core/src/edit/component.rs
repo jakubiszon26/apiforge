@@ -161,7 +161,7 @@ pub fn initialize_inputs(
         for port in &ports {
             let root = node.inputs.get(&port.name);
             let leaves: Vec<(Vec<String>, Option<&Binding>)> = match root {
-                Some(root) if root.is_expression() => root
+                Some(root) if root.is_composite() => root
                     .leaves()
                     .into_iter()
                     .map(|(path, leaf)| (path, Some(leaf)))

@@ -39,6 +39,25 @@ pub enum Binding {
     Environment {
         name: String,
     },
+    /// An object whose field values are bindings.
+    Object {
+        fields: Bindings,
+    },
+    /// An array whose items are bindings.
+    Array {
+        items: Vec<Binding>,
+    },
+    /// Text with interpolated values, e.g. `/orders/{{order.id}}`.
+    Template {
+        parts: Vec<TemplatePart>,
+    },
+}
+/// A piece of a template: literal text or an interpolated value.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum TemplatePart {
+    Text { text: String },
+    Value { binding: Binding },
 }
 // JSON defaults need explicit presence: Option<Value> would erase present(null).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

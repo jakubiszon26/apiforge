@@ -4,6 +4,12 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 type Result = std::result::Result<(), ImportError>;
+
+/// Nesting of operators, objects, arrays and templates within one input.
+const MAX_BINDING_DEPTH: usize = 32;
+/// Bindings within one input, counting every nested one. Large enough for request
+/// bodies built from expressions.
+const MAX_BINDING_ITEMS: usize = 5000;
 fn require(condition: bool, path: &str, message: &'static str) -> Result {
     if condition {
         Ok(())
@@ -311,7 +317,7 @@ fn binding(
 ) -> Result {
     *count += 1;
     require(
-        depth < 12 && *count <= 200,
+        depth < MAX_BINDING_DEPTH && *count <= MAX_BINDING_ITEMS,
         path,
         "Binding exceeds nesting or item limit",
     )?;
@@ -355,6 +361,38 @@ fn binding(
             )
         }
         Binding::Environment { name } => id(name, path),
+        Binding::Object { fields } => {
+            require(fields.len() <= 1000, path, "Too many object fields")?;
+            for (key, child) in fields {
+                text(key, path)?;
+                require(
+                    !["__proto__", "constructor", "prototype"].contains(&key.as_str()),
+                    path,
+                    "Reserved JSON key",
+                )?;
+                binding(child, nodes, parameters, project, depth + 1, count, path)?;
+            }
+            Ok(())
+        }
+        Binding::Array { items } => {
+            require(items.len() <= 1000, path, "Too many array items")?;
+            for child in items {
+                binding(child, nodes, parameters, project, depth + 1, count, path)?;
+            }
+            Ok(())
+        }
+        Binding::Template { parts } => {
+            require(parts.len() <= 1000, path, "Too many template parts")?;
+            for part in parts {
+                match part {
+                    TemplatePart::Text { text: value } => text(value, path)?,
+                    TemplatePart::Value { binding: child } => {
+                        binding(child, nodes, parameters, project, depth + 1, count, path)?
+                    }
+                }
+            }
+            Ok(())
+        }
     }
 }
 fn graph(

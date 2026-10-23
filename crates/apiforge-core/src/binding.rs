@@ -1,10 +1,14 @@
-//! Traversal and rewriting of argument bindings, including nested operator trees.
+//! Traversal and rewriting of argument bindings, including nested operator trees,
+//! objects, arrays and templates.
 //!
 //! Every reference leaf, however deeply nested, is a graph dependency. Code that
 //! visits, rewrites or removes references must therefore go through these helpers
 //! instead of looking only at the outer binding kind.
 
-use crate::{format::Binding, operator::Operator};
+use crate::{
+    format::{Binding, TemplatePart},
+    operator::Operator,
+};
 use indexmap::IndexMap;
 use serde_json::Value;
 
@@ -77,60 +81,102 @@ impl Binding {
         matches!(self, Self::Expression { .. })
     }
 
-    /// Visits every non-expression leaf in operand order, with the operand path
-    /// (e.g. `["left", "right"]`) leading to it from the root.
+    /// Whether the binding contains other bindings: an expression, object, array or
+    /// template. Every other kind is a leaf.
+    pub fn is_composite(&self) -> bool {
+        matches!(
+            self,
+            Self::Expression { .. }
+                | Self::Object { .. }
+                | Self::Array { .. }
+                | Self::Template { .. }
+        )
+    }
+
+    /// Direct children of a composite binding with the path segment leading to each:
+    /// the operand name, field name, item index or template part index.
+    pub fn children(&self) -> Vec<(String, &Binding)> {
+        match self {
+            Self::Expression { inputs: map, .. } | Self::Object { fields: map } => map
+                .iter()
+                .map(|(name, child)| (name.clone(), child))
+                .collect(),
+            Self::Array { items } => items
+                .iter()
+                .enumerate()
+                .map(|(index, child)| (index.to_string(), child))
+                .collect(),
+            Self::Template { parts } => parts
+                .iter()
+                .enumerate()
+                .filter_map(|(index, part)| match part {
+                    TemplatePart::Value { binding } => Some((index.to_string(), binding)),
+                    TemplatePart::Text { .. } => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The direct child at a path segment.
+    fn child(&self, segment: &str) -> Option<&Self> {
+        match self {
+            Self::Expression { inputs: map, .. } | Self::Object { fields: map } => map.get(segment),
+            Self::Array { items } => items.get(segment.parse::<usize>().ok()?),
+            Self::Template { parts } => match parts.get(segment.parse::<usize>().ok()?)? {
+                TemplatePart::Value { binding } => Some(binding),
+                TemplatePart::Text { .. } => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Visits every leaf in document order, with the path (e.g. `["left", "right"]`)
+    /// leading to it from the root through operands, fields, items and template parts.
     pub fn for_each_leaf<'a>(&'a self, visit: &mut impl FnMut(&'a Binding, &[String])) {
         fn walk<'a>(
             binding: &'a Binding,
             path: &mut Vec<String>,
             visit: &mut impl FnMut(&'a Binding, &[String]),
         ) {
-            match binding {
-                Binding::Expression { inputs, .. } => {
-                    for (name, child) in inputs {
-                        path.push(name.clone());
-                        walk(child, path, visit);
-                        path.pop();
-                    }
+            if binding.is_composite() {
+                for (segment, child) in binding.children() {
+                    path.push(segment);
+                    walk(child, path, visit);
+                    path.pop();
                 }
-                leaf => visit(leaf, path),
+            } else {
+                visit(binding, path);
             }
         }
         walk(self, &mut Vec::new(), visit);
     }
 
-    /// Every non-expression leaf with an owned operand path.
+    /// Every leaf with an owned path.
     pub fn leaves(&self) -> Vec<(Vec<String>, &Binding)> {
         let mut result = Vec::new();
         self.for_each_leaf(&mut |leaf, path| result.push((path.to_vec(), leaf)));
         result
     }
 
-    /// Every reference leaf, in operand order.
+    /// Every reference leaf, in document order.
     pub fn references(&self) -> Vec<Reference<'_>> {
         let mut result = Vec::new();
-        self.collect_references(&mut result);
-        result
-    }
-
-    fn collect_references<'a>(&'a self, result: &mut Vec<Reference<'a>>) {
-        match self {
-            Self::Reference {
+        self.for_each_leaf(&mut |leaf, _| {
+            if let Self::Reference {
                 node_id,
                 port,
                 path,
-            } => result.push(Reference {
-                node_id,
-                port,
-                path,
-            }),
-            Self::Expression { inputs, .. } => {
-                for child in inputs.values() {
-                    child.collect_references(result);
-                }
+            } = leaf
+            {
+                result.push(Reference {
+                    node_id,
+                    port,
+                    path,
+                });
             }
-            _ => {}
-        }
+        });
+        result
     }
 
     pub fn references_node(&self, node_id: &str) -> bool {
@@ -139,8 +185,9 @@ impl Binding {
             .any(|reference| reference.node_id == node_id)
     }
 
-    /// Rewrites leaves; returning `None` removes the leaf's operand slot while the
-    /// surrounding operator stays. Returns `None` when the root leaf is removed.
+    /// Rewrites leaves; returning `None` removes the leaf's slot (operand, field, item
+    /// or template part) while the surrounding composite stays. Returns `None` when
+    /// the root leaf is removed.
     pub fn map_leaves(
         &self,
         visit: &mut impl FnMut(&Binding, &[String]) -> Option<Binding>,
@@ -153,53 +200,100 @@ impl Binding {
         path: &mut Vec<String>,
         visit: &mut impl FnMut(&Binding, &[String]) -> Option<Binding>,
     ) -> Option<Self> {
+        let mut map_child =
+            |segment: String, child: &Binding, path: &mut Vec<String>| -> Option<Binding> {
+                path.push(segment);
+                let next = child.map_leaves_at(path, visit);
+                path.pop();
+                next
+            };
         match self {
             Self::Expression { operator, inputs } => {
                 let mut mapped = IndexMap::with_capacity(inputs.len());
                 for (name, child) in inputs {
-                    path.push(name.clone());
-                    if let Some(next) = child.map_leaves_at(path, visit) {
+                    if let Some(next) = map_child(name.clone(), child, path) {
                         mapped.insert(name.clone(), next);
                     }
-                    path.pop();
                 }
                 Some(Self::Expression {
                     operator: *operator,
                     inputs: mapped,
                 })
             }
+            Self::Object { fields } => {
+                let mut mapped = IndexMap::with_capacity(fields.len());
+                for (name, child) in fields {
+                    if let Some(next) = map_child(name.clone(), child, path) {
+                        mapped.insert(name.clone(), next);
+                    }
+                }
+                Some(Self::Object { fields: mapped })
+            }
+            Self::Array { items } => Some(Self::Array {
+                items: items
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, child)| map_child(index.to_string(), child, path))
+                    .collect(),
+            }),
+            Self::Template { parts } => Some(Self::Template {
+                parts: parts
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, part)| match part {
+                        TemplatePart::Text { .. } => Some(part.clone()),
+                        TemplatePart::Value { binding } => {
+                            map_child(index.to_string(), binding, path)
+                                .map(|binding| TemplatePart::Value { binding })
+                        }
+                    })
+                    .collect(),
+            }),
             leaf => visit(leaf, path),
         }
     }
 
-    /// Replaces the binding at an operand path; an empty path replaces the root.
+    /// Replaces the binding at a path; an empty path replaces the root. A missing
+    /// operand or object field is created; array items and template parts must exist.
     ///
-    /// Returns `None` when the path does not lead through expressions.
+    /// Returns `None` when the path does not lead through composites.
     pub fn replace_at(&self, path: &[String], value: Self) -> Option<Self> {
         let Some((first, rest)) = path.split_first() else {
             return Some(value);
         };
-        let Self::Expression { operator, inputs } = self else {
-            return None;
+        let replace = |child: Option<&Self>| {
+            child
+                .cloned()
+                .unwrap_or_else(|| Self::literal(Value::Null))
+                .replace_at(rest, value.clone())
         };
-        let mut inputs = inputs.clone();
-        let child = inputs
-            .get(first)
-            .cloned()
-            .unwrap_or_else(|| Self::literal(Value::Null));
-        inputs.insert(first.clone(), child.replace_at(rest, value)?);
-        Some(Self::Expression {
-            operator: *operator,
-            inputs,
-        })
+        let mut next = self.clone();
+        match &mut next {
+            Self::Expression { inputs: map, .. } | Self::Object { fields: map } => {
+                let child = replace(map.get(first))?;
+                map.insert(first.clone(), child);
+            }
+            Self::Array { items } => {
+                let index = first.parse::<usize>().ok()?;
+                let child = replace(Some(items.get(index)?))?;
+                items[index] = child;
+            }
+            Self::Template { parts } => {
+                let index = first.parse::<usize>().ok()?;
+                let TemplatePart::Value { binding } = parts.get_mut(index)? else {
+                    return None;
+                };
+                *binding = replace(Some(binding))?;
+            }
+            _ => return None,
+        }
+        Some(next)
     }
 
-    /// The binding at an operand path, if the path exists.
+    /// The binding at a path, if the path exists.
     pub fn at(&self, path: &[String]) -> Option<&Self> {
-        path.iter().try_fold(self, |binding, name| match binding {
-            Self::Expression { inputs, .. } => inputs.get(name),
-            _ => None,
-        })
+        path.iter()
+            .try_fold(self, |binding, segment| binding.child(segment))
     }
 }
 
@@ -309,6 +403,104 @@ mod tests {
         assert_eq!(operator, Operator::Not);
         assert_eq!(inputs.len(), 1);
         assert!(inputs["left"].is_expression());
+    }
+
+    /// `{ id: a.body.id, tags: [b.body, "x"], text: "#{{c.status}}" }`
+    fn composite() -> Binding {
+        Binding::Object {
+            fields: IndexMap::from([
+                ("id".to_owned(), Binding::reference("a", "body", "id")),
+                (
+                    "tags".to_owned(),
+                    Binding::Array {
+                        items: vec![
+                            Binding::reference("b", "body", ""),
+                            Binding::literal(json!("x")),
+                        ],
+                    },
+                ),
+                (
+                    "text".to_owned(),
+                    Binding::Template {
+                        parts: vec![
+                            TemplatePart::Text { text: "#".into() },
+                            TemplatePart::Value {
+                                binding: Binding::reference("c", "status", ""),
+                            },
+                        ],
+                    },
+                ),
+            ]),
+        }
+    }
+
+    #[test]
+    fn composites_expose_leaves_through_fields_items_and_parts() {
+        let binding = composite();
+        assert!(binding.is_composite());
+        let paths: Vec<_> = binding
+            .leaves()
+            .into_iter()
+            .map(|(path, _)| path.join("/"))
+            .collect();
+        assert_eq!(paths, ["id", "tags/0", "tags/1", "text/1"]);
+        let sources: Vec<_> = binding
+            .references()
+            .iter()
+            .map(|reference| reference.node_id)
+            .collect();
+        assert_eq!(sources, ["a", "b", "c"]);
+        assert_eq!(
+            binding.at(&["text".into(), "1".into()]),
+            Some(&Binding::reference("c", "status", ""))
+        );
+        assert_eq!(binding.at(&["text".into(), "0".into()]), None, "text part");
+        assert_eq!(binding.at(&["tags".into(), "9".into()]), None);
+    }
+
+    #[test]
+    fn composites_rewrite_and_remove_slots() {
+        let replaced = composite()
+            .replace_at(&["tags".into(), "1".into()], Binding::parameter("p"))
+            .unwrap();
+        assert_eq!(
+            replaced.at(&["tags".into(), "1".into()]),
+            Some(&Binding::parameter("p"))
+        );
+        assert_eq!(
+            composite().replace_at(&["tags".into(), "5".into()], Binding::parameter("p")),
+            None,
+            "array items must exist"
+        );
+        let added = composite()
+            .replace_at(&["extra".into()], Binding::parameter("p"))
+            .unwrap();
+        assert_eq!(added.at(&["extra".into()]), Some(&Binding::parameter("p")));
+
+        let without_references = composite()
+            .map_leaves(&mut |leaf, _| {
+                (!matches!(leaf, Binding::Reference { .. })).then(|| leaf.clone())
+            })
+            .unwrap();
+        assert_eq!(
+            without_references,
+            Binding::Object {
+                fields: IndexMap::from([
+                    (
+                        "tags".to_owned(),
+                        Binding::Array {
+                            items: vec![Binding::literal(json!("x"))]
+                        }
+                    ),
+                    (
+                        "text".to_owned(),
+                        Binding::Template {
+                            parts: vec![TemplatePart::Text { text: "#".into() }]
+                        }
+                    ),
+                ])
+            }
+        );
     }
 
     #[test]

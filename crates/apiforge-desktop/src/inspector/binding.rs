@@ -1,11 +1,11 @@
 //! Editing one argument: a literal, another step's output, a nested operator block,
-//! a parameter or an environment value.
+//! an object, a list, a text template, a parameter or an environment value.
 
 use super::{fields, response};
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
-    format::{Binding, Graph, Node, Port, Project},
+    format::{Binding, Graph, Node, Port, Project, TemplatePart},
     graph::{ancestors_and_self, compatible, output_ports},
     model::ValueType,
     operator::{Operator, OperatorGroup},
@@ -15,8 +15,8 @@ use apiforge_core::{
 use eframe::egui::{self, Id, RichText, Stroke, Ui};
 use serde_json::Value;
 
-/// Nesting limit of operator blocks, as in version-one validation.
-const MAX_DEPTH: usize = 11;
+/// Nesting limit of composite bindings, one below the validator's 32 levels.
+const MAX_DEPTH: usize = 31;
 
 pub struct Context<'a> {
     pub node: &'a Node,
@@ -33,9 +33,24 @@ enum Kind {
     Literal,
     Reference,
     Expression,
+    Object,
+    List,
+    Template,
     Parameter,
     Environment,
 }
+
+const KINDS: [Kind; 9] = [
+    Kind::Unset,
+    Kind::Literal,
+    Kind::Reference,
+    Kind::Expression,
+    Kind::Object,
+    Kind::List,
+    Kind::Template,
+    Kind::Parameter,
+    Kind::Environment,
+];
 
 impl Kind {
     fn of(binding: Option<&Binding>) -> Self {
@@ -46,6 +61,9 @@ impl Kind {
             Some(Binding::Expression { .. }) => Self::Expression,
             Some(Binding::Parameter { .. }) => Self::Parameter,
             Some(Binding::Environment { .. }) => Self::Environment,
+            Some(Binding::Object { .. }) => Self::Object,
+            Some(Binding::Array { .. }) => Self::List,
+            Some(Binding::Template { .. }) => Self::Template,
         }
     }
 
@@ -57,6 +75,9 @@ impl Kind {
             Self::Expression => "Operator block",
             Self::Parameter => "Parameter",
             Self::Environment => "Environment / secret",
+            Self::Object => "Object",
+            Self::List => "List",
+            Self::Template => "Text with values",
         }
     }
 }
@@ -178,17 +199,12 @@ fn kind_combo(
         .selected_text(current.label())
         .width(ui.available_width())
         .show_ui(ui, |ui| {
-            for kind in [
-                Kind::Unset,
-                Kind::Literal,
-                Kind::Reference,
-                Kind::Expression,
-                Kind::Parameter,
-                Kind::Environment,
-            ] {
+            for kind in KINDS {
                 let enabled = match kind {
                     Kind::Reference => !available_sources.is_empty(),
-                    Kind::Expression => depth < MAX_DEPTH,
+                    Kind::Expression | Kind::Object | Kind::List | Kind::Template => {
+                        depth < MAX_DEPTH
+                    }
                     _ => true,
                 };
                 ui.add_enabled_ui(enabled, |ui| {
@@ -213,6 +229,15 @@ fn kind_combo(
             Binding::reference(source.id.clone(), output, "")
         }),
         Kind::Expression => Some(wrap(Operator::Add, value.take())),
+        Kind::Object => Some(Binding::Object {
+            fields: indexmap::IndexMap::from([("field".to_owned(), Binding::literal(Value::Null))]),
+        }),
+        Kind::List => Some(Binding::Array {
+            items: vec![Binding::literal(Value::Null)],
+        }),
+        Kind::Template => Some(Binding::Template {
+            parts: template_from(value.take()),
+        }),
         Kind::Parameter => Some(Binding::parameter(
             context
                 .parameters
@@ -267,6 +292,27 @@ fn body(
             context.parameters,
             "A scenario parameter or a component argument.",
         ),
+        Some(Binding::Object { fields }) => object_editor(ui, context, fields, depth, id),
+        Some(Binding::Array { items }) => list_editor(ui, context, items, depth, id),
+        Some(Binding::Template { parts }) => {
+            let changed = template_editor(ui, context, parts, depth, id);
+            if !parts
+                .iter()
+                .any(|part| matches!(part, TemplatePart::Value { .. }))
+            {
+                // A template without values is plain text.
+                let text = parts
+                    .iter()
+                    .map(|part| match part {
+                        TemplatePart::Text { text } => text.as_str(),
+                        TemplatePart::Value { .. } => "",
+                    })
+                    .collect();
+                *value = Some(Binding::literal(Value::String(text)));
+                return true;
+            }
+            changed
+        }
         Some(Binding::Environment { name }) => {
             let environment = &context.project.environment;
             let names: Vec<String> = std::iter::once("baseUrl".to_owned())
@@ -493,6 +539,238 @@ fn expression_editor(
             .size(11.0),
         );
     }
+    changed
+}
+
+/// Template parts that keep the current text and append one value.
+fn template_from(current: Option<Binding>) -> Vec<TemplatePart> {
+    let mut parts = Vec::new();
+    match current {
+        Some(Binding::Literal {
+            value: Value::String(text),
+        }) if !text.is_empty() => parts.push(TemplatePart::Text { text }),
+        Some(
+            binding @ (Binding::Reference { .. }
+            | Binding::Parameter { .. }
+            | Binding::Environment { .. }
+            | Binding::Expression { .. }),
+        ) => {
+            parts.push(TemplatePart::Value { binding });
+            return parts;
+        }
+        _ => {}
+    }
+    parts.push(TemplatePart::Value {
+        binding: Binding::literal(Value::String(String::new())),
+    });
+    parts
+}
+
+/// A row header with a remove button; returns whether removal was requested.
+fn removable_row(ui: &mut Ui, title: impl Into<RichText>, enabled: bool) -> bool {
+    let mut remove = false;
+    ui.horizontal(|ui| {
+        ui.label(title.into().size(11.0).color(theme::MUTED));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            remove = ui
+                .add_enabled(
+                    enabled,
+                    widgets::icon_button(Icon::Trash, "Remove")
+                        .compact()
+                        .danger(),
+                )
+                .clicked();
+        });
+    });
+    remove
+}
+
+/// Edits a nested binding in place; `None` from the nested editor becomes null.
+fn nested(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    label: &str,
+    binding: &mut Binding,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let mut slot = Some(binding.clone());
+    let port = Port::new(label, ValueType::Any);
+    if editor(ui, context, &port, &mut slot, depth + 1, id) {
+        *binding = slot.unwrap_or_else(|| Binding::literal(Value::Null));
+        return true;
+    }
+    false
+}
+
+fn object_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    fields: &mut indexmap::IndexMap<String, Binding>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    let mut removed = None;
+    let mut renamed = None;
+    for (index, (name, child)) in fields.iter_mut().enumerate() {
+        let row = id.with(("field", index));
+        ui.horizontal(|ui| {
+            let mut draft = name.clone();
+            let field = ui.add(
+                crate::widgets::text_edit(&mut draft)
+                    .id(row.with("name"))
+                    .hint_text("Field name")
+                    .desired_width(ui.available_width() - 34.0),
+            );
+            if field.changed() {
+                renamed = Some((index, draft));
+            }
+            if ui
+                .add(
+                    widgets::icon_button(Icon::Trash, "Remove field")
+                        .compact()
+                        .danger(),
+                )
+                .clicked()
+            {
+                removed = Some(index);
+            }
+        });
+        changed |= nested(ui, context, name, child, depth, row);
+    }
+    if let Some((index, next)) = renamed
+        && !next.is_empty()
+        && !fields.contains_key(&next)
+        && let Some((_, child)) = fields.shift_remove_index(index)
+    {
+        fields.shift_insert(index, next, child);
+        changed = true;
+    }
+    if let Some(index) = removed {
+        fields.shift_remove_index(index);
+        changed = true;
+    }
+    if ui
+        .add(widgets::action(Icon::Plus, "Add field").quiet())
+        .clicked()
+    {
+        let name = (1..)
+            .map(|number| format!("field{number}"))
+            .find(|name| !fields.contains_key(name))
+            .unwrap_or_default();
+        fields.insert(name, Binding::literal(Value::Null));
+        changed = true;
+    }
+    changed
+}
+
+fn list_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    items: &mut Vec<Binding>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    let mut removed = None;
+    for (index, item) in items.iter_mut().enumerate() {
+        if removable_row(ui, format!("Item {}", index + 1), true) {
+            removed = Some(index);
+        }
+        changed |= nested(
+            ui,
+            context,
+            &format!("Item {}", index + 1),
+            item,
+            depth,
+            id.with(("item", index)),
+        );
+    }
+    if let Some(index) = removed {
+        items.remove(index);
+        changed = true;
+    }
+    if ui
+        .add(widgets::action(Icon::Plus, "Add item").quiet())
+        .clicked()
+    {
+        items.push(Binding::literal(Value::Null));
+        changed = true;
+    }
+    changed
+}
+
+/// Edits the parts of a text template: literal text and interpolated values.
+fn template_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    parts: &mut Vec<TemplatePart>,
+    depth: usize,
+    id: Id,
+) -> bool {
+    let mut changed = false;
+    let mut removed = None;
+    let mut value_number = 0;
+    for (index, part) in parts.iter_mut().enumerate() {
+        let row = id.with(("part", index));
+        match part {
+            TemplatePart::Text { text } => {
+                ui.horizontal(|ui| {
+                    changed |= ui
+                        .add(
+                            crate::widgets::text_edit(text)
+                                .id(row.with("text"))
+                                .hint_text("Text")
+                                .desired_width(ui.available_width() - 34.0),
+                        )
+                        .changed();
+                    if ui
+                        .add(
+                            widgets::icon_button(Icon::Trash, "Remove text")
+                                .compact()
+                                .danger(),
+                        )
+                        .clicked()
+                    {
+                        removed = Some(index);
+                    }
+                });
+            }
+            TemplatePart::Value { binding } => {
+                value_number += 1;
+                let label = format!("Value {value_number}");
+                if removable_row(ui, label.as_str(), true) {
+                    removed = Some(index);
+                }
+                changed |= nested(ui, context, &label, binding, depth, row);
+            }
+        }
+    }
+    if let Some(index) = removed {
+        parts.remove(index);
+        changed = true;
+    }
+    ui.horizontal(|ui| {
+        if ui
+            .add(widgets::action(Icon::Plus, "Text").quiet())
+            .clicked()
+        {
+            parts.push(TemplatePart::Text {
+                text: String::new(),
+            });
+            changed = true;
+        }
+        if ui
+            .add(widgets::action(Icon::Plus, "Value").quiet())
+            .clicked()
+        {
+            parts.push(TemplatePart::Value {
+                binding: Binding::literal(Value::String(String::new())),
+            });
+            changed = true;
+        }
+    });
     changed
 }
 

@@ -18,7 +18,7 @@ use crate::{
 };
 use apiforge_core::{
     binding::Reference,
-    format::{Binding, Graph, Node, OptionalJson, Project, Scenario},
+    format::{Binding, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
     graph::{ancestors_and_self, component_definition, input_ports, predicate},
     js::{self, js_key_order},
     model::{Branch, BuildType, HttpMethod, Match, NodeKind, ValueType},
@@ -131,6 +131,9 @@ enum StepError {
     Expression { operator: String, message: String },
     #[error("Missing value to build data.")]
     IncompleteBuild,
+    /// A field, item or template value of a composite binding resolved to nothing.
+    #[error("Missing value for {0}.")]
+    MissingValue(String),
     #[error("The component revision does not exist.")]
     MissingComponent,
     #[error("Component recursion or nesting too deep.")]
@@ -904,7 +907,58 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 },
                 context,
             ),
+            Binding::Object { fields } => {
+                let mut object = Map::with_capacity(fields.len());
+                for (name, child) in fields {
+                    let value = self
+                        .resolve(child, context)?
+                        .ok_or_else(|| StepError::MissingValue(format!("field `{name}`")))?;
+                    object.insert(name.clone(), value);
+                }
+                Some(Value::Object(object))
+            }
+            Binding::Array { items } => {
+                let mut array = Vec::with_capacity(items.len());
+                for (index, child) in items.iter().enumerate() {
+                    array.push(
+                        self.resolve(child, context)?
+                            .ok_or_else(|| StepError::MissingValue(format!("item {index}")))?,
+                    );
+                }
+                Some(Value::Array(array))
+            }
+            Binding::Template { parts } => Some(Value::String(self.render(parts, context, false)?)),
         })
+    }
+
+    /// Concatenates a template. URL templates percent-encode interpolated values
+    /// like `encodeURIComponent`; their literal text is kept as written.
+    fn render(
+        &mut self,
+        parts: &[TemplatePart],
+        context: &Context,
+        encode: bool,
+    ) -> Result<String, StepError> {
+        let mut text = String::new();
+        let mut values = 0;
+        for part in parts {
+            match part {
+                TemplatePart::Text { text: literal } => text.push_str(literal),
+                TemplatePart::Value { binding } => {
+                    values += 1;
+                    let value = self.resolve(binding, context)?.ok_or_else(|| {
+                        StepError::MissingValue(format!("template value {values}"))
+                    })?;
+                    let value = template::template_text(&value);
+                    if encode {
+                        text.push_str(&template::encode_uri_component(&value));
+                    } else {
+                        text.push_str(&value);
+                    }
+                }
+            }
+        }
+        Ok(text)
     }
 
     /// Evaluates an expression eagerly: every operand is resolved, in order.

@@ -504,6 +504,9 @@ fn binding_kind(binding: &Binding) -> &'static str {
         Binding::Reference { .. } => "reference",
         Binding::Parameter { .. } => "parameter",
         Binding::Environment { .. } => "environment",
+        Binding::Object { .. } => "object",
+        Binding::Array { .. } => "list",
+        Binding::Template { .. } => "text template",
     }
 }
 

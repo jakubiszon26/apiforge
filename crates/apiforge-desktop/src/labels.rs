@@ -1,7 +1,7 @@
 //! User-facing descriptions of document values.
 
 use apiforge_core::{
-    format::{Binding, Graph},
+    format::{Binding, Graph, TemplatePart},
     model::HttpMethod,
 };
 use serde_json::Value;
@@ -51,6 +51,15 @@ pub fn binding(binding: &Binding, graph: &Graph) -> String {
         Binding::Parameter { name } => format!("Argument → {name}"),
         Binding::Environment { name } => format!("Environment → {name}"),
         Binding::Literal { value } => literal_summary(value),
+        Binding::Object { fields } => format!("{{ {} fields }}", fields.len()),
+        Binding::Array { items } => format!("[ {} items ]", items.len()),
+        Binding::Template { parts } => {
+            let values = parts
+                .iter()
+                .filter(|part| matches!(part, TemplatePart::Value { .. }))
+                .count();
+            format!("Text · {values} values")
+        }
     }
 }
 

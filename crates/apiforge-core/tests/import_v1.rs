@@ -169,7 +169,8 @@ fn enforces_byte_node_expression_and_text_limits() {
     assert!(parse(&nodes).is_err());
     let mut nested = workflow();
     let mut expression = json!({"kind":"literal","value":1});
-    for _ in 0..12 {
+    // Bindings nest at most 32 levels, including objects, arrays and templates.
+    for _ in 0..32 {
         expression = json!({"kind":"expression","operator":"abs","inputs":{"left":expression}});
     }
     nested["scenarios"][0]["graph"]["nodes"][6]["inputs"]["expected"] = expression;
