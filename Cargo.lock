@@ -245,6 +245,19 @@ name = "apiforge-layout"
 version = "0.1.0"
 
 [[package]]
+name = "apiforge-project"
+version = "0.1.0"
+dependencies = [
+ "apiforge-core",
+ "apiforge-layout",
+ "apiforge-script",
+ "apiforge-storage",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "apiforge-runner"
 version = "0.1.0"
 dependencies = [
