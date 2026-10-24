@@ -7,6 +7,7 @@ mod conflict;
 mod diagram;
 mod explorer;
 mod io;
+mod journal;
 mod metadata;
 mod path;
 mod recovery;
