@@ -17,6 +17,10 @@ impl FolderApp {
             || session.text_files().iter().any(|file| file.is_dirty())
             || session.is_manifest_dirty();
         let active = self.workbench.active();
+        let run_document = active
+            .and_then(|id| session.document(id))
+            .filter(|document| document.entry().kind == DocumentKind::Scenario)
+            .map(|document| document.id().to_owned());
         let publish = active
             .and_then(|id| session.document(id))
             .filter(|document| document.entry().kind == DocumentKind::Component)
@@ -48,6 +52,40 @@ impl FolderApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.runs.handle.is_some() {
+                    if ui.button("Cancel run").clicked()
+                        && let Some(handle) = &self.runs.handle
+                    {
+                        handle.cancel();
+                    }
+                } else if let Some(id) = &run_document {
+                    if ui
+                        .add(widgets::action(Icon::Play, "Run").primary())
+                        .on_hover_text(
+                            "Simulate the selected scenario, including unsaved valid code",
+                        )
+                        .clicked()
+                    {
+                        self.request_run(id, false);
+                    }
+                    ui.menu_button("Run options", |ui| {
+                        if ui.button("Run live requests").clicked() {
+                            ui.close();
+                            self.request_run(id, true);
+                        }
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            self.review_legacy_runs();
+                        }
+                    });
+                } else {
+                    ui.menu_button("Runs", |ui| {
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            self.review_legacy_runs();
+                        }
+                    });
+                }
                 if let Some((id, enabled)) = &publish
                     && ui
                         .add_enabled(*enabled, egui::Button::new("Publish"))
@@ -342,6 +380,13 @@ impl FolderApp {
             return;
         };
         self.prompt = match prompt {
+            Prompt::Run { prepared, live } => self.run_prompt(context, *prepared, live),
+            Prompt::Journal(review) => self.journal_prompt(context, *review),
+            Prompt::AssignResult {
+                document_id,
+                cleanup,
+                dialog,
+            } => self.assign_result_prompt(context, document_id, cleanup, *dialog),
             Prompt::CommentLoss { ticket, action } => {
                 self.comment_loss_prompt(context, ticket, action)
             }
@@ -548,7 +593,7 @@ impl FolderApp {
         context: &egui::Context,
         message: String,
     ) -> Option<Prompt> {
-        let (mut retry, mut discard, mut keep) = (false, false, false);
+        let (mut retry, mut discard, mut keep, mut export) = (false, false, false, false);
         let response = dialogs::centered_modal(egui::Id::new("folder-close-failed"), context).show(
             context,
             |ui| {
@@ -561,13 +606,19 @@ impl FolderApp {
                      change.",
                 );
                 ui.add_space(theme::SPACE_MD);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     keep = ui.add(widgets::primary_button("Keep editing")).clicked();
                     retry = ui.button("Try again").clicked();
+                    export = ui
+                        .add_enabled(!self.runs.exporting, egui::Button::new("Export and close"))
+                        .clicked();
                     discard = ui.button("Discard unsaved work and close").clicked();
                 });
             },
         );
+        if export {
+            self.export_before_close();
+        }
         if retry {
             self.close_requested = true;
             return None;
@@ -581,6 +632,7 @@ impl FolderApp {
                 self.session = Some(*session);
                 return Some(Prompt::CloseFailed(error.to_string()));
             }
+            self.runs = runs::Runs::default();
             self.close_requested = true;
             return None;
         }

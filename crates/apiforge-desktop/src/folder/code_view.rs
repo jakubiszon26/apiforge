@@ -79,10 +79,11 @@ impl FolderApp {
             .map(parameters_of)
             .unwrap_or_default();
         let names = crate::shapes::Names::of_board(&project, &nodes, &parameters, None);
+        let run = self.fresh_run(document_id);
         let shapes = crate::shapes::BoardShapes {
             project: &project,
             nodes: &nodes,
-            steps: &[],
+            steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
         let mut text = snapshot.text.clone();
         let mut scroll = egui::ScrollArea::both()

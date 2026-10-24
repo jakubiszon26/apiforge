@@ -19,11 +19,78 @@ pub(super) struct ImportRow {
 
 /// Work done by a file dialog on its own thread.
 pub(super) enum Picked {
-    Imports { folder: String, files: Vec<PathBuf> },
+    Imports {
+        folder: String,
+        files: Vec<PathBuf>,
+    },
     Exported(Result<PathBuf, String>),
+    CloseExported {
+        result: Option<Result<PathBuf, String>>,
+        contents: Vec<u8>,
+    },
 }
 
 impl FolderApp {
+    pub(super) fn export_before_close(&mut self) {
+        if self.runs.exporting {
+            return;
+        }
+        let Some(session) = &self.session else { return };
+        let contents = match session.export_unsaved() {
+            Ok(contents) => contents,
+            Err(error) => {
+                self.notify(format!("Could not prepare export: {error}"), true);
+                return;
+            }
+        };
+        let (sender, receiver) = channel();
+        let repaint = self.ui_context.clone();
+        self.runs.exporting = true;
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .set_title("Export unsaved project work")
+                .set_file_name("apiforge-recovery-export.json")
+                .save_file()
+                .map(|path| {
+                    apiforge_storage::write_atomic(&path, &contents)
+                        .map(|()| path)
+                        .map_err(|error| error.to_string())
+                });
+            let _ = sender.send(Picked::CloseExported { result, contents });
+            repaint.request_repaint();
+        });
+        self.picked.push(receiver);
+    }
+
+    pub(super) fn complete_close_export(
+        &mut self,
+        result: Option<Result<PathBuf, String>>,
+        contents: &[u8],
+    ) {
+        self.runs.exporting = false;
+        match result {
+            Some(Ok(_))
+                if self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.export_unsaved().ok())
+                    .as_deref()
+                    == Some(contents) =>
+            {
+                self.session = None;
+                self.runs = runs::Runs::default();
+                self.prompt = None;
+                self.close_requested = true;
+            }
+            Some(Ok(_)) => self.notify(
+                "Work changed during export. Export the current work before closing.",
+                true,
+            ),
+            Some(Err(error)) => self.notify(format!("Could not export: {error}"), true),
+            None => {}
+        }
+    }
+
     pub(super) fn pick_imports(&mut self, folder: String) {
         let (sender, receiver) = channel();
         let repaint = self.ui_context.clone();
@@ -74,6 +141,9 @@ impl FolderApp {
             });
         for picked in finished {
             match picked {
+                Picked::CloseExported { result, contents } => {
+                    self.complete_close_export(result, &contents)
+                }
                 Picked::Imports { files, .. } if files.is_empty() => {}
                 Picked::Imports { folder, files } => self.prepare_import(&files, &folder),
                 Picked::Exported(Ok(path)) => {

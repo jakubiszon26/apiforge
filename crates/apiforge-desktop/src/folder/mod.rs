@@ -16,6 +16,7 @@ mod explorer;
 mod file_prompts;
 mod placement;
 mod publication;
+mod runs;
 mod text_view;
 mod watcher;
 mod workbench;
@@ -71,6 +72,16 @@ const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
 const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    Run {
+        prepared: Box<apiforge_project::PreparedRun>,
+        live: bool,
+    },
+    Journal(Box<runs::JournalReview>),
+    AssignResult {
+        document_id: String,
+        cleanup: bool,
+        dialog: Box<dialogs::AssignVariableDialog>,
+    },
     CommentLoss {
         ticket: apiforge_project::AnalysisTicket,
         action: Box<publication::Action>,
@@ -183,6 +194,7 @@ pub struct FolderApp {
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
     preferences: Preferences,
+    runs: runs::Runs,
 }
 
 struct Clipboard {
@@ -245,6 +257,7 @@ impl FolderApp {
             close_error: None,
             close_requested: false,
             preferences: Preferences::load(),
+            runs: runs::Runs::default(),
         };
         match ProjectSession::open_with(&app.root, Arc::new(CardPlacer)) {
             Ok(session) => app.install(session),
@@ -328,6 +341,7 @@ impl FolderApp {
         self.seen = session.last_sequence();
         self.uninitialised = false;
         self.session = Some(session);
+        self.open_run_journal();
         self.reload_field_drafts();
         self.restore_text_tabs();
     }
@@ -412,6 +426,7 @@ impl FolderApp {
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.poll_run();
         if self.close_requested {
             self.close_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -455,6 +470,7 @@ impl FolderApp {
                 self.notices(ui);
             });
         let active = self.workbench.active().map(str::to_owned);
+        self.run_report(ui, active.as_deref());
         match self.workbench.mode {
             Mode::Code => {
                 egui::Panel::left("folder-documents")
@@ -883,7 +899,9 @@ impl FolderApp {
         if session.is_read_only() {
             return;
         }
-        if let Err(error) = session.save_recovery() {
+        let failure = session.save_recovery().err();
+        let _ = session.save_last_valid();
+        if let Some(error) = failure {
             self.notify(format!("Unsaved work is not protected: {error}"), true);
         }
         self.save_view();
@@ -927,12 +945,27 @@ impl FolderApp {
     /// Closing succeeds once unsaved work is in local recovery; it never saves
     /// a source file. A failure keeps the window open with the reason.
     pub fn prepare_close(&mut self) -> bool {
+        self.poll_run();
+        if self.runs.handle.is_some() {
+            if let Some(handle) = &self.runs.handle {
+                handle.cancel();
+            }
+            return false;
+        }
         self.save_view();
+        if let Some(session) = self.session.as_mut()
+            && !session.is_read_only()
+        {
+            let _ = session.save_last_valid();
+        }
         let Some(session) = self.session.take() else {
             return true;
         };
         match session.close() {
-            Ok(()) => true,
+            Ok(()) => {
+                self.runs = runs::Runs::default();
+                true
+            }
             Err((session, error)) => {
                 self.session = Some(*session);
                 self.close_error = Some(error.to_string());
@@ -947,6 +980,15 @@ impl FolderApp {
 
     pub fn abort_close(&mut self, error: String) {
         self.prompt = Some(Prompt::CloseFailed(error));
+    }
+
+    pub fn save_pending(&self) -> bool {
+        self.runs.handle.is_some()
+            || self
+                .runs
+                .runner
+                .as_ref()
+                .is_some_and(|runner| runner.active_runs() > 0)
     }
 
     fn request_close_tab(&mut self, document_id: &str) {

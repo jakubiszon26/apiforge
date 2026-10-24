@@ -98,6 +98,19 @@ impl FolderApp {
                 });
         }
         let project = self.context_project();
+        let run = self.fresh_run(document_id);
+        let phase = if cleanup {
+            apiforge_core::run::Phase::Cleanup
+        } else {
+            apiforge_core::run::Phase::Main
+        };
+        let steps = run.as_ref().map(|run| {
+            run.steps
+                .iter()
+                .filter(|step| step.phase == phase)
+                .cloned()
+                .collect::<Vec<_>>()
+        });
         let graph = graph_of(&model, cleanup).clone();
         let reference = graph_of(&model, false).clone();
         let parameters = parameters_of(&model);
@@ -131,7 +144,7 @@ impl FolderApp {
                         project: &project,
                         parameters: &parameters,
                         selection: &selection,
-                        steps: None,
+                        steps: steps.as_deref(),
                         can_paste,
                         context: &context,
                     },
@@ -391,6 +404,10 @@ impl FolderApp {
             .unwrap_or_default();
         let reference = graph_of(&model, false).clone();
         let parameters = parameters_of(&model);
+        let run = self.fresh_run(document_id);
+        let step = run
+            .as_ref()
+            .and_then(|run| run.steps.iter().find(|step| step.node_id == node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
@@ -414,8 +431,8 @@ impl FolderApp {
                             board: &graph,
                             project: &project,
                             parameters: &parameters,
-                            run: None,
-                            step: None,
+                            run: run.as_ref(),
+                            step,
                         },
                     )
                 })
@@ -440,11 +457,34 @@ impl FolderApp {
                     self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
                 }
                 inspector::Action::EditComponent => self.open_component(&graph, &node.id),
-                inspector::Action::AssertField { .. } | inspector::Action::AssignField { .. } => {
-                    self.notify(
-                        "Run results are not available in folder projects yet.",
-                        false,
-                    )
+                inspector::Action::AssertField { port, path, value } => {
+                    if let Some(run) = &run {
+                        self.folder_report_action(
+                            document_id,
+                            run,
+                            false,
+                            crate::report::Action::AssertField {
+                                node_id: node.id.clone(),
+                                port,
+                                path,
+                                value,
+                            },
+                        );
+                    }
+                }
+                inspector::Action::AssignField { port, path } => {
+                    if let Some(run) = &run {
+                        self.folder_report_action(
+                            document_id,
+                            run,
+                            false,
+                            crate::report::Action::AssignField {
+                                node_id: node.id.clone(),
+                                port,
+                                path,
+                            },
+                        );
+                    }
                 }
                 inspector::Action::Error(message) => {
                     if let Some(canvas) = self.canvases.get_mut(document_id) {

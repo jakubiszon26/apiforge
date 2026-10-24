@@ -250,11 +250,11 @@ impl Front {
         }
     }
 
-    /// Only the workspace saves in the background.
+    /// Background saving and run cleanup keep the owning session alive.
     fn save_pending(&self) -> bool {
         match self {
             Self::Workspace(app) => app.save_pending(),
-            Self::Folder(_) => false,
+            Self::Folder(app) => app.save_pending(),
         }
     }
 

@@ -1664,9 +1664,339 @@ fn applying_a_pin_fix_from_problems_can_be_undone_in_the_code_editor() {
 }
 
 fn label_position(app: &mut FolderApp, context: &egui::Context, label: &str) -> egui::Pos2 {
-    painted(app, context, egui::vec2(1600.0, 1000.0))
-        .into_iter()
-        .find(|(text, _)| text == label)
-        .map(|(_, rect)| rect.center())
-        .unwrap_or_else(|| panic!("no visible label {label}"))
+    // A newly opened modal first measures itself in an invisible sizing pass.
+    for _ in 0..3 {
+        if let Some((_, rect)) = painted(app, context, egui::vec2(1600.0, 1000.0))
+            .into_iter()
+            .find(|(text, _)| text == label)
+        {
+            return rect.center();
+        }
+    }
+    panic!("no visible label {label}")
+}
+
+fn run_project() -> (tempfile::TempDir, String) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Runs").unwrap();
+    let id = session
+        .create_document(
+            DocumentKind::Scenario,
+            "main.afs",
+            "scenario \"Main\" {\n  answer = 1\n  equal = assert answer == 2\n}\n",
+        )
+        .unwrap();
+    drop(session);
+    (directory, id)
+}
+
+fn finish_folder_run(app: &mut FolderApp) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.runs.handle.is_some() && Instant::now() < deadline {
+        app.poll_run();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(app.runs.handle.is_none(), "the run must finish");
+}
+
+#[test]
+fn folder_run_settles_unsaved_code_and_reports_in_every_mode_then_becomes_stale() {
+    let (directory, id) = run_project();
+    let (context, mut app) = open(directory.path());
+    let edited = text(&app, &id).replacen("answer = 1", "answer = 2", 1);
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    let at = label_position(&mut app, &context, "Run");
+    click(&mut app, &context, at);
+    finish_folder_run(&mut app);
+    assert_eq!(
+        app.run_result(&id).unwrap().status,
+        apiforge_core::run::RunStatus::Passed
+    );
+    assert!(
+        std::fs::read_to_string(directory.path().join("main.afs"))
+            .unwrap()
+            .contains("answer = 1")
+    );
+    assert!(app.fresh_run(&id).is_some());
+    for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        let shown = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+        assert!(
+            shown.iter().any(|(text, _)| text.contains("Passed")),
+            "report is visible in {mode:?}"
+        );
+    }
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited.replace("answer = 2", "answer = 3"), CODE)
+        .unwrap();
+    assert!(
+        app.fresh_run(&id).is_none(),
+        "editing invalidates report use and output completion"
+    );
+    assert!(
+        app.run_result(&id).is_some(),
+        "the stale report remains available"
+    );
+}
+
+#[test]
+fn folder_last_valid_dialog_is_explicit_and_rejects_a_later_source_version() {
+    let (directory, id) = run_project();
+    let (context, mut app) = open(directory.path());
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, "invalid", CODE)
+        .unwrap();
+    app.request_run(&id, false);
+    assert!(matches!(app.prompt, Some(Prompt::Run { .. })));
+    assert!(app.runs.handle.is_none());
+    let at = label_position(&mut app, &context, "Cancel");
+    click(&mut app, &context, at);
+    assert!(app.runs.handle.is_none());
+    app.request_run(&id, false);
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, "another invalid source", CODE)
+        .unwrap();
+    let at = label_position(&mut app, &context, "Run this version");
+    click(&mut app, &context, at);
+    assert!(app.runs.handle.is_none());
+    app.request_run(&id, false);
+    let at = label_position(&mut app, &context, "Run this version");
+    click(&mut app, &context, at);
+    finish_folder_run(&mut app);
+    assert!(app.run_result(&id).is_some());
+    assert!(
+        app.fresh_run(&id).is_none(),
+        "an earlier-version report is labelled stale"
+    );
+}
+
+#[test]
+fn close_export_keeps_read_only_and_failed_recovery_work_until_export_succeeds() {
+    let (directory, id) = run_project();
+    let (_writer_context, _writer) = open(directory.path());
+    let (context, mut reader) = open(directory.path());
+    assert!(reader.session.as_ref().unwrap().is_read_only());
+    let edited = format!("{}\n// unsaved", text(&reader, &id));
+    reader
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    assert!(!reader.prepare_close());
+    reader.abort_close("Read-only recovery".into());
+    let _ = painted(&mut reader, &context, egui::vec2(960.0, 540.0));
+    let labels = painted(&mut reader, &context, egui::vec2(960.0, 540.0));
+    assert!(labels.iter().any(|(text, _)| text == "Export and close"));
+    let contents = reader.session.as_ref().unwrap().export_unsaved().unwrap();
+    reader.complete_close_export(Some(Err("disk full".into())), &contents);
+    assert!(reader.session.is_some());
+    reader.complete_close_export(None, &contents);
+    assert!(reader.session.is_some());
+    reader
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &format!("{edited}\n"), CODE)
+        .unwrap();
+    reader.complete_close_export(Some(Ok(directory.path().join("export.json"))), &contents);
+    assert!(
+        reader.session.is_some(),
+        "an older export cannot authorise closing newer work"
+    );
+    let latest = reader.session.as_ref().unwrap().export_unsaved().unwrap();
+    let output = directory.path().join("export.json");
+    apiforge_storage::write_atomic(&output, &latest).unwrap();
+    reader.complete_close_export(Some(Ok(output)), &latest);
+    assert!(reader.session.is_none());
+    assert!(reader.close_requested);
+}
+
+#[test]
+fn project_and_legacy_interrupted_runs_are_reviewed_under_their_own_locks() {
+    use apiforge_core::journal::{JournalRun, JournalSink};
+    let (directory, id) = run_project();
+    let owner = ProjectSession::open(directory.path()).unwrap();
+    let journal = apiforge_storage::JournalStore::open_project(owner.store().clone()).unwrap();
+    journal
+        .store
+        .begin_run(&JournalRun::new(
+            "interrupted",
+            "main",
+            "Main",
+            "2026-10-24T00:00:00Z",
+        ))
+        .unwrap();
+    drop(journal);
+    drop(owner);
+    let (context, mut app) = open(directory.path());
+    assert!(matches!(app.prompt, Some(Prompt::Journal(_))));
+    let at = label_position(&mut app, &context, "Remind me later");
+    click(&mut app, &context, at);
+    assert!(
+        directory
+            .path()
+            .join(".apiforge/local/journal.json")
+            .exists()
+    );
+    assert_eq!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&id)
+            .unwrap()
+            .entry()
+            .path
+            .as_str(),
+        "main.afs"
+    );
+    assert!(app.prepare_close());
+    let (context, mut app) = open(directory.path());
+    let at = label_position(&mut app, &context, "Mark as handled");
+    click(&mut app, &context, at);
+    assert!(
+        !directory
+            .path()
+            .join(".apiforge/local/journal.json")
+            .exists()
+    );
+
+    let legacy_data = tempfile::tempdir().unwrap();
+    let legacy =
+        apiforge_storage::WorkspaceStore::open_exclusive(legacy_data.path().join("workspace.json"))
+            .unwrap();
+    legacy
+        .save(
+            &apiforge_core::import_document(
+                include_bytes!("../../../../fixtures/workspace.json"),
+                &apiforge_core::ImportLimits::default(),
+            )
+            .unwrap()
+            .into_workspace(),
+        )
+        .unwrap();
+    let journal = apiforge_storage::JournalStore::open(legacy.clone()).unwrap();
+    journal
+        .store
+        .begin_run(&JournalRun::new(
+            "legacy",
+            "main",
+            "Unassigned",
+            "2026-10-24T00:00:00Z",
+        ))
+        .unwrap();
+    let _ = apiforge_project::migrate_workspace(&legacy).unwrap();
+    drop(journal);
+    drop(legacy);
+    app.review_legacy_runs_from(legacy_data.path());
+    assert!(matches!(app.prompt, Some(Prompt::Journal(_))));
+    let _ = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+    let labels = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+    assert!(
+        labels
+            .iter()
+            .any(|(text, _)| text == "Unresolved legacy runs")
+    );
+    let at = label_position(&mut app, &context, "Mark as handled");
+    click(&mut app, &context, at);
+    assert!(!legacy_data.path().join("journal.json").exists());
+    assert!(
+        !directory
+            .path()
+            .join(".apiforge/local/journal.json")
+            .exists()
+    );
+}
+
+#[test]
+fn folder_close_cancels_the_run_and_retains_its_project_lock_until_cleanup_finishes() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let _ = stream.read(&mut [0_u8; 4096]);
+        let _ = entered.send(());
+        let _ = released.recv_timeout(Duration::from_secs(3));
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Cleanup").unwrap();
+    session
+        .edit_configuration(
+            |manifest| manifest.environment.base_url = format!("http://{address}"),
+            Origin::SESSION,
+        )
+        .unwrap();
+    let id = session.create_document(DocumentKind::Scenario, "main.afs", "scenario \"Main\" {\n  response = GET \"/slow\"\n  cleanup {\n    cleanup_value = 1\n  }\n}\n").unwrap();
+    drop(session);
+    let (_context, mut app) = open(directory.path());
+    app.request_run(&id, true);
+    waiting.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert!(
+        !app.prepare_close(),
+        "close is nonblocking while cancellation and cleanup run"
+    );
+    assert!(
+        apiforge_storage::project::ProjectStore::open_read_only(directory.path())
+            .unwrap()
+            .has_live_writer()
+            .unwrap()
+    );
+    let _ = release.send(());
+    finish_folder_run(&mut app);
+    assert!(app.prepare_close());
+    assert!(
+        !apiforge_storage::project::ProjectStore::open_read_only(directory.path())
+            .unwrap()
+            .has_live_writer()
+            .unwrap()
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn exporting_after_failed_recovery_keeps_the_foreign_recovery_file_intact() {
+    let (directory, id) = run_project();
+    let (_context, mut app) = open(directory.path());
+    let edited = format!("{}\n// latest unsaved work", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    std::fs::write(
+        directory.path().join(".apiforge/local/recovery.json"),
+        b"foreign recovery",
+    )
+    .unwrap();
+    assert!(!app.prepare_close());
+    let contents = app.session.as_ref().unwrap().export_unsaved().unwrap();
+    let output = directory.path().join("export.json");
+    apiforge_storage::write_atomic(&output, &contents).unwrap();
+    app.complete_close_export(Some(Ok(output.clone())), &contents);
+    assert!(app.session.is_none());
+    let export: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+    assert_eq!(export["recovery"]["documents"][0]["text"], edited);
+    assert_eq!(
+        std::fs::read(directory.path().join(".apiforge/local/recovery.json")).unwrap(),
+        b"foreign recovery"
+    );
 }
