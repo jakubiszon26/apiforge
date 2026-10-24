@@ -118,6 +118,24 @@ impl Workbench {
         self.active = Some(document_id.to_owned());
     }
 
+    /// Opens a tab without activating it: a restored view keeps the document
+    /// that was active when it was saved.
+    pub fn ensure(&mut self, document_id: &str) {
+        if self.tabs.iter().any(|tab| tab.document_id == document_id) {
+            return;
+        }
+        self.tabs.push(TabState {
+            document_id: document_id.to_owned(),
+            selection: TextSelection {
+                anchor: 0,
+                caret: 0,
+            },
+            scroll: 0.0,
+            cleanup: false,
+            camera: None,
+        });
+    }
+
     /// Closes a tab; the tab to its right becomes active, else the one to its left.
     pub fn close(&mut self, document_id: &str) {
         let Some(index) = self

@@ -77,6 +77,9 @@ pub struct ExplorerState {
     /// Height of the row viewport last frame. A resize can push the active
     /// row out of view without the user scrolling, so it is revealed again.
     viewport: f32,
+    /// How many rows there were last frame. The folder scan arrives after the
+    /// first frames and moves every row down, which has the same effect.
+    rows: usize,
 }
 
 /// A registered document as the explorer lists it.
@@ -384,10 +387,13 @@ impl FolderApp {
         // they are drawn, lets the offset be corrected in this same frame.
         let viewport = ui.available_height();
         let resized = (viewport - self.explorer.viewport).abs() > 0.5;
+        let grew = rows.len() != self.explorer.rows;
         self.explorer.viewport = viewport;
-        // A resize must not leave the active file's row off screen.
+        self.explorer.rows = rows.len();
+        // Neither a resize nor a changed tree may leave the active file's row
+        // off screen.
         let reveal = std::mem::take(&mut self.explorer.reveal)
-            || (resized && selected == self.active_path());
+            || ((resized || grew) && selected == self.active_path());
         let revealed = reveal
             .then(|| {
                 selected
@@ -395,6 +401,12 @@ impl FolderApp {
                     .and_then(|path| rows.iter().position(|row| row.path == path))
             })
             .flatten();
+        // A file activated before the folder was scanned has no row yet. Keep
+        // the request until its row exists, instead of losing it silently.
+        self.explorer.reveal = reveal && revealed.is_none();
+        // The scroll takes effect in the next frame, so the row is checked
+        // against the range that was actually drawn.
+        let mut drawn = 0..0;
         // A row is exactly `ROW_HEIGHT` tall with nothing between rows. The
         // list derives its own row pitch from this spacing, so setting it
         // afterwards would leave its index arithmetic out of step with the
@@ -407,6 +419,7 @@ impl FolderApp {
             .animated(false)
             .auto_shrink([false, true])
             .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+                drawn = range.clone();
                 // A row outside the drawn range cannot ask to be scrolled to, so
                 // its place is worked out from its index and the range's own top.
                 if let Some(index) = revealed {
@@ -445,6 +458,12 @@ impl FolderApp {
                     }
                 }
             });
+        // Asked for, but still outside what the list drew: ask again.
+        if let Some(index) = revealed
+            && !drawn.contains(&index)
+        {
+            self.explorer.reveal = true;
+        }
         if let Some(dragged) = background.dnd_release_payload::<Dragged>()
             && writable
             && !parent(&dragged.0).is_empty()
@@ -852,13 +871,14 @@ fn explorer_row(
     let icon_rect = |x: f32| {
         egui::Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), egui::vec2(14.0, 14.0))
     };
-    if row.is_folder() {
-        let chevron = if expanded {
+    let chevron = row.is_folder().then(|| icon_rect(x));
+    if let Some(chevron) = chevron {
+        if expanded {
             Icon::ChevronDown
         } else {
             Icon::ChevronRight
-        };
-        chevron.paint(&painter, icon_rect(x), theme::MUTED);
+        }
+        .paint(&painter, chevron, theme::MUTED);
     }
     x += 16.0;
     let (icon, colour) = match &row.kind {
@@ -908,9 +928,14 @@ fn explorer_row(
     }
     // One click selects and activates: a file opens, a folder folds. A second
     // click on an open file activates its existing tab rather than a new one.
+    // Folding the project hides every row, so the project row does that only
+    // through its chevron, Enter or the arrow keys.
     if response.clicked() {
         actions.push(Action::Select(row.path.clone()));
-        actions.push(FolderApp::activate(row));
+        let on_chevron = chevron.zip(response.interact_pointer_pos());
+        if !row.is_root() || on_chevron.is_some_and(|(chevron, at)| chevron.contains(at)) {
+            actions.push(FolderApp::activate(row));
+        }
     }
     if writable && row.portable && !row.missing && !row.is_root() && response.drag_started() {
         response.dnd_set_drag_payload(Dragged(row.path.clone()));

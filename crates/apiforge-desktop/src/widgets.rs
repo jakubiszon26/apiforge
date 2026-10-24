@@ -401,9 +401,18 @@ impl Widget for ActionButton<'_> {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label)
         });
         if ui.is_rect_visible(rect) {
-            let engaged = response.hovered() || response.is_pointer_button_down_on();
+            // A disabled button must look disabled: it is painted here, so egui
+            // does not fade it, and a full-strength accent reads as live.
+            let enabled = ui.is_enabled();
+            let engaged = enabled && (response.hovered() || response.is_pointer_button_down_on());
             let primary = self.style == ButtonStyle::Primary;
-            let fill = if primary {
+            let fill = if !enabled {
+                if primary {
+                    theme::FIELD
+                } else {
+                    egui::Color32::TRANSPARENT
+                }
+            } else if primary {
                 if response.is_pointer_button_down_on() {
                     theme::ACCENT_PRESSED
                 } else if response.hovered() {
@@ -416,16 +425,18 @@ impl Widget for ActionButton<'_> {
             } else {
                 egui::Color32::TRANSPARENT
             };
-            let border = if response.has_focus() {
+            let border = if enabled && response.has_focus() {
                 Stroke::new(1.5, theme::ACCENT)
-            } else if self.style == ButtonStyle::Secondary {
+            } else if self.style == ButtonStyle::Secondary || (!enabled && primary) {
                 Stroke::new(1.0, theme::BORDER)
             } else {
                 Stroke::NONE
             };
             ui.painter()
                 .rect(rect.shrink(0.5), 5, fill, border, egui::StrokeKind::Inside);
-            let color = if primary {
+            let color = if !enabled {
+                theme::MUTED
+            } else if primary {
                 theme::WHITE
             } else if self.style == ButtonStyle::Danger {
                 theme::DANGER

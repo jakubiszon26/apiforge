@@ -84,7 +84,9 @@ impl FolderApp {
                 return;
             };
             match session.open_text_file(&path) {
-                Ok(_) => self.workbench.open(&text_tab(&path)),
+                // Restoring must not take activation from the document that
+                // had it when the view was saved.
+                Ok(_) => self.workbench.ensure(&text_tab(&path)),
                 Err(_) => self.workbench.close(&text_tab(&path)),
             }
         }
