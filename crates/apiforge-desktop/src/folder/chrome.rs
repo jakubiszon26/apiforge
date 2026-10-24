@@ -333,7 +333,11 @@ impl FolderApp {
         };
     }
 
-    pub(super) fn close_tab_prompt(&mut self, context: &egui::Context, document_id: String) -> Option<Prompt> {
+    pub(super) fn close_tab_prompt(
+        &mut self,
+        context: &egui::Context,
+        document_id: String,
+    ) -> Option<Prompt> {
         let name = self
             .snapshot(&document_id)
             .map(|snapshot| file_name(&snapshot.path).to_owned())
@@ -467,7 +471,11 @@ impl FolderApp {
         Ok(())
     }
 
-    pub(super) fn close_failed_prompt(&mut self, context: &egui::Context, message: String) -> Option<Prompt> {
+    pub(super) fn close_failed_prompt(
+        &mut self,
+        context: &egui::Context,
+        message: String,
+    ) -> Option<Prompt> {
         let (mut retry, mut discard, mut keep) = (false, false, false);
         let response = dialogs::centered_modal(egui::Id::new("folder-close-failed"), context).show(
             context,

@@ -473,3 +473,45 @@ fn every_mode_draws_at_the_minimum_window_with_an_invalid_document() {
         assert_eq!(app.workbench.mode, mode);
     }
 }
+
+#[test]
+fn unfinished_inspector_text_joins_recovery_and_returns_on_reopening() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let project_id = app.session.as_ref().unwrap().manifest().id.clone();
+    app.workbench.mode = Mode::Diagram;
+    let node = first_node(&app, &scenario);
+    app.selections.insert(scenario.clone(), vec![node.id]);
+    let draft = CodeDraft {
+        project_id: project_id.clone(),
+        target: DraftTarget::Field {
+            owner: Box::new(inspector::drafts::document_target(&scenario)),
+            widget: 42,
+        },
+        base_hash: apiforge_storage::draft_base_hash("80"),
+        text: "{{ unfinished".into(),
+        cursor: 4,
+    };
+    inspector::drafts::restore_entries(&context, vec![draft.clone()]);
+    frame(&mut app, &context, vec![]);
+    let fields = app
+        .session
+        .as_ref()
+        .unwrap()
+        .document(&scenario)
+        .unwrap()
+        .field_drafts()
+        .to_vec();
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].text, draft.text);
+    let closed = app.prepare_close();
+    assert!(closed, "{:?}", app.close_error());
+
+    let (reopened_context, _reopened) = open(directory.path());
+    assert_eq!(
+        inspector::drafts::entries(&reopened_context),
+        vec![draft],
+        "the field gets its text back"
+    );
+}

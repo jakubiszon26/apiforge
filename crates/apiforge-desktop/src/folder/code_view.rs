@@ -254,7 +254,12 @@ impl FolderApp {
         }
     }
 
-    pub(super) fn diagnostics_panel(&mut self, ui: &mut egui::Ui, document_id: &str, snapshot: &Snapshot) {
+    pub(super) fn diagnostics_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        document_id: &str,
+        snapshot: &Snapshot,
+    ) {
         let read_only = self
             .session
             .as_ref()
