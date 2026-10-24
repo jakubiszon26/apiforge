@@ -1,6 +1,7 @@
 # ADR 0012: Shared document sessions, analysis versions and execution snapshots
 
-- Status: accepted for Stage II; P1 cache implemented; sessions/integration pending
+- Status: accepted for Stage II; P1 cache and P2 sessions implemented; desktop views
+  behind `--folder` (P4); CLI and run integration pending
 - Date: 2026-10-24
 - Scope: new `apiforge-project`, desktop, language context and CLI integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)

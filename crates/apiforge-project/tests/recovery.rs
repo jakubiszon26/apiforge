@@ -344,3 +344,20 @@ fn clean_close_reports_conflicts_instead_of_overwriting_changed_recovery() {
     assert_eq!(session.document(&id).unwrap().text(), SCENARIO);
     assert_eq!(fs::read_to_string(path).unwrap(), foreign);
 }
+
+#[test]
+fn a_failed_discard_returns_the_session_with_its_unsaved_work() {
+    let (directory, mut session, id) = project();
+    let edited = SCENARIO.replace('2', "3");
+    session.edit_source(&id, &edited, Origin::SESSION).unwrap();
+    session.save_recovery().unwrap();
+    // Recovery changed outside this session: clearing it must not overwrite it.
+    fs::write(directory.path().join(RECOVERY), b"{").unwrap();
+
+    let (mut session, _error) = session.discard_unsaved_and_close().unwrap_err();
+    assert_eq!(session.document(&id).unwrap().text(), edited);
+    session
+        .edit_source(&id, SCENARIO, Origin::SESSION)
+        .expect("the returned session stays editable");
+    assert_eq!(fs::read(directory.path().join(RECOVERY)).unwrap(), b"{");
+}

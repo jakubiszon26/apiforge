@@ -8,6 +8,7 @@ pub mod drafts;
 mod fields;
 mod response;
 
+pub use fields::forget_field_text;
 pub use response::sample_output;
 
 use crate::icons::Icon;

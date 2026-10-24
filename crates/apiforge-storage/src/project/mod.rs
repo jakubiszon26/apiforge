@@ -12,6 +12,7 @@ mod recovery;
 mod schema;
 mod transaction;
 mod trash;
+mod workspace;
 
 pub use cache::{CacheNotice, CacheProvenance, LastValidRead, LastValidSnapshot};
 pub use conflict::{
@@ -27,6 +28,7 @@ pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore};
 pub use trash::{
     RestoreDestination, TrashCommit, TrashEntry, TrashIndex, TrashPreview, TrashRestorePreview,
 };
+pub use workspace::{CameraState, PanelSizes, TabState, ViewMode, WorkspaceState};
 
 use std::{
     io as std_io,

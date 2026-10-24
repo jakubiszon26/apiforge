@@ -315,6 +315,12 @@ impl CodeEditor {
         self.completions.pending_caret = Some((at, at));
     }
 
+    /// Selects a byte range on the next frame, keeping its direction: the caret
+    /// is the end that moves.
+    pub fn select(&mut self, anchor: usize, caret: usize) {
+        self.completions.pending_caret = Some((anchor, caret));
+    }
+
     /// Draws the editor and returns what the user did.
     ///
     /// `id` is the text edit's own id, so a panel with several editors keeps each
@@ -532,6 +538,26 @@ impl CodeEditor {
 /// Whether this frame's input breaks the line the caret is on, which is the
 /// only edit an indentation follows. Enter is matched the way the text edit
 /// matches it, so Shift+Enter counts and Ctrl+Enter does not.
+/// The directional selection of a text edit as byte offsets `(anchor, caret)`,
+/// once the widget has been shown.
+pub fn selection(context: &egui::Context, id: egui::Id, text: &str) -> Option<(usize, usize)> {
+    let range = egui::text_edit::TextEditState::load(context, id)?
+        .cursor
+        .char_range()?;
+    Some((
+        byte_offset(text, range.secondary.index.0),
+        byte_offset(text, range.primary.index.0),
+    ))
+}
+
+/// Forgets a text edit's undo history, for text replaced from outside it.
+pub fn clear_history(context: &egui::Context, id: egui::Id) {
+    if let Some(mut state) = egui::text_edit::TextEditState::load(context, id) {
+        state.clear_undoer();
+        state.store(context, id);
+    }
+}
+
 fn breaks_the_line(ui: &Ui) -> bool {
     ui.input(|input| {
         input.events.iter().any(|event| {

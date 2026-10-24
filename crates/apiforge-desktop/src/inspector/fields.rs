@@ -145,6 +145,16 @@ pub fn json_editor(ui: &mut Ui, id: Id, value: &Value, rows: usize) -> Option<Va
     result
 }
 
+/// Forgets the text the template and body fields keep between frames. Needed
+/// when the owner of their unfinished text replaces it, as a discard does:
+/// otherwise a field would show and register its old text again.
+pub fn forget_field_text(context: &egui::Context) {
+    context.data_mut(|data| {
+        data.remove_by_type::<TemplateDraft>();
+        data.remove_by_type::<BodyDraft>();
+    });
+}
+
 /// The template text field's draft while it is focused or invalid.
 #[derive(Clone, Default)]
 struct TemplateDraft {

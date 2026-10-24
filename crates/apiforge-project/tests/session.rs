@@ -453,3 +453,60 @@ fn saving_pending_source_settles_it_and_seals_its_checkpoint() {
     assert_eq!(session.document(&id).unwrap().text(), edited);
     assert_eq!(session.document(&id).unwrap().model().cloned(), model);
 }
+
+#[test]
+fn reverting_restores_saved_source_layout_and_identity_with_a_new_history() {
+    let (directory, mut session) = project();
+    let id = session
+        .create_document(DocumentKind::Scenario, "scenarios/main.afs", SCENARIO)
+        .unwrap();
+    session.save(&id).unwrap();
+    let saved = session.document(&id).unwrap().model().cloned().unwrap();
+    let Document::Scenario(mut moved) = saved.clone() else {
+        panic!("scenario")
+    };
+    moved.graph.nodes[0].position = Position { x: 640.0, y: 320.0 };
+    session
+        .apply_model_edit(&id, Document::Scenario(moved), Origin::SESSION)
+        .unwrap();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "3"), Origin::SESSION)
+        .unwrap();
+    session.settle(&id).unwrap();
+    assert!(session.document(&id).unwrap().needs_recovery());
+
+    let view = Origin(7);
+    let start = session.last_sequence();
+    session.revert(&id, view).unwrap();
+    let document = session.document(&id).unwrap();
+    assert_eq!(document.text(), SCENARIO);
+    assert!(!document.needs_recovery());
+    assert_eq!(
+        document.model(),
+        Some(&saved),
+        "saved identities and layout"
+    );
+    assert!(!document.can_undo(), "a new history baseline");
+    assert!(
+        session
+            .events_since(start)
+            .iter()
+            .any(|event| event.origin == view
+                && matches!(event.kind, EventKind::SourceChanged { .. }))
+    );
+
+    // A file changed outside the session is never adopted by a revert.
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "4"), Origin::SESSION)
+        .unwrap();
+    let path = directory.path().join("scenarios/main.afs");
+    std::fs::write(&path, SCENARIO.replace('2', "9")).unwrap();
+    assert!(matches!(
+        session.revert(&id, Origin::SESSION),
+        Err(Error::Storage(ProjectError::Conflict { .. }))
+    ));
+    assert_eq!(
+        session.document(&id).unwrap().text(),
+        SCENARIO.replace('2', "4")
+    );
+}
