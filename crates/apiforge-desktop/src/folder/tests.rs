@@ -1569,3 +1569,104 @@ fn ctrl_tab_brings_the_active_tab_back_into_view() {
         "the tab reached by Ctrl+Tab must be visible: {texts:?}"
     );
 }
+
+#[test]
+fn publishing_from_the_header_requires_a_comment_decision_and_cancel_keeps_source() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    app.workbench.open(&id);
+    let original = format!("// loose comment\n\n{}", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &original, CODE)
+        .unwrap();
+    app.session.as_mut().unwrap().settle(&id).unwrap();
+    let revisions = app.session.as_ref().unwrap().manifest().revisions.len();
+    let at = label_position(&mut app, &context, "Publish");
+    click(&mut app, &context, at);
+    assert!(matches!(app.prompt, Some(Prompt::CommentLoss { .. })));
+    assert_eq!(text(&app, &id), original);
+    let at = label_position(&mut app, &context, "Cancel");
+    click(&mut app, &context, at);
+    assert!(app.prompt.is_none());
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().revisions.len(),
+        revisions
+    );
+    let at = label_position(&mut app, &context, "Publish");
+    click(&mut app, &context, at);
+    let at = label_position(&mut app, &context, "Continue");
+    click(&mut app, &context, at);
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().revisions.len(),
+        revisions + 1
+    );
+    assert_eq!(
+        text(&app, &id),
+        original,
+        "publication preserves working formatting and comments"
+    );
+}
+
+#[test]
+fn a_stale_comment_dialog_cannot_authorise_an_edit_of_newer_source() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    let original = format!("// loose\n\n{}", text(&app, &id));
+    let session = app.session.as_mut().unwrap();
+    session.edit_source(&id, &original, CODE).unwrap();
+    session.settle(&id).unwrap();
+    let ticket = session.analysis_for(&id).unwrap().ticket;
+    session
+        .edit_source(&id, &format!("{original}\n"), CODE)
+        .unwrap();
+    session.settle(&id).unwrap();
+    let revisions = session.manifest().revisions.len();
+    app.confirm_comment_loss(&ticket, publication::Action::Publish);
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().revisions.len(),
+        revisions
+    );
+    frame(&mut app, &context, vec![]);
+    assert!(app.notice.as_ref().unwrap().text.contains("changed"));
+}
+
+#[test]
+fn applying_a_pin_fix_from_problems_can_be_undone_in_the_code_editor() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    let original = text(&app, &id);
+    let unpinned = original.replace("@1(", "(");
+    assert_ne!(unpinned, original);
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &unpinned, CODE)
+        .unwrap();
+    app.session.as_mut().unwrap().settle(&id).unwrap();
+    app.workbench.open(&id);
+    frame(&mut app, &context, vec![]);
+    let at = label_position(&mut app, &context, "Apply fix");
+    click(&mut app, &context, at);
+    assert_ne!(text(&app, &id), unpinned);
+    frame(&mut app, &context, vec![]);
+    click(&mut app, &context, egui::pos2(500.0, 160.0));
+    frame(&mut app, &context, vec![key(Key::Z, COMMAND)]);
+    assert_eq!(
+        text(&app, &id),
+        unpinned,
+        "the source fix belongs to text undo"
+    );
+}
+
+fn label_position(app: &mut FolderApp, context: &egui::Context, label: &str) -> egui::Pos2 {
+    painted(app, context, egui::vec2(1600.0, 1000.0))
+        .into_iter()
+        .find(|(text, _)| text == label)
+        .map(|(_, rect)| rect.center())
+        .unwrap_or_else(|| panic!("no visible label {label}"))
+}

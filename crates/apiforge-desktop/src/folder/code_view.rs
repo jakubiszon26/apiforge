@@ -322,11 +322,12 @@ impl FolderApp {
             return;
         }
         let mut reveal = None;
+        let mut fix = None;
         egui::ScrollArea::vertical()
             .id_salt(("folder-problems", document_id))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for diagnostic in &snapshot.diagnostics {
+                for (index, diagnostic) in snapshot.diagnostics.iter().enumerate() {
                     let (line, column) = line_column(&snapshot.text, diagnostic.range.start);
                     let colour = if diagnostic.severity == Severity::Error {
                         theme::DANGER
@@ -336,7 +337,7 @@ impl FolderApp {
                     let response = ui
                         .horizontal(|ui| {
                             ui.label(RichText::new("●").color(colour));
-                            ui.add(
+                            let response = ui.add(
                                 egui::Label::new(
                                     RichText::new(format!(
                                         "Line {line}, column {column}   {}",
@@ -345,7 +346,21 @@ impl FolderApp {
                                     .size(theme::FONT_LABEL),
                                 )
                                 .sense(egui::Sense::click()),
-                            )
+                            );
+                            if diagnostic.fix.is_some()
+                                && ui
+                                    .add_enabled(
+                                        snapshot.analysis != AnalysisState::Pending
+                                            && !read_only
+                                            && !snapshot.held
+                                            && snapshot.conflict.is_none(),
+                                        egui::Button::new("Apply fix"),
+                                    )
+                                    .clicked()
+                            {
+                                fix = Some(index);
+                            }
+                            response
                         })
                         .inner;
                     if response.clicked() {
@@ -353,6 +368,9 @@ impl FolderApp {
                     }
                 }
             });
+        if let Some(index) = fix {
+            self.apply_source_fix(document_id, index);
+        }
         if let Some(range) = reveal {
             let start = range.start.min(snapshot.text.len());
             let end = range.end.clamp(start, snapshot.text.len());

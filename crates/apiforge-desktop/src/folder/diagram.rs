@@ -312,21 +312,14 @@ impl FolderApp {
         cleanup: bool,
         result: Result<Edit, String>,
     ) {
-        let outcome = result.and_then(|edit| {
-            let next = with_graph(model, cleanup, edit.graph);
-            let session = self.session.as_mut().ok_or_else(String::new)?;
-            session
-                .apply_model_edit(document_id, next, DIAGRAM)
-                .map_err(|error| error.to_string())?;
-            Ok(edit.selection)
-        });
-        match outcome {
-            Ok(selection) => {
-                if let Some(selection) = selection {
-                    self.selections.insert(document_id.to_owned(), selection);
-                }
-                self.touched();
-            }
+        match result {
+            Ok(edit) => self.component_action(
+                document_id,
+                publication::Action::Model {
+                    next: Box::new(with_graph(model, cleanup, edit.graph)),
+                    selection: edit.selection,
+                },
+            ),
             Err(message) => {
                 if let Some(canvas) = self.canvases.get_mut(document_id) {
                     canvas.set_error(message);

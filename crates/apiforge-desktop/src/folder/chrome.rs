@@ -17,6 +17,15 @@ impl FolderApp {
             || session.text_files().iter().any(|file| file.is_dirty())
             || session.is_manifest_dirty();
         let active = self.workbench.active();
+        let publish = active
+            .and_then(|id| session.document(id))
+            .filter(|document| document.entry().kind == DocumentKind::Component)
+            .map(|document| {
+                (
+                    document.id().to_owned(),
+                    session.publishable(document.id()).is_ok(),
+                )
+            });
         let active_unsaved = active
             .and_then(|active| session.document(active))
             .is_some_and(|document| document.is_dirty() || document.is_layout_dirty())
@@ -39,6 +48,16 @@ impl FolderApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some((id, enabled)) = &publish
+                    && ui
+                        .add_enabled(*enabled, egui::Button::new("Publish"))
+                        .on_hover_text(
+                            "Save this component and publish its next immutable revision",
+                        )
+                        .clicked()
+                {
+                    self.component_action(id, publication::Action::Publish);
+                }
                 if ui
                     .add_enabled(
                         !read_only && unsaved,
@@ -323,6 +342,9 @@ impl FolderApp {
             return;
         };
         self.prompt = match prompt {
+            Prompt::CommentLoss { ticket, action } => {
+                self.comment_loss_prompt(context, ticket, action)
+            }
             Prompt::CloseTab(document_id) => self.close_tab_prompt(context, document_id),
             Prompt::NewDocument {
                 kind,

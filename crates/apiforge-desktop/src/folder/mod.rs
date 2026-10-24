@@ -15,6 +15,7 @@ mod diagram;
 mod explorer;
 mod file_prompts;
 mod placement;
+mod publication;
 mod text_view;
 mod watcher;
 mod workbench;
@@ -70,6 +71,10 @@ const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
 const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    CommentLoss {
+        ticket: apiforge_project::AnalysisTicket,
+        action: Box<publication::Action>,
+    },
     /// A tab with unsaved work: save, discard or keep it open.
     CloseTab(String),
     NewDocument {
@@ -769,19 +774,7 @@ impl FolderApp {
     }
 
     fn step_model_history(&mut self, document_id: &str, undo: bool) {
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if undo {
-            session.undo(document_id, DIAGRAM)
-        } else {
-            session.redo(document_id, DIAGRAM)
-        };
-        match result {
-            Ok(true) => self.touched(),
-            Ok(false) => {}
-            Err(error) => self.notify(error.to_string(), false),
-        }
+        self.component_action(document_id, publication::Action::History { undo });
     }
 
     // ----- Saving ----------------------------------------------------------------
