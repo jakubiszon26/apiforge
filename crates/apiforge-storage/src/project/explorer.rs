@@ -1,7 +1,7 @@
 //! The project directory as the explorer presents it. Scans list the real tree
 //! without following links and hide `.git` and `.apiforge`; they are bounded so
 //! that a large or deep folder cannot stall the worker that performs them.
-use super::{path, transaction::hash, *};
+use super::{path, *};
 use std::{fs, io};
 
 /// Entries beyond this are not listed and the scan reports truncation.
@@ -163,20 +163,20 @@ impl ProjectStore {
             } else if metadata.is_dir() {
                 TreeEntryKind::Directory
             } else {
-                let hashed = path.ends_with(".afs") || path == MANIFEST_PATH;
-                let sha256 = if hashed && metadata.len() <= MAX_SOURCE_BYTES as u64 {
-                    match fs::read(item.path()) {
-                        Ok(bytes) if bytes.len() <= MAX_SOURCE_BYTES => Some(hash(&bytes)),
-                        Ok(_) => None,
+                if path.ends_with(".afs") || path == MANIFEST_PATH {
+                    match hash_file(&item.path()) {
+                        Ok((bytes, sha256)) => TreeEntryKind::File {
+                            bytes,
+                            sha256: Some(sha256),
+                        },
                         Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                         Err(error) => return Err(ProjectError::io(&item.path(), error)),
                     }
                 } else {
-                    None
-                };
-                TreeEntryKind::File {
-                    bytes: metadata.len(),
-                    sha256,
+                    TreeEntryKind::File {
+                        bytes: metadata.len(),
+                        sha256: None,
+                    }
                 }
             };
             let descend = kind == TreeEntryKind::Directory && depth + 1 < MAX_TREE_DEPTH;
@@ -248,6 +248,33 @@ impl ProjectStore {
 /// The project's own control directories are never listed.
 pub(super) fn is_hidden(name: &str) -> bool {
     name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case(".apiforge")
+}
+
+/// Streams the file, so that sources over the size limit also have a stable
+/// state for change detection without being held in memory.
+fn hash_file(path: &std::path::Path) -> io::Result<(u64, String)> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut context = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buffer = vec![0; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        context.update(&buffer[..read]);
+    }
+    let digest = context.finish();
+    Ok((
+        total,
+        digest
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    ))
 }
 
 fn is_link(metadata: &fs::Metadata) -> bool {
