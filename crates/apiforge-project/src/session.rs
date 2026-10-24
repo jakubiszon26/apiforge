@@ -797,11 +797,33 @@ impl ProjectSession {
                 apiforge_storage::project::ProjectError::InvalidMetadata,
             ));
         }
-        let mut project = context::base_project(&manifest);
-        project.components = self.published.clone();
+        if manifest == self.manifest {
+            return Ok(());
+        }
+        // Validate immutable revision sources against the proposed settings,
+        // including sources that use a display name instead of a stable
+        // contract ID. A failed edit never changes memory or the save baseline.
+        let (_, snapshot) = self.store.load()?;
+        if snapshot.state(&ProjectPath::new(MANIFEST_PATH)?) != Some(self.manifest_saved.clone()) {
+            return Err(Error::RegistryChanged);
+        }
+        let project = context::resolve(
+            &manifest,
+            &snapshot,
+            self.diagram.as_ref(),
+            self.placer.as_ref(),
+        )?;
+        self.published = project.components.clone();
         self.manifest = manifest;
         self.manifest_dirty = true;
         self.context = Arc::new(project);
+        self.invalidate_runtime_inputs(origin);
+        Ok(())
+    }
+
+    /// Session-only execution inputs changed (for example secret values).
+    /// Invalidate analysis/run tickets without making public settings dirty.
+    pub fn invalidate_runtime_inputs(&mut self, origin: Origin) {
         self.context_generation += 1;
         for index in 0..self.documents.len() {
             if self.documents[index].unavailable.is_none() {
@@ -815,7 +837,6 @@ impl ProjectSession {
                 generation: self.context_generation,
             },
         );
-        Ok(())
     }
 
     /// Saves shared configuration without saving any document, including when

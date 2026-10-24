@@ -270,6 +270,12 @@ impl ProjectStore {
         Ok(())
     }
 
+    /// Protect additional managed application metadata with this session's
+    /// known-secret policy. This performs no filesystem I/O.
+    pub fn validate_managed_payload(&self, bytes: &[u8]) -> Result<()> {
+        self.check_secrets(bytes)
+    }
+
     /// Stable raw reads for storage clients. Definitions are loaded with `load`,
     /// which discovers all registered sources inside the same read protocol.
     pub fn read(&self, paths: &[ProjectPath]) -> Result<ProjectSnapshot> {
