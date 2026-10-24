@@ -53,6 +53,35 @@ pub fn set_owner(context: &egui::Context, owner: &crate::buffers::Context) {
     });
 }
 
+/// Field drafts of folder documents, which are keyed by document ID rather
+/// than by scenario or component.
+pub fn document_target(document_id: &str) -> DraftTarget {
+    DraftTarget::Scenario {
+        id: document_id.to_owned(),
+    }
+}
+
+pub fn set_document_owner(context: &egui::Context, project_id: &str, document_id: &str) {
+    context.data_mut(|data| {
+        let mut registry = data.get_temp::<Registry>(key()).unwrap_or_default();
+        registry.owner = Some((project_id.to_owned(), document_target(document_id)));
+        data.insert_temp(key(), registry);
+    });
+}
+
+/// Replaces every unfinished field text, as when a folder project opens.
+pub fn restore_entries(context: &egui::Context, entries: Vec<CodeDraft>) {
+    context.data_mut(|data| {
+        data.insert_temp(
+            key(),
+            Registry {
+                owner: None,
+                entries,
+            },
+        )
+    });
+}
+
 pub fn entries(context: &egui::Context) -> Vec<CodeDraft> {
     context.data_mut(|data| data.get_temp::<Registry>(key()).unwrap_or_default().entries)
 }

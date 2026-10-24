@@ -12,6 +12,7 @@ mod dialogs;
 mod dnd;
 mod editor;
 mod files;
+mod folder;
 mod icons;
 mod inspector;
 mod labels;
@@ -41,12 +42,15 @@ use std::{
 enum Arguments {
     /// The user's workspace, or a document opened for this session only.
     Window(Option<PathBuf>),
+    /// A folder project, opened explicitly.
+    Folder(PathBuf),
     Check(PathBuf),
     SmokeTest(PathBuf),
     /// Captures the window; without a project the demo workspace is shown.
     Screenshot {
         output: PathBuf,
         project: Option<PathBuf>,
+        folder: Option<PathBuf>,
         select: Option<String>,
     },
     Help,
@@ -60,28 +64,34 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
         None => Arguments::Window(None),
         Some(Some("--help" | "-h")) => Arguments::Help,
         Some(Some("--project")) => Arguments::Window(Some(path("Missing file path")?)),
+        Some(Some("--folder")) => Arguments::Folder(path("Missing folder path")?),
         Some(Some("--smoke-test")) => Arguments::SmokeTest(path("Missing file path")?),
         Some(Some("--check")) => Arguments::Check(path("Missing file path")?),
         Some(Some("--screenshot")) => {
             let output = path("Missing screenshot PNG path")?;
-            let (mut project, mut select) = (None, None);
+            let (mut project, mut folder, mut select) = (None, None, None);
             while let Some(flag) = values.next() {
                 let value = values
                     .next()
                     .ok_or("Missing value after a screenshot option")?;
                 match flag.to_str() {
                     Some("--project") => project = Some(PathBuf::from(value)),
+                    Some("--folder") => folder = Some(PathBuf::from(value)),
                     Some("--select") => select = Some(value.to_string_lossy().into_owned()),
                     _ => {
                         return Err(
-                            "Unknown screenshot option; use --project FILE or --select NODE",
+                            "Unknown screenshot option; use --project FILE, --folder PATH or --select NODE",
                         );
                     }
                 }
             }
+            if project.is_some() && folder.is_some() {
+                return Err("Use either --project or --folder, not both");
+            }
             Arguments::Screenshot {
                 output,
                 project,
+                folder,
                 select,
             }
         }
@@ -97,9 +107,10 @@ const HELP: &str = "API Forge
 
   apiforge-desktop                      open your workspace (saved automatically)
   apiforge-desktop --project FILE       open a project or workspace for this session only
+  apiforge-desktop --folder PATH        open a folder project (in development)
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
-  apiforge-desktop --screenshot OUT.png [--project FILE] [--select NODE]
+  apiforge-desktop --screenshot OUT.png [--project FILE | --folder PATH] [--select NODE]
 
 Opening a document never executes requests.";
 
@@ -131,18 +142,26 @@ fn main() -> ExitCode {
             }
         },
         Arguments::Window(None) => match WorkspaceStore::default_location() {
-            Ok(store) => run_window(app::Source::Storage(store), Probe::None),
+            Ok(store) => run_window(Opening::Workspace(app::Source::Storage(store)), Probe::None),
             Err(error) => {
                 eprintln!("{error}");
                 ExitCode::FAILURE
             }
         },
         Arguments::Window(Some(path)) => session(&path, Probe::None),
+        Arguments::Folder(path) => run_window(Opening::Folder(path), Probe::None),
         Arguments::SmokeTest(path) => session(&path, Probe::Smoke),
+        Arguments::Screenshot {
+            output,
+            folder: Some(folder),
+            select,
+            ..
+        } => run_window(Opening::Folder(folder), Probe::Screenshot(output, select)),
         Arguments::Screenshot {
             output,
             project,
             select,
+            ..
         } => {
             let workspace = match project {
                 Some(project) => match files::read_document(&project) {
@@ -155,7 +174,7 @@ fn main() -> ExitCode {
                 None => app::default_workspace(),
             };
             run_window(
-                app::Source::Session(workspace),
+                Opening::Workspace(app::Source::Session(workspace)),
                 Probe::Screenshot(output, select),
             )
         }
@@ -164,7 +183,10 @@ fn main() -> ExitCode {
 
 fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
     match files::read_document(path) {
-        Ok(document) => run_window(app::Source::Session(document.into_workspace()), probe),
+        Ok(document) => run_window(
+            Opening::Workspace(app::Source::Session(document.into_workspace())),
+            probe,
+        ),
         Err(message) => {
             eprintln!("{message}");
             ExitCode::FAILURE
@@ -180,8 +202,71 @@ enum Probe {
     Screenshot(PathBuf, Option<String>),
 }
 
+/// What the window opens: the workspace, or a folder project.
+enum Opening {
+    Workspace(app::Source),
+    Folder(PathBuf),
+}
+
+/// The workspace window, or the folder project window.
+enum Front {
+    Workspace(Box<app::App>),
+    Folder(Box<folder::FolderApp>),
+}
+
+impl Front {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui) {
+        match self {
+            Self::Workspace(app) => app.ui(ui),
+            Self::Folder(app) => app.ui(ui),
+        }
+    }
+
+    fn has_document(&self) -> bool {
+        match self {
+            Self::Workspace(app) => app.has_document(),
+            Self::Folder(app) => app.has_document(),
+        }
+    }
+
+    fn prepare_close(&mut self) -> bool {
+        match self {
+            Self::Workspace(app) => app.prepare_close(),
+            Self::Folder(app) => app.prepare_close(),
+        }
+    }
+
+    fn close_error(&mut self) -> Option<String> {
+        match self {
+            Self::Workspace(app) => app.close_save_error(),
+            Self::Folder(app) => app.close_error(),
+        }
+    }
+
+    fn abort_close(&mut self, error: String) {
+        match self {
+            Self::Workspace(app) => app.abort_close_after_save_error(error),
+            Self::Folder(app) => app.abort_close(error),
+        }
+    }
+
+    /// Only the workspace saves in the background.
+    fn save_pending(&self) -> bool {
+        match self {
+            Self::Workspace(app) => app.save_pending(),
+            Self::Folder(_) => false,
+        }
+    }
+
+    fn select_node(&mut self, node: &str) {
+        if let Self::Workspace(app) = self {
+            app.select_node(node);
+        }
+    }
+}
+
 struct Window {
-    app: app::App,
+    app: Front,
     capture: Option<capture::Capture>,
     smoke: bool,
     frames: u8,
@@ -200,8 +285,8 @@ impl eframe::App for Window {
         }
         if let Some(started) = self.closing_since {
             let ready = self.app.prepare_close();
-            if let Some(error) = self.app.close_save_error() {
-                self.app.abort_close_after_save_error(error);
+            if let Some(error) = self.app.close_error() {
+                self.app.abort_close(error);
                 self.closing_since = None;
                 ui.ctx()
                     .send_viewport_cmd(eframe::egui::ViewportCommand::CancelClose);
@@ -240,7 +325,7 @@ impl eframe::App for Window {
 /// Minimum logical window size: 1920×1080 at 200 % scaling (G6).
 const MIN_WINDOW_SIZE: [f32; 2] = [960.0, 540.0];
 
-fn run_window(source: app::Source, probe: Probe) -> ExitCode {
+fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     let automated = !matches!(probe, Probe::None);
     let completed = Arc::new(AtomicBool::new(!automated));
     let observed = Arc::clone(&completed);
@@ -263,7 +348,14 @@ fn run_window(source: app::Source, probe: Probe) -> ExitCode {
                     (Some(capture::Capture::new(path)), false, select)
                 }
             };
-            let mut app = app::App::new(&context.egui_ctx, source);
+            let mut app = match opening {
+                Opening::Workspace(source) => {
+                    Front::Workspace(Box::new(app::App::new(&context.egui_ctx, source)))
+                }
+                Opening::Folder(root) => {
+                    Front::Folder(Box::new(folder::FolderApp::open(&context.egui_ctx, root)))
+                }
+            };
             if let Some(node) = select {
                 app.select_node(&node);
             }
@@ -307,5 +399,21 @@ mod tests {
         assert!(parse(&["--check"]).is_err());
         assert!(parse(&["--project", "x.json", "--check", "y.json"]).is_err());
         assert!(parse(&["arbitrary.json"]).is_err());
+        assert_eq!(
+            parse(&["--folder", "my project"]),
+            Ok(Arguments::Folder("my project".into()))
+        );
+        assert!(parse(&["--folder"]).is_err());
+        assert!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--project",
+                "x.json",
+                "--folder",
+                "y"
+            ])
+            .is_err()
+        );
     }
 }

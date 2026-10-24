@@ -1,0 +1,475 @@
+use super::*;
+use crate::buffers::APPLY_DELAY;
+
+fn frame(app: &mut FolderApp, context: &egui::Context, events: Vec<egui::Event>) {
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    output.textures_delta.clear();
+}
+
+fn key(key: Key, modifiers: Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+const COMMAND: Modifiers = Modifiers {
+    ctrl: true,
+    command: true,
+    alt: false,
+    shift: false,
+    mac_cmd: false,
+};
+
+fn command_shift() -> Modifiers {
+    Modifiers {
+        shift: true,
+        ..COMMAND
+    }
+}
+
+/// The demo shop as a folder project: one scenario and three components.
+fn shop() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    apiforge_project::prepare_project(directory.path(), &apiforge_core::demos::shop_project())
+        .unwrap();
+    directory
+}
+
+fn open(root: &std::path::Path) -> (egui::Context, FolderApp) {
+    let context = egui::Context::default();
+    let mut app = FolderApp::open(&context, root.to_owned());
+    frame(&mut app, &context, vec![]);
+    (context, app)
+}
+
+fn document(app: &FolderApp, path: &str) -> String {
+    app.session
+        .as_ref()
+        .unwrap()
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == path)
+        .map(|document| document.id().to_owned())
+        .unwrap()
+}
+
+const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+const COMPONENT: &str = "components/add-to-cart.afs";
+
+fn text(app: &FolderApp, document_id: &str) -> String {
+    app.session
+        .as_ref()
+        .unwrap()
+        .document(document_id)
+        .unwrap()
+        .text()
+        .to_owned()
+}
+
+fn type_into_code(app: &mut FolderApp, context: &egui::Context, typed: &str) {
+    let active = app.workbench.active().unwrap().to_owned();
+    context.memory_mut(|memory| memory.request_focus(editor_id(&active)));
+    frame(app, context, vec![]);
+    frame(app, context, vec![egui::Event::Text(typed.into())]);
+}
+
+/// Lets typing pause past the debounce, then waits for every analysis.
+fn settle(app: &mut FolderApp, context: &egui::Context) {
+    std::thread::sleep(APPLY_DELAY + Duration::from_millis(10));
+    frame(app, context, vec![]);
+    let session = app.session.as_mut().unwrap();
+    app.analyser.finish(session);
+    frame(app, context, vec![]);
+}
+
+fn model(app: &FolderApp, document_id: &str) -> Document {
+    app.session
+        .as_ref()
+        .unwrap()
+        .document(document_id)
+        .unwrap()
+        .model()
+        .cloned()
+        .unwrap()
+}
+
+fn first_node(app: &FolderApp, document_id: &str) -> apiforge_core::format::Node {
+    graph_of(&model(app, document_id), false).nodes[0].clone()
+}
+
+fn move_first_node(app: &mut FolderApp, document_id: &str, to: Position) {
+    let node = first_node(app, document_id);
+    app.active_board_command(Command::Move(vec![(node.id, to)]));
+}
+
+#[test]
+fn a_folder_without_a_project_is_written_only_when_initialised() {
+    let directory = tempfile::tempdir().unwrap();
+    let (context, mut app) = open(directory.path());
+    frame(&mut app, &context, vec![]);
+    assert!(app.uninitialised && !app.has_document());
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+
+    app.new_name = "Payments".into();
+    app.initialise();
+    frame(&mut app, &context, vec![]);
+    let session = app.session.as_ref().unwrap();
+    assert_eq!(session.manifest().name, "Payments");
+    assert!(session.documents().is_empty(), "an empty project is valid");
+    assert_eq!(
+        app.workbench.mode,
+        Mode::Code,
+        "a new project starts in Code"
+    );
+}
+
+#[test]
+fn a_first_open_shows_the_first_scenario_in_code() {
+    let directory = shop();
+    let (_context, app) = open(directory.path());
+    assert_eq!(app.workbench.mode, Mode::Code);
+    assert_eq!(
+        app.workbench.active(),
+        Some(document(&app, SCENARIO).as_str())
+    );
+}
+
+#[test]
+fn switching_modes_and_tabs_keeps_unsaved_text_its_history_and_the_caret() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    let original = text(&app, &scenario);
+
+    type_into_code(&mut app, &context, "// note\n");
+    let typed = text(&app, &scenario);
+    assert_eq!(typed, format!("// note\n{original}"));
+    let caret = app.workbench.active_tab().unwrap().selection.clone();
+    assert_eq!(caret.caret, "// note\n".len());
+
+    // Ctrl+E with the caret in the code still switches the view.
+    frame(&mut app, &context, vec![key(Key::E, COMMAND)]);
+    assert_eq!(app.workbench.mode, Mode::Diagram);
+    frame(&mut app, &context, vec![]);
+    app.workbench.mode = Mode::Split;
+    frame(&mut app, &context, vec![]);
+    app.workbench.open(&component);
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Tab, COMMAND)]);
+    assert_eq!(app.workbench.active(), Some(scenario.as_str()), "wraps");
+    frame(&mut app, &context, vec![key(Key::E, COMMAND)]);
+    assert_eq!(app.workbench.mode, Mode::Code, "Split goes to Code");
+    frame(&mut app, &context, vec![]);
+
+    assert_eq!(text(&app, &scenario), typed, "nothing saved or reset");
+    assert_eq!(
+        code::selection(&context, editor_id(&scenario), &typed),
+        Some((caret.anchor, caret.caret)),
+        "the caret came back"
+    );
+    // The text edit's own history still holds the typing.
+    context.memory_mut(|memory| memory.request_focus(editor_id(&scenario)));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Z, COMMAND)]);
+    assert_eq!(text(&app, &scenario), original);
+}
+
+#[test]
+fn model_history_survives_switches_and_ctrl_z_follows_the_focus() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    let moved = Position { x: 900.0, y: 700.0 };
+    app.workbench.mode = Mode::Diagram;
+    frame(&mut app, &context, vec![]);
+    let before = first_node(&app, &scenario).position;
+    move_first_node(&mut app, &scenario, moved.clone());
+    assert_eq!(first_node(&app, &scenario).position, moved);
+    let session = app.session.as_ref().unwrap();
+    assert!(session.document(&scenario).unwrap().is_layout_dirty());
+    assert!(
+        !session.document(&scenario).unwrap().is_dirty(),
+        "layout only"
+    );
+
+    app.workbench.open(&component);
+    frame(&mut app, &context, vec![]);
+    app.workbench.mode = Mode::Code;
+    frame(&mut app, &context, vec![]);
+    app.workbench.open(&scenario);
+    frame(&mut app, &context, vec![]);
+
+    // The caret is in the code: Ctrl+Z belongs to the text, not the model.
+    context.memory_mut(|memory| memory.request_focus(editor_id(&scenario)));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Z, COMMAND)]);
+    assert_eq!(first_node(&app, &scenario).position, moved);
+    context.memory_mut(|memory| memory.surrender_focus(editor_id(&scenario)));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Z, COMMAND)]);
+    assert_eq!(first_node(&app, &scenario).position, before);
+    frame(&mut app, &context, vec![key(Key::Z, command_shift())]);
+    assert_eq!(first_node(&app, &scenario).position, moved);
+}
+
+#[test]
+fn invalid_code_locks_only_its_own_diagram_and_shows_the_last_valid_one() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    type_into_code(&mut app, &context, "}}}");
+    settle(&mut app, &context);
+    let snapshot = app.snapshot(&scenario).unwrap();
+    assert_eq!(snapshot.analysis, AnalysisState::Invalid);
+    assert_eq!(snapshot.model_state, ModelState::LastValid);
+    assert!(!snapshot.editable && !snapshot.diagnostics.is_empty());
+
+    app.workbench.mode = Mode::Diagram;
+    frame(&mut app, &context, vec![]);
+    let before = first_node(&app, &scenario).position;
+    move_first_node(&mut app, &scenario, Position { x: 1.0, y: 2.0 });
+    assert_eq!(first_node(&app, &scenario).position, before, "read-only");
+
+    app.workbench.open(&component);
+    frame(&mut app, &context, vec![]);
+    move_first_node(&mut app, &component, Position { x: 3.0, y: 4.0 });
+    assert_eq!(
+        first_node(&app, &component).position,
+        Position { x: 3.0, y: 4.0 },
+        "another document stays editable"
+    );
+}
+
+#[test]
+fn a_graphical_edit_reprints_the_source_and_retires_its_text_history() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    // A blank first line is valid but not how the printer writes it.
+    context.memory_mut(|memory| memory.request_focus(editor_id(&scenario)));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Enter, Modifiers::NONE)]);
+    settle(&mut app, &context);
+    assert!(text(&app, &scenario).starts_with('\n'));
+    let node = first_node(&app, &scenario);
+    let current = model(&app, &scenario);
+    let mut renamed = graph_of(&current, false).clone();
+    renamed.nodes[0].label = Some("Renamed product".into());
+    app.apply_edit(&scenario, &current, false, Ok(renamed.into()));
+    frame(&mut app, &context, vec![]);
+    let reprinted = text(&app, &scenario);
+    assert!(reprinted.contains("Renamed product"), "{reprinted}");
+    assert!(reprinted.starts_with("scenario"), "canonical print");
+    assert_eq!(first_node(&app, &scenario).id, node.id);
+
+    // Undoing in the text cannot type back the source the graph replaced.
+    context.memory_mut(|memory| memory.request_focus(editor_id(&scenario)));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::Z, COMMAND)]);
+    assert_eq!(text(&app, &scenario), reprinted);
+}
+
+#[test]
+fn ctrl_s_saves_exact_invalid_text_and_save_all_saves_each_document() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    type_into_code(&mut app, &context, "}}}");
+    let invalid = text(&app, &scenario);
+    frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+        invalid,
+        "saved exactly, errors included"
+    );
+
+    // A hidden document and the active one, each with unsaved work.
+    let edited = format!("// helper\n{}", text(&app, &component));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&component, &edited, CODE)
+        .unwrap();
+    type_into_code(&mut app, &context, "x");
+    frame(&mut app, &context, vec![key(Key::S, command_shift())]);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(COMPONENT)).unwrap(),
+        edited
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+        text(&app, &scenario)
+    );
+    let session = app.session.as_ref().unwrap();
+    assert!(
+        session
+            .documents()
+            .iter()
+            .all(|document| !document.is_dirty())
+    );
+}
+
+#[test]
+fn closing_a_tab_with_unsaved_work_asks_and_discarding_restores_the_saved_file() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let original = text(&app, &scenario);
+    type_into_code(&mut app, &context, "// draft\n");
+    frame(&mut app, &context, vec![key(Key::W, COMMAND)]);
+    assert!(matches!(&app.prompt, Some(Prompt::CloseTab(id)) if *id == scenario));
+    assert_eq!(
+        app.workbench.active(),
+        Some(scenario.as_str()),
+        "still open"
+    );
+
+    app.prompt = None;
+    app.close_tab_with(&scenario, false);
+    assert_eq!(text(&app, &scenario), original);
+    assert_eq!(app.workbench.active(), None);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn the_view_and_unsaved_work_come_back_after_closing_the_window() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    let saved = std::fs::read_to_string(directory.path().join(COMPONENT)).unwrap();
+    app.workbench.open(&component);
+    frame(&mut app, &context, vec![]);
+    type_into_code(&mut app, &context, "// unsaved\n");
+    let unsaved = text(&app, &component);
+    app.workbench.mode = Mode::Split;
+    frame(&mut app, &context, vec![]);
+    assert!(app.prepare_close(), "unsaved work is in local recovery");
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(COMPONENT)).unwrap(),
+        saved,
+        "closing never saves a source"
+    );
+
+    let (_context, reopened) = open(directory.path());
+    assert_eq!(reopened.workbench.mode, Mode::Split);
+    let order: Vec<_> = reopened
+        .workbench
+        .tabs()
+        .iter()
+        .map(|tab| tab.document_id.clone())
+        .collect();
+    assert_eq!(order, [scenario, component.clone()]);
+    assert_eq!(reopened.workbench.active(), Some(component.as_str()));
+    assert_eq!(text(&reopened, &component), unsaved);
+    assert_eq!(
+        reopened.workbench.active_tab().unwrap().selection.caret,
+        "// unsaved\n".len()
+    );
+}
+
+#[test]
+fn a_read_only_window_keeps_edits_in_memory_and_refuses_to_close_silently() {
+    let directory = shop();
+    let (_writer_context, _writer) = open(directory.path());
+    let (context, mut reader) = open(directory.path());
+    assert!(reader.session.as_ref().unwrap().is_read_only());
+    let scenario = document(&reader, SCENARIO);
+    let original = std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap();
+    type_into_code(&mut reader, &context, "// mine\n");
+    reader.notice = None;
+    frame(&mut reader, &context, vec![key(Key::S, COMMAND)]);
+    assert!(reader.notice.as_ref().is_some_and(|notice| notice.error));
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+        original
+    );
+    assert!(!reader.prepare_close());
+    assert!(reader.close_error().is_some());
+    assert!(text(&reader, &scenario).starts_with("// mine"));
+}
+
+#[test]
+fn new_documents_start_from_valid_sources_with_unused_paths() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    for _ in 0..2 {
+        app.create_document(DocumentKind::Scenario, "Checkout \"fast\" path")
+            .unwrap();
+    }
+    app.create_document(DocumentKind::Component, "3d secure check")
+        .unwrap();
+    settle(&mut app, &context);
+    let session = app.session.as_ref().unwrap();
+    let paths: Vec<_> = session
+        .documents()
+        .iter()
+        .map(|document| document.entry().path.as_str())
+        .collect();
+    assert!(paths.contains(&"scenarios/checkout-fast-path.afs"));
+    assert!(paths.contains(&"scenarios/checkout-fast-path-2.afs"));
+    assert!(paths.contains(&"components/3d-secure-check.afs"));
+    for document in session.documents() {
+        assert_eq!(
+            document.analysis(),
+            AnalysisState::Valid,
+            "{}: {:?}",
+            document.entry().path.as_str(),
+            document.diagnostics()
+        );
+    }
+}
+
+#[test]
+fn line_and_column_count_characters() {
+    assert_eq!(line_column("ab\nżółw", 0), (1, 1));
+    assert_eq!(line_column("ab\nżółw", 3), (2, 1));
+    assert_eq!(line_column("ab\nżółw", 5), (2, 2));
+    assert_eq!(line_column("ab\nżółw", 6), (2, 2), "inside a character");
+}
+
+#[test]
+fn every_mode_draws_at_the_minimum_window_with_an_invalid_document() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    type_into_code(&mut app, &context, "}}}");
+    settle(&mut app, &context);
+    for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        for _ in 0..2 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 540.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.ui(ui),
+            );
+            output.textures_delta.clear();
+        }
+        assert_eq!(app.workbench.mode, mode);
+    }
+}

@@ -225,6 +225,28 @@ impl Canvas {
         self.reveal_pending = Some(node_id);
     }
 
+    /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
+    /// document's view can be kept between sessions. A fitted camera is not
+    /// worth keeping: it is fitted again.
+    pub fn camera(&self) -> Option<(f32, f32, f32)> {
+        self.camera_moved_by_user.then_some((
+            self.camera.pan.x,
+            self.camera.pan.y,
+            self.camera.zoom,
+        ))
+    }
+
+    /// Restores a kept camera for a context, instead of fitting the board.
+    pub fn restore_camera(&mut self, context: &str, (x, y, zoom): (f32, f32, f32)) {
+        self.context = context.to_owned();
+        self.camera = Camera {
+            zoom: zoom.clamp(MIN_ZOOM, MAX_ZOOM),
+            pan: vec2(x, y),
+        };
+        self.fit_pending = false;
+        self.camera_moved_by_user = true;
+    }
+
     /// Shows an error banner on the board, e.g. a rejected connection.
     pub fn set_error(&mut self, message: impl Into<String>) {
         self.error = Some(message.into());
@@ -283,7 +305,7 @@ impl Canvas {
         let focus_changed = self
             .last_focus
             .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);
-        if self.fit_pending || self.last_size == Vec2::ZERO {
+        if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
             self.fit(viewport, overlays.focus, shapes(&cards, &chips));
         } else if focus_changed {
             if !self.camera_moved_by_user {
