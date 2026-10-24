@@ -1,7 +1,7 @@
 //! One registered document: exact source, its analysis, its model and the model
 //! history. The text-edit history belongs to the view adapter (ADR 0012).
 use apiforge_script::{Diagnostic, Document};
-use apiforge_storage::project::{DocumentEntry, FileState};
+use apiforge_storage::project::{DocumentEntry, FieldRecovery, FileState, TextSelection};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnalysisState {
@@ -55,6 +55,12 @@ pub struct DocumentSession {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) analysis: AnalysisState,
     pub(crate) model: Option<Document>,
+    /// The source text `model` describes, when known. Differs from `text` while
+    /// the current source is pending or invalid.
+    pub(crate) model_source: Option<String>,
+    /// View state kept for recovery: directional selection and field drafts.
+    pub(crate) selection: TextSelection,
+    pub(crate) fields: Vec<FieldRecovery>,
     /// Layout differs from the saved checkpoint while semantics do not.
     pub(crate) layout_dirty: bool,
     pub(crate) history: History,
@@ -86,6 +92,16 @@ impl DocumentSession {
     pub fn is_dirty(&self) -> bool {
         self.unavailable.is_none() && FileState::of(self.text.as_bytes()) != self.saved
     }
+    pub fn selection(&self) -> &TextSelection {
+        &self.selection
+    }
+    pub fn field_drafts(&self) -> &[FieldRecovery] {
+        &self.fields
+    }
+    /// Unsaved work that local recovery must protect.
+    pub fn needs_recovery(&self) -> bool {
+        self.is_dirty() || self.layout_dirty || !self.fields.is_empty()
+    }
     pub fn is_layout_dirty(&self) -> bool {
         self.layout_dirty
     }
@@ -109,5 +125,28 @@ impl DocumentSession {
     }
     pub fn can_redo(&self) -> bool {
         self.accepts_model_edits() && !self.history.redo.is_empty()
+    }
+}
+
+impl DocumentSession {
+    pub(crate) fn new(entry: DocumentEntry, text: String, saved: FileState) -> Self {
+        Self {
+            entry,
+            text,
+            source_version: 1,
+            saved,
+            unavailable: None,
+            diagnostics: Vec::new(),
+            analysis: AnalysisState::Pending,
+            model: None,
+            model_source: None,
+            selection: TextSelection {
+                anchor: 0,
+                caret: 0,
+            },
+            fields: Vec::new(),
+            layout_dirty: false,
+            history: History::default(),
+        }
     }
 }

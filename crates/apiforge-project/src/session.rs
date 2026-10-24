@@ -2,7 +2,7 @@ use crate::{
     Error, Result,
     analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Target},
     context,
-    document::{AnalysisState, DocumentSession, History, Unavailable},
+    document::{AnalysisState, DocumentSession, Unavailable},
     layout::{FixedPlacer, Placer},
 };
 use apiforge_core::format::Project;
@@ -13,7 +13,14 @@ use apiforge_storage::project::{
 };
 use std::{path::Path, sync::Arc};
 
+#[path = "recovery.rs"]
+mod recovery;
+pub use recovery::DraftStatus;
+use recovery::RecoveryState;
+
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
+const GITIGNORE_PATH: &str = ".gitignore";
+const LOCAL_RULE: &str = "/.apiforge/local/";
 
 /// Identifies the view or command source of a change, so that a view can
 /// recognise its own edits instead of echoing them back as new commands.
@@ -85,6 +92,10 @@ pub struct ProjectSession {
     sequence: u64,
     events: Vec<Event>,
     placer: Arc<dyn Placer>,
+    /// Identifies this session instance in cache provenance.
+    session_id: String,
+    recovery: RecoveryState,
+    cache: Option<apiforge_storage::project::LastValidRead>,
 }
 
 impl ProjectSession {
@@ -108,11 +119,13 @@ impl ProjectSession {
             documents: Vec::new(),
             revisions: Vec::new(),
         };
-        store.commit(vec![ProjectChange::Write {
+        let mut changes = vec![ProjectChange::Write {
             path: ProjectPath::new(MANIFEST_PATH)?,
             expected: FileState::Missing,
             bytes: manifest.to_public_bytes()?,
-        }])?;
+        }];
+        changes.extend(ignore_local_data(&store)?);
+        store.commit(changes)?;
         Self::load(store, Arc::new(FixedPlacer), 1)
     }
 
@@ -175,6 +188,9 @@ impl ProjectSession {
             sequence: 0,
             events: Vec::new(),
             placer,
+            session_id: uuid::Uuid::new_v4().to_string(),
+            recovery: RecoveryState::default(),
+            cache: None,
         };
         for entry in manifest.documents {
             session.documents.push(document_from(&snapshot, entry));
@@ -182,6 +198,8 @@ impl ProjectSession {
         for index in 0..session.documents.len() {
             session.analyse_now(index)?;
         }
+        session.load_last_valid();
+        session.load_recovery()?;
         Ok(session)
     }
 
@@ -259,20 +277,14 @@ impl ProjectSession {
         });
         changes.push(self.manifest_change(&manifest)?);
         self.store.commit(changes)?;
+        self.refresh_local_baselines();
         self.manifest_saved = FileState::of(&manifest.to_public_bytes()?);
         self.manifest = manifest;
-        self.documents.push(DocumentSession {
-            entry: entry.clone(),
-            text: text.into(),
-            source_version: 1,
-            saved: FileState::of(text.as_bytes()),
-            unavailable: None,
-            diagnostics: Vec::new(),
-            analysis: AnalysisState::Pending,
-            model: None,
-            layout_dirty: false,
-            history: History::default(),
-        });
+        self.documents.push(DocumentSession::new(
+            entry.clone(),
+            text.into(),
+            FileState::of(text.as_bytes()),
+        ));
         self.emit(
             Origin::SESSION,
             Some(&entry.document_id),
@@ -286,6 +298,7 @@ impl ProjectSession {
     /// until a matching result is applied, and other documents stay editable.
     pub fn edit_source(&mut self, document_id: &str, text: &str, origin: Origin) -> Result<u64> {
         let index = self.index(document_id)?;
+        self.require_no_held_draft(document_id)?;
         let document = &mut self.documents[index];
         if document.unavailable.is_some() {
             return Err(Error::ModelLocked);
@@ -376,6 +389,7 @@ impl ProjectSession {
         match analysis.model {
             Some((model, _)) => {
                 document.analysis = AnalysisState::Valid;
+                document.model_source = Some(document.text.clone());
                 if document.model.as_ref() != Some(&model) {
                     if let Some(previous) = document.model.replace(model) {
                         document.history.record(previous);
@@ -437,6 +451,7 @@ impl ProjectSession {
         origin: Origin,
     ) -> Result<()> {
         let index = self.index(document_id)?;
+        self.require_no_held_draft(document_id)?;
         if !self.documents[index].accepts_model_edits() {
             return Err(Error::ModelLocked);
         }
@@ -521,6 +536,7 @@ impl ProjectSession {
         document.model = Some(model);
         match text {
             Some(text) => {
+                document.model_source = Some(text.clone());
                 document.text = text;
                 document.source_version += 1;
                 document.diagnostics.clear();
@@ -590,6 +606,7 @@ impl ProjectSession {
     /// configuration. Never saves another document's source.
     pub fn save(&mut self, document_id: &str) -> Result<SaveOutcome> {
         let index = self.index(document_id)?;
+        self.require_no_held_draft(document_id)?;
         if self.documents[index].unavailable.is_some() {
             return Err(Error::ModelLocked);
         }
@@ -651,6 +668,7 @@ impl ProjectSession {
             });
         }
         let generation = self.store.commit(changes)?;
+        self.refresh_local_baselines();
         let document = &mut self.documents[index];
         document.saved = FileState::of(&bytes);
         document.layout_dirty = false;
@@ -670,6 +688,9 @@ impl ProjectSession {
                 generation,
             },
         );
+        // The saved draft is obsolete. A failure here is reported by the next
+        // explicit recovery write, which close and project switch require.
+        let _ = self.save_recovery();
         Ok(SaveOutcome {
             generation: Some(generation),
             source_version: version,
@@ -759,26 +780,50 @@ fn document_from(snapshot: &ProjectSnapshot, entry: DocumentEntry) -> DocumentSe
         Some(Err(_)) => (String::new(), Some(Unavailable::NotUtf8)),
         Some(Ok(text)) => (text.to_owned(), None),
     };
-    DocumentSession {
-        saved: bytes.map_or(FileState::Missing, FileState::of),
-        entry,
-        text,
-        source_version: 1,
-        unavailable,
-        diagnostics: Vec::new(),
-        analysis: if unavailable.is_some() {
-            AnalysisState::Invalid
-        } else {
-            AnalysisState::Pending
-        },
-        model: None,
-        layout_dirty: false,
-        history: History::default(),
+    let mut document =
+        DocumentSession::new(entry, text, bytes.map_or(FileState::Missing, FileState::of));
+    if unavailable.is_some() {
+        document.unavailable = unavailable;
+        document.analysis = AnalysisState::Invalid;
     }
+    document
 }
 
 fn has_manifest(root: &Path) -> Result<bool> {
     let probe = ProjectStore::open_read_only(root)?;
     let path = ProjectPath::new(MANIFEST_PATH)?;
     Ok(probe.read(std::slice::from_ref(&path))?.files[&path].is_some())
+}
+
+/// Keeps local session data out of Git: appends the rule to an existing
+/// `.gitignore` without rewriting it, or creates one.
+fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChange>> {
+    let path = ProjectPath::new(GITIGNORE_PATH)?;
+    let current = store.read(std::slice::from_ref(&path))?.files[&path].clone();
+    let Some(bytes) = current else {
+        return Ok(vec![ProjectChange::Write {
+            path,
+            expected: FileState::Missing,
+            bytes: format!("{LOCAL_RULE}\n").into_bytes(),
+        }]);
+    };
+    let covered = String::from_utf8_lossy(&bytes).lines().any(|line| {
+        matches!(
+            line.trim(),
+            "/.apiforge/local/" | "/.apiforge/local" | ".apiforge/local/" | ".apiforge/local"
+        )
+    });
+    if covered {
+        return Ok(Vec::new());
+    }
+    let mut next = bytes.clone();
+    if !next.is_empty() && !next.ends_with(b"\n") {
+        next.push(b'\n');
+    }
+    next.extend_from_slice(format!("{LOCAL_RULE}\n").as_bytes());
+    Ok(vec![ProjectChange::Write {
+        path,
+        expected: FileState::of(&bytes),
+        bytes: next,
+    }])
 }

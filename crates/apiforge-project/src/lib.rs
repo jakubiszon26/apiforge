@@ -13,7 +13,7 @@ pub use analysis::{Analysis, AnalysisInput, AnalysisTicket, Restored};
 pub use document::{AnalysisState, DocumentSession, ModelState, Unavailable};
 pub use layout::{FixedPlacer, Placer};
 pub use prepare::prepare_project;
-pub use session::{Event, EventKind, Origin, ProjectSession, SaveOutcome};
+pub use session::{DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome};
 
 pub use apiforge_script::Document;
 pub use apiforge_storage::project::{DocumentEntry, DocumentKind, ProjectError, ProjectManifest};
@@ -40,6 +40,10 @@ pub enum Error {
     Unprintable,
     #[error("Published component {component_id}@{revision} is not a valid definition.")]
     InvalidRevision { component_id: String, revision: u32 },
+    #[error("A recovered draft of this document needs a keep or discard decision first.")]
+    DraftDecisionRequired,
+    #[error("Local recovery data is unreadable; export or discard unsaved work explicitly.")]
+    RecoveryUnavailable,
     #[error("The analysis result is stale and was discarded.")]
     StaleAnalysis,
     #[error("The document source exceeds the 1 MiB limit.")]
