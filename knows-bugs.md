@@ -14,6 +14,11 @@ line against it and the native window — and fixed **BUG-032–034**, in the
 [end-to-end verification report](docs/qa/2026-10-24/fixes-e2e/verification.md).
 Original reproductions and screenshots are retained below.
 
+Stage II P1–P4 native QA on `main` at `8fafaae` found **BUG-035 (open, P2)**:
+new folder-project diagram cards overlap. The
+[P1–P4 QA report](docs/qa/2026-10-24/p1-p4-native-interactive.md) records the
+interactive checks, supporting automated tests and their limits.
+
 Tested revision: `854b44f` (`feat/live-sync` merged). Native release executable:
 `target/release/apiforge-desktop`, SHA-256
 `5b7868b6bb25ed265bd28081f8aa7cf73aa1a21fcdf4387cba39b138e67f14ce`.
@@ -72,6 +77,12 @@ Found in the fourth pass, running the application end to end:
 | BUG-032 | P2 | An ordering wire runs under the block it leaves, so nothing shows where it starts |
 | BUG-033 | P2 | A failed component prints no inner steps, though its message says to read them |
 | BUG-034 | P3 | A failed comparison at the command line never says what it expected |
+
+Found in Stage II P1–P4 folder-project QA on `8fafaae`:
+
+| ID | Priority | Status | Finding |
+| --- | --- | --- | --- |
+| BUG-035 | P2 | Open | Newly analysed folder-project cards overlap in Diagram and Split |
 
 ## BUG-001 — P1 — The first code edit in a fresh buffer is silently lost
 
@@ -794,6 +805,47 @@ command line prints neither.
 
 **Investigation:** the same printer; `StepResult::expected` and `::actual` were
 not used.
+
+## BUG-035 — P2 — Newly analysed folder-project cards overlap
+
+**Status: open.** Reproduced on `main` at `8fafaae`, in the real native folder
+window on isolated KWin/Xwayland, at 100% zoom in Diagram and Split, including
+after saving and reopening the project.
+
+1. Open a fresh folder with `apiforge-desktop --folder PATH` and initialise it.
+2. Create a scenario and replace its code with:
+
+   ```afs
+   scenario "QA Alpha" {
+     alpha = 7
+     beta = alpha + 3
+   }
+   ```
+
+3. Wait for analysis and switch to Split or Diagram.
+4. Save, close and reopen the project.
+
+**Actual:** the saved checkpoint places `alpha` at `(0, 0)` and `beta` at
+`(0, 120)`. The second card covers the lower part and ports of the first. The
+overlap remains after restart.
+
+**Expected:** new cards use their rendered dimensions for placement, so their
+contents and ports remain visible without overlap.
+
+**Impact:** even a two-step scenario produces a partially obscured diagram;
+users must rearrange cards to read and connect them.
+
+**Evidence:** [initial Split view](docs/qa/2026-10-24/p1-p4-native/split-good.png),
+[Diagram after restart](docs/qa/2026-10-24/p1-p4-native/overlap-after-restart.png),
+[full QA report](docs/qa/2026-10-24/p1-p4-native-interactive.md).
+
+**Investigation:** `FolderApp::open` calls `ProjectSession::open`
+(`crates/apiforge-desktop/src/folder/mod.rs:169`), selecting the default
+`FixedPlacer`. Its uniform 240×96 card size
+(`crates/apiforge-project/src/layout.rs:37`) does not match the native renderer's
+larger, content-dependent cards. Supply a desktop placer using rendered card
+dimensions for both opening and initialising folder projects. This is a separate
+folder-session path from the legacy component-layout issue BUG-006.
 
 ## Coverage and limits
 

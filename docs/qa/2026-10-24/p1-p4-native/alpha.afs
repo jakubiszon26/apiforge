@@ -1,0 +1,4 @@
+scenario "QA Alpha" {
+  alpha = 7
+  beta = alpha + 3
+}

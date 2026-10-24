@@ -1,0 +1,7 @@
+scenario "QA Beta" {
+  on_error stop
+  @config({ method: "POST" })
+  response = POST "/qa" {
+    body { message: "hello" }
+  }
+}

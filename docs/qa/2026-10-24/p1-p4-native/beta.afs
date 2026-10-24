@@ -1,0 +1,5 @@
+scenario "QA Beta" {
+  response = POST "/qa" {
+    body {message: "hello"}
+  }
+}
