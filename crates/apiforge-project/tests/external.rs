@@ -238,3 +238,31 @@ fn unsaved_configuration_must_be_discarded_before_following_a_changed_registry()
     assert_eq!(session.manifest().environment.base_url, "");
     assert_eq!(fs::read_to_string(&registry).unwrap(), changed);
 }
+
+#[test]
+fn a_source_beyond_the_scan_limit_is_not_taken_for_deleted() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Deep").unwrap();
+    let depth = apiforge_storage::project::MAX_TREE_DEPTH + 1;
+    let folder: Vec<String> = (0..depth).map(|level| format!("d{level}")).collect();
+    let path = format!("{}/deep.afs", folder.join("/"));
+    let id = session
+        .create_document(DocumentKind::Scenario, &path, SCENARIO)
+        .unwrap();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "5"), Origin::SESSION)
+        .unwrap();
+    let changes = session.external_check().run().unwrap();
+    assert!(changes.scan.truncated);
+    assert!(session.apply_external(changes).unwrap().is_empty());
+    let document = session.document(&id).unwrap();
+    assert_eq!(document.unavailable(), None);
+    assert_eq!(document.conflict(), None);
+    session.save(&id).unwrap();
+
+    // A real change below the limit is still seen, by a direct check.
+    fs::write(directory.path().join(&path), CHANGED).unwrap();
+    assert_eq!(poll(&mut session).reloaded, std::slice::from_ref(&id));
+    fs::remove_file(directory.path().join(&path)).unwrap();
+    assert_eq!(poll(&mut session).missing, std::slice::from_ref(&id));
+}

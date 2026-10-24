@@ -7,7 +7,7 @@ use super::{EventKind, Origin, ProjectSession};
 use crate::{Error, Result, document::AnalysisState, document::Unavailable};
 use apiforge_storage::project::{
     FileState, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange, ProjectError, ProjectManifest,
-    ProjectPath, ProjectStore, TreeEntryKind, TreeScan,
+    ProjectPath, ProjectStore, TreeScan,
 };
 use std::collections::HashMap;
 
@@ -88,9 +88,22 @@ impl ExternalCheck {
     pub fn run(&self) -> Result<ExternalChanges> {
         let scan = self.store.scan_tree()?;
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
-        let manifest = match scan.entry(MANIFEST_PATH).and_then(|entry| entry.state()) {
+        // A bounded scan can leave out existing files: absence from it is
+        // confirmed directly before anything counts as removed.
+        let state_of = |path: &ProjectPath| -> Result<Option<FileState>> {
+            match scan.entry(path.as_str()) {
+                Some(entry) => Ok(Some(entry.state().unwrap_or(FileState::Directory))),
+                None => match self.store.file_state(path) {
+                    Ok(state) => Ok(Some(state)),
+                    // Over the payload limit: the next scan records its hash.
+                    Err(ProjectError::Limit) => Ok(None),
+                    Err(error) => Err(error.into()),
+                },
+            }
+        };
+        let manifest = match state_of(&manifest_path)? {
             Some(state) if state == self.manifest => None,
-            None if scan.entry(MANIFEST_PATH).is_none() => Some(ObservedFile::Missing),
+            Some(FileState::Missing) => Some(ObservedFile::Missing),
             _ => Some(
                 match self.store.read(std::slice::from_ref(&manifest_path)) {
                     Ok(mut snapshot) => snapshot
@@ -105,30 +118,27 @@ impl ExternalCheck {
         };
         let mut documents = Vec::new();
         for (id, path, saved) in &self.documents {
-            let entry = scan.entry(path.as_str());
-            let current = entry.and_then(|entry| entry.state());
-            if current.as_ref().unwrap_or(&FileState::Missing) == saved {
+            let Some(current) = state_of(path)? else {
+                continue;
+            };
+            if &current == saved {
                 continue;
             }
-            let observed = match (entry.map(|entry| &entry.kind), current) {
-                (Some(TreeEntryKind::File { bytes, .. }), Some(state))
-                    if *bytes > MAX_SOURCE_BYTES as u64 =>
-                {
-                    ObservedFile::TooLarge(state)
+            let observed = match &current {
+                FileState::File { bytes, .. } if *bytes > MAX_SOURCE_BYTES as u64 => {
+                    ObservedFile::TooLarge(current.clone())
                 }
-                (Some(TreeEntryKind::File { .. }), _) => {
-                    match self.store.read(std::slice::from_ref(path)) {
-                        Ok(mut snapshot) => snapshot
-                            .files
-                            .remove(path)
-                            .flatten()
-                            .map_or(ObservedFile::Missing, ObservedFile::Bytes),
-                        // Grew past the limit after the scan; the next check
-                        // records its state.
-                        Err(ProjectError::Limit) => continue,
-                        Err(error) => return Err(error.into()),
-                    }
-                }
+                FileState::File { .. } => match self.store.read(std::slice::from_ref(path)) {
+                    Ok(mut snapshot) => snapshot
+                        .files
+                        .remove(path)
+                        .flatten()
+                        .map_or(ObservedFile::Missing, ObservedFile::Bytes),
+                    // Grew past the limit after the scan; the next check
+                    // records its state.
+                    Err(ProjectError::Limit) => continue,
+                    Err(error) => return Err(error.into()),
+                },
                 // A directory or link where the source was: treat as removed.
                 _ => ObservedFile::Missing,
             };
