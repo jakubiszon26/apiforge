@@ -19,4 +19,4 @@ mod reconcile;
 pub use reconcile::{Reconciled, reconcile, semantic};
 
 mod print;
-pub use print::{print_component, print_scenario};
+pub use print::{print_component, print_folder_document, print_scenario};

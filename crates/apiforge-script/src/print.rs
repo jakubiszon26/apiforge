@@ -3,7 +3,7 @@
 use crate::{
     ast::*,
     format::print_file,
-    lower::{Document, LowerContext, lower},
+    lower::{Document, LowerContext, lower, validate_document_model},
     parse,
     reconcile::semantic,
 };
@@ -20,18 +20,38 @@ pub fn print_component(
 ) -> Result<String, Vec<Diagnostic>> {
     print_document(project, &Document::Component(component.clone()))
 }
+/// Prints a folder definition with the folder policy: component-only projects
+/// are valid and every call must carry its explicit published revision.
+pub fn print_folder_document(
+    project: &Project,
+    document: &Document,
+) -> Result<String, Vec<Diagnostic>> {
+    print_with(project, document, true)
+}
 fn print_document(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
-    let mut validation = project.clone();
-    match document {
-        Document::Scenario(s) => validation.scenarios = vec![s.clone()],
-        Document::Component(c) => {
-            validation
-                .components
-                .retain(|old| old.id != c.id || old.revision != c.revision);
-            validation.components.push(c.clone());
+    print_with(project, document, false)
+}
+fn print_with(
+    project: &Project,
+    document: &Document,
+    folder: bool,
+) -> Result<String, Vec<Diagnostic>> {
+    let valid = if folder {
+        validate_document_model(document, &LowerContext::folder(project)).is_ok()
+    } else {
+        let mut validation = project.clone();
+        match document {
+            Document::Scenario(s) => validation.scenarios = vec![s.clone()],
+            Document::Component(c) => {
+                validation
+                    .components
+                    .retain(|old| old.id != c.id || old.revision != c.revision);
+                validation.components.push(c.clone());
+            }
         }
-    }
-    if apiforge_core::validate_project(&validation).is_err() {
+        apiforge_core::validate_project(&validation).is_ok()
+    };
+    if !valid {
         return Err(vec![Diagnostic::error(
             0..0,
             "Cannot print an invalid document",
@@ -110,7 +130,11 @@ fn print_document(project: &Project, document: &Document) -> Result<String, Vec<
     // Printing is a checked projection: never return plausible text that silently
     // drops a field or cannot be lowered back to the same semantics.
     let tree = parse(&source);
-    let context = LowerContext::document(project);
+    let context = if folder {
+        LowerContext::folder(project)
+    } else {
+        LowerContext::document(project)
+    };
     let context = if let Document::Component(component) = document {
         context.with_component(component)
     } else {
