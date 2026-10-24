@@ -61,6 +61,9 @@ impl Default for Context<'_> {
 pub struct Outcome {
     pub response: egui::Response,
     pub changed: bool,
+    /// The caret, as a byte offset, while the editor has the keyboard. The panel
+    /// uses it to keep the board's selection in step with the text.
+    pub cursor: Option<usize>,
 }
 
 /// The editor's own state: what the popup is showing and what it is for.
@@ -266,6 +269,12 @@ impl Completions {
 }
 
 impl CodeEditor {
+    /// Puts the caret at a byte offset on the next frame, for a selection made
+    /// outside the editor.
+    pub fn reveal(&mut self, at: usize) {
+        self.completions.pending_caret = Some(at);
+    }
+
     /// Draws the editor and returns what the user did.
     ///
     /// `id` is the text edit's own id, so a panel with several editors keeps each
@@ -433,7 +442,11 @@ impl CodeEditor {
             }
         }
 
-        Outcome { response, changed }
+        Outcome {
+            cursor: response.has_focus().then_some(cursor).flatten(),
+            response,
+            changed,
+        }
     }
 }
 

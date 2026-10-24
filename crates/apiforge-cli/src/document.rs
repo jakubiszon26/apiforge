@@ -75,7 +75,7 @@ fn read_document(path: &Path) -> Result<apiforge_core::ValidatedDocument, String
     import_document(&bytes, &limits)
         .map_err(|_| "Invalid or unsupported workspace/project document".into())
 }
-fn scenario_index(project: &Project, selector: &str) -> Result<usize, String> {
+pub fn scenario_index(project: &Project, selector: &str) -> Result<usize, String> {
     if let Some(index) = project.scenarios.iter().position(|s| s.id == selector) {
         return Ok(index);
     }

@@ -411,3 +411,38 @@ fn hover_describes_an_operator_and_a_parameter() {
     assert_eq!(described.kind, Kind::Parameter);
     assert!(described.definition.is_none());
 }
+
+#[test]
+fn the_outline_locates_every_statement_including_nested_ones() {
+    let source = "scenario \"S\" {\n  begin = start\n  ok = if begin.passed {\n    inner = 1\n  } else {\n    other = 2\n  }\n  cleanup {\n    gone = 3\n  }\n}";
+    let handles: Vec<String> = outline(source)
+        .into_iter()
+        .map(|(handle, _)| handle)
+        .collect();
+    assert_eq!(handles, ["begin", "ok", "inner", "other", "gone"]);
+
+    // The cursor names the innermost block it is inside.
+    let at = source.find("inner").unwrap() + 2;
+    assert_eq!(statement_at(source, at).as_deref(), Some("inner"));
+    let at = source.find("begin = start").unwrap() + 1;
+    assert_eq!(statement_at(source, at).as_deref(), Some("begin"));
+    // Between statements there is nothing to name.
+    assert_eq!(statement_at(source, 0), None);
+
+    let range = statement_range(source, "other").expect("the block is written here");
+    assert!(source[range].starts_with("other"));
+    assert_eq!(statement_range(source, "absent"), None);
+}
+
+#[test]
+fn an_outline_of_unfinished_text_names_what_it_can() {
+    // A half-written statement still has a handle and a place.
+    let source = "scenario \"S\" {\n  first = 1\n  second =\n}";
+    let handles: Vec<String> = outline(source)
+        .into_iter()
+        .map(|(handle, _)| handle)
+        .collect();
+    assert!(handles.contains(&"first".to_owned()), "{handles:?}");
+    assert!(outline("").is_empty());
+    assert!(statement_at("", 0).is_none());
+}

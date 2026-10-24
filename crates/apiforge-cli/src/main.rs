@@ -1,4 +1,5 @@
 mod document;
+mod run;
 use std::{env, ffi::OsString, fs::File, io::Read, path::Path, process::ExitCode};
 
 fn source(path: &Path) -> Result<String, String> {
@@ -29,7 +30,11 @@ fn arguments(args: &[OsString]) -> Option<(&Path, bool)> {
 fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().skip(1).collect();
     if args.len() == 1 && matches!(args[0].to_str(), Some("--help" | "-h")) {
-        println!("apiforge fmt <file.afs> [--check]\n{}", document::USAGE);
+        println!(
+            "apiforge fmt <file.afs> [--check]\n{}\n{}",
+            document::USAGE,
+            run::USAGE
+        );
         return ExitCode::SUCCESS;
     }
     if args
@@ -38,6 +43,9 @@ fn main() -> ExitCode {
         .is_some_and(|s| matches!(s, "check" | "print" | "apply"))
     {
         return ExitCode::from(document::run(&args));
+    }
+    if args.first().and_then(|a| a.to_str()) == Some("run") {
+        return ExitCode::from(run::run(&args));
     }
     let Some((path, check)) = arguments(&args) else {
         eprintln!("Usage: apiforge fmt <file.afs> [--check]");

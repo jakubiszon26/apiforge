@@ -71,11 +71,15 @@ apiforge fmt scenario.afs [--check]
 apiforge check --workspace workspace.json [--scenario <name|id>] [scenario.afs]
 apiforge print --workspace workspace.json --scenario <name|id>
 apiforge apply --workspace workspace.json --scenario <name|id> scenario.afs
+apiforge run --workspace workspace.json --scenario <name|id> [--live] [--secrets secrets.json] [--json]
 ```
 
 Run the CLI with `cargo run -p apiforge-cli --locked -- <command>`. `apply` keeps the
 identity and position of unchanged blocks and saves through the same exclusive
-session as the desktop application. The grammar and the round-trip contract are
+session as the desktop application. `run` executes the saved scenario: a simulation
+by default, real requests with `--live`, which takes the writer lock so that what it
+sends is journalled. Secrets come from `--secrets` or from `APIFORGE_SECRET_<name>`
+in the environment, never from the command line. The grammar and the round-trip contract are
 specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 
 ## Repository layout

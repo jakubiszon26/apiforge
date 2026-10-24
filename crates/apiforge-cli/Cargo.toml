@@ -14,6 +14,8 @@ apiforge-core.workspace = true
 serde_json.workspace = true
 apiforge-storage.workspace = true
 apiforge-layout.workspace = true
+apiforge-runner.workspace = true
+indexmap.workspace = true
 apiforge-script.workspace = true
 
 [dev-dependencies]

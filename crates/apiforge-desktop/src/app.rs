@@ -115,6 +115,9 @@ pub struct App {
     code: code::CodeEditor,
     /// Whether the code panel is open beside the board.
     code_open: bool,
+    /// The block whose statement the panel last revealed, so a selection that
+    /// has not changed does not keep pulling the caret back.
+    revealed: Option<String>,
 }
 
 impl App {
@@ -276,6 +279,7 @@ impl App {
             saved_drafts: Vec::new(),
             buffers,
             code: code::CodeEditor::default(),
+            revealed: None,
         }
     }
 
@@ -797,11 +801,60 @@ impl App {
             .inner;
         // The buffer owns the text; the widget only borrowed it for a frame.
         if outcome.changed {
-            self.buffers.typed(&context, text, Instant::now());
+            self.buffers.typed(&context, text.clone(), Instant::now());
         } else if let Some(buffer) = self.buffers.get_mut(&context) {
-            buffer.text = text;
+            buffer.text.clone_from(&text);
         }
+        if let Some(cursor) = outcome.cursor
+            && let Some(buffer) = self.buffers.get_mut(&context)
+        {
+            buffer.cursor = cursor;
+        }
+        self.sync_selection(&text, outcome.cursor);
         self.apply_code(&context, &project, &document);
+    }
+
+    /// Keeps the board's selection and the caret pointing at the same block.
+    ///
+    /// Whoever has the keyboard leads: with the caret in the text, the board
+    /// follows it; otherwise a block selected on the board reveals its statement.
+    fn sync_selection(&mut self, text: &str, cursor: Option<usize>) {
+        if let Some(cursor) = cursor {
+            let Some(handle) = apiforge_script::complete::statement_at(text, cursor) else {
+                return;
+            };
+            let selected = self
+                .editor
+                .graph()
+                .nodes
+                .iter()
+                .find(|node| node.handle == handle)
+                .map(|node| node.id.clone());
+            if let Some(id) = selected
+                && self.editor.selection != [id.clone()]
+            {
+                self.editor.selection = vec![id];
+            }
+            self.revealed = None;
+            return;
+        }
+        // The caret is elsewhere, so the board leads.
+        let Some(handle) = self
+            .editor
+            .selection
+            .first()
+            .and_then(|id| self.editor.graph().nodes.iter().find(|node| &node.id == id))
+            .map(|node| node.handle.clone())
+        else {
+            return;
+        };
+        if self.revealed.as_deref() == Some(handle.as_str()) {
+            return;
+        }
+        if let Some(range) = apiforge_script::complete::statement_range(text, &handle) {
+            self.code.reveal(range.start);
+            self.revealed = Some(handle);
+        }
     }
 
     /// The banner for code restored against a document that has moved on since.
@@ -3311,6 +3364,38 @@ mod tests {
         // Still broken, so the next run asks again.
         app.start_run(RunKind::Full);
         assert!(app.run_prompt.is_some());
+    }
+
+    #[test]
+    fn the_caret_and_the_board_point_at_the_same_block() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let text = app.buffers.get(&key).unwrap().text.clone();
+        let handle = app.editor.graph().nodes[1].handle.clone();
+        let id = app.editor.graph().nodes[1].id.clone();
+
+        // The caret leads: putting it in a statement selects that block.
+        let at = apiforge_script::complete::statement_range(&text, &handle)
+            .expect("the block is written in the code")
+            .start
+            + 1;
+        app.sync_selection(&text, Some(at));
+        assert_eq!(app.editor.selection, vec![id.clone()]);
+
+        // With the caret away, a selection on the board reveals its statement.
+        app.editor.selection = vec![app.editor.graph().nodes[0].id.clone()];
+        app.revealed = None;
+        app.sync_selection(&text, None);
+        assert_eq!(
+            app.revealed.as_deref(),
+            Some(app.editor.graph().nodes[0].handle.as_str())
+        );
+        // It is revealed once, not pulled back on every frame.
+        app.sync_selection(&text, None);
+        assert!(app.revealed.is_some());
     }
 
     #[test]

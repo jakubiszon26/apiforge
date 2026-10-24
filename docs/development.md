@@ -104,6 +104,17 @@ successfully; the probe step verifies that its capture exists and is not empty. 
 probes detect startup, rendering, capture and exit failures; they are not pixel-diff or
 end-to-end editing tests.
 
+## Running a scenario from the command line
+
+```bash
+cargo run -p apiforge-cli --locked -- run --workspace fixtures/workspace.json \
+  --scenario "Promocja i cena w koszyku" [--live] [--secrets secrets.json] [--json]
+```
+
+Exit code 0 means the scenario passed, 1 that it did not or could not run, and 2
+that the arguments were wrong. `--live` opens the workspace exclusively, because a
+live run records what it sends in the run journal; a simulation only reads.
+
 ## The code editor
 
 Scenario text, request bodies and the small template fields share one completion
