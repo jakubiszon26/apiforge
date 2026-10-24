@@ -37,6 +37,8 @@ pub struct Context<'a> {
     pub diagnostics: &'a [Diagnostic],
     /// Line numbers in a gutter, which a one-line field does not want.
     pub line_numbers: bool,
+    /// Whether a long line folds back under itself. Code scrolls instead.
+    pub wrap: bool,
     pub font_size: f32,
 }
 
@@ -47,6 +49,7 @@ impl Default for Context<'_> {
             scope: Scope::default(),
             diagnostics: &[],
             line_numbers: true,
+            wrap: false,
             font_size: 13.0,
         }
     }
@@ -61,6 +64,9 @@ impl Default for Context<'_> {
 pub struct Outcome {
     pub response: egui::Response,
     pub changed: bool,
+    /// The caret, as a byte offset, while the editor has the keyboard. The panel
+    /// uses it to keep the board's selection in step with the text.
+    pub cursor: Option<usize>,
 }
 
 /// The editor's own state: what the popup is showing and what it is for.
@@ -266,6 +272,12 @@ impl Completions {
 }
 
 impl CodeEditor {
+    /// Puts the caret at a byte offset on the next frame, for a selection made
+    /// outside the editor.
+    pub fn reveal(&mut self, at: usize) {
+        self.completions.pending_caret = Some(at);
+    }
+
     /// Draws the editor and returns what the user did.
     ///
     /// `id` is the text edit's own id, so a panel with several editors keeps each
@@ -284,9 +296,12 @@ impl CodeEditor {
         let keys = self.completions.take_keys(ui);
         let diagnostics: Vec<Diagnostic> = context.diagnostics.to_vec();
         let font_for_layout = font.clone();
+        let wrap = context.wrap;
         let mut layouter = move |ui: &Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
             let mut job = layout_job(buffer.as_str(), &diagnostics, font_for_layout.clone());
-            job.wrap.max_width = wrap_width;
+            // Code is read by its indentation, so a long line scrolls rather than
+            // folding back under itself. A one-line field wraps as a field does.
+            job.wrap.max_width = if wrap { wrap_width } else { f32::INFINITY };
             ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
         };
 
@@ -336,7 +351,11 @@ impl CodeEditor {
         output: &egui::text_edit::TextEditOutput,
         context: &Context<'_>,
     ) {
-        let painter = ui.painter_at(rect);
+        // The gutter is as tall as the text, which a wrapped line makes taller
+        // than the rectangle reserved for it; the panel's own clipping decides
+        // what is visible.
+        let visible = ui.clip_rect();
+        let painter = ui.painter().with_clip_rect(visible);
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         let marked = marked_lines(text, context.diagnostics);
@@ -348,10 +367,10 @@ impl CodeEditor {
                         text, start,
                     ))))
                     .top();
-            if top > rect.bottom() {
+            if top > visible.bottom() {
                 break;
             }
-            if top + row_height < rect.top() {
+            if top + row_height < visible.top() {
                 continue;
             }
             let flagged = marked.contains(&number);
@@ -433,7 +452,11 @@ impl CodeEditor {
             }
         }
 
-        Outcome { response, changed }
+        Outcome {
+            cursor: response.has_focus().then_some(cursor).flatten(),
+            response,
+            changed,
+        }
     }
 }
 

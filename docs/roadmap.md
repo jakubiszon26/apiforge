@@ -1,7 +1,7 @@
 # Roadmap: scenario code, Export, variables and wire routing
 
-- Status: in progress; M0, M1, S1, M4, the run journal, M2 and M5 are complete;
-  M6 is next
+- Status: in progress; M0, M1, S1, M4, the run journal, M2, M5 and M6 are
+  complete; M3 is next
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
@@ -277,7 +277,7 @@ with screenshots.
 | M5 | `feat/code-editor` | Completion engine, `CodeEditor` widget, body views and modes, completion in small fields | M4 |
 | M6 | `feat/live-sync` | Code panel, buffers, drafts and both histories (ADR 0007), both sync directions, selection sync; `apiforge run` | S1, M2, M5 |
 | M3 | `feat/variable-proxies` | Variable mark in the inspector, Variables panel, proxies, nearest-proxy wiring, navigation | M2 |
-| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, language reference for users and MCP, screenshot QA | M6, M3 |
+| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, go to definition and rename from the code panel, language reference for users and MCP, screenshot QA | M6, M3 |
 
 S1 lands before anything extends what is stored, because M1 already changes the
 file format and ADR 0007 adds a second file. M4 and M2 are independent and can run
@@ -294,12 +294,13 @@ path works end to end.
 | M4 | Complete: parser, formatter, lowering, printer, reconciliation, located diagnostics and type warnings, `fmt/check/print/apply`; generated-topology property tests and sustained syntax and semantic fuzzing |
 | M2 | Complete: `apiforge-layout`, *Tidy up*, pinning, routed wires with bridges and spline mode, wire settings, benchmarks |
 | M5 | Complete: completion engine with hover and go-to-definition, the `CodeEditor` widget, request bodies in both modes, completion in the URL, header and query fields |
-| M6, M3, M7 | Planned |
+| M6 | Complete: the code panel, buffers and drafts ([ADR 0007](decisions/0007-code-editing-state.md)), both sync directions, selection sync, `apiforge run` |
+| M3, M7 | Planned |
 
-Of M5, two pieces wait for the code panel that M6 brings, because that panel is
-what can act on them: going to a block's definition (Ctrl+click, F12) and
-renaming one (F2) both change what is selected on the board. Hovering a name
-already explains it, which the widget can do alone.
+Two pieces of M5 remain open and are listed with M7: going to a block's
+definition (Ctrl+click, F12) and renaming one (F2) from the code panel. The
+panel keeps the caret and the board's selection in step, which is most of what
+they were for.
 
 The run journal gate is closed: live requests are recorded before they are sent and
 resolved afterwards, an interrupted run is reported at the next start, and reports

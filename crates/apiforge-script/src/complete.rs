@@ -1135,3 +1135,54 @@ pub fn method_words() -> Vec<(HttpMethod, &'static str)> {
 
 #[cfg(test)]
 mod tests;
+
+/// Where each statement of a source is written, as `(handle, range)`.
+///
+/// Statements inside an `if` block are included, so a cursor anywhere in the
+/// text can be traced to the block it belongs to. The ranges come from the parse
+/// tree and are in the order the text has them.
+pub fn outline(source: &str) -> Vec<(String, Range<usize>)> {
+    fn walk(statements: &[crate::ast::Statement], found: &mut Vec<(String, Range<usize>)>) {
+        for statement in statements {
+            found.push((statement.handle.clone(), statement.range.clone()));
+            if let crate::ast::Form::If {
+                then, otherwise, ..
+            } = &statement.form
+            {
+                walk(then, found);
+                if let Some(otherwise) = otherwise {
+                    walk(otherwise, found);
+                }
+            }
+        }
+    }
+    let tree = crate::parse(source);
+    let mut found = Vec::new();
+    if let Some(file) = &tree.file {
+        walk(&file.statements, &mut found);
+        if let Some(cleanup) = &file.cleanup {
+            walk(cleanup, &mut found);
+        }
+    }
+    found
+}
+
+/// The block the cursor is inside, by handle.
+///
+/// The innermost statement wins, so a cursor inside an `if` branch names the
+/// block in the branch rather than the `if` around it.
+pub fn statement_at(source: &str, cursor: usize) -> Option<String> {
+    outline(source)
+        .into_iter()
+        .filter(|(_, range)| range.start <= cursor && cursor <= range.end)
+        .min_by_key(|(_, range)| range.end - range.start)
+        .map(|(handle, _)| handle)
+}
+
+/// Where a block is written, for revealing it when it is selected elsewhere.
+pub fn statement_range(source: &str, handle: &str) -> Option<Range<usize>> {
+    outline(source)
+        .into_iter()
+        .find(|(found, _)| found == handle)
+        .map(|(_, range)| range)
+}

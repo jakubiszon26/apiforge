@@ -36,6 +36,22 @@ struct Snapshot {
     /// The cleanup graph, captured with main-graph edits because deleting a main
     /// node also removes cleanup inputs that referenced it.
     cleanup: Option<Graph>,
+    /// Everything of a scenario except its two graphs, captured only for an edit
+    /// that can change it — which, apart from the settings dialog, means an edit
+    /// written as code. Settings changed in a dialog stay outside this history,
+    /// so restoring them here would undo something the user never undid.
+    settings: Option<Settings>,
+    /// A component draft's declaration, for the same reason.
+    definition: Option<Component>,
+}
+
+/// A scenario without its graphs.
+#[derive(Clone, Debug)]
+struct Settings {
+    name: String,
+    description: String,
+    parameters: indexmap::IndexMap<String, serde_json::Value>,
+    error_policy: apiforge_core::model::ErrorPolicy,
 }
 
 #[derive(Debug, Default)]
@@ -331,11 +347,114 @@ impl Editor {
     }
 
     fn snapshot(&self) -> Snapshot {
+        self.snapshot_with(false)
+    }
+
+    /// The current state. `wide` also captures what only a code edit changes.
+    fn snapshot_with(&self, wide: bool) -> Snapshot {
         Snapshot {
             graph: self.graph().clone(),
             cleanup: (self.drafts.is_empty() && self.phase == Phase::Main)
                 .then(|| self.scenario().cleanup.clone()),
+            settings: (wide && self.drafts.is_empty()).then(|| {
+                let scenario = self.scenario();
+                Settings {
+                    name: scenario.name.clone(),
+                    description: scenario.description.clone(),
+                    parameters: scenario.parameters.clone(),
+                    error_policy: scenario.error_policy,
+                }
+            }),
+            definition: (wide && !self.drafts.is_empty())
+                .then(|| self.drafts.last().map(|draft| draft.definition.clone()))
+                .flatten(),
         }
+    }
+
+    /// Puts a snapshot back, graphs and all.
+    fn restore(&mut self, snapshot: Snapshot) {
+        if let Some(definition) = snapshot.definition
+            && let Some(draft) = self.drafts.last_mut()
+        {
+            draft.definition = definition;
+        }
+        if let Some(settings) = snapshot.settings {
+            let scenario = self.scenario_mut();
+            scenario.name = settings.name;
+            scenario.description = settings.description;
+            scenario.parameters = settings.parameters;
+            scenario.error_policy = settings.error_policy;
+        }
+        self.replace_graph(snapshot.graph, snapshot.cleanup);
+    }
+
+    /// Applies a whole scenario — both graphs and its settings — as one undo
+    /// step. This is what editing a scenario as code produces: the text says
+    /// everything about the scenario, not only about one graph.
+    pub fn apply_scenario(&mut self, next: Scenario, now: Instant) -> Result<(), String> {
+        if !self.drafts.is_empty() {
+            return Err("A component is open; its code applies to the component.".into());
+        }
+        if next.id != self.scenario_id {
+            return Err("The code belongs to another scenario.".into());
+        }
+        for graph in [&next.graph, &next.cleanup] {
+            if has_cycle(graph) {
+                return Err("This change creates a dependency cycle and was not applied.".into());
+            }
+        }
+        let mut next = next;
+        for graph in [&mut next.graph, &mut next.cleanup] {
+            for node in &mut graph.nodes {
+                for binding in node.inputs.values_mut() {
+                    *binding = binding.normalized();
+                }
+            }
+        }
+        if &next == self.scenario() {
+            return Ok(());
+        }
+        let snapshot = self.snapshot_with(true);
+        push_bounded(&mut self.history.past, snapshot);
+        self.history.future.clear();
+        // Code edits arrive debounced and already merged; each is its own step.
+        self.history.merge_key = None;
+        self.history.last_edit = Some(now);
+        self.revision += 1;
+        *self.scenario_mut() = next;
+        self.prune_selection();
+        Ok(())
+    }
+
+    /// Applies a component draft's declaration and graph as one undo step.
+    pub fn apply_component(&mut self, next: Component, now: Instant) -> Result<(), String> {
+        let Some(draft) = self.drafts.last() else {
+            return Err("No component is open.".into());
+        };
+        if has_cycle(&next.graph) {
+            return Err("This change creates a dependency cycle and was not applied.".into());
+        }
+        let mut next = next;
+        for node in &mut next.graph.nodes {
+            for binding in node.inputs.values_mut() {
+                *binding = binding.normalized();
+            }
+        }
+        if next.graph == draft.graph && next == draft.definition {
+            return Ok(());
+        }
+        let snapshot = self.snapshot_with(true);
+        push_bounded(&mut self.history.past, snapshot);
+        self.history.future.clear();
+        self.history.merge_key = None;
+        self.history.last_edit = Some(now);
+        let graph = next.graph.clone();
+        if let Some(draft) = self.drafts.last_mut() {
+            draft.definition = next;
+        }
+        self.replace_graph(graph, None);
+        self.prune_selection();
+        Ok(())
     }
 
     fn replace_graph(&mut self, next: Graph, restored_cleanup: Option<Graph>) {
@@ -387,11 +506,14 @@ impl Editor {
         let Some(previous) = self.history.past.pop() else {
             return;
         };
-        let current = self.snapshot();
+        // The step going the other way captures as much as the one coming back,
+        // so redoing restores exactly what undoing replaced.
+        let wide = previous.settings.is_some() || previous.definition.is_some();
+        let current = self.snapshot_with(wide);
         self.history.future.insert(0, current);
         self.history.future.truncate(HISTORY_LIMIT);
         self.history.merge_key = None;
-        self.replace_graph(previous.graph, previous.cleanup);
+        self.restore(previous);
         self.prune_selection();
     }
 
@@ -400,10 +522,11 @@ impl Editor {
             return;
         }
         let next = self.history.future.remove(0);
-        let current = self.snapshot();
+        let wide = next.settings.is_some() || next.definition.is_some();
+        let current = self.snapshot_with(wide);
         push_bounded(&mut self.history.past, current);
         self.history.merge_key = None;
-        self.replace_graph(next.graph, next.cleanup);
+        self.restore(next);
         self.prune_selection();
     }
 

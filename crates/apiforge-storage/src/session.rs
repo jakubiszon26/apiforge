@@ -482,6 +482,20 @@ fn guard(path: &Path, tracked: &Tracked) -> Result<(), StorageError> {
     }
 }
 
+/// The hash a draft records of the document it was written against.
+///
+/// A later session compares it with the document it finds: when they differ the
+/// document moved on while the draft was away, and the draft cannot simply be
+/// applied over it.
+pub fn draft_base_hash(printed: &str) -> String {
+    let digest = ring::digest::digest(&SHA256, printed.as_bytes());
+    digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn validate_drafts(drafts: &Drafts) -> Result<(), StorageError> {
     if drafts.version != 1 {
         return Err(StorageError::UnsupportedDraftVersion);

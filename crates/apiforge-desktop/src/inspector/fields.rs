@@ -201,6 +201,7 @@ pub fn template_field(
             scope: completion,
             diagnostics: &[],
             line_numbers: false,
+            wrap: true,
             font_size: 12.0,
         },
         &output,
@@ -713,6 +714,7 @@ pub fn request_body_editor(
             scope: completion,
             diagnostics: &[],
             line_numbers: false,
+            wrap: true,
             font_size: 12.0,
         },
     );

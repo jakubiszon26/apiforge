@@ -3,6 +3,7 @@
 //! Opening a document never executes a request.
 
 mod app;
+mod buffers;
 mod canvas;
 mod capture;
 mod code;

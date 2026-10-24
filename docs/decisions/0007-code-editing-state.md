@@ -1,6 +1,7 @@
 # ADR 0007: Code buffers, drafts and history
 
-- Status: accepted
+- Status: accepted and implemented, with the deviations recorded under
+  *As implemented*
 - Date: 2026-10-23
 - Scope: `apiforge-desktop` (code panel, editor state), `apiforge-storage`
 - Plan: [scenario code and canvas](../roadmap.md)
@@ -81,6 +82,32 @@ Run always executes the document, never the buffer. With an Invalid buffer in th
 scenario being run, Run asks once: *The code has errors. Run the last valid
 version?* With an Applied buffer nothing differs, because it is already in the
 document.
+
+## As implemented
+
+The decisions above hold, with these corrections and limits:
+
+- **No body tab.** A request body is edited where it belongs: as part of its
+  scenario's code, and in the inspector, whose body field is the same editor in
+  object or template mode. *Open in code* on that field shows the request in the
+  panel. A tab per body would have been a second editor over the same text, with
+  a fragment to map back and forth, for no reach the panel does not already have.
+- **Reprinting an applied buffer** happens when the document moves on without it,
+  and not while the caret is in it. That is the rule the decision describes; the
+  revision the text was applied at is what tells the two apart.
+- **The cursor after a reprint** is not restored statement by statement. The panel
+  keeps the board's selection and the caret pointing at the same block, which is
+  what the user sees; a reprint of text the caret is in does not happen.
+- **The text history** is the text edit's own. Ctrl+Z while the panel has the
+  keyboard walks the keystrokes, and anywhere else it walks the document, which is
+  the rule the decision states; the buffer does not keep a second copy of it.
+- **Drafts** are written beside the workspace on the autosave schedule and record
+  the hash of the document they were written against. A draft that comes back to a
+  document that has moved on is shown with a banner asking whether to keep or
+  discard it, rather than side by side with the current code: nothing is lost
+  either way, and the question is the same one.
+- **A deleted scenario or component** loses its draft by not being written again:
+  a draft is only stored for a document that is still there.
 
 ## Consequences
 

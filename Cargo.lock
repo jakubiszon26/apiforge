@@ -180,8 +180,10 @@ version = "0.1.0"
 dependencies = [
  "apiforge-core",
  "apiforge-layout",
+ "apiforge-runner",
  "apiforge-script",
  "apiforge-storage",
+ "indexmap",
  "serde_json",
  "tempfile",
 ]

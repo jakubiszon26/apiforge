@@ -104,6 +104,28 @@ successfully; the probe step verifies that its capture exists and is not empty. 
 probes detect startup, rendering, capture and exit failures; they are not pixel-diff or
 end-to-end editing tests.
 
+## Running a scenario from the command line
+
+```bash
+cargo run -p apiforge-cli --locked -- run --workspace fixtures/workspace.json \
+  --scenario "Promocja i cena w koszyku" [--live] [--secrets secrets.json] [--json]
+```
+
+Exit code 0 means the scenario passed, 1 that it did not or could not run, and 2
+that the arguments were wrong. `--live` opens the workspace exclusively, because a
+live run records what it sends in the run journal; a simulation only reads.
+
+## The code panel
+
+A scenario or an open component can be edited as text beside its board (Ctrl+E).
+Typing pauses for 250 ms, then the text becomes one document edit: blocks keep
+their identity, and a block the code introduces is placed by the board's layout.
+Text that does not parse keeps the document as it was and holds the board until
+it is fixed or discarded. Unfinished code is written to `drafts.json` beside the
+workspace and comes back at the next start. Ctrl+Z in the panel walks the text;
+anywhere else it walks the document. [ADR 0007](decisions/0007-code-editing-state.md)
+has the rules.
+
 ## The code editor
 
 Scenario text, request bodies and the small template fields share one completion
