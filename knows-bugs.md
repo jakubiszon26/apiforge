@@ -19,6 +19,17 @@ new folder-project diagram cards overlap. The
 [P1–P4 QA report](docs/qa/2026-10-24/p1-p4-native-interactive.md) records the
 interactive checks, supporting automated tests and their limits.
 
+Stage II P5 UI quality QA on `0fcff3e` adds **BUG-036–043 (open, planned for P6)**.
+The user approved merging P5 on 2026-10-24 with these UI issues assigned to P6;
+they are not fixed by that merge. The [P6 acceptance plan](docs/stage-ii-code-workspace.md#p6-ui-quality-and-text-file-acceptance)
+includes the four user-reported issues and the accompanying navigation,
+accessibility and visual findings. The [UI quality record](docs/qa/2026-10-24/p5-ui-quality/results.json)
+contains native evidence and the reproducible acceptance probes: two controls
+pass and eight requirements fail, separately from the 791 passing standard tests.
+The three earlier P5 CR problems (false deletion after a truncated scan,
+partial invalid case-only rename, and omitted missing dirty documents in folder
+deletion) pass their [reproduction retests](docs/qa/2026-10-24/p5-ui-quality/previous-cr-retest.log).
+
 Tested revision: `854b44f` (`feat/live-sync` merged). Native release executable:
 `target/release/apiforge-desktop`, SHA-256
 `5b7868b6bb25ed265bd28081f8aa7cf73aa1a21fcdf4387cba39b138e67f14ce`.
@@ -33,10 +44,12 @@ was not used. The host desktop is GNOME/Wayland, so KWin tools do not apply.
 Priorities: **P1** = lost edits or incorrect execution; **P2** = broken workflow;
 **P3** = polish/accessibility. Findings require a reproducible UI observation;
 source references are investigation hints, not substitutes for reproduction.
+The later Stage II records distinguish native observations from egui input,
+geometry and AccessKit probes; none claims a complete native accessibility audit.
 
 ## Triage summary
 
-**17 findings: 8 P1, 7 P2, 2 P3.** Fix loss of edits and incorrect execution first;
+**Original pass: 17 findings, 8 P1, 7 P2, 2 P3.** Fix loss of edits and incorrect execution first;
 review visual polish alongside the locking and panel-layout work.
 
 | ID | Priority | Finding |
@@ -83,6 +96,23 @@ Found in Stage II P1–P4 folder-project QA on `8fafaae`:
 | ID | Priority | Status | Finding |
 | --- | --- | --- | --- |
 | BUG-035 | P2 | Open | Newly analysed folder-project cards overlap in Diagram and Split |
+
+### Stage II P5 UI quality follow-up (P6)
+
+All eight findings below remain open and are assigned to P6. BUG-035 also joins
+P6's UI quality acceptance. Merging P5 is an explicitly approved delivery
+decision, not closure of these findings.
+
+| ID | Priority | Status / package | Finding |
+| --- | --- | --- | --- |
+| BUG-036 | P2 | Open / P6 | Close icon is outside its file tab's visible surface |
+| BUG-037 | P2 | Open / P6 | A single explorer click selects a file without opening it |
+| BUG-038 | P2 | Open / P6 | Project root has no selectable explorer row |
+| BUG-039 | P2 | Open / P6 | Project text files such as .gitignore do not open in application tabs |
+| BUG-040 | P2 | Open / P6 | Active file tab remains offscreen when the strip overflows |
+| BUG-041 | P3 | Open / P6 | Duplicate filenames are indistinguishable in the tab strip |
+| BUG-042 | P3 | Open / P6 | Explorer files have no named accessibility nodes |
+| BUG-043 | P2 | Open / P6 | Activating a file does not reveal its offscreen explorer row |
 
 ## BUG-001 — P1 — The first code edit in a fresh buffer is silently lost
 
@@ -812,6 +842,9 @@ not used.
 window on isolated KWin/Xwayland, at 100% zoom in Diagram and Split, including
 after saving and reopening the project.
 
+**Planned package: P6.** Included in the user's UI quality follow-up alongside
+BUG-036–043; this issue is not closed by merging P5.
+
 1. Open a fresh folder with `apiforge-desktop --folder PATH` and initialise it.
 2. Create a scenario and replace its code with:
 
@@ -846,6 +879,154 @@ users must rearrange cards to read and connect them.
 larger, content-dependent cards. Supply a desktop placer using rendered card
 dimensions for both opening and initialising folder projects. This is a separate
 folder-session path from the legacy component-layout issue BUG-006.
+
+## BUG-036 — P2 — The close icon is outside its file tab
+
+**Status: open; planned for P6.** User report confirmed in native P5 on `0fcff3e`
+and by the egui geometry probe.
+
+1. Open several files and select a tab.
+2. Inspect the selected tab's background and its close icon.
+
+**Actual:** the pill encloses the filename, while the close control is a separate
+button outside it. The isolated probe measures the surface ending at x=72.2 and
+the close strokes at x=89.8–96.8.
+
+**Expected:** name, state and close control share one tab surface, with a stable
+close target that closes only that file and retains dirty-close protection.
+
+**Evidence:** [tabs with long and duplicate names](docs/qa/2026-10-24/p5-ui-quality/long-and-duplicate-tabs.png),
+`ui_quality_close_icon_is_inside_its_tab_surface` in the
+[acceptance log](docs/qa/2026-10-24/p5-ui-quality/acceptance.log).
+
+## BUG-037 — P2 — One explorer click does not open the selected file
+
+**Status: open; planned for P6.** User-reported interaction requirement,
+confirmed with native input and the egui pointer-event probe on `0fcff3e`.
+
+1. Open Alpha, then click Beta once in the explorer.
+2. Wait beyond the external polling interval without clicking Refresh.
+
+**Actual:** Beta is highlighted, but Alpha remains in the editor. Two separated
+single clicks still only select. Controlled double-click and Enter open Beta.
+The user's exact three-click/Refresh dependency was not reproduced.
+
+**Expected:** one click opens or activates a file without Refresh or extra
+clicks; repeated activation does not create duplicate tabs. Enter remains usable.
+
+**Evidence:** [single click](docs/qa/2026-10-24/p5-ui-quality/beta-one-click.png),
+[controlled double-click](docs/qa/2026-10-24/p5-ui-quality/beta-double-controlled.png),
+`ui_quality_one_click_opens_a_registered_file_without_refresh` and its passing
+double-click/Enter controls in the acceptance log.
+
+## BUG-038 — P2 — The project root cannot be selected in the explorer
+
+**Status: open; planned for P6.** User report confirmed in the native window and
+the explorer-row acceptance probe on `0fcff3e`.
+
+1. Open a folder project and try to select its root in the explorer.
+2. Try to make the root an explicit destination for a new file, folder or import.
+
+**Actual:** the tree lists the root's children only. The blank background has a
+context menu and drop handling, but no named, selectable root row.
+
+**Expected:** a root row with mouse/keyboard selection and collapse/expand;
+creation/import/drop actions use an explicit visible destination. Root rename
+and delete are excluded from ordinary file actions.
+
+**Evidence:** [initial explorer](docs/qa/2026-10-24/p5-ui-quality/initial.png),
+`ui_quality_project_root_is_a_selectable_explorer_row` in the acceptance log.
+
+## BUG-039 — P2 — Project text files do not open in the application
+
+**Status: open; planned for P6; accepted scope addition.** The original Stage II
+plan excluded non-`.afs` editing. The user's request explicitly adds project text
+files such as `.gitignore` to P6, so the old exclusion no longer satisfies acceptance.
+
+1. Click `.gitignore` in the project explorer.
+2. Try Enter or double-click to open its contents.
+
+**Actual:** one click selects; Enter/double-click invokes Reveal in file manager.
+No application text tab opens. Only registered `.afs` documents have editor tabs.
+
+**Expected:** open and edit project text files in application tabs with exact
+save semantics, dirty/close/recovery/read-only/conflict handling, without treating
+them as scenarios. Preserve path and managed-metadata protections.
+
+**Evidence:** [gitignore selected with the previous document still open](docs/qa/2026-10-24/p5-ui-quality/gitignore-enter.png),
+`ui_quality_gitignore_opens_as_text_inside_the_application` in the acceptance log.
+
+## BUG-040 — P2 — The active tab remains offscreen
+
+**Status: open; planned for P6.** Confirmed in native P5 at 960 × 540 and by the
+many-tabs acceptance probe on `0fcff3e`.
+
+1. Open enough documents to overflow the tab strip.
+2. Activate a later file through the explorer or cycle tabs with Ctrl+Tab.
+
+**Actual:** the editor changes, but the active tab is not scrolled into view.
+The native capture shows Task 12 while the strip displays earlier tabs and has
+no visible selected tab.
+
+**Expected:** reveal the active tab on activation and keyboard cycling, keeping
+its name, status and close control reachable at the minimum window size.
+
+**Evidence:** [many tabs at 960 × 540](docs/qa/2026-10-24/p5-ui-quality/many-tabs-minimum.png),
+`ui_quality_active_tab_stays_visible_with_many_open_files` in the acceptance log.
+
+## BUG-041 — P3 — Equal filenames produce indistinguishable tabs
+
+**Status: open; planned for P6.** Confirmed in native P5 and by the tab-label
+acceptance probe on `0fcff3e`.
+
+1. Open `other/alpha.afs` and `scenarios/alpha.afs`.
+2. Open a file with a long descriptive name as well.
+
+**Actual:** both Alpha tabs say only `alpha.afs`; the full path is available only
+on hover. Long filenames consume a large fraction of the tab strip.
+
+**Expected:** visibly disambiguate duplicate filenames with a minimal parent-path
+suffix; bound long labels while retaining full-path tooltips and reachable controls.
+
+**Evidence:** [duplicate and long filenames](docs/qa/2026-10-24/p5-ui-quality/long-and-duplicate-tabs.png),
+`ui_quality_tabs_disambiguate_equal_names_from_different_folders` in the acceptance log.
+
+## BUG-042 — P3 — Explorer files have no named accessibility nodes
+
+**Status: open; planned for P6.** Confirmed by the egui AccessKit output probe on
+`0fcff3e`; this is not a complete native screen-reader audit.
+
+1. Enable AccessKit output for the folder window with Alpha and Beta files.
+2. Inspect the generated named nodes.
+
+**Actual:** the standard `Close alpha.afs` button is labelled, but there is no
+named `beta.afs` explorer item. The file label is painted without corresponding
+named navigation metadata.
+
+**Expected:** expose filename, role, selection and expanded/collapsed state for
+explorer navigation; keyboard focus must also be visible.
+
+**Evidence:** `ui_quality_explorer_files_have_named_accessibility_nodes`, including
+its standard-button control, in the
+[acceptance log](docs/qa/2026-10-24/p5-ui-quality/acceptance.log).
+
+## BUG-043 — P2 — The explorer does not reveal an active offscreen file
+
+**Status: open; planned for P6.** Confirmed by native observation of Task 12 below
+the 960 × 540 explorer viewport and the virtualised-row acceptance probe on `0fcff3e`.
+
+1. Open a project containing more files than fit in the explorer viewport.
+2. Activate a document whose row is below the visible range.
+
+**Actual:** the active document changes without scrolling its explorer row into
+view. Reveal handling calls `scroll_to_me` only for already-rendered visible
+rows, so a virtualised offscreen row never receives it.
+
+**Expected:** activating a document reveals and highlights its explorer row,
+including when it was outside the rendered range.
+
+**Evidence:** [Task 12 open with its explorer row offscreen](docs/qa/2026-10-24/p5-ui-quality/many-tabs-minimum.png),
+`ui_quality_active_file_is_revealed_in_a_long_explorer` in the acceptance log.
 
 ## Coverage and limits
 

@@ -1,0 +1,188 @@
+{
+  "tested_ref": "origin/feat/stage-ii-p5-explorer",
+  "tested_commit": "0fcff3eb786024fe6fee76c94fedb29410e10877",
+  "date": "2026-10-24",
+  "merge_eligible": false,
+  "scope": "UI quality acceptance audit and verification of the three previous CR fixes. No production UI changes.",
+  "baseline": {
+    "format": "passed",
+    "clippy_workspace_all_targets": "passed",
+    "fixtures": "passed",
+    "workspace_tests": {
+      "passed": 791,
+      "failed": 0,
+      "ignored": 2
+    }
+  },
+  "previous_cr_reproductions": {
+    "passed": 3,
+    "failed": 0,
+    "log": "previous-cr-retest.log"
+  },
+  "ui_acceptance_tests": {
+    "passed": 2,
+    "failed": 8,
+    "tests": "tools/qa/ui-quality/probes.rs",
+    "command": "tools/qa/ui-quality/run.sh",
+    "pinned_command": "tools/qa/ui-quality/run.sh 0fcff3eb786024fe6fee76c94fedb29410e10877",
+    "note": "Runner exports an isolated source tree and appends acceptance tests, without changing production code or Git refs. Exit 101 is expected until unmet requirements are implemented. Two passing controls check actual double-click and Enter input. The additional tests are not part of the 791-test baseline.",
+    "log": "acceptance.log"
+  },
+  "native_qa": {
+    "platform": "Linux; isolated KWin virtual compositor with Xwayland; real eframe binary and pointer/keyboard injection",
+    "client_sizes": [
+      [
+        1600,
+        972
+      ],
+      [
+        960,
+        540
+      ]
+    ],
+    "binary_sha256": "4fe56229d609f4b06e65dae952c2ed482ee548d160e8508480a579261bd4da88",
+    "passed": [
+      "Controlled double-click opens the registered file",
+      "Enter opens the selected registered file",
+      "Ctrl+Tab changes the document",
+      "Ctrl+E changes Code/Diagram at 960x540"
+    ],
+    "limits": [
+      "No Windows run",
+      "No subjective modernity score or complete accessibility certification",
+      "No claim that exact three-click or Refresh dependency was reproduced",
+      "No native file-dialog tests in this pass"
+    ],
+    "cleanup": "Test windows and compositor stopped; user workspace/config untouched."
+  },
+  "findings": [
+    {
+      "id": "UI-001",
+      "kind": "visual",
+      "title": "Close icon is outside the tab surface",
+      "priority": "P2",
+      "expected": "One coherent tab surface with label, state and close control inside it. Stable close target.",
+      "observed": "Selected pill ends at x=72.2; close strokes are at x=89.8..96.8 in isolated egui geometry.",
+      "source": "crates/apiforge-desktop/src/folder/chrome.rs:105",
+      "evidence": "long-and-duplicate-tabs.png",
+      "known_bug_id": "BUG-036",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-002",
+      "kind": "interaction",
+      "title": "One click selects an .afs file but does not open it",
+      "priority": "P2",
+      "expected": "One click opens/activates the file without Refresh.",
+      "observed": "Native: beta selected while Other Alpha remains in the editor even after waiting beyond polling interval. Controlled double click and Enter open Beta. Exact need for three clicks or Refresh was not reproduced.",
+      "source": "crates/apiforge-desktop/src/folder/explorer.rs:735",
+      "evidence": "beta-one-click.png",
+      "known_bug_id": "BUG-037",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-003",
+      "kind": "navigation",
+      "title": "Project root has no selectable explorer row",
+      "priority": "P2",
+      "expected": "A named root row can be selected and used as the explicit destination for creation/import/drop.",
+      "observed": "Only root children are listed. Blank background supports a context menu/drop, but does not provide a selectable root row.",
+      "source": "crates/apiforge-desktop/src/folder/explorer.rs:69",
+      "evidence": "initial.png",
+      "known_bug_id": "BUG-038",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-004",
+      "kind": "unmet_user_requirement",
+      "title": ".gitignore does not open in the application",
+      "priority": "P2",
+      "expected": "Project text files such as .gitignore can be opened as text in an application tab.",
+      "observed": "One click only selects; Enter/double click invokes Reveal in file manager. Only registered .afs documents have editor tabs. This requires expanding the original Stage II scope, which explicitly excluded arbitrary file editing. It is now a requested acceptance requirement.",
+      "source": "crates/apiforge-desktop/src/folder/explorer.rs:741",
+      "evidence": "gitignore-enter.png",
+      "known_bug_id": "BUG-039",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-005",
+      "kind": "navigation",
+      "title": "Active tab is not automatically scrolled into view",
+      "priority": "P2",
+      "expected": "Opening or cycling to a tab reveals it even when the strip overflows.",
+      "observed": "Native: Task 12 is in the editor at 960x540, while its active tab is offscreen. No visible active-tab indication in the strip.",
+      "source": "crates/apiforge-desktop/src/folder/chrome.rs:100",
+      "evidence": "many-tabs-minimum.png",
+      "known_bug_id": "BUG-040",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-006",
+      "kind": "visual",
+      "title": "Equal filenames in different folders produce indistinguishable tabs",
+      "priority": "P3",
+      "expected": "Show a minimal directory suffix for duplicate filenames; keep full path in tooltip. Bound tab width and truncate long labels while keeping close controls reachable.",
+      "observed": "Two alpha.afs tabs have identical visible labels. A long filename consumes a large fraction of the strip.",
+      "source": "crates/apiforge-desktop/src/folder/chrome.rs:83",
+      "evidence": "long-and-duplicate-tabs.png",
+      "known_bug_id": "BUG-041",
+      "status": "open",
+      "planned_package": "P6"
+    },
+    {
+      "id": "UI-007",
+      "kind": "accessibility",
+      "title": "Explorer files have no named accessibility nodes",
+      "priority": "P2",
+      "expected": "Expose filenames and selection/expanded state as accessible navigation items; keyboard focus should be visible.",
+      "observed": "AccessKit output labels the standard Close alpha.afs button, but contains no named beta.afs explorer entry. Test inspects egui output, not a complete native screen-reader session.",
+      "source": "crates/apiforge-desktop/src/folder/explorer.rs:653",
+      "evidence": "acceptance.log",
+      "known_bug_id": "BUG-042",
+      "status": "open",
+      "planned_package": "P6",
+      "current_registry_priority": "P3; accessibility triage follows the known-bugs priority convention; audit priority is preserved above."
+    },
+    {
+      "id": "UI-008",
+      "kind": "navigation",
+      "title": "Active document is not revealed in a long explorer",
+      "priority": "P2",
+      "expected": "Changing active tabs scrolls the selected explorer row into view, including virtualised rows.",
+      "observed": "Reveal is applied only to rows in show_rows visible range; an offscreen row never gets scroll_to_me. Native Task 12 is below the explorer viewport at 960x540.",
+      "source": "crates/apiforge-desktop/src/folder/explorer.rs:306",
+      "evidence": "many-tabs-minimum.png",
+      "known_bug_id": "BUG-043",
+      "status": "open",
+      "planned_package": "P6"
+    }
+  ],
+  "visual_acceptance": [
+    "Use one integrated visual surface per tab, with bounded width and a close target inside.",
+    "Keep active, selected, focused, dirty, invalid and conflict states distinct and legible.",
+    "Provide a visible project root and predictable single-click navigation.",
+    "Reveal the active document in both the tab strip and explorer.",
+    "Distinguish duplicate filenames and show full paths on hover.",
+    "Keep controls reachable at 960x540 and with many open tabs.",
+    "Keep explorer/header/tab/dialog typography, spacing, target sizes and states consistent.",
+    "New-document/import UI should show the destination path.",
+    "Text-file tabs require their own open/save/dirty/close/recovery/conflict policy before implementation can be considered complete."
+  ],
+  "merge_eligibility_basis": "UI quality gate at audit time. Subsequent explicit user delivery authorization is recorded below; the failed probes remain open P6 work.",
+  "delivery_decision": {
+    "date": "2026-10-24",
+    "authorization": "User explicitly requested merging P5 to main and assigning the UI remarks to P6.",
+    "merge_commit": "4c1d1f23f9fccb5c6be7ff132d6cda36913ab97a",
+    "accepted_package": "P5",
+    "remaining_work_package": "P6",
+    "ui_gate_passed": false,
+    "standard_tests_changed": false,
+    "plan": "docs/stage-ii-code-workspace.md#p6-ui-quality-and-text-file-acceptance",
+    "registry": "knows-bugs.md#stage-ii-p5-ui-quality-follow-up-p6"
+  }
+}

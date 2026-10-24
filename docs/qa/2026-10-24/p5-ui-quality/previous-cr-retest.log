@@ -1,0 +1,14 @@
+   Compiling apiforge-core v0.1.0 (/tmp/apiforge-p5-ui-review/source/crates/apiforge-core)
+   Compiling apiforge-script v0.1.0 (/tmp/apiforge-p5-ui-review/source/crates/apiforge-script)
+   Compiling apiforge-storage v0.1.0 (/tmp/apiforge-p5-ui-review/source/crates/apiforge-storage)
+   Compiling apiforge-project v0.1.0 (/tmp/apiforge-p5-ui-review/source/crates/apiforge-project)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.37s
+     Running tests/cr_review.rs (/home/jakub/Projekty/apiforge-qa/target/debug/deps/cr_review-5109db5946de351f)
+
+running 3 tests
+test deleting_directory_must_include_missing_dirty_registered_document ... ok
+test failed_case_only_rename_must_keep_original_path ... ok
+test truncated_scan_must_not_mark_existing_document_deleted ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+

@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes implemented behind `--folder`, P6–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`; P6 includes the open UI quality findings as well as publication, CLI and runs; P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -29,9 +29,11 @@ The agreed product decisions are:
 - This stage supplies the shared session needed for a future second diagram
   window. The second native window itself is outside this stage.
 
-System fullscreen, IPC, collaboration, arbitrary file-type editing, new variable-
+System fullscreen, IPC, collaboration, binary/rich-document editing, new variable-
 proxy functionality and a general symbol-rename/navigation feature are outside
-this stage. M3 variable proxies were merged in `c9c5ba0` and must survive folder
+this stage. By the user's scope update on 2026-10-24, P6 also opens and edits
+project text files such as `.gitignore` inside the application. M3 variable
+proxies were merged in `c9c5ba0` and must survive folder
 storage, migration and reconciliation. M7 remains tracked by the
 [original roadmap](roadmap.md).
 
@@ -144,8 +146,11 @@ Show the real directory tree, hiding `.git` and `.apiforge`. Support new folders
 new scenarios/components, multi-file `.afs` import, rename, move through menus and
 drag-and-drop, delete, restore from local trash, refresh and reveal in the system.
 Provide keyboard navigation, Enter and explorer F2. Show dirty, error, conflict
-and read-only status. Other file types can be revealed through the system, but
-are not edited in this stage.
+and read-only status. P6 adds a selectable project-root row, single-click file
+opening and in-application editing of project text files such as `.gitignore`.
+Other file types can still be revealed through the system. The explicit
+[P6 UI acceptance requirements](#p6-ui-quality-and-text-file-acceptance) apply to
+the explorer and tabs.
 
 File moves retain document IDs. Explorer rename does not rename declarations or
 symbols. Deleting a working component never deletes published revisions. Directory
@@ -251,12 +256,74 @@ verified findings.
 | P3 | Legacy workspace, draft and journal migration | All fixtures verified; crash/resume and catalogue activation tested |
 | P4 | Code/Diagram/Split, tabs, shortcuts, focus and diagnostics | Mode/tab switching retains work and histories |
 | P5 | Explorer, import, file operations, trash and external polling | Operations survive restart; no silent overwrite |
-| P6 | Component publication, folder CLI and run integration | CLI/GUI interpret saved projects identically |
+| P6 | Component publication, folder CLI, run integration, explorer/tab ergonomics and project text-file editing | CLI/GUI interpret saved projects identically; UI quality acceptance and BUG-035–043 pass |
 | P7 | Startup activation, native QA, performance and documentation | Release evidence on Linux and Windows |
 
 Implement P1/P2 first and pass the P2 round-trip gate before P3. Until P7, folder
 projects are opened explicitly for development; do not enable automatic migration
 in the normal startup path before integration evidence is complete.
+
+### P6 UI quality and text-file acceptance
+
+On 2026-10-24 the user approved merging P5 through `0fcff3e` and assigned the
+remaining UI work to P6. This accepts P5 delivery with tracked follow-up work;
+it does not mark the UI findings fixed or the UI quality gate passed. Implement
+these requirements alongside component publication, folder CLI and run/report
+integration, before P6 acceptance, rather than leaving them to P7 polish.
+
+The user's four reported issues are mandatory P6 work:
+
+1. **Integrated file tabs (BUG-036).** The close button belongs inside the tab's
+   visible surface, with a stable clickable area. Name, dirty/error/conflict
+   state and close control form one coherent tab; closing must affect only that
+   file and preserve Save/Discard/Cancel protection.
+2. **Predictable opening (BUG-037).** One explorer click opens or activates a
+   file without Refresh or extra clicks. Enter remains supported. Repeated
+   activation keeps one tab per file. The user's report mentioned three clicks
+   and possibly Refresh; QA confirmed selection-only single clicks, while a
+   controlled double-click and Enter opened the file without Refresh.
+3. **Selectable project root (BUG-038).** Render a named root row that supports
+   mouse and keyboard selection, collapse/expand and explicit destinations for
+   new files/folders, import and drops. Creating an item must show its intended
+   destination. The root itself cannot be renamed or deleted through ordinary
+   explorer file actions.
+4. **Project text files (BUG-039).** Open files such as `.gitignore` and
+   `README.md` as text in application tabs. Define their identity, exact-text
+   saving, dirty state, Save All, close decisions, recovery, read-only handling
+   and external-change conflicts. These files do not become scenario/component
+   definitions and cannot be run as scenarios. Keep project boundaries and
+   hidden control directories protected; any raw registry editing needs an
+   explicit validated reload policy.
+
+The accompanying QA findings are part of the same P6 acceptance:
+
+- Reveal the active tab when it is opened or selected by Ctrl+Tab, even when
+  the strip overflows (BUG-040).
+- Bound long tab labels and visibly disambiguate equal filenames with a minimal
+  parent-path suffix, retaining full paths on hover (BUG-041).
+- Expose named explorer items, selection and expansion state through
+  accessibility metadata, and show keyboard focus (BUG-042).
+- Scroll the active document into view in the explorer even when its row was
+  outside the virtualised visible range (BUG-043).
+- Fix new folder-project cards overlapping in Diagram and Split (BUG-035).
+
+The UI must be visually coherent, modern and ergonomic: consistent typography,
+spacing, control sizes, alignment and hover/focus/active/disabled states across
+the header, tabs, explorer, menus and dialogs. Review Code, Diagram and Split at
+960 × 540 and larger sizes, with long names, duplicate filenames, many files and
+tabs, and dirty/invalid/conflicted/read-only documents. Controls and selection
+must remain visible and usable. Visual review of the actual native window is
+required in addition to functional tests.
+
+Use real pointer and keyboard events in regression tests; calling an `Open`
+action directly is insufficient evidence for click behaviour. The reproducible
+acceptance probes are in [tools/qa/ui-quality](../tools/qa/ui-quality/run.sh),
+with [baseline results and native evidence](qa/2026-10-24/p5-ui-quality/results.json).
+Run `tools/qa/ui-quality/run.sh HEAD` against the P6 candidate. At the P5 baseline,
+two controls pass and eight acceptance probes fail; these expected failures
+record unfinished work and must pass before P6 is accepted. They remain separate
+from the standard workspace suite. Windows and the broader release/accessibility
+review remain P7 gates.
 
 ### Implementation progress
 
@@ -587,9 +654,10 @@ with Ctrl+S, keyboard navigation, initialisation and registration.
 
 P5 does not include runs, component publication or the CLI (P6). File operations,
 saves and project reloads still run on the UI thread; checks and scans do not.
-Moving them to a storage worker, keyboard and accessibility review of the
-explorer, permission and full-disk native QA of file operations and Windows QA
-remain for P7. Two egui limits apply: a dialog's text field takes the keyboard,
+Moving them to a storage worker, permission and full-disk native QA of file
+operations and Windows QA remain for P7. The explorer's interaction, focus and
+accessibility fixes identified in the UI audit are assigned to P6; the broader
+release review remains P7. Two egui limits apply: a dialog's text field takes the keyboard,
 so the explorer needs a click to regain it, and only one item is selected.
 
 Verification of P5 (Linux, 2026-10-24): formatting, workspace clippy with warnings
@@ -597,6 +665,16 @@ denied, fixture verification and all-target workspace tests passed (791 passed,
 two parent-launched helpers ignored), run serially with isolated config/data
 directories. Native QA used `--screenshot` captures of the folder window at
 1600 × 1000 with an expanded tree, unregistered sources and other files.
+
+P5 delivery decision (2026-10-24): merged through `0fcff3e` after explicit user
+approval, with the open UI findings assigned to P6. Independent verification
+passed formatting, workspace clippy, fixture checks and all 791 standard tests
+(two helpers ignored), plus the three original CR reproductions after the
+fixes. Native interactive UI QA used 1600 × 972 and 960 × 540 client windows.
+The separate UI acceptance suite still has two passes and eight failures; its
+[results and evidence](qa/2026-10-24/p5-ui-quality/results.json) are retained,
+and [BUG-036–043](../knows-bugs.md#stage-ii-p5-ui-quality-follow-up-p6) stay open.
+P5 delivery does not enable folder mode or migration by default.
 
 Acceptance must cover:
 
