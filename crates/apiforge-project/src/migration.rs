@@ -107,6 +107,34 @@ impl ProjectCatalogue {
     }
 }
 
+/// Deserialisation alone does not make durable metadata safe to use as paths
+/// or as evidence that a migration completed.
+trait Metadata {
+    fn is_valid(&self) -> bool;
+}
+
+impl Metadata for ProjectCatalogue {
+    fn is_valid(&self) -> bool {
+        let mut ids = HashSet::new();
+        self.format_version == 1
+            && valid_migration_id(&self.migration_id)
+            && valid_inputs(&self.inputs)
+            && self.projects.iter().all(|entry| {
+                valid_project_id(&entry.project_id)
+                    && ids.insert(entry.project_id.to_lowercase())
+                    && !entry.path.as_os_str().is_empty()
+                    && !entry
+                        .path
+                        .components()
+                        .any(|part| matches!(part, std::path::Component::ParentDir))
+            })
+            && self
+                .active_project_id
+                .as_ref()
+                .is_none_or(|id| self.projects.iter().any(|entry| entry.project_id == *id))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MigrationIndex {
@@ -114,6 +142,20 @@ struct MigrationIndex {
     migration_id: String,
     inputs: BTreeMap<String, Option<String>>,
     projects: Vec<IndexEntry>,
+}
+
+impl Metadata for MigrationIndex {
+    fn is_valid(&self) -> bool {
+        let mut ids = HashSet::new();
+        self.format_version == 1
+            && valid_migration_id(&self.migration_id)
+            && valid_inputs(&self.inputs)
+            && self.projects.iter().all(|entry| {
+                valid_project_id(&entry.project_id)
+                    && ids.insert(entry.project_id.to_lowercase())
+                    && valid_hash(&entry.digest)
+            })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -130,6 +172,43 @@ struct IndexEntry {
 struct Marker {
     migration_id: String,
     project_id: String,
+}
+
+impl Metadata for Marker {
+    fn is_valid(&self) -> bool {
+        valid_migration_id(&self.migration_id) && valid_project_id(&self.project_id)
+    }
+}
+
+fn valid_migration_id(id: &str) -> bool {
+    uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id)
+}
+
+fn valid_project_id(id: &str) -> bool {
+    !id.contains('/') && ProjectPath::new(id.to_owned()).is_ok()
+}
+
+fn valid_hash(hash: &str) -> bool {
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_inputs(inputs: &BTreeMap<String, Option<String>>) -> bool {
+    inputs.len() == INPUTS.len()
+        && INPUTS.iter().all(|name| {
+            inputs
+                .get(*name)
+                .is_some_and(|hash| hash.as_deref().is_none_or(valid_hash))
+        })
+}
+
+fn invalid_metadata(path: &Path) -> Error {
+    MigrationError::InvalidMetadata {
+        path: path.to_owned(),
+    }
+    .into()
 }
 
 #[derive(Debug)]
@@ -157,6 +236,7 @@ pub fn migrate_workspace(legacy: &WorkspaceStore) -> Result<MigrationOutcome> {
         .parent()
         .ok_or(MigrationError::NoWorkspace)?
         .to_owned();
+    check_boundary(&data)?;
     if let Some(catalogue) = ProjectCatalogue::load(&data)? {
         return Ok(MigrationOutcome {
             catalogue,
@@ -178,7 +258,7 @@ pub fn migrate_workspace(legacy: &WorkspaceStore) -> Result<MigrationOutcome> {
     };
     let workspace = loaded.workspace;
     for project in &workspace.projects {
-        if ProjectPath::new(project.id.clone()).is_err() || project.id.contains('/') {
+        if !valid_project_id(&project.id) {
             return Err(MigrationError::UnportableId {
                 project_id: project.id.clone(),
             }
@@ -201,30 +281,56 @@ pub fn migrate_workspace(legacy: &WorkspaceStore) -> Result<MigrationOutcome> {
             projects: Vec::new(),
         },
     };
+    if index.projects.iter().any(|entry| {
+        !workspace
+            .projects
+            .iter()
+            .any(|project| project.id == entry.project_id)
+    }) {
+        return Err(invalid_metadata(&index_path));
+    }
     let staging = migration.join(&index.migration_id);
     let projects = data.join(PROJECTS_DIRECTORY);
+    check_boundary(&staging)?;
+    check_boundary(&projects)?;
     let mut unmigrated = Vec::new();
 
     for project in &workspace.projects {
         let destination = projects.join(&project.id);
-        if let Some(entry) = index
+        let folder = staging.join(&project.id);
+        check_boundary(&destination)?;
+        check_boundary(&folder)?;
+        if let Some(position) = index
             .projects
             .iter()
-            .find(|entry| entry.project_id == project.id && entry.published)
+            .position(|entry| entry.project_id == project.id)
+            && (index.projects[position].published || destination.exists())
         {
-            // Published by an earlier attempt: reuse only our own, unchanged copy.
+            // rename may have succeeded before published=true reached disk.
+            // The marker and recorded digest, not that flag alone, prove this
+            // is our own unchanged publication. Foreign changes stay untouched.
             check_owned(
                 &destination,
                 &index.migration_id,
                 &project.id,
-                &entry.digest,
+                &index.projects[position].digest,
             )?;
+            if !index.projects[position].published {
+                // Finish durability of the interrupted rename before advancing
+                // its index. The staging parent may already have been removed
+                // after an earlier successful catalogue activation.
+                sync_directory(&projects)?;
+                if staging.exists() {
+                    sync_directory(&staging)?;
+                }
+                index.projects[position].published = true;
+                write_json(&index_path, &index)?;
+            }
             continue;
         }
         if destination.exists() {
             return Err(MigrationError::Occupied { path: destination }.into());
         }
-        let folder = staging.join(&project.id);
         if folder.exists() {
             fs::remove_dir_all(&folder).map_err(io(&folder))?;
         }
@@ -659,6 +765,8 @@ fn check_owned(
 /// Moves a prepared folder into place. `rename` replaces an empty directory on
 /// some platforms, so an existing destination is refused first.
 fn publish(folder: &Path, destination: &Path) -> Result<()> {
+    check_boundary(folder)?;
+    check_boundary(destination)?;
     if fs::symlink_metadata(destination).is_ok() {
         return Err(MigrationError::Occupied {
             path: destination.to_owned(),
@@ -703,6 +811,7 @@ fn input_hashes(data: &Path) -> Result<BTreeMap<String, Option<String>>> {
 /// Digest of every file except locks, transaction staging and the marker's
 /// own directory metadata, so a published copy can be recognised later.
 fn tree_digest(root: &Path) -> Result<String> {
+    check_boundary(root)?;
     fn walk(root: &Path, directory: &Path, files: &mut Vec<(String, Vec<u8>)>) -> Result<()> {
         for entry in fs::read_dir(directory).map_err(io(directory))? {
             let entry = entry.map_err(io(directory))?;
@@ -713,7 +822,8 @@ fn tree_digest(root: &Path) -> Result<String> {
                 .to_string_lossy()
                 .replace('\\', "/");
             if relative == ".apiforge/local/project.lock"
-                || relative.starts_with(".apiforge/local/transactions")
+                || relative == ".apiforge/local/transactions"
+                || relative.starts_with(".apiforge/local/transactions/")
             {
                 continue;
             }
@@ -722,6 +832,8 @@ fn tree_digest(root: &Path) -> Result<String> {
                 walk(root, &path, files)?;
             } else if kind.is_file() {
                 files.push((relative, fs::read(&path).map_err(io(&path))?));
+            } else {
+                return Err(invalid_metadata(&path));
             }
         }
         Ok(())
@@ -746,23 +858,54 @@ fn sha256(bytes: &[u8]) -> Option<String> {
     }
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+/// Reject links and parent traversal before raw migration filesystem operations.
+/// Like folder storage, this guards existing ancestors as well as the leaf.
+fn check_boundary(path: &Path) -> Result<()> {
+    let mut current = PathBuf::new();
+    for part in path.components() {
+        if matches!(part, std::path::Component::ParentDir) {
+            return Err(invalid_metadata(path));
+        }
+        current.push(part);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                let link = metadata.file_type().is_symlink();
+                #[cfg(windows)]
+                let link = {
+                    use std::os::windows::fs::MetadataExt;
+                    link || metadata.file_attributes() & 0x400 != 0
+                };
+                if link {
+                    return Err(invalid_metadata(&current));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io(&current)(error)),
+        }
+    }
+    Ok(())
+}
+
+fn read_json<T: serde::de::DeserializeOwned + Metadata>(path: &Path) -> Result<Option<T>> {
+    check_boundary(path)?;
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(io(path)(error)),
     };
-    apiforge_core::strict_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|_| {
-            MigrationError::InvalidMetadata {
-                path: path.to_owned(),
-            }
-            .into()
-        })
+    let metadata: T =
+        apiforge_core::strict_json::from_slice(&bytes).map_err(|_| invalid_metadata(path))?;
+    if !metadata.is_valid() {
+        return Err(invalid_metadata(path));
+    }
+    Ok(Some(metadata))
 }
 
-fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
+fn write_json(path: &Path, value: &(impl Serialize + Metadata)) -> Result<()> {
+    check_boundary(path)?;
+    if !value.is_valid() {
+        return Err(invalid_metadata(path));
+    }
     let bytes = serde_json::to_vec_pretty(value).map_err(|_| MigrationError::InvalidMetadata {
         path: path.to_owned(),
     })?;

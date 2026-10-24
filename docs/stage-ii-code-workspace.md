@@ -448,7 +448,12 @@ never replaces an existing `projects/<project-id>/`. A durable index records eac
 prepared folder's digest and publication state. A retry with unchanged inputs
 resumes the same migration and reuses only folders it published itself, unchanged;
 anything else is reported as occupied and left alone. Changed inputs start a new
-migration. Writing `projects.json` activates the catalogue: it holds the
+migration. A restart after a rename but before its index update also verifies
+the destination's marker and digest before acknowledging that publication.
+Migration indices, catalogues and markers are validated before use; unsupported
+versions, unsafe IDs, inconsistent entries and linked paths are preserved and
+rejected before migration can modify them. Writing `projects.json` activates the
+catalogue: it holds the
 migration ID, input hashes, every project path, the previously active project and
 the legacy journal, whose unresolved runs stay under global review. Originals are
 never modified. Startup does not call migration until P7.

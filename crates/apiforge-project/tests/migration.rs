@@ -413,3 +413,220 @@ fn an_interrupted_publication_finishes_the_remaining_projects() {
     assert!(data.join("projects").join(&project_id).is_dir());
     ProjectSession::open(data.join("projects").join(&project_id)).unwrap();
 }
+
+#[test]
+fn a_restart_between_rename_and_index_write_recognises_its_own_destination() {
+    let legacy = legacy();
+    let first = migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    let index_path = data.join("migration/index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    // rename succeeded, but published=true was not written durably yet.
+    index["projects"][0]["published"] = false.into();
+    fs::write(&index_path, serde_json::to_vec_pretty(&index).unwrap()).unwrap();
+    let before = originals(data);
+    let outcome = migrate_workspace(&legacy.store).unwrap();
+    assert!(outcome.resumed);
+    assert_eq!(outcome.catalogue, first.catalogue);
+    assert_eq!(originals(data), before);
+}
+
+#[test]
+fn a_renamed_destination_with_changes_is_preserved_even_if_not_marked_published() {
+    let legacy = legacy();
+    let first = migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    let index_path = data.join("migration/index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    index["projects"][0]["published"] = false.into();
+    fs::write(&index_path, serde_json::to_vec_pretty(&index).unwrap()).unwrap();
+    let note = first.catalogue.projects[0].path.join("notes.txt");
+    fs::write(&note, "new user work").unwrap();
+    let index_before = fs::read(&index_path).unwrap();
+    assert!(matches!(
+        migrate_workspace(&legacy.store),
+        Err(Error::Migration(MigrationError::Occupied { .. }))
+    ));
+    assert_eq!(fs::read_to_string(note).unwrap(), "new user work");
+    assert_eq!(fs::read(index_path).unwrap(), index_before);
+    assert!(!data.join(CATALOGUE_FILE).exists());
+}
+
+#[test]
+fn invalid_migration_ids_cannot_delete_unrelated_directories() {
+    let legacy = legacy();
+    migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    fs::remove_dir_all(data.join("projects")).unwrap();
+    let index_path = data.join("migration/index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    for entry in index["projects"].as_array_mut().unwrap() {
+        entry["published"] = false.into();
+    }
+    let victim = data.join(&legacy.workspace.projects[0].id);
+    fs::create_dir_all(&victim).unwrap();
+    let note = victim.join("do-not-delete.txt");
+    fs::write(&note, "unrelated user data").unwrap();
+    let before = originals(data);
+    let absolute = data.join("absolute");
+    for id in [
+        "..",
+        "../..",
+        absolute.to_str().unwrap(),
+        "nested/directory",
+        "",
+        "not-a-uuid",
+    ] {
+        index["migrationId"] = id.into();
+        let bytes = serde_json::to_vec_pretty(&index).unwrap();
+        fs::write(&index_path, &bytes).unwrap();
+        assert!(
+            matches!(
+                migrate_workspace(&legacy.store),
+                Err(Error::Migration(MigrationError::InvalidMetadata { .. }))
+            ),
+            "migration ID {id:?}"
+        );
+        assert_eq!(fs::read_to_string(&note).unwrap(), "unrelated user data");
+        assert_eq!(fs::read(&index_path).unwrap(), bytes);
+        assert_eq!(originals(data), before);
+        assert!(!data.join(CATALOGUE_FILE).exists());
+    }
+}
+
+#[test]
+fn unsupported_and_inconsistent_metadata_are_preserved_before_any_migration() {
+    let legacy = legacy();
+    migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    let catalogue_path = data.join(CATALOGUE_FILE);
+    let catalogue: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalogue_path).unwrap()).unwrap();
+    let index_path = data.join("migration/index.json");
+    let index: serde_json::Value = serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    let originals_before = originals(data);
+    for (path, base) in [(&catalogue_path, &catalogue), (&index_path, &index)] {
+        for invalid in [
+            "version",
+            "project_id",
+            "duplicate",
+            "migration_id",
+            "input_hash",
+        ] {
+            let mut metadata = base.clone();
+            match invalid {
+                "version" => metadata["formatVersion"] = 99.into(),
+                "project_id" => metadata["projects"][0]["projectId"] = "../victim".into(),
+                "duplicate" => {
+                    let duplicate = metadata["projects"][0].clone();
+                    metadata["projects"].as_array_mut().unwrap().push(duplicate);
+                }
+                "migration_id" => metadata["migrationId"] = "..".into(),
+                "input_hash" => metadata["inputs"]["workspace.json"] = "invalid".into(),
+                _ => unreachable!(),
+            }
+            let bytes = serde_json::to_vec_pretty(&metadata).unwrap();
+            fs::write(path, &bytes).unwrap();
+            assert!(
+                matches!(
+                    migrate_workspace(&legacy.store),
+                    Err(Error::Migration(MigrationError::InvalidMetadata { .. }))
+                ),
+                "{path:?}: {invalid}"
+            );
+            assert_eq!(fs::read(path).unwrap(), bytes);
+            assert_eq!(originals(data), originals_before);
+        }
+        // Without a catalogue, the next iteration exercises index validation.
+        if path == &catalogue_path {
+            fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[test]
+fn index_entries_for_unregistered_projects_are_never_used_as_paths() {
+    let legacy = legacy();
+    migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    let index_path = data.join("migration/index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    let mut foreign = index["projects"][0].clone();
+    foreign["projectId"] = "unregistered".into();
+    foreign["published"] = false.into();
+    index["projects"].as_array_mut().unwrap().push(foreign);
+    let bytes = serde_json::to_vec_pretty(&index).unwrap();
+    fs::write(&index_path, &bytes).unwrap();
+    assert!(matches!(
+        migrate_workspace(&legacy.store),
+        Err(Error::Migration(MigrationError::InvalidMetadata { .. }))
+    ));
+    assert_eq!(fs::read(index_path).unwrap(), bytes);
+    assert!(!data.join(CATALOGUE_FILE).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_migration_directory_cannot_delete_outside_staging() {
+    use std::os::unix::fs::symlink;
+    let legacy = legacy();
+    let first = migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    fs::remove_dir_all(data.join("projects")).unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let redirected = external.path().join("redirected");
+    fs::rename(data.join("migration"), &redirected).unwrap();
+    symlink(&redirected, data.join("migration")).unwrap();
+    let index_path = redirected.join("index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    for entry in index["projects"].as_array_mut().unwrap() {
+        entry["published"] = false.into();
+    }
+    let index_bytes = serde_json::to_vec_pretty(&index).unwrap();
+    fs::write(&index_path, &index_bytes).unwrap();
+    let victim = redirected
+        .join(first.catalogue.migration_id)
+        .join(&legacy.workspace.projects[0].id);
+    fs::create_dir_all(&victim).unwrap();
+    let note = victim.join("do-not-delete.txt");
+    fs::write(&note, "outside staging").unwrap();
+    assert!(matches!(
+        migrate_workspace(&legacy.store),
+        Err(Error::Migration(MigrationError::InvalidMetadata { .. }))
+    ));
+    assert_eq!(fs::read_to_string(note).unwrap(), "outside staging");
+    assert_eq!(fs::read(index_path).unwrap(), index_bytes);
+    assert!(!data.join(CATALOGUE_FILE).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_in_a_published_folder_is_not_ignored_by_ownership_verification() {
+    use std::os::unix::fs::symlink;
+    let legacy = legacy();
+    let first = migrate_workspace(&legacy.store).unwrap();
+    let data = legacy.directory.path();
+    fs::remove_file(data.join(CATALOGUE_FILE)).unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let note = external.path().join("notes.txt");
+    fs::write(&note, "outside project").unwrap();
+    let link = first.catalogue.projects[0].path.join("new-link");
+    symlink(&note, &link).unwrap();
+    assert!(matches!(
+        migrate_workspace(&legacy.store),
+        Err(Error::Migration(MigrationError::InvalidMetadata { .. }))
+    ));
+    assert!(link.is_symlink());
+    assert_eq!(fs::read_to_string(note).unwrap(), "outside project");
+    assert!(!data.join(CATALOGUE_FILE).exists());
+}
