@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI and P6d runs pending; P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI implemented; P6d folder-window runs pending; P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -748,6 +748,41 @@ passed all ten probes with its own target directory. Native evidence is in the
 work still runs on the UI thread until P7's storage worker; this package does not
 activate folder startup or migration. Windows QA and directory durability remain
 open.
+
+P6c implements `check`, `print`, `apply` and `run --folder` on
+`feat/stage-ii-p6-cli`, based on unmerged P6b `d04d4f2`
+(`feat/stage-ii-p6-publish`). It shares `ProjectSession`'s stable saved loader,
+folder lowering, reconciliation and verified closed snapshots. The saved-only
+constructors omit recovery and local last-valid cache; invalid saved source never
+falls back to them. Check/print/simulation leave an untouched checkout without
+local metadata. Apply saves only valid input, exactly, under the exclusive lock;
+print emits canonical source. Files are selected by registered relative path.
+Run accepts a scenario's registered path or entity ID, includes only its exact
+transitive published dependencies and configuration, and ignores an unrelated
+invalid scenario.
+
+Live folder runs retain the project writer lock through an abstract shared
+journal owner. Project journal I/O serialises with transactions and refuses active
+recovery and unsafe paths. Interrupted project runs remain in
+`.apiforge/local/journal.json`; legacy JSON runs keep their existing journal.
+An acknowledgement or record that fails to persist no longer changes the
+in-memory journal. This shared storage boundary is also the basis for P6d.
+
+Seven CLI integration tests compare saved GUI/CLI projections, pinned revisions,
+identity and layout after Apply, lock contention, invalid Apply, path/argument
+rejection, recovery/cache exclusion, an untouched checkout, selected-scenario
+runs and live journal failure. Four journal tests cover lock lifetime, interrupted
+runs and acknowledgement, read-only opening, unsafe paths and failed persistence.
+Folder commands are explicitly available behind `--folder`; this package does not
+enable startup migration or default folder opening. GUI runs and report handling
+remain P6d, and moving GUI storage I/O to a worker remains P7.
+
+Verification of P6c (Linux, 2026-10-24): formatting, workspace clippy with warnings
+denied, converter fixtures and all-target workspace tests passed (832 passed,
+two parent-launched helpers ignored), serially with isolated config/data directories.
+The UI quality gate passed all ten probes with `CARGO_TARGET_DIR=/tmp/apiforge-gate`.
+No language or layout algorithm changed. This CLI/library increment adds no native
+controls; Windows QA and directory durability remain open release gates.
 
 Acceptance must cover:
 
