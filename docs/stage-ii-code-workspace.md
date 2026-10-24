@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI implemented; P6d folder-window runs pending; P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI implemented; P6d folder-window runs and close export implemented; P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -783,6 +783,36 @@ two parent-launched helpers ignored), serially with isolated config/data directo
 The UI quality gate passed all ten probes with `CARGO_TARGET_DIR=/tmp/apiforge-gate`.
 No language or layout algorithm changed. This CLI/library increment adds no native
 controls; Windows QA and directory durability remain open release gates.
+
+P6d implements folder-window Run, reports and A4 on `feat/stage-ii-p6-runs`,
+based on unmerged P6c `bea2441` (`feat/stage-ii-p6-cli`). The session seals
+last-valid snapshots while their source/context are current, preserving earlier
+public configuration across edits and restart. Run settles source, freezes the
+selected scenario and exact dependencies, and checks version-bound consent before
+an earlier snapshot can run. Fields, context, source or session changes invalidate
+consent; missing candidates and conflicts block execution. Reports remain visible
+in Code/Diagram/Split, become stale after changes and stop supplying live shapes
+or graph-edit actions. Active runs retain their immutable snapshots.
+
+Project journals use P6c's shared writer owner. The window reviews interrupted
+project runs and exposes a separate global legacy-journal review under its legacy
+lock. Close cancels a run and waits for cleanup while retaining project ownership.
+Export and close preserves all in-memory recovery plus public dirty settings in
+a version-one JSON bundle on a dialog worker; failure, cancellation or an obsolete
+export cannot close newer work. Successful export preserves existing project-local
+recovery bytes, including foreign/unreadable data.
+
+The [P6d verification record](qa/2026-10-24/p6-runs/verification.md) describes
+five new library tests, six window regressions and native XTest evidence at
+1600 × 1000 and 960 × 540. Ordinary project I/O remains synchronous until P7;
+startup activation and migration are still disabled. Windows QA and directory
+durability remain open release gates.
+
+Verification of P6d (Linux, 2026-10-24): formatting, workspace clippy with warnings
+denied, converter fixtures and all-target workspace tests passed (843 passed,
+two parent-launched helpers ignored), serially with isolated config/data directories.
+The separate UI quality gate passed all ten probes with its own target directory.
+No language grammar or layout algorithm changed.
 
 Acceptance must cover:
 
