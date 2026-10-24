@@ -1,6 +1,6 @@
 # ADR 0011: Folder storage transactions and deliberate recovery
 
-- Status: accepted for Stage II; P1 partially implemented; native Windows durability unverified
+- Status: accepted for Stage II; P1 storage implemented and fault-tested on Linux; native Windows durability unverified
 - Date: 2026-10-24
 - Scope: `apiforge-storage`, folder loader, migration and run-journal integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -246,6 +246,23 @@ as successful persistence of a newer source version.
 Versioned cache is derived and optional. Unknown/corrupt cache is preserved and
 ignored with a notice; do not overwrite current source from it. ADR 0012 defines
 the provenance required before display or explicit last-valid execution.
+
+Ordinary writes refuse to replace corrupt or unsupported shared diagram metadata.
+Explicit repair is bound to a preview fingerprint and preserves opaque original
+bytes plus an index under `.apiforge/local/metadata-history/<id>/` before replacing
+metadata. Shared checkpoint repair uses the same redo transaction for the archive
+and replacement. Local cache repair durably installs its archive/index first,
+then the new cache; a failure may leave an unused archive but cannot silently
+lose the original. Oversized or unreadable originals require manual export and
+remain untouched. Normal cache saves never replace an unrecognised cache.
+
+The P1 I/O test seam surrounds actual temporary creation, chunked writes, file
+sync, replacement/no-clobber installation, directory sync, directory creation,
+removal and cleanup. Tests inject permission/disk-full failures on both sides,
+interrupt replay, and kill native child writers at each transaction boundary.
+These tests cover process interruption, not physical power loss or the durability
+of a particular Windows filesystem. See the [acceptance record](../stage-ii-p1-acceptance.md).
+
 
 Apply the existing 1 MiB source and 16 MiB JSON payload bounds from ADR 0010 to
 individual staged payloads. Bound descriptor size to 16 MiB and each transaction

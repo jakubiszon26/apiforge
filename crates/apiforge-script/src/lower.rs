@@ -12,6 +12,7 @@ pub struct LowerContext<'a> {
     pub project: &'a Project,
     allow_unresolved_environment: bool,
     component: Option<&'a Component>,
+    folder: bool,
 }
 impl<'a> LowerContext<'a> {
     /// Workspace-aware checking: unknown environment names are errors.
@@ -20,6 +21,7 @@ impl<'a> LowerContext<'a> {
             project,
             allow_unresolved_environment: false,
             component: None,
+            folder: false,
         }
     }
     /// Editing/printing an existing document may retain intentionally unset
@@ -29,6 +31,17 @@ impl<'a> LowerContext<'a> {
             project,
             allow_unresolved_environment: true,
             component: None,
+            folder: false,
+        }
+    }
+    /// Folder definitions allow component-only authoring and require explicit
+    /// published revisions. Legacy JSON contexts keep their existing policy.
+    pub fn folder(project: &'a Project) -> Self {
+        Self {
+            project,
+            allow_unresolved_environment: false,
+            component: None,
+            folder: true,
         }
     }
     /// Pins the definition being edited/printed, including a historical revision.
@@ -69,6 +82,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         arguments: None,
         allow_unresolved_environment: context.allow_unresolved_environment,
         component: context.component,
+        folder: context.folder,
         ranges: HashMap::new(),
         slot_ranges: HashMap::new(),
         handle: String::new(),
@@ -85,19 +99,8 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         .any(|d| d.severity == Severity::Error)
         && let Some(document) = &document
     {
-        let mut project = context.project.clone();
-        match document {
-            Document::Scenario(scenario) => {
-                project.scenarios = vec![scenario.clone()];
-            }
-            Document::Component(component) => {
-                project
-                    .components
-                    .retain(|c| c.id != component.id || c.revision != component.revision);
-                project.components.push(component.clone());
-            }
-        }
-        if let Err(error) = apiforge_core::validate_project(&project) {
+        let project = validation_project(document, context);
+        if let Err(error) = validate_model_project(&project, context) {
             let (range, message) = match &error {
                 ImportError::InvalidDocument { path, message } => {
                     (located(path, document, &project, &lower.ranges), *message)
@@ -113,6 +116,58 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
     }
 }
 
+/// Validate a model with exactly the same authoring/dependency rules as lowering,
+/// without constructing a source parser or a hidden placeholder scenario.
+pub fn validate_document_model(
+    document: &Document,
+    context: &LowerContext<'_>,
+) -> Result<(), ImportError> {
+    validate_model_project(&validation_project(document, context), context)
+}
+
+fn validate_model_project(
+    project: &Project,
+    context: &LowerContext<'_>,
+) -> Result<(), ImportError> {
+    if context.folder {
+        apiforge_core::validate_authoring_project(project)
+    } else {
+        apiforge_core::validate_project(project)
+    }
+}
+
+fn validation_project(document: &Document, context: &LowerContext<'_>) -> Project {
+    let mut project = context.project.clone();
+    match document {
+        Document::Scenario(scenario) => project.scenarios = vec![scenario.clone()],
+        Document::Component(component) => {
+            let mut checked = component.clone();
+            if context.folder
+                && project.components.iter().any(|existing| {
+                    existing.id == checked.id && existing.revision == checked.revision
+                })
+            {
+                // A working definition may call its own older published revision.
+                // Give only the validation clone an unused revision, preserving
+                // published dependencies and the returned model's identity.
+                checked.revision = (1..=project.components.len() as u32 + 1)
+                    .find(|revision| {
+                        !project.components.iter().any(|existing| {
+                            existing.id == checked.id && existing.revision == *revision
+                        })
+                    })
+                    .unwrap_or(1);
+            } else {
+                project.components.retain(|existing| {
+                    existing.id != checked.id || existing.revision != checked.revision
+                });
+            }
+            project.components.push(checked);
+        }
+    }
+    project
+}
+
 struct Lower<'a> {
     project: &'a Project,
     diagnostics: Vec<Diagnostic>,
@@ -122,6 +177,7 @@ struct Lower<'a> {
     arguments: Option<HashSet<String>>,
     allow_unresolved_environment: bool,
     component: Option<&'a Component>,
+    folder: bool,
     /// Statement ranges by lowered node ID, to locate document validation errors.
     ranges: HashMap<String, Range<usize>>,
     /// Source of each slot (handle, input, operand path) for type warnings.
@@ -323,6 +379,20 @@ impl Lower<'_> {
                             })
                             .max_by_key(|c| c.revision);
                         if let Some(definition) = definition {
+                            if self.folder && revision.is_none() {
+                                let range = ungroup(expr).range.start
+                                    ..ungroup(expr).range.start + name.len();
+                                self.diagnostics.push(Diagnostic {
+                                    range: range.clone(),
+                                    severity: Severity::Error,
+                                    message: "Folder component calls require an explicit revision"
+                                        .into(),
+                                    fix: Some(Fix {
+                                        range,
+                                        replacement: format!("{name}@{}", definition.revision),
+                                    }),
+                                });
+                            }
                             (
                                 NodeKind::Component,
                                 NodeConfig {

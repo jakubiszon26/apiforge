@@ -1,6 +1,6 @@
 # ADR 0012: Shared document sessions, analysis versions and execution snapshots
 
-- Status: accepted for Stage II; not implemented
+- Status: accepted for Stage II; P1 cache implemented; sessions/integration pending
 - Date: 2026-10-24
 - Scope: new `apiforge-project`, desktop, language context and CLI integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -146,6 +146,17 @@ public environment configuration, so an explicit last-valid run cannot accidenta
 mix an old graph with a newly changed dependency. Validate structure, all digests,
 IDs and model semantics before accepting an entry. Cache entries never contain
 runtime secrets; invalid/unsupported entries are preserved and ignored.
+
+P1 retains exact source text in each cache entry and lowers it with the folder
+policy to verify source/model semantic equality. Explicit revision pins are
+required without changing legacy lowering. The closed context contains exactly
+the transitive published component revisions, public contracts/configuration and
+no placeholder scenario. A full snapshot digest also binds identities, positions,
+proxies and provenance; the wire DTO is private and exposed snapshots are
+immutable. Capture and load both validate these invariants. Cache matching helpers
+report equality only: they never promote a snapshot to a current model. Session
+analysis tickets and GUI run confirmation remain P2/P6 integration work.
+
 
 If current source is valid, derive its current model from that source/context.
 Never declare cache current from filename or document ID alone. A matching

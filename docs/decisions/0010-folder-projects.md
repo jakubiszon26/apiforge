@@ -1,6 +1,6 @@
 # ADR 0010: Folder projects, source identity and component revisions
 
-- Status: accepted for Stage II; storage schemas partially implemented
+- Status: accepted for Stage II; P1 storage implemented; folder/session integration pending
 - Date: 2026-10-24
 - Scope: core authoring validation, new `apiforge-project`, storage, desktop and CLI
 - Plan: [Stage II](../stage-ii-code-workspace.md)

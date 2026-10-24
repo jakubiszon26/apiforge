@@ -1,20 +1,25 @@
 //! Folder persistence primitives (ADR 0011). These APIs perform blocking I/O;
 //! desktop callers must use a storage worker. Opening a store never initialises
 //! a manifest or enables folder mode in legacy startup.
+mod cache;
 mod codec;
 mod conflict;
 mod diagram;
+mod io;
+mod metadata;
 mod path;
 mod recovery;
 mod schema;
 mod transaction;
 mod trash;
 
+pub use cache::{CacheNotice, CacheProvenance, LastValidRead, LastValidSnapshot};
 pub use conflict::{
     ConflictArchive, RecoveryCandidate, RecoveryCandidateStatus, RecoveryCompletion,
     TransactionRecoveryPreview,
 };
 pub use diagram::{DiagramFile, DiagramRecord, DocumentKey, IdentityBase};
+pub use metadata::{DiagramRecoveryPreview, MetadataReplacement};
 pub use path::ProjectPath;
 pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection};
 pub use schema::{DocumentEntry, DocumentKind, MANIFEST_PATH, ProjectManifest, RevisionEntry};
@@ -24,7 +29,7 @@ pub use trash::{
 };
 
 use std::{
-    io,
+    io as std_io,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -42,7 +47,7 @@ pub enum ProjectError {
     Io {
         path: PathBuf,
         #[source]
-        source: io::Error,
+        source: std_io::Error,
     },
     #[error("The folder project is open in another writer session.")]
     Locked,
@@ -92,10 +97,16 @@ pub enum ProjectError {
     UnsupportedRecoveryConflict,
     #[error("No active transaction matches this recovery preview.")]
     NoActiveTransaction,
+    #[error("Invalid last-valid cache; source definitions were preserved.")]
+    InvalidCache,
+    #[error(
+        "Existing last-valid cache needs an explicit discard or recovery decision before replacement."
+    )]
+    CacheReplacementRequired,
 }
 
 impl ProjectError {
-    fn io(path: &Path, source: io::Error) -> Self {
+    fn io(path: &Path, source: std_io::Error) -> Self {
         Self::Io {
             path: path.to_owned(),
             source,
@@ -103,5 +114,7 @@ impl ProjectError {
     }
 }
 
+#[cfg(test)]
+mod fault_tests;
 #[cfg(test)]
 mod tests;

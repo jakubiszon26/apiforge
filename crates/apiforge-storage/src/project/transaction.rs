@@ -1,5 +1,7 @@
+use super::io as disk;
+pub(super) use super::io::{create_directory, sync_parent};
+use super::io::{sync_directory, sync_surviving_parent};
 use super::{path, schema, *};
-use crate::file::{sync_directory, write_atomic};
 use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -153,7 +155,7 @@ impl ProjectStore {
         // infrastructure. Establish its durability even when it already exists.
         for relative in [".apiforge", ".apiforge/local"] {
             let path = path::resolve(&store.root, relative)?;
-            sync_directory(&path).map_err(|error| ProjectError::io(&path, error))?;
+            sync_directory(&path)?;
             sync_parent(&path)?;
         }
         sync_parent(&lock_path)?;
@@ -161,7 +163,7 @@ impl ProjectStore {
         if !transactions.exists() {
             create_directory(&transactions)?;
         }
-        sync_directory(&transactions).map_err(|error| ProjectError::io(&transactions, error))?;
+        sync_directory(&transactions)?;
         sync_parent(&transactions)?;
         Self::new(&store.root, Some(lock))
     }
@@ -345,10 +347,19 @@ impl ProjectStore {
         if changes.iter().any(|change| {
             matches!(
                 change_path(change).as_str(),
-                super::recovery::RECOVERY_PATH | super::recovery::BACKUP_PATH
-            )
+                super::recovery::RECOVERY_PATH
+                    | super::recovery::BACKUP_PATH
+                    | super::cache::CACHE_PATH
+            ) || change_path(change).is_metadata_history()
         }) {
             return Err(ProjectError::InvalidTransaction);
+        }
+        if changes
+            .iter()
+            .any(|change| change_path(change).as_str() == ".apiforge/diagram.json")
+            && let Some(bytes) = self.read_file(".apiforge/diagram.json")?
+        {
+            DiagramFile::from_bytes(&bytes)?;
         }
         self.commit_locked(changes, boundary)
     }
@@ -402,8 +413,7 @@ impl ProjectStore {
         self.replay(&descriptor, &payloads, &BTreeMap::new(), &mut boundary)?;
         // Cleanup is not part of acknowledgement. Only this transaction's own
         // staging directory may be removed, and never replay unreferenced intent.
-        let _ = fs::remove_dir_all(&directory);
-        let _ = sync_parent(&directory);
+        let _ = disk::cleanup_directory(&directory);
         Ok(descriptor.target_generation)
     }
 
@@ -524,8 +534,7 @@ impl ProjectStore {
     }
 
     pub(super) fn cleanup_transaction(&self, active: &ActiveTransaction) {
-        let _ = fs::remove_dir_all(&active.directory);
-        let _ = sync_parent(&active.directory);
+        let _ = disk::cleanup_directory(&active.directory);
     }
 
     pub(super) fn check_transaction_secrets(&self, active: &ActiveTransaction) -> Result<()> {
@@ -557,27 +566,17 @@ impl ProjectStore {
                     )?,
                     FileState::Directory => create_directory(&path)?,
                     FileState::Missing => {
-                        match operation.expected {
-                            FileState::Directory => fs::remove_dir(&path),
-                            _ => fs::remove_file(&path),
-                        }
-                        .map_err(|error| ProjectError::io(&path, error))?;
-                        sync_parent(&path)?;
+                        disk::remove(&path, operation.expected == FileState::Directory)?;
                     }
                 }
             } else {
                 // A previous attempt may have failed after replacement but before
                 // directory sync. Idempotent replay must still establish durability.
                 if matches!(current, FileState::File { .. }) {
-                    File::options()
-                        .read(true)
-                        .write(true)
-                        .open(&path)
-                        .and_then(|file| file.sync_all())
-                        .map_err(|error| ProjectError::io(&path, error))?;
+                    disk::sync_file(&path)?;
                 }
                 if current == FileState::Directory {
-                    sync_directory(&path).map_err(|error| ProjectError::io(&path, error))?;
+                    sync_directory(&path)?;
                 }
                 if current == FileState::Missing {
                     // A later operation may already have removed this parent
@@ -676,6 +675,9 @@ impl ProjectStore {
             if operation.path.is_conflict_archive() {
                 return Err(ProjectError::InvalidTransaction);
             }
+            if operation.path.as_str() == super::cache::CACHE_PATH {
+                return Err(ProjectError::InvalidTransaction);
+            }
             if !paths.insert(operation.path.as_str().to_lowercase()) {
                 return Err(ProjectError::InvalidTransaction);
             }
@@ -713,6 +715,9 @@ impl ProjectStore {
                         super::recovery::RECOVERY_PATH | super::recovery::BACKUP_PATH
                     ) {
                         SourceRecovery::from_bytes(bytes)?;
+                    }
+                    if operation.path.as_str() == ".apiforge/diagram.json" {
+                        DiagramFile::from_bytes(bytes)?;
                     }
                     used_payloads.insert(payload);
                     total += bytes.len();
@@ -870,16 +875,7 @@ impl ProjectStore {
     }
 
     pub(super) fn atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        path::check_boundary(path)?;
-        // All managed directories are explicit operations (or writer-local
-        // infrastructure), never implicitly created by write_atomic.
-        if !path.parent().is_some_and(Path::is_dir) {
-            return Err(ProjectError::InvalidPath);
-        }
-        write_atomic(path, bytes).map_err(|error| match error {
-            crate::file::StorageError::Io { path, source } => ProjectError::Io { path, source },
-            _ => ProjectError::InvalidTransaction,
-        })
+        disk::atomic(path, bytes, false)
     }
 }
 
@@ -949,24 +945,6 @@ pub(super) fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>>
         return Err(ProjectError::Limit);
     }
     Ok(Some(bytes))
-}
-pub(super) fn sync_parent(path: &Path) -> Result<()> {
-    let parent = path.parent().ok_or(ProjectError::InvalidPath)?;
-    sync_directory(parent).map_err(|error| ProjectError::io(parent, error))
-}
-fn sync_surviving_parent(path: &Path) -> Result<()> {
-    let mut parent = path.parent().ok_or(ProjectError::InvalidPath)?;
-    while !parent.is_dir() {
-        parent = parent.parent().ok_or(ProjectError::InvalidPath)?;
-    }
-    path::check_boundary(parent)?;
-    sync_directory(parent).map_err(|error| ProjectError::io(parent, error))
-}
-pub(super) fn create_directory(path: &Path) -> Result<()> {
-    path::check_boundary(path)?;
-    fs::create_dir(path).map_err(|error| ProjectError::io(path, error))?;
-    sync_directory(path).map_err(|error| ProjectError::io(path, error))?;
-    sync_parent(path)
 }
 
 #[cfg(test)]

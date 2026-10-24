@@ -1,17 +1,15 @@
 //! Deliberate completion of a transaction after a foreign file edit. Approvals
 //! never change original intent: exact observed states and durable conflict copies
 //! are bound to that intent in a separate, versioned receipt.
+use super::io as disk;
 use super::{
     path, schema,
     transaction::{self, ActiveTransaction, Head},
     *,
 };
-use crate::file::sync_directory;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
-    fs::File,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -507,13 +505,7 @@ impl ProjectStore {
         }
         let mut directories = HashSet::new();
         for file in files {
-            path::check_boundary(&file)?;
-            File::options()
-                .read(true)
-                .write(true)
-                .open(&file)
-                .and_then(|file| file.sync_all())
-                .map_err(|error| ProjectError::io(&file, error))?;
+            disk::sync_file(&file)?;
             let mut parent = file.parent();
             while let Some(directory) =
                 parent.filter(|directory| directory.starts_with(self.root()))
@@ -527,7 +519,7 @@ impl ProjectStore {
         directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
         for directory in directories {
             path::check_boundary(&directory)?;
-            sync_directory(&directory).map_err(|error| ProjectError::io(&directory, error))?;
+            disk::sync_directory(&directory)?;
         }
         Ok(())
     }
@@ -539,24 +531,13 @@ impl ProjectStore {
             FileState::Directory => {}
             _ => return Err(ProjectError::Conflict { path }),
         }
-        sync_directory(&path).map_err(|error| ProjectError::io(&path, error))?;
+        disk::sync_directory(&path)?;
         transaction::sync_parent(&path)
     }
 
     fn write_conflict_copy(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        path::check_boundary(path)?;
         self.check_secrets(bytes)?;
-        let directory = path.parent().ok_or(ProjectError::InvalidPath)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(directory)
-            .map_err(|error| ProjectError::io(directory, error))?;
-        temporary
-            .write_all(bytes)
-            .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|error| ProjectError::io(temporary.path(), error))?;
-        temporary
-            .persist_noclobber(path)
-            .map_err(|error| ProjectError::io(path, error.error))?;
-        transaction::sync_parent(path)
+        disk::atomic(path, bytes, true)
     }
 }
 

@@ -27,6 +27,8 @@ impl ProjectPath {
                 || path.starts_with(".apiforge/local/trash/")
                 || path == ".apiforge/local/conflicts"
                 || path.starts_with(".apiforge/local/conflicts/")
+                || path == ".apiforge/local/metadata-history"
+                || path.starts_with(".apiforge/local/metadata-history/")
                 || matches!(
                     path.as_str(),
                     ".apiforge/local/recovery.json"
@@ -64,6 +66,10 @@ impl ProjectPath {
 
     pub(super) fn is_conflict_archive(&self) -> bool {
         self.0 == ".apiforge/local/conflicts" || self.0.starts_with(".apiforge/local/conflicts/")
+    }
+    pub(super) fn is_metadata_history(&self) -> bool {
+        self.0 == ".apiforge/local/metadata-history"
+            || self.0.starts_with(".apiforge/local/metadata-history/")
     }
 }
 

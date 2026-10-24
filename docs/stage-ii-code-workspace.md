@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 in progress, P2 groundwork started, P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 groundwork only, P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: planning documents on `main`; implementation on `feat/stage-ii-code-workspace`
@@ -346,12 +346,25 @@ approval boundaries, restart/repeated interruption, stale decisions, changed
 staging/proof inputs, damaged copies, copy limits, secret refusal and directory/link
 rejection. This does not close native Windows durability or the P2 round-trip gate.
 
-P1 remains open for last-valid cache provenance and broader persistence fault
-injection. Explorer directory/unregistered-file
-operations and UI integration remain P5 work. P2's
-shared semantic loader and document sessions remain pending; the P2 round-trip
-gate has not passed. Desktop/CLI folder integration, automatic migration and native
-Windows directory durability are not enabled or verified by these increments.
+P1 is complete at the storage-service boundary on Linux. The final increment
+adds verified, immutable last-valid candidates with exact source/provenance,
+closed pinned dependencies, public configuration and full snapshot digests.
+Invalid/future cache is preserved and ignored. Explicit cache/checkpoint repair
+preserves original bytes under local metadata history before replacement.
+Ordinary saves cannot bypass that preservation policy.
+
+Persistence tests now inject disk-full and permission failures before and after
+actual filesystem operations, including partial temporary writes, file/directory
+sync, installation, removal and cleanup. Native child-process tests kill a writer
+at every transaction I/O boundary, check stable readers and restart roll-forward.
+See the [P1 acceptance record](stage-ii-p1-acceptance.md) for evidence and limits.
+
+Explorer directory/unregistered-file operations and UI integration remain P5 work.
+P2's shared semantic loader and document sessions remain pending; its round-trip
+gate has not passed. Folder lowering/authoring validation is used only to verify
+P1 cache candidates. Desktop/CLI folder integration and automatic migration are
+not enabled. Windows directory durability remains the P7 release gate. No P2 work
+is included in this completion increment.
 
 Acceptance must cover:
 
