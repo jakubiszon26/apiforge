@@ -137,3 +137,105 @@ fn many_comment_notes_keep_their_statement_association() {
         format(&source).unwrap()
     );
 }
+
+use apiforge_script::complete::{self, Mode, Request, Scope};
+use apiforge_script::{LowerContext, lexer::lex, lower};
+
+const PIECES: [&str; 45] = [
+    "scenario",
+    "component",
+    "cleanup",
+    "param",
+    "input",
+    "var",
+    "export",
+    "start",
+    "assert",
+    "condition",
+    "if",
+    "else",
+    "all",
+    "any",
+    "exists",
+    "nonempty",
+    "contains",
+    "is",
+    "within",
+    "with",
+    "true",
+    "false",
+    "null",
+    "env",
+    "GET",
+    "POST",
+    "{",
+    "}",
+    "[",
+    "]",
+    "(",
+    ")",
+    "\"",
+    "\"a\"",
+    "'",
+    "=",
+    "==",
+    ".",
+    ",",
+    ":",
+    "@",
+    "//",
+    "{{",
+    "}}",
+    "ż",
+];
+
+fn fragment(state: &mut u64) -> String {
+    let count = random(state) % 24;
+    let mut out = String::new();
+    for _ in 0..count {
+        out.push_str(PIECES[random(state) % PIECES.len()]);
+        if random(state).is_multiple_of(3) {
+            out.push(' ');
+        }
+        if random(state).is_multiple_of(7) {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// The editor colours, parses, completes and describes whatever is in the
+/// buffer, keystroke by keystroke, so none of it may panic on text that is not
+/// yet a scenario. Every caret is tried, because a caret is where completion
+/// and hover both start.
+#[test]
+fn half_typed_text_never_breaks_what_the_editor_calls_on_every_keystroke() {
+    let project = apiforge_core::demos::empty_project();
+    let mut state = 0x5eed_1234_u64;
+    for _ in 0..1_000 {
+        let source = fragment(&mut state);
+        let _ = lex(&source);
+        let tree = parse(&source);
+        let _ = lower(&tree, &LowerContext::document(&project));
+        // Every caret the editor can hand over is a character boundary.
+        for (cursor, _) in source
+            .char_indices()
+            .chain(std::iter::once((source.len(), ' ')))
+        {
+            let request = Request {
+                source: &source,
+                cursor,
+                mode: if cursor % 2 == 0 {
+                    Mode::Script
+                } else {
+                    Mode::Template
+                },
+                scope: Scope::default(),
+            };
+            let _ = complete::complete(&request);
+            let _ = complete::describe(&request);
+            let _ = complete::statement_at(&source, cursor);
+        }
+        let _ = complete::statement_range(&source, "a");
+    }
+}

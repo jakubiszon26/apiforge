@@ -121,6 +121,20 @@ pub struct App {
     /// The block whose statement the panel last revealed, so a selection that
     /// has not changed does not keep pulling the caret back.
     revealed: Option<String>,
+    /// What the current document prints, kept until the document changes.
+    printed: Option<Printed>,
+}
+
+/// One document's printed text, with what it was printed from.
+///
+/// Printing validates and formats the whole document, which at the two hundred
+/// blocks a graph may hold costs several milliseconds — too much to repeat on
+/// every frame for text that has not changed.
+struct Printed {
+    context: buffers::Context,
+    revision: u64,
+    generation: u64,
+    text: Option<String>,
 }
 
 impl App {
@@ -287,6 +301,7 @@ impl App {
             code: code::CodeEditor::default(),
             shown_code: None,
             revealed: None,
+            printed: None,
         }
     }
 
@@ -815,9 +830,28 @@ impl App {
             self.shown_code = Some(context.clone());
         }
         let editor_id = self.code_editor_id();
-        let document = self.code_document();
         let project = self.editor.project().clone();
-        let printed = buffers::print(&project, &document);
+        let revision = self.editor.revision();
+        let generation = self.editor.context_generation();
+        let printed = match &self.printed {
+            Some(cached)
+                if cached.context == context
+                    && cached.revision == revision
+                    && cached.generation == generation =>
+            {
+                cached.text.clone()
+            }
+            _ => {
+                let text = buffers::print(&project, &self.code_document());
+                self.printed = Some(Printed {
+                    context: context.clone(),
+                    revision,
+                    generation,
+                    text: text.clone(),
+                });
+                text
+            }
+        };
         let differs_from_print = self
             .buffers
             .get(&context)
@@ -837,7 +871,6 @@ impl App {
         });
         ui.add_space(4.0);
         let focused = self.code_has_focus(ui.ctx());
-        let revision = self.editor.revision();
         let Some(buffer) = self.buffers.text(&context, printed, revision, focused) else {
             widgets::hint(
                 ui,
