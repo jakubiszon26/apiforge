@@ -337,8 +337,10 @@ impl ProjectSession {
     /// Explicitly abandons every unsaved change and held draft, then closes.
     /// A writable session also removes them from recovery, so they do not
     /// return on the next open.
-    pub fn discard_unsaved_and_close(mut self) -> Result<()> {
-        let Some(read) = self.recovery.read.take() else {
+    /// A failed recovery write returns the session unchanged, so the caller can
+    /// keep editing or retry.
+    pub fn discard_unsaved_and_close(self) -> std::result::Result<(), (Box<Self>, Error)> {
+        let Some(read) = &self.recovery.read else {
             return Ok(());
         };
         if self.store.is_read_only() || read.is_backup_candidate() {
@@ -349,8 +351,10 @@ impl ProjectSession {
             project_id: self.manifest.id.clone(),
             documents: Vec::new(),
         };
-        if read.recovery().is_some_and(|current| *current != empty) {
-            self.store.save_source_recovery(&read, &empty)?;
+        if read.recovery().is_some_and(|current| *current != empty)
+            && let Err(error) = self.store.save_source_recovery(read, &empty)
+        {
+            return Err((Box::new(self), error.into()));
         }
         Ok(())
     }

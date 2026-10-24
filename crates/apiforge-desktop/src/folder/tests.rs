@@ -515,3 +515,69 @@ fn unfinished_inspector_text_joins_recovery_and_returns_on_reopening() {
         "the field gets its text back"
     );
 }
+
+#[test]
+fn a_failed_discard_on_close_keeps_the_window_usable() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    type_into_code(&mut app, &context, "// unfinished\n");
+    app.session.as_mut().unwrap().save_recovery().unwrap();
+    type_into_code(&mut app, &context, "// later work\n");
+    // A foreign edit makes both the protective close and clearing recovery fail.
+    std::fs::write(directory.path().join(".apiforge/local/recovery.json"), b"{").unwrap();
+    assert!(!app.prepare_close());
+    let error = app.close_error().unwrap();
+    app.abort_close(error);
+
+    fn label_position(shape: &egui::epaint::Shape) -> Option<egui::Pos2> {
+        match shape {
+            egui::epaint::Shape::Vec(shapes) => shapes.iter().find_map(label_position),
+            egui::epaint::Shape::Text(text)
+                if text.galley.job.text == "Discard unsaved work and close" =>
+            {
+                Some(text.pos + text.galley.rect.center().to_vec2())
+            }
+            _ => None,
+        }
+    }
+    frame(&mut app, &context, vec![]);
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    let position = output
+        .shapes
+        .iter()
+        .find_map(|shape| label_position(&shape.shape))
+        .unwrap();
+    output.textures_delta.clear();
+    for pressed in [true, false] {
+        frame(
+            &mut app,
+            &context,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    assert!(
+        matches!(app.prompt, Some(Prompt::CloseFailed(_))),
+        "The failing discard should report an error"
+    );
+    assert!(
+        app.session.is_some(),
+        "A failed discard must retain the session for Keep editing or Try again"
+    );
+}

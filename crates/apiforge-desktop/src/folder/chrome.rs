@@ -162,12 +162,16 @@ impl FolderApp {
                 );
                 if ui.button("Restore backup").clicked()
                     && let Some(session) = self.session.as_mut()
-                    && let Err(error) = session.restore_recovery_backup()
                 {
-                    self.notice = Some(Notice {
-                        text: error.to_string(),
-                        error: true,
-                    });
+                    match session.restore_recovery_backup() {
+                        Ok(()) => self.shown = None,
+                        Err(error) => {
+                            self.notice = Some(Notice {
+                                text: error.to_string(),
+                                error: true,
+                            })
+                        }
+                    }
                 }
             });
         } else if unavailable {
@@ -502,8 +506,11 @@ impl FolderApp {
         }
         if discard {
             if let Some(session) = self.session.take()
-                && let Err(error) = session.discard_unsaved_and_close()
+                && let Err((session, error)) = session.discard_unsaved_and_close()
             {
+                // Nothing was discarded: the window stays usable for Keep
+                // editing or Try again.
+                self.session = Some(*session);
                 return Some(Prompt::CloseFailed(error.to_string()));
             }
             self.close_requested = true;
