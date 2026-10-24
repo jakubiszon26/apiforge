@@ -183,7 +183,8 @@ These points should be handled by the session/explorer work that uses them:
 
 - Recorded: 2026-10-24
 - Source: review of the Stage II plan, ADRs 0010–0012, these notes and the roadmap
-  against P5 (`feat/stage-ii-p5-explorer`)
+  against P5 (`feat/stage-ii-p5-explorer`), re-checked against `main` at `9012180`
+  after the P6 scope update in `692f199`
 - Status: open; resolved by package P8, which runs after P6 and before P7
 - Applies to: [Stage II plan](stage-ii-code-workspace.md), ADRs 0002, 0005,
   0007–0012, [roadmap](roadmap.md)
@@ -193,14 +194,21 @@ unowned requirement to one package and gives each open note in this file a
 decided or deferred status. Code changes stay in the packages they are assigned
 to. Format changes, if any, update ADRs 0010/0011 together with their code.
 
+The P6 scope update of 2026-10-24 (`692f199`) already extended P6 with the open
+UI quality findings and in-application editing of project text files, and
+narrowed the stage's exclusion from “arbitrary file-type editing” to
+“binary/rich-document editing”. The assignments below are reconciled with that
+wider P6 row: A3 and A4 belong to the same P6 acceptance, and the remaining
+unowned requirements stay with P7.
+
 ### Requirements without a package
 
 | # | Requirement | Current state | Assign to |
 | --- | --- | --- | --- |
 | A1 | Open Folder, recent projects and project switching, with recovery written before a switch | Only `apiforge-desktop --folder` | P7 |
 | A2 | Editing project settings marks the manifest dirty | `ProjectSession::edit_configuration` exists; the folder window has no settings editor | P7 |
-| A3 | Decision before a graphical edit or publication drops unattached comments | P4 deferred it to P5–P6; P5 does not include it and the P6 row does not list it | P6 |
-| A4 | Export when closing a read-only session or after a failed recovery write | The close dialog offers Keep editing, Try again and Discard only | P6 |
+| A3 | Decision before a graphical edit or publication drops unattached comments | P4 deferred it to P5–P6; P5 does not include it, and the widened P6 row still names only publication, CLI, runs, ergonomics and text files | P6, with publication |
+| A4 | Export when closing a read-only session or after a failed recovery write | The close dialog offers Keep editing, Try again and Discard only | P6, with runs |
 | A5 | Native transaction-recovery and conflict dialogs with export | Storage services exist; no package integrates them | P7 |
 | A6 | All I/O off the UI thread; one storage worker serialises mutations | Saves, recovery, file operations and reloads run on the UI thread; the P7 row does not list it | P7 |
 
@@ -231,9 +239,11 @@ to. Format changes, if any, update ADRs 0010/0011 together with their code.
 
 ### Naming and scope
 
-- Folder CLI commands use `--project <folder>`, the desktop uses `--folder`, and
-  desktop `--project FILE` keeps its JSON-session meaning. Choose one name for
-  folders at the start of P6.
+- **Decided at the start of P6:** one name selects a folder project everywhere.
+  Both the CLI folder commands and the desktop take `--folder <path>`; the plan's
+  earlier CLI spelling `--project <folder>` is withdrawn. Desktop and CLI
+  `--project FILE` keep their existing JSON meanings, so no established argument
+  changes behaviour. P6c carries the specification change with its code.
 - F2 renames in the explorer; M7 plans F2 rename from the code panel. Record that
   F2 follows keyboard focus.
 - “Merged packages stay inactive … until their integration package enables
