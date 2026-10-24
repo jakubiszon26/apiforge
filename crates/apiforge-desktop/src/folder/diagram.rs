@@ -461,7 +461,9 @@ impl FolderApp {
         let owned = document.field_drafts().to_vec();
         let agreed = self.agreed_fields.get(document_id);
         if agreed.map_or(&[][..], Vec::as_slice) != owned.as_slice() {
-            // The session changed the fields itself; the inspector follows.
+            // The session changed the fields itself; the inspector follows, and
+            // its fields drop the text they still hold.
+            inspector::forget_field_text(&self.ui_context);
             let entries = owned
                 .iter()
                 .map(|field| CodeDraft {

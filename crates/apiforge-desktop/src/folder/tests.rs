@@ -693,3 +693,65 @@ fn a_failed_discard_on_close_keeps_the_window_usable() {
         "A failed discard must retain the session for Keep editing or Try again"
     );
 }
+
+#[test]
+fn discarding_a_tab_clears_unfinished_text_held_by_the_url_field() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let component = document(&app, COMPONENT);
+    app.workbench.open(&component);
+    app.workbench.mode = Mode::Diagram;
+    let current = model(&app, &component);
+    let node = graph_of(&current, false)
+        .nodes
+        .iter()
+        .find(|node| node.kind == apiforge_core::model::NodeKind::Request)
+        .unwrap()
+        .clone();
+    app.selections
+        .insert(component.clone(), vec![node.id.clone()]);
+    frame(&mut app, &context, vec![]);
+    let url_id = egui::Id::new(("inspector", &node.id))
+        .with("url")
+        .with("text");
+    context.memory_mut(|memory| memory.request_focus(url_id));
+    frame(&mut app, &context, vec![]);
+    frame(
+        &mut app,
+        &context,
+        vec![egui::Event::Text("{{ unfinished".into())],
+    );
+    assert!(
+        !app.session
+            .as_ref()
+            .unwrap()
+            .document(&component)
+            .unwrap()
+            .field_drafts()
+            .is_empty(),
+        "The actual URL widget must contain an unfinished draft before discard"
+    );
+    app.close_tab_with(&component, false);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&component)
+            .unwrap()
+            .field_drafts()
+            .is_empty()
+    );
+    app.workbench.open(&component);
+    app.selections.insert(component.clone(), vec![node.id]);
+    frame(&mut app, &context, vec![]);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&component)
+            .unwrap()
+            .field_drafts()
+            .is_empty(),
+        "Discard must also clear the widget's cached invalid TemplateDraft"
+    );
+}
