@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication, P6c folder CLI and P6d runs pending; P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI and P6d runs pending; P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -715,6 +715,36 @@ keyboard events. Native review used `--screenshot` captures of the folder window
 at 1600 × 1000 and 960 × 540; the [P6 UI verification
 report](qa/2026-10-24/p6-ui/verification.md) records them and the limits.
 Publication, the folder CLI and runs remain P6b–P6d.
+
+P6b implements publication and A3 on `feat/stage-ii-p6-publish`, based on
+unmerged P6a `aa3c356` (`feat/stage-ii-p6-ui`), because it extends that folder
+window and its text-document sessions. A single redo transaction saves the exact
+working text, installs the next immutable canonical revision, records both
+checkpoints and advances only the publishing document's `baseRevision`. Resolution
+changes only after commit. Recovered working documents use their own source and
+publish after the current maximum without changing the primary document. A
+published handle cannot be renamed, occupied revision paths are preserved, and
+publication refuses invalid source, unresolved fields, held drafts, read-only
+sessions, foreign source/registry bytes and damaged diagram metadata.
+
+The folder header offers Publish for components. Graphical semantic edits,
+model Undo/Redo and publication request a decision before dropping unattached
+comments; cancellation retains the original text. The decision binds the exact
+source version, and the dialog also checks the session/context ticket. Pure
+layout changes and ordinary Save preserve text. Problems offers Apply fix for
+unqualified component calls; the explicit current revision is inserted into the
+source and can be undone in the text editor. No load/save/publication pins calls
+implicitly.
+
+P6b verification (Linux, 2026-10-24): formatting, workspace clippy with warnings
+denied, fixture verification and all-target workspace tests passed (821 passed,
+two parent-launched helpers ignored), serially with isolated config/data directories.
+Both language fuzzers completed 60 seconds without failures; the UI quality gate
+passed all ten probes with its own target directory. Native evidence is in the
+[publication review](qa/2026-10-24/p6-publish/verification.md). Publication/storage
+work still runs on the UI thread until P7's storage worker; this package does not
+activate folder startup or migration. Windows QA and directory durability remain
+open.
 
 Acceptance must cover:
 
