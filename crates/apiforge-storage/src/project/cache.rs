@@ -471,7 +471,7 @@ fn validate_models(entry: &CacheEntry) -> Result<()> {
         .map_err(|_| ProjectError::InvalidCache)
 }
 
-fn closed_public_context(document: &IdentityBase, context: &Project) -> Result<Project> {
+pub(super) fn closed_public_context(document: &IdentityBase, context: &Project) -> Result<Project> {
     let mut public = crate::public_project(context);
     public.scenarios.clear();
     let mut required = BTreeSet::new();
@@ -539,13 +539,13 @@ fn script_document(document: &IdentityBase) -> Document {
         IdentityBase::Component(component) => Document::Component(component.clone()),
     }
 }
-fn semantic_digest(document: &IdentityBase, context: &Project) -> Result<String> {
+pub(super) fn semantic_digest(document: &IdentityBase, context: &Project) -> Result<String> {
     digest_json(&apiforge_script::semantic(
         &script_document(document),
         context,
     ))
 }
-fn context_digest(context: &Project) -> Result<String> {
+pub(super) fn context_digest(context: &Project) -> Result<String> {
     let components: Vec<_> = context.components.iter().map(|component| serde_json::json!({ "id":component.id, "revision":component.revision, "handle":component.handle,
         "definition":apiforge_script::semantic(&Document::Component(component.clone()), context) })).collect();
     digest_json(
