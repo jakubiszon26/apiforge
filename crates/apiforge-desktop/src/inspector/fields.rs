@@ -166,6 +166,26 @@ pub fn template_field(
     scope: Scope<'_>,
     hint: &str,
 ) -> Option<Binding> {
+    template_field_completing(
+        ui,
+        id,
+        binding,
+        scope,
+        hint,
+        apiforge_script::complete::Scope::default(),
+    )
+}
+
+/// [`template_field`] with completion: the same field, offering the names that
+/// may be written inside `{{ }}`.
+pub fn template_field_completing(
+    ui: &mut Ui,
+    id: Id,
+    binding: &Binding,
+    scope: Scope<'_>,
+    hint: &str,
+    completion: apiforge_script::complete::Scope<'_>,
+) -> Option<Binding> {
     let Some(printed) = print_template(binding, scope) else {
         widgets::hint(ui, "Calculated value — edit it as an argument below.");
         return None;
@@ -176,14 +196,35 @@ pub fn template_field(
                 text: printed.clone(),
                 error: None,
             });
+    // The popup takes its keys before the field sees them, so Enter chooses a
+    // completion instead of committing a half-typed name.
+    let mut completions: crate::code::Completions = ui
+        .data_mut(|data| data.get_temp(id.with("completions")))
+        .unwrap_or_default();
+    let keys = completions.take_keys(ui);
     let output = crate::widgets::text_edit(&mut draft.text)
         .id(id.with("text"))
         .hint_text(hint)
         .font(egui::TextStyle::Monospace)
         .desired_width(f32::INFINITY)
         .show(ui);
-    let response = output.response;
+    let response = output.response.clone();
     let mut changed = response.changed();
+    changed |= completions.update(
+        ui,
+        id.with("text"),
+        &mut draft.text,
+        &crate::code::Context {
+            mode: apiforge_script::complete::Mode::Template,
+            scope: completion,
+            diagnostics: &[],
+            line_numbers: false,
+            font_size: 12.0,
+        },
+        &output,
+        keys,
+    );
+    ui.data_mut(|data| data.insert_temp(id.with("completions"), completions));
     if response
         .dnd_hover_payload::<Payload>()
         .is_some_and(|payload| matches!(*payload, Payload::Variable { .. }))
@@ -633,6 +674,7 @@ pub fn request_body_editor(
     binding: Option<&Binding>,
     format: apiforge_core::model::BodyFormat,
     scope: Scope<'_>,
+    completion: apiforge_script::complete::Scope<'_>,
 ) -> Option<Option<Binding>> {
     use apiforge_core::{body_text, model::BodyFormat};
     let mut draft: BodyDraft = ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
@@ -663,20 +705,29 @@ pub fn request_body_editor(
         );
         return None;
     }
-    let response = ui.add(
-        crate::widgets::text_area(&mut draft.text)
-            .id(id.with("text"))
-            .code_editor()
-            .desired_rows(8)
-            .desired_width(f32::INFINITY)
-            .hint_text(if format == BodyFormat::Json {
-                "{\n  \"productId\": \"{{input.productId}}\"\n}"
-            } else {
-                "<product>{{input.productId}}</product>"
-            }),
+    // The body is code: it is coloured, it completes, and it says what a name
+    // means, in the mode its format implies.
+    let mut editor: crate::code::CodeEditor = ui
+        .data_mut(|data| data.get_temp(id.with("editor")))
+        .unwrap_or_default();
+    let outcome = editor.show(
+        ui,
+        id.with("text"),
+        &mut draft.text,
+        &crate::code::Context {
+            mode: match format {
+                BodyFormat::Json => apiforge_script::complete::Mode::ObjectBody,
+                BodyFormat::Text => apiforge_script::complete::Mode::Template,
+            },
+            scope: completion,
+            diagnostics: &[],
+            line_numbers: false,
+            font_size: 12.0,
+        },
     );
+    ui.data_mut(|data| data.insert_temp(id.with("editor"), editor));
     let mut result = None;
-    if response.changed() {
+    if outcome.changed {
         match draft.parse(format, scope) {
             Ok(next) => {
                 draft.error = None;
@@ -691,6 +742,8 @@ pub fn request_body_editor(
     }
     if let Some(error) = &draft.error {
         ui.colored_label(theme::DANGER, RichText::new(error).size(11.0));
+        // Also on the field itself, which stays in view when the body is long.
+        outcome.response.on_hover_text(error.clone());
     }
     widgets::hint(
         ui,
@@ -770,8 +823,14 @@ mod body_editor_tests {
                 },
                 |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {
-                        result =
-                            request_body_editor(ui, id, value.as_ref(), BodyFormat::Json, scope);
+                        result = request_body_editor(
+                            ui,
+                            id,
+                            value.as_ref(),
+                            BodyFormat::Json,
+                            scope,
+                            apiforge_script::complete::Scope::default(),
+                        );
                     });
                 },
             );

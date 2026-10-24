@@ -5,6 +5,7 @@
 mod app;
 mod canvas;
 mod capture;
+mod code;
 mod dialogs;
 mod dnd;
 mod editor;
@@ -17,6 +18,7 @@ mod navigator;
 mod persistence;
 mod preferences;
 mod report;
+mod shapes;
 mod theme;
 mod widgets;
 

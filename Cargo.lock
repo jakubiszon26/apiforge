@@ -225,6 +225,7 @@ dependencies = [
  "apiforge-core",
  "apiforge-layout",
  "apiforge-runner",
+ "apiforge-script",
  "apiforge-storage",
  "dirs",
  "eframe",
