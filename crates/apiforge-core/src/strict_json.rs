@@ -7,6 +7,14 @@ use serde::{
 use serde_json::{Map, Number, Value};
 use std::fmt;
 
+/// Parse a typed JSON payload without silently overwriting duplicate keys,
+/// including keys nested in user-provided maps and literal values. Callers must
+/// bound input bytes and sanitise parse errors before showing diagnostics.
+pub fn from_slice<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_json::Error> {
+    let value = serde_json::from_slice::<StrictValue>(bytes)?.0;
+    serde_json::from_value(value)
+}
+
 pub(crate) struct StrictValue(pub Value);
 impl<'de> Deserialize<'de> for StrictValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

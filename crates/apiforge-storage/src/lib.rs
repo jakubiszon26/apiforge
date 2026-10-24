@@ -1,6 +1,7 @@
 //! Single-writer workspace sessions with external-change detection and explicit recovery.
 mod file;
 mod journal;
+pub mod project;
 mod session;
 
 pub use file::StorageError as DocumentError;

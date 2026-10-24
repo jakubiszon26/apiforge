@@ -361,7 +361,7 @@ fn write_atomic_with_sync(
 }
 
 /// Makes the rename durable where the platform supports syncing directories.
-fn sync_directory(directory: &Path) -> io::Result<()> {
+pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         File::open(directory)?.sync_all()

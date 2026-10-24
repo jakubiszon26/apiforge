@@ -1,6 +1,6 @@
 # ADR 0011: Folder storage transactions and deliberate recovery
 
-- Status: accepted for Stage II; not implemented; native Windows durability unverified
+- Status: accepted for Stage II; P1 partially implemented; native Windows durability unverified
 - Date: 2026-10-24
 - Scope: `apiforge-storage`, folder loader, migration and run-journal integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -32,6 +32,11 @@ states and all targets of the operation. Atomic replacement uses a temporary fil
 on the target filesystem, file sync, replacement and directory sync where
 supported. A sync error is a failure, never acknowledged as saved. Preserve the
 Linux/Windows platform limitations already recorded in ADR 0008 until verified.
+
+Transaction fingerprints describe exact file bytes, including line endings. Do
+not normalise CRLF/LF when comparing expected/target states or checking staged
+payload integrity. Any future normalised source/cache digest is a separate,
+explicitly versioned policy, not a replacement for these fingerprints.
 
 `head.json` is a small strict structure with `formatVersion: 1`, monotonically
 increasing `generation` and nullable `activeTransactionId`. An absent head in a
@@ -126,6 +131,16 @@ An external editor/Git can observe intermediate physical files; only API Forge
 readers implement the stable-generation protocol. After a checkout or external
 edit, validate source and metadata rather than trusting local head alone.
 
+Local head is not a Git tree identifier and need not change when Git replaces
+shared files. Fingerprint rechecks detect changes during the read, but an external
+checkout can pause with a partially replaced tree that remains identical across
+both checks. Stable-generation reads guarantee the transaction boundary for
+cooperating API Forge writers; they cannot guarantee one atomic Git checkout from
+an uncoordinated writer. Advancing generation after an observed external reload
+could invalidate overlapping readers, but cannot remove that limitation. The
+reload-generation policy and cross-platform line-ending proposals are tracked in
+the [Stage II review notes](../stage-ii-review-notes.md).
+
 Trash lives under `.apiforge/local/trash/<operation-id>/`, with a versioned index
 of original paths, document IDs, hashes and deletion time, plus preserved payloads.
 Capture dirty source/layout as part of a delete so the last edit is recoverable.
@@ -142,6 +157,28 @@ failed write prevents close/project switch unless the user explicitly discards o
 exports the work. Atomically save versioned recovery, with a checked backup and
 existing base-hash/stale-draft rules. Unknown versions are preserved. Restoring a
 backup requires an explicit decision and another fingerprint check.
+
+The initial recovery schema uses `formatVersion: 1`, `projectId` and `documents`.
+Each document stores its stable document/entity IDs, kind, nullable base revision,
+last known working path, nullable exact saved-source base hash, source version,
+text, selection, inspector field drafts and optional identity/layout checkpoint.
+Selections contain directional `anchor`/`caret` UTF-8 byte offsets at character
+boundaries. Field drafts retain widget identity, base hash, text and selection.
+The optional checkpoint may describe an earlier valid source while current text
+is invalid; it is a candidate requiring source/context/semantic validation, never
+permission to replace source or execute a model.
+
+Recovery writes use a preview baseline containing fingerprints of the registry,
+primary and backup. A changed baseline requires another read. Rotate only a
+validated primary into the checked backup, then atomically replace the primary;
+each write must be durable before acknowledgement. A missing/corrupt primary may
+offer a matching-project backup without writing anything. Restoring it is an
+explicit operation bound to that preview and preserves the good backup. Future
+versions and foreign-project recovery data are preserved. Recovery reads/writes
+are serialised with other storage work and blocked by active shared transactions;
+they do not advance shared definition generation or save `.afs` files. Failed
+writes leave source work in memory; a caller must not treat a readable older draft
+as successful persistence of a newer source version.
 
 Versioned cache is derived and optional. Unknown/corrupt cache is preserved and
 ignored with a notice; do not overwrite current source from it. ADR 0012 defines

@@ -13,6 +13,7 @@ serde.workspace = true
 ring = "=0.17.14"
 tempfile.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

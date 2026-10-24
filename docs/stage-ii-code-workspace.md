@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 documentation prepared, P1–P7 not implemented
+- Status: approved implementation specification; P0 prepared, P1 in progress, P2 groundwork started, P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: planning documents on `main`; implementation on `feat/stage-ii-code-workspace`
@@ -255,6 +255,63 @@ verified findings.
 Implement P1/P2 first and pass the P2 round-trip gate before P3. Until P7, folder
 projects are opened explicitly for development; do not enable automatic migration
 in the normal startup path before integration evidence is complete.
+
+### Implementation progress
+
+Open design feedback is tracked in [Stage II review notes](stage-ii-review-notes.md),
+including checkpoint merge ergonomics, Git line-ending conversion and local head
+behaviour during external checkouts.
+
+The first P1 increment provides `apiforge_storage::project`: the version-one
+registry schema, portable managed paths, cloneable exclusive/read-only stores,
+stable-generation reads and staged multi-file transactions with explicit
+roll-forward recovery. Source bytes are saved exactly, including invalid text.
+Published source hashes are checked; existing revisions cannot be overwritten or
+removed through the transaction API. New managed payloads are checked against
+known session secrets.
+
+Storage tests exercise interruption at staging, activation, each operation and
+commit; interrupted replay; foreign target preservation; equal-length edits;
+stable-read retries; directory ordering; path boundaries; and the 1 MiB source
+limit. These are storage-level checks, not the P2 semantic/identity/layout gate.
+
+Verification for this increment (Linux, 2026-10-24): formatting, workspace clippy
+with warnings denied, fixture verification and workspace/all-target tests passed
+(575 passed; one helper test ignored because its parent launches it separately).
+The test run used isolated config/data directories and serial execution. Existing
+HTTP tests required loopback access outside the restricted sandbox. Twenty new
+folder-storage tests are included in those totals. No native GUI or Windows QA
+was performed for this library-only increment.
+
+The next P1 increment adds bounded source recovery with checked backup rotation,
+explicit preview-bound backup restoration, exact invalid/CRLF text, inspector
+drafts and directional UTF-8 selections. Both files and the registry participate
+in conflict checks. Read-only sessions can preview but cannot persist or restore.
+Known-secret checks also cover bytes copied into backups and explicit restoration.
+Encoded JSON limits are enforced while serialising, including escape expansion;
+an oversized payload never becomes a truncated successful save.
+
+Version-one diagram DTOs now preserve core scenario/component snapshots and keep
+working/published keys separate. Serialisation sorts records deterministically.
+Recovery can retain an unsaved checkpoint locally without writing shared diagram
+metadata. These are candidates: the future semantic loader must verify their
+source/context/semantic digests before use. A shared authoring validator permits
+empty/component-only projects while retaining legacy JSON import requirements.
+
+Verification of the recovery/checkpoint increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (598 passed, one parent-launched helper ignored). The
+serial test run used isolated config/data directories and loopback access for
+existing HTTP tests. This adds 23 tests to the first increment's total, including
+backup/restore races and failures, local unsaved-layout recovery, checkpoint
+identity/proxy preservation and authoring/legacy validation separation. This does
+not constitute native GUI/Windows QA or the P2 source/model round-trip gate.
+
+P1 remains open for last-valid cache provenance, versioned trash/restore services,
+explicit conflict-copy resolution and broader persistence fault injection. P2's
+shared semantic loader and document sessions remain pending; the P2 round-trip
+gate has not passed. Desktop/CLI folder integration, automatic migration and native
+Windows directory durability are not enabled or verified by these increments.
 
 Acceptance must cover:
 
