@@ -98,6 +98,18 @@ pub struct ProjectSession {
     cache: Option<apiforge_storage::project::LastValidRead>,
 }
 
+impl std::fmt::Debug for ProjectSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProjectSession")
+            .field("root", &self.store.root())
+            .field("read_only", &self.store.is_read_only())
+            .field("epoch", &self.epoch)
+            .field("documents", &self.documents.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl ProjectSession {
     /// Writes a new, empty manifest. The folder must not contain a project.
     pub fn create(root: impl AsRef<Path>, name: &str) -> Result<Self> {

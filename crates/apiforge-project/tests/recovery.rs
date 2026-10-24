@@ -228,3 +228,34 @@ fn saved_invalid_source_reopens_with_its_last_valid_model_for_the_same_context()
         ModelState::Absent
     );
 }
+
+#[test]
+fn closing_requires_protected_work_or_an_explicit_discard() {
+    let (directory, mut session, id) = project();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "3"), Origin::SESSION)
+        .unwrap();
+    session.close().unwrap();
+    let session = ProjectSession::open(directory.path()).unwrap();
+    assert!(
+        session.document(&id).unwrap().is_dirty(),
+        "restored after close"
+    );
+
+    // A read-only session cannot protect its edits by itself.
+    let mut second = ProjectSession::open(directory.path()).unwrap();
+    assert!(second.is_read_only());
+    second
+        .edit_source(&id, &SCENARIO.replace('2', "4"), Origin::SESSION)
+        .unwrap();
+    let (second, error) = second.close().unwrap_err();
+    assert!(matches!(error, Error::Storage(ProjectError::ReadOnly)));
+    second.discard_unsaved_and_close().unwrap();
+
+    session.discard_unsaved_and_close().unwrap();
+    let session = ProjectSession::open(directory.path()).unwrap();
+    let document = session.document(&id).unwrap();
+    assert_eq!(document.text(), SCENARIO);
+    assert!(!document.is_dirty());
+    assert!(session.recovered_drafts().is_empty());
+}

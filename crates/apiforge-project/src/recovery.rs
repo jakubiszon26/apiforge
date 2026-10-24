@@ -301,6 +301,45 @@ impl ProjectSession {
         Ok(true)
     }
 
+    /// Closes the session once unsaved work is protected: recovery must be
+    /// written successfully. A read-only session, or one whose recovery files
+    /// are unusable, returns itself so the caller can offer export or discard.
+    pub fn close(mut self) -> std::result::Result<(), (Box<Self>, Error)> {
+        let unsaved = !self.recovery.held.is_empty()
+            || self
+                .documents
+                .iter()
+                .any(|document| document.needs_recovery());
+        if !unsaved {
+            return Ok(());
+        }
+        match self.save_recovery() {
+            Ok(_) => Ok(()),
+            Err(error) => Err((Box::new(self), error)),
+        }
+    }
+
+    /// Explicitly abandons every unsaved change and held draft, then closes.
+    /// A writable session also removes them from recovery, so they do not
+    /// return on the next open.
+    pub fn discard_unsaved_and_close(mut self) -> Result<()> {
+        let Some(read) = self.recovery.read.take() else {
+            return Ok(());
+        };
+        if self.store.is_read_only() || read.is_backup_candidate() {
+            return Ok(());
+        }
+        let empty = SourceRecovery {
+            format_version: 1,
+            project_id: self.manifest.id.clone(),
+            documents: Vec::new(),
+        };
+        if read.recovery().is_some_and(|current| *current != empty) {
+            self.store.save_source_recovery(&read, &empty)?;
+        }
+        Ok(())
+    }
+
     /// Supplies verified last-valid models to documents whose saved source is
     /// invalid. Only an entry for the same document and the same closed
     /// configuration/dependency context is used, and only as a last-valid model.
