@@ -2,7 +2,7 @@
 
 use crate::icons::Icon;
 use crate::{
-    buffers,
+    board_edit, buffers,
     canvas::{self, Canvas, Command},
     code,
     dialogs::{self, Outcome},
@@ -17,10 +17,9 @@ use crate::{
     theme, widgets,
 };
 use apiforge_core::{
-    block::Block,
     edit,
     format::{Binding, Graph, Position, Project, Workspace},
-    graph::{create_operator_node, delete_nodes, position_after},
+    graph::{create_operator_node, position_after},
     journal::{CleanupState, JournalRun},
     run::{Phase, RunMode, RunResult, RunStatus, StepResult},
 };
@@ -676,77 +675,12 @@ impl App {
         }
     }
 
-    /// The proxies of a graph as pinned obstacles, so that automatic placement
-    /// keeps clear of the chips the user put on the board.
-    fn chip_obstacles(&self, graph: &Graph, parameters: &[String]) -> Vec<apiforge_layout::Block> {
-        let project = self.editor.project();
-        graph
-            .proxies
-            .iter()
-            .map(|proxy| {
-                let rect = canvas::Chip::build(proxy, graph, project, parameters).rect();
-                apiforge_layout::Block::new(
-                    apiforge_layout::Size::new(rect.width(), rect.height()),
-                    apiforge_layout::Point::new(rect.min.x, rect.min.y),
-                )
-                .pinned()
-            })
-            .collect()
-    }
-
-    /// Lays out the selection, or the whole board when nothing is selected.
-    ///
-    /// One undo step, and it clears the pins of everything it moves: after a tidy
-    /// up the layout owns those positions again. Blocks outside the selection are
-    /// pinned for the layout, so the tidied blocks keep clear of them.
+    /// Lays out the selection, or the whole board when nothing is selected, in
+    /// one undo step.
     fn tidy_up(&mut self, selection: &[String]) {
-        let graph = self.editor.graph().clone();
-        let reference = self.editor.reference_graph().into_owned();
-        let project = self.editor.project().clone();
-        let moving = |node: &apiforge_core::format::Node| {
-            selection.is_empty() || selection.contains(&node.id)
-        };
-        if graph.nodes.iter().filter(|node| moving(node)).count() < 2 {
-            return;
+        if let Some(graph) = self.with_board(|board| board.tidy_up(selection)) {
+            self.apply_graph(graph);
         }
-        let blocks: Vec<apiforge_layout::Block> = graph
-            .nodes
-            .iter()
-            .map(|node| {
-                let rect = canvas::Card::build(node, &reference, &project).rect();
-                let block = apiforge_layout::Block::new(
-                    apiforge_layout::Size::new(rect.width(), rect.height()),
-                    apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
-                );
-                if moving(node) { block } else { block.pinned() }
-            })
-            // The chips come after the blocks, so a block keeps its index and the
-            // laid-out positions still line up with the nodes.
-            .chain(self.chip_obstacles(&graph, &self.editor.parameter_names()))
-            .collect();
-        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
-        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
-            .iter()
-            .filter_map(|wire| {
-                Some(apiforge_layout::Edge::new(
-                    index_of(&wire.source)?,
-                    index_of(&wire.target)?,
-                ))
-            })
-            .collect();
-        let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(&blocks, &edges));
-        let mut tidied = graph;
-        for (node, position) in tidied.nodes.iter_mut().zip(placed) {
-            if !(selection.is_empty() || selection.contains(&node.id)) {
-                continue;
-            }
-            node.position = Position {
-                x: f64::from(position.x),
-                y: f64::from(position.y),
-            };
-            node.auto_placed = true;
-        }
-        self.apply_graph(tidied);
     }
 
     /// Opens or closes the code panel and remembers the choice.
@@ -1769,7 +1703,9 @@ impl App {
             }
             library::Action::AddNode { block, component } => {
                 let position = position_after(self.editor.graph(), 100.0);
-                self.add_node(block, component, position, None);
+                let result =
+                    self.with_board(|board| board.add_node(block, component, position, None));
+                self.apply_edit(result);
             }
             library::Action::AddOperator(operator) => {
                 let node = create_operator_node(operator, self.canvas.visible_center());
@@ -2414,20 +2350,7 @@ impl App {
         match command {
             Command::Select(ids) => self.editor.selection = ids,
             Command::Move(positions) => {
-                let mut graph = self.editor.graph().clone();
-                for (id, position) in positions {
-                    if let Some(node) = graph.nodes.iter_mut().find(|node| node.id == id) {
-                        node.position = position;
-                        // A block placed by hand is pinned: automatic layout treats
-                        // it as an obstacle until the next tidy up.
-                        node.auto_placed = false;
-                    } else if let Some(proxy) =
-                        graph.proxies.iter_mut().find(|proxy| proxy.id == id)
-                    {
-                        // A proxy is always where it was put: layout never moves it.
-                        proxy.position = position;
-                    }
-                }
+                let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);
             }
             Command::TidyUp(selection) => self.tidy_up(&selection),
@@ -2446,7 +2369,11 @@ impl App {
                 component,
                 position,
                 source,
-            } => self.add_node(block, component, position, source),
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, component, position, source));
+                self.apply_edit(result);
+            }
             Command::AddOperator { operator, position } => {
                 self.push_node(create_operator_node(operator, position))
             }
@@ -2463,30 +2390,13 @@ impl App {
                 binding,
             } => self.set_input(&node, &input, &path, binding),
             Command::Delete { ids, wires } => {
-                let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
-                let wire_ids: HashSet<&str> = wires.iter().map(String::as_str).collect();
-                // One selection can hold blocks and proxies; deleting a variable
-                // takes its proxies with it, which `delete_nodes` does.
-                let graph = edit::remove_proxies(
-                    &edit::remove_connections(&delete_nodes(self.editor.graph(), &ids), &wire_ids),
-                    &ids,
-                );
-                self.editor
-                    .selection
-                    .retain(|id| !ids.contains(id.as_str()));
+                let graph = self.with_board(|board| board.delete(&ids, &wires));
+                self.editor.selection.retain(|id| !ids.contains(id));
                 self.apply_graph(graph);
             }
             Command::AddProxy { source, position } => {
-                match edit::add_proxy(self.editor.graph(), source, position) {
-                    Ok(graph) => {
-                        let placed = graph.proxies.last().map(|proxy| proxy.id.clone());
-                        self.apply_graph(graph);
-                        // Selecting it shows at once what it stands for and what
-                        // now reads it from here.
-                        self.editor.selection = placed.into_iter().collect();
-                    }
-                    Err(error) => self.canvas.set_error(error.to_string()),
-                }
+                let result = self.with_board(|board| board.add_proxy(source, position));
+                self.apply_edit(result);
             }
             Command::EditComponent(id) => self.edit_component(&id),
             Command::Connect {
@@ -2496,19 +2406,10 @@ impl App {
                 target_input,
                 target_path,
             } => {
-                let result = edit::connect(
-                    self.editor.graph(),
-                    self.editor.project(),
-                    &source,
-                    &source_port,
-                    &target,
-                    &target_input,
-                    &target_path,
-                );
-                match result {
-                    Ok(graph) => self.apply_graph(graph),
-                    Err(error) => self.canvas.set_error(error.to_string()),
-                }
+                let result = self.with_board(|board| {
+                    board.connect(&source, &source_port, &target, &target_input, &target_path)
+                });
+                self.apply_edit(result.map(Into::into));
             }
             Command::Copy => self.copy_selection(),
             Command::Paste => self.paste(),
@@ -2521,20 +2422,9 @@ impl App {
                 // Cleanup bindings may read main-graph outputs. Preserve those
                 // references exactly as a regular paste does.
                 let fragment = edit::copy_selection(self.editor.graph(), &selected);
-                let reference = self.editor.reference_graph().into_owned();
-                let external: Vec<&str> = reference
-                    .nodes
-                    .iter()
-                    .map(|node| node.id.as_str())
-                    .collect();
-                match edit::paste_selection(
-                    self.editor.graph(),
-                    &fragment,
-                    &edit::PASTE_OFFSET,
-                    &external,
-                ) {
-                    Ok(pasted) => self.insert_pasted(pasted),
-                    Err(error) => self.canvas.set_error(error.to_string()),
+                match self.with_board(|board| board.paste(&fragment, &edit::PASTE_OFFSET)) {
+                    Ok(edit) => self.insert_pasted(edit),
+                    Err(message) => self.canvas.set_error(message),
                 }
             }
             Command::SaveSelectionAsComponent => {
@@ -2582,153 +2472,60 @@ impl App {
             x: edit::PASTE_OFFSET.x * count,
             y: edit::PASTE_OFFSET.y * count,
         };
-        let reference = self.editor.reference_graph().into_owned();
-        let external: Vec<&str> = reference
-            .nodes
-            .iter()
-            .map(|node| node.id.as_str())
-            .collect();
-        match edit::paste_selection(self.editor.graph(), &clipboard.fragment, &offset, &external) {
-            Ok(pasted) => {
+        let result = self.with_board(|board| board.paste(&clipboard.fragment, &offset));
+        match result {
+            Ok(edit) => {
                 if let Some(stored) = &mut self.editor.clipboard {
                     stored.pastes += 1;
                 }
-                self.insert_pasted(pasted);
+                self.insert_pasted(edit);
             }
-            Err(error) => self.canvas.set_error(error.to_string()),
+            Err(message) => self.canvas.set_error(message),
         }
     }
 
-    fn insert_pasted(&mut self, pasted: edit::Pasted) {
-        let count = pasted.ids.len();
-        self.apply_graph(pasted.graph);
-        self.editor.selection = pasted.ids;
+    fn insert_pasted(&mut self, pasted: board_edit::Edit) {
+        let count = pasted.selection.as_ref().map_or(0, Vec::len);
+        self.apply_edit(Ok(pasted));
         self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
     }
 
     /// Sets a slot of a node: a whole input, or the binding at `path` inside it.
     fn set_input(&mut self, node: &str, input: &str, path: &[String], binding: Binding) {
-        let mut graph = self.editor.graph().clone();
-        let Some(target) = graph
-            .nodes
-            .iter_mut()
-            .find(|candidate| candidate.id == node)
-        else {
-            return;
-        };
-        let next = match target.inputs.get(input) {
-            Some(current) => current.replace_at(path, binding),
-            None => path.is_empty().then_some(binding),
-        };
-        match next {
-            Some(next) => {
-                target.inputs.insert(input.to_owned(), next);
-                self.apply_graph(graph);
-            }
-            None => self
-                .canvas
-                .set_error(edit::EditError::InvalidOperandPath.to_string()),
-        }
-    }
-
-    fn add_node(
-        &mut self,
-        block: Block,
-        component: Option<(String, u32)>,
-        position: Position,
-        source: Option<(String, String)>,
-    ) {
-        let definition = component.as_ref().and_then(|(id, revision)| {
-            self.editor
-                .project()
-                .components
-                .iter()
-                .find(|candidate| &candidate.id == id && candidate.revision == *revision)
-                .cloned()
-        });
-        let source = source
-            .as_ref()
-            .map(|(node_id, port)| edit::OutputRef { node_id, port });
-        match edit::add_node(
-            self.editor.graph(),
-            block,
-            position,
-            definition.as_ref(),
-            source,
-        ) {
-            Ok(added) => {
-                let graph = self.free_slot_for(added.graph, &added.node_id);
-                self.apply_graph(graph);
-                self.editor.selection = vec![added.node_id];
-            }
-            Err(error) => self.canvas.set_error(error.to_string()),
+        match self.with_board(|board| board.set_input(node, input, path, binding)) {
+            Ok(Some(graph)) => self.apply_graph(graph),
+            Ok(None) => {}
+            Err(message) => self.canvas.set_error(message),
         }
     }
 
     fn push_node(&mut self, node: apiforge_core::format::Node) {
-        let id = node.id.clone();
-        let mut graph = self.editor.graph().clone();
-        graph.nodes.push(node);
-        let graph = self.free_slot_for(graph, &id);
-        self.apply_graph(graph);
-        self.editor.selection = vec![id];
+        let edit = self.with_board(|board| board.push_node(node));
+        self.apply_edit(Ok(edit));
+    }
+    /// Applies the result of a board edit and the selection that follows it.
+    fn apply_edit(&mut self, result: Result<board_edit::Edit, String>) {
+        match result {
+            Ok(edit) => {
+                self.apply_graph(edit.graph);
+                if let Some(selection) = edit.selection {
+                    self.editor.selection = selection;
+                }
+            }
+            Err(message) => self.canvas.set_error(message),
+        }
     }
 
-    /// Moves a freshly added block to the nearest free slot when the position it
-    /// was given is already occupied, and leaves everything else where it is.
-    ///
-    /// A block that keeps its requested position stays pinned, because that
-    /// position is the one the user pointed at; a block the layout had to move is
-    /// marked as automatically placed, so a later tidy up owns it.
-    fn free_slot_for(&self, mut graph: Graph, node_id: &str) -> Graph {
-        let reference = self.editor.reference_graph().into_owned();
-        let project = self.editor.project().clone();
-        let Some(fresh) = graph.nodes.iter().position(|node| node.id == node_id) else {
-            return graph;
-        };
-        let blocks: Vec<apiforge_layout::Block> = graph
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| {
-                let rect = canvas::Card::build(node, &reference, &project).rect();
-                let block = apiforge_layout::Block::new(
-                    apiforge_layout::Size::new(rect.width(), rect.height()),
-                    apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
-                );
-                if index == fresh {
-                    block
-                } else {
-                    block.pinned()
-                }
-            })
-            .chain(self.chip_obstacles(&graph, &self.editor.parameter_names()))
-            .collect();
-        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
-        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
-            .iter()
-            .filter_map(|wire| {
-                Some(apiforge_layout::Edge::new(
-                    index_of(&wire.source)?,
-                    index_of(&wire.target)?,
-                ))
-            })
-            .collect();
-        let placed =
-            apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &[fresh]);
-        if let Some(position) = placed.first() {
-            let node = &mut graph.nodes[fresh];
-            let moved = (position.x - node.position.x as f32).abs() > 0.5
-                || (position.y - node.position.y as f32).abs() > 0.5;
-            if moved {
-                node.position = Position {
-                    x: f64::from(position.x),
-                    y: f64::from(position.y),
-                };
-                node.auto_placed = true;
-            }
-        }
-        graph
+    /// The board being edited, for one shared board edit.
+    fn with_board<R>(&self, edit: impl FnOnce(&board_edit::Board<'_>) -> R) -> R {
+        let reference = self.editor.reference_graph();
+        let parameters = self.editor.parameter_names();
+        edit(&board_edit::Board {
+            graph: self.editor.graph(),
+            reference: &reference,
+            project: self.editor.project(),
+            parameters: &parameters,
+        })
     }
 
     fn edit_component(&mut self, node_id: &str) {
@@ -3131,6 +2928,7 @@ fn restore_drafts(editor: &Editor, drafts: Option<apiforge_storage::Drafts>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apiforge_core::block::Block;
     use apiforge_core::model::ErrorPolicy;
     use serde_json::json;
     use std::time::Duration;
