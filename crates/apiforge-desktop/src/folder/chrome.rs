@@ -38,10 +38,16 @@ impl FolderApp {
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(name)
-                    .size(theme::FONT_TITLE)
-                    .family(theme::bold_family()),
+            self.navigation_menu(ui);
+            let title_width = (ui.available_width() - 550.0).clamp(80.0, 320.0);
+            ui.add_sized(
+                [title_width, theme::CONTROL_HEIGHT],
+                egui::Label::new(
+                    RichText::new(name)
+                        .size(theme::FONT_TITLE)
+                        .family(theme::bold_family()),
+                )
+                .truncate(),
             )
             .on_hover_text(self.root.display().to_string());
             if read_only {
@@ -594,6 +600,7 @@ impl FolderApp {
         message: String,
     ) -> Option<Prompt> {
         let (mut retry, mut discard, mut keep, mut export) = (false, false, false, false);
+        let switching = self.switching();
         let response = dialogs::centered_modal(egui::Id::new("folder-close-failed"), context).show(
             context,
             |ui| {
@@ -602,17 +609,29 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_SM);
                 ui.label(&message);
                 ui.label(
-                    "Save your documents, try again, or close and discard every unsaved \
-                     change.",
+                    "Save your documents, export your work, retry, or discard unsaved changes.",
                 );
                 ui.add_space(theme::SPACE_MD);
                 ui.horizontal_wrapped(|ui| {
                     keep = ui.add(widgets::primary_button("Keep editing")).clicked();
                     retry = ui.button("Try again").clicked();
                     export = ui
-                        .add_enabled(!self.runs.exporting, egui::Button::new("Export and close"))
+                        .add_enabled(
+                            !self.runs.exporting,
+                            egui::Button::new(if switching {
+                                "Export and open folder"
+                            } else {
+                                "Export and close"
+                            }),
+                        )
                         .clicked();
-                    discard = ui.button("Discard unsaved work and close").clicked();
+                    discard = ui
+                        .button(if switching {
+                            "Discard unsaved work and open folder"
+                        } else {
+                            "Discard unsaved work and close"
+                        })
+                        .clicked();
                 });
             },
         );
@@ -620,7 +639,11 @@ impl FolderApp {
             self.export_before_close();
         }
         if retry {
-            self.close_requested = true;
+            if switching {
+                self.navigation.failed = false;
+            } else {
+                self.close_requested = true;
+            }
             return None;
         }
         if discard {
@@ -633,8 +656,11 @@ impl FolderApp {
                 return Some(Prompt::CloseFailed(error.to_string()));
             }
             self.runs = runs::Runs::default();
-            self.close_requested = true;
-            return None;
+            self.finish_departure();
+            return self.prompt.take();
+        }
+        if keep || response.should_close() {
+            self.cancel_switch();
         }
         (!keep && !response.should_close()).then_some(Prompt::CloseFailed(message))
     }

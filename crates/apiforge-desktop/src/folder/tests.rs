@@ -2000,3 +2000,148 @@ fn exporting_after_failed_recovery_keeps_the_foreign_recovery_file_intact() {
         b"foreign recovery"
     );
 }
+
+fn named_folder(name: &str) -> (tempfile::TempDir, String) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), name).unwrap();
+    let id = session
+        .create_document(
+            DocumentKind::Scenario,
+            "main.afs",
+            "scenario \"Main\" {\n  answer = 1\n}\n",
+        )
+        .unwrap();
+    drop(session);
+    (directory, id)
+}
+
+#[test]
+fn recent_project_switching_writes_recovery_and_returns_exact_unsaved_work() {
+    let (alpha, id) = named_folder("Navigation Alpha");
+    let (beta, _) = named_folder("Navigation Beta");
+    let (context, mut app) = open(alpha.path());
+    let edited = format!("{}\nunfinished", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    let field = FieldRecovery {
+        widget: 9,
+        base_hash: "0".repeat(64),
+        text: "unfinished field".into(),
+        selection: TextSelection {
+            anchor: 2,
+            caret: 1,
+        },
+    };
+    app.session
+        .as_mut()
+        .unwrap()
+        .set_field_drafts(&id, vec![field.clone()])
+        .unwrap();
+    app.request_switch(beta.path().into());
+    frame(&mut app, &context, vec![]);
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().name,
+        "Navigation Beta"
+    );
+    assert!(
+        std::fs::read_to_string(alpha.path().join("main.afs"))
+            .unwrap()
+            .contains("answer = 1")
+    );
+    assert!(alpha.path().join(".apiforge/local/recovery.json").is_file());
+    let at = label_position(&mut app, &context, "Project");
+    click(&mut app, &context, at);
+    let at = label_position(&mut app, &context, "Navigation Alpha");
+    click(&mut app, &context, at);
+    frame(&mut app, &context, vec![]);
+    assert_eq!(text(&app, &id), edited);
+    assert_eq!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&id)
+            .unwrap()
+            .field_drafts(),
+        &[field]
+    );
+    assert_eq!(app.navigation.recent.active.as_deref(), Some(alpha.path()));
+    assert_eq!(app.navigation.recent.entries[0].name, "Navigation Alpha");
+}
+
+#[test]
+fn failed_switch_recovery_preserves_the_current_project_and_recent_active_path() {
+    let (alpha, id) = named_folder("Navigation failure Alpha");
+    let (beta, _) = named_folder("Navigation failure Beta");
+    let (context, mut app) = open(alpha.path());
+    let edited = format!("{}\nunfinished", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    std::fs::write(
+        alpha.path().join(".apiforge/local/recovery.json"),
+        b"foreign recovery",
+    )
+    .unwrap();
+    app.request_switch(beta.path().into());
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.root, alpha.path());
+    assert_eq!(text(&app, &id), edited);
+    assert_eq!(app.navigation.recent.active.as_deref(), Some(alpha.path()));
+    assert!(matches!(app.prompt, Some(Prompt::CloseFailed(_))));
+    let at = label_position(&mut app, &context, "Keep editing");
+    click(&mut app, &context, at);
+    assert!(!app.switching());
+    assert_eq!(
+        std::fs::read(alpha.path().join(".apiforge/local/recovery.json")).unwrap(),
+        b"foreign recovery"
+    );
+}
+
+#[test]
+fn opening_an_uninitialised_folder_writes_no_project_and_bad_targets_keep_the_current_one() {
+    let (alpha, id) = named_folder("Navigation source");
+    let target = tempfile::tempdir().unwrap();
+    let (context, mut app) = open(alpha.path());
+    app.request_switch(target.path().join("missing"));
+    assert_eq!(app.root, alpha.path());
+    assert!(app.session.as_ref().unwrap().document(&id).is_some());
+    app.request_switch(target.path().into());
+    frame(&mut app, &context, vec![]);
+    assert!(app.uninitialised);
+    assert!(app.session.is_none());
+    assert!(!target.path().join("apiforge.project.json").exists());
+    assert!(!target.path().join(".apiforge").exists());
+}
+
+#[test]
+fn exporting_a_read_only_project_allows_the_pending_folder_switch() {
+    let (alpha, id) = named_folder("Navigation read-only Alpha");
+    let (beta, _) = named_folder("Navigation read-only Beta");
+    let (_writer_context, _writer) = open(alpha.path());
+    let (context, mut app) = open(alpha.path());
+    let edited = format!("{}\nunfinished", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    app.request_switch(beta.path().into());
+    frame(&mut app, &context, vec![]);
+    assert!(app.switching());
+    let _ = label_position(&mut app, &context, "Export and open folder");
+    let contents = app.session.as_ref().unwrap().export_unsaved().unwrap();
+    let path = alpha.path().join("export.json");
+    apiforge_storage::write_atomic(&path, &contents).unwrap();
+    app.complete_close_export(Some(Ok(path)), &contents);
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().name,
+        "Navigation read-only Beta"
+    );
+    assert!(!app.close_requested);
+    assert!(!app.switching());
+}

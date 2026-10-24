@@ -14,6 +14,7 @@ mod code_view;
 mod diagram;
 mod explorer;
 mod file_prompts;
+mod navigation;
 mod placement;
 mod publication;
 mod runs;
@@ -195,6 +196,7 @@ pub struct FolderApp {
     close_requested: bool,
     preferences: Preferences,
     runs: runs::Runs,
+    navigation: navigation::Navigation,
 }
 
 struct Clipboard {
@@ -222,9 +224,9 @@ struct Snapshot {
 }
 
 impl FolderApp {
-    pub fn open(context: &egui::Context, root: PathBuf) -> Self {
+    fn shell(context: &egui::Context, root: PathBuf) -> Self {
         theme::apply(context);
-        let mut app = Self {
+        Self {
             ui_context: context.clone(),
             root,
             session: None,
@@ -258,7 +260,12 @@ impl FolderApp {
             close_requested: false,
             preferences: Preferences::load(),
             runs: runs::Runs::default(),
-        };
+            navigation: navigation::Navigation::default(),
+        }
+    }
+
+    pub fn open(context: &egui::Context, root: PathBuf) -> Self {
+        let mut app = Self::shell(context, root);
         match ProjectSession::open_with(&app.root, Arc::new(CardPlacer)) {
             Ok(session) => app.install(session),
             Err(apiforge_project::Error::NotAProject) => {
@@ -344,6 +351,7 @@ impl FolderApp {
         self.open_run_journal();
         self.reload_field_drafts();
         self.restore_text_tabs();
+        self.remember_project();
     }
 
     /// Unfinished inspector text comes from the session, which owns it.
@@ -427,6 +435,7 @@ impl FolderApp {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll_run();
+        self.advance_switch();
         if self.close_requested {
             self.close_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -531,6 +540,7 @@ impl FolderApp {
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(48))
             .show(ui, |ui| {
                 ui.set_max_width(560.0);
+                self.navigation_menu(ui);
                 ui.label(
                     RichText::new("Open a folder project")
                         .size(theme::FONT_TITLE)

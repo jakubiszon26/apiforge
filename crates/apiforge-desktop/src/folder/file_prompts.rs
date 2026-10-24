@@ -19,6 +19,7 @@ pub(super) struct ImportRow {
 
 /// Work done by a file dialog on its own thread.
 pub(super) enum Picked {
+    Folder(Option<PathBuf>),
     Imports {
         folder: String,
         files: Vec<PathBuf>,
@@ -80,7 +81,7 @@ impl FolderApp {
                 self.session = None;
                 self.runs = runs::Runs::default();
                 self.prompt = None;
-                self.close_requested = true;
+                self.finish_departure();
             }
             Some(Ok(_)) => self.notify(
                 "Work changed during export. Export the current work before closing.",
@@ -141,6 +142,8 @@ impl FolderApp {
             });
         for picked in finished {
             match picked {
+                Picked::Folder(Some(path)) => self.request_switch(path),
+                Picked::Folder(None) => {}
                 Picked::CloseExported { result, contents } => {
                     self.complete_close_export(result, &contents)
                 }
