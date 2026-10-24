@@ -49,6 +49,8 @@ pub enum Error {
     DraftDecisionRequired,
     #[error("Local recovery data is unreadable; export or discard unsaved work explicitly.")]
     RecoveryUnavailable,
+    #[error("Save the project configuration or discard it explicitly before closing.")]
+    UnsavedConfiguration,
     #[error("The analysis result is stale and was discarded.")]
     StaleAnalysis,
     #[error("The document source exceeds the 1 MiB limit.")]

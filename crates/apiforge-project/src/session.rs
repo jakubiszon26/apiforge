@@ -92,7 +92,7 @@ pub struct ProjectSession {
     sequence: u64,
     events: Vec<Event>,
     placer: Arc<dyn Placer>,
-    /// Identifies this session instance in cache provenance.
+    /// Identifies this session instance in analysis tickets and cache provenance.
     session_id: String,
     recovery: RecoveryState,
     cache: Option<apiforge_storage::project::LastValidRead>,
@@ -306,6 +306,7 @@ impl ProjectSession {
         self.refresh_local_baselines();
         self.manifest_saved = FileState::of(&manifest.to_public_bytes()?);
         self.manifest = manifest;
+        self.manifest_dirty = false;
         self.documents.push(DocumentSession::new(
             entry.clone(),
             text.into(),
@@ -391,6 +392,7 @@ impl ProjectSession {
 
     fn ticket(&self, index: usize) -> AnalysisTicket {
         AnalysisTicket {
+            session_id: self.session_id.clone(),
             session_epoch: self.epoch,
             document_id: self.documents[index].entry.document_id.clone(),
             source_version: self.documents[index].source_version,
@@ -625,6 +627,22 @@ impl ProjectSession {
             },
         );
         Ok(())
+    }
+
+    /// Saves shared configuration without saving any document, including when
+    /// the project is empty. Failure keeps the configuration dirty and editable.
+    pub fn save_configuration(&mut self) -> Result<Option<u64>> {
+        if !self.manifest_dirty {
+            return Ok(None);
+        }
+        let bytes = self.manifest.to_public_bytes()?;
+        let generation = self
+            .store
+            .commit(vec![self.manifest_change(&self.manifest)?])?;
+        self.manifest_saved = FileState::of(&bytes);
+        self.manifest_dirty = false;
+        self.refresh_local_baselines();
+        Ok(Some(generation))
     }
 
     /// Saves exactly the document's current text, including invalid text, plus

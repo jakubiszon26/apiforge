@@ -259,3 +259,88 @@ fn closing_requires_protected_work_or_an_explicit_discard() {
     assert!(!document.is_dirty());
     assert!(session.recovered_drafts().is_empty());
 }
+
+#[test]
+fn closing_after_reverting_source_clears_the_obsolete_recovery() {
+    let (directory, mut session, id) = project();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "3"), Origin::SESSION)
+        .unwrap();
+    session.save_recovery().unwrap();
+    session.edit_source(&id, SCENARIO, Origin::SESSION).unwrap();
+    assert!(!session.document(&id).unwrap().needs_recovery());
+    session.close().unwrap();
+
+    let session = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(session.document(&id).unwrap().text(), SCENARIO);
+    assert!(!session.document(&id).unwrap().is_dirty());
+    assert!(session.recovered_drafts().is_empty());
+}
+
+#[test]
+fn closing_with_dirty_configuration_returns_the_session_even_without_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Original").unwrap();
+    session
+        .edit_configuration(|manifest| manifest.name = "Unsaved".into(), Origin::SESSION)
+        .unwrap();
+    let (session, error) = session.close().unwrap_err();
+    assert!(matches!(error, Error::UnsavedConfiguration));
+    assert!(session.is_manifest_dirty());
+    assert_eq!(session.manifest().name, "Unsaved");
+    session.discard_unsaved_and_close().unwrap();
+    let session = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(session.manifest().name, "Original");
+}
+
+#[test]
+fn closing_after_discarding_a_held_draft_does_not_restore_it_again() {
+    let (directory, mut session, id) = project();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "3"), Origin::SESSION)
+        .unwrap();
+    session.close().unwrap();
+    let external = SCENARIO.replace('2', "9");
+    fs::write(directory.path().join("scenarios/main.afs"), &external).unwrap();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(session.recovered_drafts().len(), 1);
+    session.discard_draft(&id).unwrap();
+    session.close().unwrap();
+
+    let session = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(session.document(&id).unwrap().text(), external);
+    assert!(session.recovered_drafts().is_empty());
+}
+
+#[test]
+fn clean_sessions_can_close_without_writing_unusable_or_read_only_recovery() {
+    let (directory, session, _) = project();
+    let reader = ProjectSession::open(directory.path()).unwrap();
+    assert!(reader.is_read_only());
+    reader.close().unwrap();
+    session.close().unwrap();
+
+    let path = directory.path().join(RECOVERY);
+    let unsupported = r#"{"formatVersion":99}"#;
+    fs::write(&path, unsupported).unwrap();
+    let session = ProjectSession::open(directory.path()).unwrap();
+    assert!(session.recovery_unavailable());
+    session.close().unwrap();
+    assert_eq!(fs::read_to_string(path).unwrap(), unsupported);
+}
+
+#[test]
+fn clean_close_reports_conflicts_instead_of_overwriting_changed_recovery() {
+    let (directory, mut session, id) = project();
+    session
+        .edit_source(&id, &SCENARIO.replace('2', "3"), Origin::SESSION)
+        .unwrap();
+    session.save_recovery().unwrap();
+    session.edit_source(&id, SCENARIO, Origin::SESSION).unwrap();
+    let path = directory.path().join(RECOVERY);
+    let foreign = r#"{"formatVersion":99}"#;
+    fs::write(&path, foreign).unwrap();
+    let (session, _) = session.close().unwrap_err();
+    assert_eq!(session.document(&id).unwrap().text(), SCENARIO);
+    assert_eq!(fs::read_to_string(path).unwrap(), foreign);
+}

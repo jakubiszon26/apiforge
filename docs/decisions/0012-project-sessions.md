@@ -57,6 +57,7 @@ Each analysis input/result carries:
 
 ```text
 AnalysisTicket {
+    sessionId,
     sessionEpoch,
     documentId,
     sourceVersion,
@@ -64,7 +65,9 @@ AnalysisTicket {
 }
 ```
 
-Advance the epoch on reopen/reload/replacement of a session. Increment source
+Assign a fresh session ID on open/reload/replacement, so results from a closed
+session cannot match a reopened one. Advance the epoch on reload/replacement.
+Increment source
 version on each source change, including undo and graphical projection. Advance
 context generation on environment, contract, registry or published-definition
 changes. Conservatively invalidate outstanding results for the whole context;

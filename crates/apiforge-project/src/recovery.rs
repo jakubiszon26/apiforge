@@ -304,13 +304,28 @@ impl ProjectSession {
     /// Closes the session once unsaved work is protected: recovery must be
     /// written successfully. A read-only session, or one whose recovery files
     /// are unusable, returns itself so the caller can offer export or discard.
+    /// Configuration is not part of source recovery and must be saved first.
     pub fn close(mut self) -> std::result::Result<(), (Box<Self>, Error)> {
+        if self.manifest_dirty {
+            return Err((Box::new(self), Error::UnsavedConfiguration));
+        }
         let unsaved = !self.recovery.held.is_empty()
             || self
                 .documents
                 .iter()
                 .any(|document| document.needs_recovery());
-        if !unsaved {
+        // Undoing an edit or discarding the final held draft can leave the
+        // session clean while the on-disk recovery still contains obsolete work.
+        // Synchronise that recovery before acknowledging close. Clean readers
+        // and unusable/backup candidates must still be left untouched.
+        let recovery_needs_clearing = !self.store.is_read_only()
+            && self.recovery.read.as_ref().is_some_and(|read| {
+                !read.is_backup_candidate()
+                    && read
+                        .recovery()
+                        .is_some_and(|recovery| !recovery.documents.is_empty())
+            });
+        if !unsaved && !recovery_needs_clearing {
             return Ok(());
         }
         match self.save_recovery() {
