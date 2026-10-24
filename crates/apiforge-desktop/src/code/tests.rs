@@ -8,6 +8,8 @@ struct Harness {
     context: egui::Context,
     editor: CodeEditor,
     text: String,
+    top_space: f32,
+    request_focus: bool,
 }
 
 impl Harness {
@@ -18,6 +20,8 @@ impl Harness {
             context,
             editor: CodeEditor::default(),
             text: text.to_owned(),
+            top_space: 0.0,
+            request_focus: true,
         }
     }
 
@@ -30,6 +34,8 @@ impl Harness {
                 .with_ports(vec![Port::new("status", ValueType::Number)]),
             Handle::new("promotion", "value").with_ports(vec![Port::new("value", ValueType::Any)]),
         ];
+        let top_space = self.top_space;
+        let request_focus = self.request_focus;
         let text = &mut self.text;
         let editor = &mut self.editor;
         let mut output = self.context.run_ui(
@@ -42,6 +48,7 @@ impl Harness {
                 ..Default::default()
             },
             |ui| {
+                ui.add_space(top_space);
                 let outcome = editor.show(
                     ui,
                     egui::Id::new("test-editor"),
@@ -54,7 +61,9 @@ impl Harness {
                         ..Context::default()
                     },
                 );
-                outcome.response.request_focus();
+                if request_focus && !outcome.response.has_focus() {
+                    outcome.response.request_focus();
+                }
                 changed = outcome.changed;
                 cursor = outcome.response.has_focus().then_some(0);
             },
@@ -328,4 +337,142 @@ fn a_buffer_too_large_to_colour_is_laid_out_plainly() {
     // Below the limit it is coloured as usual.
     let small = layout_job("var a = 1", &[], FontId::monospace(13.0));
     assert!(small.sections.len() > 1);
+}
+
+#[test]
+fn blur_dismisses_completion_and_enter_in_another_field_keeps_code_unchanged() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+    harness.request_focus = false;
+    harness
+        .context
+        .memory_mut(|m| m.request_focus(egui::Id::new("inspector-field")));
+    let before = harness.text.clone();
+    harness.press(Key::Enter);
+    assert_eq!(harness.text, before);
+    assert!(harness.editor.completions.popup.is_none());
+}
+
+#[test]
+fn popup_follows_the_caret_after_diagnostics_move_the_editor() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    let before = harness.editor.completions.popup.as_ref().unwrap().at;
+    harness.top_space = 100.0;
+    harness.frame(vec![]);
+    let after = harness.editor.completions.popup.as_ref().unwrap().at;
+    assert!(
+        (after.y - before.y - 100.0).abs() < 1.0,
+        "{before:?} -> {after:?}"
+    );
+}
+
+#[test]
+fn manual_completion_is_consumed_only_by_the_focused_editor() {
+    let ctx = egui::Context::default();
+    let mut first = CodeEditor::default();
+    let mut second = CodeEditor::default();
+    let mut a = String::new();
+    let mut b = "scenario \"S\" { total = prod".to_owned();
+    let handles = [Handle::new("products", "request")];
+    ctx.memory_mut(|m| m.request_focus(egui::Id::new("second")));
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events: vec![Event::Key {
+                key: Key::Space,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::CTRL,
+            }],
+            ..Default::default()
+        },
+        |ui| {
+            let context = Context {
+                scope: Scope {
+                    handles: &handles,
+                    ..Scope::default()
+                },
+                ..Context::default()
+            };
+            first.show(ui, egui::Id::new("first"), &mut a, &context);
+            second.show(ui, egui::Id::new("second"), &mut b, &context);
+        },
+    );
+    output.textures_delta.clear();
+    assert!(first.completions.popup.is_none());
+    assert!(second.completions.popup.is_some());
+}
+
+#[test]
+fn reveal_scrolls_an_offscreen_statement_into_view() {
+    let ctx = egui::Context::default();
+    let mut editor = CodeEditor::default();
+    let mut text = (0..100)
+        .map(|i| format!("value_{i} = {i}\n"))
+        .collect::<String>();
+    let mut offset = 0.0;
+    for index in 0..4 {
+        if index == 1 {
+            editor.reveal(text.find("value_90").unwrap());
+        }
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(500.0, 300.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let scroll = egui::ScrollArea::both()
+                    .id_salt("reveal-scroll")
+                    .animated(false)
+                    .show(ui, |ui| {
+                        editor.show(
+                            ui,
+                            egui::Id::new("long-editor"),
+                            &mut text,
+                            &Context::default(),
+                        );
+                    });
+                offset = scroll.state.offset.y;
+            },
+        );
+        output.textures_delta.clear();
+    }
+    assert!(offset > 1000.0, "offset: {offset}");
+}
+
+#[test]
+fn moving_the_caret_forward_dismisses_a_completion_for_the_old_location() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro\n}");
+    harness.settle();
+    harness.editor.reveal(harness.text.find("pro").unwrap() + 3);
+    harness.frame(vec![]);
+    harness.frame(vec![]);
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+    harness.press(Key::ArrowRight);
+    assert!(
+        harness.editor.completions.popup.is_none(),
+        "the caret moved outside the completion prefix"
+    );
+    let before = harness.text.clone();
+    harness.press(Key::Enter);
+    assert!(
+        !harness.text.contains("products"),
+        "{before:?} -> {:?}",
+        harness.text
+    );
+}
+
+#[test]
+fn typing_immediately_after_a_completion_uses_its_new_caret() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    harness.press(Key::Enter);
+    harness.type_text(".");
+    assert!(harness.text.ends_with("products."), "{}", harness.text);
 }

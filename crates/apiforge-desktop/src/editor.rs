@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Undo entries kept per editing context.
+/// Undo entries kept per editing document (a scenario includes both phases).
 const HISTORY_LIMIT: usize = 50;
 /// Consecutive edits of one node within this interval (typing, dragging) are one
 /// undo step.
@@ -32,6 +32,8 @@ pub struct Draft {
 
 #[derive(Clone, Debug)]
 struct Snapshot {
+    /// The phase changed by this edit; viewing another phase does not change it.
+    phase: Phase,
     graph: Graph,
     /// The cleanup graph, captured with main-graph edits because deleting a main
     /// node also removes cleanup inputs that referenced it.
@@ -171,8 +173,8 @@ impl Editor {
         }
     }
 
-    /// Identifies the editing context; history and the block clipboard are scoped to
-    /// it.
+    /// Identifies the board context for the camera and block clipboard.
+    /// Scenario history spans both phases.
     pub fn context_key(&self) -> String {
         let drafts: Vec<String> = self
             .drafts
@@ -238,9 +240,16 @@ impl Editor {
     pub fn set_phase(&mut self, phase: Phase) {
         if self.phase != phase || !self.drafts.is_empty() {
             self.phase = phase;
+            let leaving_component = !self.drafts.is_empty();
             self.drafts.clear();
             self.selection.clear();
-            self.context_changed();
+            if leaving_component {
+                self.context_changed();
+            } else {
+                // Both phases belong to one scenario and one chronological history.
+                self.history.merge_key = None;
+                self.history.last_edit = None;
+            }
         }
     }
 
@@ -352,9 +361,20 @@ impl Editor {
 
     /// The current state. `wide` also captures what only a code edit changes.
     fn snapshot_with(&self, wide: bool) -> Snapshot {
+        self.snapshot_for(self.phase, wide)
+    }
+
+    fn snapshot_for(&self, phase: Phase, wide: bool) -> Snapshot {
         Snapshot {
-            graph: self.graph().clone(),
-            cleanup: (self.drafts.is_empty() && self.phase == Phase::Main)
+            phase,
+            graph: if let Some(draft) = self.drafts.last() {
+                draft.graph.clone()
+            } else if wide || phase == Phase::Main {
+                self.scenario().graph.clone()
+            } else {
+                self.scenario().cleanup.clone()
+            },
+            cleanup: (self.drafts.is_empty() && (wide || phase == Phase::Main))
                 .then(|| self.scenario().cleanup.clone()),
             settings: (wide && self.drafts.is_empty()).then(|| {
                 let scenario = self.scenario();
@@ -373,6 +393,7 @@ impl Editor {
 
     /// Puts a snapshot back, graphs and all.
     fn restore(&mut self, snapshot: Snapshot) {
+        self.phase = snapshot.phase;
         if let Some(definition) = snapshot.definition
             && let Some(draft) = self.drafts.last_mut()
         {
@@ -384,6 +405,10 @@ impl Editor {
             scenario.description = settings.description;
             scenario.parameters = settings.parameters;
             scenario.error_policy = settings.error_policy;
+            scenario.graph = snapshot.graph;
+            scenario.cleanup = snapshot.cleanup.expect("whole scenario snapshot");
+            self.revision += 1;
+            return;
         }
         self.replace_graph(snapshot.graph, snapshot.cleanup);
     }
@@ -509,7 +534,7 @@ impl Editor {
         // The step going the other way captures as much as the one coming back,
         // so redoing restores exactly what undoing replaced.
         let wide = previous.settings.is_some() || previous.definition.is_some();
-        let current = self.snapshot_with(wide);
+        let current = self.snapshot_for(previous.phase, wide);
         self.history.future.insert(0, current);
         self.history.future.truncate(HISTORY_LIMIT);
         self.history.merge_key = None;
@@ -523,7 +548,7 @@ impl Editor {
         }
         let next = self.history.future.remove(0);
         let wide = next.settings.is_some() || next.definition.is_some();
-        let current = self.snapshot_with(wide);
+        let current = self.snapshot_for(next.phase, wide);
         push_bounded(&mut self.history.past, current);
         self.history.merge_key = None;
         self.restore(next);
@@ -707,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn contexts_have_separate_history_and_selection() {
+    fn phases_share_history_but_keep_selection_scoped_to_the_board() {
         let mut editor = editor();
         let node = create_node(NodeKind::Value, Position { x: 0.0, y: 0.0 }, None);
         let mut graph = editor.graph().clone();
@@ -717,7 +742,7 @@ mod tests {
         let main_key = editor.context_key();
         editor.set_phase(Phase::Cleanup);
         assert_ne!(editor.context_key(), main_key);
-        assert!(!editor.can_undo());
+        assert!(editor.can_undo());
         assert!(editor.selection.is_empty());
         assert!(
             editor

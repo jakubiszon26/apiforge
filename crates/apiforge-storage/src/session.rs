@@ -83,8 +83,18 @@ pub struct CodeDraft {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum DraftTarget {
-    Scenario { id: String },
-    Component { id: String, revision: u32 },
+    Scenario {
+        id: String,
+    },
+    Component {
+        id: String,
+        revision: u32,
+    },
+    /// Unfinished inspector text, owned by a scenario or component.
+    Field {
+        owner: Box<DraftTarget>,
+        widget: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -512,6 +522,14 @@ fn validate_drafts(drafts: &Drafts) -> Result<(), StorageError> {
             return Err(StorageError::InvalidDrafts("invalid context or base hash"));
         }
         match &draft.target {
+            DraftTarget::Field { owner, .. }
+                if !matches!(owner.as_ref(),
+                DraftTarget::Scenario { id } if !id.is_empty())
+                    && !matches!(owner.as_ref(), DraftTarget::Component { id, revision }
+                    if !id.is_empty() && *revision > 0) =>
+            {
+                return Err(StorageError::InvalidDrafts("invalid field owner"));
+            }
             DraftTarget::Scenario { id } if id.is_empty() => {
                 return Err(StorageError::InvalidDrafts("missing scenario"));
             }

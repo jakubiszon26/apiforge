@@ -218,12 +218,12 @@ fn a_restored_draft_waits_to_be_parsed_and_can_be_stale() {
     let buffer = buffers.get(&context).unwrap();
     assert_eq!(buffer.cursor, 4);
     assert!(buffer.stale);
-    // The restored text is parsed at the next pause, like anything else typed.
+    // A stale draft stays unapplied until the user answers the conflict.
     let (_, later) = settled();
     let applied = buffers.apply(&context, &project, &document(&project), later);
     assert!(
-        matches!(applied, Apply::Scenario(_) | Apply::Nothing),
-        "valid restored text is not an error: {applied:?}"
+        matches!(applied, Apply::Nothing),
+        "an unresolved draft cannot change the document: {applied:?}"
     );
     // Typing answers the question the stale banner asks.
     buffers.typed(&context, format!("{printed}\n"), Instant::now());

@@ -89,7 +89,7 @@ The decisions above hold, with these corrections and limits:
 
 - **No body tab.** A request body is edited where it belongs: as part of its
   scenario's code, and in the inspector, whose body field is the same editor in
-  object or template mode. *Open in code* on that field shows the request in the
+  JSON-with-placeholders or template mode. *Open in code* on that field shows the request in the
   panel. A tab per body would have been a second editor over the same text, with
   a fragment to map back and forth, for no reach the panel does not already have.
 - **Reprinting an applied buffer** happens when the document moves on without it,
@@ -106,6 +106,30 @@ The decisions above hold, with these corrections and limits:
   document that has moved on is shown with a banner asking whether to keep or
   discard it, rather than side by side with the current code: nothing is lost
   either way, and the question is the same one.
+- **Scenario history spans both phases.** Changing the board phase, including
+  navigation from the code caret, keeps undo/redo. Each graph snapshot records
+  which phase it changes, so undo and redo restore the right graph even if a
+  different phase is visible. Component and scenario changes still delimit the
+  editing context.
+- **Text widget state belongs to its document.** Scenario/component contexts use
+  distinct text-edit and scroll-area identities. Restored cursors are installed
+  before the next input event. Reprinting from a changed document clears obsolete
+  text undo history and completions.
+- **Debounce belongs to the buffer.** Its scheduled repaint and application do
+  not depend on Code being visible; Ctrl+E remains available while typing. Close
+  settles active typing before saving. A failed draft write keeps the window open
+  and exposes Retry save, just like a failed workspace write.
+- **Pending edits** retain their text and hold document mutations during the
+  debounce. Run settles pending code before constructing its execution snapshot.
+  A restored conflict never applies before the user keeps or edits it, and its
+  original base hash survives further draft writes until that choice is made.
+- **Inspector drafts** for URLs, headers, query values and request bodies are
+  stored in the same draft file, keyed by their owning document and stable widget
+  identity. Their base hash describes the printed field. An external field change
+  offers keep/discard actions; unresolved text never overwrites the current field.
+  JSON bodies complete references only inside the placeholders their parser accepts.
+- **All projects** contribute drafts on save and restore, including projects that
+  are inactive at startup. The draft file is not a projection of the active project.
 - **A deleted scenario or component** loses its draft by not being written again:
   a draft is only stored for a document that is still there.
 

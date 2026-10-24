@@ -75,6 +75,7 @@ pub fn layout_mode(available: egui::Vec2) -> LayoutMode {
 
 pub struct App {
     editor: Editor,
+    ui_context: egui::Context,
     saver: Option<Saver>,
     saved_revision: u64,
     canvas: Canvas,
@@ -109,10 +110,12 @@ pub struct App {
     /// Writes code drafts beside the workspace; `None` without a writable one.
     store: Option<WorkspaceStore>,
     /// What was last written as drafts, so an unchanged set is not rewritten.
-    saved_drafts: Vec<(buffers::Context, String)>,
+    saved_drafts: Vec<apiforge_storage::CodeDraft>,
+    draft_save_error: Option<String>,
     /// The text of every context the user has edited as code.
     buffers: buffers::Buffers,
     code: code::CodeEditor,
+    shown_code: Option<buffers::Context>,
     /// Whether the code panel is open beside the board.
     code_open: bool,
     /// The block whose statement the panel last revealed, so a selection that
@@ -245,9 +248,11 @@ impl App {
                 None => runner,
             });
         let editor = Editor::new(workspace);
+        inspector::drafts::restore(context, drafts.as_ref());
         let buffers = restore_drafts(&editor, drafts.take());
         Self {
             editor,
+            ui_context: context.clone(),
             saver,
             saved_revision: 0,
             canvas,
@@ -277,8 +282,10 @@ impl App {
             preferences,
             store,
             saved_drafts: Vec::new(),
+            draft_save_error: None,
             buffers,
             code: code::CodeEditor::default(),
+            shown_code: None,
             revealed: None,
         }
     }
@@ -306,6 +313,7 @@ impl App {
             return false;
         }
         if !self.closing {
+            self.settle_code();
             self.save_if_changed();
             self.closing = true;
             self.cancel_run();
@@ -343,6 +351,9 @@ impl App {
         if !self.closing {
             return None;
         }
+        if let Some(error) = &self.draft_save_error {
+            return Some(error.clone());
+        }
         match self.saver.as_ref().map(Saver::status) {
             Some(SaveStatus::Failed(error) | SaveStatus::Conflict(error)) => Some(error),
             _ => None,
@@ -364,10 +375,11 @@ impl App {
         if self.storage_prompt.is_some() || self.storage_busy {
             return;
         }
+        self.notice = None;
+        self.save_drafts();
         if let Some(saver) = &self.saver {
             saver.save(self.editor.workspace());
             saver.flush();
-            self.notice = None;
         }
     }
 
@@ -381,8 +393,30 @@ impl App {
                 }
                 Ok(loaded) => {
                     self.clear_run();
+                    let bases: Vec<_> = self
+                        .buffers
+                        .drafts()
+                        .map(|(context, buffer)| {
+                            (
+                                context.clone(),
+                                buffer.base_hash.clone().or_else(|| {
+                                    self.printed_for(context)
+                                        .map(|printed| apiforge_storage::draft_base_hash(&printed))
+                                }),
+                            )
+                        })
+                        .collect();
                     self.editor =
                         Editor::new(loaded.map_or_else(default_workspace, |l| l.workspace));
+                    for (context, base) in bases {
+                        let current = self
+                            .printed_for(&context)
+                            .map(|printed| apiforge_storage::draft_base_hash(&printed));
+                        if let Some(buffer) = self.buffers.get_mut(&context) {
+                            buffer.stale |= base != current;
+                            buffer.base_hash = base;
+                        }
+                    }
                     self.canvas = Canvas::default();
                     self.inspector = Inspector::default();
                     self.inspector_collapsed = false;
@@ -424,6 +458,8 @@ impl App {
             return;
         }
         self.saver = None;
+        self.store = None;
+        self.draft_save_error = None;
         self.storage_prompt = None;
         self.closing = false;
         self.storage_message = Some(
@@ -699,14 +735,26 @@ impl App {
 
     /// Whether the code panel has the keyboard, which decides whose history
     /// Ctrl+Z walks: the text's or the document's.
+    fn code_editor_id(&self) -> egui::Id {
+        egui::Id::new(("code-panel-editor", self.code_context()))
+    }
+
     fn code_has_focus(&self, context: &egui::Context) -> bool {
-        self.code_open
-            && context.memory(|memory| memory.has_focus(egui::Id::new("code-panel-editor")))
+        self.code_open && context.memory(|memory| memory.has_focus(self.code_editor_id()))
     }
 
     /// What a context's document prints as, for comparing a draft against it.
     fn printed_for(&self, context: &buffers::Context) -> Option<String> {
-        let project = self.editor.project();
+        let project_id = match context {
+            buffers::Context::Scenario { project, .. }
+            | buffers::Context::Component { project, .. } => project,
+        };
+        let project = self
+            .editor
+            .workspace()
+            .projects
+            .iter()
+            .find(|p| &p.id == project_id)?;
         let document = match context {
             buffers::Context::Scenario { id, .. } => apiforge_script::Document::Scenario(
                 project
@@ -760,9 +808,20 @@ impl App {
     /// board. Typing pauses, then the text becomes a document edit.
     fn code_panel(&mut self, ui: &mut egui::Ui) {
         let context = self.code_context();
+        let entering = self.shown_code.as_ref() != Some(&context);
+        if entering {
+            self.code = code::CodeEditor::default();
+            self.revealed = None;
+            self.shown_code = Some(context.clone());
+        }
+        let editor_id = self.code_editor_id();
         let document = self.code_document();
         let project = self.editor.project().clone();
         let printed = buffers::print(&project, &document);
+        let differs_from_print = self
+            .buffers
+            .get(&context)
+            .is_none_or(|buffer| Some(buffer.text.as_str()) != printed.as_deref());
         ui.horizontal(|ui| {
             widgets::caption(ui, "CODE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -786,14 +845,30 @@ impl App {
             );
             return;
         };
+        if differs_from_print && buffer.state == buffers::State::Clean && !buffer.blocks_the_board()
+        {
+            if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), editor_id) {
+                state.clear_undoer();
+                state.store(ui.ctx(), editor_id);
+            }
+            self.code = code::CodeEditor::default();
+            self.revealed = None;
+        }
+        if entering {
+            self.code.reveal(buffer.cursor);
+        }
         let state = buffer.state;
         let stale = buffer.stale;
-        let mut text = std::mem::take(&mut buffer.text);
+        let mut text = buffer.text.clone();
         let diagnostics = buffer.diagnostics.clone();
         if stale {
             self.stale_banner(ui, &context);
         } else if state == buffers::State::Invalid {
             self.code_banner(ui, &context);
+        }
+        if self.buffers.get(&context).is_none() {
+            ui.ctx().request_repaint();
+            return;
         }
         let names = crate::shapes::Names::of_board(
             &project,
@@ -808,11 +883,13 @@ impl App {
             steps,
         };
         let outcome = egui::ScrollArea::both()
+            .id_salt((&context, "code-scroll"))
+            .animated(false)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 self.code.show(
                     ui,
-                    egui::Id::new("code-panel-editor"),
+                    editor_id,
                     &mut text,
                     &code::Context {
                         mode: apiforge_script::complete::Mode::Script,
@@ -837,7 +914,7 @@ impl App {
             buffer.cursor = cursor;
         }
         self.sync_selection(&text, outcome.cursor);
-        self.apply_code(&context, &project, &document);
+        self.poll_code();
     }
 
     /// Keeps the board's selection and the caret pointing at the same block.
@@ -849,6 +926,29 @@ impl App {
             let Some(handle) = apiforge_script::complete::statement_at(text, cursor) else {
                 return;
             };
+            if self.editor.draft().is_none() {
+                let scenario = self.editor.scenario();
+                let phase = if scenario
+                    .graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.handle == handle)
+                {
+                    Some(Phase::Main)
+                } else if scenario
+                    .cleanup
+                    .nodes
+                    .iter()
+                    .any(|node| node.handle == handle)
+                {
+                    Some(Phase::Cleanup)
+                } else {
+                    None
+                };
+                if let Some(phase) = phase {
+                    self.editor.set_phase(phase);
+                }
+            }
             let selected = self
                 .editor
                 .graph()
@@ -949,6 +1049,20 @@ impl App {
         document: &apiforge_script::Document,
     ) {
         let now = Instant::now();
+        if self
+            .buffers
+            .get(context)
+            .is_some_and(|buffer| buffer.base_hash.is_none())
+        {
+            // A component draft is based on its saved revision, even after valid
+            // edits have changed the temporary graph being edited.
+            let base_hash = self
+                .printed_for(context)
+                .map(|printed| apiforge_storage::draft_base_hash(&printed));
+            if let Some(buffer) = self.buffers.get_mut(context) {
+                buffer.base_hash = base_hash;
+            }
+        }
         match self.buffers.apply(context, project, document, now) {
             buffers::Apply::Nothing | buffers::Apply::Failed => {}
             buffers::Apply::Scenario(scenario) => {
@@ -958,7 +1072,10 @@ impl App {
                     Err(message) => self.canvas.set_error(message),
                 }
             }
-            buffers::Apply::Component(component) => {
+            buffers::Apply::Component(mut component) => {
+                if let apiforge_script::Document::Component(current) = document {
+                    self.place_new_graph_blocks(&mut component.graph, &current.graph, project);
+                }
                 match self.editor.apply_component(*component, now) {
                     Ok(()) => self.buffers.applied(context, self.editor.revision()),
                     Err(message) => self.canvas.set_error(message),
@@ -977,60 +1094,100 @@ impl App {
         let apiforge_script::Document::Scenario(current) = document else {
             return scenario;
         };
-        let reference = self.editor.reference_graph().into_owned();
         for (graph, previous) in [
             (&mut scenario.graph, &current.graph),
             (&mut scenario.cleanup, &current.cleanup),
         ] {
-            let fresh: Vec<usize> = graph
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| !previous.nodes.iter().any(|old| old.id == node.id))
-                .map(|(index, _)| index)
-                .collect();
-            if fresh.is_empty() {
-                continue;
-            }
-            let blocks: Vec<apiforge_layout::Block> = graph
-                .nodes
-                .iter()
-                .enumerate()
-                .map(|(index, node)| {
-                    let rect = canvas::Card::build(node, &reference, project).rect();
-                    let block = apiforge_layout::Block::new(
-                        apiforge_layout::Size::new(rect.width(), rect.height()),
-                        apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
-                    );
-                    if fresh.contains(&index) {
-                        block
-                    } else {
-                        block.pinned()
-                    }
-                })
-                .collect();
-            let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
-            let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
-                .iter()
-                .filter_map(|wire| {
-                    Some(apiforge_layout::Edge::new(
-                        index_of(&wire.source)?,
-                        index_of(&wire.target)?,
-                    ))
-                })
-                .collect();
-            let placed =
-                apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &fresh);
-            for (index, position) in fresh.iter().zip(placed) {
-                let node = &mut graph.nodes[*index];
-                node.position = Position {
-                    x: f64::from(position.x),
-                    y: f64::from(position.y),
-                };
-                node.auto_placed = true;
-            }
+            self.place_new_graph_blocks(graph, previous, project);
         }
         scenario
+    }
+
+    fn place_new_graph_blocks(&self, graph: &mut Graph, previous: &Graph, project: &Project) {
+        let reference = self.editor.reference_graph().into_owned();
+        let fresh: Vec<usize> = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| !previous.nodes.iter().any(|old| old.id == node.id))
+            .map(|(index, _)| index)
+            .collect();
+        if fresh.is_empty() {
+            return;
+        }
+        let blocks: Vec<apiforge_layout::Block> = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let rect = canvas::Card::build(node, &reference, project).rect();
+                let block = apiforge_layout::Block::new(
+                    apiforge_layout::Size::new(rect.width(), rect.height()),
+                    apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
+                );
+                if fresh.contains(&index) {
+                    block
+                } else {
+                    block.pinned()
+                }
+            })
+            .collect();
+        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
+            .iter()
+            .filter_map(|wire| {
+                Some(apiforge_layout::Edge::new(
+                    index_of(&wire.source)?,
+                    index_of(&wire.target)?,
+                ))
+            })
+            .collect();
+        let placed = apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &fresh);
+        for (index, position) in fresh.iter().zip(placed) {
+            let node = &mut graph.nodes[*index];
+            node.position = Position {
+                x: f64::from(position.x),
+                y: f64::from(position.y),
+            };
+            node.auto_placed = true;
+        }
+    }
+
+    /// Resolve pending typing before an action that uses the document.
+    fn settle_code(&mut self) {
+        let context = self.code_context();
+        if let Some(buffer) = self.buffers.get_mut(&context) {
+            buffer.typed_at = None;
+        }
+        let project = self.editor.project().clone();
+        let document = self.code_document();
+        self.apply_code(&context, &project, &document);
+    }
+
+    /// Typing settles even when Code is closed; schedule the debounce explicitly.
+    fn poll_code(&mut self) {
+        if self.storage_prompt.is_some() || self.storage_busy {
+            return;
+        }
+        let context = self.code_context();
+        let Some(delay) = self
+            .buffers
+            .get(&context)
+            .and_then(|buffer| buffer.apply_in(Instant::now()))
+        else {
+            return;
+        };
+        if !delay.is_zero() {
+            self.ui_context.request_repaint_after(delay);
+            return;
+        }
+        let project = self.editor.project().clone();
+        let document = self.code_document();
+        self.apply_code(&context, &project, &document);
+    }
+
+    fn document_locked(&self) -> bool {
+        self.buffers.blocks_the_board(&self.code_context())
     }
 
     fn is_running(&self) -> bool {
@@ -1079,6 +1236,7 @@ impl App {
         {
             return;
         }
+        self.settle_code();
         // A run executes the document, never the buffer. When the code says
         // something else, the user is asked once which one they meant.
         if self.buffers.blocks_the_board(&self.code_context()) && self.run_anyway != Some(kind) {
@@ -1169,16 +1327,7 @@ impl App {
         let Some(store) = &self.store else {
             return;
         };
-        let project = self.editor.project().id.clone();
-        let current: Vec<(buffers::Context, String)> = self
-            .buffers
-            .drafts()
-            .map(|(context, buffer)| (context.clone(), buffer.text.clone()))
-            .collect();
-        if current == self.saved_drafts {
-            return;
-        }
-        let entries: Vec<apiforge_storage::CodeDraft> = self
+        let mut entries: Vec<apiforge_storage::CodeDraft> = self
             .buffers
             .drafts()
             .filter_map(|(context, buffer)| {
@@ -1199,22 +1348,52 @@ impl App {
                         },
                     ),
                 };
-                if project_id != project {
-                    return None;
-                }
-                // The base is the document as it stands now. A context whose
-                // document is gone writes nothing, which is how a deleted
-                // scenario loses its draft.
+                // Preserve the base of unfinished text until it is applied or
+                // discarded. A deleted document no longer writes a draft.
                 let printed = self.printed_for(context)?;
                 Some(apiforge_storage::CodeDraft {
                     project_id,
                     target,
-                    base_hash: apiforge_storage::draft_base_hash(&printed),
+                    base_hash: buffer
+                        .base_hash
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| apiforge_storage::draft_base_hash(&printed)),
                     text: buffer.text.clone(),
                     cursor: buffer.cursor.min(buffer.text.len()),
                 })
             })
             .collect();
+        entries.extend(
+            inspector::drafts::entries(&self.ui_context)
+                .into_iter()
+                .filter(|draft| {
+                    let apiforge_storage::DraftTarget::Field { owner, .. } = &draft.target else {
+                        return false;
+                    };
+                    self.editor
+                        .workspace()
+                        .projects
+                        .iter()
+                        .find(|project| project.id == draft.project_id)
+                        .is_some_and(|project| match owner.as_ref() {
+                            apiforge_storage::DraftTarget::Scenario { id } => {
+                                project.scenarios.iter().any(|scenario| &scenario.id == id)
+                            }
+                            apiforge_storage::DraftTarget::Component { id, revision } => {
+                                project.components.iter().any(|component| {
+                                    &component.id == id && component.revision == *revision
+                                })
+                            }
+                            apiforge_storage::DraftTarget::Field { .. } => false,
+                        })
+                }),
+        );
+        entries.sort_by_key(|draft| (draft.project_id.clone(), format!("{:?}", draft.target)));
+        if entries == self.saved_drafts {
+            self.draft_save_error = None;
+            return;
+        }
         // Code names a secret, it never holds one; the store refuses text that
         // does, and the session's own values are what it checks against.
         let secrets: Vec<String> = self.secrets.values().cloned().collect();
@@ -1224,16 +1403,24 @@ impl App {
             entries,
         };
         match store.save_drafts(&drafts, &borrowed) {
-            Ok(()) => self.saved_drafts = current,
+            Ok(()) => {
+                self.saved_drafts = drafts.entries;
+                self.draft_save_error = None;
+            }
             Err(error) => {
+                let message = format!("Code drafts were not saved: {error}");
+                self.draft_save_error = Some(message.clone());
                 if self.notice.is_none() {
-                    self.notice = Some(format!("Code drafts were not saved: {error}"));
+                    self.notice = Some(message);
                 }
             }
         }
     }
 
     fn apply_graph(&mut self, graph: Graph) {
+        if self.document_locked() {
+            return;
+        }
         if let Err(message) = self.editor.apply_graph(graph, Instant::now()) {
             self.canvas.set_error(message);
         }
@@ -1242,6 +1429,7 @@ impl App {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll_run();
         self.poll_storage();
+        self.poll_code();
         if self.storage_prompt.is_some() || self.storage_busy {
             ui.disable();
         }
@@ -1300,13 +1488,27 @@ impl App {
         if self.editor.draft().is_none() {
             self.report(ui);
         }
+        // Keep a usable board when auxiliary panels are already open on resize.
+        let sidebar_width = if compact {
+            theme::COMPACT_SIDEBAR_WIDTH
+        } else {
+            theme::SIDEBAR_WIDTH
+        };
+        let show_inspector = self.editor.selected_node().is_some()
+            && !self.inspector_collapsed
+            && (!self.code_open || ui.ctx().content_rect().width() >= 1440.0);
+        let code_max = (ui.ctx().content_rect().width()
+            - sidebar_width
+            - 360.0
+            - if show_inspector { 520.0 } else { 0.0 })
+        .max(260.0);
         if self.code_open {
             egui::Panel::left("code-panel")
                 .default_size(if compact { 320.0 } else { 440.0 })
                 .size_range(if compact {
-                    260.0..=520.0
+                    260.0..=code_max.min(520.0)
                 } else {
-                    300.0..=760.0
+                    300.0..=code_max.clamp(300.0, 760.0)
                 })
                 .frame(
                     egui::Frame::new()
@@ -1315,7 +1517,7 @@ impl App {
                 )
                 .show(ui, |ui| self.code_panel(ui));
         }
-        if self.editor.selected_node().is_some() && !self.inspector_collapsed {
+        if show_inspector {
             egui::Panel::right(if compact {
                 "inspector-compact"
             } else {
@@ -1332,18 +1534,41 @@ impl App {
                     .fill(theme::WHITE)
                     .inner_margin(if compact { 12 } else { 16 }),
             )
-            .show(ui, |ui| self.inspector(ui));
+            .show(ui, |ui| {
+                ui.add_enabled_ui(!self.document_locked(), |ui| self.inspector(ui));
+            });
         }
         let board_waits = self.buffers.blocks_the_board(&self.code_context());
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(theme::BG))
             .show(ui, |ui| {
                 // A graph edit cannot be merged into text that does not parse,
                 // so the board waits until the code is fixed or discarded.
                 if board_waits {
-                    ui.disable();
+                    egui::Frame::new()
+                        .fill(theme::ACCENT_SOFT)
+                        .inner_margin(egui::Margin::symmetric(12, 6))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Board is read-only while code changes need attention.");
+                                if ui.button("Show code").clicked() {
+                                    self.code_open = true;
+                                }
+                                if ui.button("Discard code changes").clicked() {
+                                    self.buffers.discard(&self.code_context());
+                                }
+                            });
+                        });
                 }
-                self.board(ui);
+                ui.scope(|ui| {
+                    if board_waits {
+                        // Keep the last valid graph legible as a reference.
+                        ui.visuals_mut().disabled_alpha = 1.0;
+                        ui.disable();
+                    }
+                    self.board(ui);
+                });
             });
         self.dialogs(ui.ctx());
         if let Some(id) = self.navigator.show(ui.ctx(), self.editor.graph()) {
@@ -1382,23 +1607,30 @@ impl App {
             parameters: self.editor.parameter_names(),
             editing_component: self.editor.draft().is_some(),
             running,
+            document_locked: self.document_locked(),
         };
         let actions = self.library.show(ui, &context);
         drop(graph);
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             let status = self.saver.as_ref().map(Saver::status);
-            if matches!(&status, Some(SaveStatus::Failed(_)))
+            if (matches!(&status, Some(SaveStatus::Failed(_))) || self.draft_save_error.is_some())
                 && ui
                     .add(widgets::action(Icon::Refresh, "Retry save").quiet())
                     .clicked()
             {
                 self.retry_save();
             }
-            let (text, color) = match &status {
-                None => ("Session only — not saved".to_owned(), theme::MUTED),
-                Some(SaveStatus::Failed(error)) => (format!("Save failed: {error}"), theme::DANGER),
-                Some(status) => (status.label().to_owned(), theme::MUTED),
+            let (text, color) = if self.draft_save_error.is_some() {
+                ("Drafts not saved".to_owned(), theme::DANGER)
+            } else {
+                match &status {
+                    None => ("Session only — not saved".to_owned(), theme::MUTED),
+                    Some(SaveStatus::Failed(error)) => {
+                        (format!("Save failed: {error}"), theme::DANGER)
+                    }
+                    Some(status) => (status.label().to_owned(), theme::MUTED),
+                }
             };
             ui.label(RichText::new(format!("●  {text}")).size(11.0).color(color));
             ui.add_space(4.0);
@@ -1419,7 +1651,7 @@ impl App {
             )
             .min_size(egui::vec2(ui.available_width(), 44.0));
             if ui
-                .add(environment)
+                .add_enabled(!self.document_locked(), environment)
                 .on_hover_text("Base URL, variables and session secrets")
                 .clicked()
             {
@@ -1436,6 +1668,14 @@ impl App {
     }
 
     fn library_action(&mut self, action: library::Action) {
+        if self.document_locked()
+            && matches!(
+                action,
+                library::Action::AddNode { .. } | library::Action::AddOperator(_)
+            )
+        {
+            return;
+        }
         match action {
             library::Action::SwitchProject(id) => {
                 if self.is_running() {
@@ -1544,7 +1784,10 @@ impl App {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Project file actions")
         });
         if ui
-            .add(widgets::icon_button(Icon::Settings, "Settings"))
+            .add_enabled(
+                !self.document_locked(),
+                widgets::icon_button(Icon::Settings, "Settings"),
+            )
             .clicked()
         {
             self.dialog = Some(Dialog::Settings(dialogs::SettingsDialog::new(
@@ -1605,7 +1848,7 @@ impl App {
                 self.project_menu(ui);
                 if let Some(draft) = &draft {
                     if ui
-                        .add(widgets::action(Icon::Save, "Save revision").primary())
+                        .add_enabled(!self.document_locked(), widgets::action(Icon::Save, "Save revision").primary())
                         .on_hover_text("Save the inner graph as a new revision")
                         .clicked()
                     {
@@ -1777,7 +2020,9 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.editor.selected_node().is_some() {
-                    let toggle_label = if self.inspector_collapsed {
+                    let toggle_label = if self.inspector_collapsed
+                        || (self.code_open && ui.ctx().content_rect().width() < 1440.0)
+                    {
                         "Show Inspector"
                     } else {
                         "Hide Inspector"
@@ -1786,12 +2031,17 @@ impl App {
                         .add(widgets::icon_button(Icon::Panel, toggle_label))
                         .clicked()
                     {
-                        self.inspector_collapsed = !self.inspector_collapsed;
+                        if self.code_open && ui.ctx().content_rect().width() < 1440.0 {
+                            self.code_open = false;
+                            self.inspector_collapsed = false;
+                        } else {
+                            self.inspector_collapsed = !self.inspector_collapsed;
+                        }
                     }
                 }
                 if ui
                     .add_enabled(
-                        self.editor.can_redo(),
+                        self.editor.can_redo() && !self.document_locked(),
                         widgets::icon_button(Icon::Redo, "Redo (Ctrl+Shift+Z)"),
                     )
                     .clicked()
@@ -1800,7 +2050,7 @@ impl App {
                 }
                 if ui
                     .add_enabled(
-                        self.editor.can_undo(),
+                        self.editor.can_undo() && !self.document_locked(),
                         widgets::icon_button(Icon::Undo, "Undo (Ctrl+Z)"),
                     )
                     .clicked()
@@ -1840,6 +2090,7 @@ impl App {
                 running: self.is_running(),
                 stale: self.is_run_stale(),
                 files_busy: self.files.busy(),
+                document_locked: self.document_locked(),
             };
             self.report.show(ui, &context)
         };
@@ -1849,6 +2100,16 @@ impl App {
     }
 
     fn report_action(&mut self, action: report::Action) {
+        if self.document_locked()
+            && matches!(
+                action,
+                report::Action::AssertField { .. }
+                    | report::Action::AssignField { .. }
+                    | report::Action::SetErrorPolicy(_)
+            )
+        {
+            return;
+        }
         match action {
             report::Action::SelectNode(id) => {
                 let Some(phase) = self
@@ -1932,6 +2193,7 @@ impl App {
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
+        inspector::drafts::set_owner(ui.ctx(), &self.code_context());
         let Some(node) = self.editor.selected_node().cloned() else {
             return;
         };
@@ -1973,6 +2235,9 @@ impl App {
         for action in actions {
             if let inspector::Action::Reveal(_) = &action {
                 self.inspector_action(action);
+                continue;
+            }
+            if self.document_locked() {
                 continue;
             }
             match action {
@@ -2069,6 +2334,17 @@ impl App {
     }
 
     fn board_command(&mut self, command: Command) {
+        if self.document_locked()
+            && !matches!(
+                command,
+                Command::Select(_)
+                    | Command::Copy
+                    | Command::SetWireStyle(_)
+                    | Command::SetBridges(_)
+            )
+        {
+            return;
+        }
         match command {
             Command::Select(ids) => self.editor.selection = ids,
             Command::Move(positions) => {
@@ -2402,6 +2678,11 @@ impl App {
             self.navigator.open();
             return;
         }
+        if context.input_mut(|input| {
+            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::E))
+        }) {
+            self.toggle_code_panel();
+        }
         if context.egui_wants_keyboard_input() {
             return;
         }
@@ -2417,19 +2698,18 @@ impl App {
         if context
             .input_mut(|input| input.consume_shortcut(&redo) || input.consume_shortcut(&redo_alt))
         {
-            self.editor.redo();
-        } else if context.input_mut(|input| input.consume_shortcut(&undo)) {
+            if !self.document_locked() {
+                self.editor.redo();
+            }
+        } else if context.input_mut(|input| input.consume_shortcut(&undo))
+            && !self.document_locked()
+        {
             self.editor.undo();
         }
         if context.input_mut(|input| {
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::D))
         }) {
             self.board_command(Command::Duplicate);
-        }
-        if context.input_mut(|input| {
-            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::E))
-        }) {
-            self.toggle_code_panel();
         }
         let (copy, paste) = context.input(|input| {
             let copy = input
@@ -2451,6 +2731,21 @@ impl App {
     }
 
     fn dialogs(&mut self, context: &egui::Context) {
+        // A dialog opened before the code became invalid cannot commit an old graph.
+        if self.document_locked()
+            && matches!(
+                self.dialog,
+                Some(
+                    Dialog::Component(_)
+                        | Dialog::Settings(_)
+                        | Dialog::Environment(_)
+                        | Dialog::AssignVariable(_)
+                )
+            )
+        {
+            self.dialog = None;
+            return;
+        }
         match &mut self.dialog {
             None => {}
             Some(Dialog::NewProject(_) | Dialog::NewScenario(_)) => self.new_item_dialog(context),
@@ -2681,12 +2976,17 @@ fn restore_drafts(editor: &Editor, drafts: Option<apiforge_storage::Drafts>) -> 
     let Some(drafts) = drafts else {
         return buffers;
     };
-    let project = editor.project();
     for draft in drafts.entries {
-        if draft.project_id != project.id {
+        let Some(project) = editor
+            .workspace()
+            .projects
+            .iter()
+            .find(|p| p.id == draft.project_id)
+        else {
             continue;
-        }
+        };
         let (context, printed) = match &draft.target {
+            apiforge_storage::DraftTarget::Field { .. } => continue,
             apiforge_storage::DraftTarget::Scenario { id } => {
                 let Some(scenario) = project.scenarios.iter().find(|found| &found.id == id) else {
                     continue;
@@ -2728,13 +3028,14 @@ fn restore_drafts(editor: &Editor, drafts: Option<apiforge_storage::Drafts>) -> 
             .map(apiforge_storage::draft_base_hash)
             .is_none_or(|hash| hash != draft.base_hash);
         buffers.restore(
-            context,
+            context.clone(),
             buffers::Draft {
                 text: draft.text,
                 cursor: draft.cursor,
                 stale,
             },
         );
+        buffers.get_mut(&context).unwrap().base_hash = Some(draft.base_hash);
     }
     buffers
 }
@@ -4331,3 +4632,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "app_regressions.rs"]
+mod regressions;

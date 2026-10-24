@@ -148,6 +148,7 @@ pub fn json_editor(ui: &mut Ui, id: Id, value: &Value, rows: usize) -> Option<Va
 /// The template text field's draft while it is focused or invalid.
 #[derive(Clone, Default)]
 struct TemplateDraft {
+    source: Option<Binding>,
     text: String,
     error: Option<String>,
 }
@@ -175,18 +176,35 @@ pub fn template_field(
     let mut draft: TemplateDraft =
         ui.data_mut(|data| data.get_temp(id))
             .unwrap_or_else(|| TemplateDraft {
+                source: Some(binding.clone()),
                 text: printed.clone(),
                 error: None,
             });
+    if draft.source.as_ref() != Some(binding) {
+        draft = TemplateDraft {
+            source: Some(binding.clone()),
+            text: printed.clone(),
+            error: None,
+        };
+    }
+    let recovered = super::drafts::text(ui, id, &printed);
+    let conflict = recovered.as_ref().is_some_and(|(_, conflict)| *conflict);
+    let mut restored = false;
+    if let Some((text, _)) = recovered {
+        restored = draft.text != text || draft.error.is_none();
+        draft.text = text;
+    }
     // The popup takes its keys before the field sees them, so Enter chooses a
     // completion instead of committing a half-typed name.
     let mut completions: crate::code::Completions = ui
         .data_mut(|data| data.get_temp(id.with("completions")))
         .unwrap_or_default();
-    let keys = completions.take_keys(ui);
+    let keys = completions.take_keys(ui, id.with("text"));
+    completions.prepare(ui, id.with("text"), &draft.text);
     let output = crate::widgets::text_edit(&mut draft.text)
         .id(id.with("text"))
         .hint_text(hint)
+        .interactive(!conflict)
         .font(egui::TextStyle::Monospace)
         .desired_width(f32::INFINITY)
         .show(ui);
@@ -242,10 +260,11 @@ pub fn template_field(
         changed = true;
     }
     let mut result = None;
-    if changed {
+    if (changed || restored) && !conflict {
         match parse_template(&draft.text, scope) {
             Ok(next) => {
                 draft.error = None;
+                draft.source = Some(next.clone());
                 result = (next != *binding).then_some(next);
             }
             Err(error) => draft.error = Some(error.to_string()),
@@ -254,7 +273,14 @@ pub fn template_field(
     if let Some(error) = &draft.error {
         ui.colored_label(theme::DANGER, RichText::new(error).size(11.0));
     }
-    if response.has_focus() || draft.error.is_some() {
+    super::drafts::store(
+        ui,
+        id,
+        &printed,
+        &draft.text,
+        conflict || draft.error.is_some(),
+    );
+    if response.has_focus() || draft.error.is_some() || conflict {
         ui.data_mut(|data| data.insert_temp(id, draft));
     } else {
         ui.data_mut(|data| data.remove::<TemplateDraft>(id));
@@ -685,9 +711,18 @@ pub fn request_body_editor(
         draft = BodyDraft {
             source: Some((binding.cloned(), format)),
             editable: printed.is_some(),
+            printed: printed.clone().unwrap_or_default(),
             text: printed.unwrap_or_default(),
             error: None,
         };
+    }
+    let source = draft.printed.clone();
+    let recovered = super::drafts::text(ui, id, &source);
+    let conflict = recovered.as_ref().is_some_and(|(_, conflict)| *conflict);
+    let mut restored = false;
+    if let Some((text, _)) = recovered {
+        restored = draft.text != text || draft.error.is_none();
+        draft.text = text;
     }
     if !draft.editable {
         ui.data_mut(|data| data.insert_temp(id, draft));
@@ -702,29 +737,39 @@ pub fn request_body_editor(
     let mut editor: crate::code::CodeEditor = ui
         .data_mut(|data| data.get_temp(id.with("editor")))
         .unwrap_or_default();
-    let outcome = editor.show(
-        ui,
-        id.with("text"),
-        &mut draft.text,
-        &crate::code::Context {
-            mode: match format {
-                BodyFormat::Json => apiforge_script::complete::Mode::ObjectBody,
-                BodyFormat::Text => apiforge_script::complete::Mode::Template,
-            },
-            scope: completion,
-            diagnostics: &[],
-            line_numbers: false,
-            wrap: true,
-            font_size: 12.0,
-        },
-    );
+    let outcome = ui
+        .add_enabled_ui(!conflict, |ui| {
+            editor.show(
+                ui,
+                id.with("text"),
+                &mut draft.text,
+                &crate::code::Context {
+                    // Both projections parse references inside {{...}} placeholders.
+                    mode: apiforge_script::complete::Mode::Template,
+                    scope: completion,
+                    diagnostics: &[],
+                    line_numbers: false,
+                    wrap: true,
+                    font_size: 12.0,
+                },
+            )
+        })
+        .inner;
     ui.data_mut(|data| data.insert_temp(id.with("editor"), editor));
     let mut result = None;
-    if outcome.changed {
+    if (outcome.changed || restored) && !conflict {
         match draft.parse(format, scope) {
             Ok(next) => {
                 draft.error = None;
                 // Keep the user's spacing while they continue typing.
+                draft.printed = match next.as_ref() {
+                    None => String::new(),
+                    Some(binding) => match format {
+                        BodyFormat::Json => body_text::print_json_body(binding, scope),
+                        BodyFormat::Text => body_text::print_text_body(binding, scope),
+                    }
+                    .unwrap_or_default(),
+                };
                 draft.source = Some((next.clone(), format));
                 if next.as_ref() != binding {
                     result = Some(next);
@@ -741,10 +786,17 @@ pub fn request_body_editor(
     widgets::hint(
         ui,
         if format == BodyFormat::Json {
-            "Use {{input.name}} as a JSON value (quotes are optional). A whole placeholder keeps its JSON type; text around it produces a string. Empty = no body."
+            "Use {{param.name}}, {{block.field}} or {{input.name}} as a JSON value (quotes are optional). A whole placeholder keeps its JSON type; text around it produces a string. Empty = no body."
         } else {
             "Insert request arguments as {{input.name}}. Empty = no body."
         },
+    );
+    super::drafts::store(
+        ui,
+        id,
+        &source,
+        &draft.text,
+        conflict || draft.error.is_some(),
     );
     ui.data_mut(|data| data.insert_temp(id, draft));
     result
@@ -753,6 +805,7 @@ pub fn request_body_editor(
 #[derive(Clone, Default)]
 struct BodyDraft {
     editable: bool,
+    printed: String,
     source: Option<(Option<Binding>, apiforge_core::model::BodyFormat)>,
     text: String,
     error: Option<String>,
@@ -855,5 +908,173 @@ mod body_editor_tests {
         assert!(draft.text.ends_with(','));
         assert!(draft.error.is_some());
         assert!(matches!(value, Some(Binding::Object { .. })));
+    }
+}
+
+#[cfg(test)]
+mod draft_regressions {
+    use super::*;
+    use crate::inspector::drafts;
+    use apiforge_core::{demos, model::BodyFormat};
+
+    fn owner() -> crate::buffers::Context {
+        crate::buffers::Context::Scenario {
+            project: "test".into(),
+            id: "scenario".into(),
+        }
+    }
+
+    fn render(ctx: &egui::Context, events: Vec<egui::Event>, url: &str) {
+        let project = demos::empty_project();
+        let scope = Scope {
+            nodes: &[],
+            project: &project,
+            request: None,
+        };
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(500.0, 700.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                drafts::set_owner(ui.ctx(), &owner());
+                assert!(
+                    template_field(
+                        ui,
+                        Id::new("url-draft"),
+                        &Binding::literal(Value::String(url.into())),
+                        scope,
+                        "URL",
+                        Default::default()
+                    )
+                    .is_none()
+                );
+                assert!(
+                    request_body_editor(
+                        ui,
+                        Id::new("body-draft"),
+                        None,
+                        BodyFormat::Json,
+                        scope,
+                        Default::default()
+                    )
+                    .is_none()
+                );
+            },
+        );
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn invalid_url_and_body_survive_storage_and_rehydrate_in_a_new_ui() {
+        let ctx = egui::Context::default();
+        render(&ctx, vec![], "");
+        ctx.memory_mut(|m| m.request_focus(Id::new("url-draft").with("text")));
+        render(
+            &ctx,
+            vec![egui::Event::Paste("/unfinished/{{missing}}".into())],
+            "",
+        );
+        ctx.memory_mut(|m| m.request_focus(Id::new("body-draft").with("text")));
+        render(
+            &ctx,
+            vec![egui::Event::Paste(
+                "{\"note\": \"unfinished\", \"quantity\":".into(),
+            )],
+            "",
+        );
+        let entries = drafts::entries(&ctx);
+        assert_eq!(entries.len(), 2);
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            apiforge_storage::WorkspaceStore::open_exclusive(dir.path().join("workspace.json"))
+                .unwrap();
+        store
+            .save_drafts(
+                &apiforge_storage::Drafts {
+                    version: 1,
+                    entries,
+                },
+                &[],
+            )
+            .unwrap();
+        let loaded = store.load_drafts().unwrap().unwrap().drafts;
+        let next = egui::Context::default();
+        drafts::restore(&next, Some(&loaded));
+        render(&next, vec![], "");
+        assert_eq!(
+            next.data_mut(|d| d.get_temp::<TemplateDraft>(Id::new("url-draft")))
+                .unwrap()
+                .text,
+            "/unfinished/{{missing}}"
+        );
+        let body = next
+            .data_mut(|d| d.get_temp::<BodyDraft>(Id::new("body-draft")))
+            .unwrap();
+        assert!(body.text.contains("unfinished"));
+        assert!(body.error.is_some());
+        // External edits expose a conflict without overwriting either version.
+        render(&next, vec![], "/updated");
+        assert_eq!(drafts::entries(&next).len(), 2);
+        assert!(
+            next.data_mut(|d| d.get_temp::<TemplateDraft>(Id::new("url-draft")))
+                .unwrap()
+                .text
+                .contains("missing")
+        );
+    }
+
+    #[test]
+    fn json_body_completion_only_offers_references_inside_placeholders() {
+        let parameters = vec!["quantity".into()];
+        let scope = apiforge_script::complete::Scope {
+            parameters: &parameters,
+            ..Default::default()
+        };
+        let bare = "{\"quantity\": param.";
+        assert!(
+            apiforge_script::complete::complete(&apiforge_script::complete::Request {
+                source: bare,
+                cursor: bare.len(),
+                mode: apiforge_script::complete::Mode::Template,
+                scope,
+            })
+            .is_empty()
+        );
+        let source = "{\"quantity\": {{param.}}}";
+        let found = apiforge_script::complete::complete(&apiforge_script::complete::Request {
+            source,
+            cursor: source.find(".}").unwrap() + 1,
+            mode: apiforge_script::complete::Mode::Template,
+            scope: apiforge_script::complete::Scope {
+                parameters: &parameters,
+                ..Default::default()
+            },
+        });
+        let completion = found.iter().find(|c| c.label == "quantity").unwrap();
+        let mut text = source.to_owned();
+        text.replace_range(completion.replace.clone(), &completion.insert);
+        let project = demos::empty_project();
+        let mut project = project;
+        project.scenarios[0]
+            .parameters
+            .insert("quantity".into(), Value::from(3));
+        let parsed = BodyDraft {
+            text,
+            ..Default::default()
+        }
+        .parse(
+            BodyFormat::Json,
+            Scope {
+                nodes: &[],
+                project: &project,
+                request: None,
+            },
+        );
+        assert!(parsed.is_ok(), "{parsed:?}");
     }
 }
