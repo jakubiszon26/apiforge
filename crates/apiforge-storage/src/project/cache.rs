@@ -286,6 +286,13 @@ impl ProjectStore {
         let bytes = super::codec::encode(&file, MAX_JSON_BYTES)?;
         let manifest_snapshot = self.stable_read(|| Ok(vec![ProjectPath::new(MANIFEST_PATH)?]))?;
         let manifest = manifest_in(&manifest_snapshot, &preview.project_id)?;
+        // Loading ignores obsolete entries; saving one is a caller error.
+        if snapshots
+            .iter()
+            .any(|snapshot| !matches_registry(&snapshot.entry, &manifest))
+        {
+            return Err(ProjectError::ForeignRecovery);
+        }
         decode_cache(&bytes, &manifest)?;
         self.check_secrets(&bytes)?;
         let preserved_copy = if replace {
@@ -356,6 +363,17 @@ fn decode_cache(bytes: &[u8], manifest: &ProjectManifest) -> Result<Vec<LastVali
     let mut keys = HashSet::new();
     let mut snapshots = Vec::new();
     for entry in cache.entries {
+        // A document that left the registry (trash, external edit) makes its own
+        // entry obsolete, not the snapshots of every other document.
+        if let DocumentKey::Working { document_id } = &entry.key
+            && entry.project_id == manifest.id
+            && !manifest
+                .documents
+                .iter()
+                .any(|document| &document.document_id == document_id)
+        {
+            continue;
+        }
         verify_entry(&entry)?;
         if !keys.insert(entry.key.clone()) {
             return Err(ProjectError::InvalidCache);
@@ -471,7 +489,7 @@ fn validate_models(entry: &CacheEntry) -> Result<()> {
         .map_err(|_| ProjectError::InvalidCache)
 }
 
-fn closed_public_context(document: &IdentityBase, context: &Project) -> Result<Project> {
+pub(super) fn closed_public_context(document: &IdentityBase, context: &Project) -> Result<Project> {
     let mut public = crate::public_project(context);
     public.scenarios.clear();
     let mut required = BTreeSet::new();
@@ -539,13 +557,13 @@ fn script_document(document: &IdentityBase) -> Document {
         IdentityBase::Component(component) => Document::Component(component.clone()),
     }
 }
-fn semantic_digest(document: &IdentityBase, context: &Project) -> Result<String> {
+pub(super) fn semantic_digest(document: &IdentityBase, context: &Project) -> Result<String> {
     digest_json(&apiforge_script::semantic(
         &script_document(document),
         context,
     ))
 }
-fn context_digest(context: &Project) -> Result<String> {
+pub(super) fn context_digest(context: &Project) -> Result<String> {
     let components: Vec<_> = context.components.iter().map(|component| serde_json::json!({ "id":component.id, "revision":component.revision, "handle":component.handle,
         "definition":apiforge_script::semantic(&Document::Component(component.clone()), context) })).collect();
     digest_json(

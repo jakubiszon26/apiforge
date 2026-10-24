@@ -228,3 +228,48 @@ fn malformed_and_future_diagram_files_are_reported_without_accepting_partial_rec
         Err(ProjectError::InvalidCheckpoint)
     ));
 }
+
+#[test]
+fn captured_checkpoints_describe_only_their_exact_source_context_and_semantics() {
+    let (mut project, _) = fixture();
+    let scenario = project.scenarios.remove(0);
+    let source = apiforge_script::print_folder_document(
+        &project,
+        &apiforge_script::Document::Scenario(scenario.clone()),
+    )
+    .unwrap();
+    let base = IdentityBase::Scenario(scenario.clone());
+    let record = DiagramRecord::capture(
+        DocumentKey::Working {
+            document_id: "document".into(),
+        },
+        &source,
+        base.clone(),
+        &project,
+    )
+    .unwrap();
+    assert_eq!(record.identity_base, base);
+    assert!(record.describes(&source, &base, &project));
+    assert!(!record.describes(&format!("{source} "), &base, &project));
+    let mut renamed = scenario.clone();
+    renamed.name.push_str(" renamed");
+    assert!(!record.describes(&source, &IdentityBase::Scenario(renamed), &project));
+    let mut configured = project.clone();
+    configured.environment.base_url.push_str("/other");
+    assert!(!record.describes(&source, &base, &configured));
+    // Unrelated components are outside the closed dependency context.
+    let mut unrelated = project.clone();
+    let mut extra = unrelated.components[0].clone();
+    extra.id = "unrelated".into();
+    extra.handle = "unrelated".into();
+    unrelated.components.push(extra);
+    let called: Vec<_> = scenario
+        .graph
+        .nodes
+        .iter()
+        .chain(&scenario.cleanup.nodes)
+        .filter_map(|node| node.config.component_id.clone())
+        .collect();
+    assert!(!called.contains(&"unrelated".to_owned()));
+    assert!(record.describes(&source, &base, &unrelated));
+}

@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 groundwork only, P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -367,6 +367,68 @@ gate has not passed. Folder lowering/authoring validation is used only to verify
 P1 cache candidates. Desktop/CLI folder integration and automatic migration are
 not enabled. Windows directory durability remains the P7 release gate. No P2 work
 is included in this completion increment.
+
+The first P2 increment adds the `apiforge-project` crate. `ProjectSession` opens
+an existing manifest (a folder without one is not written), creates a new empty
+project explicitly and owns one `DocumentSession` per registered document.
+Published revisions are derived from their immutable sources in dependency order;
+a revision that does not lower is an integrity error. Documents keep exact text,
+a source version, diagnostics, a current or last-valid model and a bounded model
+history. Missing or non-UTF-8 sources are explicit unavailable states.
+
+Analysis inputs are immutable and can run on a worker. Results apply only when
+session instance ID, epoch, document ID, source version and context generation
+all match; configuration edits and reloads invalidate outstanding results. Identities come
+from the session's previous model, otherwise from the shared checkpoint (adopted
+as-is only when it describes exactly this source, closed context and semantics),
+otherwise they are fresh and placed by a host-supplied placer. Graphical semantic
+edits reprint canonical folder source; block movement changes layout only. Save
+settles pending analysis, writes exact text (including invalid text), seals the
+document's checkpoint only for valid source and adds dirty configuration. Events
+carry a sequence and an origin, so several views can follow one log.
+
+`prepare_project` writes a model-backed project as a folder in one transaction,
+keeping entity, node and edge IDs, positions, `autoPlaced`, proxies and every
+published revision; each component gets a working document at its latest
+revision. It is the basis for P3 migration and does not touch originals.
+
+The P2 round-trip gate passes headless: every fixture project, plus one with
+variable/environment proxies, cleanup and an unused second revision, reopens with
+identical scenario models and published revisions. Diagram layout and semantic
+edits, then a code edit, survive save, close and reopen with unchanged IDs,
+positions, proxies, cleanup and pinned revisions. Saved invalid source reopens as
+text without a model and regains its identities when fixed. Session tests cover
+stale results after source, configuration and reload changes, hidden pending
+documents, an invalid document not locking another, component-only projects,
+history projection, shared event logs, read-only second sessions and external
+edit conflicts.
+
+The second increment protects unsaved work. Recovery stores each dirty or
+layout-dirty document's exact text, directional selection, field drafts and an
+identity/layout checkpoint of its model. On reopen a draft whose base is still
+the saved source is restored automatically (text, view state and unsaved
+layout); any other draft is held for an explicit keep or discard, blocks edits
+and saves of its document and survives later recovery writes. Unreadable,
+unsupported or foreign recovery is preserved and blocks recovery writes; a
+backup candidate needs explicit restoration. Saving a document removes its draft.
+Valid models are also stored as verified last-valid snapshots: saved invalid
+source reopens with its last-valid model only for the same closed configuration
+and dependency context, and never as a current model. Creating a project adds
+`/.apiforge/local/` to `.gitignore` without rewriting existing rules.
+
+Closing a session succeeds only after unsaved work is written to recovery; a
+read-only session or unusable recovery returns the session so the caller can
+offer export, and an explicit discard removes the drafts. A writable close also
+clears obsolete recovery after edits are undone or held drafts discarded.
+Unsaved configuration blocks close and returns the session for an explicit save
+or discard; `save_configuration` saves it independently of document sources,
+including in an empty project.
+
+P2 is complete at the session-library boundary. Inspector widgets that produce
+field drafts arrive with P4; the session stores and recovers their drafts but
+does not yet apply them to models. Item 5 of the
+[P1 code review](stage-ii-review-notes.md#p1-code-review) remains open.
+Desktop and CLI do not use folder sessions yet.
 
 Acceptance must cover:
 

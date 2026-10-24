@@ -363,3 +363,37 @@ fn ordered_directory_operations_preflight_and_replay_after_parent_deletion() {
     assert_eq!(writer.recover().unwrap(), Some(2));
     assert!(writer.load().unwrap().0.documents.is_empty());
 }
+
+#[test]
+fn unactivated_staging_is_removed_after_a_failure_and_when_reopening() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    let staging = directory.path().join(".apiforge/local/transactions");
+    let source = directory.path().join("scenarios/main.afs");
+    let result = writer.commit_with_hook(
+        vec![write(
+            "scenarios/main.afs",
+            FileState::of(b"scenario \"Main\" {}\n"),
+            b"scenario \"Saved\" {}\n",
+        )],
+        |phase| {
+            if phase == "descriptor" {
+                fs::write(&source, b"scenario \"Foreign\" {}\n").unwrap();
+            }
+            Ok(())
+        },
+    );
+    assert!(matches!(result, Err(ProjectError::Conflict { .. })));
+    assert_eq!(fs::read_dir(&staging).unwrap().count(), 0);
+    assert_eq!(fs::read(&source).unwrap(), b"scenario \"Foreign\" {}\n");
+
+    // A writer that crashed before activation leaves staging nobody references.
+    let orphan = staging.join("0b7c2f0e-6f5f-4d5b-9a3e-2b1c0d9e8f7a");
+    fs::create_dir(&orphan).unwrap();
+    fs::write(orphan.join("0"), b"payload").unwrap();
+    drop(writer);
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    assert_eq!(fs::read_dir(&staging).unwrap().count(), 0);
+    assert_eq!(writer.load().unwrap().0, crate::project::tests::manifest());
+}

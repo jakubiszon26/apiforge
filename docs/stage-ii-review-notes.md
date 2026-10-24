@@ -130,3 +130,51 @@ Acceptance should pause an external checkout between file replacements, exercise
 readers before and after detection/reload and with no writer open, and verify
 that neither stale head nor a generation bump is treated as proof of an atomic
 Git snapshot.
+
+## P1 code review
+
+- Recorded: 2026-10-24
+- Source: review of the P1 storage increments (`c870fb8`..`86e5d9e`)
+- Status: P1 accepted; items 1, 3 and 4 fixed in P2, item 2 resolved by a probe,
+  item 5 open
+- Applies to: [ADR 0011](decisions/0011-project-transactions.md),
+  [ADR 0012](decisions/0012-project-sessions.md)
+
+The reviewed storage passed formatting, clippy with warnings denied and the full
+serial workspace test run (661 passed, two parent-launched helpers ignored). The
+transaction protocol, stable reads, conflict receipts and trash match ADR 0011.
+These points should be handled by the session/explorer work that uses them:
+
+1. **One stale cache entry hides the whole last-valid cache.** `decode_cache`
+   rejects the file as foreign when any entry's document has left the registry.
+   Trash does not prune cache entries, so trashing a document makes every other
+   document's last-valid snapshot unavailable and requires explicit replacement.
+   Entries for unregistered documents should be ignored individually, or pruned
+   by the operation that unregisters them. *Fixed:* loading ignores such entries
+   individually; saving one is still rejected.
+2. **Read-only readers report an in-flight commit as recovery.** A stable read that
+   sees an active transaction returns `RecoveryRequired` without retrying. For a
+   read-only session whose writer is alive this is a transient state and should
+   be reported as busy; only an active transaction without a lock owner needs
+   recovery. *Resolved differently:* a live writer may also be stuck in its own
+   conflict recovery, which the lock cannot distinguish, so reads keep reporting
+   `RecoveryRequired`. `ProjectStore::has_live_writer` lets a read-only session
+   decide to retry.
+3. **Pre-activation failures leave staging directories.** A conflict detected
+   after staging, or a failed staged write, returns without removing
+   `.apiforge/local/transactions/<id>/`. Nothing removes unreferenced staging
+   later. They are never replayed, but they accumulate local data. *Fixed:*
+   failures before activation remove their staging, and a writer removes
+   unreferenced staging when it opens.
+4. **Opening a writer store writes local infrastructure.** `ProjectStore::open`
+   creates `.apiforge/local` and the lock in any directory. Sessions must check for
+   a manifest with a read-only store first, as `ProjectSession::open` now does.
+   Two concurrent first openers can also race in `create_dir` and report an I/O
+   error instead of falling back to read-only. *Fixed:* concurrent creation is
+   tolerated and an unwritable folder opens read-only. The lock is also retried
+   briefly: a process spawned by another thread keeps inherited descriptors until
+   its exec, which made reopening a just-closed project intermittently report
+   another writer (and made the parallel storage tests flaky).
+5. **Storage depends on the language crate.** Cache verification lowers source in
+   `apiforge-storage`. This is acceptable while the cache verifies its own
+   candidates, but analysis policy otherwise belongs to `apiforge-project`.

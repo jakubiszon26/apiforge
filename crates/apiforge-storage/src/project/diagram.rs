@@ -105,6 +105,45 @@ impl DiagramRecord {
             && self.identity_base.entity_id() == entry.entity_id
     }
 
+    /// Seal a shared checkpoint for saved, valid source and its derived model.
+    /// The digests bind the exact source bytes, the closed dependency context
+    /// (pinned published revisions and public configuration) and semantics.
+    pub fn capture(
+        key: DocumentKey,
+        source: &str,
+        identity_base: IdentityBase,
+        context: &Project,
+    ) -> Result<Self> {
+        let closed = super::cache::closed_public_context(&identity_base, context)
+            .map_err(|_| ProjectError::InvalidCheckpoint)?;
+        let record = Self {
+            key,
+            source_hash: super::transaction::hash(source.as_bytes()),
+            context_digest: super::cache::context_digest(&closed)?,
+            model_version: FORMAT_VERSION,
+            cache_version: 1,
+            semantic_digest: super::cache::semantic_digest(&identity_base, &closed)?,
+            identity_base,
+        };
+        record.validate_in_context(&closed)?;
+        Ok(record)
+    }
+
+    /// True only when this checkpoint describes exactly `source`, lowered to the
+    /// semantics of `lowered` against the same closed dependency context. Even
+    /// then, the caller adopts identities/layout, never semantics.
+    pub fn describes(&self, source: &str, lowered: &IdentityBase, context: &Project) -> bool {
+        self.source_hash == super::transaction::hash(source.as_bytes())
+            && self.identity_base.kind() == lowered.kind()
+            && super::cache::closed_public_context(lowered, context).is_ok_and(|closed| {
+                super::cache::context_digest(&closed).is_ok_and(|d| d == self.context_digest)
+                    && super::cache::semantic_digest(lowered, &closed)
+                        .is_ok_and(|d| d == self.semantic_digest)
+                    && super::cache::semantic_digest(&self.identity_base, &closed)
+                        .is_ok_and(|d| d == self.semantic_digest)
+            })
+    }
+
     /// Validate the full graph, bindings and identities against resolved public
     /// dependencies, using the shared core validator. This still does not prove
     /// the stored digests match source; only the project analyser can do that.

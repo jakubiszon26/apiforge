@@ -68,3 +68,29 @@ fn unqualified_folder_calls_have_an_explicit_pin_fix_while_legacy_keeps_latest()
     };
     assert_eq!(scenario.graph.nodes[0].config.revision, Some(1));
 }
+
+#[test]
+fn folder_printing_supports_component_only_projects_and_keeps_pins() {
+    let mut project = context();
+    let Some(Document::Component(component)) = lower(
+        &parse("component Helper \"Helper\" { export result: number = 2 }"),
+        &LowerContext::folder(&project),
+    )
+    .document
+    else {
+        panic!("component")
+    };
+    let document = Document::Component(component.clone());
+    assert!(print_folder_document(&project, &document).is_ok());
+    assert!(
+        print_component(&project, &component).is_err(),
+        "legacy needs a scenario"
+    );
+    project.components.push(component);
+    let tree = parse("scenario \"Main\" { call = (Helper@1()) }");
+    let scenario = lower(&tree, &LowerContext::folder(&project))
+        .document
+        .unwrap();
+    let printed = print_folder_document(&project, &scenario).unwrap();
+    assert!(printed.contains("Helper@1("));
+}

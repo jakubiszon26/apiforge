@@ -118,10 +118,20 @@ pub struct ProjectStore {
 }
 
 impl ProjectStore {
-    /// A second writer falls back to read-only, without creating local data.
+    /// A second writer, or a folder this user cannot write, falls back to
+    /// read-only. A writable opener creates `.apiforge/local` and its lock even
+    /// before a manifest exists, so callers check for a manifest first.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         match Self::open_exclusive(root.as_ref()) {
             Err(ProjectError::Locked) => Self::open_read_only(root),
+            Err(ProjectError::Io { source, .. })
+                if matches!(
+                    source.kind(),
+                    io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+                ) =>
+            {
+                Self::open_read_only(root)
+            }
             result => result,
         }
     }
@@ -133,10 +143,7 @@ impl ProjectStore {
     pub fn open_exclusive(root: impl AsRef<Path>) -> Result<Self> {
         let store = Self::new(root.as_ref(), None)?;
         for relative in [".apiforge", ".apiforge/local"] {
-            let path = path::resolve(&store.root, relative)?;
-            if !path.exists() {
-                create_directory(&path)?;
-            }
+            ensure_directory(&path::resolve(&store.root, relative)?)?;
         }
         let lock_path = path::resolve(&store.root, ".apiforge/local/project.lock")?;
         let lock = File::options()
@@ -146,10 +153,22 @@ impl ProjectStore {
             .truncate(false)
             .open(&lock_path)
             .map_err(|error| ProjectError::io(&lock_path, error))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(TryLockError::WouldBlock) => return Err(ProjectError::Locked),
-            Err(TryLockError::Error(error)) => return Err(ProjectError::io(&lock_path, error)),
+        // A process spawned by another thread holds inherited descriptors until
+        // its exec, which can briefly keep a just-released lock. Retry for a
+        // short time before reporting another writer.
+        let mut attempts = 0;
+        loop {
+            match lock.try_lock() {
+                Ok(()) => break,
+                Err(TryLockError::WouldBlock) if attempts < 20 => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(TryLockError::WouldBlock) => return Err(ProjectError::Locked),
+                Err(TryLockError::Error(error)) => {
+                    return Err(ProjectError::io(&lock_path, error));
+                }
+            }
         }
         // An earlier opener may have failed while flushing newly-created local
         // infrastructure. Establish its durability even when it already exists.
@@ -160,12 +179,37 @@ impl ProjectStore {
         }
         sync_parent(&lock_path)?;
         let transactions = path::resolve(&store.root, TRANSACTIONS)?;
-        if !transactions.exists() {
-            create_directory(&transactions)?;
-        }
+        ensure_directory(&transactions)?;
         sync_directory(&transactions)?;
         sync_parent(&transactions)?;
-        Self::new(&store.root, Some(lock))
+        let store = Self::new(&store.root, Some(lock))?;
+        store.remove_unreferenced_staging(&transactions)?;
+        Ok(store)
+    }
+
+    /// Staging that head does not reference was never activated, or belongs to
+    /// a committed transaction whose cleanup failed. It is never replayed, so the
+    /// lock owner removes it. Unreadable heads leave everything in place.
+    fn remove_unreferenced_staging(&self, transactions: &Path) -> Result<()> {
+        let Ok(head) = self.head() else {
+            return Ok(());
+        };
+        let entries =
+            fs::read_dir(transactions).map_err(|error| ProjectError::io(transactions, error))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| ProjectError::io(transactions, error))?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if head.active_transaction_id.as_deref() == Some(name) {
+                continue;
+            }
+            if let Ok(directory) = self.transaction_path(name)
+                && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            {
+                let _ = disk::cleanup_directory(&directory);
+            }
+        }
+        Ok(())
     }
 
     fn new(root: &Path, lock: Option<File>) -> Result<Self> {
@@ -386,29 +430,47 @@ impl ProjectStore {
         boundary("preflight")?;
         let directory = self.transaction_path(&descriptor.transaction_id)?;
         create_directory(&directory)?;
-        boundary("stage-directory")?;
-        for (index, bytes) in &payloads {
-            self.atomic(&directory.join(index.to_string()), bytes)?;
-            boundary("payload")?;
-        }
-        self.atomic(
-            &directory.join("transaction.json"),
-            &json_bytes(&descriptor)?,
-        )?;
-        boundary("descriptor")?;
-        // Recheck all targets after staging and before durable activation.
-        for operation in &descriptor.operations {
-            if self.state(operation.path.as_str())? != operation.expected {
-                return Err(self.conflict(&operation.path));
+        let staged = (|| {
+            boundary("stage-directory")?;
+            for (index, bytes) in &payloads {
+                self.atomic(&directory.join(index.to_string()), bytes)?;
+                boundary("payload")?;
             }
+            self.atomic(
+                &directory.join("transaction.json"),
+                &json_bytes(&descriptor)?,
+            )?;
+            boundary("descriptor")?;
+            // Recheck all targets after staging and before durable activation.
+            for operation in &descriptor.operations {
+                if self.state(operation.path.as_str())? != operation.expected {
+                    return Err(self.conflict(&operation.path));
+                }
+            }
+            if self.head()? != head || self.read_file(MANIFEST_PATH)? != manifest_before {
+                return Err(ProjectError::Busy);
+            }
+            Ok(())
+        })();
+        // Nothing references this staging before activation; never keep it.
+        if let Err(error) = staged {
+            let _ = disk::cleanup_directory(&directory);
+            return Err(error);
         }
-        if self.head()? != head || self.read_file(MANIFEST_PATH)? != manifest_before {
-            return Err(ProjectError::Busy);
-        }
-        self.write_head(&Head {
+        if let Err(error) = self.write_head(&Head {
             active_transaction_id: Some(descriptor.transaction_id.clone()),
             ..head
-        })?;
+        }) {
+            // A failed head write may still have installed the new head; only
+            // remove staging when head provably does not reference it.
+            if self
+                .head()
+                .is_ok_and(|current| current.active_transaction_id.is_none())
+            {
+                let _ = disk::cleanup_directory(&directory);
+            }
+            return Err(error);
+        }
         boundary("activation")?;
         self.replay(&descriptor, &payloads, &BTreeMap::new(), &mut boundary)?;
         // Cleanup is not part of acknowledgement. Only this transaction's own
@@ -814,6 +876,24 @@ impl ProjectStore {
         Ok(())
     }
 
+    /// Whether another process holds the writer lock. A read-only session that
+    /// meets `RecoveryRequired` while a writer is alive is seeing a commit in
+    /// progress or that writer's own recovery, and can retry later. The probe
+    /// never creates the lock, never blocks and is released immediately.
+    pub fn has_live_writer(&self) -> Result<bool> {
+        let path = path::resolve(&self.root, ".apiforge/local/project.lock")?;
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(ProjectError::io(&path, error)),
+        };
+        match file.try_lock_shared() {
+            Ok(()) => Ok(false),
+            Err(TryLockError::WouldBlock) => Ok(true),
+            Err(TryLockError::Error(error)) => Err(ProjectError::io(&path, error)),
+        }
+    }
+
     pub(super) fn writable(&self) -> Result<()> {
         if self.is_read_only() {
             Err(ProjectError::ReadOnly)
@@ -876,6 +956,21 @@ impl ProjectStore {
 
     pub(super) fn atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         disk::atomic(path, bytes, false)
+    }
+}
+
+/// Creates a directory unless a concurrent opener already did.
+fn ensure_directory(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    match create_directory(path) {
+        Err(ProjectError::Io { source, .. })
+            if source.kind() == io::ErrorKind::AlreadyExists && path.is_dir() =>
+        {
+            Ok(())
+        }
+        result => result,
     }
 }
 

@@ -5,6 +5,7 @@ members = [
     "crates/apiforge-desktop",
     "crates/apiforge-runner",
     "crates/apiforge-storage",
+    "crates/apiforge-project",
     "crates/apiforge-script",
     "crates/apiforge-layout",
     "crates/apiforge-cli",
@@ -22,6 +23,7 @@ publish = false
 apiforge-core = { path = "crates/apiforge-core" }
 apiforge-runner = { path = "crates/apiforge-runner" }
 apiforge-storage = { path = "crates/apiforge-storage" }
+apiforge-project = { path = "crates/apiforge-project" }
 apiforge-layout = { path = "crates/apiforge-layout" }
 apiforge-script = { path = "crates/apiforge-script" }
 serde = { version = "=1.0.229", features = ["derive"] }
