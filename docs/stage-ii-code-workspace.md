@@ -403,9 +403,22 @@ documents, an invalid document not locking another, component-only projects,
 history projection, shared event logs, read-only second sessions and external
 edit conflicts.
 
-Remaining P2 work: field drafts, local recovery integration (source/layout of
-unsaved work), last-valid cache promotion, `.gitignore` handling during explicit
-initialisation and the open items from the [P1 code review](stage-ii-review-notes.md#p1-code-review).
+The second increment protects unsaved work. Recovery stores each dirty or
+layout-dirty document's exact text, directional selection, field drafts and an
+identity/layout checkpoint of its model. On reopen a draft whose base is still
+the saved source is restored automatically (text, view state and unsaved
+layout); any other draft is held for an explicit keep or discard, blocks edits
+and saves of its document and survives later recovery writes. Unreadable,
+unsupported or foreign recovery is preserved and blocks recovery writes; a
+backup candidate needs explicit restoration. Saving a document removes its draft.
+Valid models are also stored as verified last-valid snapshots: saved invalid
+source reopens with its last-valid model only for the same closed configuration
+and dependency context, and never as a current model. Creating a project adds
+`/.apiforge/local/` to `.gitignore` without rewriting existing rules.
+
+Remaining P2 work: applying inspector field drafts to models (P4 owns their
+widgets), close/switch orchestration that requires a successful recovery write,
+and the open item in the [P1 code review](stage-ii-review-notes.md#p1-code-review).
 Desktop and CLI do not use folder sessions yet.
 
 Acceptance must cover:
