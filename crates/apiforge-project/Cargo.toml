@@ -10,6 +10,8 @@ apiforge-core.workspace = true
 apiforge-layout.workspace = true
 apiforge-script.workspace = true
 apiforge-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 

@@ -155,6 +155,15 @@ impl ProjectSession {
         Self::load(ProjectStore::open(root)?, placer, 1)
     }
 
+    /// The saved definitions only: no recovery drafts and no last-valid cache.
+    /// Used to verify what a writer produced before it is published.
+    pub(crate) fn open_without_recovery(root: &Path) -> Result<Self> {
+        if !has_manifest(root)? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_saved(ProjectStore::open(root)?, Arc::new(FixedPlacer), 1)
+    }
+
     /// Rereads every file and starts a new epoch, invalidating all tickets.
     /// Unsaved work is the caller's responsibility (recovery or a decision).
     pub fn reload(&mut self) -> Result<()> {
@@ -174,6 +183,13 @@ impl ProjectSession {
     }
 
     fn load(store: ProjectStore, placer: Arc<dyn Placer>, epoch: u64) -> Result<Self> {
+        let mut session = Self::load_saved(store, placer, epoch)?;
+        session.load_last_valid();
+        session.load_recovery()?;
+        Ok(session)
+    }
+
+    fn load_saved(store: ProjectStore, placer: Arc<dyn Placer>, epoch: u64) -> Result<Self> {
         let diagram_path = ProjectPath::new(DIAGRAM_PATH)?;
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
         let (manifest, snapshot) = store.load()?;
@@ -210,8 +226,6 @@ impl ProjectSession {
         for index in 0..session.documents.len() {
             session.analyse_now(index)?;
         }
-        session.load_last_valid();
-        session.load_recovery()?;
         Ok(session)
     }
 
