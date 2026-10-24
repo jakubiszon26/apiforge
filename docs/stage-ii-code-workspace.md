@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -425,6 +425,39 @@ field drafts arrive with P4; the session stores and recovers their drafts but
 does not yet apply them to models. Item 5 of the
 [P1 code review](stage-ii-review-notes.md#p1-code-review) remains open.
 Desktop and CLI do not use folder sessions yet.
+
+P3 adds `migrate_workspace` in `apiforge-project`. It runs under the exclusive
+legacy workspace session and records SHA-256 hashes of the workspace, drafts and
+journal files and their backups. Each project is prepared in
+`migration/<migration-id>/<project-id>/` beside the workspace with
+`prepare_project`. Legacy drafts move into the folder's local recovery with their
+original base hashes and cursors. The folder printer produces the same text as
+the legacy printer, so a draft that matched its definition is restored
+automatically and any other draft is held. Inspector field drafts join their
+owner's recovery entry, including those of inactive projects. A draft of an older
+component revision becomes a separate `recovered` working document based on that
+revision, with its own checkpoint; the primary working document stays on the
+latest revision. Drafts of missing definitions are reported and remain in the
+untouched original file.
+
+Every prepared folder is reopened through the folder loader without recovery and
+compared with the workspace: scenarios, all published revisions and working
+copies must keep semantics, identities, layout and proxies. A marker records the
+owning migration. The inputs are rechecked before publication; a renamed folder
+never replaces an existing `projects/<project-id>/`. A durable index records each
+prepared folder's digest and publication state. A retry with unchanged inputs
+resumes the same migration and reuses only folders it published itself, unchanged;
+anything else is reported as occupied and left alone. Changed inputs start a new
+migration. Writing `projects.json` activates the catalogue: it holds the
+migration ID, input hashes, every project path, the previously active project and
+the legacy journal, whose unresolved runs stay under global review. Originals are
+never modified. Startup does not call migration until P7.
+
+Tests migrate the fixture workspace with proxies, cleanup, a second component
+revision and active, inactive, field, older-revision and orphaned drafts, plus
+every fixture project file. They also cover occupied destinations, resumption
+after preparation, an interrupted publication, a lost catalogue with reused and
+tampered folders, changed inputs and read-only sessions.
 
 Acceptance must cover:
 
