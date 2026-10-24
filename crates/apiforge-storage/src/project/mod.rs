@@ -5,6 +5,7 @@ mod cache;
 mod codec;
 mod conflict;
 mod diagram;
+mod explorer;
 mod io;
 mod metadata;
 mod path;
@@ -20,6 +21,9 @@ pub use conflict::{
     TransactionRecoveryPreview,
 };
 pub use diagram::{DiagramFile, DiagramRecord, DocumentKey, IdentityBase};
+pub use explorer::{
+    MAX_TREE_DEPTH, MAX_TREE_ENTRIES, TreeEntry, TreeEntryKind, TreeScan, tree_order,
+};
 pub use metadata::{DiagramRecoveryPreview, MetadataReplacement};
 pub use path::ProjectPath;
 pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection};

@@ -922,7 +922,7 @@ impl ProjectStore {
         read_bounded(&path, payload_limit(relative))
     }
 
-    fn head(&self) -> Result<Head> {
+    pub(super) fn head(&self) -> Result<Head> {
         let Some(bytes) = self.read_file(HEAD)? else {
             return Ok(Head {
                 format_version: 1,
