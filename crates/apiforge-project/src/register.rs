@@ -317,6 +317,76 @@ impl ProjectSession {
         Ok(ids)
     }
 
+    /// Registers unregistered sources already in the project folder, exactly as
+    /// they are, with new identity. Only the registry is written.
+    pub fn register_existing(
+        &mut self,
+        registrations: &[Registration],
+        origin: Origin,
+    ) -> Result<Vec<String>> {
+        if self.store.is_read_only() {
+            return Err(Error::Storage(ProjectError::ReadOnly));
+        }
+        self.require_current_registry()?;
+        let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
+        let mut paths = vec![manifest_path.clone()];
+        for registration in registrations {
+            let path = ProjectPath::working_source(registration.path.as_str())?;
+            if self
+                .manifest
+                .documents
+                .iter()
+                .any(|entry| entry.path.as_str().eq_ignore_ascii_case(path.as_str()))
+            {
+                return Err(Error::Storage(ProjectError::InvalidMetadata));
+            }
+            paths.push(path);
+        }
+        let snapshot = self.store.read(&paths)?;
+        let mut registry = self.saved_manifest(&snapshot.files[&manifest_path])?;
+        let mut entries = Vec::new();
+        for (registration, path) in registrations.iter().zip(&paths[1..]) {
+            let Some(Some(bytes)) = snapshot.files.get(path) else {
+                return Err(Error::Storage(ProjectError::Conflict {
+                    path: self.store.root().join(path.as_str()),
+                }));
+            };
+            if let Some(declared) = std::str::from_utf8(bytes).ok().and_then(declaration)
+                && declared.kind != registration.kind
+            {
+                return Err(Error::KindMismatch);
+            }
+            let entry = DocumentEntry {
+                document_id: self.new_document_id(),
+                kind: registration.kind,
+                path: path.clone(),
+                entity_id: uuid::Uuid::new_v4().to_string(),
+                base_revision: None,
+                recovered: false,
+            };
+            registry.documents.push(entry.clone());
+            entries.push(entry);
+        }
+        let bytes = registry.to_public_bytes()?;
+        self.store.commit(vec![ProjectChange::Write {
+            path: manifest_path,
+            expected: self.manifest_saved.clone(),
+            bytes: bytes.clone(),
+        }])?;
+        self.manifest_saved = FileState::of(&bytes);
+        self.manifest.documents = registry.documents;
+        self.refresh_local_baselines();
+        let mut ids = Vec::new();
+        for entry in entries {
+            let id = entry.document_id.clone();
+            self.documents.push(document_from(&snapshot, entry));
+            self.emit(origin, Some(&id), EventKind::DocumentRegistered);
+            self.analyse_now(self.documents.len() - 1)?;
+            ids.push(id);
+        }
+        Ok(ids)
+    }
+
     /// Handles of published revisions and of every working component's header.
     fn component_handles(&self) -> HashSet<String> {
         let mut handles: HashSet<String> = self

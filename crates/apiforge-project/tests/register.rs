@@ -237,3 +237,40 @@ fn import_refuses_binary_files_and_kind_mismatches() {
     assert!(matches!(error, Error::KindMismatch));
     assert!(session.documents().is_empty());
 }
+
+#[test]
+fn sources_found_later_are_registered_in_place_on_request() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Later").unwrap();
+    fs::write(directory.path().join("found.afs"), COMPONENT).unwrap();
+    let registration = |kind| Registration {
+        path: "found.afs".into(),
+        kind,
+    };
+    assert!(matches!(
+        session.register_existing(&[registration(DocumentKind::Scenario)], Origin::SESSION),
+        Err(Error::KindMismatch)
+    ));
+    let ids = session
+        .register_existing(&[registration(DocumentKind::Component)], Origin::SESSION)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(directory.path().join("found.afs")).unwrap(),
+        COMPONENT
+    );
+    assert!(session.document(&ids[0]).unwrap().model().is_some());
+    assert!(
+        session
+            .register_existing(&[registration(DocumentKind::Component)], Origin::SESSION)
+            .is_err(),
+        "already registered"
+    );
+    drop(session);
+    assert_eq!(
+        ProjectSession::open(directory.path())
+            .unwrap()
+            .documents()
+            .len(),
+        1
+    );
+}
