@@ -158,7 +158,7 @@ pub(crate) fn derive(
     };
     let mut document = reconciled.document;
     normalise(&mut document, target);
-    placer.place(&mut document, &reconciled.unpositioned);
+    placer.place(&mut document, &reconciled.unpositioned, context);
     if apiforge_script::validate_document_model(&document, &LowerContext::folder(context)).is_err()
     {
         diagnostics.push(Diagnostic::error(

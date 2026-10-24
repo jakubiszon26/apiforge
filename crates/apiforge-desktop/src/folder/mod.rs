@@ -14,6 +14,7 @@ mod code_view;
 mod diagram;
 mod explorer;
 mod file_prompts;
+mod placement;
 mod watcher;
 mod workbench;
 
@@ -44,6 +45,7 @@ use apiforge_storage::{
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
+use placement::CardPlacer;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -226,7 +228,7 @@ impl FolderApp {
             close_requested: false,
             preferences: Preferences::load(),
         };
-        match ProjectSession::open(&app.root) {
+        match ProjectSession::open_with(&app.root, Arc::new(CardPlacer)) {
             Ok(session) => app.install(session),
             Err(apiforge_project::Error::NotAProject) => {
                 app.uninitialised = true;
@@ -571,7 +573,12 @@ impl FolderApp {
                 })
             })
             .collect();
-        match ProjectSession::initialise(&self.root, self.new_name.trim(), &registrations) {
+        match ProjectSession::initialise_with(
+            &self.root,
+            self.new_name.trim(),
+            &registrations,
+            Arc::new(CardPlacer),
+        ) {
             Ok(session) => self.install(session),
             Err(error) => self.open_error = Some(error.to_string()),
         }

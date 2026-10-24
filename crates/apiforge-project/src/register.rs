@@ -2,7 +2,10 @@
 //! and importing files from elsewhere. Registration never rewrites a source in
 //! place; import copies it with new identity and never publishes a component.
 use super::{EventKind, Origin, ProjectSession, document_from, has_manifest, ignore_local_data};
-use crate::{Error, Result, layout::FixedPlacer};
+use crate::{
+    Error, Result,
+    layout::{FixedPlacer, Placer},
+};
 use apiforge_script::lexer::{TokenKind, lex};
 use apiforge_storage::project::{
     DocumentEntry, DocumentKind, FileState, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange,
@@ -124,6 +127,16 @@ impl ProjectSession {
         name: &str,
         registrations: &[Registration],
     ) -> Result<Self> {
+        Self::initialise_with(root, name, registrations, Arc::new(FixedPlacer))
+    }
+
+    /// Initialises a project whose fresh blocks the host places itself.
+    pub fn initialise_with(
+        root: impl AsRef<Path>,
+        name: &str,
+        registrations: &[Registration],
+        placer: Arc<dyn Placer>,
+    ) -> Result<Self> {
         let root = root.as_ref();
         if has_manifest(root)? {
             return Err(Error::AlreadyAProject);
@@ -157,7 +170,7 @@ impl ProjectSession {
         }];
         changes.extend(ignore_local_data(&store)?);
         store.commit(changes)?;
-        Self::load(store, Arc::new(FixedPlacer), 1)
+        Self::load(store, placer, 1)
     }
 
     /// Reads files for import into `folder` and proposes destinations. Files

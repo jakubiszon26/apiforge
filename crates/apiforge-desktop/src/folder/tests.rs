@@ -1047,3 +1047,38 @@ fn a_found_source_is_registered_from_the_explorer() {
         .unwrap();
     assert!(matches!(row.kind, explorer::RowKind::Document { .. }));
 }
+
+/// BUG-035: the library's uniform card size left two analysed blocks 120 points
+/// apart, which the painted cards are taller than.
+#[test]
+fn fresh_cards_are_placed_at_the_sizes_the_board_draws() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session =
+        ProjectSession::create_with(directory.path(), "Placement", Arc::new(CardPlacer)).unwrap();
+    let id = session
+        .create_document(
+            DocumentKind::Scenario,
+            "scenarios/alpha.afs",
+            "scenario \"QA Alpha\" {\n  alpha = 7\n  beta = alpha + 3\n}\n",
+        )
+        .unwrap();
+    drop(session);
+    let (context, mut app) = open(directory.path());
+    app.workbench.open(&id);
+    settle(&mut app, &context);
+    let model = model(&app, &id);
+    let graph = graph_of(&model, false);
+    assert_eq!(graph.nodes.len(), 2);
+    let project = app.session.as_ref().unwrap().context().clone();
+    let cards: Vec<egui::Rect> = graph
+        .nodes
+        .iter()
+        .map(|node| canvas::Card::build(node, graph, &project).rect())
+        .collect();
+    assert!(
+        !cards[0].intersects(cards[1]),
+        "painted cards overlap: {:?} and {:?}",
+        cards[0],
+        cards[1]
+    );
+}

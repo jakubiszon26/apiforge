@@ -140,6 +140,14 @@ impl ProjectSession {
         Self::initialise(root, name, &[])
     }
 
+    pub fn create_with(
+        root: impl AsRef<Path>,
+        name: &str,
+        placer: Arc<dyn Placer>,
+    ) -> Result<Self> {
+        Self::initialise_with(root, name, &[], placer)
+    }
+
     /// Opens an existing project. A folder without a manifest is left untouched.
     /// A second session on the same folder is read-only.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
