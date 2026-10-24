@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`; P6 includes the open UI quality findings as well as publication, CLI and runs; P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication, P6c folder CLI and P6d runs pending; P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -319,11 +319,12 @@ Use real pointer and keyboard events in regression tests; calling an `Open`
 action directly is insufficient evidence for click behaviour. The reproducible
 acceptance probes are in [tools/qa/ui-quality](../tools/qa/ui-quality/run.sh),
 with [baseline results and native evidence](qa/2026-10-24/p5-ui-quality/results.json).
-Run `tools/qa/ui-quality/run.sh HEAD` against the P6 candidate. At the P5 baseline,
-two controls pass and eight acceptance probes fail; these expected failures
-record unfinished work and must pass before P6 is accepted. They remain separate
-from the standard workspace suite. Windows and the broader release/accessibility
-review remain P7 gates.
+Run `tools/qa/ui-quality/run.sh HEAD` against the P6 candidate. At the P5
+baseline, two controls passed and eight acceptance probes failed; all ten pass
+from P6a onwards. They remain separate from the standard workspace suite.
+Windows and the broader release/accessibility review remain P7 gates. The gate
+builds an identical package from a temporary checkout, so give it its own
+`CARGO_TARGET_DIR`; sharing the repository's leaves a stale binary behind.
 
 ### Implementation progress
 
@@ -675,6 +676,45 @@ The separate UI acceptance suite still has two passes and eight failures; its
 [results and evidence](qa/2026-10-24/p5-ui-quality/results.json) are retained,
 and [BUG-036–043](../knows-bugs.md#stage-ii-p5-ui-quality-follow-up-p6) stay open.
 P5 delivery does not enable folder mode or migration by default.
+
+P6a is the UI quality and text-file row of P6, on `feat/stage-ii-p6-ui` from
+`9012180`. Fresh blocks are placed at the sizes the board draws: `Placer::place`
+now receives the project context the document was analysed in, and the window
+supplies a placer that measures cards and proxy chips as it paints them, when
+opening and when initialising. The explorer lists the project itself as its
+first row: named, selectable by mouse and keyboard, the explicit destination of
+new files, folders, imports and drops, folded by its chevron, Enter or the arrow
+keys but not by a plain click, and outside ordinary rename, move and delete. One
+click opens or activates the file it selects, every row reports its name, role,
+selection and expansion through accessibility metadata, and the selected row
+shows the list's keyboard focus. Revealing the active document works from its
+index, so a row the virtualised list never drew is reached too; a resize or a
+tree that grew after the folder scan re-reveals it.
+
+A file that is not a definition opens as text. `ProjectSession` owns such files
+by path: exact text, a disk baseline, dirty state, explicit save, revert and
+close, local recovery with held drafts, read-only sessions and external-change
+conflicts. They are never definitions, so they have no entity, model, analysis
+or checkpoint and cannot be run, and the diagram view says so rather than
+showing an empty board. The registry, `.apiforge` data, `.git`, registered
+documents, directories, non-UTF-8 files and files over the 1 MiB limit are
+refused. Recovery gains a `texts` array beside its documents; an explorer move
+carries an open file and its unsaved work, and a delete leaves unsaved work with
+a deletion conflict instead of dropping it. Each tab is one surface whose close
+control lives inside it, labels are bounded and equal names gain the least
+parent path that tells them apart, and activation, Ctrl+Tab and a narrower
+window all scroll the active tab into view.
+
+The UI acceptance gate passes: ten of ten probes, against two passing controls
+and eight failures at the P5 baseline. Verification of P6a (Linux, 2026-10-24):
+formatting, workspace clippy with warnings denied, fixture verification and
+all-target workspace tests passed (808 passed, two parent-launched helpers
+ignored), run serially with isolated config/data directories. Seventeen of those
+tests are new, seven of them window regressions driven by real pointer and
+keyboard events. Native review used `--screenshot` captures of the folder window
+at 1600 × 1000 and 960 × 540; the [P6 UI verification
+report](qa/2026-10-24/p6-ui/verification.md) records them and the limits.
+Publication, the folder CLI and runs remain P6b–P6d.
 
 Acceptance must cover:
 

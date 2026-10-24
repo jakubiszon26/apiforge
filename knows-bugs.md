@@ -14,18 +14,27 @@ line against it and the native window — and fixed **BUG-032–034**, in the
 [end-to-end verification report](docs/qa/2026-10-24/fixes-e2e/verification.md).
 Original reproductions and screenshots are retained below.
 
-Stage II P1–P4 native QA on `main` at `8fafaae` found **BUG-035 (open, P2)**:
+Stage II P1–P4 native QA on `main` at `8fafaae` found **BUG-035 (fixed in P6, P2)**:
 new folder-project diagram cards overlap. The
 [P1–P4 QA report](docs/qa/2026-10-24/p1-p4-native-interactive.md) records the
 interactive checks, supporting automated tests and their limits.
 
-Stage II P5 UI quality QA on `0fcff3e` adds **BUG-036–043 (open, planned for P6)**.
+Stage II P6 fixed **BUG-035–043** on `feat/stage-ii-p6-ui`: card placement at the
+sizes the board draws, the explorer's project row, one-click opening, named rows
+and a reveal that reaches a virtualised row, project text files in application
+tabs, and tabs whose close control lives inside them with bounded, unambiguous
+labels. All ten acceptance probes pass; see the
+[P6 UI verification report](docs/qa/2026-10-24/p6-ui/verification.md). The
+original reports and reproductions remain below.
+
+Stage II P5 UI quality QA on `0fcff3e` added **BUG-036–043 (fixed in P6)**.
 The user approved merging P5 on 2026-10-24 with these UI issues assigned to P6;
 they are not fixed by that merge. The [P6 acceptance plan](docs/stage-ii-code-workspace.md#p6-ui-quality-and-text-file-acceptance)
 includes the four user-reported issues and the accompanying navigation,
 accessibility and visual findings. The [UI quality record](docs/qa/2026-10-24/p5-ui-quality/results.json)
-contains native evidence and the reproducible acceptance probes: two controls
-pass and eight requirements fail, separately from the 791 passing standard tests.
+contains native evidence and the reproducible acceptance probes: at that
+baseline two controls passed and eight requirements failed, separately from the
+791 passing standard tests.
 The three earlier P5 CR problems (false deletion after a truncated scan,
 partial invalid case-only rename, and omitted missing dirty documents in folder
 deletion) pass their [reproduction retests](docs/qa/2026-10-24/p5-ui-quality/previous-cr-retest.log).
@@ -838,12 +847,11 @@ not used.
 
 ## BUG-035 — P2 — Newly analysed folder-project cards overlap
 
-**Status: open.** Reproduced on `main` at `8fafaae`, in the real native folder
-window on isolated KWin/Xwayland, at 100% zoom in Diagram and Split, including
-after saving and reopening the project.
-
-**Planned package: P6.** Included in the user's UI quality follow-up alongside
-BUG-036–043; this issue is not closed by merging P5.
+**Status: fixed in P6.** Reproduced on `main` at `8fafaae`, in the real native
+folder window on isolated KWin/Xwayland, at 100% zoom in Diagram and Split,
+including after saving and reopening the project. The window now supplies a
+placer that measures cards and proxy chips as the board paints them, so fresh
+blocks are laid out at their real sizes.
 
 1. Open a fresh folder with `apiforge-desktop --folder PATH` and initialise it.
 2. Create a scenario and replace its code with:
@@ -882,8 +890,9 @@ folder-session path from the legacy component-layout issue BUG-006.
 
 ## BUG-036 — P2 — The close icon is outside its file tab
 
-**Status: open; planned for P6.** User report confirmed in native P5 on `0fcff3e`
-and by the egui geometry probe.
+**Status: fixed in P6.** User report confirmed in native P5 on `0fcff3e` and by
+the egui geometry probe. Name, state and close control now share one tab
+surface.
 
 1. Open several files and select a tab.
 2. Inspect the selected tab's background and its close icon.
@@ -901,8 +910,9 @@ close target that closes only that file and retains dirty-close protection.
 
 ## BUG-037 — P2 — One explorer click does not open the selected file
 
-**Status: open; planned for P6.** User-reported interaction requirement,
-confirmed with native input and the egui pointer-event probe on `0fcff3e`.
+**Status: fixed in P6.** User-reported interaction requirement, confirmed with
+native input and the egui pointer-event probe on `0fcff3e`. One click now opens
+or activates the file it selects.
 
 1. Open Alpha, then click Beta once in the explorer.
 2. Wait beyond the external polling interval without clicking Refresh.
@@ -921,8 +931,10 @@ double-click/Enter controls in the acceptance log.
 
 ## BUG-038 — P2 — The project root cannot be selected in the explorer
 
-**Status: open; planned for P6.** User report confirmed in the native window and
-the explorer-row acceptance probe on `0fcff3e`.
+**Status: fixed in P6.** User report confirmed in the native window and the
+explorer-row acceptance probe on `0fcff3e`. The project is the explorer's first
+row and the explicit destination for new items; its chevron, Enter and the
+arrow keys fold it, and ordinary file actions cannot rename or delete it.
 
 1. Open a folder project and try to select its root in the explorer.
 2. Try to make the root an explicit destination for a new file, folder or import.
@@ -939,9 +951,12 @@ and delete are excluded from ordinary file actions.
 
 ## BUG-039 — P2 — Project text files do not open in the application
 
-**Status: open; planned for P6; accepted scope addition.** The original Stage II
-plan excluded non-`.afs` editing. The user's request explicitly adds project text
-files such as `.gitignore` to P6, so the old exclusion no longer satisfies acceptance.
+**Status: fixed in P6; accepted scope addition.** The original Stage II plan
+excluded non-`.afs` editing. The user's request explicitly adds project text
+files such as `.gitignore` to P6, so the old exclusion no longer satisfies
+acceptance. Such files now open as text in their own tabs, with exact saving,
+dirty state, Save All, close decisions, recovery, read-only handling and
+external-change conflicts; API Forge's own managed data stays out of reach.
 
 1. Click `.gitignore` in the project explorer.
 2. Try Enter or double-click to open its contents.
@@ -958,8 +973,9 @@ them as scenarios. Preserve path and managed-metadata protections.
 
 ## BUG-040 — P2 — The active tab remains offscreen
 
-**Status: open; planned for P6.** Confirmed in native P5 at 960 × 540 and by the
-many-tabs acceptance probe on `0fcff3e`.
+**Status: fixed in P6.** Confirmed in native P5 at 960 × 540 and by the
+many-tabs acceptance probe on `0fcff3e`. Activation, Ctrl+Tab and a narrower
+window all scroll the active tab into view.
 
 1. Open enough documents to overflow the tab strip.
 2. Activate a later file through the explorer or cycle tabs with Ctrl+Tab.
@@ -976,8 +992,9 @@ its name, status and close control reachable at the minimum window size.
 
 ## BUG-041 — P3 — Equal filenames produce indistinguishable tabs
 
-**Status: open; planned for P6.** Confirmed in native P5 and by the tab-label
-acceptance probe on `0fcff3e`.
+**Status: fixed in P6.** Confirmed in native P5 and by the tab-label acceptance
+probe on `0fcff3e`. A tab label carries the least parent path that tells it
+apart and is bounded to 160 points, with the full path on hover.
 
 1. Open `other/alpha.afs` and `scenarios/alpha.afs`.
 2. Open a file with a long descriptive name as well.
@@ -993,8 +1010,10 @@ suffix; bound long labels while retaining full-path tooltips and reachable contr
 
 ## BUG-042 — P3 — Explorer files have no named accessibility nodes
 
-**Status: open; planned for P6.** Confirmed by the egui AccessKit output probe on
-`0fcff3e`; this is not a complete native screen-reader audit.
+**Status: fixed in P6.** Confirmed by the egui AccessKit output probe on
+`0fcff3e`; this is not a complete native screen-reader audit. Rows now report
+their name, role, selection and expansion, and the selected row shows the
+list's keyboard focus.
 
 1. Enable AccessKit output for the folder window with Alpha and Beta files.
 2. Inspect the generated named nodes.
@@ -1012,8 +1031,10 @@ its standard-button control, in the
 
 ## BUG-043 — P2 — The explorer does not reveal an active offscreen file
 
-**Status: open; planned for P6.** Confirmed by native observation of Task 12 below
-the 960 × 540 explorer viewport and the virtualised-row acceptance probe on `0fcff3e`.
+**Status: fixed in P6.** Confirmed by native observation of Task 12 below the
+960 × 540 explorer viewport and the virtualised-row acceptance probe on
+`0fcff3e`. The row list also had a spacing mismatch, which left its last rows
+unreachable by scrolling at all; rows are now exactly one row-height apart.
 
 1. Open a project containing more files than fit in the explorer viewport.
 2. Activate a document whose row is below the visible range.
