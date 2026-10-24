@@ -1,6 +1,7 @@
 //! Workspace-aware commands. Mutations share the desktop's exclusive session,
 //! external-change checks, backup rotation and deliberate recovery rules.
 use apiforge_core::{ImportLimits, format::*, import_document};
+use apiforge_layout::{Block, Edge, Point, Size};
 use apiforge_script::{Document, LowerContext, lower, parse, print_scenario, reconcile};
 use apiforge_storage::WorkspaceStore;
 use std::{
@@ -169,25 +170,15 @@ fn execute(args: Args) -> Result<(), String> {
     let Document::Scenario(scenario) = &mut result.document else {
         return Err("Expected a scenario declaration".into());
     };
-    // M2 will replace this simple placement with the shared layout engine. Keep
-    // existing positions and place only new nodes beyond the board's right edge.
+    // New blocks are placed by the same layout the board uses. The command has
+    // no cards to measure, so it lays out nominal ones: a block's width is fixed
+    // and its height varies little, and the positions are a starting point the
+    // board's *Tidy up* can improve.
     for (new, old) in [
         (&mut scenario.graph, &project.scenarios[index].graph),
         (&mut scenario.cleanup, &project.scenarios[index].cleanup),
     ] {
-        let mut next_x = old
-            .nodes
-            .iter()
-            .map(|n| n.position.x)
-            .reduce(f64::max)
-            .map_or(0.0, |x| x + 340.0);
-        for node in &mut new.nodes {
-            if result.unpositioned.contains(&node.id) {
-                node.position = Position { x: next_x, y: 0.0 };
-                node.auto_placed = true;
-                next_x += 340.0;
-            }
-        }
+        place_new_nodes(new, old, &result.unpositioned);
     }
     // A semantic no-op must not rotate backups or rewrite existing layout/order.
     if apiforge_script::semantic(&current, project)
@@ -208,4 +199,59 @@ fn execute(args: Args) -> Result<(), String> {
     }
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// The size a block is assumed to have when no window has measured one.
+const NOMINAL_CARD: Size = Size {
+    width: 280.0,
+    height: 140.0,
+};
+
+/// Places the nodes of `graph` that reconciliation left without a position,
+/// keeping every other block where the document already had it.
+fn place_new_nodes(graph: &mut Graph, previous: &Graph, unpositioned: &[String]) {
+    let fresh: Vec<usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| unpositioned.contains(&node.id))
+        .map(|(index, _)| index)
+        .collect();
+    if fresh.is_empty() {
+        return;
+    }
+    let blocks: Vec<Block> = graph
+        .nodes
+        .iter()
+        .map(|node| {
+            let position = previous
+                .nodes
+                .iter()
+                .find(|old| old.id == node.id)
+                .map_or(node.position.clone(), |old| old.position.clone());
+            let block = Block::new(
+                NOMINAL_CARD,
+                Point::new(position.x as f32, position.y as f32),
+            );
+            if unpositioned.contains(&node.id) {
+                block
+            } else {
+                block.pinned()
+            }
+        })
+        .collect();
+    let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+    let edges: Vec<Edge> = apiforge_core::graph::wires(graph)
+        .iter()
+        .filter_map(|wire| Some(Edge::new(index_of(&wire.source)?, index_of(&wire.target)?)))
+        .collect();
+    let placed = apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &fresh);
+    for (index, position) in fresh.iter().zip(placed) {
+        let node = &mut graph.nodes[*index];
+        node.position = Position {
+            x: f64::from(position.x),
+            y: f64::from(position.y),
+        };
+        node.auto_placed = true;
+    }
 }

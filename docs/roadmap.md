@@ -1,7 +1,7 @@
 # Roadmap: scenario code, Export, variables and wire routing
 
-- Status: in progress; M0, M1, S1, M4, the run journal and M2 are complete; M5 is
-  next
+- Status: in progress; M0, M1, S1, M4, the run journal, M2 and M5 are complete;
+  M6 is next
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
@@ -293,7 +293,13 @@ path works end to end.
 | S1 | Complete: single-writer sessions, external-change detection, deliberate recovery, draft storage ([ADR 0008](decisions/0008-storage-sessions.md)) |
 | M4 | Complete: parser, formatter, lowering, printer, reconciliation, located diagnostics and type warnings, `fmt/check/print/apply`; generated-topology property tests and sustained syntax and semantic fuzzing |
 | M2 | Complete: `apiforge-layout`, *Tidy up*, pinning, routed wires with bridges and spline mode, wire settings, benchmarks |
-| M5, M6, M3, M7 | Planned |
+| M5 | Complete: completion engine with hover and go-to-definition, the `CodeEditor` widget, request bodies in both modes, completion in the URL, header and query fields |
+| M6, M3, M7 | Planned |
+
+Of M5, two pieces wait for the code panel that M6 brings, because that panel is
+what can act on them: going to a block's definition (Ctrl+click, F12) and
+renaming one (F2) both change what is selected on the board. Hovering a name
+already explains it, which the widget can do alone.
 
 The run journal gate is closed: live requests are recorded before they are sent and
 resolved afterwards, an interrupted run is reported at the next start, and reports

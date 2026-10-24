@@ -179,6 +179,7 @@ name = "apiforge-cli"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-layout",
  "apiforge-script",
  "apiforge-storage",
  "serde_json",
@@ -225,6 +226,7 @@ dependencies = [
  "apiforge-core",
  "apiforge-layout",
  "apiforge-runner",
+ "apiforge-script",
  "apiforge-storage",
  "dirs",
  "eframe",

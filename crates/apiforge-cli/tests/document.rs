@@ -256,3 +256,79 @@ fn malformed_document_command_arguments_exit_two() {
         );
     }
 }
+
+/// A statement the document did not have gets a position from the same layout
+/// the board uses: beside its neighbours, and on top of nothing.
+#[test]
+fn applying_a_new_statement_places_it_clear_of_the_other_blocks() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let source = directory.path().join("scenario.afs");
+    let workspace = fixture();
+    let project = workspace
+        .projects
+        .iter()
+        .find(|project| project.id == workspace.active_id)
+        .unwrap();
+    let scenario = &project.scenarios[0];
+    fs::write(&path, serde_json::to_vec_pretty(&workspace).unwrap()).unwrap();
+    let printed = run("print", &path, Some(&scenario.id), None);
+    assert!(printed.status.success());
+    let text = String::from_utf8(printed.stdout).unwrap();
+    let before: Vec<(String, (f64, f64))> = scenario
+        .graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), (node.position.x, node.position.y)))
+        .collect();
+
+    // One more statement, written at the end of the scenario body.
+    let closing = text.rfind('}').expect("the scenario body is closed");
+    let mut extended = text.clone();
+    extended.insert_str(closing, "  var fresh_total = 1\n");
+    fs::write(&source, extended).unwrap();
+    let applied = run("apply", &path, Some(&scenario.id), Some(&source));
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+
+    let saved: Workspace = import_document(&fs::read(&path).unwrap(), &ImportLimits::default())
+        .unwrap()
+        .into_workspace();
+    let saved_scenario = &saved
+        .projects
+        .iter()
+        .find(|project| project.id == saved.active_id)
+        .unwrap()
+        .scenarios[0];
+    assert_eq!(saved_scenario.graph.nodes.len(), before.len() + 1);
+    // Every block that already existed stayed exactly where it was.
+    for (id, position) in &before {
+        let node = saved_scenario
+            .graph
+            .nodes
+            .iter()
+            .find(|node| &node.id == id)
+            .expect("an existing block kept its identity");
+        assert_eq!((node.position.x, node.position.y), *position);
+    }
+    let fresh = saved_scenario
+        .graph
+        .nodes
+        .iter()
+        .find(|node| node.handle == "fresh_total")
+        .expect("the new block was added");
+    assert!(fresh.auto_placed, "the layout owns the position it chose");
+    // Nominal cards of 280 × 140 must not overlap.
+    for (_, (x, y)) in &before {
+        let apart = (fresh.position.x - x).abs() >= 280.0 || (fresh.position.y - y).abs() >= 140.0;
+        assert!(
+            apart,
+            "the new block at {:?} lands on a block at {:?}",
+            (fresh.position.x, fresh.position.y),
+            (x, y)
+        );
+    }
+}

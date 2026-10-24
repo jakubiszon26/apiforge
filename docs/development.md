@@ -104,6 +104,18 @@ successfully; the probe step verifies that its capture exists and is not empty. 
 probes detect startup, rendering, capture and exit failures; they are not pixel-diff or
 end-to-end editing tests.
 
+## The code editor
+
+Scenario text, request bodies and the small template fields share one completion
+engine in `apiforge-script`, which also answers what a name means. The desktop
+adds the shapes behind a name — the contract a request declares, the sample a
+simulation would use, then the output of the last run — so a path offered after
+`handle.` says where its shape came from. Environment variables are offered by
+name; no value, secret or not, reaches a completion list.
+
+A buffer above 256 KiB is laid out without colouring, which keeps a very large
+body responsive; the text is unaffected.
+
 ## Storage behaviour
 
 Only one window can save a workspace directory; others open read-only and say why.

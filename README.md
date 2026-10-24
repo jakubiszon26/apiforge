@@ -25,7 +25,9 @@ the first release targets.
   phase also runs after errors and cancellation. A live run is journalled, so a run
   interrupted by a crash is reported at the next start.
 - **Scenario language.** A lossless parser, a formatter and a CLI to check, print and
-  apply scenarios against a workspace.
+  apply scenarios against a workspace. Request bodies and the URL, header and query
+  fields are edited as code, with completion for blocks, variables, parameters,
+  environment names, components, operators and response paths.
 - **Safe local storage.** Atomic saves with a validated backup, a single writer per
   workspace, detection of external changes and deliberate recovery.
 

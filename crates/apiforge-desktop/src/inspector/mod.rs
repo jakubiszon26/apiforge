@@ -555,6 +555,19 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
 
 fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     let scope = scope(context);
+    // The URL and the header and query values are templates, so they complete
+    // from the same index the code editor uses.
+    let names = crate::shapes::Names::of_board(
+        context.project,
+        &context.graph.nodes,
+        context.parameters,
+        Some(node),
+    );
+    let shapes = crate::shapes::BoardShapes {
+        project: context.project,
+        nodes: &context.graph.nodes,
+        steps: context.run.map_or(&[][..], |run| run.steps.as_slice()),
+    };
     ui.add_space(6.0);
     widgets::field_label(ui, "Method and URL or path");
     let mut method = node
@@ -575,9 +588,14 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         .get(URL_INPUT)
         .cloned()
         .unwrap_or_else(|| Binding::literal(serde_json::json!("")));
-    if let Some(next) =
-        fields::template_field(ui, id.with("url"), &url, scope, "/orders/{{order.body.id}}")
-    {
+    if let Some(next) = fields::template_field(
+        ui,
+        id.with("url"),
+        &url,
+        scope,
+        "/orders/{{order.body.id}}",
+        names.scope(&shapes),
+    ) {
         node.inputs.insert(URL_INPUT.into(), next);
     }
     widgets::hint(
@@ -619,7 +637,14 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         if current.is_some_and(|binding| !has_text_form(binding, scope)) {
             continue;
         }
-        match fields::template_map(ui, id.with(input), label, current, scope) {
+        match fields::template_map(
+            ui,
+            id.with(input),
+            label,
+            current,
+            scope,
+            names.scope(&shapes),
+        ) {
             Some(Some(next)) => {
                 node.inputs.insert(input.into(), next);
             }
@@ -683,12 +708,24 @@ fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut
             project: context.project,
             request: Some(node),
         };
+        let names = crate::shapes::Names::of_board(
+            context.project,
+            &context.graph.nodes,
+            context.parameters,
+            Some(node),
+        );
+        let shapes = crate::shapes::BoardShapes {
+            project: context.project,
+            nodes: &context.graph.nodes,
+            steps: context.run.map_or(&[][..], |run| run.steps.as_slice()),
+        };
         if let Some(next) = fields::request_body_editor(
             ui,
             id.with("body-source"),
             value.as_ref(),
             node.config.body_format.unwrap_or_default(),
             scope,
+            names.scope(&shapes),
         ) {
             value = next;
             changed = true;

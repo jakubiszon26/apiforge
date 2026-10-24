@@ -1,5 +1,6 @@
 //! ApiForge Script syntax, diagnostics and canonical source formatting.
 pub mod ast;
+pub mod complete;
 mod format;
 pub mod lexer;
 mod lower;
