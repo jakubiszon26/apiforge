@@ -11,4 +11,3 @@ test failed_case_only_rename_must_keep_original_path ... ok
 test truncated_scan_must_not_mark_existing_document_deleted ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
-
