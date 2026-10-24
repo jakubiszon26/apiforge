@@ -19,7 +19,8 @@ pub use migration::{
 };
 pub use prepare::prepare_project;
 pub use session::{
-    DeletePreview, DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome,
+    Declaration, DeletePreview, DraftStatus, Event, EventKind, ImportCandidate, ImportItem, Origin,
+    ProjectSession, Registration, SaveOutcome, SourceSurvey, declaration, rename_handle,
 };
 
 pub use apiforge_script::Document;
@@ -59,6 +60,12 @@ pub enum Error {
     SourceTooLarge,
     #[error("A registered source must keep the .afs extension outside .apiforge.")]
     RegisteredSourceExtension,
+    #[error("{} is not UTF-8 text.", .0.display())]
+    NotText(std::path::PathBuf),
+    #[error("The source does not declare the chosen kind of document.")]
+    KindMismatch,
+    #[error("Another component already uses the handle {0}.")]
+    HandleCollision(String),
     #[error(transparent)]
     Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]

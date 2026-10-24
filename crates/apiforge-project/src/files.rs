@@ -326,7 +326,7 @@ impl ProjectSession {
     }
 
     /// The registry as saved, failing when it changed outside this session.
-    fn saved_manifest(&self, bytes: &Option<Vec<u8>>) -> Result<ProjectManifest> {
+    pub(super) fn saved_manifest(&self, bytes: &Option<Vec<u8>>) -> Result<ProjectManifest> {
         let bytes = bytes.as_deref().ok_or(ProjectError::InvalidMetadata)?;
         if FileState::of(bytes) != self.manifest_saved {
             return Err(Error::Storage(ProjectError::Conflict {
@@ -336,13 +336,13 @@ impl ProjectSession {
         Ok(ProjectManifest::from_bytes(bytes)?)
     }
 
-    fn check_saved_manifest(&self) -> Result<()> {
+    pub(super) fn check_saved_manifest(&self) -> Result<()> {
         let path = ProjectPath::new(MANIFEST_PATH)?;
         let snapshot = self.store.read(std::slice::from_ref(&path))?;
         self.saved_manifest(&snapshot.files[&path]).map(|_| ())
     }
 
-    fn read_manifest(&self) -> Result<ProjectManifest> {
+    pub(super) fn read_manifest(&self) -> Result<ProjectManifest> {
         let path = ProjectPath::new(MANIFEST_PATH)?;
         let snapshot = self.store.read(std::slice::from_ref(&path))?;
         let bytes = snapshot.files[&path]

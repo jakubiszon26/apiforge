@@ -17,9 +17,15 @@ use std::{path::Path, sync::Arc};
 mod files;
 #[path = "recovery.rs"]
 mod recovery;
+#[path = "register.rs"]
+mod register;
 pub use files::DeletePreview;
 pub use recovery::DraftStatus;
 use recovery::RecoveryState;
+pub use register::{
+    Declaration, ImportCandidate, ImportItem, Registration, SourceSurvey, declaration,
+    rename_handle,
+};
 
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 const GITIGNORE_PATH: &str = ".gitignore";
@@ -120,32 +126,7 @@ impl std::fmt::Debug for ProjectSession {
 impl ProjectSession {
     /// Writes a new, empty manifest. The folder must not contain a project.
     pub fn create(root: impl AsRef<Path>, name: &str) -> Result<Self> {
-        let root = root.as_ref();
-        if has_manifest(root)? {
-            return Err(Error::AlreadyAProject);
-        }
-        let store = ProjectStore::open_exclusive(root)?;
-        let manifest = ProjectManifest {
-            format_version: 1,
-            id: uuid::Uuid::new_v4().to_string(),
-            name: name.into(),
-            environment: apiforge_core::format::Environment {
-                base_url: String::new(),
-                variables: Default::default(),
-                secret_names: Vec::new(),
-            },
-            contracts: Vec::new(),
-            documents: Vec::new(),
-            revisions: Vec::new(),
-        };
-        let mut changes = vec![ProjectChange::Write {
-            path: ProjectPath::new(MANIFEST_PATH)?,
-            expected: FileState::Missing,
-            bytes: manifest.to_public_bytes()?,
-        }];
-        changes.extend(ignore_local_data(&store)?);
-        store.commit(changes)?;
-        Self::load(store, Arc::new(FixedPlacer), 1)
+        Self::initialise(root, name, &[])
     }
 
     /// Opens an existing project. A folder without a manifest is left untouched.
@@ -851,6 +832,22 @@ impl ProjectSession {
             document_id: document_id.map(str::to_owned),
             kind,
         });
+    }
+}
+
+fn empty_manifest(name: &str) -> ProjectManifest {
+    ProjectManifest {
+        format_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.into(),
+        environment: apiforge_core::format::Environment {
+            base_url: String::new(),
+            variables: Default::default(),
+            secret_names: Vec::new(),
+        },
+        contracts: Vec::new(),
+        documents: Vec::new(),
+        revisions: Vec::new(),
     }
 }
 
