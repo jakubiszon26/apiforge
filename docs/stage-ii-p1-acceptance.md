@@ -59,8 +59,9 @@ Language fuzzing completed for 60 seconds per fuzzer:
 - Semantics seed `2718281828`: 81,866 cases, 12,408 lowered without errors.
 
 No layout algorithm changed, so the layout benchmark was not required. Native
-interactive regression testing follows the P1 implementation commit and has its
-own QA record; these library tests do not claim GUI coverage.
+interactive regression testing after the implementation commit passed the exercised
+paths; see its [QA record](qa/2026-10-24/p1-native-interactive.md) and screenshots.
+These library tests alone do not claim GUI coverage.
 
 ## Remaining stage gates
 
