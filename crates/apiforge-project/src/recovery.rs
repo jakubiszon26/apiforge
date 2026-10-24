@@ -5,7 +5,7 @@ use super::{ProjectSession, Result};
 use crate::{
     Error,
     analysis::{self, document_of, identity_base},
-    document::AnalysisState,
+    document::{AnalysisState, Unavailable},
 };
 use apiforge_storage::project::{
     CacheNotice, CacheProvenance, DiagramRecord, DocumentKey, FieldRecovery, FileState,
@@ -54,7 +54,9 @@ impl ProjectSession {
             document.entry.document_id == draft.document_id
                 && document.entry.entity_id == draft.entity_id
                 && document.entry.kind == draft.kind
-                && document.unavailable.is_none()
+                // A missing file can be recreated from a kept draft; other
+                // unavailable files cannot be edited as text.
+                && matches!(document.unavailable, None | Some(Unavailable::Missing))
         })
     }
 
@@ -72,6 +74,8 @@ impl ProjectSession {
                 model
             });
         let document = &mut self.documents[index];
+        // Over a missing file the draft becomes unsaved text; saving recreates it.
+        document.unavailable = None;
         document.selection = draft.selection;
         document.fields = draft.fields;
         if document.text != draft.text {

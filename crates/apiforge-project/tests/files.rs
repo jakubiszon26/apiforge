@@ -330,3 +330,63 @@ fn a_refused_case_only_rename_changes_nothing() {
     session.relocate("Flows", "flows", Origin::SESSION).unwrap();
     assert_eq!(path_of(&session, &id), "flows/main.afs");
 }
+
+#[test]
+fn deleting_a_folder_includes_documents_whose_files_were_removed_outside() {
+    let (directory, mut session, id) = project();
+    let other = session
+        .create_document(DocumentKind::Scenario, "scenarios/nested/other.afs", OTHER)
+        .unwrap();
+    let edited = SCENARIO.replace('2', "8");
+    session.edit_source(&id, &edited, Origin::SESSION).unwrap();
+    let root = directory.path();
+    fs::remove_file(root.join("scenarios/main.afs")).unwrap();
+    fs::remove_dir_all(root.join("scenarios/nested")).unwrap();
+
+    let preview = session.preview_delete(&["scenarios"]).unwrap();
+    let mut listed: Vec<_> = preview
+        .documents()
+        .iter()
+        .map(|entry| entry.document_id.clone())
+        .collect();
+    listed.sort();
+    let mut expected = vec![id.clone(), other.clone()];
+    expected.sort();
+    assert_eq!(listed, expected);
+    assert_eq!(preview.unsaved_documents(), std::slice::from_ref(&id));
+    let commit = session.delete(&preview, Origin::SESSION).unwrap();
+    assert!(session.document(&id).is_none() && session.document(&other).is_none());
+    assert!(!root.join("scenarios").exists());
+
+    session.restore(&commit.operation_id, &[]).unwrap();
+    assert!(session.document(&other).is_some());
+    assert!(
+        !root.join("scenarios/main.afs").exists(),
+        "absence is restored"
+    );
+    // The unsaved work was written against the deleted file: it waits for a
+    // decision, and keeping it recreates the file on save.
+    assert!(
+        session
+            .recovered_drafts()
+            .iter()
+            .any(|(status, draft)| *status == DraftStatus::Stale && draft.document_id == id)
+    );
+    session.keep_draft(&id).unwrap();
+    assert_eq!(session.document(&id).unwrap().text(), edited);
+    session.save(&id).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("scenarios/main.afs")).unwrap(),
+        edited
+    );
+
+    // A missing document on its own can be deleted too; a missing path that
+    // is not registered cannot.
+    let preview = session
+        .preview_delete(&["scenarios/nested/other.afs"])
+        .unwrap();
+    assert_eq!(preview.documents().len(), 1);
+    session.delete(&preview, Origin::SESSION).unwrap();
+    assert!(session.document(&other).is_none());
+    assert!(session.preview_delete(&["scenarios/nothing.afs"]).is_err());
+}

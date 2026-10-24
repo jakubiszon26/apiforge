@@ -258,6 +258,7 @@ impl ProjectStore {
         }
         let mut files = std::collections::BTreeSet::new();
         let mut directories = std::collections::BTreeSet::new();
+        let mut absent = Vec::new();
         for path in paths {
             if !explorable(path) || path.as_str() == MANIFEST_PATH {
                 return Err(ProjectError::InvalidTrash);
@@ -273,11 +274,9 @@ impl ProjectStore {
                 FileState::File { .. } => {
                     files.insert(path.clone());
                 }
-                FileState::Missing => {
-                    return Err(ProjectError::Conflict {
-                        path: self.root().join(path.as_str()),
-                    });
-                }
+                // Only registered documents (or folders of them) whose files
+                // are missing can be deleted without a file on disk.
+                FileState::Missing => absent.push(path.clone()),
             }
         }
         if files.len() + directories.len() > MAX_TRANSACTION_OPERATIONS {
@@ -286,12 +285,34 @@ impl ProjectStore {
         let mut extra = recovery_paths()?;
         extra.extend(files.iter().cloned());
         let (manifest, snapshot) = self.load_locked(&extra)?;
-        let (registered, files): (Vec<_>, Vec<_>) = files
-            .into_iter()
-            .partition(|path| manifest.documents.iter().any(|entry| &entry.path == path));
-        if files.iter().any(|path| path.as_str() == MANIFEST_PATH) {
-            return Err(ProjectError::InvalidTrash);
+        let inside = |entry: &DocumentEntry, path: &ProjectPath| {
+            entry.path == *path
+                || entry
+                    .path
+                    .as_str()
+                    .strip_prefix(path.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        };
+        for path in &absent {
+            if !manifest.documents.iter().any(|entry| inside(entry, path)) {
+                return Err(ProjectError::Conflict {
+                    path: self.root().join(path.as_str()),
+                });
+            }
         }
+        // Every registered document in the selection, including those whose
+        // files were removed outside the project: their records and unsaved
+        // work go to the trash as well.
+        let entries: Vec<_> = manifest
+            .documents
+            .iter()
+            .filter(|entry| paths.iter().any(|path| inside(entry, path)))
+            .cloned()
+            .collect();
+        let files: Vec<_> = files
+            .into_iter()
+            .filter(|path| !manifest.documents.iter().any(|entry| &entry.path == path))
+            .collect();
         for path in &files {
             if !matches!(snapshot.state(path), Some(FileState::File { .. })) {
                 return Err(ProjectError::Conflict {
@@ -299,12 +320,6 @@ impl ProjectStore {
                 });
             }
         }
-        let entries: Vec<_> = manifest
-            .documents
-            .iter()
-            .filter(|entry| registered.contains(&entry.path))
-            .cloned()
-            .collect();
         let diagram = diagram_from_snapshot(&snapshot)?;
         let recovery = recovery::recovery_from_snapshot(&snapshot, &manifest.id)?;
         for entry in &entries {
