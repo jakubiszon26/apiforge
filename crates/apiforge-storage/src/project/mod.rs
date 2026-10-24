@@ -30,7 +30,8 @@ pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery
 pub use schema::{DocumentEntry, DocumentKind, MANIFEST_PATH, ProjectManifest, RevisionEntry};
 pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore};
 pub use trash::{
-    RestoreDestination, TrashCommit, TrashEntry, TrashIndex, TrashPreview, TrashRestorePreview,
+    RestoreDestination, TrashCommit, TrashEntry, TrashFile, TrashIndex, TrashPreview,
+    TrashRestorePreview,
 };
 pub use workspace::{CameraState, PanelSizes, TabState, ViewMode, WorkspaceState};
 
