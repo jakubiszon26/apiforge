@@ -69,6 +69,25 @@ pub fn set_document_owner(context: &egui::Context, project_id: &str, document_id
     });
 }
 
+/// Replaces the unfinished field text of one folder document.
+pub fn replace_document_entries(
+    context: &egui::Context,
+    project_id: &str,
+    document_id: &str,
+    entries: Vec<CodeDraft>,
+) {
+    let owner = document_target(document_id);
+    context.data_mut(|data| {
+        let mut registry = data.get_temp::<Registry>(key()).unwrap_or_default();
+        registry.entries.retain(|draft| {
+            draft.project_id != project_id
+                || !matches!(&draft.target, DraftTarget::Field { owner: of, .. } if **of == owner)
+        });
+        registry.entries.extend(entries);
+        data.insert_temp(key(), registry);
+    });
+}
+
 /// Replaces every unfinished field text, as when a folder project opens.
 pub fn restore_entries(context: &egui::Context, entries: Vec<CodeDraft>) {
     context.data_mut(|data| {

@@ -97,6 +97,10 @@ pub struct FolderApp {
     revealed: Option<String>,
     canvases: HashMap<String, Canvas>,
     selections: HashMap<String, Vec<String>>,
+    /// Each document's field drafts as the inspector and the session last
+    /// agreed on them. A session-side change (a kept, discarded or restored
+    /// draft, or a revert) shows as a difference and wins over the inspector.
+    agreed_fields: HashMap<String, Vec<FieldRecovery>>,
     clipboard: Option<Clipboard>,
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
@@ -152,6 +156,7 @@ impl FolderApp {
             revealed: None,
             canvases: HashMap::new(),
             selections: HashMap::new(),
+            agreed_fields: HashMap::new(),
             clipboard: None,
             inspector: Inspector::default(),
             changed_at: None,
@@ -207,23 +212,6 @@ impl FolderApp {
                 tab.selection = document.selection().clone();
             }
         }
-        let fields = session
-            .documents()
-            .iter()
-            .flat_map(|document| {
-                document.field_drafts().iter().map(|field| CodeDraft {
-                    project_id: project_id.clone(),
-                    target: DraftTarget::Field {
-                        owner: Box::new(inspector::drafts::document_target(document.id())),
-                        widget: field.widget,
-                    },
-                    base_hash: field.base_hash.clone(),
-                    text: field.text.clone(),
-                    cursor: field.selection.caret,
-                })
-            })
-            .collect();
-        inspector::drafts::restore_entries(&self.ui_context, fields);
         for tab in self.workbench.tabs() {
             if let Some(camera) = tab.camera {
                 let mut canvas = self.new_canvas();
@@ -245,6 +233,37 @@ impl FolderApp {
         self.seen = session.last_sequence();
         self.uninitialised = false;
         self.session = Some(session);
+        self.reload_field_drafts();
+    }
+
+    /// Unfinished inspector text comes from the session, which owns it.
+    fn reload_field_drafts(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let project_id = &session.manifest().id;
+        let fields = session
+            .documents()
+            .iter()
+            .flat_map(|document| {
+                document.field_drafts().iter().map(|field| CodeDraft {
+                    project_id: project_id.clone(),
+                    target: DraftTarget::Field {
+                        owner: Box::new(inspector::drafts::document_target(document.id())),
+                        widget: field.widget,
+                    },
+                    base_hash: field.base_hash.clone(),
+                    text: field.text.clone(),
+                    cursor: field.selection.caret,
+                })
+            })
+            .collect();
+        self.agreed_fields = session
+            .documents()
+            .iter()
+            .map(|document| (document.id().to_owned(), document.field_drafts().to_vec()))
+            .collect();
+        inspector::drafts::restore_entries(&self.ui_context, fields);
     }
 
     pub fn has_document(&self) -> bool {

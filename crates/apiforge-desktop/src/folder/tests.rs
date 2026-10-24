@@ -516,6 +516,118 @@ fn unfinished_inspector_text_joins_recovery_and_returns_on_reopening() {
     );
 }
 
+fn unfinished_field(app: &FolderApp, document_id: &str) -> CodeDraft {
+    CodeDraft {
+        project_id: app.session.as_ref().unwrap().manifest().id.clone(),
+        target: DraftTarget::Field {
+            owner: Box::new(inspector::drafts::document_target(document_id)),
+            widget: 42,
+        },
+        base_hash: apiforge_storage::draft_base_hash("80"),
+        text: "{{ unfinished".into(),
+        cursor: 4,
+    }
+}
+
+#[test]
+fn discarding_a_tab_also_forgets_its_unfinished_inspector_text() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let draft = unfinished_field(&app, &scenario);
+    let project_id = draft.project_id.clone();
+    inspector::drafts::restore_entries(&context, vec![draft]);
+    app.sync_field_drafts(&scenario, &project_id);
+    assert_eq!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap()
+            .field_drafts()
+            .len(),
+        1
+    );
+
+    app.close_tab_with(&scenario, false);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap()
+            .field_drafts()
+            .is_empty()
+    );
+    app.workbench.open(&scenario);
+    app.workbench.mode = Mode::Diagram;
+    let node = first_node(&app, &scenario);
+    app.selections.insert(scenario.clone(), vec![node.id]);
+    frame(&mut app, &context, vec![]);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap()
+            .field_drafts()
+            .is_empty(),
+        "Discard must clear the inspector registry as well as the session"
+    );
+}
+
+#[test]
+fn keeping_a_stale_draft_keeps_its_unfinished_inspector_text() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let draft = unfinished_field(&app, &scenario);
+    let project_id = draft.project_id.clone();
+    inspector::drafts::restore_entries(&context, vec![draft.clone()]);
+    app.sync_field_drafts(&scenario, &project_id);
+    assert!(app.prepare_close());
+    let path = directory.path().join(SCENARIO);
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("// external change\n{source}")).unwrap();
+
+    let (context, mut reopened) = open(directory.path());
+    assert!(reopened.snapshot(&scenario).unwrap().held);
+    // The same action as the Keep unsaved work button.
+    reopened
+        .session
+        .as_mut()
+        .unwrap()
+        .keep_draft(&scenario)
+        .unwrap();
+    assert_eq!(
+        reopened
+            .session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap()
+            .field_drafts()
+            .len(),
+        1
+    );
+    reopened.workbench.mode = Mode::Diagram;
+    let node = first_node(&reopened, &scenario);
+    reopened.selections.insert(scenario.clone(), vec![node.id]);
+    frame(&mut reopened, &context, vec![]);
+    assert_eq!(
+        reopened
+            .session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap()
+            .field_drafts()
+            .len(),
+        1,
+        "Showing the inspector must not erase the fields of a kept recovery draft"
+    );
+}
+
 #[test]
 fn a_failed_discard_on_close_keeps_the_window_usable() {
     let directory = shop();

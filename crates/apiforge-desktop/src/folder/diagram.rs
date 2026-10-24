@@ -385,6 +385,8 @@ impl FolderApp {
             .unwrap_or_default();
         let reference = graph_of(&model, false).clone();
         let parameters = parameters_of(&model);
+        // Adopt fields the session changed before the inspector reads them.
+        self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
         let actions = egui::Panel::right("folder-inspector")
             .default_size(360.0)
@@ -450,6 +452,38 @@ impl FolderApp {
 
     /// Unfinished inspector text joins the document's local recovery.
     pub(super) fn sync_field_drafts(&mut self, document_id: &str, project_id: &str) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let Some(document) = session.document(document_id) else {
+            return;
+        };
+        let owned = document.field_drafts().to_vec();
+        let agreed = self.agreed_fields.get(document_id);
+        if agreed.map_or(&[][..], Vec::as_slice) != owned.as_slice() {
+            // The session changed the fields itself; the inspector follows.
+            let entries = owned
+                .iter()
+                .map(|field| CodeDraft {
+                    project_id: project_id.to_owned(),
+                    target: DraftTarget::Field {
+                        owner: Box::new(inspector::drafts::document_target(document_id)),
+                        widget: field.widget,
+                    },
+                    base_hash: field.base_hash.clone(),
+                    text: field.text.clone(),
+                    cursor: field.selection.caret,
+                })
+                .collect();
+            inspector::drafts::replace_document_entries(
+                &self.ui_context,
+                project_id,
+                document_id,
+                entries,
+            );
+            self.agreed_fields.insert(document_id.to_owned(), owned);
+            return;
+        }
         let owner = inspector::drafts::document_target(document_id);
         let fields: Vec<FieldRecovery> = inspector::drafts::entries(&self.ui_context)
             .into_iter()
@@ -467,14 +501,12 @@ impl FolderApp {
                 _ => None,
             })
             .collect();
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        if session
-            .document(document_id)
-            .is_some_and(|document| document.field_drafts() != fields.as_slice())
-            && session.set_field_drafts(document_id, fields).is_ok()
+        if fields != owned
+            && session
+                .set_field_drafts(document_id, fields.clone())
+                .is_ok()
         {
+            self.agreed_fields.insert(document_id.to_owned(), fields);
             self.touched();
         }
     }
