@@ -136,7 +136,11 @@ impl FolderApp {
             .id_salt("folder-tab-strip")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
         // The active tab must be reachable, so activating one scrolls it in.
-        if active != self.followed_tab {
+        // A narrower window can push it out of view just as activation can.
+        let width = ui.available_width();
+        let resized = (width - self.tabs_width).abs() > 0.5;
+        self.tabs_width = width;
+        if active != self.followed_tab || resized {
             self.followed_tab = active.clone();
             if let Some(index) = active
                 .as_deref()
@@ -144,7 +148,7 @@ impl FolderApp {
             {
                 let left: f32 = widths[..index].iter().sum::<f32>() + index as f32 * TAB_SPACING;
                 let right = left + widths[index];
-                let viewport = ui.available_width();
+                let viewport = width;
                 if left < self.tabs_offset {
                     scroll = scroll.horizontal_scroll_offset(left);
                 } else if right > self.tabs_offset + viewport {
@@ -395,16 +399,20 @@ impl FolderApp {
     /// Closes a tab after saving its document, or after discarding its unsaved
     /// work. A failure keeps the tab open and says why.
     pub(super) fn close_tab_with(&mut self, document_id: &str, save: bool) {
+        let text = self.text_of(document_id).map(str::to_owned);
         let result = if save {
             self.save_document(document_id)
         } else {
+            let document_id = document_id.to_owned();
             self.session
                 .as_mut()
                 .ok_or_else(String::new)
                 .and_then(|session| {
-                    session
-                        .revert(document_id, DIAGRAM)
-                        .map_err(|error| format!("Could not discard the changes: {error}"))
+                    match &text {
+                        Some(path) => session.revert_text_file(path, DIAGRAM),
+                        None => session.revert(&document_id, DIAGRAM),
+                    }
+                    .map_err(|error| format!("Could not discard the changes: {error}"))
                 })
         };
         match result {
@@ -562,12 +570,12 @@ impl FolderApp {
 /// so the control is always inside the tab the user is pointing at.
 const TAB_PADDING: f32 = 10.0;
 const TAB_GAP: f32 = 6.0;
-const TAB_CLOSE: f32 = 14.0;
+pub(super) const TAB_CLOSE: f32 = 14.0;
 const TAB_SPACING: f32 = 4.0;
 const TAB_HEIGHT: f32 = 26.0;
 /// A long name is bounded so that the other tabs and controls stay reachable;
 /// the full path is on hover.
-const TAB_LABEL_WIDTH: f32 = 160.0;
+pub(super) const TAB_LABEL_WIDTH: f32 = 160.0;
 
 /// What one tab shows this frame.
 pub(super) struct TabFace {

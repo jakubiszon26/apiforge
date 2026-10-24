@@ -172,6 +172,7 @@ pub struct FolderApp {
     /// offset, so activating a tab can scroll it into view.
     followed_tab: Option<String>,
     tabs_offset: f32,
+    tabs_width: f32,
     prompt: Option<Prompt>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
@@ -234,6 +235,7 @@ impl FolderApp {
             notice: None,
             followed_tab: None,
             tabs_offset: 0.0,
+            tabs_width: 0.0,
             prompt: None,
             close_error: None,
             close_requested: false,

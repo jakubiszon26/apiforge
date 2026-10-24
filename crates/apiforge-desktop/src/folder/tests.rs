@@ -1082,3 +1082,490 @@ fn fresh_cards_are_placed_at_the_sizes_the_board_draws() {
         cards[1]
     );
 }
+
+// ----- P6 UI quality regressions ------------------------------------------
+//
+// These drive the window with real pointer and keyboard events: calling an
+// action directly would not show that a click reaches it.
+
+/// Every text actually visible this frame, with the rectangle it occupies.
+fn painted(
+    app: &mut FolderApp,
+    context: &egui::Context,
+    size: egui::Vec2,
+) -> Vec<(String, egui::Rect)> {
+    fn collect(shape: &egui::epaint::Shape, clip: egui::Rect, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, clip, out);
+                }
+            }
+            egui::epaint::Shape::Text(text) => {
+                let rect = text.galley.rect.translate(text.pos.to_vec2());
+                if clip.contains(rect.center()) {
+                    out.push((text.galley.job.text.clone(), rect));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    output.textures_delta.clear();
+    let mut texts = Vec::new();
+    for shape in &output.shapes {
+        collect(&shape.shape, shape.clip_rect, &mut texts);
+    }
+    texts
+}
+
+/// The centre of a painted explorer row, which is left of the code area.
+fn row_at(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos2 {
+    fn find(app: &mut FolderApp, context: &egui::Context, name: &str) -> Option<egui::Pos2> {
+        fn collect(
+            shape: &egui::epaint::Shape,
+            clip: egui::Rect,
+            out: &mut Vec<(String, egui::Rect, egui::Rect)>,
+        ) {
+            match shape {
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, clip, out);
+                    }
+                }
+                egui::epaint::Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                    clip,
+                )),
+                _ => {}
+            }
+        }
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 1000.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.ui(ui),
+        );
+        output.textures_delta.clear();
+        let mut texts = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, shape.clip_rect, &mut texts);
+        }
+        texts
+            .into_iter()
+            .find(|(text, rect, clip)| {
+                text == name
+                    && rect.center().x < 230.0
+                    && rect.center().y > 90.0
+                    && clip.contains(rect.center())
+            })
+            .map(|(_, rect, _)| rect.center())
+    }
+    find(app, context, name).unwrap_or_else(|| panic!("no visible explorer row {name}"))
+}
+
+fn click(app: &mut FolderApp, context: &egui::Context, at: egui::Pos2) {
+    frame(app, context, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        frame(
+            app,
+            context,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+    }
+}
+
+#[test]
+fn one_explorer_click_opens_a_file_and_the_project_row_is_its_own_destination() {
+    let directory = shop();
+    std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    // Another document is active to begin with.
+    app.workbench.open(&component);
+    frame(&mut app, &context, vec![]);
+    app.workbench.expanded.insert("scenarios".into());
+    frame(&mut app, &context, vec![]);
+
+    let at = row_at(&mut app, &context, file_name(SCENARIO));
+    click(&mut app, &context, at);
+    assert_eq!(
+        app.workbench.active(),
+        Some(scenario.as_str()),
+        "one click must open the file it selects"
+    );
+    // Clicking it again keeps one tab for it.
+    let tabs = app.workbench.tabs().len();
+    click(&mut app, &context, at);
+    assert_eq!(app.workbench.tabs().len(), tabs);
+    assert_eq!(app.workbench.active(), Some(scenario.as_str()));
+
+    // The project itself is a row, and new items go into it.
+    let root = row_at(&mut app, &context, "Demo shop");
+    click(&mut app, &context, root);
+    assert_eq!(app.explorer.selected.as_deref(), Some(""));
+    let rows = app.explorer_rows();
+    let selected = rows.iter().find(|row| row.path.is_empty()).unwrap();
+    assert_eq!(explorer::folder_of(Some(selected)), "");
+    assert!(!selected.portable, "the project is not renamed or deleted");
+    // Selecting the project does not hide its tree; its chevron folds it.
+    assert!(app.explorer_rows().len() > 1);
+    let chevron = egui::pos2(19.0, root.y);
+    click(&mut app, &context, chevron);
+    assert_eq!(
+        app.explorer_rows().len(),
+        1,
+        "the chevron folds the project"
+    );
+    click(&mut app, &context, chevron);
+    assert!(app.explorer_rows().len() > 1);
+}
+
+#[test]
+fn the_keyboard_reaches_the_project_row_and_opens_a_text_file() {
+    let directory = shop();
+    std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    let at = row_at(&mut app, &context, "README.md");
+    click(&mut app, &context, at);
+    assert_eq!(
+        app.workbench.active(),
+        Some(text_tab("README.md").as_str()),
+        "a project text file opens in its own tab"
+    );
+    // Up from the first file reaches the project row, which folds with Left.
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
+    frame(&mut app, &context, vec![]);
+    for _ in 0..12 {
+        frame(&mut app, &context, vec![key(Key::ArrowUp, Modifiers::NONE)]);
+    }
+    assert_eq!(app.explorer.selected.as_deref(), Some(""));
+    frame(
+        &mut app,
+        &context,
+        vec![key(Key::ArrowLeft, Modifiers::NONE)],
+    );
+    assert_eq!(app.explorer_rows().len(), 1, "Left folds the project");
+    frame(
+        &mut app,
+        &context,
+        vec![key(Key::ArrowRight, Modifiers::NONE)],
+    );
+    assert!(app.explorer_rows().len() > 1);
+}
+
+#[test]
+fn a_project_text_file_is_edited_saved_exactly_and_recovered() {
+    let directory = shop();
+    std::fs::write(directory.path().join(".gitignore"), "/.apiforge/local/\n").unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    app.open_text(".gitignore");
+    let tab = text_tab(".gitignore");
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.workbench.active(), Some(tab.as_str()));
+
+    context.memory_mut(|memory| memory.request_focus(editor_id(&tab)));
+    frame(&mut app, &context, vec![]);
+    frame(
+        &mut app,
+        &context,
+        vec![egui::Event::Text("target\n".into())],
+    );
+    let file = app
+        .session
+        .as_ref()
+        .unwrap()
+        .text_file(".gitignore")
+        .unwrap();
+    assert!(file.is_dirty() && file.text().contains("target"));
+
+    // The saved bytes are exactly what the editor holds.
+    frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    let text = app
+        .session
+        .as_ref()
+        .unwrap()
+        .text_file(".gitignore")
+        .unwrap()
+        .text()
+        .to_owned();
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(".gitignore")).unwrap(),
+        text
+    );
+
+    // Unsaved work survives closing the window and comes back in its tab.
+    frame(&mut app, &context, vec![egui::Event::Text("more\n".into())]);
+    frame(&mut app, &context, vec![]);
+    app.changed_at = Some(Instant::now() - RECOVERY_DELAY * 2);
+    frame(&mut app, &context, vec![]);
+    assert!(app.prepare_close(), "recovery protects the unsaved text");
+    drop(app);
+    let (context, mut app) = open(directory.path());
+    frame(&mut app, &context, vec![]);
+    let file = app
+        .session
+        .as_ref()
+        .unwrap()
+        .text_file(".gitignore")
+        .unwrap();
+    assert!(file.is_dirty() && file.text().contains("more"));
+    assert!(
+        app.workbench
+            .tabs()
+            .iter()
+            .any(|state| state.document_id == tab),
+        "the text file returns as a tab"
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join(".gitignore")).unwrap(),
+        text,
+        "recovery never saved the file"
+    );
+
+    // Closing its tab asks, and discarding returns the saved bytes.
+    app.request_close_tab(&tab);
+    assert!(matches!(app.prompt, Some(Prompt::CloseTab(_))));
+    app.close_tab_with(&tab, false);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .text_file(".gitignore")
+            .is_none()
+    );
+    assert!(!app.workbench.tabs().iter().any(|s| s.document_id == tab));
+}
+
+#[test]
+fn a_text_file_has_no_diagram_and_cannot_be_registered_as_one() {
+    let directory = shop();
+    std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    app.open_text("README.md");
+    app.workbench.mode = Mode::Diagram;
+    let texts = painted(&mut app, &context, egui::vec2(1600.0, 1000.0));
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text.contains("text file, not a scenario")),
+        "the diagram says why it is empty: {texts:?}"
+    );
+    // API Forge's own data is never a text file.
+    app.open_text(".apiforge/diagram.json");
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .text_file(".apiforge/diagram.json")
+            .is_none()
+    );
+    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
+}
+
+#[test]
+fn a_tabs_close_control_closes_only_its_own_file_and_keeps_asking() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    app.workbench.open(&component);
+    type_into_code(&mut app, &context, "// note\n");
+    settle(&mut app, &context);
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&component)
+            .unwrap()
+            .is_dirty()
+    );
+    // The close control of the clean tab is inside its own surface.
+    let clean = tab_close(&mut app, &context, file_name(SCENARIO));
+    click(&mut app, &context, clean);
+    assert!(
+        !app.workbench
+            .tabs()
+            .iter()
+            .any(|tab| tab.document_id == scenario),
+        "the close control closes its tab"
+    );
+    assert_eq!(app.workbench.active(), Some(component.as_str()));
+    // The dirty tab still asks before losing work.
+    let dirty = tab_close(&mut app, &context, file_name(COMPONENT));
+    click(&mut app, &context, dirty);
+    assert!(matches!(app.prompt, Some(Prompt::CloseTab(_))));
+    assert!(
+        app.workbench
+            .tabs()
+            .iter()
+            .any(|tab| tab.document_id == component)
+    );
+}
+
+/// The centre of a tab's close control in the window, from the painted cross.
+fn tab_close(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos2 {
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    output.textures_delta.clear();
+    fn walk<'a>(shape: &'a egui::epaint::Shape, out: &mut Vec<&'a egui::epaint::Shape>) {
+        if let egui::epaint::Shape::Vec(shapes) = shape {
+            for shape in shapes {
+                walk(shape, out);
+            }
+        } else {
+            out.push(shape);
+        }
+    }
+    let mut shapes = Vec::new();
+    for shape in &output.shapes {
+        walk(&shape.shape, &mut shapes);
+    }
+    let label = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with(name) => {
+                Some(text.galley.rect.translate(text.pos.to_vec2()))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no tab for {name}"));
+    // The nearest cross to the right of the label is this tab's control.
+    let points: Vec<egui::Pos2> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::epaint::Shape::LineSegment { points, .. } => Some(*points),
+            _ => None,
+        })
+        .flatten()
+        // Only the tab strip, and only to the right of this tab's name.
+        .filter(|point| point.x > label.right() && point.y < 90.0)
+        .collect();
+    let left = points
+        .iter()
+        .map(|point| point.x)
+        .fold(f32::INFINITY, f32::min);
+    let near: Vec<egui::Pos2> = points
+        .into_iter()
+        .filter(|point| point.x < left + chrome::TAB_CLOSE + 2.0)
+        .collect();
+    assert!(near.len() >= 4, "a tab needs a visible close icon");
+    let x = near.iter().map(|point| point.x).sum::<f32>() / near.len() as f32;
+    let y = near.iter().map(|point| point.y).sum::<f32>() / near.len() as f32;
+    egui::pos2(x, y)
+}
+
+#[test]
+fn equal_file_names_are_told_apart_in_the_tab_strip_and_long_ones_are_bounded() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let session = app.session.as_mut().unwrap();
+    let nested = session
+        .create_document(
+            DocumentKind::Scenario,
+            "other/promotion-and-cart-price.afs",
+            "scenario \"Elsewhere\" {}\n",
+        )
+        .unwrap();
+    let long = session
+        .create_document(
+            DocumentKind::Scenario,
+            "a-very-long-descriptive-scenario-file-name-indeed.afs",
+            "scenario \"Long\" {}\n",
+        )
+        .unwrap();
+    app.workbench.open(&nested);
+    app.workbench.open(&long);
+    let texts = painted(&mut app, &context, egui::vec2(1600.0, 1000.0));
+    let tabs: Vec<&String> = texts
+        .iter()
+        .filter(|(text, _)| text.contains("promotion-and-cart-price"))
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        tabs.iter().any(|text| text.contains("other/")),
+        "equal names need their folder: {tabs:?}"
+    );
+    let long_tab = texts
+        .iter()
+        .find(|(text, rect)| text.starts_with("a-very-long") && rect.center().y < 90.0)
+        .expect("the long name has a tab");
+    assert!(
+        long_tab.1.width() <= chrome::TAB_LABEL_WIDTH + 1.0,
+        "a long tab label is bounded: {} points",
+        long_tab.1.width()
+    );
+}
+
+#[test]
+fn ctrl_tab_brings_the_active_tab_back_into_view() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let session = app.session.as_mut().unwrap();
+    let mut last = String::new();
+    for index in 0..16 {
+        last = session
+            .create_document(
+                DocumentKind::Scenario,
+                &format!("task-{index:02}.afs"),
+                &format!("scenario \"Task {index}\" {{}}\n"),
+            )
+            .unwrap();
+        app.workbench.open(&last);
+    }
+    // The first tab is active again, far to the left of the strip.
+    let first = app.workbench.tabs()[0].document_id.clone();
+    app.workbench.open(&first);
+    let small = egui::vec2(960.0, 540.0);
+    let texts = painted(&mut app, &context, small);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, rect)| text.starts_with(file_name(SCENARIO)) && rect.right() < 960.0),
+        "the active tab must be visible: {texts:?}"
+    );
+    // Cycling forward to the last tab reveals it too.
+    for _ in 0..16 {
+        frame(&mut app, &context, vec![key(Key::Tab, COMMAND)]);
+    }
+    assert_eq!(app.workbench.active(), Some(last.as_str()));
+    let texts = painted(&mut app, &context, small);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text.starts_with("task-15.afs")),
+        "the tab reached by Ctrl+Tab must be visible: {texts:?}"
+    );
+}
