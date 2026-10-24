@@ -69,6 +69,8 @@ pub struct DocumentSession {
     /// The saved file changed or disappeared outside the session while this
     /// document had unsaved work.
     pub(crate) conflict: Option<crate::session::ExternalConflict>,
+    /// The exact source version for which comment loss was accepted.
+    pub(crate) comments_accepted: Option<u64>,
 }
 
 impl DocumentSession {
@@ -154,6 +156,7 @@ impl DocumentSession {
             },
             fields: Vec::new(),
             layout_dirty: false,
+            comments_accepted: None,
             history: History::default(),
             conflict: None,
         }

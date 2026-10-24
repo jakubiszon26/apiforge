@@ -7,7 +7,7 @@ mod lower;
 mod parser;
 pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model};
 
-pub use ast::{Diagnostic, Fix, Severity, SyntaxTree};
+pub use ast::{Diagnostic, Fix, Severity, SyntaxTree, UNATTACHED_COMMENT};
 pub use format::{format, format_tree};
 pub use parser::parse;
 

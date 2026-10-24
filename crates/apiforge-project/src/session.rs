@@ -13,10 +13,14 @@ use apiforge_storage::project::{
 };
 use std::{path::Path, sync::Arc};
 
+#[path = "comments.rs"]
+mod comments;
 #[path = "external.rs"]
 mod external;
 #[path = "files.rs"]
 mod files;
+#[path = "publish.rs"]
+mod publish;
 #[path = "recovery.rs"]
 mod recovery;
 #[path = "register.rs"]
@@ -27,6 +31,7 @@ pub use external::{
     ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome, ObservedFile, RegistryState,
 };
 pub use files::DeletePreview;
+pub use publish::Published;
 pub use recovery::DraftStatus;
 use recovery::RecoveryState;
 pub use register::{
@@ -35,7 +40,7 @@ pub use register::{
 };
 pub use text::TextFileSession;
 
-const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
+pub(crate) const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 const GITIGNORE_PATH: &str = ".gitignore";
 const LOCAL_RULE: &str = "/.apiforge/local/";
 
@@ -78,6 +83,11 @@ pub enum EventKind {
     },
     ContextChanged {
         generation: u64,
+    },
+    /// A working component became an immutable published revision.
+    Published {
+        component_id: String,
+        revision: u32,
     },
     /// A project text file, identified by its path rather than a document ID.
     TextFileOpened {
@@ -388,6 +398,39 @@ impl ProjectSession {
         Ok(version)
     }
 
+    /// Applies one diagnostic's suggested fix to the source, as an ordinary
+    /// edit, so it joins the document's history and can be undone. The
+    /// explicit pin for an unqualified component call is such a fix.
+    ///
+    /// The diagnostic is named by its position, and a document whose analysis
+    /// has not settled has none to offer: a range taken from an earlier text
+    /// could otherwise cut this one apart.
+    pub fn apply_fix(
+        &mut self,
+        document_id: &str,
+        diagnostic: usize,
+        origin: Origin,
+    ) -> Result<u64> {
+        let index = self.index(document_id)?;
+        if self.documents[index].analysis == AnalysisState::Pending {
+            return Err(Error::StaleAnalysis);
+        }
+        let fix = self.documents[index]
+            .diagnostics
+            .get(diagnostic)
+            .and_then(|diagnostic| diagnostic.fix.clone())
+            .ok_or(Error::NoFix)?;
+        let mut text = self.documents[index].text.clone();
+        if fix.range.end > text.len()
+            || !text.is_char_boundary(fix.range.start)
+            || !text.is_char_boundary(fix.range.end)
+        {
+            return Err(Error::StaleAnalysis);
+        }
+        text.replace_range(fix.range, &fix.replacement);
+        self.edit_source(document_id, &text, origin)
+    }
+
     /// Replaces a document's unsaved work with its saved source: text, unsaved
     /// layout and field drafts. Its model history starts again and identities
     /// come from the saved checkpoint. A file changed outside this session is a
@@ -627,6 +670,9 @@ impl ProjectSession {
         let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, &self.context)
             != apiforge_script::semantic(&model, &self.context);
+        if semantic {
+            self.require_comment_decision(index)?;
+        }
         let text = if semantic {
             Some(
                 apiforge_script::print_folder_document(&self.context, &model)
@@ -911,7 +957,7 @@ fn working_revision(manifest: &ProjectManifest, entry: &DocumentEntry) -> u32 {
         .map(|revision| revision.revision)
         .max()
         .unwrap_or(0)
-        + 1
+        .saturating_add(1)
 }
 
 fn document_from(snapshot: &ProjectSnapshot, entry: DocumentEntry) -> DocumentSession {

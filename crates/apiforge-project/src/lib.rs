@@ -21,8 +21,8 @@ pub use prepare::prepare_project;
 pub use session::{
     Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
     ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
-    ProjectSession, Registration, RegistryState, SaveOutcome, SourceSurvey, TextFileSession,
-    declaration, rename_handle,
+    ProjectSession, Published, Registration, RegistryState, SaveOutcome, SourceSurvey,
+    TextFileSession, declaration, rename_handle,
 };
 
 pub use apiforge_script::Document;
@@ -60,6 +60,18 @@ pub enum Error {
     Unprintable,
     #[error("Published component {component_id}@{revision} is not a valid definition.")]
     InvalidRevision { component_id: String, revision: u32 },
+    #[error("Only a component can be published.")]
+    NotAComponent,
+    #[error("Component {component_id} already has revision {revision}.")]
+    RevisionExists { component_id: String, revision: u32 },
+    #[error(
+        "This component is published as {published}; Stage II does not rename a published component."
+    )]
+    HandleChanged { published: String },
+    #[error(
+        "Reprinting this source would drop {comments} comment(s) that belong to no statement; decide explicitly first."
+    )]
+    CommentsWouldBeLost { comments: usize },
     #[error("A recovered draft of this document needs a keep or discard decision first.")]
     DraftDecisionRequired,
     #[error("Local recovery data is unreadable; export or discard unsaved work explicitly.")]
@@ -68,6 +80,8 @@ pub enum Error {
     UnsavedConfiguration,
     #[error("The analysis result is stale and was discarded.")]
     StaleAnalysis,
+    #[error("This diagnostic has no suggested fix.")]
+    NoFix,
     #[error("The document source exceeds the 1 MiB limit.")]
     SourceTooLarge,
     #[error("A registered source must keep the .afs extension outside .apiforge.")]
