@@ -35,6 +35,7 @@ struct Stored {
     version: u32,
     wire_style: StoredWireStyle,
     bridges: bool,
+    code_panel: bool,
 }
 
 /// The preferences of this session.
@@ -43,6 +44,8 @@ pub struct Preferences {
     pub wire_style: WireStyle,
     /// Whether a wire crossing is drawn as a bridge.
     pub bridges: bool,
+    /// Whether the code panel is open beside the board.
+    pub code_panel: bool,
     /// Where to write them, or `None` when the system has no configuration
     /// directory and preferences last only for this session.
     path: Option<PathBuf>,
@@ -53,6 +56,7 @@ impl Default for Preferences {
         Self {
             wire_style: WireStyle::default(),
             bridges: true,
+            code_panel: false,
             path: default_path(),
         }
     }
@@ -99,6 +103,7 @@ impl Preferences {
             StoredWireStyle::Spline => WireStyle::Spline,
         };
         preferences.bridges = stored.bridges;
+        preferences.code_panel = stored.code_panel;
         preferences
     }
 
@@ -114,6 +119,7 @@ impl Preferences {
                 WireStyle::Spline => StoredWireStyle::Spline,
             },
             bridges: self.bridges,
+            code_panel: self.code_panel,
         };
         let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
             return;
@@ -137,10 +143,12 @@ mod tests {
         let mut preferences = Preferences::at(Some(path.clone()));
         preferences.wire_style = WireStyle::Spline;
         preferences.bridges = false;
+        preferences.code_panel = true;
         preferences.save();
         let reloaded = Preferences::at(Some(path));
         assert_eq!(reloaded.wire_style, WireStyle::Spline);
         assert!(!reloaded.bridges);
+        assert!(reloaded.code_panel);
     }
 
     #[test]
@@ -173,7 +181,9 @@ mod tests {
     fn an_oversized_file_is_not_read() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("preferences.json");
-        let mut padded = br#"{"version": 1, "wireStyle": "spline", "bridges": false}"#.to_vec();
+        let mut padded =
+            br#"{"version": 1, "wireStyle": "spline", "bridges": false, "codePanel": true}"#
+                .to_vec();
         padded.resize(MAX_BYTES as usize + 1, b' ');
         std::fs::write(&path, padded).unwrap();
         assert_eq!(

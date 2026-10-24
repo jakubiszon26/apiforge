@@ -35,6 +35,8 @@ pub enum Icon {
     Layout,
     /// A wire turning a corner, for the wire style.
     Wire,
+    /// Angle brackets, for the code view.
+    Code,
 }
 
 impl Icon {
@@ -253,6 +255,10 @@ impl Icon {
                 path(&[(3.0, 6.0), (12.0, 6.0), (12.0, 18.0), (21.0, 18.0)]);
                 painter.circle_stroke(p(3.5, 6.0), size * 1.5 / 24.0, stroke);
                 painter.circle_stroke(p(20.5, 18.0), size * 1.5 / 24.0, stroke);
+            }
+            Self::Code => {
+                path(&[(9.0, 7.0), (4.0, 12.0), (9.0, 17.0)]);
+                path(&[(15.0, 7.0), (20.0, 12.0), (15.0, 17.0)]);
             }
             Self::Eye | Self::EyeOff => {
                 let points = [

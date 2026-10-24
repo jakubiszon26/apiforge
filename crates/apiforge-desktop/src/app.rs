@@ -2,7 +2,9 @@
 
 use crate::icons::Icon;
 use crate::{
+    buffers,
     canvas::{self, Canvas, Command},
+    code,
     dialogs::{self, Outcome},
     editor::{BlockClipboard, Editor},
     files,
@@ -99,7 +101,20 @@ pub struct App {
     journal: Option<Arc<JournalStore>>,
     /// Live runs a previous process left unfinished, until the user has seen them.
     interrupted: Option<Vec<JournalRun>>,
+    /// A run waiting for an answer to "the code has errors; run the last valid
+    /// version?", and the answer once it is given.
+    run_prompt: Option<RunKind>,
+    run_anyway: Option<RunKind>,
     preferences: Preferences,
+    /// Writes code drafts beside the workspace; `None` without a writable one.
+    store: Option<WorkspaceStore>,
+    /// What was last written as drafts, so an unchanged set is not rewritten.
+    saved_drafts: Vec<(buffers::Context, String)>,
+    /// The text of every context the user has edited as code.
+    buffers: buffers::Buffers,
+    code: code::CodeEditor,
+    /// Whether the code panel is open beside the board.
+    code_open: bool,
 }
 
 impl App {
@@ -110,6 +125,8 @@ impl App {
         let mut storage_message = None;
         let mut journal: Option<Arc<JournalStore>> = None;
         let mut interrupted = None;
+        let mut store_handle: Option<WorkspaceStore> = None;
+        let mut drafts: Option<apiforge_storage::Drafts> = None;
         let (workspace, saver) = match source {
             Source::Session(workspace) => (workspace, None),
             Source::Storage(store) => {
@@ -164,8 +181,19 @@ impl App {
                 if !writable && storage_message.is_none() {
                     storage_message = Some("Temporary workspace — autosave is disabled. Export to keep changes from this session.".into());
                 }
-                // The journal shares the session's writer lock, so it is opened from
-                // a clone before the saver takes ownership of the store.
+                // The journal and the drafts share the session's writer lock, so
+                // both are opened from a clone before the saver takes the store.
+                if writable {
+                    store_handle = Some(store.clone());
+                    match store.load_drafts() {
+                        Ok(Some(loaded)) => drafts = Some(loaded.drafts),
+                        Ok(None) => {}
+                        Err(error) if notice.is_none() => {
+                            notice = Some(format!("{error} Code drafts were not restored."));
+                        }
+                        Err(_) => {}
+                    }
+                }
                 if writable {
                     match JournalStore::open(store.clone()) {
                         Ok(loaded) => {
@@ -197,6 +225,7 @@ impl App {
             }
         };
         let preferences = Preferences::load();
+        let store = store_handle;
         let mut canvas = Canvas::default();
         canvas.wire_style = preferences.wire_style;
         canvas.bridges = preferences.bridges;
@@ -212,8 +241,10 @@ impl App {
                 Some(journal) => runner.with_journal(Arc::clone(journal) as _),
                 None => runner,
             });
+        let editor = Editor::new(workspace);
+        let buffers = restore_drafts(&editor, drafts.take());
         Self {
-            editor: Editor::new(workspace),
+            editor,
             saver,
             saved_revision: 0,
             canvas,
@@ -237,7 +268,14 @@ impl App {
             storage_busy: false,
             journal,
             interrupted,
+            run_prompt: None,
+            run_anyway: None,
+            code_open: preferences.code_panel,
             preferences,
+            store,
+            saved_drafts: Vec::new(),
+            buffers,
+            code: code::CodeEditor::default(),
         }
     }
 
@@ -432,6 +470,45 @@ impl App {
         }
     }
 
+    /// Asks whether to run the last valid version when the code has errors.
+    fn run_with_errors_dialog(&mut self, context: &egui::Context) {
+        let Some(kind) = self.run_prompt else {
+            return;
+        };
+        let mut run = false;
+        let mut cancel = false;
+        let response = dialogs::centered_modal(egui::Id::new("run-with-errors"), context).show(
+            context,
+            |ui| {
+                ui.set_width((context.content_rect().width() - 80.0).clamp(320.0, 460.0));
+                ui.heading("The code has errors");
+                ui.add_space(8.0);
+                ui.label(
+                    "A test always runs the saved scenario, not the text in the code panel. The last version without errors is what would run.",
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    run = ui
+                        .add(widgets::primary_button("Run the last valid version"))
+                        .clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            },
+        );
+        if response.is_top_modal
+            && context.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            cancel = true;
+        }
+        if run {
+            self.run_prompt = None;
+            self.run_anyway = Some(kind);
+            self.start_run(kind);
+        } else if cancel {
+            self.run_prompt = None;
+        }
+    }
+
     /// Reports live runs that a previous process left unfinished.
     ///
     /// The journal only holds a run that never reported its own outcome, so every
@@ -586,6 +663,295 @@ impl App {
         self.apply_graph(tidied);
     }
 
+    /// Opens or closes the code panel and remembers the choice.
+    fn toggle_code_panel(&mut self) {
+        self.code_open = !self.code_open;
+        self.preferences.code_panel = self.code_open;
+        self.preferences.save();
+    }
+
+    /// Whether the code panel has the keyboard, which decides whose history
+    /// Ctrl+Z walks: the text's or the document's.
+    fn code_has_focus(&self, context: &egui::Context) -> bool {
+        self.code_open
+            && context.memory(|memory| memory.has_focus(egui::Id::new("code-panel-editor")))
+    }
+
+    /// What a context's document prints as, for comparing a draft against it.
+    fn printed_for(&self, context: &buffers::Context) -> Option<String> {
+        let project = self.editor.project();
+        let document = match context {
+            buffers::Context::Scenario { id, .. } => apiforge_script::Document::Scenario(
+                project
+                    .scenarios
+                    .iter()
+                    .find(|scenario| &scenario.id == id)?
+                    .clone(),
+            ),
+            buffers::Context::Component { id, revision, .. } => {
+                apiforge_script::Document::Component(
+                    project
+                        .components
+                        .iter()
+                        .find(|component| &component.id == id && component.revision == *revision)?
+                        .clone(),
+                )
+            }
+        };
+        buffers::print(project, &document)
+    }
+
+    /// Which document the code panel is showing.
+    fn code_context(&self) -> buffers::Context {
+        let project = self.editor.project().id.clone();
+        match self.editor.draft() {
+            Some(draft) => buffers::Context::Component {
+                project,
+                id: draft.definition.id.clone(),
+                revision: draft.definition.revision,
+            },
+            None => buffers::Context::Scenario {
+                project,
+                id: self.editor.scenario().id.clone(),
+            },
+        }
+    }
+
+    /// The document the panel's text is printed from and applied to.
+    fn code_document(&self) -> apiforge_script::Document {
+        match self.editor.draft() {
+            Some(draft) => {
+                let mut definition = draft.definition.clone();
+                definition.graph = draft.graph.clone();
+                apiforge_script::Document::Component(definition)
+            }
+            None => apiforge_script::Document::Scenario(self.editor.scenario().clone()),
+        }
+    }
+
+    /// The code panel: the scenario or component as text, kept in step with the
+    /// board. Typing pauses, then the text becomes a document edit.
+    fn code_panel(&mut self, ui: &mut egui::Ui) {
+        let context = self.code_context();
+        let document = self.code_document();
+        let project = self.editor.project().clone();
+        let printed = buffers::print(&project, &document);
+        ui.horizontal(|ui| {
+            widgets::caption(ui, "CODE");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(widgets::icon_button(Icon::Close, "Close the code panel").compact())
+                    .clicked()
+                {
+                    self.code_open = false;
+                    self.preferences.code_panel = false;
+                    self.preferences.save();
+                }
+            });
+        });
+        ui.add_space(4.0);
+        let Some(buffer) = self.buffers.text(&context, printed) else {
+            widgets::hint(
+                ui,
+                "This scenario uses something the language cannot write yet, so it has no code view.",
+            );
+            return;
+        };
+        let state = buffer.state;
+        let stale = buffer.stale;
+        let mut text = std::mem::take(&mut buffer.text);
+        let diagnostics = buffer.diagnostics.clone();
+        if stale {
+            self.stale_banner(ui, &context);
+        } else if state == buffers::State::Invalid {
+            self.code_banner(ui, &context);
+        }
+        let names = crate::shapes::Names::of_board(
+            &project,
+            &self.editor.graph().nodes,
+            &self.editor.parameter_names(),
+            None,
+        );
+        let steps: &[StepResult] = self.run.as_ref().map_or(&[], |run| run.steps.as_slice());
+        let shapes = crate::shapes::BoardShapes {
+            project: &project,
+            nodes: &self.editor.graph().nodes,
+            steps,
+        };
+        let outcome = egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                self.code.show(
+                    ui,
+                    egui::Id::new("code-panel-editor"),
+                    &mut text,
+                    &code::Context {
+                        mode: apiforge_script::complete::Mode::Script,
+                        scope: names.scope(&shapes),
+                        diagnostics: &diagnostics,
+                        line_numbers: true,
+                        font_size: 13.0,
+                    },
+                )
+            })
+            .inner;
+        // The buffer owns the text; the widget only borrowed it for a frame.
+        if outcome.changed {
+            self.buffers.typed(&context, text, Instant::now());
+        } else if let Some(buffer) = self.buffers.get_mut(&context) {
+            buffer.text = text;
+        }
+        self.apply_code(&context, &project, &document);
+    }
+
+    /// The banner for code restored against a document that has moved on since.
+    ///
+    /// Nothing is thrown away without being asked: the text is shown as it was
+    /// written, and the user says whether to keep editing it or go back to the
+    /// document.
+    fn stale_banner(&mut self, ui: &mut egui::Ui, context: &buffers::Context) {
+        egui::Frame::new()
+            .fill(theme::ACCENT_SOFT)
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("This code was written before the document changed.")
+                        .size(12.0)
+                        .color(theme::TEXT),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Keep editing it").clicked()
+                        && let Some(buffer) = self.buffers.get_mut(context)
+                    {
+                        buffer.stale = false;
+                    }
+                    if ui.button("Discard it").clicked() {
+                        self.buffers.discard(context);
+                    }
+                });
+            });
+        ui.add_space(6.0);
+    }
+
+    /// The banner shown while the code has errors and the board is read-only.
+    fn code_banner(&mut self, ui: &mut egui::Ui, context: &buffers::Context) {
+        let first = self
+            .buffers
+            .get(context)
+            .and_then(|buffer| buffer.errors().next())
+            .map(|diagnostic| diagnostic.message.clone())
+            .unwrap_or_default();
+        egui::Frame::new()
+            .fill(theme::ACCENT_SOFT)
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("The code has errors, so the board waits for it.")
+                        .size(12.0)
+                        .color(theme::DANGER),
+                );
+                if !first.is_empty() {
+                    ui.label(RichText::new(first).size(11.0).color(theme::MUTED));
+                }
+                if ui.button("Discard code changes").clicked() {
+                    self.buffers.discard(context);
+                }
+            });
+        ui.add_space(6.0);
+    }
+
+    /// Turns a paused buffer into a document edit.
+    fn apply_code(
+        &mut self,
+        context: &buffers::Context,
+        project: &apiforge_core::format::Project,
+        document: &apiforge_script::Document,
+    ) {
+        let now = Instant::now();
+        match self.buffers.apply(context, project, document, now) {
+            buffers::Apply::Nothing | buffers::Apply::Failed => {}
+            buffers::Apply::Scenario(scenario) => {
+                let placed = self.place_new_blocks(*scenario, document, project);
+                if let Err(message) = self.editor.apply_scenario(placed, now) {
+                    self.canvas.set_error(message);
+                }
+            }
+            buffers::Apply::Component(component) => {
+                if let Err(message) = self.editor.apply_component(*component, now) {
+                    self.canvas.set_error(message);
+                }
+            }
+        }
+    }
+
+    /// Gives the blocks that code introduced a place on the board.
+    fn place_new_blocks(
+        &self,
+        mut scenario: apiforge_core::format::Scenario,
+        document: &apiforge_script::Document,
+        project: &apiforge_core::format::Project,
+    ) -> apiforge_core::format::Scenario {
+        let apiforge_script::Document::Scenario(current) = document else {
+            return scenario;
+        };
+        let reference = self.editor.reference_graph().into_owned();
+        for (graph, previous) in [
+            (&mut scenario.graph, &current.graph),
+            (&mut scenario.cleanup, &current.cleanup),
+        ] {
+            let fresh: Vec<usize> = graph
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, node)| !previous.nodes.iter().any(|old| old.id == node.id))
+                .map(|(index, _)| index)
+                .collect();
+            if fresh.is_empty() {
+                continue;
+            }
+            let blocks: Vec<apiforge_layout::Block> = graph
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| {
+                    let rect = canvas::Card::build(node, &reference, project).rect();
+                    let block = apiforge_layout::Block::new(
+                        apiforge_layout::Size::new(rect.width(), rect.height()),
+                        apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
+                    );
+                    if fresh.contains(&index) {
+                        block
+                    } else {
+                        block.pinned()
+                    }
+                })
+                .collect();
+            let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+            let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
+                .iter()
+                .filter_map(|wire| {
+                    Some(apiforge_layout::Edge::new(
+                        index_of(&wire.source)?,
+                        index_of(&wire.target)?,
+                    ))
+                })
+                .collect();
+            let placed =
+                apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &fresh);
+            for (index, position) in fresh.iter().zip(placed) {
+                let node = &mut graph.nodes[*index];
+                node.position = Position {
+                    x: f64::from(position.x),
+                    y: f64::from(position.y),
+                };
+                node.auto_placed = true;
+            }
+        }
+        scenario
+    }
+
     fn is_running(&self) -> bool {
         self.run_handle.is_some()
             || self
@@ -632,6 +998,13 @@ impl App {
         {
             return;
         }
+        // A run executes the document, never the buffer. When the code says
+        // something else, the user is asked once which one they meant.
+        if self.buffers.blocks_the_board(&self.code_context()) && self.run_anyway != Some(kind) {
+            self.run_prompt = Some(kind);
+            return;
+        }
+        self.run_anyway = None;
         let selected = (self.editor.phase() == Phase::Main)
             .then(|| self.editor.selected_node().map(|node| node.id.clone()))
             .flatten();
@@ -703,6 +1076,80 @@ impl App {
                 saver.save(self.editor.workspace());
             }
         }
+        self.save_drafts();
+    }
+
+    /// Writes the unfinished code beside the workspace, so that closing the
+    /// window, switching away or a crash does not lose what was typed.
+    ///
+    /// Only what the document does not already say is written, and only when it
+    /// changed: a draft file is rewritten by editing, not by looking.
+    fn save_drafts(&mut self) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let project = self.editor.project().id.clone();
+        let current: Vec<(buffers::Context, String)> = self
+            .buffers
+            .drafts()
+            .map(|(context, buffer)| (context.clone(), buffer.text.clone()))
+            .collect();
+        if current == self.saved_drafts {
+            return;
+        }
+        let entries: Vec<apiforge_storage::CodeDraft> = self
+            .buffers
+            .drafts()
+            .filter_map(|(context, buffer)| {
+                let (project_id, target) = match context {
+                    buffers::Context::Scenario { project, id } => (
+                        project.clone(),
+                        apiforge_storage::DraftTarget::Scenario { id: id.clone() },
+                    ),
+                    buffers::Context::Component {
+                        project,
+                        id,
+                        revision,
+                    } => (
+                        project.clone(),
+                        apiforge_storage::DraftTarget::Component {
+                            id: id.clone(),
+                            revision: *revision,
+                        },
+                    ),
+                };
+                if project_id != project {
+                    return None;
+                }
+                // The base is the document as it stands now. A context whose
+                // document is gone writes nothing, which is how a deleted
+                // scenario loses its draft.
+                let printed = self.printed_for(context)?;
+                Some(apiforge_storage::CodeDraft {
+                    project_id,
+                    target,
+                    base_hash: apiforge_storage::draft_base_hash(&printed),
+                    text: buffer.text.clone(),
+                    cursor: buffer.cursor.min(buffer.text.len()),
+                })
+            })
+            .collect();
+        // Code names a secret, it never holds one; the store refuses text that
+        // does, and the session's own values are what it checks against.
+        let secrets: Vec<String> = self.secrets.values().cloned().collect();
+        let borrowed: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        let drafts = apiforge_storage::Drafts {
+            version: 1,
+            entries,
+        };
+        match store.save_drafts(&drafts, &borrowed) {
+            Ok(()) => self.saved_drafts = current,
+            Err(error) => {
+                if self.notice.is_none() {
+                    self.notice = Some(format!("Code drafts were not saved: {error}"));
+                }
+            }
+        }
     }
 
     fn apply_graph(&mut self, graph: Graph) {
@@ -772,6 +1219,21 @@ impl App {
         if self.editor.draft().is_none() {
             self.report(ui);
         }
+        if self.code_open {
+            egui::Panel::left("code-panel")
+                .default_size(if compact { 320.0 } else { 440.0 })
+                .size_range(if compact {
+                    260.0..=520.0
+                } else {
+                    300.0..=760.0
+                })
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::WHITE)
+                        .inner_margin(egui::Margin::symmetric(12, 10)),
+                )
+                .show(ui, |ui| self.code_panel(ui));
+        }
         if self.editor.selected_node().is_some() && !self.inspector_collapsed {
             egui::Panel::right(if compact {
                 "inspector-compact"
@@ -791,9 +1253,17 @@ impl App {
             )
             .show(ui, |ui| self.inspector(ui));
         }
+        let board_waits = self.buffers.blocks_the_board(&self.code_context());
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show(ui, |ui| self.board(ui));
+            .show(ui, |ui| {
+                // A graph edit cannot be merged into text that does not parse,
+                // so the board waits until the code is fixed or discarded.
+                if board_waits {
+                    ui.disable();
+                }
+                self.board(ui);
+            });
         self.dialogs(ui.ctx());
         if let Some(id) = self.navigator.show(ui.ctx(), self.editor.graph()) {
             self.editor.selection = vec![id.clone()];
@@ -802,6 +1272,7 @@ impl App {
         }
         self.storage_dialog(ui.ctx());
         self.interrupted_runs_dialog(ui.ctx());
+        self.run_with_errors_dialog(ui.ctx());
         self.save_if_changed();
     }
 
@@ -1211,6 +1682,17 @@ impl App {
                 .clicked()
             {
                 self.navigator.open();
+            }
+            if ui
+                .add(if self.code_open {
+                    widgets::action(Icon::Code, "Code")
+                } else {
+                    widgets::action(Icon::Code, "Code").quiet()
+                })
+                .on_hover_text("Edit this scenario as code (Ctrl+E)")
+                .clicked()
+            {
+                self.toggle_code_panel();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.editor.selected_node().is_some() {
@@ -1837,6 +2319,11 @@ impl App {
         if context.egui_wants_keyboard_input() {
             return;
         }
+        if self.code_has_focus(context) {
+            // The code panel owns its keystrokes: undo there walks the text, not
+            // the document. The text edit handles it, so it is left alone.
+            return;
+        }
         let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
         let redo = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
         let redo_alt = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
@@ -1852,6 +2339,11 @@ impl App {
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::D))
         }) {
             self.board_command(Command::Duplicate);
+        }
+        if context.input_mut(|input| {
+            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::E))
+        }) {
+            self.toggle_code_panel();
         }
         let (copy, paste) = context.input(|input| {
             let copy = input
@@ -2091,6 +2583,74 @@ pub fn default_workspace() -> Workspace {
         active_id: projects[0].id.clone(),
         projects,
     }
+}
+
+/// Puts the code drafts of the open workspace back into their buffers.
+///
+/// A draft whose document has changed since it was written is still restored —
+/// losing someone's text is worse than showing it against a document that moved —
+/// but it is marked stale, and the panel asks what to do with it.
+fn restore_drafts(editor: &Editor, drafts: Option<apiforge_storage::Drafts>) -> buffers::Buffers {
+    let mut buffers = buffers::Buffers::default();
+    let Some(drafts) = drafts else {
+        return buffers;
+    };
+    let project = editor.project();
+    for draft in drafts.entries {
+        if draft.project_id != project.id {
+            continue;
+        }
+        let (context, printed) = match &draft.target {
+            apiforge_storage::DraftTarget::Scenario { id } => {
+                let Some(scenario) = project.scenarios.iter().find(|found| &found.id == id) else {
+                    continue;
+                };
+                (
+                    buffers::Context::Scenario {
+                        project: project.id.clone(),
+                        id: id.clone(),
+                    },
+                    buffers::print(
+                        project,
+                        &apiforge_script::Document::Scenario(scenario.clone()),
+                    ),
+                )
+            }
+            apiforge_storage::DraftTarget::Component { id, revision } => {
+                let Some(component) = project
+                    .components
+                    .iter()
+                    .find(|found| &found.id == id && found.revision == *revision)
+                else {
+                    continue;
+                };
+                (
+                    buffers::Context::Component {
+                        project: project.id.clone(),
+                        id: id.clone(),
+                        revision: *revision,
+                    },
+                    buffers::print(
+                        project,
+                        &apiforge_script::Document::Component(component.clone()),
+                    ),
+                )
+            }
+        };
+        let stale = printed
+            .as_deref()
+            .map(apiforge_storage::draft_base_hash)
+            .is_none_or(|hash| hash != draft.base_hash);
+        buffers.restore(
+            context,
+            buffers::Draft {
+                text: draft.text,
+                cursor: draft.cursor,
+                stale,
+            },
+        );
+    }
+    buffers
 }
 
 #[cfg(test)]
@@ -2487,6 +3047,283 @@ mod tests {
         let stored = crate::preferences::Preferences::at(Some(path));
         assert_eq!(stored.wire_style, canvas::WireStyle::Spline);
         assert!(!stored.bridges);
+    }
+
+    /// Types `text` into the code panel and lets the pause before applying pass.
+    fn edit_code(app: &mut App, context: &egui::Context, text: &str) {
+        let key = app.code_context();
+        app.buffers.typed(&key, text.to_owned(), Instant::now());
+        std::thread::sleep(crate::buffers::APPLY_DELAY + Duration::from_millis(5));
+        let project = app.editor.project().clone();
+        let document = app.code_document();
+        app.apply_code(&key, &project, &document);
+        draw_frame(app, context, vec![]);
+    }
+
+    #[test]
+    fn the_code_panel_shows_the_scenario_and_applies_what_is_typed() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let printed = app
+            .buffers
+            .get(&key)
+            .map(|buffer| buffer.text.clone())
+            .expect("the scenario printed into the panel");
+        assert!(printed.starts_with("scenario \""), "{printed}");
+
+        let renamed = printed.replacen("scenario \"", "scenario \"Renamed ", 1);
+        edit_code(&mut app, &context, &renamed);
+        assert!(
+            app.editor.scenario().name.starts_with("Renamed "),
+            "the document took the change: {}",
+            app.editor.scenario().name
+        );
+        // One undo step puts the whole scenario back.
+        app.editor.undo();
+        assert!(!app.editor.scenario().name.starts_with("Renamed "));
+    }
+
+    #[test]
+    fn a_block_added_in_code_lands_on_the_board_with_a_position() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let printed = app.buffers.get(&key).unwrap().text.clone();
+        let closing = printed.rfind('}').unwrap();
+        let mut extended = printed.clone();
+        extended.insert_str(closing, "  var from_code = 7\n");
+        let before: Vec<String> = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect();
+        edit_code(&mut app, &context, &extended);
+
+        let graph = app.editor.graph().clone();
+        assert_eq!(graph.nodes.len(), before.len() + 1);
+        let fresh = graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == "from_code")
+            .expect("the new block reached the board");
+        assert!(fresh.auto_placed, "the layout chose where it goes");
+        let reference = app.editor.reference_graph().into_owned();
+        let project = app.editor.project().clone();
+        let rect = |node: &apiforge_core::format::Node| {
+            canvas::Card::build(node, &reference, &project).rect()
+        };
+        for other in graph.nodes.iter().filter(|node| node.id != fresh.id) {
+            assert!(
+                !rect(fresh).intersects(rect(other)),
+                "the new block landed on {}",
+                other.handle
+            );
+        }
+    }
+
+    #[test]
+    fn code_with_errors_holds_the_board_until_it_is_fixed_or_discarded() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let printed = app.buffers.get(&key).unwrap().text.clone();
+        let revision = app.editor.revision();
+
+        edit_code(&mut app, &context, &format!("{printed}\n  oops ="));
+        assert!(app.buffers.blocks_the_board(&key), "the board waits");
+        assert_eq!(
+            app.editor.revision(),
+            revision,
+            "a broken buffer changes no document"
+        );
+        // The text is not thrown away by a reprint while it is being fixed.
+        draw_frame(&mut app, &context, vec![]);
+        assert!(app.buffers.get(&key).unwrap().text.ends_with("oops ="));
+
+        app.buffers.discard(&key);
+        draw_frame(&mut app, &context, vec![]);
+        assert!(!app.buffers.blocks_the_board(&key));
+        assert_eq!(app.buffers.get(&key).unwrap().text, printed);
+    }
+
+    #[test]
+    fn a_board_edit_reprints_the_code_beside_it() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let before = app.buffers.get(&key).unwrap().text.clone();
+        let id = app.editor.graph().nodes[0].id.clone();
+        app.board_command(Command::Move(vec![(id, Position { x: 640.0, y: 480.0 })]));
+        draw_frame(&mut app, &context, vec![]);
+        // Layout is not code, so moving a block changes nothing in the text.
+        assert_eq!(app.buffers.get(&key).unwrap().text, before);
+
+        app.editor.change_project(|project| {
+            project.scenarios[0].description = "Edited on the board".into();
+        });
+        draw_frame(&mut app, &context, vec![]);
+        let after = app.buffers.get(&key).unwrap().text.clone();
+        assert!(
+            after.contains("Edited on the board"),
+            "the panel followed the document: {after}"
+        );
+    }
+
+    #[test]
+    fn unfinished_code_survives_closing_and_comes_back() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let context = egui::Context::default();
+        let broken = {
+            let mut app = App::new(
+                &context,
+                Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+            );
+            app.code_open = true;
+            draw_frame(&mut app, &context, vec![]);
+            let key = app.code_context();
+            let printed = app.buffers.get(&key).unwrap().text.clone();
+            let broken = format!("{printed}\n  half_written =");
+            edit_code(&mut app, &context, &broken);
+            assert!(app.buffers.blocks_the_board(&key));
+            app.save_drafts();
+            wait_for_storage(&mut app);
+            drop(app);
+            broken
+        };
+        assert!(directory.path().join("drafts.json").exists());
+
+        // A new window finds the text where it was left.
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        let key = app.code_context();
+        let restored = app
+            .buffers
+            .get(&key)
+            .expect("the draft came back")
+            .text
+            .clone();
+        assert_eq!(restored, broken);
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        assert!(
+            app.buffers.blocks_the_board(&key),
+            "the restored draft still has its error"
+        );
+    }
+
+    #[test]
+    fn a_draft_written_against_an_older_document_comes_back_marked_stale() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let context = egui::Context::default();
+        {
+            let mut app = App::new(
+                &context,
+                Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+            );
+            app.code_open = true;
+            draw_frame(&mut app, &context, vec![]);
+            let key = app.code_context();
+            let printed = app.buffers.get(&key).unwrap().text.clone();
+            edit_code(&mut app, &context, &format!("{printed}\n  half ="));
+            app.save_drafts();
+            // The document moves on after the draft was written.
+            app.editor.change_project(|project| {
+                project.scenarios[0].description = "Changed afterwards".into();
+            });
+            wait_for_storage(&mut app);
+            app.save_if_changed();
+            wait_for_storage(&mut app);
+        }
+        let app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        let key = app.code_context();
+        let buffer = app.buffers.get(&key).expect("the draft came back");
+        assert!(buffer.stale, "the user is asked what to do with it");
+        assert!(buffer.text.ends_with("half ="), "nothing was thrown away");
+    }
+
+    #[test]
+    fn a_draft_never_holds_a_secret() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let context = egui::Context::default();
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        app.secrets.insert("apiToken".into(), "s3cret-value".into());
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let printed = app.buffers.get(&key).unwrap().text.clone();
+        // Text that spells a secret out is refused rather than written.
+        edit_code(&mut app, &context, &format!("{printed}\n// s3cret-value"));
+        app.notice = None;
+        app.save_drafts();
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("not saved")),
+            "{:?}",
+            app.notice
+        );
+        let written =
+            std::fs::read_to_string(directory.path().join("drafts.json")).unwrap_or_default();
+        assert!(!written.contains("s3cret-value"));
+    }
+
+    #[test]
+    fn running_with_broken_code_asks_before_it_runs_the_saved_version() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let printed = app.buffers.get(&key).unwrap().text.clone();
+        edit_code(&mut app, &context, &format!("{printed}\n  broken ="));
+
+        app.start_run(RunKind::Full);
+        assert!(app.run_prompt.is_some(), "the question is asked first");
+        assert!(app.run_handle.is_none(), "and nothing ran yet");
+        draw_frame(&mut app, &context, vec![]);
+        click_storage_button(&mut app, &context, "Run the last valid version");
+        assert!(app.run_prompt.is_none());
+        wait_until_finished(&mut app);
+        let run = app.run.clone().expect("the saved scenario ran");
+        assert_ne!(run.status, RunStatus::Running);
+        // Still broken, so the next run asks again.
+        app.start_run(RunKind::Full);
+        assert!(app.run_prompt.is_some());
+    }
+
+    #[test]
+    fn the_code_panel_remembers_whether_it_was_open() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        app.preferences = crate::preferences::Preferences::at(Some(path.clone()));
+        assert!(!app.code_open);
+        app.toggle_code_panel();
+        assert!(app.code_open);
+        assert!(crate::preferences::Preferences::at(Some(path)).code_panel);
     }
 
     #[test]
