@@ -113,6 +113,46 @@ the same secret checks, and record the accepted current fingerprint before retry
 Failure to preserve it blocks replacement. Declining leaves the project in
 recovery mode, with export available; it does not authorise partial normal use.
 
+The initial conflict service exposes an immutable, read-only recovery preview
+with expected, intended and current states plus the readable current/intended
+bytes for adapter-driven export. Finish is bound to the root, active head, exact
+descriptor hash, receipt fingerprint and observed target states. An edit after
+preview needs another preview/decision, including a second foreign edit after
+an earlier accepted conflict. Reading or reopening never counts as consent.
+
+Preserve foreign files under
+`.apiforge/local/conflicts/<transaction-id>/<approval-id>/<operation-index>.bin`,
+with a version-one `index.json` recording original paths and accepted fingerprints.
+An accepted absence is explicit and has no payload. Copies use no-clobber
+replacement and file/directory sync. After all copies and their index are durable,
+atomically persist version-one `resolutions.json` beside the active descriptor.
+Both index and receipt bind the transaction ID and exact original descriptor
+SHA-256. The receipt retains every accepted state/copy reference in order; later
+decisions supersede earlier states for an operation without discarding old copies.
+Do not rewrite the original descriptor, original expected states or staged intent.
+
+Replay may accept an additional initial state only from this verified receipt.
+Validate receipts, archive indexes and every referenced copy, then establish their
+durability before replacing targets, including on restart after a failed sync.
+Recheck staging and consent inputs before replay. Missing/corrupt evidence blocks
+completion; unknown receipt/index versions are preserved. Before receipt activation,
+unreferenced copies never authorise replay. After activation, ordinary recovery can
+resume the accepted operation without asking again for the same fingerprint.
+
+Bound receipts/indexes to 16 MiB, accepted-state entries to 1024 and preserved
+payloads referenced by a receipt to 64 MiB. Apply individual source/JSON bounds
+and known-session-secret checks before creating new managed copies. Failure leaves
+the original/staged candidates available and the transaction unresolved. Generic
+transactions cannot edit the conflict archive namespace. Retain copies and their
+indexes after successful commit, even when transaction staging is cleaned up.
+
+This action handles file contents and absence, not recursive directory recovery
+or file/directory kind replacement. A directory conflict, link, oversized foreign
+file or inaccessible path needs manual correction/export; it is never treated as
+an empty file or silently overwritten. Intended bytes can still be previewed when
+a current target cannot be safely inspected. Native dialogs/export controls remain
+later integration work.
+
 Do not overwrite a foreign edit automatically, discard a transaction because its
 PID is gone, or load a partial set of files as a writable session. The native GUI
 must distinguish source errors, recoverable I/O failure and unresolved storage

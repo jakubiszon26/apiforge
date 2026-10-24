@@ -68,29 +68,37 @@ impl ProjectSnapshot {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Head {
-    format_version: u32,
-    generation: u64,
-    active_transaction_id: Option<String>,
+pub(super) struct Head {
+    pub(super) format_version: u32,
+    pub(super) generation: u64,
+    pub(super) active_transaction_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Descriptor {
-    format_version: u32,
-    transaction_id: String,
-    base_generation: u64,
-    target_generation: u64,
-    operations: Vec<Operation>,
+pub(super) struct Descriptor {
+    pub(super) format_version: u32,
+    pub(super) transaction_id: String,
+    pub(super) base_generation: u64,
+    pub(super) target_generation: u64,
+    pub(super) operations: Vec<Operation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Operation {
-    path: ProjectPath,
-    expected: FileState,
-    target: FileState,
-    payload: Option<usize>,
+pub(super) struct Operation {
+    pub(super) path: ProjectPath,
+    pub(super) expected: FileState,
+    pub(super) target: FileState,
+    pub(super) payload: Option<usize>,
+}
+
+pub(super) struct ActiveTransaction {
+    pub(super) head: Head,
+    pub(super) directory: PathBuf,
+    pub(super) descriptor: Descriptor,
+    pub(super) descriptor_bytes: Vec<u8>,
+    pub(super) payloads: BTreeMap<usize, Vec<u8>>,
 }
 
 pub(super) struct Owner {
@@ -391,7 +399,7 @@ impl ProjectStore {
             ..head
         })?;
         boundary("activation")?;
-        self.replay(&descriptor, &payloads, &mut boundary)?;
+        self.replay(&descriptor, &payloads, &BTreeMap::new(), &mut boundary)?;
         // Cleanup is not part of acknowledgement. Only this transaction's own
         // staging directory may be removed, and never replay unreferenced intent.
         let _ = fs::remove_dir_all(&directory);
@@ -411,15 +419,35 @@ impl ProjectStore {
     ) -> Result<Option<u64>> {
         self.writable()?;
         let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(active) = self.read_active_transaction()? else {
+            return Ok(None);
+        };
+        self.check_transaction_secrets(&active)?;
+        let approvals = self.read_conflict_approvals(&active)?;
+        self.make_approvals_durable(&active, &approvals)?;
+        self.verify_active_inputs(&active)?;
+        self.replay(
+            &active.descriptor,
+            &active.payloads,
+            &approvals.accepted_states(),
+            &mut boundary,
+        )?;
+        self.cleanup_transaction(&active);
+        Ok(Some(active.descriptor.target_generation))
+    }
+
+    /// Validate the original intent without modifying it. Read-only recovery
+    /// previews may inspect candidates containing known secrets; only mutation
+    /// paths apply the managed-write secret checks.
+    pub(super) fn read_active_transaction(&self) -> Result<Option<ActiveTransaction>> {
         let head = self.head()?;
         let Some(id) = &head.active_transaction_id else {
             return Ok(None);
         };
         let directory = self.transaction_path(id)?;
-        let descriptor: Descriptor = parse_json(
-            &read_bounded(&directory.join("transaction.json"), MAX_JSON_BYTES)?
-                .ok_or(ProjectError::InvalidTransaction)?,
-        )?;
+        let descriptor_bytes = read_bounded(&directory.join("transaction.json"), MAX_JSON_BYTES)?
+            .ok_or(ProjectError::InvalidTransaction)?;
+        let descriptor: Descriptor = parse_json(&descriptor_bytes)?;
         if descriptor.format_version != 1 {
             return Err(ProjectError::UnsupportedVersion);
         }
@@ -448,7 +476,6 @@ impl ProjectStore {
                 if total > MAX_TRANSACTION_BYTES {
                     return Err(ProjectError::Limit);
                 }
-                self.check_secrets(&bytes)?;
                 payloads.insert(index, bytes);
             }
         }
@@ -464,23 +491,63 @@ impl ProjectStore {
                 .ok_or(ProjectError::InvalidTransaction)?;
             ProjectManifest::from_bytes(bytes)?;
         }
-        self.replay(&descriptor, &payloads, &mut boundary)?;
-        let _ = fs::remove_dir_all(&directory);
-        let _ = sync_parent(&directory);
-        Ok(Some(descriptor.target_generation))
+        let active = ActiveTransaction {
+            head,
+            directory,
+            descriptor,
+            descriptor_bytes,
+            payloads,
+        };
+        self.verify_active_inputs(&active)?;
+        Ok(Some(active))
     }
 
-    fn replay(
+    /// Recheck the immutable intent immediately before replay as well as load.
+    pub(super) fn verify_active_inputs(&self, active: &ActiveTransaction) -> Result<()> {
+        if self.head()? != active.head
+            || read_bounded(&active.directory.join("transaction.json"), MAX_JSON_BYTES)?.as_deref()
+                != Some(active.descriptor_bytes.as_slice())
+        {
+            return Err(ProjectError::Busy);
+        }
+        for (index, bytes) in &active.payloads {
+            if read_bounded(&active.directory.join(index.to_string()), MAX_JSON_BYTES)?.as_deref()
+                != Some(bytes.as_slice())
+            {
+                return Err(ProjectError::Busy);
+            }
+        }
+        if self.head()? != active.head {
+            return Err(ProjectError::Busy);
+        }
+        Ok(())
+    }
+
+    pub(super) fn cleanup_transaction(&self, active: &ActiveTransaction) {
+        let _ = fs::remove_dir_all(&active.directory);
+        let _ = sync_parent(&active.directory);
+    }
+
+    pub(super) fn check_transaction_secrets(&self, active: &ActiveTransaction) -> Result<()> {
+        self.check_secrets(&active.descriptor_bytes)?;
+        for bytes in active.payloads.values() {
+            self.check_secrets(bytes)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn replay(
         &self,
         descriptor: &Descriptor,
         payloads: &BTreeMap<usize, Vec<u8>>,
+        approved: &BTreeMap<usize, FileState>,
         boundary: &mut impl FnMut(&str) -> Result<()>,
     ) -> Result<()> {
-        for operation in &descriptor.operations {
+        for (index, operation) in descriptor.operations.iter().enumerate() {
             let path = path::resolve(&self.root, operation.path.as_str())?;
             let current = self.state(operation.path.as_str())?;
             if current != operation.target {
-                if current != operation.expected {
+                if current != operation.expected && approved.get(&index) != Some(&current) {
                     return Err(self.conflict(&operation.path));
                 }
                 match &operation.target {
@@ -588,6 +655,7 @@ impl ProjectStore {
             operations,
         };
         self.validate_descriptor(&descriptor, &payloads)?;
+        self.check_secrets(&json_bytes(&descriptor)?)?;
         Ok((descriptor, payloads))
     }
 
@@ -605,6 +673,9 @@ impl ProjectStore {
         let mut used_payloads = HashSet::new();
         let mut total = 0;
         for (index, operation) in descriptor.operations.iter().enumerate() {
+            if operation.path.is_conflict_archive() {
+                return Err(ProjectError::InvalidTransaction);
+            }
             if !paths.insert(operation.path.as_str().to_lowercase()) {
                 return Err(ProjectError::InvalidTransaction);
             }
@@ -654,7 +725,7 @@ impl ProjectStore {
         if total > MAX_TRANSACTION_BYTES || used_payloads.len() != payloads.len() {
             return Err(ProjectError::Limit);
         }
-        self.check_secrets(&json_bytes(descriptor)?)?;
+        json_bytes(descriptor)?;
         Ok(())
     }
 
@@ -761,7 +832,7 @@ impl ProjectStore {
             .map_or(FileState::Missing, FileState::of))
     }
 
-    fn read_file(&self, relative: &str) -> Result<Option<Vec<u8>>> {
+    pub(super) fn read_file(&self, relative: &str) -> Result<Option<Vec<u8>>> {
         let path = path::resolve(&self.root, relative)?;
         read_bounded(&path, payload_limit(relative))
     }
@@ -812,7 +883,7 @@ impl ProjectStore {
     }
 }
 
-fn payload_limit(path: &str) -> usize {
+pub(super) fn payload_limit(path: &str) -> usize {
     if path.ends_with(".afs") {
         MAX_SOURCE_BYTES
     } else {
@@ -827,7 +898,7 @@ fn change_path(change: &ProjectChange) -> &ProjectPath {
         | ProjectChange::RemoveDirectory { path } => path,
     }
 }
-fn hash(bytes: &[u8]) -> String {
+pub(super) fn hash(bytes: &[u8]) -> String {
     digest(&SHA256, bytes)
         .as_ref()
         .iter()
@@ -840,7 +911,7 @@ fn json_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
 fn parse_json<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     apiforge_core::strict_json::from_slice(bytes).map_err(|_| ProjectError::InvalidTransaction)
 }
-fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
+pub(super) fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
     path::check_boundary(path)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -879,7 +950,7 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Option<Vec<u8>>> {
     }
     Ok(Some(bytes))
 }
-fn sync_parent(path: &Path) -> Result<()> {
+pub(super) fn sync_parent(path: &Path) -> Result<()> {
     let parent = path.parent().ok_or(ProjectError::InvalidPath)?;
     sync_directory(parent).map_err(|error| ProjectError::io(parent, error))
 }
@@ -891,7 +962,7 @@ fn sync_surviving_parent(path: &Path) -> Result<()> {
     path::check_boundary(parent)?;
     sync_directory(parent).map_err(|error| ProjectError::io(parent, error))
 }
-fn create_directory(path: &Path) -> Result<()> {
+pub(super) fn create_directory(path: &Path) -> Result<()> {
     path::check_boundary(path)?;
     fs::create_dir(path).map_err(|error| ProjectError::io(path, error))?;
     sync_directory(path).map_err(|error| ProjectError::io(path, error))?;

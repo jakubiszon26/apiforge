@@ -2,6 +2,7 @@
 //! desktop callers must use a storage worker. Opening a store never initialises
 //! a manifest or enables folder mode in legacy startup.
 mod codec;
+mod conflict;
 mod diagram;
 mod path;
 mod recovery;
@@ -9,6 +10,10 @@ mod schema;
 mod transaction;
 mod trash;
 
+pub use conflict::{
+    ConflictArchive, RecoveryCandidate, RecoveryCandidateStatus, RecoveryCompletion,
+    TransactionRecoveryPreview,
+};
 pub use diagram::{DiagramFile, DiagramRecord, DocumentKey, IdentityBase};
 pub use path::ProjectPath;
 pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection};
@@ -77,6 +82,16 @@ pub enum ProjectError {
     InvalidCheckpoint,
     #[error("Invalid trash operation or preserved payload; existing files were preserved.")]
     InvalidTrash,
+    #[error(
+        "Invalid conflict approval or preserved conflict copy; the transaction remains unresolved."
+    )]
+    InvalidResolution,
+    #[error(
+        "A directory or inaccessible path needs manual recovery before this transaction can finish."
+    )]
+    UnsupportedRecoveryConflict,
+    #[error("No active transaction matches this recovery preview.")]
+    NoActiveTransaction,
 }
 
 impl ProjectError {

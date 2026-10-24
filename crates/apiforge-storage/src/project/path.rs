@@ -25,6 +25,8 @@ impl ProjectPath {
                 || path.starts_with(".apiforge/revisions/")
                 || path == ".apiforge/local/trash"
                 || path.starts_with(".apiforge/local/trash/")
+                || path == ".apiforge/local/conflicts"
+                || path.starts_with(".apiforge/local/conflicts/")
                 || matches!(
                     path.as_str(),
                     ".apiforge/local/recovery.json"
@@ -58,6 +60,10 @@ impl ProjectPath {
 
     pub(super) fn is_revision(&self) -> bool {
         self.0.starts_with(".apiforge/revisions/")
+    }
+
+    pub(super) fn is_conflict_archive(&self) -> bool {
+        self.0 == ".apiforge/local/conflicts" || self.0.starts_with(".apiforge/local/conflicts/")
     }
 }
 

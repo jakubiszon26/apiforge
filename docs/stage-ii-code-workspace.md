@@ -327,8 +327,27 @@ exercise every stage/operation in both delete and restore, then restart and
 roll forward. These are storage-service checks; explorer/native QA and the P2
 round-trip gate remain open.
 
-P1 remains open for last-valid cache provenance, explicit conflict-copy resolution
-and broader persistence fault injection. Explorer directory/unregistered-file
+The conflict-resolution increment adds read-only transaction previews and explicit
+Finish intended operation. It preserves foreign bytes and versioned archive indexes
+before recording exact-state approvals in a descriptor-bound receipt. Original
+intent stays unchanged; restart verifies copies/receipts and resumes only an
+already accepted fingerprint. New edits require a new decision. Failure, unknown
+versions, damaged evidence, secret checks or unsafe paths leave recovery blocked.
+Directories/type replacement and unreadable/oversized targets require manual
+correction; preview never turns them into absent/empty data. Copies remain after
+commit. Native recovery dialogs and export controls are not yet integrated.
+
+Verification of the conflict-resolution increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (635 passed, one parent-launched helper ignored), using
+isolated config/data directories, serial tests and loopback access for existing
+HTTP tests. Twenty new tests cover read-only export candidates, preservation and
+approval boundaries, restart/repeated interruption, stale decisions, changed
+staging/proof inputs, damaged copies, copy limits, secret refusal and directory/link
+rejection. This does not close native Windows durability or the P2 round-trip gate.
+
+P1 remains open for last-valid cache provenance and broader persistence fault
+injection. Explorer directory/unregistered-file
 operations and UI integration remain P5 work. P2's
 shared semantic loader and document sessions remain pending; the P2 round-trip
 gate has not passed. Desktop/CLI folder integration, automatic migration and native
