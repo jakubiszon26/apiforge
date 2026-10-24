@@ -674,6 +674,29 @@ impl App {
         self.preferences.save();
     }
 
+    /// Applies an inspector action that belongs to the window rather than to the
+    /// document: showing a block in the code panel.
+    fn inspector_action(&mut self, action: inspector::Action) {
+        let inspector::Action::Reveal(handle) = action else {
+            return;
+        };
+        // A request's body lives in the code of its scenario, so that is where
+        // the panel shows it.
+        self.code_open = true;
+        self.preferences.code_panel = true;
+        self.preferences.save();
+        self.revealed = None;
+        if let Some(node) = self
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+        {
+            self.editor.selection = vec![node.id.clone()];
+        }
+    }
+
     /// Whether the code panel has the keyboard, which decides whose history
     /// Ctrl+Z walks: the text's or the document's.
     fn code_has_focus(&self, context: &egui::Context) -> bool {
@@ -754,7 +777,9 @@ impl App {
             });
         });
         ui.add_space(4.0);
-        let Some(buffer) = self.buffers.text(&context, printed) else {
+        let focused = self.code_has_focus(ui.ctx());
+        let revision = self.editor.revision();
+        let Some(buffer) = self.buffers.text(&context, printed, revision, focused) else {
             widgets::hint(
                 ui,
                 "This scenario uses something the language cannot write yet, so it has no code view.",
@@ -794,6 +819,7 @@ impl App {
                         scope: names.scope(&shapes),
                         diagnostics: &diagnostics,
                         line_numbers: true,
+                        wrap: false,
                         font_size: 13.0,
                     },
                 )
@@ -927,13 +953,15 @@ impl App {
             buffers::Apply::Nothing | buffers::Apply::Failed => {}
             buffers::Apply::Scenario(scenario) => {
                 let placed = self.place_new_blocks(*scenario, document, project);
-                if let Err(message) = self.editor.apply_scenario(placed, now) {
-                    self.canvas.set_error(message);
+                match self.editor.apply_scenario(placed, now) {
+                    Ok(()) => self.buffers.applied(context, self.editor.revision()),
+                    Err(message) => self.canvas.set_error(message),
                 }
             }
             buffers::Apply::Component(component) => {
-                if let Err(message) = self.editor.apply_component(*component, now) {
-                    self.canvas.set_error(message);
+                match self.editor.apply_component(*component, now) {
+                    Ok(()) => self.buffers.applied(context, self.editor.revision()),
+                    Err(message) => self.canvas.set_error(message),
                 }
             }
         }
@@ -1943,7 +1971,12 @@ impl App {
             self.inspector.show(ui, &context)
         };
         for action in actions {
+            if let inspector::Action::Reveal(_) = &action {
+                self.inspector_action(action);
+                continue;
+            }
             match action {
+                inspector::Action::Reveal(_) => unreachable!("handled above"),
                 inspector::Action::UpdateNode(updated) => {
                     let mut graph = self.editor.graph().clone();
                     if let Some(slot) = graph
@@ -3396,6 +3429,196 @@ mod tests {
         // It is revealed once, not pulled back on every frame.
         app.sync_selection(&text, None);
         assert!(app.revealed.is_some());
+    }
+
+    #[test]
+    fn opening_a_request_in_code_shows_it_in_the_panel() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let node = app.editor.graph().nodes[0].clone();
+        assert!(!app.code_open);
+        let directory = tempfile::tempdir().unwrap();
+        app.preferences =
+            crate::preferences::Preferences::at(Some(directory.path().join("preferences.json")));
+
+        app.inspector_action(inspector::Action::Reveal(node.handle.clone()));
+        assert!(app.code_open, "the panel opened");
+        assert_eq!(app.editor.selection, vec![node.id.clone()]);
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let text = app.buffers.get(&key).unwrap().text.clone();
+        assert!(
+            apiforge_script::complete::statement_range(&text, &node.handle).is_some(),
+            "the block is written in the code the panel shows"
+        );
+        assert_eq!(app.revealed.as_deref(), Some(node.handle.as_str()));
+    }
+
+    /// The session the plan describes, start to finish: type in code, edit on the
+    /// board, undo, break the code, switch away and back, close and reopen, fix
+    /// it. Nothing typed is lost, and whenever the text is valid the document
+    /// says the same thing.
+    #[test]
+    fn a_whole_editing_session_keeps_the_text_and_the_document_in_step() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("workspace.json");
+        let context = egui::Context::default();
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+
+        // 1. Type in the code: a new block arrives on the board.
+        let printed = app.buffers.get(&key).unwrap().text.clone();
+        let closing = printed.rfind('}').unwrap();
+        let mut typed = printed.clone();
+        typed.insert_str(closing, "  var from_code = 7\n");
+        edit_code(&mut app, &context, &typed);
+        assert!(
+            app.editor
+                .graph()
+                .nodes
+                .iter()
+                .any(|node| node.handle == "from_code")
+        );
+
+        // 2. Edit on the board: the code follows.
+        app.editor.change_project(|project| {
+            project.scenarios[0].description = "Edited on the board".into();
+        });
+        draw_frame(&mut app, &context, vec![]);
+        assert!(
+            app.buffers
+                .get(&key)
+                .unwrap()
+                .text
+                .contains("Edited on the board")
+        );
+
+        // 3. Undo the document edit: the block from the code goes with it.
+        app.editor.undo();
+        draw_frame(&mut app, &context, vec![]);
+
+        // 4. Break the code: the document stands still and the board waits.
+        let valid = app.buffers.get(&key).unwrap().text.clone();
+        let revision = app.editor.revision();
+        edit_code(&mut app, &context, &format!("{valid}\n  broken ="));
+        assert!(app.buffers.blocks_the_board(&key));
+        assert_eq!(app.editor.revision(), revision);
+
+        // 5. Switch scenario and back: the broken text is still there.
+        let other = {
+            let scenario = apiforge_core::format::Scenario {
+                id: "second".into(),
+                name: "Second".into(),
+                description: String::new(),
+                graph: Graph {
+                    nodes: vec![],
+                    edges: vec![],
+                },
+                cleanup: Graph {
+                    nodes: vec![],
+                    edges: vec![],
+                },
+                parameters: Default::default(),
+                error_policy: ErrorPolicy::Stop,
+            };
+            app.editor.add_scenario(scenario);
+            "second".to_owned()
+        };
+        draw_frame(&mut app, &context, vec![]);
+        app.editor
+            .switch_scenario(&app.editor.scenario().id.clone());
+        app.editor.switch_scenario(&other);
+        draw_frame(&mut app, &context, vec![]);
+        let first = match &key {
+            buffers::Context::Scenario { id, .. } => id.clone(),
+            buffers::Context::Component { id, .. } => id.clone(),
+        };
+        app.editor.switch_scenario(&first);
+        draw_frame(&mut app, &context, vec![]);
+        assert!(
+            app.buffers.get(&key).unwrap().text.ends_with("broken ="),
+            "the unfinished text survived the detour"
+        );
+
+        // 6. Close and reopen: it is still there.
+        app.save_drafts();
+        wait_for_storage(&mut app);
+        drop(app);
+        let mut app = App::new(
+            &context,
+            Source::Storage(WorkspaceStore::open_exclusive(&path).unwrap()),
+        );
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        assert!(app.buffers.get(&key).unwrap().text.ends_with("broken ="));
+
+        // 7. Fix it: the board is released and the document matches the text.
+        let fixed = app
+            .buffers
+            .get(&key)
+            .unwrap()
+            .text
+            .replace("\n  broken =", "");
+        edit_code(&mut app, &context, &fixed);
+        assert!(!app.buffers.blocks_the_board(&key));
+        let document = app.code_document();
+        let project = app.editor.project().clone();
+        let printed = buffers::print(&project, &document).expect("the document prints");
+        let lowered = apiforge_script::lower(
+            &apiforge_script::parse(&app.buffers.get(&key).unwrap().text),
+            &apiforge_script::LowerContext::document(&project),
+        );
+        assert!(!lowered.has_errors());
+        assert_eq!(
+            apiforge_script::semantic(&lowered.document.unwrap(), &project),
+            apiforge_script::semantic(
+                &apiforge_script::lower(
+                    &apiforge_script::parse(&printed),
+                    &apiforge_script::LowerContext::document(&project),
+                )
+                .document
+                .unwrap(),
+                &project
+            ),
+            "the text and the document say the same thing"
+        );
+    }
+
+    #[test]
+    fn renaming_a_block_in_code_keeps_where_it_sits() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        app.code_open = true;
+        draw_frame(&mut app, &context, vec![]);
+        let key = app.code_context();
+        let text = app.buffers.get(&key).unwrap().text.clone();
+        // A Value block: its handle is its own, not a component's name as well.
+        let node = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.kind == apiforge_core::model::NodeKind::Value)
+            .expect("the demo has a value block")
+            .clone();
+        let renamed = text.replace(&node.handle, "renamed_block");
+        edit_code(&mut app, &context, &renamed);
+
+        let found = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|found| found.handle == "renamed_block")
+            .expect("the block was renamed, not replaced");
+        assert_eq!(found.id, node.id, "it is the same block");
+        assert_eq!(found.position, node.position, "and it did not move");
     }
 
     #[test]

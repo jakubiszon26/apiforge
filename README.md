@@ -5,7 +5,8 @@ models requests, checks, reusable components, data contracts and business action
 a graph of blocks. The engine assumes no domain and no endpoint names.
 
 Every scenario is also text: the scenario language prints a board as code and applies
-edited code back to the board without losing block identity or layout.
+edited code back to the board without losing block identity or layout. The code panel
+sits beside the board and the two stay in step as either is edited.
 
 It is written in Rust with [egui](https://github.com/emilk/egui). Linux and Windows are
 the first release targets.

@@ -28,7 +28,9 @@ fn a_clean_buffer_is_whatever_the_document_prints() {
     let context = context(&project);
     let printed = print(&project, &document(&project)).expect("the demo prints");
     let mut buffers = Buffers::default();
-    let buffer = buffers.text(&context, Some(printed.clone())).unwrap();
+    let buffer = buffers
+        .text(&context, Some(printed.clone()), 0, false)
+        .unwrap();
     assert_eq!(buffer.text, printed);
     assert_eq!(buffer.state, State::Clean);
     // Nothing is kept for a clean buffer, so a document edit simply reprints.
@@ -41,7 +43,7 @@ fn text_becomes_a_document_only_after_typing_pauses() {
     let context = context(&project);
     let printed = print(&project, &document(&project)).unwrap();
     let mut buffers = Buffers::default();
-    buffers.text(&context, Some(printed.clone()));
+    buffers.text(&context, Some(printed.clone()), 0, false);
     let (typed, later) = settled();
     buffers.typed(
         &context,
@@ -72,7 +74,7 @@ fn invalid_text_keeps_the_document_and_holds_the_board() {
     let context = context(&project);
     let printed = print(&project, &document(&project)).unwrap();
     let mut buffers = Buffers::default();
-    buffers.text(&context, Some(printed.clone()));
+    buffers.text(&context, Some(printed.clone()), 0, false);
     let (typed, later) = settled();
     buffers.typed(&context, format!("{printed}\n  oops ="), typed);
     assert!(matches!(
@@ -85,7 +87,7 @@ fn invalid_text_keeps_the_document_and_holds_the_board() {
     assert!(buffers.blocks_the_board(&context));
     // An invalid buffer is never replaced by a reprint: the text is not lost.
     let kept = buffers
-        .text(&context, Some(printed.clone()))
+        .text(&context, Some(printed.clone()), 0, false)
         .unwrap()
         .text
         .clone();
@@ -105,13 +107,16 @@ fn discarding_goes_back_to_the_document() {
     buffers.discard(&context);
     assert!(!buffers.blocks_the_board(&context));
     assert_eq!(
-        buffers.text(&context, Some(printed.clone())).unwrap().text,
+        buffers
+            .text(&context, Some(printed.clone()), 0, false)
+            .unwrap()
+            .text,
         printed
     );
 }
 
 #[test]
-fn an_applied_buffer_keeps_the_spelling_the_user_chose() {
+fn an_applied_buffer_keeps_its_spelling_until_the_document_moves_on() {
     let project = project();
     let context = context(&project);
     let printed = print(&project, &document(&project)).unwrap();
@@ -121,8 +126,33 @@ fn an_applied_buffer_keeps_the_spelling_the_user_chose() {
     buffers.typed(&context, spaced.clone(), typed);
     buffers.apply(&context, &project, &document(&project), later);
     assert_eq!(buffers.get(&context).unwrap().state, State::Applied);
-    // A reprint does not reformat it under the cursor.
-    assert_eq!(buffers.text(&context, Some(printed)).unwrap().text, spaced);
+    buffers.applied(&context, 1);
+
+    // The document is where this text put it, so the spelling stands.
+    assert_eq!(
+        buffers
+            .text(&context, Some(printed.clone()), 1, false)
+            .unwrap()
+            .text,
+        spaced
+    );
+    // The caret is in it, so it is not reformatted underneath.
+    assert_eq!(
+        buffers
+            .text(&context, Some(printed.clone()), 2, true)
+            .unwrap()
+            .text,
+        spaced
+    );
+    // The document moved on without it, so the panel shows what it now says.
+    assert_eq!(
+        buffers
+            .text(&context, Some(printed.clone()), 2, false)
+            .unwrap()
+            .text,
+        printed
+    );
+    assert_eq!(buffers.get(&context).unwrap().state, State::Clean);
 }
 
 #[test]
@@ -131,7 +161,7 @@ fn a_draft_is_every_buffer_the_document_does_not_already_say() {
     let context = context(&project);
     let printed = print(&project, &document(&project)).unwrap();
     let mut buffers = Buffers::default();
-    buffers.text(&context, Some(printed.clone()));
+    buffers.text(&context, Some(printed.clone()), 0, false);
     assert_eq!(buffers.drafts().count(), 0);
     let (typed, later) = settled();
     buffers.typed(&context, format!("{printed}\n  broken ="), typed);
@@ -168,7 +198,7 @@ fn a_document_that_cannot_be_written_as_code_produces_no_text() {
     let project = project();
     let context = context(&project);
     let mut buffers = Buffers::default();
-    assert!(buffers.text(&context, None).is_none());
+    assert!(buffers.text(&context, None, 0, false).is_none());
 }
 
 #[test]

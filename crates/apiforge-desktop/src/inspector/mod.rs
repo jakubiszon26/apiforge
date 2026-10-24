@@ -41,6 +41,8 @@ pub enum Action {
         port: String,
         path: String,
     },
+    /// Show this block in the code panel, by handle.
+    Reveal(String),
     Error(String),
 }
 
@@ -266,7 +268,9 @@ impl Inspector {
             check(ui, id, node);
         }
 
-        self.arguments(ui, id, context, node);
+        if let Some(handle) = self.arguments(ui, id, context, node) {
+            actions.push(Action::Reveal(handle));
+        }
         // Keep the values being configured near the top; ordering remains
         // available below them as a keyboard alternative to canvas wires.
         if node.kind != NodeKind::Start || !context.board.nodes.is_empty() {
@@ -280,13 +284,20 @@ impl Inspector {
         }
     }
 
-    fn arguments(&mut self, ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
+    fn arguments(
+        &mut self,
+        ui: &mut Ui,
+        id: Id,
+        context: &Context<'_>,
+        node: &mut Node,
+    ) -> Option<String> {
+        let mut reveal = None;
         let scope = scope(context);
         // Fields shown as text in the request section are edited there; a value
         // that text cannot express falls back to an argument editor.
         let ports = argument_ports(node, context.project, scope);
         if ports.is_empty() && node.kind != NodeKind::Request {
-            return;
+            return reveal;
         }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -303,13 +314,14 @@ impl Inspector {
         }
         let binding_context = binding_context(context);
         for port in &ports {
-            argument(
+            reveal = argument(
                 ui,
                 &binding_context,
                 port,
                 node,
                 id.with(("argument", &port.name)),
-            );
+            )
+            .or(reveal);
             if node.kind == NodeKind::Request
                 && apiforge_core::graph::is_request_argument(&port.name)
                 && ui
@@ -328,6 +340,7 @@ impl Inspector {
             }
             ui.add_space(4.0);
         }
+        reveal
     }
 
     /// The variable's "take the value from a response" dialog.
@@ -697,10 +710,18 @@ fn binding_context<'a>(context: &Context<'a>) -> binding::Context<'a> {
     }
 }
 
-/// The editor of one input: sets or removes it.
-fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut Node, id: Id) {
+/// The editor of one input: sets or removes it. Returns the block to show in the
+/// code panel when the user asked for it.
+fn argument(
+    ui: &mut Ui,
+    context: &binding::Context<'_>,
+    port: &Port,
+    node: &mut Node,
+    id: Id,
+) -> Option<String> {
     let mut value = node.inputs.get(&port.name).cloned();
     let mut changed = false;
+    let mut reveal = None;
     if node.kind == NodeKind::Request && port.name == BODY_INPUT {
         widgets::field_label(ui, "Body");
         let scope = Scope {
@@ -730,6 +751,17 @@ fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut
             value = next;
             changed = true;
         }
+        if ui
+            .add(
+                widgets::action(Icon::Code, "Open in code")
+                    .quiet()
+                    .compact(),
+            )
+            .on_hover_text("Show this request in the code panel")
+            .clicked()
+        {
+            reveal = Some(node.handle.clone());
+        }
         egui::CollapsingHeader::new("Body value source")
             .id_salt(id.with("body-binding"))
             .show(ui, |ui| {
@@ -748,6 +780,7 @@ fn argument(ui: &mut Ui, context: &binding::Context<'_>, port: &Port, node: &mut
             }
         }
     }
+    reveal
 }
 
 fn check(ui: &mut Ui, id: Id, node: &mut Node) {
@@ -950,7 +983,8 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
         }
     }
     if passes_data && let Some(port) = port(VALUE_INPUT) {
-        argument(ui, &binding_context, &port, node, id.with("passed-on"));
+        // A condition has no body, so nothing here asks for the code panel.
+        let _ = argument(ui, &binding_context, &port, node, id.with("passed-on"));
     }
     widgets::hint(
         ui,

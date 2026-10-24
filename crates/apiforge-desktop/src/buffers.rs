@@ -64,6 +64,9 @@ pub struct Buffer {
     pub cursor: usize,
     /// When the text last changed, for the pause that precedes applying it.
     pub typed_at: Option<Instant>,
+    /// The document revision this text was applied at. A document that has moved
+    /// on since is reprinted over the text, as ADR 0007 asks.
+    pub applied_revision: Option<u64>,
     /// Restored from a draft written against a document that has moved on since.
     /// The user decides whether to keep it; the hash it was compared against
     /// belongs to the draft, not to the buffer, and is taken again at each write.
@@ -123,25 +126,51 @@ pub struct Buffers {
 
 impl Buffers {
     /// The text to show for a context, printed from the document when the buffer
-    /// is clean or absent.
+    /// has nothing of its own to say.
     ///
-    /// A document that cannot be printed — which means it says something the
-    /// language cannot write — produces `None`, and the panel says so rather than
-    /// showing text that would destroy the document if it were applied.
-    pub fn text(&mut self, context: &Context, printed: Option<String>) -> Option<&mut Buffer> {
-        match self.open.get(context).map(|buffer| buffer.state) {
-            Some(State::Invalid | State::Applied) => self.open.get_mut(context),
-            _ => {
-                let printed = printed?;
-                let buffer = self
-                    .open
-                    .entry(context.clone())
-                    .or_insert_with(|| Buffer::clean(printed.clone()));
-                buffer.text = printed;
-                buffer.state = State::Clean;
-                buffer.diagnostics.clear();
-                Some(buffer)
-            }
+    /// Three rules, from ADR 0007. Text with errors is never overwritten: it is
+    /// the only copy of what someone typed. Text that was applied keeps the
+    /// spelling its author chose until the document moves on without it, and even
+    /// then not while the caret is in it — reformatting under a cursor is its own
+    /// kind of loss. Everything else is what the document prints.
+    ///
+    /// A document that cannot be printed — it says something the language cannot
+    /// write — produces `None`, and the panel says so rather than showing text
+    /// that would destroy the document if it were applied.
+    pub fn text(
+        &mut self,
+        context: &Context,
+        printed: Option<String>,
+        revision: u64,
+        focused: bool,
+    ) -> Option<&mut Buffer> {
+        let keep = match self.open.get(context) {
+            Some(buffer) => match buffer.state {
+                State::Invalid => true,
+                State::Applied => focused || buffer.applied_revision == Some(revision),
+                State::Clean => false,
+            },
+            None => false,
+        };
+        if keep {
+            return self.open.get_mut(context);
+        }
+        let printed = printed?;
+        let buffer = self
+            .open
+            .entry(context.clone())
+            .or_insert_with(|| Buffer::clean(printed.clone()));
+        buffer.text = printed;
+        buffer.state = State::Clean;
+        buffer.applied_revision = None;
+        buffer.diagnostics.clear();
+        Some(buffer)
+    }
+
+    /// Records the document revision a buffer's text was applied at.
+    pub fn applied(&mut self, context: &Context, revision: u64) {
+        if let Some(buffer) = self.open.get_mut(context) {
+            buffer.applied_revision = Some(revision);
         }
     }
 
@@ -185,6 +214,7 @@ impl Buffers {
                 text: draft.text,
                 state: State::Invalid,
                 cursor: draft.cursor,
+                applied_revision: None,
                 stale: draft.stale,
                 typed_at: None,
                 diagnostics: Vec::new(),
