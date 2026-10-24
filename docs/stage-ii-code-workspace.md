@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 in progress (round-trip gate passed headless), P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -416,9 +416,14 @@ source reopens with its last-valid model only for the same closed configuration
 and dependency context, and never as a current model. Creating a project adds
 `/.apiforge/local/` to `.gitignore` without rewriting existing rules.
 
-Remaining P2 work: applying inspector field drafts to models (P4 owns their
-widgets), close/switch orchestration that requires a successful recovery write,
-and the open item in the [P1 code review](stage-ii-review-notes.md#p1-code-review).
+Closing a session succeeds only after unsaved work is written to recovery; a
+read-only session or unusable recovery returns the session so the caller can
+offer export, and an explicit discard removes the drafts.
+
+P2 is complete at the session-library boundary. Inspector widgets that produce
+field drafts arrive with P4; the session stores and recovers their drafts but
+does not yet apply them to models. Item 5 of the
+[P1 code review](stage-ii-review-notes.md#p1-code-review) remains open.
 Desktop and CLI do not use folder sessions yet.
 
 Acceptance must cover:
