@@ -545,12 +545,16 @@ opens, F2 renames and Delete deletes. The active document is revealed.
 model undo. Moves keep document IDs, unsaved text and histories and rewrite only
 registry paths; a case-only rename passes through a unique temporary name. An
 occupied target, an external registry change or a read-only session stops the
-operation before anything is written; unsaved configuration is never saved by it.
+operation before anything is written; the whole move, including the second step of
+a case-only rename, is validated first, and a failed second step moves back; unsaved configuration is never saved by it.
 Deleting files or directories goes through a preview listing documents, other
 files, folders and documents with unsaved work. The trash now also preserves
 unregistered files byte for byte and directories (recreated on restoration, at
 their original paths only); unsaved work moves with its document and returns
-unsaved. A file added to a directory after its preview stops the deletion.
+unsaved. Registered documents whose files were removed outside API Forge are
+included by path, so their records and unsaved work also go to the trash; after
+restoration such work is a held draft, and keeping it recreates the file on save.
+A file added to a directory after its preview stops the deletion.
 
 Initialising a folder surveys its `.afs` files without writing, then registers the
 chosen ones unchanged; an unrecognisable header needs an explicit kind. Import
@@ -560,7 +564,9 @@ colliding component (the copy's header is changed, the original is not).
 
 A watcher checks the folder once a second and when the window regains focus or a
 file operation finishes. The check runs on a worker; the session applies it. Clean
-documents follow external edits, deletions and reappearance. Documents with
+documents follow external edits, deletions and reappearance. A source left out of
+a bounded scan (too deep or past the entry limit) is checked directly, so it is
+never taken for deleted. Documents with
 unsaved work get a conflict that pauses their saving: Changed offers the version
 on disk or an export of the local text; Deleted also offers keeping the local
 version, recreating the file on the next save. An external rename is followed
@@ -587,7 +593,7 @@ remain for P7. Two egui limits apply: a dialog's text field takes the keyboard,
 so the explorer needs a click to regain it, and only one item is selected.
 
 Verification of P5 (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, fixture verification and all-target workspace tests passed (788 passed,
+denied, fixture verification and all-target workspace tests passed (791 passed,
 two parent-launched helpers ignored), run serially with isolated config/data
 directories. Native QA used `--screenshot` captures of the folder window at
 1600 × 1000 with an expanded tree, unregistered sources and other files.
