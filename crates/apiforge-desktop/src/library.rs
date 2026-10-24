@@ -411,9 +411,11 @@ impl Library {
             ));
         }
         ui.label(
-            RichText::new("Drag onto an argument, or into a URL, query or header.")
-                .size(11.0)
-                .color(theme::MUTED),
+            RichText::new(
+                "Drag onto an argument, into a URL, query or header, or onto the board to show it there.",
+            )
+            .size(11.0)
+            .color(theme::MUTED),
         );
         ui.horizontal_wrapped(|ui| {
             for (label, kind, binding, node) in chips {

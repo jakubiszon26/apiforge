@@ -9,8 +9,8 @@
 //! as [ADR 0006](../../../../docs/decisions/0006-layout-and-wire-routing.md)
 //! prescribes, and the first idle frame routes the whole board again.
 
-use super::layout::Card;
-use apiforge_core::{graph::WireKind, model::Branch};
+use super::layout::{Card, Chip};
+use apiforge_core::model::Branch;
 use apiforge_layout as layout;
 use eframe::egui::{Pos2, Rect, pos2};
 use std::{
@@ -64,14 +64,50 @@ impl Routed {
     }
 }
 
+/// Where a wire starts: an output of a card, or a proxy chip standing for a
+/// variable, parameter or environment value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Start {
+    Output { card: usize, port: String },
+    Chip(usize),
+}
+
+/// A wire as the board draws it. The document says which consumer reads what; the
+/// board decides where the wire starts, which is the only thing a proxy changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoardWire {
+    pub id: String,
+    pub start: Start,
+    /// The consumer, as an index into the cards.
+    pub target: usize,
+    pub input: String,
+    pub operand_path: Vec<String>,
+    /// An ordering wire, drawn dashed between control ports.
+    pub control: bool,
+    pub branch: Option<Branch>,
+}
+
 /// What the board asks for.
 pub struct Request<'a> {
     pub cards: &'a [Card],
-    pub wires: &'a [apiforge_core::graph::Wire],
-    /// Cards the user is dragging; their wires are the only ones rerouted.
+    /// Proxy chips: wire starts, and obstacles like any card.
+    pub chips: &'a [Chip],
+    pub wires: &'a [BoardWire],
+    /// Cards and chips the user is dragging; their wires are the only ones rerouted.
     pub moving: &'a HashSet<String>,
     pub style: WireStyle,
     pub bridges: bool,
+}
+
+impl Request<'_> {
+    /// Rectangles are indexed by card and then by chip, so one index addresses
+    /// everything a wire can start from or has to avoid.
+    fn block_id(&self, index: usize) -> &str {
+        match self.cards.get(index) {
+            Some(card) => card.id.as_str(),
+            None => self.chips[index - self.cards.len()].id(),
+        }
+    }
 }
 
 /// Keeps the routes of one board between frames.
@@ -85,7 +121,7 @@ pub struct Router {
 /// Everything a set of routes depends on.
 #[derive(Clone, PartialEq)]
 struct Key {
-    cards: Vec<(String, [i32; 4])>,
+    blocks: Vec<(String, [i32; 4])>,
     wires: Vec<(String, [i32; 4])>,
     style: WireStyle,
     bridges: bool,
@@ -106,10 +142,16 @@ impl Router {
     pub fn routes(&mut self, request: &Request<'_>) -> &[Routed] {
         let prepared = prepare(request);
         let key = Key {
-            cards: request
+            blocks: request
                 .cards
                 .iter()
                 .map(|card| (card.id.clone(), quantise(card.rect())))
+                .chain(
+                    request
+                        .chips
+                        .iter()
+                        .map(|chip| (chip.id().to_owned(), quantise(chip.rect()))),
+                )
                 .collect(),
             wires: prepared
                 .iter()
@@ -170,32 +212,37 @@ struct Prepared {
     branch: Option<Branch>,
 }
 
-/// Translates the board's cards and wires into rectangles and ports.
+/// Translates the board's cards, chips and wires into rectangles and ports.
 fn prepare(request: &Request<'_>) -> Vec<Prepared> {
     request
         .wires
         .iter()
         .filter_map(|wire| {
-            let source = request
-                .cards
-                .iter()
-                .position(|card| card.id == wire.source)?;
-            let target = request
-                .cards
-                .iter()
-                .position(|card| card.id == wire.target)?;
-            let (output, input) = super::wire_ports(wire);
-            let start = request.cards[source].output_anchor(&output)?;
-            let end = request.cards[target].input_anchor(&input, &wire.operand_path)?;
+            let target = request.cards.get(wire.target)?;
+            let end = target.input_anchor(&wire.input, &wire.operand_path)?;
+            let (source, start, source_rect) = match &wire.start {
+                Start::Output { card, port } => {
+                    let source = request.cards.get(*card)?;
+                    (*card, source.output_anchor(port)?, source.rect())
+                }
+                Start::Chip(index) => {
+                    let chip = request.chips.get(*index)?;
+                    (
+                        request.cards.len() + index,
+                        chip.output_anchor(),
+                        chip.rect(),
+                    )
+                }
+            };
             Some(Prepared {
                 id: wire.id.clone(),
                 wire: layout::Wire::new(
-                    port_at(source, start, request.cards[source].rect()),
-                    port_at(target, end, request.cards[target].rect()),
+                    port_at(source, start, source_rect),
+                    port_at(wire.target, end, target.rect()),
                 ),
                 start,
                 end,
-                control: wire.kind == WireKind::Order,
+                control: wire.control,
                 branch: wire.branch,
             })
         })
@@ -222,11 +269,14 @@ fn port_at(block: usize, anchor: Pos2, card: Rect) -> layout::Port {
     layout::Port::new(block, side, offset)
 }
 
-fn rectangles(cards: &[Card]) -> Vec<layout::Rect> {
-    cards
+/// Cards first, then chips: one index space for ports and obstacles.
+fn rectangles(request: &Request<'_>) -> Vec<layout::Rect> {
+    request
+        .cards
         .iter()
-        .map(|card| {
-            let rect = card.rect();
+        .map(Card::rect)
+        .chain(request.chips.iter().map(Chip::rect))
+        .map(|rect| {
             layout::Rect::new(
                 layout::Point::new(rect.min.x, rect.min.y),
                 layout::Point::new(rect.max.x, rect.max.y),
@@ -236,7 +286,7 @@ fn rectangles(cards: &[Card]) -> Vec<layout::Rect> {
 }
 
 fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Routed> {
-    let cards = rectangles(request.cards);
+    let cards = rectangles(request);
     let wires: Vec<layout::Wire> = prepared.iter().map(|wire| wire.wire).collect();
     let routes = layout::route(&cards, &wires, &layout::Routing::default());
     let _ = key;
@@ -249,16 +299,16 @@ fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Rou
 
 /// Reroutes the wires of the dragged cards in place, within the frame budget.
 fn reroute_moving(request: &Request<'_>, prepared: &[Prepared], routes: &mut [Routed]) {
-    let cards = rectangles(request.cards);
+    let cards = rectangles(request);
     let started = Instant::now();
     let mut over_budget = false;
     for (index, wire) in prepared.iter().enumerate() {
         let touched = request
             .moving
-            .contains(&request.cards[wire.wire.from.block].id)
+            .contains(request.block_id(wire.wire.from.block))
             || request
                 .moving
-                .contains(&request.cards[wire.wire.to.block].id);
+                .contains(request.block_id(wire.wire.to.block));
         if !touched {
             continue;
         }
@@ -382,11 +432,13 @@ mod tests {
                         continue;
                     }
                     boards += 1;
-                    let graph_wires = apiforge_core::graph::wires(graph);
+                    let chips: Vec<Chip> = Vec::new();
+                    let board_wires = super::super::board_wires(graph, &cards, &chips);
                     let mut router = Router::default();
                     let request = Request {
                         cards: &cards,
-                        wires: &graph_wires,
+                        chips: &chips,
+                        wires: &board_wires,
                         moving: &HashSet::new(),
                         style: WireStyle::Orthogonal,
                         bridges: true,
@@ -397,7 +449,7 @@ mod tests {
                         .map(|route| (route.points.clone(), route.routed))
                         .collect();
                     let prepared = prepare(&request);
-                    let rectangles = rectangles(&cards);
+                    let rectangles = rectangles(&request);
                     let wires: Vec<layout::Wire> = prepared.iter().map(|wire| wire.wire).collect();
                     let drawn: Vec<layout::Route> = first
                         .iter()

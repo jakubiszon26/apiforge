@@ -251,6 +251,8 @@ impl Redactor {
 
     fn redact_graph(&self, graph: &Graph) -> Graph {
         Graph {
+            // A proxy holds a name and a position, never a value.
+            proxies: graph.proxies.clone(),
             nodes: graph
                 .nodes
                 .iter()

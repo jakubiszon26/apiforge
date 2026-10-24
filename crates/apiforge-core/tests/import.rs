@@ -135,6 +135,48 @@ fn rejects_dangling_nested_references_and_missing_output_ports() {
     }
 }
 #[test]
+fn proxies_round_trip_and_must_stand_for_a_variable_of_their_graph() {
+    let placed = |proxies: Value| {
+        let mut value = workflow();
+        value["scenarios"][0]["graph"]["nodes"][4]["config"]["variable"] = json!(true);
+        value["scenarios"][0]["graph"]["proxies"] = proxies;
+        value
+    };
+    let value = placed(json!([
+        {"id": "proxy-body", "source": {"kind":"variable","nodeId":"flow-body"}, "position": {"x": 40.0, "y": 600.0}},
+        {"id": "proxy-env", "source": {"kind":"environment","name":"baseUrl"}, "position": {"x": 40.0, "y": 680.0}},
+        {"id": "proxy-param", "source": {"kind":"parameter","name":"quantity"}, "position": {"x": 40.0, "y": 760.0}}
+    ]));
+    let document = parse(&value).expect("placed variables are valid");
+    let actual: Value = serde_json::from_slice(&document.to_json().expect("export")).expect("JSON");
+    assert_semantic_json(&actual, &value);
+
+    // A graph without proxies writes no field at all, so documents from before
+    // proxies existed stay byte-identical.
+    let exported: Value = serde_json::from_slice(
+        &parse(&workflow())
+            .expect("fixture")
+            .to_json()
+            .expect("export"),
+    )
+    .expect("JSON");
+    assert!(exported["scenarios"][0]["graph"].get("proxies").is_none());
+
+    for broken in [
+        // Not a variable, gone, in the other graph, or placed twice.
+        json!([{"id":"p","source":{"kind":"variable","nodeId":"flow-prices"},"position":{"x":0.0,"y":0.0}}]),
+        json!([{"id":"p","source":{"kind":"variable","nodeId":"missing"},"position":{"x":0.0,"y":0.0}}]),
+        json!([{"id":"p","source":{"kind":"variable","nodeId":"cleanup-start"},"position":{"x":0.0,"y":0.0}}]),
+        json!([
+            {"id":"p","source":{"kind":"variable","nodeId":"flow-body"},"position":{"x":0.0,"y":0.0}},
+            {"id":"p","source":{"kind":"environment","name":"baseUrl"},"position":{"x":0.0,"y":0.0}}
+        ]),
+    ] {
+        let error = parse(&placed(broken)).err().expect("invalid proxy");
+        assert!(error.to_string().contains("graph"), "{error}");
+    }
+}
+#[test]
 fn validates_control_branches_start_and_mixed_cycles() {
     let mut unknown_branch = workflow();
     unknown_branch["scenarios"][0]["graph"]["edges"][4]["branch"] = json!("maybe");

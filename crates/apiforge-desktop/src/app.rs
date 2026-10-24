@@ -305,14 +305,24 @@ impl App {
         }
     }
 
-    /// Selects a node of the current board by id, handle or label (used by screenshots).
+    /// Selects a block of the current board by id, handle or label, or a proxy by
+    /// id (used by screenshots).
     pub fn select_node(&mut self, key: &str) {
-        if let Some(node) =
-            self.editor.graph().nodes.iter().find(|node| {
-                node.id == key || node.handle == key || node.label.as_deref() == Some(key)
-            })
-        {
-            self.editor.selection = vec![node.id.clone()];
+        let graph = self.editor.graph();
+        let block = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == key || node.handle == key || node.label.as_deref() == Some(key))
+            .map(|node| node.id.clone());
+        let found = block.or_else(|| {
+            graph
+                .proxies
+                .iter()
+                .find(|proxy| proxy.id == key)
+                .map(|proxy| proxy.id.clone())
+        });
+        if let Some(id) = found {
+            self.editor.selection = vec![id];
         }
     }
 
@@ -666,6 +676,24 @@ impl App {
         }
     }
 
+    /// The proxies of a graph as pinned obstacles, so that automatic placement
+    /// keeps clear of the chips the user put on the board.
+    fn chip_obstacles(&self, graph: &Graph, parameters: &[String]) -> Vec<apiforge_layout::Block> {
+        let project = self.editor.project();
+        graph
+            .proxies
+            .iter()
+            .map(|proxy| {
+                let rect = canvas::Chip::build(proxy, graph, project, parameters).rect();
+                apiforge_layout::Block::new(
+                    apiforge_layout::Size::new(rect.width(), rect.height()),
+                    apiforge_layout::Point::new(rect.min.x, rect.min.y),
+                )
+                .pinned()
+            })
+            .collect()
+    }
+
     /// Lays out the selection, or the whole board when nothing is selected.
     ///
     /// One undo step, and it clears the pins of everything it moves: after a tidy
@@ -692,6 +720,9 @@ impl App {
                 );
                 if moving(node) { block } else { block.pinned() }
             })
+            // The chips come after the blocks, so a block keeps its index and the
+            // laid-out positions still line up with the nodes.
+            .chain(self.chip_obstacles(&graph, &self.editor.parameter_names()))
             .collect();
         let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
         let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
@@ -2345,11 +2376,13 @@ impl App {
             })
         })
         .flatten();
+        let parameters = self.editor.parameter_names();
         let commands = {
             let input = canvas::Input {
                 graph: self.editor.graph(),
                 reference_graph: &reference,
                 project: self.editor.project(),
+                parameters: &parameters,
                 selection: &self.editor.selection,
                 steps: steps.as_deref(),
                 can_paste: self
@@ -2388,6 +2421,11 @@ impl App {
                         // A block placed by hand is pinned: automatic layout treats
                         // it as an obstacle until the next tidy up.
                         node.auto_placed = false;
+                    } else if let Some(proxy) =
+                        graph.proxies.iter_mut().find(|proxy| proxy.id == id)
+                    {
+                        // A proxy is always where it was put: layout never moves it.
+                        proxy.position = position;
                     }
                 }
                 self.apply_graph(graph);
@@ -2424,15 +2462,31 @@ impl App {
                 path,
                 binding,
             } => self.set_input(&node, &input, &path, binding),
-            Command::Delete { nodes, wires } => {
-                let ids: HashSet<&str> = nodes.iter().map(String::as_str).collect();
+            Command::Delete { ids, wires } => {
+                let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
                 let wire_ids: HashSet<&str> = wires.iter().map(String::as_str).collect();
-                let graph =
-                    edit::remove_connections(&delete_nodes(self.editor.graph(), &ids), &wire_ids);
+                // One selection can hold blocks and proxies; deleting a variable
+                // takes its proxies with it, which `delete_nodes` does.
+                let graph = edit::remove_proxies(
+                    &edit::remove_connections(&delete_nodes(self.editor.graph(), &ids), &wire_ids),
+                    &ids,
+                );
                 self.editor
                     .selection
                     .retain(|id| !ids.contains(id.as_str()));
                 self.apply_graph(graph);
+            }
+            Command::AddProxy { source, position } => {
+                match edit::add_proxy(self.editor.graph(), source, position) {
+                    Ok(graph) => {
+                        let placed = graph.proxies.last().map(|proxy| proxy.id.clone());
+                        self.apply_graph(graph);
+                        // Selecting it shows at once what it stands for and what
+                        // now reads it from here.
+                        self.editor.selection = placed.into_iter().collect();
+                    }
+                    Err(error) => self.canvas.set_error(error.to_string()),
+                }
             }
             Command::EditComponent(id) => self.edit_component(&id),
             Command::Connect {
@@ -2648,6 +2702,7 @@ impl App {
                     block.pinned()
                 }
             })
+            .chain(self.chip_obstacles(&graph, &self.editor.parameter_names()))
             .collect();
         let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
         let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(&graph)
@@ -3452,6 +3507,189 @@ mod tests {
     }
 
     #[test]
+    fn a_placed_variable_lives_and_dies_with_it_in_single_undo_steps() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        // Mark a Value of the demo scenario as a variable.
+        let variable = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.kind == apiforge_core::model::NodeKind::Value)
+            .expect("the demo scenario computes a value")
+            .id
+            .clone();
+        let mut node = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.id == variable)
+            .unwrap()
+            .clone();
+        node.config.variable = Some(true);
+        let mut marked = app.editor.graph().clone();
+        *marked
+            .nodes
+            .iter_mut()
+            .find(|slot| slot.id == variable)
+            .unwrap() = node;
+        app.apply_graph(marked);
+        let printed = apiforge_script::print_scenario(app.editor.project(), app.editor.scenario())
+            .expect("the scenario prints");
+
+        app.board_command(Command::AddProxy {
+            source: apiforge_core::format::ProxySource::Variable {
+                node_id: variable.clone(),
+            },
+            position: Position { x: 900.0, y: 500.0 },
+        });
+        let proxy = app.editor.graph().proxies[0].id.clone();
+        assert_eq!(app.editor.selection, vec![proxy.clone()]);
+        // Placing a variable is layout: the code does not change at all.
+        assert_eq!(
+            apiforge_script::print_scenario(app.editor.project(), app.editor.scenario()).unwrap(),
+            printed
+        );
+
+        // Moving it is remembered, and moving a proxy and a block together works.
+        app.board_command(Command::Move(vec![
+            (proxy.clone(), Position { x: 40.0, y: 60.0 }),
+            (variable.clone(), Position { x: 10.0, y: 20.0 }),
+        ]));
+        assert_eq!(
+            app.editor.graph().proxies[0].position,
+            Position { x: 40.0, y: 60.0 }
+        );
+        assert_eq!(
+            app.editor
+                .graph()
+                .nodes
+                .iter()
+                .find(|node| node.id == variable)
+                .unwrap()
+                .position,
+            Position { x: 10.0, y: 20.0 }
+        );
+
+        // Deleting the variable takes its proxy with it, as one step, and one undo
+        // brings both back together.
+        app.board_command(Command::Delete {
+            ids: vec![variable.clone()],
+            wires: vec![],
+        });
+        assert!(app.editor.graph().proxies.is_empty());
+        assert!(
+            app.editor
+                .graph()
+                .nodes
+                .iter()
+                .all(|node| node.id != variable)
+        );
+        app.editor.undo();
+        assert_eq!(app.editor.graph().proxies.len(), 1);
+        assert!(
+            app.editor
+                .graph()
+                .nodes
+                .iter()
+                .any(|node| node.id == variable)
+        );
+
+        // Clearing the variable mark says the same as deleting the block, and is
+        // also one step.
+        let mut plain = app.editor.graph().clone();
+        plain
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == variable)
+            .unwrap()
+            .config
+            .variable = None;
+        app.apply_graph(plain);
+        assert!(app.editor.graph().proxies.is_empty());
+        app.editor.undo();
+        assert_eq!(app.editor.graph().proxies.len(), 1);
+
+        // A proxy is its own thing to delete, and the variable stays.
+        app.board_command(Command::Delete {
+            ids: vec![proxy],
+            wires: vec![],
+        });
+        assert!(app.editor.graph().proxies.is_empty());
+        assert!(
+            app.editor
+                .graph()
+                .nodes
+                .iter()
+                .any(|node| node.id == variable)
+        );
+    }
+
+    #[test]
+    fn a_new_block_keeps_clear_of_a_placed_value() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let spot = Position {
+            x: 1200.0,
+            y: 700.0,
+        };
+        app.board_command(Command::AddProxy {
+            source: apiforge_core::format::ProxySource::Environment {
+                name: "baseUrl".into(),
+            },
+            position: spot.clone(),
+        });
+        app.board_command(Command::AddNode {
+            block: Block::Request,
+            component: None,
+            position: spot.clone(),
+            source: None,
+        });
+        let graph = app.editor.graph().clone();
+        let project = app.editor.project().clone();
+        let chip = canvas::Chip::build(&graph.proxies[0], &graph, &project, &[]);
+        let added = graph.nodes.last().unwrap();
+        let card = canvas::Card::build(added, &graph, &project);
+        assert!(
+            !card.rect().intersects(chip.rect()),
+            "the new block landed on a placed value"
+        );
+        assert_eq!(graph.proxies[0].position, spot, "the chip stayed put");
+    }
+
+    #[test]
+    fn only_a_whole_variable_can_be_placed_on_the_board() {
+        let context = egui::Context::default();
+        let mut app = App::new(&context, Source::Session(default_workspace()));
+        let value = app
+            .editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.kind == apiforge_core::model::NodeKind::Value)
+            .unwrap()
+            .id
+            .clone();
+        // A Value that is not marked as a variable is not listed with them.
+        app.board_command(Command::AddProxy {
+            source: apiforge_core::format::ProxySource::Variable { node_id: value },
+            position: Position { x: 0.0, y: 0.0 },
+        });
+        assert!(app.editor.graph().proxies.is_empty());
+
+        // An environment value needs no block at all.
+        app.board_command(Command::AddProxy {
+            source: apiforge_core::format::ProxySource::Environment {
+                name: "baseUrl".into(),
+            },
+            position: Position { x: 0.0, y: 0.0 },
+        });
+        assert_eq!(app.editor.graph().proxies.len(), 1);
+    }
+
+    #[test]
     fn the_wire_style_is_remembered_for_the_next_session() {
         let context = egui::Context::default();
         let mut app = App::new(&context, Source::Session(default_workspace()));
@@ -3852,10 +4090,12 @@ mod tests {
                 graph: Graph {
                     nodes: vec![],
                     edges: vec![],
+                    proxies: Vec::new(),
                 },
                 cleanup: Graph {
                     nodes: vec![],
                     edges: vec![],
+                    proxies: Vec::new(),
                 },
                 parameters: Default::default(),
                 error_policy: ErrorPolicy::Stop,

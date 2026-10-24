@@ -26,6 +26,35 @@ fn drafts() -> Drafts {
 }
 
 #[test]
+fn a_saved_workspace_keeps_the_places_a_variable_is_shown() {
+    use apiforge_core::format::{Position, Proxy, ProxySource};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let store = WorkspaceStore::open_exclusive(&path).unwrap();
+    let mut workspace = workspace();
+    let graph = &mut workspace.projects[0].scenarios[0].graph;
+    let variable = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.kind == apiforge_core::model::NodeKind::Value)
+        .expect("the fixture computes a value");
+    variable.config.variable = Some(true);
+    let node_id = variable.id.clone();
+    graph.proxies = vec![Proxy {
+        id: "proxy-one".into(),
+        source: ProxySource::Variable { node_id },
+        position: Position { x: 240.0, y: 480.0 },
+    }];
+    let expected = graph.proxies.clone();
+    store.save(&workspace).unwrap();
+    let loaded = store.load().unwrap().expect("a saved workspace loads");
+    assert_eq!(
+        loaded.workspace.projects[0].scenarios[0].graph.proxies,
+        expected
+    );
+}
+
+#[test]
 fn lock_is_shared_by_clones_and_released_after_the_last_one() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("workspace.json");

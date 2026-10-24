@@ -146,6 +146,8 @@ fn component(source: &v1::Component, handle: String) -> current::Component {
 
 fn graph(source: &v1::Graph, handles: &mut HashSet<String>) -> current::Graph {
     current::Graph {
+        // Version 1 had no proxies, so a converted document starts without any.
+        proxies: Vec::new(),
         nodes: source
             .nodes
             .iter()

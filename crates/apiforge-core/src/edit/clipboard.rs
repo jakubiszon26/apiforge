@@ -22,6 +22,8 @@ pub struct Pasted {
 /// The fragment is an owned copy: later edits of the originals do not change it.
 pub fn copy_selection(graph: &Graph, selected: &HashSet<&str>) -> Graph {
     Graph {
+        // A pasted block is a new block, which no copied proxy could point at.
+        proxies: Vec::new(),
         nodes: graph
             .nodes
             .iter()
@@ -233,6 +235,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![source],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let fragment = copy_selection(&graph, &HashSet::from([original.id.as_str()]));
         graph.nodes[0].config.revision = Some(8);
@@ -284,6 +287,7 @@ mod tests {
                 target: target.id.clone(),
                 branch: Some(Branch::False),
             }],
+            proxies: Vec::new(),
         };
         let fragment = copy_selection(
             &graph,
@@ -293,6 +297,7 @@ mod tests {
         let board = Graph {
             nodes: vec![external.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let result = paste_selection(&board, &fragment, &PASTE_OFFSET, &[]).unwrap();
         let (copied_branch, copied_target) = (&result.graph.nodes[1], &result.graph.nodes[2]);
@@ -318,6 +323,7 @@ mod tests {
         let empty = Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let error = paste_selection(&empty, &fragment, &PASTE_OFFSET, &[]).unwrap_err();
         assert!(matches!(error, EditError::PasteMissingSource));
@@ -331,6 +337,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![start.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let error = duplicate_selection(&graph, &HashSet::from([start.id.as_str()])).unwrap_err();
         assert!(matches!(error, EditError::PasteSecondStart));

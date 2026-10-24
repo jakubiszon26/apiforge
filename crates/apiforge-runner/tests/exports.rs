@@ -30,7 +30,11 @@ fn component(name: &str, nodes: Vec<Node>, edges: Vec<OrderEdge>) -> Component {
         revision: 1,
         description: String::new(),
         inputs: vec![],
-        graph: Graph { nodes, edges },
+        graph: Graph {
+            nodes,
+            edges,
+            proxies: Vec::new(),
+        },
         action: None,
     }
 }
@@ -49,6 +53,7 @@ fn project(components: Vec<Component>, nodes: Vec<Node>) -> Project {
     project.scenarios[0].graph = Graph {
         nodes,
         edges: vec![],
+        proxies: Vec::new(),
     };
     project
 }

@@ -234,7 +234,7 @@ pub fn variable_chip(ui: &mut Ui, label: &str, kind: &str, payload: Payload) -> 
         .galley(rect.min + vec2(9.0, 5.0), galley, theme::VARIABLE);
     response
         .on_hover_text(format!(
-            "{label} · {kind} — drag onto an argument or into text"
+            "{label} · {kind} — drag onto an argument, into text, or onto the board to place it there"
         ))
         .on_hover_cursor(egui::CursorIcon::Grab)
 }

@@ -224,6 +224,91 @@ fn all_frozen_project_and_run_documents_round_trip() {
 }
 
 #[test]
+fn a_code_edit_keeps_the_proxies_of_the_variables_it_keeps() {
+    let workspace = workspace();
+    let project = &workspace.projects[0];
+    let mut old = lowered(
+        "scenario \"Placed\" { var token = 1 var other = 2 }",
+        project,
+    );
+    let Document::Scenario(s) = &mut old else {
+        panic!()
+    };
+    let token = s.graph.nodes[0].id.clone();
+    let other = s.graph.nodes[1].id.clone();
+    s.graph.proxies = vec![
+        Proxy {
+            id: "proxy-token".into(),
+            source: ProxySource::Variable {
+                node_id: token.clone(),
+            },
+            position: Position { x: 40.0, y: 600.0 },
+        },
+        Proxy {
+            id: "proxy-other".into(),
+            source: ProxySource::Variable { node_id: other },
+            position: Position { x: 40.0, y: 680.0 },
+        },
+        Proxy {
+            id: "proxy-env".into(),
+            source: ProxySource::Environment {
+                name: "baseUrl".into(),
+            },
+            position: Position { x: 40.0, y: 760.0 },
+        },
+    ];
+    let old_proxies = s.graph.proxies.clone();
+
+    // Editing the text around a variable moves nothing: proxies are layout, and
+    // layout survives a code edit as positions do.
+    let same = reconcile(
+        &old,
+        &lower(
+            &parse("scenario \"Placed\" { var token = 9 var other = 2 }"),
+            &LowerContext::new(project),
+        ),
+    )
+    .unwrap();
+    let Document::Scenario(kept) = same.document else {
+        panic!()
+    };
+    assert_eq!(kept.graph.proxies, old_proxies);
+
+    // Removing a variable, or only its mark, takes its proxies with it, and the
+    // document the editor applies is already without them.
+    for (source, left) in [
+        (
+            "scenario \"Placed\" { var token = 1 }",
+            vec!["proxy-token", "proxy-env"],
+        ),
+        (
+            "scenario \"Placed\" { token = 1 var other = 2 }",
+            vec!["proxy-other", "proxy-env"],
+        ),
+    ] {
+        let result = reconcile(&old, &lower(&parse(source), &LowerContext::new(project))).unwrap();
+        let Document::Scenario(pruned) = result.document else {
+            panic!()
+        };
+        let ids: Vec<&str> = pruned
+            .graph
+            .proxies
+            .iter()
+            .map(|proxy| proxy.id.as_str())
+            .collect();
+        assert_eq!(ids, left, "{source}");
+    }
+
+    // Two documents that differ only in their proxies are the same document.
+    let mut without = old.clone();
+    let Document::Scenario(s) = &mut without else {
+        panic!()
+    };
+    s.graph.proxies.clear();
+    assert_eq!(semantic(&old, project), semantic(&without, project));
+}
+
+#[test]
 fn ambiguous_renames_kind_changes_swaps_and_insertions_do_not_exchange_identity() {
     let workspace = workspace();
     let project = &workspace.projects[0];

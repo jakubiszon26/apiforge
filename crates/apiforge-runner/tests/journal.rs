@@ -454,10 +454,12 @@ async fn a_run_without_requests_is_still_opened_and_closed() {
     target.graph = Graph {
         nodes: vec![],
         edges: vec![],
+        proxies: Vec::new(),
     };
     target.cleanup = Graph {
         nodes: vec![],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let journal = Recorder::shared();
     let report = run_scenario(

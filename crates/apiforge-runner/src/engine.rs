@@ -1363,6 +1363,7 @@ mod tests {
         scenario.cleanup = Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let scenario_id = scenario.id.clone();
         let result = run_scenario(
@@ -1396,6 +1397,7 @@ mod tests {
         scenario.graph = Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         };
         scenario.cleanup = Graph {
             nodes: vec![
@@ -1406,6 +1408,7 @@ mod tests {
                 .unwrap(),
             ],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let scenario_id = scenario.id.clone();
         let request = RunRequest::new(

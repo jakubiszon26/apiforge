@@ -88,8 +88,8 @@ A summary of [ADR 0004](decisions/0004-document-format-v2.md):
 - **Notes.** `node.note: Option<String>` carries comments from code.
 - **Layout.** `node.position` is required so every document can be drawn.
   `node.autoPlaced` marks blocks that automatic layout may move; moving one by hand
-  clears the flag. Proxies will live in `graph.proxies` from M3.
-  Layout never appears in code.
+  clears the flag. Proxies live in `graph.proxies`, which is written only when a
+  graph has any. Layout never appears in code.
 - **Requests.** URL, headers and query become bindings (templates and objects),
   replacing `templateInputs`, `inputPorts` and `/:name` path parameters. Values
   interpolated into a URL are percent-encoded.
@@ -251,10 +251,11 @@ Settings: wire style (orthogonal / spline), bridges (on / off).
 
 - The *Variables* panel lists variables (Value blocks marked `var`), parameters and
   environment variables. Dragging one onto the board creates a proxy chip, which is
-  stored in `graph.proxies`.
+  stored in `graph.proxies`; dropping it on an argument still binds it there.
 - A consumer's wire comes from the nearest proxy of that variable, or from the
   block itself when it is nearer. Proxies are layout only: the binding is unchanged,
-  and code shows the plain reference.
+  and code shows the plain reference. A parameter or environment value has no block
+  on the board, so it is drawn only where it has been placed.
 - Dropping a proxy's output onto a field binds the variable, exactly as dragging
   from the block does.
 - Clicking a proxy highlights its source and all uses; a button jumps to the source.
@@ -295,7 +296,8 @@ path works end to end.
 | M2 | Complete: `apiforge-layout`, *Tidy up*, pinning, routed wires with bridges and spline mode, wire settings, benchmarks |
 | M5 | Complete: completion engine with hover and go-to-definition, the `CodeEditor` widget, request bodies in both modes, completion in the URL, header and query fields |
 | M6 | Complete: the code panel, buffers and drafts ([ADR 0007](decisions/0007-code-editing-state.md)), both sync directions, selection sync, `apiforge run` |
-| M3, M7 | Planned |
+| M3 | Complete: the variable mark, proxies in the document and on the board, nearest-proxy wiring, navigation from a proxy to its variable |
+| M7 | Planned |
 
 Two pieces of M5 remain open and are listed with M7: going to a block's
 definition (Ctrl+click, F12) and renaming one (F2) from the code panel. The

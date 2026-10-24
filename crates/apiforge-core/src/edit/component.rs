@@ -658,6 +658,9 @@ pub fn materialize_component(
             .collect(),
         graph: Graph {
             nodes,
+            // The component's board starts without proxies: its inputs are not the
+            // scenario's parameters, and its variables are placed afresh.
+            proxies: Vec::new(),
             edges: graph
                 .edges
                 .iter()

@@ -56,6 +56,7 @@ fn project(graph: Graph, components: Vec<Component>) -> Project {
             cleanup: Graph {
                 nodes: vec![],
                 edges: vec![],
+                proxies: Vec::new(),
             },
             parameters: IndexMap::new(),
             error_policy: ErrorPolicy::Continue,
@@ -115,6 +116,7 @@ fn saving_a_revision_uses_exports_edited_on_the_board_and_keeps_their_identity()
             Graph {
                 nodes: vec![plain_request("read")],
                 edges: vec![],
+                proxies: Vec::new(),
             },
         ),
         vec![output(
@@ -143,6 +145,7 @@ fn saving_a_revision_uses_exports_edited_on_the_board_and_keeps_their_identity()
         Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         },
         vec![initial.clone()],
     );
@@ -172,6 +175,7 @@ fn deleted_or_disabled_exports_are_not_resurrected_and_leave_no_dangling_edges()
             Graph {
                 nodes: vec![plain_request("read")],
                 edges: vec![],
+                proxies: Vec::new(),
             },
         ),
         vec![
@@ -191,6 +195,7 @@ fn deleted_or_disabled_exports_are_not_resurrected_and_leave_no_dangling_edges()
         Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         },
         vec![initial.clone()],
     );
@@ -242,6 +247,7 @@ fn export_ordering_branches_and_explicit_public_arguments_survive_revision() {
         Graph {
             nodes: vec![branch, yes],
             edges: vec![order],
+            proxies: Vec::new(),
         },
     );
     let graph = &initial.graph;
@@ -250,6 +256,7 @@ fn export_ordering_branches_and_explicit_public_arguments_survive_revision() {
         Graph {
             nodes: vec![],
             edges: vec![],
+            proxies: Vec::new(),
         },
         vec![initial.clone()],
     );
@@ -325,6 +332,7 @@ fn extraction_maps_external_arguments_and_keeps_internal_dependencies() {
             edge("order", "get", "select"),
             edge("outside-order", "select", "outside"),
         ],
+        proxies: Vec::new(),
     };
     let before = graph.clone();
     let ids = HashSet::from(["get", "select"]);
@@ -367,6 +375,7 @@ fn one_parameter_feeds_several_blocks_and_null_defaults_survive_revision() {
             request("two", &[("id", parameter.clone())]),
         ],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let mut public = Port::new("recordId", ValueType::Any)
         .labelled("Record identifier")
@@ -427,6 +436,7 @@ fn a_direct_parameter_output_follows_the_argument_rename() {
     let graph = Graph {
         nodes: vec![plain_request("request")],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let mut context = Port::new("context", ValueType::Object).required(false);
     context.default_value = OptionalJson::Present(json!({"source": "manual"}));
@@ -477,6 +487,7 @@ fn duplicate_names_and_disabled_boundary_arguments_are_rejected() {
     let graph = Graph {
         nodes: vec![plain_request("one"), plain_request("two")],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let ids = HashSet::from(["one", "two"]);
     let p = project(graph.clone(), vec![]);
@@ -505,6 +516,7 @@ fn duplicate_names_and_disabled_boundary_arguments_are_rejected() {
             ),
         ],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let ids = HashSet::from(["target"]);
     let p = project(boundary.clone(), vec![]);
@@ -523,6 +535,7 @@ fn every_draft_problem_is_reported() {
     let graph = Graph {
         nodes: vec![plain_request("one")],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let none = HashSet::new();
     let p = project(graph.clone(), vec![]);
@@ -557,6 +570,7 @@ fn the_action_input_and_contracts_are_saved() {
     let graph = Graph {
         nodes: vec![plain_request("one")],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let ids = HashSet::from(["one"]);
     let p = project(graph.clone(), vec![]);
@@ -592,6 +606,7 @@ fn existing_output_aliases_keep_literal_environment_and_nested_bindings() {
     let graph = Graph {
         nodes: vec![plain_request("read")],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let initial = with_outputs(
         Component {
@@ -634,6 +649,7 @@ fn project_validation_rejects_a_recursive_definition() {
     let graph = Graph {
         nodes: vec![nested],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let initial = with_outputs(
         Component {
@@ -648,6 +664,7 @@ fn project_validation_rejects_a_recursive_definition() {
     let empty = Graph {
         nodes: vec![],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let p = project(empty, vec![initial.clone()]);
     let graph = initial.graph.clone();
@@ -722,6 +739,7 @@ fn extraction_maps_expression_leaves_and_keeps_the_operator_tree() {
     project.scenarios[0].graph = Graph {
         nodes: vec![graph.nodes[0].clone(), instance],
         edges: vec![],
+        proxies: Vec::new(),
     };
     crate::validate_project(&project).unwrap();
 }
@@ -749,6 +767,7 @@ fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
     let graph = Graph {
         nodes: vec![source.clone(), calculation.clone()],
         edges: vec![],
+        proxies: Vec::new(),
     };
     let ids = HashSet::from([calculation.id.as_str()]);
     let rows = initialize_inputs(&graph, &ids, &project, None);
@@ -777,6 +796,7 @@ fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
     project.scenarios[0].graph = Graph {
         nodes: vec![source, instance],
         edges: vec![],
+        proxies: Vec::new(),
     };
     crate::validate_project(&project).unwrap();
 }

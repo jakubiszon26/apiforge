@@ -2,7 +2,7 @@
 
 use super::{
     Camera,
-    layout::{Card, RowValue, WIDTH},
+    layout::{CHIP_HEIGHT, Card, Chip, RowValue, WIDTH},
     routing::Routed,
 };
 use crate::{icons::Icon, theme, widgets::paint_label as label};
@@ -344,6 +344,8 @@ pub fn card(
     card: &Card,
     camera: Camera,
     selected: bool,
+    // Part of what a selected proxy stands for, or reads it.
+    related: bool,
     step: Option<&StepResult>,
 ) {
     use super::layout::{CARD_PADDING, CardDetail};
@@ -363,13 +365,15 @@ pub fn card(
     painter.rect_filled(rect, radius, theme::WHITE);
     let border_color = if selected {
         theme::ACCENT
+    } else if related {
+        theme::VARIABLE
     } else {
         theme::BORDER
     };
     painter.rect_stroke(
         rect,
         radius,
-        Stroke::new(if selected { 1.7 } else { 1.0 }, border_color),
+        Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
@@ -606,6 +610,71 @@ pub fn card(
     }
 }
 
+/// A proxy chip: the name of the value, and the socket its wires leave from.
+///
+/// A chip is deliberately not a card. It holds no arguments and no settings — it
+/// is the same value shown in another place — so it stays a pill with one name.
+pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
+    let z = camera.zoom;
+    let rect = camera.rect(chip.rect());
+    let radius = (CHIP_HEIGHT / 2.0 * z).max(2.0);
+    let color = if chip.known {
+        theme::VARIABLE
+    } else {
+        theme::MUTED
+    };
+    painter.rect_filled(
+        rect.translate(vec2(0.0, 1.5 * z)),
+        radius,
+        Color32::from_black_alpha(8),
+    );
+    painter.rect(
+        rect,
+        radius,
+        color.gamma_multiply(if selected { 0.22 } else { 0.12 }),
+        Stroke::new(
+            if selected { 1.7 } else { 1.0 },
+            if selected {
+                theme::ACCENT
+            } else {
+                color.gamma_multiply(0.45)
+            },
+        ),
+        StrokeKind::Inside,
+    );
+    let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
+    let local = |x: f32, y: f32| camera.to_screen(chip.origin + vec2(x, y));
+    let icon = Rect::from_min_size(local(8.0, 9.0), Vec2::splat(18.0 * z));
+    Icon::Variable.paint(&clipped, icon, color);
+    let follows = chip.source_node().is_some();
+    label(
+        &clipped,
+        Rect::from_min_max(
+            local(30.0, 2.0),
+            local(
+                chip.width() - if follows { 32.0 } else { 12.0 },
+                CHIP_HEIGHT - 2.0,
+            ),
+        ),
+        &chip.label,
+        FontId::new((13.0 * z).max(6.0), theme::bold_family()),
+        if chip.known {
+            theme::TEXT
+        } else {
+            theme::MUTED
+        },
+        egui::Align::Min,
+    );
+    if follows && super::layout::CardDetail::at_zoom(z) == super::layout::CardDetail::Full {
+        Icon::ExternalLink.paint(
+            &clipped,
+            camera.rect(chip.follow_button()).shrink(4.0 * z),
+            theme::MUTED,
+        );
+    }
+    socket(painter, camera.to_screen(chip.output_anchor()), false, z);
+}
+
 /// Data sockets are round, control sockets square, so they differ beyond colour.
 fn socket(painter: &Painter, center: Pos2, control: bool, zoom: f32) {
     let radius = (4.5 * zoom).max(1.25);
@@ -680,12 +749,12 @@ pub fn minimap(
     painter: &Painter,
     minimap_rect: Option<Rect>,
     board_rect: Rect,
-    cards: &[Card],
+    shapes: super::Shapes<'_>,
     camera: Camera,
     selection: &HashSet<&str>,
 ) -> Option<(Rect, Rect, f32)> {
     let rect = minimap_rect?;
-    let bounds = cards.iter().map(Card::rect).reduce(Rect::union)?;
+    let bounds = shapes.bounds()?;
     painter.rect(
         rect,
         7.0,
@@ -697,7 +766,7 @@ pub fn minimap(
     let scale =
         (inner.width() / bounds.width().max(1.0)).min(inner.height() / bounds.height().max(1.0));
     let map = |point: Pos2| inner.min + (point - bounds.min) * scale;
-    for card in cards {
+    for card in shapes.cards {
         let fill = if selection.contains(card.id.as_str()) {
             theme::ACCENT
         } else {
@@ -705,6 +774,18 @@ pub fn minimap(
         };
         painter.rect_filled(
             Rect::from_min_max(map(card.rect().min), map(card.rect().max)),
+            1.0,
+            fill,
+        );
+    }
+    for chip in shapes.chips {
+        let fill = if selection.contains(chip.id()) {
+            theme::ACCENT
+        } else {
+            theme::VARIABLE.gamma_multiply(0.6)
+        };
+        painter.rect_filled(
+            Rect::from_min_max(map(chip.rect().min), map(chip.rect().max)),
             1.0,
             fill,
         );
@@ -758,7 +839,7 @@ mod tests {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1200.0))),
                         ..Default::default()
                     },
-                    |ui| super::card(ui.painter(), &card, camera, true, None),
+                    |ui| super::card(ui.painter(), &card, camera, true, false, None),
                 );
                 let mut labels = 0;
                 for shape in &output.shapes {

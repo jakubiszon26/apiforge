@@ -11,6 +11,7 @@ mod connect;
 mod fold;
 mod inspect;
 mod nodes;
+mod proxies;
 mod storage;
 
 pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
@@ -25,6 +26,9 @@ pub use inspect::{
 };
 pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
+};
+pub use proxies::{
+    add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,
 };
 pub use storage::{migrate_demo_address, public_project};
 
@@ -66,6 +70,8 @@ pub enum EditError {
     VariableNameRequired,
     #[error("Choose an existing variable.")]
     VariableNotFound,
+    #[error("Only a value marked as a variable can be placed on the board.")]
+    NotAVariable,
     #[error(
         "This assignment creates a cycle: a request cannot use a variable taken from its own response."
     )]

@@ -9,14 +9,16 @@ mod menu;
 mod paint;
 mod routing;
 
-pub use layout::{Card, parse_inline};
+pub use layout::{Card, Chip, parse_inline};
 pub use routing::WireStyle;
 
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
+    binding::data_edge_id,
     block::Block,
-    format::{Binding, Graph, Position, Project},
+    edit::proxy_binding,
+    format::{Binding, Graph, Position, Project, ProxySource},
     graph::{ORDER_PORT, WireKind, wires},
     model::{Branch, NodeKind},
     operator::Operator,
@@ -73,8 +75,14 @@ pub enum Command {
         binding: Binding,
     },
     Delete {
-        nodes: Vec<String>,
+        /// Blocks and proxies, by identifier.
+        ids: Vec<String>,
         wires: Vec<String>,
+    },
+    /// Show a variable, parameter or environment value in another place.
+    AddProxy {
+        source: ProxySource,
+        position: Position,
     },
     EditComponent(String),
     SaveSelectionAsComponent,
@@ -94,11 +102,20 @@ pub struct Input<'a> {
     /// Nodes that bindings may reference (main graph nodes on the cleanup board).
     pub reference_graph: &'a Graph,
     pub project: &'a Project,
+    /// Parameters of the scenario, or arguments of the component being edited.
+    pub parameters: &'a [String],
     pub selection: &'a [String],
     pub steps: Option<&'a [StepResult]>,
     pub can_paste: bool,
     /// Changing context resets the camera and transient state.
     pub context: &'a str,
+}
+
+/// Everything the board draws: the blocks' cards and the proxies' chips.
+#[derive(Clone, Copy)]
+struct Shapes<'a> {
+    cards: &'a [Card],
+    chips: &'a [Chip],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -123,16 +140,22 @@ impl Camera {
 
 #[derive(Clone, Debug)]
 enum Drag {
-    /// Moving the selected cards; `offset` is in world units.
+    /// Moving the selected cards and proxies; `offset` is in world units.
     Nodes { ids: Vec<String>, offset: Vec2 },
-    /// Drawing a wire from an output.
-    Wire {
-        source: String,
-        port: String,
-        from: Pos2,
-    },
+    /// Drawing a wire from an output or a proxy.
+    Wire { start: WireStart, from: Pos2 },
     /// Rubber-band selection from a screen position.
     Select { from: Pos2, additive: bool },
+}
+
+/// What a dragged wire comes from.
+#[derive(Clone, Debug)]
+enum WireStart {
+    /// An output of a block: dropping it on an input connects the two.
+    Output { node: String, port: String },
+    /// A proxy: dropping it on an input binds the value it stands for, exactly as
+    /// dragging the variable out of the panel does.
+    Proxy { binding: Binding },
 }
 
 #[derive(Clone, Debug)]
@@ -250,15 +273,21 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
+        let mut chips: Vec<Chip> = input
+            .graph
+            .proxies
+            .iter()
+            .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
+            .collect();
 
         let focus_changed = self
             .last_focus
             .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);
         if self.fit_pending || self.last_size == Vec2::ZERO {
-            self.fit(viewport, overlays.focus, &cards);
+            self.fit(viewport, overlays.focus, shapes(&cards, &chips));
         } else if focus_changed {
             if !self.camera_moved_by_user {
-                self.fit(viewport, overlays.focus, &cards);
+                self.fit(viewport, overlays.focus, shapes(&cards, &chips));
             } else if let Some(prev) = self.last_focus {
                 let delta = (overlays.focus.center() - viewport.min)
                     - (prev.center() - self.last_viewport.min);
@@ -317,24 +346,30 @@ impl Canvas {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
                 *card = card.translated(*offset);
             }
+            for chip in chips.iter_mut().filter(|chip| ids.contains(&chip.proxy.id)) {
+                *chip = chip.translated(*offset);
+            }
         }
 
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);
 
-        // Wires go under the cards. They are routed around the cards, so what is
-        // drawn is also what hit testing uses.
-        let graph_wires = wires(input.graph);
+        // Wires go under the cards. They are routed around the cards and chips, so
+        // what is drawn is also what hit testing uses.
+        let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
+        let board_wires = board_wires(input.graph, &cards, &chips);
+        let (related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         let moving: HashSet<String> = match &self.drag {
             Some(Drag::Nodes { ids, .. }) => ids.iter().cloned().collect(),
             _ => HashSet::new(),
         };
         let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
-        let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(graph_wires.len());
+        let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(board_wires.len());
         {
             let routed = self.router.routes(&routing::Request {
                 cards: &cards,
-                wires: &graph_wires,
+                chips: &chips,
+                wires: &board_wires,
                 moving: &moving,
                 style: self.wire_style,
                 bridges: self.bridges,
@@ -344,13 +379,12 @@ impl Canvas {
                     &board_painter,
                     wire,
                     camera,
-                    selected_wires.contains(&wire.id),
+                    selected_wires.contains(&wire.id) || related_wires.contains(&wire.id),
                 );
                 drawn.push((wire.id.clone(), wire.points.clone()));
             }
         }
 
-        let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let pointer = ui.input(|state| state.pointer.interact_pos());
         let modifiers = ui.input(|state| state.modifiers);
         let mut clicked_card = false;
@@ -425,22 +459,7 @@ impl Canvas {
                 && let Some(Drag::Nodes { ids, offset }) = self.drag.take()
                 && offset.length() > 0.0
             {
-                let moved = input
-                    .graph
-                    .nodes
-                    .iter()
-                    .filter(|node| ids.contains(&node.id))
-                    .map(|node| {
-                        (
-                            node.id.clone(),
-                            Position {
-                                x: (node.position.x + f64::from(offset.x)).round(),
-                                y: (node.position.y + f64::from(offset.y)).round(),
-                            },
-                        )
-                    })
-                    .collect();
-                commands.push(Command::Move(moved));
+                commands.push(Command::Move(moved_positions(input.graph, &ids, offset)));
             }
 
             let step = input
@@ -451,13 +470,86 @@ impl Canvas {
                 card,
                 camera,
                 selection.contains(card.id.as_str()),
+                related_blocks.contains(&card.id),
                 step,
             );
             self.card_controls(&mut board_ui, card, camera, input, &mut commands);
         }
 
+        for chip in &chips {
+            let rect = camera.rect(chip.rect());
+            if !rect.intersects(overlays.board) {
+                continue;
+            }
+            let id = board_ui.id().with(("chip", chip.id()));
+            let response = board_ui
+                .interact(rect.intersect(overlays.board), id, Sense::click_and_drag())
+                .on_hover_text(format!(
+                    "{} · {}{}",
+                    chip.label,
+                    chip.caption,
+                    if chip.known {
+                        ""
+                    } else {
+                        " — nothing of this name is on the board any more"
+                    }
+                ));
+            let a11y_label = format!("{} ({} proxy)", chip.label, chip.caption);
+            response.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+            });
+            if response.clicked() {
+                clicked_card = true;
+                self.menu = None;
+                self.selected_wires.clear();
+                commands.push(Command::Select(toggle_selection(
+                    input.selection,
+                    chip.id(),
+                    modifiers,
+                )));
+            }
+            if response.double_clicked()
+                && let Some(node) = chip.source_node()
+            {
+                self.reveal(node.to_owned());
+                commands.push(Command::Select(vec![node.to_owned()]));
+            }
+            if response.drag_started_by(PointerButton::Primary) {
+                let ids = if selection.contains(chip.id()) {
+                    input.selection.to_vec()
+                } else {
+                    commands.push(Command::Select(vec![chip.id().to_owned()]));
+                    vec![chip.id().to_owned()]
+                };
+                self.drag = Some(Drag::Nodes {
+                    ids,
+                    offset: Vec2::ZERO,
+                });
+            }
+            if response.dragged_by(PointerButton::Primary)
+                && let Some(Drag::Nodes { offset, .. }) = &mut self.drag
+            {
+                *offset += response.drag_delta() / camera.zoom;
+            }
+            if response.drag_stopped()
+                && let Some(Drag::Nodes { ids, offset }) = self.drag.take()
+                && offset.length() > 0.0
+            {
+                commands.push(Command::Move(moved_positions(input.graph, &ids, offset)));
+            }
+            paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
+            self.chip_controls(&mut board_ui, chip, camera, &mut commands);
+        }
+
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
-        self.handle_box_selection(&board_ui, &background, &cards, camera, input, &mut commands);
+        self.handle_box_selection(
+            &board_ui,
+            &background,
+            shapes(&cards, &chips),
+            camera,
+            input,
+            &mut commands,
+        );
 
         if background.clicked() && !clicked_card {
             self.menu = None;
@@ -486,7 +578,14 @@ impl Canvas {
             self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
         }
 
-        self.handle_drop(&board_ui, overlays.board, &cards, camera, &mut commands);
+        self.handle_drop(
+            &board_ui,
+            overlays.board,
+            &cards,
+            camera,
+            input,
+            &mut commands,
+        );
         self.handle_keys(ui, input, &mut commands);
 
         paint::overlay_chrome(&painter, &overlays, input.graph);
@@ -497,12 +596,12 @@ impl Canvas {
         )
         .on_hover_text(paint::mode_line_text(input.graph));
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
-        self.zoom_controls(ui, viewport, &overlays, &cards);
+        self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips));
         if let Some((mm_inner, bounds, scale)) = paint::minimap(
             &painter,
             overlays.minimap,
             overlays.board,
-            &cards,
+            shapes(&cards, &chips),
             camera,
             &selection,
         ) && let Some(mm_rect) = overlays.minimap
@@ -525,7 +624,7 @@ impl Canvas {
                 self.camera_moved_by_user = true;
             }
         }
-        if input.graph.nodes.is_empty() {
+        if input.graph.nodes.is_empty() && input.graph.proxies.is_empty() {
             self.empty_state(ui, overlays.board, &mut commands);
         }
         self.error_banner(ui, &overlays);
@@ -578,11 +677,11 @@ impl Canvas {
         }
     }
 
-    fn fit(&mut self, viewport: Rect, focus: Rect, cards: &[Card]) {
+    fn fit(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
         self.fit_pending = false;
         self.camera_moved_by_user = false;
         let local_focus_center = focus.center() - viewport.min;
-        let Some(bounds) = cards.iter().map(Card::rect).reduce(Rect::union) else {
+        let Some(bounds) = shapes.bounds() else {
             self.camera = Camera {
                 zoom: 1.0,
                 pan: vec2(60.0, 60.0),
@@ -667,8 +766,10 @@ impl Canvas {
                 .on_hover_cursor(egui::CursorIcon::Crosshair);
             if response.drag_started() {
                 self.drag = Some(Drag::Wire {
-                    source: card.id.clone(),
-                    port: port.clone(),
+                    start: WireStart::Output {
+                        node: card.id.clone(),
+                        port: port.clone(),
+                    },
                     from: center,
                 });
             }
@@ -829,6 +930,50 @@ impl Canvas {
         }
     }
 
+    /// The socket a proxy's wires leave from, and the button to its variable.
+    fn chip_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        chip: &Chip,
+        camera: Camera,
+        commands: &mut Vec<Command>,
+    ) {
+        if chip.source_node().is_some()
+            && layout::CardDetail::at_zoom(camera.zoom) == layout::CardDetail::Full
+        {
+            let rect = camera.rect(chip.follow_button());
+            if ui
+                .interact(rect, ui.id().with(("follow", chip.id())), Sense::click())
+                .on_hover_text("Go to the variable this stands for")
+                .clicked()
+                && let Some(node) = chip.source_node()
+            {
+                self.reveal(node.to_owned());
+                commands.push(Command::Select(vec![node.to_owned()]));
+            }
+        }
+        let center = camera.to_screen(chip.output_anchor());
+        let rect = Rect::from_center_size(
+            center,
+            Vec2::splat((SOCKET_HIT * camera.zoom).max(3.0) * 2.0),
+        );
+        let response = ui
+            .interact(
+                rect,
+                ui.id().with(("chip-socket", chip.id())),
+                Sense::drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Crosshair);
+        if response.drag_started() {
+            self.drag = Some(Drag::Wire {
+                start: WireStart::Proxy {
+                    binding: proxy_binding(&chip.proxy.source),
+                },
+                from: center,
+            });
+        }
+    }
+
     fn handle_wire_drag(
         &mut self,
         ui: &egui::Ui,
@@ -837,8 +982,13 @@ impl Canvas {
         input: &Input<'_>,
         commands: &mut Vec<Command>,
     ) {
-        let Some(Drag::Wire { source, port, from }) = &self.drag else {
+        let Some(Drag::Wire { start, from }) = &self.drag else {
             return;
+        };
+        let (source, port) = match start {
+            WireStart::Output { node, port } => (Some(node.clone()), port.clone()),
+            // A proxy carries a value, not an output: it fits any argument.
+            WireStart::Proxy { .. } => (None, String::new()),
         };
         let (pointer, released) =
             ui.input(|state| (state.pointer.interact_pos(), state.pointer.any_released()));
@@ -848,7 +998,7 @@ impl Canvas {
         let control = port.starts_with("__");
         let target = cards
             .iter()
-            .filter(|card| &card.id != source)
+            .filter(|card| Some(&card.id) != source.as_ref())
             .flat_map(|card| {
                 let slots: Vec<(String, Vec<String>, Pos2)> = if control {
                     card.input_anchor(ORDER_PORT, &[])
@@ -878,39 +1028,54 @@ impl Canvas {
             *from,
             end,
             control,
-            branch_of(port),
+            branch_of(&port),
             true,
             camera.zoom,
         );
 
         if released {
-            let (source, port) = (source.clone(), port.clone());
+            let binding = match start {
+                WireStart::Proxy { binding } => Some(binding.clone()),
+                WireStart::Output { .. } => None,
+            };
             self.drag = None;
-            match target {
-                Some((target, input_name, path, _)) => commands.push(Command::Connect {
-                    source,
+            match (target, binding) {
+                // A proxy binds the value it stands for, as dragging the variable
+                // out of the panel does.
+                (Some((target, input_name, path, _)), Some(binding)) => {
+                    commands.push(Command::Bind {
+                        node: target,
+                        input: input_name,
+                        path,
+                        binding,
+                    });
+                }
+                (Some((target, input_name, path, _)), None) => commands.push(Command::Connect {
+                    source: source.unwrap_or_default(),
                     source_port: port,
                     target,
                     target_input: input_name,
                     target_path: path,
                 }),
-                None if cards
-                    .iter()
-                    .any(|card| camera.rect(card.rect()).contains(pointer)) =>
-                {
-                    self.error = Some(if control {
-                        "Drop the wire on the top input of the next step.".into()
+                (None, binding) => {
+                    if binding.is_some()
+                        || cards
+                            .iter()
+                            .any(|card| camera.rect(card.rect()).contains(pointer))
+                    {
+                        self.error = Some(if control {
+                            "Drop the wire on the top input of the next step.".into()
+                        } else {
+                            "Drop the wire on an input port.".into()
+                        });
                     } else {
-                        "Drop the wire on an input port.".into()
-                    });
-                }
-                None => {
-                    self.menu = Some(ActionMenu::new(
-                        pointer,
-                        camera.to_world(pointer),
-                        Some((source, port)),
-                    ));
-                    let _ = input;
+                        self.menu = Some(ActionMenu::new(
+                            pointer,
+                            camera.to_world(pointer),
+                            source.map(|source| (source, port)),
+                        ));
+                        let _ = input;
+                    }
                 }
             }
         }
@@ -920,7 +1085,7 @@ impl Canvas {
         &mut self,
         ui: &egui::Ui,
         background: &egui::Response,
-        cards: &[Card],
+        shapes: Shapes<'_>,
         camera: Camera,
         input: &Input<'_>,
         commands: &mut Vec<Command>,
@@ -953,9 +1118,15 @@ impl Canvas {
             } else {
                 vec![]
             };
-            for card in cards {
+            for card in shapes.cards {
                 if camera.rect(card.rect()).intersects(area) && !selected.contains(&card.id) {
                     selected.push(card.id.clone());
+                }
+            }
+            for chip in shapes.chips {
+                let id = chip.id().to_owned();
+                if camera.rect(chip.rect()).intersects(area) && !selected.contains(&id) {
+                    selected.push(id);
                 }
             }
             self.drag = None;
@@ -970,6 +1141,7 @@ impl Canvas {
         viewport: Rect,
         cards: &[Card],
         camera: Camera,
+        input: &Input<'_>,
         commands: &mut Vec<Command>,
     ) {
         let (pointer, released) =
@@ -1028,13 +1200,29 @@ impl Canvas {
                 position,
             }),
             Payload::Variable { binding, .. } => match row_under(cards) {
-                Some((node, input, path, _)) => commands.push(Command::Bind {
+                Some((node, target_input, path, _)) => commands.push(Command::Bind {
                     node,
-                    input,
+                    input: target_input,
                     path,
                     binding: binding.clone(),
                 }),
-                None => self.error = Some("Drop a variable on an argument of a step.".into()),
+                // Dropped on a card but beside its arguments, it was aimed at one
+                // of them.
+                None if cards
+                    .iter()
+                    .any(|card| camera.rect(card.rect()).contains(pointer)) =>
+                {
+                    self.error = Some("Drop a variable on an argument of a step.".into());
+                }
+                // Dropped beside the steps, the value is placed there instead, so
+                // that its consumers can take it from nearby.
+                None => match placeable(binding, input.graph) {
+                    Some(source) => commands.push(Command::AddProxy { source, position }),
+                    None => {
+                        self.error =
+                            Some("Only a whole variable, parameter or environment value can be placed on the board. Drop this on an argument of a step.".into());
+                    }
+                },
             },
         }
     }
@@ -1062,7 +1250,7 @@ impl Canvas {
             ui.input(|state| state.key_pressed(Key::Delete) || state.key_pressed(Key::Backspace));
         if delete && (!input.selection.is_empty() || !self.selected_wires.is_empty()) {
             commands.push(Command::Delete {
-                nodes: input.selection.to_vec(),
+                ids: input.selection.to_vec(),
                 wires: std::mem::take(&mut self.selected_wires),
             });
         }
@@ -1212,7 +1400,7 @@ impl Canvas {
                                             .clicked()
                                         {
                                             commands.push(Command::Delete {
-                                                nodes: input.selection.to_vec(),
+                                                ids: input.selection.to_vec(),
                                                 wires: std::mem::take(&mut self.selected_wires),
                                             });
                                             ui.close();
@@ -1248,7 +1436,7 @@ impl Canvas {
         ui: &mut egui::Ui,
         viewport: Rect,
         overlays: &BoardOverlays,
-        cards: &[Card],
+        shapes: Shapes<'_>,
     ) {
         egui::Area::new(ui.id().with("board-zoom"))
             .fixed_pos(overlays.zoom_controls.left_center())
@@ -1294,7 +1482,7 @@ impl Canvas {
                                 .add(widgets::icon_button(Icon::Fit, "Fit the view").compact())
                                 .clicked()
                             {
-                                self.fit(viewport, overlays.focus, cards);
+                                self.fit(viewport, overlays.focus, shapes);
                             }
                         });
                     });
@@ -1380,6 +1568,187 @@ impl Canvas {
     }
 }
 
+impl Shapes<'_> {
+    /// Everything the board draws, as one rectangle.
+    fn bounds(self) -> Option<Rect> {
+        self.cards
+            .iter()
+            .map(Card::rect)
+            .chain(self.chips.iter().map(Chip::rect))
+            .reduce(Rect::union)
+    }
+}
+
+fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip]) -> Shapes<'a> {
+    Shapes { cards, chips }
+}
+
+/// The positions a drag leaves behind, for the blocks and proxies it moved.
+fn moved_positions(graph: &Graph, ids: &[String], offset: Vec2) -> Vec<(String, Position)> {
+    let moved = |position: &Position| Position {
+        x: (position.x + f64::from(offset.x)).round(),
+        y: (position.y + f64::from(offset.y)).round(),
+    };
+    graph
+        .nodes
+        .iter()
+        .filter(|node| ids.contains(&node.id))
+        .map(|node| (node.id.clone(), moved(&node.position)))
+        .chain(
+            graph
+                .proxies
+                .iter()
+                .filter(|proxy| ids.contains(&proxy.id))
+                .map(|proxy| (proxy.id.clone(), moved(&proxy.position))),
+        )
+        .collect()
+}
+
+/// What a dragged value can be placed as, or `None` for something no proxy stands
+/// for: a field of a response, or a value that is not a variable.
+fn placeable(binding: &Binding, graph: &Graph) -> Option<ProxySource> {
+    let source = apiforge_core::edit::proxy_source(binding)?;
+    match &source {
+        ProxySource::Variable { node_id } => graph
+            .nodes
+            .iter()
+            .any(|node| &node.id == node_id && node.is_variable())
+            .then_some(source),
+        ProxySource::Parameter { .. } | ProxySource::Environment { .. } => Some(source),
+    }
+}
+
+/// Whether a binding reads what a proxy stands for, a field of it included.
+fn reads_source(source: &ProxySource, leaf: &Binding) -> bool {
+    match (source, leaf) {
+        (ProxySource::Variable { node_id }, Binding::Reference { node_id: read, .. }) => {
+            read == node_id
+        }
+        (ProxySource::Parameter { name }, Binding::Parameter { name: read, .. })
+        | (ProxySource::Environment { name }, Binding::Environment { name: read }) => read == name,
+        _ => false,
+    }
+}
+
+/// The nearest proxy `wanted` accepts, with its distance to `end`.
+fn nearest_chip(chips: &[Chip], wanted: impl Fn(&Chip) -> bool, end: Pos2) -> Option<(usize, f32)> {
+    chips
+        .iter()
+        .enumerate()
+        .filter(|(_, chip)| wanted(chip))
+        .map(|(index, chip)| (index, chip.output_anchor().distance(end)))
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+}
+
+/// Where every wire of the board starts and ends.
+///
+/// A consumer takes its value from the nearest place that value is shown: a proxy
+/// of it, or the block itself when the block is nearer. Each reference draws
+/// exactly one wire, however many proxies stand for it. A parameter or an
+/// environment value has no block, so it is drawn only where it has been placed —
+/// without a proxy such a binding is text on the card, as before.
+fn board_wires(graph: &Graph, cards: &[Card], chips: &[Chip]) -> Vec<routing::BoardWire> {
+    let card_of = |id: &str| cards.iter().position(|card| card.id == id);
+    let mut result = Vec::new();
+    for wire in wires(graph) {
+        let (Some(source), Some(target)) = (card_of(&wire.source), card_of(&wire.target)) else {
+            continue;
+        };
+        let (output, input) = wire_ports(&wire);
+        let from_block = routing::Start::Output {
+            card: source,
+            port: output.clone(),
+        };
+        let start = match (
+            wire.kind,
+            cards[target].input_anchor(&input, &wire.operand_path),
+        ) {
+            (WireKind::Data, Some(end)) => {
+                let direct = cards[source]
+                    .output_anchor(&output)
+                    .map_or(f32::INFINITY, |anchor| anchor.distance(end));
+                match nearest_chip(
+                    chips,
+                    |chip| chip.source_node() == Some(wire.source.as_str()),
+                    end,
+                ) {
+                    Some((index, distance)) if distance < direct => routing::Start::Chip(index),
+                    _ => from_block,
+                }
+            }
+            _ => from_block,
+        };
+        result.push(routing::BoardWire {
+            id: wire.id,
+            start,
+            target,
+            input,
+            operand_path: wire.operand_path,
+            control: wire.kind == WireKind::Order,
+            branch: wire.branch,
+        });
+    }
+    for node in &graph.nodes {
+        let Some(target) = card_of(&node.id) else {
+            continue;
+        };
+        for (input, binding) in &node.inputs {
+            binding.for_each_leaf(&mut |leaf, path| {
+                // References are wires of the document already; a parameter or an
+                // environment value becomes one only where it is placed.
+                if matches!(leaf, Binding::Reference { .. }) {
+                    return;
+                }
+                let Some(end) = cards[target].input_anchor(input, path) else {
+                    return;
+                };
+                let Some((index, _)) =
+                    nearest_chip(chips, |chip| reads_source(&chip.proxy.source, leaf), end)
+                else {
+                    return;
+                };
+                result.push(routing::BoardWire {
+                    id: data_edge_id(&node.id, input, path),
+                    start: routing::Start::Chip(index),
+                    target,
+                    input: input.clone(),
+                    operand_path: path.to_vec(),
+                    control: false,
+                    branch: None,
+                });
+            });
+        }
+    }
+    result
+}
+
+/// What the selected proxies stand for and everything that reads it: the blocks to
+/// ring and the wires to pick out.
+fn highlights(
+    graph: &Graph,
+    chips: &[Chip],
+    selection: &HashSet<&str>,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut blocks = HashSet::new();
+    let mut wire_ids = HashSet::new();
+    for chip in chips.iter().filter(|chip| selection.contains(chip.id())) {
+        if let Some(node) = chip.source_node() {
+            blocks.insert(node.to_owned());
+        }
+        for node in &graph.nodes {
+            for (input, binding) in &node.inputs {
+                binding.for_each_leaf(&mut |leaf, path| {
+                    if reads_source(&chip.proxy.source, leaf) {
+                        blocks.insert(node.id.clone());
+                        wire_ids.insert(data_edge_id(&node.id, input, path));
+                    }
+                });
+            }
+        }
+    }
+    (blocks, wire_ids)
+}
+
 fn toggle(list: &mut Vec<String>, id: &str) {
     if let Some(index) = list.iter().position(|item| item == id) {
         list.remove(index);
@@ -1449,6 +1818,226 @@ fn hit_wire(drawn: &[(String, Vec<Pos2>)], camera: Camera, pointer: Pos2) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apiforge_core::{
+        format::{Node, Proxy},
+        graph::create_node,
+    };
+
+    fn board(variable_x: f64, consumer_x: f64, binding: Binding) -> (Graph, Project) {
+        let mut variable = create_node(
+            NodeKind::Value,
+            Position {
+                x: variable_x,
+                y: 0.0,
+            },
+            None,
+        );
+        variable.id = "token".into();
+        variable.handle = "token".into();
+        variable.config.variable = Some(true);
+        let mut consumer = create_node(
+            NodeKind::Assert,
+            Position {
+                x: consumer_x,
+                y: 0.0,
+            },
+            None,
+        );
+        consumer.id = "check".into();
+        consumer.handle = "check".into();
+        consumer.inputs.insert("actual".into(), binding);
+        let project = apiforge_core::demos::shop_project();
+        (
+            Graph {
+                nodes: vec![variable, consumer],
+                edges: vec![],
+                proxies: Vec::new(),
+            },
+            project,
+        )
+    }
+
+    fn placed(graph: &Graph, source: ProxySource, x: f64) -> Graph {
+        let mut next = graph.clone();
+        next.proxies.push(Proxy {
+            id: format!("proxy-{}", next.proxies.len()),
+            source,
+            position: Position { x, y: 40.0 },
+        });
+        next
+    }
+
+    fn drawn(graph: &Graph, project: &Project) -> Vec<routing::BoardWire> {
+        let cards: Vec<Card> = graph
+            .nodes
+            .iter()
+            .map(|node: &Node| Card::build(node, graph, project))
+            .collect();
+        let chips: Vec<Chip> = graph
+            .proxies
+            .iter()
+            .map(|proxy| Chip::build(proxy, graph, project, &["quantity".to_owned()]))
+            .collect();
+        board_wires(graph, &cards, &chips)
+    }
+
+    #[test]
+    fn a_consumer_takes_its_value_from_the_nearest_place_it_is_shown() {
+        let (graph, project) = board(0.0, 3000.0, Binding::reference("token", "value", ""));
+        // Without a proxy the wire crosses the board from the block itself.
+        let wires = drawn(&graph, &project);
+        assert_eq!(wires.len(), 1);
+        assert!(matches!(
+            wires[0].start,
+            routing::Start::Output { card: 0, .. }
+        ));
+
+        // A proxy beside the consumer is nearer, so the wire starts there instead —
+        // and it is still one wire, not two.
+        let near = placed(
+            &graph,
+            ProxySource::Variable {
+                node_id: "token".into(),
+            },
+            2700.0,
+        );
+        let wires = drawn(&near, &project);
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].start, routing::Start::Chip(0));
+        assert_eq!(wires[0].target, 1);
+
+        // A proxy that sits by the block changes nothing about where the wire
+        // starts, so placing one never makes the board longer.
+        let far = placed(
+            &graph,
+            ProxySource::Variable {
+                node_id: "token".into(),
+            },
+            -200.0,
+        );
+        let wires = drawn(&far, &project);
+        assert_eq!(wires.len(), 1);
+        assert!(matches!(
+            wires[0].start,
+            routing::Start::Output { card: 0, .. }
+        ));
+
+        // Of several places, the nearest wins.
+        let both = placed(
+            &far,
+            ProxySource::Variable {
+                node_id: "token".into(),
+            },
+            2700.0,
+        );
+        let wires = drawn(&both, &project);
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].start, routing::Start::Chip(1));
+    }
+
+    #[test]
+    fn a_parameter_is_drawn_only_where_it_has_been_placed() {
+        let (graph, project) = board(0.0, 600.0, Binding::parameter_field("quantity", "unit"));
+        assert!(drawn(&graph, &project).is_empty(), "no proxy, no wire");
+        let with_proxy = placed(
+            &graph,
+            ProxySource::Parameter {
+                name: "quantity".into(),
+            },
+            400.0,
+        );
+        let wires = drawn(&with_proxy, &project);
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].start, routing::Start::Chip(0));
+        assert_eq!(wires[0].input, "actual");
+        assert!(!wires[0].control);
+
+        // The proxy stands for the whole parameter, so a field of it is a use too.
+        let selection = HashSet::from(["proxy-0"]);
+        let chips = vec![Chip::build(
+            &with_proxy.proxies[0],
+            &with_proxy,
+            &project,
+            &["quantity".to_owned()],
+        )];
+        let (blocks, highlighted) = highlights(&with_proxy, &chips, &selection);
+        assert_eq!(blocks, HashSet::from(["check".to_owned()]));
+        assert_eq!(highlighted, HashSet::from([wires[0].id.clone()]));
+    }
+
+    #[test]
+    fn selecting_a_proxy_points_at_its_variable_and_everything_reading_it() {
+        let (graph, project) = board(0.0, 600.0, Binding::reference("token", "value", "id"));
+        let graph = placed(
+            &graph,
+            ProxySource::Variable {
+                node_id: "token".into(),
+            },
+            400.0,
+        );
+        let chips = vec![Chip::build(&graph.proxies[0], &graph, &project, &[])];
+        assert!(chips[0].known);
+        assert_eq!(chips[0].source_node(), Some("token"));
+        let (blocks, wires) = highlights(&graph, &chips, &HashSet::from(["proxy-0"]));
+        assert_eq!(
+            blocks,
+            HashSet::from(["token".to_owned(), "check".to_owned()])
+        );
+        assert_eq!(wires.len(), 1);
+        // Nothing is highlighted while the proxy is not selected.
+        assert_eq!(
+            highlights(&graph, &chips, &HashSet::new()),
+            (HashSet::new(), HashSet::new())
+        );
+    }
+
+    #[test]
+    fn a_response_field_is_not_something_the_board_can_place() {
+        let (graph, _) = board(0.0, 600.0, Binding::literal(serde_json::json!(1)));
+        // What the Variables panel offers can be placed.
+        assert_eq!(
+            placeable(&Binding::reference("token", "value", ""), &graph),
+            Some(ProxySource::Variable {
+                node_id: "token".into()
+            })
+        );
+        assert_eq!(
+            placeable(&Binding::environment("baseUrl"), &graph),
+            Some(ProxySource::Environment {
+                name: "baseUrl".into()
+            })
+        );
+        // A field of a response, a plain Value and a literal cannot: they are not
+        // listed with the variables, so there would be nothing to show.
+        assert_eq!(
+            placeable(&Binding::reference("token", "value", "id"), &graph),
+            None
+        );
+        assert_eq!(
+            placeable(&Binding::reference("check", "value", ""), &graph),
+            None
+        );
+        assert_eq!(
+            placeable(&Binding::literal(serde_json::json!("x")), &graph),
+            None
+        );
+    }
+
+    #[test]
+    fn a_proxy_of_something_the_board_no_longer_has_says_so() {
+        let (graph, project) = board(0.0, 600.0, Binding::parameter("gone"));
+        let graph = placed(
+            &graph,
+            ProxySource::Parameter {
+                name: "gone".into(),
+            },
+            400.0,
+        );
+        let chip = Chip::build(&graph.proxies[0], &graph, &project, &[]);
+        assert!(!chip.known);
+        assert_eq!(chip.label, "gone");
+        assert_eq!(chip.source_node(), None);
+    }
 
     #[test]
     fn adding_a_block_uses_the_focus_center_with_viewport_offsets() {
@@ -1504,6 +2093,7 @@ mod tests {
                                 graph,
                                 reference_graph: graph,
                                 project: &project,
+                                parameters: &[],
                                 selection: &selection,
                                 steps: None,
                                 can_paste: false,
