@@ -163,24 +163,21 @@ pub struct SettingsDialog {
     parameters: String,
     contracts: Vec<ContractRow>,
     focused: bool,
+    project_only: bool,
+    error: Option<String>,
 }
 
 impl SettingsDialog {
-    pub fn new(project: &apiforge_core::format::Project, scenario_id: &str) -> Self {
-        let scenario = project
-            .scenarios
-            .iter()
-            .find(|scenario| scenario.id == scenario_id)
-            .unwrap_or(&project.scenarios[0]);
-        let parameters = Value::Object(scenario.parameters.clone().into_iter().collect());
+    /// Project-level fields only, including empty/component-only authoring.
+    pub fn project(project: &Project) -> Self {
         Self {
             tab: Tab::Scenario,
             project_name: project.name.clone(),
-            scenario_id: scenario.id.clone(),
-            scenario_name: scenario.name.clone(),
-            description: scenario.description.clone(),
-            error_policy: scenario.error_policy,
-            parameters: json_text(&parameters),
+            scenario_id: String::new(),
+            scenario_name: String::new(),
+            description: String::new(),
+            error_policy: ErrorPolicy::Stop,
+            parameters: "{}".into(),
             contracts: project
                 .contracts
                 .iter()
@@ -191,13 +188,41 @@ impl SettingsDialog {
                 })
                 .collect(),
             focused: false,
+            project_only: true,
+            error: None,
         }
+    }
+
+    pub fn new(project: &Project, scenario_id: &str) -> Self {
+        let scenario = project
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == scenario_id)
+            .unwrap_or(&project.scenarios[0]);
+        let mut dialog = Self::project(project);
+        dialog.project_only = false;
+        dialog.scenario_id = scenario.id.clone();
+        dialog.scenario_name = scenario.name.clone();
+        dialog.description = scenario.description.clone();
+        dialog.error_policy = scenario.error_policy;
+        dialog.parameters = json_text(&Value::Object(
+            scenario.parameters.clone().into_iter().collect(),
+        ));
+        dialog
+    }
+
+    pub fn set_error(&mut self, error: String) {
+        self.error = Some(error);
     }
 
     fn problems(&self) -> Problems {
         Problems {
             project_name: required_name(&self.project_name),
-            scenario_name: required_name(&self.scenario_name),
+            scenario_name: if self.project_only {
+                None
+            } else {
+                required_name(&self.scenario_name)
+            },
             parameters: parse_parameters(&self.parameters).err(),
             contracts: self
                 .contracts
@@ -251,10 +276,20 @@ impl SettingsDialog {
         let chrome = Chrome {
             id: "settings-dialog",
             eyebrow: "PROJECT SETTINGS",
-            title: "Project and scenario",
+            title: if self.project_only {
+                "Project settings"
+            } else {
+                "Project and scenario"
+            },
             width: 600.0,
-            apply_label: "Save settings",
-            note: None,
+            apply_label: if self.project_only {
+                "Apply settings"
+            } else {
+                "Save settings"
+            },
+            note: self
+                .project_only
+                .then_some("Apply changes, then use Save all to save the project settings."),
         };
         let action = chrome.show(
             ctx,
@@ -271,8 +306,17 @@ impl SettingsDialog {
 
     fn body(&mut self, ui: &mut Ui) {
         let problems = self.problems();
+        if let Some(error) = &self.error {
+            widgets::field_error(ui, error);
+        }
         ui.horizontal(|ui| {
-            let scenario = if problems.scenario_invalid() {
+            let scenario = if self.project_only {
+                if problems.scenario_invalid() {
+                    "Project  ⚠"
+                } else {
+                    "Project"
+                }
+            } else if problems.scenario_invalid() {
                 "Project and scenario  ⚠"
             } else {
                 "Project and scenario"
@@ -301,6 +345,9 @@ impl SettingsDialog {
             problems.project_name,
         );
         autofocus(&field, &mut self.focused);
+        if self.project_only {
+            return;
+        }
         super::labelled_field(
             ui,
             "Scenario name",
@@ -576,5 +623,24 @@ mod tests {
         }
         check(&serde_json::to_value(&project).unwrap(), &removed);
         apiforge_core::validate_project(&project).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod folder_project_tests {
+    use super::*;
+
+    #[test]
+    fn project_settings_work_without_a_scenario_or_a_placeholder() {
+        let mut project = apiforge_core::demos::empty_project();
+        project.scenarios.clear();
+        let mut dialog = SettingsDialog::project(&project);
+        dialog.project_name = "Renamed empty project".into();
+        let result = dialog.result().unwrap();
+        assert_eq!(result.project_name, "Renamed empty project");
+        assert!(result.scenario_id.is_empty());
+        assert!(project.scenarios.is_empty());
+        dialog.project_name.clear();
+        assert!(dialog.result().is_none());
     }
 }

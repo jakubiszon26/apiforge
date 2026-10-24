@@ -105,6 +105,10 @@ impl RecentProjects {
         if bytes.len() > RECENT_BYTES {
             return Err("Recent-project metadata exceeds its size limit.".into());
         }
+        session
+            .store()
+            .validate_managed_payload(&bytes)
+            .map_err(|error| error.to_string())?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
@@ -132,6 +136,24 @@ impl FolderApp {
             if ui.button("Open Folder…").clicked() {
                 ui.close();
                 self.pick_folder();
+            }
+            if self.session.is_some() {
+                ui.separator();
+                let writable = self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| !session.is_read_only());
+                if ui
+                    .add_enabled(writable, egui::Button::new("Project settings…"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.open_project_settings();
+                }
+                if ui.button("Test environment…").clicked() {
+                    ui.close();
+                    self.open_environment();
+                }
             }
             if !entries.is_empty() {
                 ui.separator();
@@ -300,5 +322,31 @@ mod tests {
         let session = ProjectSession::create(directory.path(), "Project").unwrap();
         assert!(recent.remember(&session).is_err());
         assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    #[test]
+    fn recent_metadata_cannot_persist_a_known_session_secret_in_a_project_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("recent.json");
+        let mut session = ProjectSession::create(directory.path(), "Public name").unwrap();
+        let mut recent = RecentProjects::load(Some(path.clone()));
+        recent.remember(&session).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        session
+            .store()
+            .set_known_secrets(["private-session-value".into()]);
+        session
+            .edit_configuration(
+                |manifest| manifest.name = "private-session-value".into(),
+                DIAGRAM,
+            )
+            .unwrap();
+        assert!(recent.remember(&session).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), before);
     }
 }

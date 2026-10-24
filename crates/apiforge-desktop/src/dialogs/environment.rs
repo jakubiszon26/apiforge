@@ -79,6 +79,8 @@ pub struct EnvironmentDialog {
     new_variable: String,
     new_secret: String,
     focused: bool,
+    folder: bool,
+    error: Option<String>,
 }
 
 impl EnvironmentDialog {
@@ -107,7 +109,19 @@ impl EnvironmentDialog {
             new_variable: String::new(),
             new_secret: String::new(),
             focused: false,
+            folder: false,
+            error: None,
         }
+    }
+
+    pub fn folder(environment: &Environment, secrets: &SessionSecrets) -> Self {
+        let mut dialog = Self::new(environment, secrets);
+        dialog.folder = true;
+        dialog
+    }
+
+    pub fn set_error(&mut self, error: String) {
+        self.error = Some(error);
     }
 
     fn names(&self) -> Vec<&str> {
@@ -165,8 +179,14 @@ impl EnvironmentDialog {
             eyebrow: "PROJECT SETTINGS",
             title: "Test environment",
             width: 580.0,
-            apply_label: "Save environment",
-            note: None,
+            apply_label: if self.folder {
+                "Apply environment"
+            } else {
+                "Save environment"
+            },
+            note: self.folder.then_some(
+                "Public settings are saved with Save all. Secret values stay in this session.",
+            ),
         };
         let mut submit = false;
         let action = chrome.show(
@@ -186,6 +206,9 @@ impl EnvironmentDialog {
     /// Draws the form; returns whether Enter was pressed in the base URL field.
     fn body(&mut self, ui: &mut Ui) -> bool {
         let problems = self.problems();
+        if let Some(error) = &self.error {
+            widgets::field_error(ui, error);
+        }
         let field = super::labelled_field(
             ui,
             "Base URL",

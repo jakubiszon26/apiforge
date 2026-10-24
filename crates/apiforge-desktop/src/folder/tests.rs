@@ -2145,3 +2145,148 @@ fn exporting_a_read_only_project_allows_the_pending_folder_switch() {
     assert!(!app.close_requested);
     assert!(!app.switching());
 }
+
+#[test]
+fn empty_project_settings_apply_without_saving_and_save_all_persists_only_the_manifest() {
+    let directory = tempfile::tempdir().unwrap();
+    drop(ProjectSession::create(directory.path(), "Empty settings").unwrap());
+    let (context, mut app) = open(directory.path());
+    let at = label_position(&mut app, &context, "Project");
+    click(&mut app, &context, at);
+    let at = label_position(&mut app, &context, "Project settings…");
+    click(&mut app, &context, at);
+    frame(&mut app, &context, vec![]);
+    frame(
+        &mut app,
+        &context,
+        vec![
+            key(Key::A, COMMAND),
+            egui::Event::Text("Renamed empty settings".into()),
+        ],
+    );
+    let at = label_position(&mut app, &context, "Apply settings");
+    click(&mut app, &context, at);
+    assert!(app.prompt.is_none());
+    let session = app.session.as_ref().unwrap();
+    assert_eq!(session.manifest().name, "Renamed empty settings");
+    assert!(session.is_manifest_dirty());
+    assert!(session.documents().is_empty());
+    let saved = std::fs::read(directory.path().join("apiforge.project.json")).unwrap();
+    assert_eq!(
+        apiforge_project::ProjectManifest::from_bytes(&saved)
+            .unwrap()
+            .name,
+        "Empty settings"
+    );
+    let at = label_position(&mut app, &context, "Save all");
+    click(&mut app, &context, at);
+    let saved = std::fs::read(directory.path().join("apiforge.project.json")).unwrap();
+    assert_eq!(
+        apiforge_project::ProjectManifest::from_bytes(&saved)
+            .unwrap()
+            .name,
+        "Renamed empty settings"
+    );
+    assert!(!app.session.as_ref().unwrap().is_manifest_dirty());
+}
+
+#[test]
+fn environment_public_changes_save_separately_and_secret_values_do_not_survive_restart() {
+    let (directory, id) = named_folder("Environment settings");
+    let (_context, mut app) = open(directory.path());
+    let original = text(&app, &id);
+    let mut environment = app.session.as_ref().unwrap().manifest().environment.clone();
+    environment.base_url = "https://api.example.test".into();
+    environment.secret_names.push("token".into());
+    let secrets = [("token".into(), "secret-only-in-memory".into())]
+        .into_iter()
+        .collect();
+    app.apply_environment(environment.clone(), secrets).unwrap();
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &format!("{original}\n// unfinished"), CODE)
+        .unwrap();
+    app.save_configuration();
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("main.afs")).unwrap(),
+        original
+    );
+    let saved = std::fs::read_to_string(directory.path().join("apiforge.project.json")).unwrap();
+    assert!(!saved.contains("secret-only-in-memory"));
+    assert!(
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(&id)
+            .unwrap()
+            .is_dirty()
+    );
+    let prepared = app.session.as_mut().unwrap().prepare_run(&id).unwrap();
+    app.apply_environment(
+        environment,
+        [("token".into(), "changed-session-value".into())]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+    assert!(!app.session.as_ref().unwrap().is_manifest_dirty());
+    assert!(
+        app.session
+            .as_mut()
+            .unwrap()
+            .validate_run(&prepared)
+            .is_err()
+    );
+    assert!(app.prepare_close());
+    let (_context, reopened) = open(directory.path());
+    assert!(reopened.runs.secrets.is_empty());
+    assert_eq!(
+        reopened
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .environment
+            .secret_names,
+        ["token"]
+    );
+}
+
+#[test]
+fn read_only_environment_accepts_session_values_without_writing_public_settings() {
+    let (directory, id) = named_folder("Read-only settings");
+    let mut writer = ProjectSession::open(directory.path()).unwrap();
+    writer
+        .edit_configuration(
+            |manifest| manifest.environment.secret_names.push("token".into()),
+            DIAGRAM,
+        )
+        .unwrap();
+    writer.save_configuration().unwrap();
+    let before = std::fs::read(directory.path().join("apiforge.project.json")).unwrap();
+    let (_context, mut app) = open(directory.path());
+    assert!(app.session.as_ref().unwrap().is_read_only());
+    let prepared = app.session.as_mut().unwrap().prepare_run(&id).unwrap();
+    let environment = app.session.as_ref().unwrap().manifest().environment.clone();
+    app.apply_environment(
+        environment,
+        [("token".into(), "read-only-session-value".into())]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+    assert!(!app.session.as_ref().unwrap().is_manifest_dirty());
+    assert!(
+        app.session
+            .as_mut()
+            .unwrap()
+            .validate_run(&prepared)
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read(directory.path().join("apiforge.project.json")).unwrap(),
+        before
+    );
+    assert_eq!(app.runs.secrets["token"], "read-only-session-value");
+}

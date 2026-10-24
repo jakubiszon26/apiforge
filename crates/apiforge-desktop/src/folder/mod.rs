@@ -18,6 +18,7 @@ mod navigation;
 mod placement;
 mod publication;
 mod runs;
+mod settings;
 mod text_view;
 mod watcher;
 mod workbench;
@@ -73,6 +74,8 @@ const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
 const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    Settings(Box<dialogs::SettingsDialog>),
+    Environment(Box<dialogs::EnvironmentDialog>),
     Run {
         prepared: Box<apiforge_project::PreparedRun>,
         live: bool,
