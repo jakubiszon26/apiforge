@@ -317,8 +317,10 @@ fn the_editor_draws_and_takes_focus_without_a_gpu() {
 #[test]
 fn a_buffer_too_large_to_colour_is_laid_out_plainly() {
     // Colouring every token of a very large buffer costs more per frame than it
-    // is worth; the text is still shown, in one piece.
-    let big = "var a = 1\n".repeat(30_000);
+    // is worth; the text is still shown, in one piece. A megabyte body is the
+    // size the plan asks the editor to survive.
+    let big = "var a = 1\n".repeat(110_000);
+    assert!(big.len() >= 1024 * 1024);
     assert!(big.len() > MAX_COLOURED_BYTES);
     let job = layout_job(&big, &[], FontId::monospace(13.0));
     assert_eq!(job.sections.len(), 1);

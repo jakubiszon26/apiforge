@@ -588,7 +588,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         .get(URL_INPUT)
         .cloned()
         .unwrap_or_else(|| Binding::literal(serde_json::json!("")));
-    if let Some(next) = fields::template_field_completing(
+    if let Some(next) = fields::template_field(
         ui,
         id.with("url"),
         &url,
@@ -637,7 +637,14 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         if current.is_some_and(|binding| !has_text_form(binding, scope)) {
             continue;
         }
-        match fields::template_map(ui, id.with(input), label, current, scope) {
+        match fields::template_map(
+            ui,
+            id.with(input),
+            label,
+            current,
+            scope,
+            names.scope(&shapes),
+        ) {
             Some(Some(next)) => {
                 node.inputs.insert(input.into(), next);
             }

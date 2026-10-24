@@ -159,26 +159,8 @@ struct TemplateDraft {
 ///
 /// A binding whose values are not plain references cannot be shown as text; the
 /// field then says so and returns `None`.
+/// A one-line field holding a template, with completion inside its `{{ }}`.
 pub fn template_field(
-    ui: &mut Ui,
-    id: Id,
-    binding: &Binding,
-    scope: Scope<'_>,
-    hint: &str,
-) -> Option<Binding> {
-    template_field_completing(
-        ui,
-        id,
-        binding,
-        scope,
-        hint,
-        apiforge_script::complete::Scope::default(),
-    )
-}
-
-/// [`template_field`] with completion: the same field, offering the names that
-/// may be written inside `{{ }}`.
-pub fn template_field_completing(
     ui: &mut Ui,
     id: Id,
     binding: &Binding,
@@ -288,6 +270,7 @@ pub fn template_map(
     label: &str,
     binding: Option<&Binding>,
     scope: Scope<'_>,
+    completion: apiforge_script::complete::Scope<'_>,
 ) -> Option<Option<Binding>> {
     let mut fields = match binding {
         Some(Binding::Object { fields }) => fields.clone(),
@@ -320,6 +303,14 @@ pub fn template_map(
             value,
             scope,
             "Value or {{block.field}}",
+            apiforge_script::complete::Scope {
+                handles: completion.handles,
+                environment: completion.environment,
+                parameters: completion.parameters,
+                inputs: completion.inputs,
+                components: completion.components,
+                shapes: completion.shapes,
+            },
         ) {
             *value = next;
             changed = true;
