@@ -194,10 +194,16 @@ impl ProjectStore {
         Ok(())
     }
 
-    /// Every file and directory below `directory`, deepest last. Links and
-    /// non-portable names refuse the walk: an operation on the directory could
-    /// not account for them.
-    pub(super) fn walk(
+    /// The current state of one path: a file with its hash, a directory or
+    /// absence. A file larger than the payload limit is reported as `Limit`.
+    pub fn file_state(&self, path: &ProjectPath) -> Result<FileState> {
+        self.state(path.as_str())
+    }
+
+    /// Every file and every directory below `directory`, each list sorted. Links
+    /// and non-portable names refuse the listing: an operation on the directory
+    /// could not account for them.
+    pub fn list_directory(
         &self,
         directory: &ProjectPath,
     ) -> Result<(Vec<ProjectPath>, Vec<ProjectPath>)> {

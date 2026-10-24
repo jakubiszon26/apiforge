@@ -13,8 +13,11 @@ use apiforge_storage::project::{
 };
 use std::{path::Path, sync::Arc};
 
+#[path = "files.rs"]
+mod files;
 #[path = "recovery.rs"]
 mod recovery;
+pub use files::DeletePreview;
 pub use recovery::DraftStatus;
 use recovery::RecoveryState;
 
@@ -34,6 +37,10 @@ impl Origin {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind {
     DocumentRegistered,
+    /// The document's registry path changed; its identity did not.
+    DocumentMoved,
+    /// The document was moved to the trash and is no longer registered.
+    DocumentRemoved,
     SourceChanged {
         source_version: u64,
     },

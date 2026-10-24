@@ -265,7 +265,7 @@ impl ProjectStore {
             super::path::resolve(self.root(), path.as_str())?;
             match self.state(path.as_str())? {
                 FileState::Directory => {
-                    let (inner_files, inner_directories) = self.walk(path)?;
+                    let (inner_files, inner_directories) = self.list_directory(path)?;
                     files.extend(inner_files);
                     directories.extend(inner_directories);
                     directories.insert(path.clone());

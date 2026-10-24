@@ -16,9 +16,9 @@ use apiforge_storage::project::{
 pub(super) struct RecoveryState {
     /// Baseline for the next write. `None` when the files are unreadable,
     /// unsupported or foreign: they are preserved and never overwritten.
-    read: Option<RecoveryRead>,
+    pub(super) read: Option<RecoveryRead>,
     /// Drafts that are not applied, preserved verbatim in every later write.
-    held: Vec<RecoveryDocument>,
+    pub(super) held: Vec<RecoveryDocument>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,12 +44,7 @@ impl ProjectSession {
         };
         self.recovery.read = Some(read);
         for draft in drafts {
-            match self.draft_target(&draft) {
-                Some(index) if draft.matches_base(&self.documents[index].saved) => {
-                    self.apply_draft(index, draft)?;
-                }
-                _ => self.recovery.held.push(draft),
-            }
+            self.adopt_draft(draft)?;
         }
         Ok(())
     }
@@ -100,6 +95,33 @@ impl ProjectSession {
             },
         );
         self.analyse_now(index)
+    }
+
+    /// Own trash operations rewrite recovery under the writer lock. Adopt the
+    /// result as the next baseline; unusable files stay unusable.
+    pub(super) fn adopt_recovery_baseline(&mut self) {
+        if self
+            .recovery
+            .read
+            .as_ref()
+            .is_some_and(|read| !read.is_backup_candidate())
+            && let Ok(read) = self.store.load_source_recovery(&self.manifest.id)
+        {
+            self.recovery.read = Some(read);
+        }
+    }
+
+    /// Applies a draft whose base is the saved source; holds any other.
+    pub(super) fn adopt_draft(&mut self, draft: RecoveryDocument) -> Result<()> {
+        match self.draft_target(&draft) {
+            Some(index) if draft.matches_base(&self.documents[index].saved) => {
+                self.apply_draft(index, draft)
+            }
+            _ => {
+                self.recovery.held.push(draft);
+                Ok(())
+            }
+        }
     }
 
     /// Own commits change the manifest that recovery and cache baselines bind.

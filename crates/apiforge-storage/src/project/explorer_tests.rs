@@ -109,13 +109,15 @@ fn scan_refuses_a_folder_with_an_unfinished_transaction() {
 }
 
 #[test]
-fn walk_lists_everything_below_a_directory_and_refuses_links() {
+fn listing_covers_everything_below_a_directory_and_refuses_links() {
     let (directory, store) = setup();
     let root = directory.path();
     fs::create_dir_all(root.join("docs/inner")).unwrap();
     fs::write(root.join("docs/inner/a.txt"), "a").unwrap();
     fs::write(root.join("docs/b.afs"), "b").unwrap();
-    let (files, directories) = store.walk(&ProjectPath::new("docs").unwrap()).unwrap();
+    let (files, directories) = store
+        .list_directory(&ProjectPath::new("docs").unwrap())
+        .unwrap();
     assert_eq!(
         files.iter().map(ProjectPath::as_str).collect::<Vec<_>>(),
         ["docs/b.afs", "docs/inner/a.txt"]
@@ -131,7 +133,7 @@ fn walk_lists_everything_below_a_directory_and_refuses_links() {
     {
         std::os::unix::fs::symlink(root.join("scenarios"), root.join("docs/link")).unwrap();
         assert!(matches!(
-            store.walk(&ProjectPath::new("docs").unwrap()),
+            store.list_directory(&ProjectPath::new("docs").unwrap()),
             Err(ProjectError::UnsafePath { .. })
         ));
     }

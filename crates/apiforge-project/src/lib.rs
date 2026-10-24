@@ -18,7 +18,9 @@ pub use migration::{
     migrate_workspace,
 };
 pub use prepare::prepare_project;
-pub use session::{DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome};
+pub use session::{
+    DeletePreview, DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome,
+};
 
 pub use apiforge_script::Document;
 pub use apiforge_storage::project::{DocumentEntry, DocumentKind, ProjectError, ProjectManifest};
@@ -55,6 +57,8 @@ pub enum Error {
     StaleAnalysis,
     #[error("The document source exceeds the 1 MiB limit.")]
     SourceTooLarge,
+    #[error("A registered source must keep the .afs extension outside .apiforge.")]
+    RegisteredSourceExtension,
     #[error(transparent)]
     Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]
