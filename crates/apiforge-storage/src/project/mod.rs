@@ -7,12 +7,16 @@ mod path;
 mod recovery;
 mod schema;
 mod transaction;
+mod trash;
 
 pub use diagram::{DiagramFile, DiagramRecord, DocumentKey, IdentityBase};
 pub use path::ProjectPath;
 pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection};
 pub use schema::{DocumentEntry, DocumentKind, MANIFEST_PATH, ProjectManifest, RevisionEntry};
 pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore};
+pub use trash::{
+    RestoreDestination, TrashCommit, TrashEntry, TrashIndex, TrashPreview, TrashRestorePreview,
+};
 
 use std::{
     io,
@@ -71,6 +75,8 @@ pub enum ProjectError {
     NoRecoveryCandidate,
     #[error("Invalid identity or layout checkpoint; source definitions were preserved.")]
     InvalidCheckpoint,
+    #[error("Invalid trash operation or preserved payload; existing files were preserved.")]
+    InvalidTrash,
 }
 
 impl ProjectError {

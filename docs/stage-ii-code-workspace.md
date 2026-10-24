@@ -307,8 +307,29 @@ backup/restore races and failures, local unsaved-layout recovery, checkpoint
 identity/proxy preservation and authoring/legacy validation separation. This does
 not constitute native GUI/Windows QA or the P2 source/model round-trip gate.
 
-P1 remains open for last-valid cache provenance, versioned trash/restore services,
-explicit conflict-copy resolution and broader persistence fault injection. P2's
+The next P1 increment adds versioned trash/restore for registered working documents.
+One transaction preserves exact saved bytes, checkpoint and dirty source/fields/
+layout before removal, then updates the registry, shared checkpoint set and local
+recovery with checked backup rotation. Restoration retains IDs and registry order,
+requires an unused destination and reinstates unsaved work as recovery instead of
+silently saving it. Published component revisions remain intact; trash has no
+automatic expiry. Preview baselines, source hashes, path boundaries and known
+secrets are checked before activation. Tests interrupt deletion/restoration at
+each transaction boundary and verify restart/replay, occupied destinations,
+multi-document operations, unrelated recovery and foreign metadata preservation.
+
+Verification of the trash/restore increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (615 passed, one parent-launched helper ignored), with
+isolated config/data directories, serial tests and loopback access for existing
+HTTP tests. Seventeen new trash tests are included. Transaction-boundary tests
+exercise every stage/operation in both delete and restore, then restart and
+roll forward. These are storage-service checks; explorer/native QA and the P2
+round-trip gate remain open.
+
+P1 remains open for last-valid cache provenance, explicit conflict-copy resolution
+and broader persistence fault injection. Explorer directory/unregistered-file
+operations and UI integration remain P5 work. P2's
 shared semantic loader and document sessions remain pending; the P2 round-trip
 gate has not passed. Desktop/CLI folder integration, automatic migration and native
 Windows directory durability are not enabled or verified by these increments.

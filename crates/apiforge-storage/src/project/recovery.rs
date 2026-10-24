@@ -414,12 +414,82 @@ impl ProjectStore {
     }
 }
 
-fn decode_for_project(bytes: &[u8], project_id: &str) -> Result<SourceRecovery> {
+pub(super) fn decode_for_project(bytes: &[u8], project_id: &str) -> Result<SourceRecovery> {
     let recovery = SourceRecovery::from_bytes(bytes)?;
     if recovery.project_id != project_id {
         return Err(ProjectError::ForeignRecovery);
     }
     Ok(recovery)
+}
+
+/// File operations must preserve the same recovery/backup rules as ordinary
+/// autosave, but include their post-images in the shared operation transaction.
+pub(super) fn recovery_from_snapshot(
+    snapshot: &ProjectSnapshot,
+    project_id: &str,
+) -> Result<SourceRecovery> {
+    let primary = snapshot
+        .files
+        .get(&ProjectPath::new(RECOVERY_PATH)?)
+        .ok_or(ProjectError::InvalidRecovery)?
+        .as_deref();
+    let backup = snapshot
+        .files
+        .get(&ProjectPath::new(BACKUP_PATH)?)
+        .ok_or(ProjectError::InvalidRecovery)?
+        .as_deref();
+    if let Some(backup) = backup {
+        match decode_for_project(backup, project_id) {
+            Err(ProjectError::InvalidRecovery) if primary.is_some() => {}
+            result => {
+                result?;
+            }
+        }
+    }
+    match primary.map(|bytes| decode_for_project(bytes, project_id)) {
+        Some(Ok(recovery)) => Ok(recovery),
+        Some(Err(ProjectError::InvalidRecovery)) | None if backup.is_some() => {
+            Err(ProjectError::RecoveryDecisionRequired)
+        }
+        Some(Err(error)) => Err(error),
+        None => Ok(SourceRecovery {
+            format_version: 1,
+            project_id: project_id.into(),
+            documents: Vec::new(),
+        }),
+    }
+}
+
+pub(super) fn recovery_changes(
+    snapshot: &ProjectSnapshot,
+    desired: &SourceRecovery,
+) -> Result<Vec<ProjectChange>> {
+    let current = recovery_from_snapshot(snapshot, &desired.project_id)?;
+    if current == *desired {
+        return Ok(Vec::new());
+    }
+    let mut changes = Vec::new();
+    if let Some(bytes) = snapshot
+        .files
+        .get(&ProjectPath::new(RECOVERY_PATH)?)
+        .and_then(|bytes| bytes.as_ref())
+    {
+        changes.push(ProjectChange::Write {
+            path: ProjectPath::new(BACKUP_PATH)?,
+            expected: snapshot
+                .state(&ProjectPath::new(BACKUP_PATH)?)
+                .ok_or(ProjectError::InvalidRecovery)?,
+            bytes: bytes.clone(),
+        });
+    }
+    changes.push(ProjectChange::Write {
+        path: ProjectPath::new(RECOVERY_PATH)?,
+        expected: snapshot
+            .state(&ProjectPath::new(RECOVERY_PATH)?)
+            .ok_or(ProjectError::InvalidRecovery)?,
+        bytes: desired.to_bytes()?,
+    });
+    Ok(changes)
 }
 
 #[cfg(test)]

@@ -59,7 +59,9 @@ Each source save, manifest save, publication or explorer command is one logical
 transaction over its complete affected file set. Save All schedules individual
 document transactions with per-document results. A pure layout update is its own
 transaction when it describes saved source. Recovery updates are serialised
-single-file atomic writes under the same lock.
+single-file atomic writes under the same lock during ordinary recovery saves.
+Explorer operations that change recovery membership include the checked recovery
+and backup post-images in their shared multi-file transaction instead.
 
 Transaction directories are `.apiforge/local/transactions/<uuid>/`. Their versioned
 descriptor contains transaction ID, base/target generations and ordered operations.
@@ -149,6 +151,27 @@ Restore is another transaction retaining document identity; it requires another
 destination if the original path is occupied. No automatic expiry in Stage II.
 Text/model undo does not perform filesystem undo. Published revisions cannot be
 deleted through this explorer.
+
+The initial trash service covers registered working documents. Its version-one
+index records project/operation IDs, deletion time, nullable restoration time and
+entries containing the original registry entry/order, exact saved-source state,
+optional saved checkpoint and optional dirty recovery document. Payload names are
+derived from operation ID and entry number; index data cannot redirect reads to
+an arbitrary path. Missing source remains explicit rather than becoming an empty
+file. Preserve all copies before removing originals and unregistering documents.
+Updating shared checkpoints, recovery membership and checked backups belongs to
+that same activated transaction.
+
+Delete/restore previews bind the observed file set and generation. Changes require
+another preview; live drafts supplied at deletion must match the selected document
+context. Restore preserves document identity, reinstates saved source exactly and
+puts unsaved text/fields/layout into local recovery. A different destination also
+updates recovery's last known path without changing its original base hash. Never
+overwrite occupied destinations, foreign checkpoint/recovery contexts or published
+revisions. Retain the trash index/payloads after restoration, marking the operation
+restored in the transaction to prevent an accidental duplicate restoration.
+Directory selection/preview, unregistered files and explorer UI integration remain
+later explorer work; this service does not recursively delete directories.
 
 ## Recovery files, limits and secrets
 

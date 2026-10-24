@@ -228,6 +228,13 @@ impl ProjectStore {
     /// mismatched immutable published source is always an integrity error.
     pub fn load(&self) -> Result<(ProjectManifest, ProjectSnapshot)> {
         let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        self.load_locked(&[])
+    }
+
+    pub(super) fn load_locked(
+        &self,
+        extra_paths: &[ProjectPath],
+    ) -> Result<(ProjectManifest, ProjectSnapshot)> {
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
         let snapshot = self.stable_read(|| {
             let bytes = self
@@ -240,6 +247,7 @@ impl ProjectStore {
             ];
             paths.extend(manifest.documents.iter().map(|entry| entry.path.clone()));
             paths.extend(manifest.revisions.iter().map(|entry| entry.path.clone()));
+            paths.extend_from_slice(extra_paths);
             Ok(paths)
         })?;
         let manifest = ProjectManifest::from_bytes(
@@ -320,10 +328,29 @@ impl ProjectStore {
     fn commit_with_hook(
         &self,
         changes: Vec<ProjectChange>,
-        mut boundary: impl FnMut(&str) -> Result<()>,
+        boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<u64> {
         self.writable()?;
         let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        // Only the checked recovery/file-operation services may update these
+        // files. Replay still validates their complete staged post-images.
+        if changes.iter().any(|change| {
+            matches!(
+                change_path(change).as_str(),
+                super::recovery::RECOVERY_PATH | super::recovery::BACKUP_PATH
+            )
+        }) {
+            return Err(ProjectError::InvalidTransaction);
+        }
+        self.commit_locked(changes, boundary)
+    }
+
+    pub(super) fn commit_locked(
+        &self,
+        changes: Vec<ProjectChange>,
+        mut boundary: impl FnMut(&str) -> Result<()>,
+    ) -> Result<u64> {
+        self.writable()?;
         let head = self.head()?;
         if head.active_transaction_id.is_some() {
             return Err(ProjectError::RecoveryRequired);
@@ -578,14 +605,6 @@ impl ProjectStore {
         let mut used_payloads = HashSet::new();
         let mut total = 0;
         for (index, operation) in descriptor.operations.iter().enumerate() {
-            // Recovery has checked-backup and deliberate-restore rules of its
-            // own. It cannot be replaced through the generic transaction API.
-            if matches!(
-                operation.path.as_str(),
-                super::recovery::RECOVERY_PATH | super::recovery::BACKUP_PATH
-            ) {
-                return Err(ProjectError::InvalidTransaction);
-            }
             if !paths.insert(operation.path.as_str().to_lowercase()) {
                 return Err(ProjectError::InvalidTransaction);
             }
@@ -617,6 +636,12 @@ impl ProjectStore {
                     }
                     if bytes.len() > payload_limit(operation.path.as_str()) {
                         return Err(ProjectError::Limit);
+                    }
+                    if matches!(
+                        operation.path.as_str(),
+                        super::recovery::RECOVERY_PATH | super::recovery::BACKUP_PATH
+                    ) {
+                        SourceRecovery::from_bytes(bytes)?;
                     }
                     used_payloads.insert(payload);
                     total += bytes.len();
@@ -726,7 +751,7 @@ impl ProjectStore {
         }
     }
 
-    fn state(&self, relative: &str) -> Result<FileState> {
+    pub(super) fn state(&self, relative: &str) -> Result<FileState> {
         let path = path::resolve(&self.root, relative)?;
         if path.is_dir() {
             return Ok(FileState::Directory);
@@ -792,6 +817,14 @@ fn payload_limit(path: &str) -> usize {
         MAX_SOURCE_BYTES
     } else {
         MAX_JSON_BYTES
+    }
+}
+fn change_path(change: &ProjectChange) -> &ProjectPath {
+    match change {
+        ProjectChange::Write { path, .. }
+        | ProjectChange::RemoveFile { path, .. }
+        | ProjectChange::CreateDirectory { path }
+        | ProjectChange::RemoveDirectory { path } => path,
     }
 }
 fn hash(bytes: &[u8]) -> String {
