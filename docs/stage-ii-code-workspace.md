@@ -1,9 +1,9 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3 migration implemented (not enabled at startup), P4 views complete behind `--folder`, P5 explorer and external changes merged behind `--folder`, P6a UI quality and project text files implemented behind `--folder` (UI acceptance gate green); P6b publication implemented behind `--folder`; P6c folder CLI implemented; P6d folder-window runs and close export implemented; P7 pending
+- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7 activation, integration and release gates pending
 - Date: 2026-10-24
-- Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
-- Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
+- Historical analysis baseline: `d967a79`; initial implementation baseline: `c9c5ba0`. Later package bases are recorded below.
+- Delivery: one branch per package from current `main` or a required unmerged predecessor; a human merges after review. P6 and P8 review branches do not imply a merge to `main`.
 - Decisions: [folder format and components](decisions/0010-folder-projects.md),
   [storage and recovery](decisions/0011-project-transactions.md),
   [sessions and synchronisation](decisions/0012-project-sessions.md)
@@ -37,17 +37,15 @@ proxies were merged in `c9c5ba0` and must survive folder
 storage, migration and reconciliation. M7 remains tracked by the
 [original roadmap](roadmap.md).
 
-## Current implementation and review findings
+## Historical analysis and verified review findings
 
-The existing language already parses, lowers, prints and reconciles scenarios and
-components. Desktop buffers support a 250 ms debounce, invalid-source protection,
-draft recovery and code/diagram selection synchronisation. Storage provides atomic
-JSON replacement, exclusive sessions and external-change detection.
-
-The missing foundation is the folder project. The GUI imports JSON only;
-`WorkspaceStore` persists the entire workspace. `App` combines synchronisation,
-storage, execution and view orchestration. `Editor` has one active document history
-and assumes that a scenario exists. Component editing uses nested temporary copies.
+At the analysis baseline `d967a79`, the language already parsed, lowered, printed
+and reconciled scenarios/components, and desktop buffers supplied debounce,
+invalid-source protection, draft recovery and selection synchronisation.
+Folder projects were the missing foundation: the GUI imported JSON only,
+`WorkspaceStore` persisted the whole workspace, and `App`/`Editor` combined
+orchestration with one active document history. The packages below replace that
+folder-mode architecture while retaining legacy JSON compatibility.
 
 The independent review was checked against the code, rather than accepted as an
 implementation specification:
@@ -55,7 +53,7 @@ implementation specification:
 | Review point | Verified decision |
 | --- | --- |
 | Multi-file saves, cache provenance and dependency versions need explicit contracts | Accepted; ADRs 0010–0012 define them. |
-| Component calls must retain their revision | Accepted. The printer already emits revisions; lowering an unqualified call currently selects the latest. Folder validation will require explicit revisions. |
+| Component calls must retain their revision | Accepted. The printer emits revisions; legacy JSON lowering keeps implicit latest. Folder validation now requires explicit revisions. |
 | Reconciliation can distinguish every delete/recreate with the same handle | Rejected. The same handle and kind retain identity. An intermediate deletion must have been applied to distinguish a later insertion. |
 | Runs need an immutable project snapshot | Preserve the existing mechanism: the GUI already constructs `RunRequest` with a project clone. Adapt ownership rather than inventing another runner. |
 | Every secret can be detected in every source or archive | Rejected as an absolute guarantee. Protect known session secrets and never persist runtime substitution. Preserve existing original files without rewriting them. |
@@ -242,13 +240,13 @@ project in the managed projects directory instead of creating another legacy JSO
 
 ## Delivery and acceptance
 
-Planning lands on `main` as a documentation-only commit. P1 was implemented on
-`feat/stage-ii-code-workspace` and merged after review. Each later package uses
-its own branch from `main` (for example `feat/stage-ii-p2-sessions`) and merges
-after review and its exit evidence. Merged packages stay inactive in the normal
-desktop/CLI paths until their integration package enables them. Keep unrelated local QA material out of
-the planning commit. Remove the temporary `recenzja.md` after incorporating its
-verified findings.
+P0 planning landed on `main`; P1–P5 were merged after review. Each remaining
+package uses a separate branch from the latest `main`, or from the tip of an
+unmerged predecessor it requires. Record that dependency/base in its final docs
+commit, together with implementation, limits and verification. Push the branch;
+merging belongs to human review. Folder CLI commands become available behind
+`--folder` with P6c. Default folder startup and automatic migration stay disabled
+until P7's activation package passes its integration gates.
 
 | Package | Implementation | Required exit evidence |
 | --- | --- | --- |
@@ -259,8 +257,18 @@ verified findings.
 | P3 | Legacy workspace, draft and journal migration | All fixtures verified; crash/resume and catalogue activation tested |
 | P4 | Code/Diagram/Split, tabs, shortcuts, focus and diagnostics | Mode/tab switching retains work and histories |
 | P5 | Explorer, import, file operations, trash and external polling | Operations survive restart; no silent overwrite |
-| P6 | Component publication, folder CLI, run integration, explorer/tab ergonomics and project text-file editing | CLI/GUI interpret saved projects identically; UI quality acceptance and BUG-035–043 pass |
-| P7 | Startup activation, native QA, performance and documentation | Release evidence on Linux and Windows |
+| P6a | Explorer/tab ergonomics, project text files and BUG-035–043 | Ten UI acceptance probes and native review |
+| P6b | Component publication, comment-loss decisions (A3), revision pin fixes | Immutable/old/recovered revisions; version-bound consent |
+| P6c | `check/print/apply/run --folder` over saved definitions | CLI/GUI equivalence; stable reads; no recovery/cache fallback |
+| P6d | Folder Run/reports, project/global journal review and close export (A4) | Immutable snapshots, invalidated consent, stale reports and protected close |
+| P8 | Documentation consistency and ownership of review decisions | Current status per package; B7–B10 decided or explicitly deferred |
+| P7a | Open Folder, recent projects and recovery before switching (A1) | Switching/reopening retains work; failed recovery prevents switching |
+| P7b | Project settings editor (A2) | Dirty manifest and independent save; session-only secrets |
+| P7c | Native transaction/conflict recovery and export (A5) | Explicit preview-bound decisions; failure preserves work |
+| P7d | Storage worker and asynchronous project I/O (A6) | Responsive frames during slow reads/writes; serial mutations and stale-result rejection |
+| P7e | B7 merge evidence, B8 Git attributes and B9 external-writer boundary | Independent checkpoint merges; LF/CRLF and checkout tests |
+| P7f | Performance, keyboard/accessibility review and user documentation | 1000-line/1 MiB budgets; Linux native and accessibility evidence |
+| P7g | Startup activation through `migrate_workspace`; new managed folder projects | Migration/creation/restart integration; acceptance matrix; Windows remains an explicit release gate |
 
 Implement P1/P2 first and pass the P2 round-trip gate before P3. Until P7, folder
 projects are opened explicitly for development; do not enable automatic migration
@@ -269,10 +277,10 @@ in the normal startup path before integration evidence is complete.
 ### P6 UI quality and text-file acceptance
 
 On 2026-10-24 the user approved merging P5 through `0fcff3e` and assigned the
-remaining UI work to P6. This accepts P5 delivery with tracked follow-up work;
-it does not mark the UI findings fixed or the UI quality gate passed. Implement
-these requirements alongside component publication, folder CLI and run/report
-integration, before P6 acceptance, rather than leaving them to P7 polish.
+remaining UI work to P6. That historical P5 decision retained tracked follow-up
+work; P6a subsequently fixed the findings and passed the UI gate. The requirements
+below remain part of P6 acceptance together with publication, CLI and Run/report
+integration.
 
 The user's four reported issues are mandatory P6 work:
 
@@ -331,488 +339,40 @@ builds an identical package from a temporary checkout, so give it its own
 
 ### Implementation progress
 
-Open design feedback is tracked in [Stage II review notes](stage-ii-review-notes.md),
-including checkpoint merge ergonomics, Git line-ending conversion and local head
-behaviour during external checkouts.
+This is the current state per package. Detailed historical increments remain in
+Git and the linked QA records. Implemented review branches stay distinct from
+merged delivery. P8 uses P6d `001414f` as its unmerged prerequisite and incorporates
+the input findings from `docs/stage-ii-p8-findings` at `cedabc3`.
 
-The first P1 increment provides `apiforge_storage::project`: the version-one
-registry schema, portable managed paths, cloneable exclusive/read-only stores,
-stable-generation reads and staged multi-file transactions with explicit
-roll-forward recovery. Source bytes are saved exactly, including invalid text.
-Published source hashes are checked; existing revisions cannot be overwritten or
-removed through the transaction API. New managed payloads are checked against
-known session secrets.
+| Package | State and implementation | Verification and remaining limits |
+| --- | --- | --- |
+| P0 | Approved plan and ADRs 0010–0012 on `main` | Contracts and package ownership documented; P8 corrects status drift |
+| P1 | Merged: folder schema/store, stable reads, lock, redo transactions, recovery, trash, checkpoints and verified cache | Linux persistence/fault and child-process interruption tests; [P1 acceptance](stage-ii-p1-acceptance.md). Windows directory durability remains open |
+| P2 | Merged: shared per-document sessions, exact source, ticketed analysis, independent histories and recovery; empty/component-only authoring | Round-trip gate passed before migration: fixture semantics, identities, layout, cleanup, proxies and explicit revision bindings survive restart. Late results, independent documents and two subscribers are tested |
+| P3 | Merged: `migrate_workspace` prepares/verifies all projects before one catalogue activates them; original v2 workspace/drafts stay intact; older component drafts remain separate | Fixtures, multiple/inactive/invalid drafts, occupied destinations, changed inputs and crash/resume are tested. Library implementation exists; automatic startup invocation waits for P7g |
+| P4 | Merged: Code/Diagram/Split, tabs, shortcuts, text/model history, diagnostics, field recovery and close decisions behind `--folder` | Reviewed baseline: 743 tests, two helpers ignored. Mode/tab/caret/history and 960 × 540 are tested. Source saves and ordinary recovery remain synchronous until P7d |
+| P5 | Merged: real explorer, import/registration, file operations, trash and asynchronous external scans | 791 tests, two helpers ignored. Conflicts, missing dirty documents, bounded scans and case-only rename are covered. Its open UI findings were assigned to P6a |
+| P6a | Pushed: `feat/stage-ii-p6-ui`, base `9012180`, tip `aa3c356`. Project text tabs, integrated/disambiguated tabs, root selection, one-click opening, named rows/reveal and measured card placement | 808 tests, two helpers ignored; UI gate 10/10 and [native review](qa/2026-10-24/p6-ui/verification.md). Broader accessibility and Windows QA remain P7 |
+| P6b | Pushed: `feat/stage-ii-p6-publish`, base unmerged P6a `aa3c356`, tip `d04d4f2`. Atomic immutable publication, recovered drafts, explicit pin fixes and version-bound comment decisions (A3) | 821 tests, two helpers ignored; UI gate 10/10; both 60-second language fuzzers and [native publication review](qa/2026-10-24/p6-publish/verification.md) passed |
+| P6c | Pushed: `feat/stage-ii-p6-cli`, base unmerged P6b `d04d4f2`, tip `bea2441`. Saved-only shared CLI loader, `--folder`, exact valid Apply, closed Run snapshots and abstract project journal ownership | 832 tests, two helpers ignored; UI gate 10/10. Seven CLI tests cover equivalence, lock/failure handling, explicit pins, recovery/cache exclusion and untouched checkouts; four new journal tests cover ownership and persistence |
+| P6d | Pushed: `feat/stage-ii-p6-runs`, base unmerged P6c `bea2441`, tip `001414f`. Folder Run/reports, sealed earlier configurations, consent invalidation, global legacy review and exact/public close export (A4) | 843 tests, two helpers ignored; UI gate 10/10 and [native Run/export review](qa/2026-10-24/p6-runs/verification.md). Closing retains ownership through cancellation/cleanup. Ordinary project/journal I/O moves to P7d |
+| P8 | Documentation-only review: current package summaries/statuses and decisions B7–B10; base unmerged P6d `001414f`, findings input `cedabc3` | 843 tests, two helpers ignored; formatting, clippy and fixtures passed. No runtime/format change. Decision implementation/evidence belongs to P7e; startup remains inactive |
+| P7a–g | Pending, in the delivery order above, each on its own branch | Open Folder/recent/switching, settings, native recovery, storage worker, portability evidence, performance/accessibility/docs, then activation. Linux evidence cannot close Windows QA or Windows durability |
 
-Storage tests exercise interruption at staging, activation, each operation and
-commit; interrupted replay; foreign target preservation; equal-length edits;
-stable-read retries; directory ordering; path boundaries; and the 1 MiB source
-limit. These are storage-level checks, not the P2 semantic/identity/layout gate.
+Every completed package runs formatting, all-target workspace clippy with warnings
+denied, serial all-target workspace tests with isolated config/data directories,
+and converter fixture checks. The separate UI quality gate uses its own target
+directory. Counts above exclude that ten-probe gate. Language changes also run
+both sustained smoke fuzzers; layout algorithm changes run release benchmarks.
 
-Verification for this increment (Linux, 2026-10-24): formatting, workspace clippy
-with warnings denied, fixture verification and workspace/all-target tests passed
-(575 passed; one helper test ignored because its parent launches it separately).
-The test run used isolated config/data directories and serial execution. Existing
-HTTP tests required loopback access outside the restricted sandbox. Twenty new
-folder-storage tests are included in those totals. No native GUI or Windows QA
-was performed for this library-only increment.
-
-The next P1 increment adds bounded source recovery with checked backup rotation,
-explicit preview-bound backup restoration, exact invalid/CRLF text, inspector
-drafts and directional UTF-8 selections. Both files and the registry participate
-in conflict checks. Read-only sessions can preview but cannot persist or restore.
-Known-secret checks also cover bytes copied into backups and explicit restoration.
-Encoded JSON limits are enforced while serialising, including escape expansion;
-an oversized payload never becomes a truncated successful save.
-
-Version-one diagram DTOs now preserve core scenario/component snapshots and keep
-working/published keys separate. Serialisation sorts records deterministically.
-Recovery can retain an unsaved checkpoint locally without writing shared diagram
-metadata. These are candidates: the future semantic loader must verify their
-source/context/semantic digests before use. A shared authoring validator permits
-empty/component-only projects while retaining legacy JSON import requirements.
-
-Verification of the recovery/checkpoint increment (Linux, 2026-10-24): formatting,
-workspace clippy with warnings denied, fixture verification and all-target
-workspace tests passed (598 passed, one parent-launched helper ignored). The
-serial test run used isolated config/data directories and loopback access for
-existing HTTP tests. This adds 23 tests to the first increment's total, including
-backup/restore races and failures, local unsaved-layout recovery, checkpoint
-identity/proxy preservation and authoring/legacy validation separation. This does
-not constitute native GUI/Windows QA or the P2 source/model round-trip gate.
-
-The next P1 increment adds versioned trash/restore for registered working documents.
-One transaction preserves exact saved bytes, checkpoint and dirty source/fields/
-layout before removal, then updates the registry, shared checkpoint set and local
-recovery with checked backup rotation. Restoration retains IDs and registry order,
-requires an unused destination and reinstates unsaved work as recovery instead of
-silently saving it. Published component revisions remain intact; trash has no
-automatic expiry. Preview baselines, source hashes, path boundaries and known
-secrets are checked before activation. Tests interrupt deletion/restoration at
-each transaction boundary and verify restart/replay, occupied destinations,
-multi-document operations, unrelated recovery and foreign metadata preservation.
-
-Verification of the trash/restore increment (Linux, 2026-10-24): formatting,
-workspace clippy with warnings denied, fixture verification and all-target
-workspace tests passed (615 passed, one parent-launched helper ignored), with
-isolated config/data directories, serial tests and loopback access for existing
-HTTP tests. Seventeen new trash tests are included. Transaction-boundary tests
-exercise every stage/operation in both delete and restore, then restart and
-roll forward. These are storage-service checks; explorer/native QA and the P2
-round-trip gate remain open.
-
-The conflict-resolution increment adds read-only transaction previews and explicit
-Finish intended operation. It preserves foreign bytes and versioned archive indexes
-before recording exact-state approvals in a descriptor-bound receipt. Original
-intent stays unchanged; restart verifies copies/receipts and resumes only an
-already accepted fingerprint. New edits require a new decision. Failure, unknown
-versions, damaged evidence, secret checks or unsafe paths leave recovery blocked.
-Directories/type replacement and unreadable/oversized targets require manual
-correction; preview never turns them into absent/empty data. Copies remain after
-commit. Native recovery dialogs and export controls are not yet integrated.
-
-Verification of the conflict-resolution increment (Linux, 2026-10-24): formatting,
-workspace clippy with warnings denied, fixture verification and all-target
-workspace tests passed (635 passed, one parent-launched helper ignored), using
-isolated config/data directories, serial tests and loopback access for existing
-HTTP tests. Twenty new tests cover read-only export candidates, preservation and
-approval boundaries, restart/repeated interruption, stale decisions, changed
-staging/proof inputs, damaged copies, copy limits, secret refusal and directory/link
-rejection. This does not close native Windows durability or the P2 round-trip gate.
-
-P1 is complete at the storage-service boundary on Linux. The final increment
-adds verified, immutable last-valid candidates with exact source/provenance,
-closed pinned dependencies, public configuration and full snapshot digests.
-Invalid/future cache is preserved and ignored. Explicit cache/checkpoint repair
-preserves original bytes under local metadata history before replacement.
-Ordinary saves cannot bypass that preservation policy.
-
-Persistence tests now inject disk-full and permission failures before and after
-actual filesystem operations, including partial temporary writes, file/directory
-sync, installation, removal and cleanup. Native child-process tests kill a writer
-at every transaction I/O boundary, check stable readers and restart roll-forward.
-See the [P1 acceptance record](stage-ii-p1-acceptance.md) for evidence and limits.
-
-Explorer directory/unregistered-file operations and UI integration remain P5 work.
-P2's shared semantic loader and document sessions remain pending; its round-trip
-gate has not passed. Folder lowering/authoring validation is used only to verify
-P1 cache candidates. Desktop/CLI folder integration and automatic migration are
-not enabled. Windows directory durability remains the P7 release gate. No P2 work
-is included in this completion increment.
-
-The first P2 increment adds the `apiforge-project` crate. `ProjectSession` opens
-an existing manifest (a folder without one is not written), creates a new empty
-project explicitly and owns one `DocumentSession` per registered document.
-Published revisions are derived from their immutable sources in dependency order;
-a revision that does not lower is an integrity error. Documents keep exact text,
-a source version, diagnostics, a current or last-valid model and a bounded model
-history. Missing or non-UTF-8 sources are explicit unavailable states.
-
-Analysis inputs are immutable and can run on a worker. Results apply only when
-session instance ID, epoch, document ID, source version and context generation
-all match; configuration edits and reloads invalidate outstanding results. Identities come
-from the session's previous model, otherwise from the shared checkpoint (adopted
-as-is only when it describes exactly this source, closed context and semantics),
-otherwise they are fresh and placed by a host-supplied placer. Graphical semantic
-edits reprint canonical folder source; block movement changes layout only. Save
-settles pending analysis, writes exact text (including invalid text), seals the
-document's checkpoint only for valid source and adds dirty configuration. Events
-carry a sequence and an origin, so several views can follow one log.
-
-`prepare_project` writes a model-backed project as a folder in one transaction,
-keeping entity, node and edge IDs, positions, `autoPlaced`, proxies and every
-published revision; each component gets a working document at its latest
-revision. It is the basis for P3 migration and does not touch originals.
-
-The P2 round-trip gate passes headless: every fixture project, plus one with
-variable/environment proxies, cleanup and an unused second revision, reopens with
-identical scenario models and published revisions. Diagram layout and semantic
-edits, then a code edit, survive save, close and reopen with unchanged IDs,
-positions, proxies, cleanup and pinned revisions. Saved invalid source reopens as
-text without a model and regains its identities when fixed. Session tests cover
-stale results after source, configuration and reload changes, hidden pending
-documents, an invalid document not locking another, component-only projects,
-history projection, shared event logs, read-only second sessions and external
-edit conflicts.
-
-The second increment protects unsaved work. Recovery stores each dirty or
-layout-dirty document's exact text, directional selection, field drafts and an
-identity/layout checkpoint of its model. On reopen a draft whose base is still
-the saved source is restored automatically (text, view state and unsaved
-layout); any other draft is held for an explicit keep or discard, blocks edits
-and saves of its document and survives later recovery writes. Unreadable,
-unsupported or foreign recovery is preserved and blocks recovery writes; a
-backup candidate needs explicit restoration. Saving a document removes its draft.
-Valid models are also stored as verified last-valid snapshots: saved invalid
-source reopens with its last-valid model only for the same closed configuration
-and dependency context, and never as a current model. Creating a project adds
-`/.apiforge/local/` to `.gitignore` without rewriting existing rules.
-
-Closing a session succeeds only after unsaved work is written to recovery; a
-read-only session or unusable recovery returns the session so the caller can
-offer export, and an explicit discard removes the drafts. A writable close also
-clears obsolete recovery after edits are undone or held drafts discarded.
-Unsaved configuration blocks close and returns the session for an explicit save
-or discard; `save_configuration` saves it independently of document sources,
-including in an empty project.
-
-P2 is complete at the session-library boundary. Inspector widgets that produce
-field drafts arrive with P4; the session stores and recovers their drafts but
-does not yet apply them to models. Item 5 of the
-[P1 code review](stage-ii-review-notes.md#p1-code-review) remains open.
-Desktop and CLI do not use folder sessions yet.
-
-P3 adds `migrate_workspace` in `apiforge-project`. It runs under the exclusive
-legacy workspace session and records SHA-256 hashes of the workspace, drafts and
-journal files and their backups. Each project is prepared in
-`migration/<migration-id>/<project-id>/` beside the workspace with
-`prepare_project`. Legacy drafts move into the folder's local recovery with their
-original base hashes and cursors. The folder printer produces the same text as
-the legacy printer, so a draft that matched its definition is restored
-automatically and any other draft is held. Inspector field drafts join their
-owner's recovery entry, including those of inactive projects. A draft of an older
-component revision becomes a separate `recovered` working document based on that
-revision, with its own checkpoint; the primary working document stays on the
-latest revision. Drafts of missing definitions are reported and remain in the
-untouched original file.
-
-Every prepared folder is reopened through the folder loader without recovery and
-compared with the workspace: scenarios, all published revisions and working
-copies must keep semantics, identities, layout and proxies. A marker records the
-owning migration. The inputs are rechecked before publication; a renamed folder
-never replaces an existing `projects/<project-id>/`. A durable index records each
-prepared folder's digest and publication state. A retry with unchanged inputs
-resumes the same migration and reuses only folders it published itself, unchanged;
-anything else is reported as occupied and left alone. Changed inputs start a new
-migration. A restart after a rename but before its index update also verifies
-the destination's marker and digest before acknowledging that publication.
-Migration indices, catalogues and markers are validated before use; unsupported
-versions, unsafe IDs, inconsistent entries and linked paths are preserved and
-rejected before migration can modify them. Writing `projects.json` activates the
-catalogue: it holds the
-migration ID, input hashes, every project path, the previously active project and
-the legacy journal, whose unresolved runs stay under global review. Originals are
-never modified. Startup does not call migration until P7.
-
-Tests migrate the fixture workspace with proxies, cleanup, a second component
-revision and active, inactive, field, older-revision and orphaned drafts, plus
-every fixture project file. They also cover occupied destinations, resumption
-after preparation, an interrupted publication, a lost catalogue with reused and
-tampered folders, changed inputs and read-only sessions.
-
-P4 adds the folder window, opened explicitly with `apiforge-desktop --folder
-<path>`; the normal startup path is unchanged. A folder without a manifest shows
-an Initialise action and nothing is written before it is chosen. The window owns
-views only: one tab per document ID, each with its own text-edit identity, caret,
-scroll, board selection and diagram camera, over the single `ProjectSession`.
-Code shows a document list (the P5 explorer replaces it), tabs, the editor and a
-Problems panel with save and analysis state; Diagram shows the board and the
-inspector; Split shows code beside the diagram and keeps the inspector at 1440
-points and wider. Ctrl+E toggles Code and Diagram and leaves Split for Code.
-Ctrl+Tab cycles tabs, Ctrl+W closes one, Ctrl+S saves the active source exactly
-and Ctrl+Shift+S saves each dirty document in its own transaction. Ctrl+Z/Ctrl+Y
-use the text history while a text field has the keyboard and the document's model
-history otherwise. Source replaced by a graphical edit, model undo or a revert
-retires the obsolete text history.
-
-Analysis runs on worker threads after a 250 ms pause per document, hidden tabs
-included; the session drops late results by ticket. Pending, invalid and held-
-draft documents lock only their own diagram, which shows the last valid model with
-a banner or an explicit unavailable state. Board commands use the same graph edits
-as the workspace window (`board_edit`). Unsaved work and the view are written to
-local recovery and `.apiforge/local/workspace.json` after one second of quiet.
-Closing a tab with unsaved work offers Save, Discard or Cancel; Discard uses the
-new `ProjectSession::revert`, which rereads the saved file, refuses an external
-change and starts a new model history from the saved checkpoint. Closing the
-window succeeds only after recovery is written; otherwise it stays open with Keep
-editing, Try again or an explicit discard. Inspector field drafts join document
-recovery and return on reopening. New scenarios and components start from valid
-sources at unused paths.
-
-The view state is versioned, validated and local: a damaged, future or foreign
-`workspace.json` is ignored rather than blocking the project, and read-only
-sessions never write it. Tests cover mode and tab switching with unsaved text,
-its text history and caret; model history across switches and focus routing of
-Ctrl+Z; invalid source locking only its own diagram; graphical reprinting that
-retires text history; exact invalid saves and Save All; close-tab discard;
-restoring mode, tabs, active document, caret and unsaved text after closing; a
-read-only second window; inspector field drafts across reopening; and drawing
-every mode at 960 × 540.
-
-P4 does not include runs or reports in folder windows, component publication,
-the comment-loss decision before a destructive reprint, external-change polling,
-explorer file operations or expanded-folder state (P5–P6). Recovery and saves run
-on the UI thread; they are small, but moving them to a storage worker remains
-open for P7. Native QA used screenshots of the window at 1600 × 1000 on Linux; keyboard
-and accessibility review of the new controls and Windows QA remain for P7.
-
-Verification of P4 (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, fixture verification and all-target workspace tests passed (724 passed,
-two parent-launched helpers ignored), run serially with isolated config/data
-directories.
-
-P4 review acceptance (Linux, 2026-10-24): the reviewed P2/P3 integration and
-P4 through `5d7f085` passed formatting, workspace clippy with warnings denied,
-fixture verification and all-target workspace tests (743 passed, two
-parent-launched helpers ignored), with serial tests and isolated config/data
-directories. Regression coverage verifies that keeping recovery retains inspector
-fields, discarding a tab clears both the registry and the actual URL/body widget
-text, and a failed discard on close returns a usable session. The body-field
-regression was added during review. P5 can start from this integrated baseline;
-the documented P6/P7 limits remain open.
-
-P5 replaces the document list with an explorer of the real directory tree. The
-storage scan lists the folder without following links, hides `.git` and
-`.apiforge`, hashes every source and the registry (streamed, so oversized sources
-also have a stable state) and is bounded to 10 000 entries and 32 levels. The
-explorer shows registered documents, unregistered sources and other files, marks
-unsaved, error and conflict status (folders show the most urgent status inside),
-draws only visible rows and remembers expanded folders in the local view state.
-It offers new scenarios, components and folders, multi-file import, rename, move
-through a menu or drag and drop, delete, restore from the trash, registration of
-found sources and reveal in the file manager. Arrow keys move and fold, Enter
-opens, F2 renames and Delete deletes. The active document is revealed.
-
-`ProjectSession` performs each file operation as one transaction outside text and
-model undo. Moves keep document IDs, unsaved text and histories and rewrite only
-registry paths; a case-only rename passes through a unique temporary name. An
-occupied target, an external registry change or a read-only session stops the
-operation before anything is written; the whole move, including the second step of
-a case-only rename, is validated first, and a failed second step moves back; unsaved configuration is never saved by it.
-Deleting files or directories goes through a preview listing documents, other
-files, folders and documents with unsaved work. The trash now also preserves
-unregistered files byte for byte and directories (recreated on restoration, at
-their original paths only); unsaved work moves with its document and returns
-unsaved. Registered documents whose files were removed outside API Forge are
-included by path, so their records and unsaved work also go to the trash; after
-restoration such work is a held draft, and keeping it recreates the file on save.
-A file added to a directory after its preview stops the deletion.
-
-Initialising a folder surveys its `.afs` files without writing, then registers the
-chosen ones unchanged; an unrecognisable header needs an explicit kind. Import
-copies files with new document and entity IDs in one transaction, proposes unused
-destinations, never overwrites or publishes, and requires a new handle for a
-colliding component (the copy's header is changed, the original is not).
-
-A watcher checks the folder once a second and when the window regains focus or a
-file operation finishes. The check runs on a worker; the session applies it. Clean
-documents follow external edits, deletions and reappearance. A source left out of
-a bounded scan (too deep or past the entry limit) is checked directly, so it is
-never taken for deleted. Documents with
-unsaved work get a conflict that pauses their saving: Changed offers the version
-on disk or an export of the local text; Deleted also offers keeping the local
-version, recreating the file on the next save. An external rename is followed
-only when one removed source and one unregistered source share a hash; the
-registry records the new path. A changed registry reloads a clean project;
-otherwise, and while the registry is invalid or missing, writes pause and a
-reload carries unsaved work across in memory and into recovery.
-
-Tests cover the tree scan (order, hidden data, links, non-portable names, depth,
-active transactions), directory and loose-file trash with restart and roll-forward
-from each transaction boundary, moves of dirty and missing documents, case-only
-renames, refused overwrites, registry conflicts, delete/restore of unsaved work
-across restart, survey/initialise/import/registration, equal-length external
-edits, conflicts, deletion and recreation, unique and ambiguous rename matches,
-changed/invalid/missing registries, a check overtaken by an own save, and in the
-window: the tree, rename and delete/restore of open dirty tabs, external edits
-with Ctrl+S, keyboard navigation, initialisation and registration.
-
-P5 does not include runs, component publication or the CLI (P6). File operations,
-saves and project reloads still run on the UI thread; checks and scans do not.
-Moving them to a storage worker, permission and full-disk native QA of file
-operations and Windows QA remain for P7. The explorer's interaction, focus and
-accessibility fixes identified in the UI audit are assigned to P6; the broader
-release review remains P7. Two egui limits apply: a dialog's text field takes the keyboard,
-so the explorer needs a click to regain it, and only one item is selected.
-
-Verification of P5 (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, fixture verification and all-target workspace tests passed (791 passed,
-two parent-launched helpers ignored), run serially with isolated config/data
-directories. Native QA used `--screenshot` captures of the folder window at
-1600 × 1000 with an expanded tree, unregistered sources and other files.
-
-P5 delivery decision (2026-10-24): merged through `0fcff3e` after explicit user
-approval, with the open UI findings assigned to P6. Independent verification
-passed formatting, workspace clippy, fixture checks and all 791 standard tests
-(two helpers ignored), plus the three original CR reproductions after the
-fixes. Native interactive UI QA used 1600 × 972 and 960 × 540 client windows.
-The separate UI acceptance suite still has two passes and eight failures; its
-[results and evidence](qa/2026-10-24/p5-ui-quality/results.json) are retained,
-and [BUG-036–043](../knows-bugs.md#stage-ii-p5-ui-quality-follow-up-p6) stay open.
-P5 delivery does not enable folder mode or migration by default.
-
-P6a is the UI quality and text-file row of P6, on `feat/stage-ii-p6-ui` from
-`9012180`. Fresh blocks are placed at the sizes the board draws: `Placer::place`
-now receives the project context the document was analysed in, and the window
-supplies a placer that measures cards and proxy chips as it paints them, when
-opening and when initialising. The explorer lists the project itself as its
-first row: named, selectable by mouse and keyboard, the explicit destination of
-new files, folders, imports and drops, folded by its chevron, Enter or the arrow
-keys but not by a plain click, and outside ordinary rename, move and delete. One
-click opens or activates the file it selects, every row reports its name, role,
-selection and expansion through accessibility metadata, and the selected row
-shows the list's keyboard focus. Revealing the active document works from its
-index, so a row the virtualised list never drew is reached too; a resize or a
-tree that grew after the folder scan re-reveals it.
-
-A file that is not a definition opens as text. `ProjectSession` owns such files
-by path: exact text, a disk baseline, dirty state, explicit save, revert and
-close, local recovery with held drafts, read-only sessions and external-change
-conflicts. They are never definitions, so they have no entity, model, analysis
-or checkpoint and cannot be run, and the diagram view says so rather than
-showing an empty board. The registry, `.apiforge` data, `.git`, registered
-documents, directories, non-UTF-8 files and files over the 1 MiB limit are
-refused. Recovery gains a `texts` array beside its documents; an explorer move
-carries an open file and its unsaved work, and a delete leaves unsaved work with
-a deletion conflict instead of dropping it. Each tab is one surface whose close
-control lives inside it, labels are bounded and equal names gain the least
-parent path that tells them apart, and activation, Ctrl+Tab and a narrower
-window all scroll the active tab into view.
-
-The UI acceptance gate passes: ten of ten probes, against two passing controls
-and eight failures at the P5 baseline. Verification of P6a (Linux, 2026-10-24):
-formatting, workspace clippy with warnings denied, fixture verification and
-all-target workspace tests passed (808 passed, two parent-launched helpers
-ignored), run serially with isolated config/data directories. Seventeen of those
-tests are new, seven of them window regressions driven by real pointer and
-keyboard events. Native review used `--screenshot` captures of the folder window
-at 1600 × 1000 and 960 × 540; the [P6 UI verification
-report](qa/2026-10-24/p6-ui/verification.md) records them and the limits.
-Publication, the folder CLI and runs remain P6b–P6d.
-
-P6b implements publication and A3 on `feat/stage-ii-p6-publish`, based on
-unmerged P6a `aa3c356` (`feat/stage-ii-p6-ui`), because it extends that folder
-window and its text-document sessions. A single redo transaction saves the exact
-working text, installs the next immutable canonical revision, records both
-checkpoints and advances only the publishing document's `baseRevision`. Resolution
-changes only after commit. Recovered working documents use their own source and
-publish after the current maximum without changing the primary document. A
-published handle cannot be renamed, occupied revision paths are preserved, and
-publication refuses invalid source, unresolved fields, held drafts, read-only
-sessions, foreign source/registry bytes and damaged diagram metadata.
-
-The folder header offers Publish for components. Graphical semantic edits,
-model Undo/Redo and publication request a decision before dropping unattached
-comments; cancellation retains the original text. The decision binds the exact
-source version, and the dialog also checks the session/context ticket. Pure
-layout changes and ordinary Save preserve text. Problems offers Apply fix for
-unqualified component calls; the explicit current revision is inserted into the
-source and can be undone in the text editor. No load/save/publication pins calls
-implicitly.
-
-P6b verification (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, fixture verification and all-target workspace tests passed (821 passed,
-two parent-launched helpers ignored), serially with isolated config/data directories.
-Both language fuzzers completed 60 seconds without failures; the UI quality gate
-passed all ten probes with its own target directory. Native evidence is in the
-[publication review](qa/2026-10-24/p6-publish/verification.md). Publication/storage
-work still runs on the UI thread until P7's storage worker; this package does not
-activate folder startup or migration. Windows QA and directory durability remain
-open.
-
-P6c implements `check`, `print`, `apply` and `run --folder` on
-`feat/stage-ii-p6-cli`, based on unmerged P6b `d04d4f2`
-(`feat/stage-ii-p6-publish`). It shares `ProjectSession`'s stable saved loader,
-folder lowering, reconciliation and verified closed snapshots. The saved-only
-constructors omit recovery and local last-valid cache; invalid saved source never
-falls back to them. Check/print/simulation leave an untouched checkout without
-local metadata. Apply saves only valid input, exactly, under the exclusive lock;
-print emits canonical source. Files are selected by registered relative path.
-Run accepts a scenario's registered path or entity ID, includes only its exact
-transitive published dependencies and configuration, and ignores an unrelated
-invalid scenario.
-
-Live folder runs retain the project writer lock through an abstract shared
-journal owner. Project journal I/O serialises with transactions and refuses active
-recovery and unsafe paths. Interrupted project runs remain in
-`.apiforge/local/journal.json`; legacy JSON runs keep their existing journal.
-An acknowledgement or record that fails to persist no longer changes the
-in-memory journal. This shared storage boundary is also the basis for P6d.
-
-Seven CLI integration tests compare saved GUI/CLI projections, pinned revisions,
-identity and layout after Apply, lock contention, invalid Apply, path/argument
-rejection, recovery/cache exclusion, an untouched checkout, selected-scenario
-runs and live journal failure. Four journal tests cover lock lifetime, interrupted
-runs and acknowledgement, read-only opening, unsafe paths and failed persistence.
-Folder commands are explicitly available behind `--folder`; this package does not
-enable startup migration or default folder opening. GUI runs and report handling
-remain P6d, and moving GUI storage I/O to a worker remains P7.
-
-Verification of P6c (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, converter fixtures and all-target workspace tests passed (832 passed,
-two parent-launched helpers ignored), serially with isolated config/data directories.
-The UI quality gate passed all ten probes with `CARGO_TARGET_DIR=/tmp/apiforge-gate`.
-No language or layout algorithm changed. This CLI/library increment adds no native
-controls; Windows QA and directory durability remain open release gates.
-
-P6d implements folder-window Run, reports and A4 on `feat/stage-ii-p6-runs`,
-based on unmerged P6c `bea2441` (`feat/stage-ii-p6-cli`). The session seals
-last-valid snapshots while their source/context are current, preserving earlier
-public configuration across edits and restart. Run settles source, freezes the
-selected scenario and exact dependencies, and checks version-bound consent before
-an earlier snapshot can run. Fields, context, source or session changes invalidate
-consent; missing candidates and conflicts block execution. Reports remain visible
-in Code/Diagram/Split, become stale after changes and stop supplying live shapes
-or graph-edit actions. Active runs retain their immutable snapshots.
-
-Project journals use P6c's shared writer owner. The window reviews interrupted
-project runs and exposes a separate global legacy-journal review under its legacy
-lock. Close cancels a run and waits for cleanup while retaining project ownership.
-Export and close preserves all in-memory recovery plus public dirty settings in
-a version-one JSON bundle on a dialog worker; failure, cancellation or an obsolete
-export cannot close newer work. Successful export preserves existing project-local
-recovery bytes, including foreign/unreadable data.
-
-The [P6d verification record](qa/2026-10-24/p6-runs/verification.md) describes
-five new library tests, six window regressions and native XTest evidence at
-1600 × 1000 and 960 × 540. Ordinary project I/O remains synchronous until P7;
-startup activation and migration are still disabled. Windows QA and directory
-durability remain open release gates.
-
-Verification of P6d (Linux, 2026-10-24): formatting, workspace clippy with warnings
-denied, converter fixtures and all-target workspace tests passed (843 passed,
-two parent-launched helpers ignored), serially with isolated config/data directories.
-The separate UI quality gate passed all ten probes with its own target directory.
-No language grammar or layout algorithm changed.
+P8 decisions are in [review notes](stage-ii-review-notes.md#plan-consistency-review).
+B7 retains one deterministically ordered `diagram.json`, with a realistic
+independent-document merge gate assigned to P7e. B8 adds LF Git attributes during
+explicit initialisation/migration without rewriting source or the Git index;
+P7e carries the code and tests. B9 defers a local-head reload bump because it
+cannot make Git checkout atomic; existing ticket invalidation and best-effort
+fingerprint checks remain. B10 keeps cache verification in storage, deferring a
+crate split until it has a concrete architectural benefit.
 
 Acceptance must cover:
 

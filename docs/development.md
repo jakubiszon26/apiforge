@@ -141,7 +141,7 @@ their journal under `.apiforge/local/`. Check, print and simulations use stable
 read-only loads without creating local metadata. All folder CLI commands ignore
 local recovery and last-valid cache, and fail on invalid saved definitions.
 
-## The code panel
+## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).
 Typing pauses for 250 ms, then the text becomes one document edit: blocks keep
@@ -194,9 +194,12 @@ cargo run -p apiforge-convert-v1 --locked -- workspace.v1.json workspace-v2.json
 ## Conventions
 
 - Stage II's [plan](stage-ii-code-workspace.md) and ADRs are published on `main`
-  before implementation. Develop that stage on `feat/stage-ii-code-workspace`
-  starting at the planning commit; a planning merge does not enable folder mode
-  or automatic migration. Follow P1/P2 and its restart round-trip gate before P3.
+  before implementation. P1–P5 are merged and P6 uses separate review branches.
+  Each later package starts at the latest `main` or a required unmerged
+  predecessor, records that base and its verification in a final docs commit, and
+  is pushed for human review. Default folder startup/migration waits for P7;
+  explicit `--folder` commands are available independently. The P2 restart
+  round-trip gate passed before P3 migration work.
 - Production code, comments, documentation and the interface are in English.
 - Work happens on short-lived `feat/…`, `fix/…` or `docs/…` branches with small
   [Conventional Commits](https://www.conventionalcommits.org/), merged into `main`

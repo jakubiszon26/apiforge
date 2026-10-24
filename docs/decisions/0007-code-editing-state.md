@@ -6,7 +6,7 @@
 - Scope: `apiforge-desktop` (code panel, editor state), `apiforge-storage`
 - Plan: [scenario code and canvas](../roadmap.md)
 
-Stage II amendment (planned, not yet implemented):
+Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0012](0012-project-sessions.md) defines independent save/analysis/conflict/model
 states and shared per-document sessions for folder projects;
 [ADR 0011](0011-project-transactions.md) defines their durable recovery. The rules

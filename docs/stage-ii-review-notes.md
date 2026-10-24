@@ -4,8 +4,8 @@
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: open, severity reduced by the reviewer; consider when implementing
-  shared checkpoint persistence
+- Status: B7 decided in P8: retain one deterministic checkpoint file; the
+  independent-document merge gate belongs to P7e
 - Applies to: [ADR 0010](decisions/0010-folder-projects.md), P1 diagram schema
 
 Stage II makes `.afs` files the durable definitions so that projects work well
@@ -29,8 +29,8 @@ serialization layout suitable for `git merge-file`. Deterministic output removes
 ordering noise, but its effectiveness for independent edits still needs a merge
 test with realistic full snapshots.
 
-Before implementing checkpoints, decide the file granularity and verify a merge
-of two branches that edit different scenarios. If the format changes, update
+P8 retains the implemented single-file granularity. P7e must verify a merge
+of two branches that edit different scenarios before activation. If the format changes, update
 ADRs 0010/0011, managed-path validation and transaction/load coverage together.
 This note records the concern and proposals; it does not amend the accepted
 format by itself.
@@ -44,8 +44,8 @@ roll-forward architecture or require a format change on its own.
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: open; decide the project initialisation policy before cross-platform
-  folder acceptance
+- Status: B8 decided in P8: LF attributes on explicit initialisation/migration;
+  code and checkout tests assigned to P7e, Windows native evidence still open
 - Applies to: [ADR 0010](decisions/0010-folder-projects.md),
   [ADR 0011](decisions/0011-project-transactions.md),
   [ADR 0012](decisions/0012-project-sessions.md)
@@ -92,8 +92,8 @@ a line-ending-only foreign edit.
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: open for reload-generation policy; stable-read limitation clarified in
-  ADR 0011
+- Status: B9 deferred in P8: no durable reload-generation bump; retain the
+  best-effort external-writer boundary and ticket invalidation, tested in P7e
 - Applies to: [ADR 0011](decisions/0011-project-transactions.md),
   [ADR 0012](decisions/0012-project-sessions.md)
 
@@ -136,7 +136,7 @@ Git snapshot.
 - Recorded: 2026-10-24
 - Source: review of the P1 storage increments (`c870fb8`..`86e5d9e`)
 - Status: P1 accepted; items 1, 3 and 4 fixed in P2, item 2 resolved by a probe,
-  item 5 open
+  item 5 explicitly deferred by B10 in P8
 - Applies to: [ADR 0011](decisions/0011-project-transactions.md),
   [ADR 0012](decisions/0012-project-sessions.md)
 
@@ -178,3 +178,90 @@ These points should be handled by the session/explorer work that uses them:
 5. **Storage depends on the language crate.** Cache verification lowers source in
    `apiforge-storage`. This is acceptable while the cache verifies its own
    candidates, but analysis policy otherwise belongs to `apiforge-project`.
+
+## Plan consistency review
+
+- Recorded: 2026-10-24
+- Source: review of the Stage II plan, ADRs 0010–0012, these notes and the roadmap
+  against P5 (`feat/stage-ii-p5-explorer`), re-checked against `main` at `9012180`
+  after the P6 scope update in `692f199`
+- Status: resolved by documentation-only P8 after P6 and before P7; the
+  implementation/evidence gates assigned below remain open
+- Applies to: [Stage II plan](stage-ii-code-workspace.md), ADRs 0002, 0005,
+  0007–0012, [roadmap](roadmap.md)
+
+P8 is documentation only. It corrects the statements below, assigns every
+unowned requirement to one package and gives each open note in this file a
+decided or deferred status. Code changes stay in the packages they are assigned
+to. Format changes, if any, update ADRs 0010/0011 together with their code.
+
+The input findings were pushed as `docs/stage-ii-p8-findings` through `cedabc3`.
+P8 is based on the unmerged P6d tip `001414f`; it changes documentation only and
+records implemented review branches without implying that a human merged them.
+
+### Requirement ownership
+
+| # | Requirement | Current state | Assign to |
+| --- | --- | --- | --- |
+| A1 | Open Folder, recent projects and project switching, with recovery written before a switch | Pending; explicit `--folder` works | P7a |
+| A2 | Editing project settings marks the manifest dirty | Session API exists; native editor pending | P7b |
+| A3 | Decision before a graphical edit or publication drops unattached comments | Implemented and tested in P6b, including history and obsolete consent | P6b complete in review |
+| A4 | Export when closing a read-only session or after a failed recovery write | Implemented and tested in P6d; exact/public bundle, cancellation/failure and obsolete-export checks | P6d complete in review |
+| A5 | Native transaction-recovery and conflict dialogs with export | Storage services exist; native integration pending | P7c |
+| A6 | All I/O off the UI thread; one storage worker serialises mutations | Scans/analysis/dialog export use workers; ordinary project/journal I/O still needs integration | P7d |
+
+### Decisions and remaining evidence
+
+| # | Decision | Reason and remaining work |
+| --- | --- | --- |
+| B7 | Retain one deterministically ordered `.apiforge/diagram.json` | Avoid a format migration before measuring the actual merge problem. P7e adds a realistic Git merge test for independent scenario edits, including identity/layout snapshots. Failure blocks activation and requires revisiting granularity with ADR/path/transaction coverage together; P8 does not claim the test passed |
+| B8 | Emit canonical/generated files with LF; append LF attributes during explicit initialisation and migration; preserve existing attributes and exact source saves | P7e owns code and checkout tests. Use `*.afs text eol=lf` plus root `apiforge.project.json` and API Forge's shared diagram JSON, rather than changing every user JSON file. No index edits, renormalisation, original-source rewrite or newline-normalised hashes |
+| B9 | Defer a durable local-head bump after external reload | It cannot prove an atomic uncoordinated Git checkout and adds another write/failure boundary. Keep exact fingerprint checks, analysis context/session invalidation and explicit dirty conflicts. P7e tests paused external replacement with and without a writer, documenting the limitation rather than claiming atomic checkout |
+| B10 | Keep storage's language dependency for verified cache candidates; defer crate extraction | The dependency checks the cache's exact source/model equivalence, while general analysis policy remains in `apiforge-project`. Extract only when a concrete architectural change removes that verification need without duplicating policy; no Stage II gate depends on a crate split |
+
+B7's recommendation is to keep the accepted format with measured merge evidence,
+rather than pre-emptively split every record. If the gate demonstrates conflict
+between independent documents, splitting becomes P7e code work and must revise
+ADRs 0010/0011, managed paths, loaders and transaction/recovery tests together.
+
+B8's recommendation is exact-byte integrity plus narrowly scoped Git attributes.
+Existing/nested overriding attributes and already-tracked CRLF files can still
+produce incompatible immutable revisions: detect and report them, preserving
+bytes. P7e tests Linux `core.autocrlf=true` checkout behaviour with/without generated
+attributes, nested overrides, exact CRLF saving and line-ending-only recovery
+conflicts. Native Windows checkout and directory durability remain open gates;
+Linux emulation does not close them.
+
+### Consistency corrections
+
+- Roadmap now records M3 complete and M7 pending, with P1–P5 merged, P6 in review
+  branches and P7 activation pending. There is no universal implementation branch.
+- ADRs 0002/0005/0007/0008/0009 distinguish implemented folder amendments from
+  legacy JSON rules; ADRs 0010/0012 record implemented P6 integration and the
+  remaining P7 worker/startup/release gates.
+- Implementation progress is a current summary per package. The P2 round-trip
+  gate has passed, the explorer is implemented and the folder CLI shares the
+  session loader. Historical increment details remain in Git/QA records.
+- The obsolete instruction to remove a temporary review file is removed.
+  Historical analysis/initial implementation baselines are labelled as such;
+  later package bases are explicit.
+
+### Naming and scope
+
+- **Decided at the start of P6:** one name selects a folder project everywhere.
+  Both the CLI folder commands and the desktop take `--folder <path>`; the plan's
+  earlier CLI spelling `--project <folder>` is withdrawn. Desktop
+  `--project FILE` and CLI `--workspace FILE` keep their existing JSON meanings, so no established argument
+  changes behaviour. P6c carries the specification change with its code.
+- F2 follows keyboard focus: file rename belongs to the focused explorer; code
+  symbol rename remains M7 work.
+- Folder CLI commands are available with explicit `--folder` as soon as P6c is
+  reviewed/merged. Default folder startup and automatic migration remain P7g.
+
+P8 verification (Linux, 2026-10-24): documentation-only diff, local link targets
+checked, formatting, all-target workspace clippy with warnings denied, converter
+fixtures and all-target workspace tests passed: 843 passed, two parent-launched
+helpers ignored, serially with isolated config/data directories. Runtime code is
+unchanged from P6d. The separate UI quality gate passed 10/10 with
+`CARGO_TARGET_DIR=/tmp/apiforge-gate`.
+Windows QA and Windows directory durability remain open.

@@ -4,7 +4,7 @@
 - Date: 2026-10-19
 - Scope: `apiforge-storage`
 
-Stage II amendment (planned, not yet implemented):
+Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0010](0010-folder-projects.md) and
 [ADR 0011](0011-project-transactions.md) replace the single-file container and
 save protocol for folder projects. This decision remains applicable to legacy
