@@ -9,6 +9,9 @@ limits. A subsequent review fixed **BUG-018–025**, recorded in the
 A third pass, prompted by a report that Backspace does not work in the code
 editor, found and fixed **BUG-026–031** in the editor's own key handling and
 drawing; see the [editor verification report](docs/qa/2026-10-24/fixes-editor/verification.md).
+A fourth pass ran the whole application end to end — the demo API, the command
+line against it and the native window — and fixed **BUG-032–034**, in the
+[end-to-end verification report](docs/qa/2026-10-24/fixes-e2e/verification.md).
 Original reproductions and screenshots are retained below.
 
 Tested revision: `854b44f` (`feat/live-sync` merged). Native release executable:
@@ -61,6 +64,14 @@ Found in the third pass, on the same areas:
 | BUG-029 | P2 | The line-number gutter makes a long buffer unusable |
 | BUG-030 | P3 | Auto-indent ignores brackets in a request body |
 | BUG-031 | P3 | The code panel reprints the whole document every frame |
+
+Found in the fourth pass, running the application end to end:
+
+| ID | Priority | Finding |
+| --- | --- | --- |
+| BUG-032 | P2 | An ordering wire runs under the block it leaves, so nothing shows where it starts |
+| BUG-033 | P2 | A failed component prints no inner steps, though its message says to read them |
+| BUG-034 | P3 | A failed comparison at the command line never says what it expected |
 
 ## BUG-001 — P1 — The first code edit in a fresh buffer is silently lost
 
@@ -722,6 +733,67 @@ quarter of a 60 Hz frame spent producing text that has not changed.
 `Editor::revision` already counts document changes; moving between documents
 needed a counter of its own, because a component draft left unsaved and opened
 again is the saved definition once more without any revision changing.
+
+## BUG-032 — P2 — An ordering wire runs under the block it leaves
+
+**Reported by the user; reproduced in the router and in the native window.**
+
+1. Open the `Przepływ: ceny i koszyk` demo project, whose steps are joined by
+   ordering wires.
+2. Look at the wire between `begin` and `Pobierz ceny produktów`, two cards side
+   by side.
+
+**Actual:** the dashed wire appears above `begin`, with nothing joining it to the
+`Next` port at the bottom of the card. The route is
+`(180,176) → (180,84) → (510,84) → (510,100)`: it leaves the port at the bottom
+edge and goes straight up **through the whole card**, which is painted over it.
+Only the sixteen pixels above the card are visible.
+
+**Expected:** a wire leaves its port perpendicular to the card side and stays in
+the open, as [ADR 0006](docs/decisions/0006-layout-and-wire-routing.md) says. It
+may hug a card; it may not pass behind one.
+
+**Impact:** on a board read for its execution order, an ordering wire cannot be
+traced back to the step it starts at.
+
+**Investigation:** `crates/apiforge-layout/src/route.rs`. The two cards a wire
+joins were excluded from the obstacles altogether, so the search was free to
+cross them. Excluding them is only needed so a port on a card's edge has
+somewhere to start, which the stub already provides.
+
+## BUG-033 — P2 — A failed component prints no inner steps at the command line
+
+1. Point a project's environment at a port nothing listens on.
+2. `apiforge run --workspace <doc.json> --scenario <name> --live`
+
+**Actual:** the component's line reads `error Produkt — Check the results of the
+component's inner steps.` and the inner steps are never printed. The reason the
+run failed — `Connection refused` on the request inside the component — appears
+only with `--json`.
+
+**Expected:** the report names the step that explains the failure.
+
+**Impact:** a failing run in a terminal or in CI tells the reader to look at
+something it does not show.
+
+**Investigation:** `print_report` in `crates/apiforge-cli/src/run.rs` walked
+`report.steps` and never `step.children`.
+
+## BUG-034 — P3 — A failed comparison at the command line never says what it expected
+
+1. Run a scenario whose assertion does not hold.
+
+**Actual:** `failed  Priorytet wysoki — The comparison failed.` The report
+carries `expected` and `actual`, and the window shows both side by side; the
+command line prints neither.
+
+**Expected:** the line that failed says what it wanted and what it got.
+
+**Impact:** the one output a test runner exists to produce has to be re-run with
+`--json` to be read.
+
+**Investigation:** the same printer; `StepResult::expected` and `::actual` were
+not used.
 
 ## Coverage and limits
 
