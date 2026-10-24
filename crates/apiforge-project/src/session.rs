@@ -343,6 +343,51 @@ impl ProjectSession {
         Ok(version)
     }
 
+    /// Replaces a document's unsaved work with its saved source: text, unsaved
+    /// layout and field drafts. Its model history starts again and identities
+    /// come from the saved checkpoint. A file changed outside this session is a
+    /// conflict; it is never adopted silently.
+    pub fn revert(&mut self, document_id: &str, origin: Origin) -> Result<()> {
+        let index = self.index(document_id)?;
+        self.require_no_held_draft(document_id)?;
+        if self.documents[index].unavailable.is_some() {
+            return Err(Error::ModelLocked);
+        }
+        let path = self.documents[index].entry.path.clone();
+        let mut snapshot = self.store.read(std::slice::from_ref(&path))?;
+        let bytes = snapshot.files.remove(&path).flatten();
+        let state = bytes.as_deref().map_or(FileState::Missing, FileState::of);
+        if state != self.documents[index].saved {
+            return Err(Error::Storage(
+                apiforge_storage::project::ProjectError::Conflict {
+                    path: self.store.root().join(path.as_str()),
+                },
+            ));
+        }
+        let text = bytes
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or(Error::ModelLocked)?;
+        let document = &mut self.documents[index];
+        document.text = text;
+        document.source_version += 1;
+        document.analysis = AnalysisState::Pending;
+        document.diagnostics.clear();
+        document.model = None;
+        document.model_source = None;
+        document.layout_dirty = false;
+        document.fields.clear();
+        document.history = Default::default();
+        let version = document.source_version;
+        self.emit(
+            origin,
+            Some(document_id),
+            EventKind::SourceChanged {
+                source_version: version,
+            },
+        );
+        self.analyse_now(index)
+    }
+
     /// Immutable input for every pending document, including hidden ones.
     pub fn pending_analyses(&self) -> Vec<AnalysisInput> {
         (0..self.documents.len())
