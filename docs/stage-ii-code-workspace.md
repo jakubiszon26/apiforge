@@ -3,7 +3,7 @@
 - Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 groundwork only, P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
-- Delivery: planning documents on `main`; implementation on `feat/stage-ii-code-workspace`
+- Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
 - Decisions: [folder format and components](decisions/0010-folder-projects.md),
   [storage and recovery](decisions/0011-project-transactions.md),
   [sessions and synchronisation](decisions/0012-project-sessions.md)
@@ -234,9 +234,11 @@ project in the managed projects directory instead of creating another legacy JSO
 
 ## Delivery and acceptance
 
-Planning lands on `main` as a documentation-only commit. Create
-`feat/stage-ii-code-workspace` from that commit; keep all implementation changes
-there until the normal review and merge. Keep unrelated local QA material out of
+Planning lands on `main` as a documentation-only commit. P1 was implemented on
+`feat/stage-ii-code-workspace` and merged after review. Each later package uses
+its own branch from `main` (for example `feat/stage-ii-p2-sessions`) and merges
+after review and its exit evidence. Merged packages stay inactive in the normal
+desktop/CLI paths until their integration package enables them. Keep unrelated local QA material out of
 the planning commit. Remove the temporary `recenzja.md` after incorporating its
 verified findings.
 
