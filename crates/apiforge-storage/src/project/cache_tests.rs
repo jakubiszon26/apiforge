@@ -555,3 +555,20 @@ fn encoded_cache_limit_reports_failure_without_truncation_or_source_changes() {
         b"scenario \"Main\" {}\n"
     );
 }
+
+#[test]
+fn an_unregistered_document_makes_only_its_own_entry_obsolete() {
+    let (_directory, store, read) = setup();
+    let read = store.save_last_valid_cache(&read, &[snapshot()]).unwrap();
+    assert_eq!(read.snapshots().len(), 1);
+    let document = manifest().documents[0].document_id.clone();
+    store
+        .trash_documents(&store.preview_trash(&[document]).unwrap(), &[])
+        .unwrap();
+    let after = store.load_last_valid_cache(&manifest().id).unwrap();
+    assert_eq!(after.notice(), None, "not a foreign or invalid cache");
+    assert!(after.snapshots().is_empty());
+    // An ordinary save, without explicit replacement, drops the obsolete entry.
+    let saved = store.save_last_valid_cache(&after, &[]).unwrap();
+    assert!(saved.preserved_copy().is_none());
+}

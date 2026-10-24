@@ -286,6 +286,13 @@ impl ProjectStore {
         let bytes = super::codec::encode(&file, MAX_JSON_BYTES)?;
         let manifest_snapshot = self.stable_read(|| Ok(vec![ProjectPath::new(MANIFEST_PATH)?]))?;
         let manifest = manifest_in(&manifest_snapshot, &preview.project_id)?;
+        // Loading ignores obsolete entries; saving one is a caller error.
+        if snapshots
+            .iter()
+            .any(|snapshot| !matches_registry(&snapshot.entry, &manifest))
+        {
+            return Err(ProjectError::ForeignRecovery);
+        }
         decode_cache(&bytes, &manifest)?;
         self.check_secrets(&bytes)?;
         let preserved_copy = if replace {
@@ -356,6 +363,17 @@ fn decode_cache(bytes: &[u8], manifest: &ProjectManifest) -> Result<Vec<LastVali
     let mut keys = HashSet::new();
     let mut snapshots = Vec::new();
     for entry in cache.entries {
+        // A document that left the registry (trash, external edit) makes its own
+        // entry obsolete, not the snapshots of every other document.
+        if let DocumentKey::Working { document_id } = &entry.key
+            && entry.project_id == manifest.id
+            && !manifest
+                .documents
+                .iter()
+                .any(|document| &document.document_id == document_id)
+        {
+            continue;
+        }
         verify_entry(&entry)?;
         if !keys.insert(entry.key.clone()) {
             return Err(ProjectError::InvalidCache);
