@@ -377,8 +377,8 @@ a source version, diagnostics, a current or last-valid model and a bounded model
 history. Missing or non-UTF-8 sources are explicit unavailable states.
 
 Analysis inputs are immutable and can run on a worker. Results apply only when
-session epoch, document ID, source version and context generation all match;
-configuration edits and reloads invalidate outstanding results. Identities come
+session instance ID, epoch, document ID, source version and context generation
+all match; configuration edits and reloads invalidate outstanding results. Identities come
 from the session's previous model, otherwise from the shared checkpoint (adopted
 as-is only when it describes exactly this source, closed context and semantics),
 otherwise they are fresh and placed by a host-supplied placer. Graphical semantic
@@ -418,7 +418,11 @@ and dependency context, and never as a current model. Creating a project adds
 
 Closing a session succeeds only after unsaved work is written to recovery; a
 read-only session or unusable recovery returns the session so the caller can
-offer export, and an explicit discard removes the drafts.
+offer export, and an explicit discard removes the drafts. A writable close also
+clears obsolete recovery after edits are undone or held drafts discarded.
+Unsaved configuration blocks close and returns the session for an explicit save
+or discard; `save_configuration` saves it independently of document sources,
+including in an empty project.
 
 P2 is complete at the session-library boundary. Inspector widgets that produce
 field drafts arrive with P4; the session stores and recovers their drafts but

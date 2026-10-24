@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnalysisTicket {
+    /// Unique session instance; epochs alone restart at one after reopening.
+    pub session_id: String,
     pub session_epoch: u64,
     pub document_id: String,
     pub source_version: u64,
