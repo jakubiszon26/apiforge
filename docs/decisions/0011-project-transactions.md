@@ -210,8 +210,13 @@ updates recovery's last known path without changing its original base hash. Neve
 overwrite occupied destinations, foreign checkpoint/recovery contexts or published
 revisions. Retain the trash index/payloads after restoration, marking the operation
 restored in the transaction to prevent an accidental duplicate restoration.
-Directory selection/preview, unregistered files and explorer UI integration remain
-later explorer work; this service does not recursively delete directories.
+Explorer deletion extends the same index with unregistered files (exact bytes and
+state, restored at their original paths only) and directories, removed deepest
+first after their contents and recreated on restoration. A directory preview
+lists its contents without following links; any link or non-portable name inside
+refuses the operation, and an entry added after the preview stops the removal.
+The registry and hidden control directories cannot be deleted this way. Older
+indexes without these fields remain readable.
 
 ## Recovery files, limits and secrets
 
