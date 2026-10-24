@@ -57,12 +57,26 @@ pub struct ExplorerState {
     followed: Option<String>,
 }
 
+/// A registered document as the explorer lists it.
+pub struct Registered {
+    pub id: String,
+    pub path: String,
+    pub kind: DocumentKind,
+    /// The session found no file for it. A document that a bounded scan left
+    /// out is not missing.
+    pub missing: bool,
+}
+
 /// Every row of the tree, in explorer order, before folding.
-pub fn tree(scan: Option<&TreeScan>, documents: &[(String, String, DocumentKind)]) -> Vec<Row> {
+pub fn tree(scan: Option<&TreeScan>, documents: &[Registered]) -> Vec<Row> {
     let mut entries: Vec<TreeEntry> = scan.map(|scan| scan.entries.clone()).unwrap_or_default();
     let mut known: HashSet<String> = entries.iter().map(|entry| entry.path.clone()).collect();
-    let mut missing = HashSet::new();
-    for (_, path, _) in documents {
+    let missing: HashSet<&str> = documents
+        .iter()
+        .filter(|document| document.missing)
+        .map(|document| document.path.as_str())
+        .collect();
+    for Registered { path, .. } in documents {
         if known.contains(path) {
             continue;
         }
@@ -81,7 +95,6 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[(String, String, DocumentKind)
             }
         }
         known.insert(path.clone());
-        missing.insert(path.clone());
         entries.push(TreeEntry {
             path: path.clone(),
             kind: TreeEntryKind::File {
@@ -95,11 +108,13 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[(String, String, DocumentKind)
     entries
         .into_iter()
         .map(|entry| {
-            let document = documents.iter().find(|(_, path, _)| *path == entry.path);
+            let document = documents
+                .iter()
+                .find(|document| document.path == entry.path);
             let kind = match (&entry.kind, document) {
-                (_, Some((id, _, kind))) => RowKind::Document {
-                    id: id.clone(),
-                    kind: *kind,
+                (_, Some(document)) => RowKind::Document {
+                    id: document.id.clone(),
+                    kind: document.kind,
                 },
                 (TreeEntryKind::Directory, None) => RowKind::Directory,
                 (TreeEntryKind::Link, None) => RowKind::Link,
@@ -110,7 +125,7 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[(String, String, DocumentKind)
             };
             Row {
                 depth: entry.path.matches('/').count(),
-                missing: missing.contains(&entry.path),
+                missing: missing.contains(entry.path.as_str()),
                 path: entry.path,
                 kind,
                 portable: entry.portable,
@@ -182,12 +197,11 @@ impl FolderApp {
         let documents: Vec<_> = session
             .documents()
             .iter()
-            .map(|document| {
-                (
-                    document.id().to_owned(),
-                    document.entry().path.as_str().to_owned(),
-                    document.entry().kind,
-                )
+            .map(|document| Registered {
+                id: document.id().to_owned(),
+                path: document.entry().path.as_str().to_owned(),
+                kind: document.entry().kind,
+                missing: document.unavailable() == Some(Unavailable::Missing),
             })
             .collect();
         visible(
@@ -378,10 +392,12 @@ impl FolderApp {
             .session
             .as_ref()
             .is_some_and(|session| !session.is_read_only());
-        if writable && row.portable && !row.missing {
-            if pressed(Key::F2) {
+        if writable && row.portable {
+            if pressed(Key::F2) && !row.missing {
                 actions.push(Action::Rename(row.path.clone()));
             }
+            // A missing document can still be deleted: it leaves the registry
+            // and its unsaved work goes to the trash.
             if pressed(Key::Delete) {
                 actions.push(Action::Delete(row.path.clone()));
             }
@@ -774,10 +790,14 @@ fn explorer_row(
                 if ui.button("Move to…").clicked() {
                     actions.push(Action::MoveTo(row.path.clone()));
                 }
-                if ui.button("Delete…").on_hover_text("Delete").clicked() {
-                    actions.push(Action::Delete(row.path.clone()));
-                }
             });
+            if ui
+                .add_enabled(row.portable, egui::Button::new("Delete…"))
+                .on_hover_text("Delete")
+                .clicked()
+            {
+                actions.push(Action::Delete(row.path.clone()));
+            }
         });
     });
     response
@@ -844,16 +864,25 @@ mod tests {
             ("README.md", false),
         ]);
         let documents = vec![
-            (
-                "main".to_owned(),
-                "flows/main.afs".to_owned(),
-                DocumentKind::Scenario,
-            ),
-            (
-                "gone".to_owned(),
-                "lost/gone.afs".to_owned(),
-                DocumentKind::Component,
-            ),
+            Registered {
+                id: "main".into(),
+                path: "flows/main.afs".into(),
+                kind: DocumentKind::Scenario,
+                missing: false,
+            },
+            Registered {
+                id: "gone".into(),
+                path: "lost/gone.afs".into(),
+                kind: DocumentKind::Component,
+                missing: true,
+            },
+            // Left out of a bounded scan, but present.
+            Registered {
+                id: "deep".into(),
+                path: "deep/far.afs".into(),
+                kind: DocumentKind::Scenario,
+                missing: false,
+            },
         ];
         let rows = tree(Some(&scan), &documents);
         let summary: Vec<_> = rows
@@ -863,6 +892,8 @@ mod tests {
         assert_eq!(
             summary,
             [
+                ("deep", 0, false),
+                ("deep/far.afs", 1, false),
                 ("flows", 0, false),
                 ("flows/loose.afs", 1, false),
                 ("flows/main.afs", 1, false),
@@ -871,9 +902,9 @@ mod tests {
                 ("README.md", 0, false),
             ]
         );
-        assert_eq!(rows[1].kind, RowKind::Source);
-        assert!(matches!(&rows[2].kind, RowKind::Document { id, .. } if id == "main"));
-        assert_eq!(rows[5].kind, RowKind::File);
+        assert_eq!(rows[3].kind, RowKind::Source);
+        assert!(matches!(&rows[4].kind, RowKind::Document { id, .. } if id == "main"));
+        assert_eq!(rows[7].kind, RowKind::File);
 
         let folded = visible(rows.clone(), &BTreeSet::new());
         assert_eq!(
@@ -881,10 +912,10 @@ mod tests {
                 .iter()
                 .map(|row| row.path.as_str())
                 .collect::<Vec<_>>(),
-            ["flows", "lost", "README.md"]
+            ["deep", "flows", "lost", "README.md"]
         );
         let open = visible(rows, &BTreeSet::from(["flows".to_owned()]));
-        assert_eq!(open.len(), 5);
+        assert_eq!(open.len(), 6);
     }
 
     #[test]

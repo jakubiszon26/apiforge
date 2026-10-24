@@ -35,6 +35,10 @@ impl FolderApp {
     }
 
     pub(super) fn code_view(&mut self, ui: &mut egui::Ui, document_id: &str, snapshot: &Snapshot) {
+        // A held draft can belong to a missing file; keeping it recreates it.
+        if snapshot.held {
+            self.draft_banner(ui, document_id);
+        }
         if let Some(unavailable) = snapshot.unavailable {
             widgets::hint(
                 ui,
@@ -47,9 +51,6 @@ impl FolderApp {
                 },
             );
             return;
-        }
-        if snapshot.held {
-            self.draft_banner(ui, document_id);
         }
         if let Some(conflict) = snapshot.conflict {
             self.conflict_banner(ui, document_id, conflict, snapshot);
