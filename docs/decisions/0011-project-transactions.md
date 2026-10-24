@@ -1,6 +1,6 @@
 # ADR 0011: Folder storage transactions and deliberate recovery
 
-- Status: accepted for Stage II; not implemented; native Windows durability unverified
+- Status: accepted for Stage II; P1 storage implemented and fault-tested on Linux; native Windows durability unverified
 - Date: 2026-10-24
 - Scope: `apiforge-storage`, folder loader, migration and run-journal integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -33,6 +33,11 @@ on the target filesystem, file sync, replacement and directory sync where
 supported. A sync error is a failure, never acknowledged as saved. Preserve the
 Linux/Windows platform limitations already recorded in ADR 0008 until verified.
 
+Transaction fingerprints describe exact file bytes, including line endings. Do
+not normalise CRLF/LF when comparing expected/target states or checking staged
+payload integrity. Any future normalised source/cache digest is a separate,
+explicitly versioned policy, not a replacement for these fingerprints.
+
 `head.json` is a small strict structure with `formatVersion: 1`, monotonically
 increasing `generation` and nullable `activeTransactionId`. An absent head in a
 new checkout means generation zero with no transaction. Only the writer creates
@@ -54,7 +59,9 @@ Each source save, manifest save, publication or explorer command is one logical
 transaction over its complete affected file set. Save All schedules individual
 document transactions with per-document results. A pure layout update is its own
 transaction when it describes saved source. Recovery updates are serialised
-single-file atomic writes under the same lock.
+single-file atomic writes under the same lock during ordinary recovery saves.
+Explorer operations that change recovery membership include the checked recovery
+and backup post-images in their shared multi-file transaction instead.
 
 Transaction directories are `.apiforge/local/transactions/<uuid>/`. Their versioned
 descriptor contains transaction ID, base/target generations and ordered operations.
@@ -106,6 +113,46 @@ the same secret checks, and record the accepted current fingerprint before retry
 Failure to preserve it blocks replacement. Declining leaves the project in
 recovery mode, with export available; it does not authorise partial normal use.
 
+The initial conflict service exposes an immutable, read-only recovery preview
+with expected, intended and current states plus the readable current/intended
+bytes for adapter-driven export. Finish is bound to the root, active head, exact
+descriptor hash, receipt fingerprint and observed target states. An edit after
+preview needs another preview/decision, including a second foreign edit after
+an earlier accepted conflict. Reading or reopening never counts as consent.
+
+Preserve foreign files under
+`.apiforge/local/conflicts/<transaction-id>/<approval-id>/<operation-index>.bin`,
+with a version-one `index.json` recording original paths and accepted fingerprints.
+An accepted absence is explicit and has no payload. Copies use no-clobber
+replacement and file/directory sync. After all copies and their index are durable,
+atomically persist version-one `resolutions.json` beside the active descriptor.
+Both index and receipt bind the transaction ID and exact original descriptor
+SHA-256. The receipt retains every accepted state/copy reference in order; later
+decisions supersede earlier states for an operation without discarding old copies.
+Do not rewrite the original descriptor, original expected states or staged intent.
+
+Replay may accept an additional initial state only from this verified receipt.
+Validate receipts, archive indexes and every referenced copy, then establish their
+durability before replacing targets, including on restart after a failed sync.
+Recheck staging and consent inputs before replay. Missing/corrupt evidence blocks
+completion; unknown receipt/index versions are preserved. Before receipt activation,
+unreferenced copies never authorise replay. After activation, ordinary recovery can
+resume the accepted operation without asking again for the same fingerprint.
+
+Bound receipts/indexes to 16 MiB, accepted-state entries to 1024 and preserved
+payloads referenced by a receipt to 64 MiB. Apply individual source/JSON bounds
+and known-session-secret checks before creating new managed copies. Failure leaves
+the original/staged candidates available and the transaction unresolved. Generic
+transactions cannot edit the conflict archive namespace. Retain copies and their
+indexes after successful commit, even when transaction staging is cleaned up.
+
+This action handles file contents and absence, not recursive directory recovery
+or file/directory kind replacement. A directory conflict, link, oversized foreign
+file or inaccessible path needs manual correction/export; it is never treated as
+an empty file or silently overwritten. Intended bytes can still be previewed when
+a current target cannot be safely inspected. Native dialogs/export controls remain
+later integration work.
+
 Do not overwrite a foreign edit automatically, discard a transaction because its
 PID is gone, or load a partial set of files as a writable session. The native GUI
 must distinguish source errors, recoverable I/O failure and unresolved storage
@@ -126,6 +173,16 @@ An external editor/Git can observe intermediate physical files; only API Forge
 readers implement the stable-generation protocol. After a checkout or external
 edit, validate source and metadata rather than trusting local head alone.
 
+Local head is not a Git tree identifier and need not change when Git replaces
+shared files. Fingerprint rechecks detect changes during the read, but an external
+checkout can pause with a partially replaced tree that remains identical across
+both checks. Stable-generation reads guarantee the transaction boundary for
+cooperating API Forge writers; they cannot guarantee one atomic Git checkout from
+an uncoordinated writer. Advancing generation after an observed external reload
+could invalidate overlapping readers, but cannot remove that limitation. The
+reload-generation policy and cross-platform line-ending proposals are tracked in
+the [Stage II review notes](../stage-ii-review-notes.md).
+
 Trash lives under `.apiforge/local/trash/<operation-id>/`, with a versioned index
 of original paths, document IDs, hashes and deletion time, plus preserved payloads.
 Capture dirty source/layout as part of a delete so the last edit is recoverable.
@@ -135,6 +192,27 @@ destination if the original path is occupied. No automatic expiry in Stage II.
 Text/model undo does not perform filesystem undo. Published revisions cannot be
 deleted through this explorer.
 
+The initial trash service covers registered working documents. Its version-one
+index records project/operation IDs, deletion time, nullable restoration time and
+entries containing the original registry entry/order, exact saved-source state,
+optional saved checkpoint and optional dirty recovery document. Payload names are
+derived from operation ID and entry number; index data cannot redirect reads to
+an arbitrary path. Missing source remains explicit rather than becoming an empty
+file. Preserve all copies before removing originals and unregistering documents.
+Updating shared checkpoints, recovery membership and checked backups belongs to
+that same activated transaction.
+
+Delete/restore previews bind the observed file set and generation. Changes require
+another preview; live drafts supplied at deletion must match the selected document
+context. Restore preserves document identity, reinstates saved source exactly and
+puts unsaved text/fields/layout into local recovery. A different destination also
+updates recovery's last known path without changing its original base hash. Never
+overwrite occupied destinations, foreign checkpoint/recovery contexts or published
+revisions. Retain the trash index/payloads after restoration, marking the operation
+restored in the transaction to prevent an accidental duplicate restoration.
+Directory selection/preview, unregistered files and explorer UI integration remain
+later explorer work; this service does not recursively delete directories.
+
 ## Recovery files, limits and secrets
 
 Local workspace is best-effort UI state. Source recovery is not best-effort: its
@@ -143,9 +221,48 @@ exports the work. Atomically save versioned recovery, with a checked backup and
 existing base-hash/stale-draft rules. Unknown versions are preserved. Restoring a
 backup requires an explicit decision and another fingerprint check.
 
+The initial recovery schema uses `formatVersion: 1`, `projectId` and `documents`.
+Each document stores its stable document/entity IDs, kind, nullable base revision,
+last known working path, nullable exact saved-source base hash, source version,
+text, selection, inspector field drafts and optional identity/layout checkpoint.
+Selections contain directional `anchor`/`caret` UTF-8 byte offsets at character
+boundaries. Field drafts retain widget identity, base hash, text and selection.
+The optional checkpoint may describe an earlier valid source while current text
+is invalid; it is a candidate requiring source/context/semantic validation, never
+permission to replace source or execute a model.
+
+Recovery writes use a preview baseline containing fingerprints of the registry,
+primary and backup. A changed baseline requires another read. Rotate only a
+validated primary into the checked backup, then atomically replace the primary;
+each write must be durable before acknowledgement. A missing/corrupt primary may
+offer a matching-project backup without writing anything. Restoring it is an
+explicit operation bound to that preview and preserves the good backup. Future
+versions and foreign-project recovery data are preserved. Recovery reads/writes
+are serialised with other storage work and blocked by active shared transactions;
+they do not advance shared definition generation or save `.afs` files. Failed
+writes leave source work in memory; a caller must not treat a readable older draft
+as successful persistence of a newer source version.
+
 Versioned cache is derived and optional. Unknown/corrupt cache is preserved and
 ignored with a notice; do not overwrite current source from it. ADR 0012 defines
 the provenance required before display or explicit last-valid execution.
+
+Ordinary writes refuse to replace corrupt or unsupported shared diagram metadata.
+Explicit repair is bound to a preview fingerprint and preserves opaque original
+bytes plus an index under `.apiforge/local/metadata-history/<id>/` before replacing
+metadata. Shared checkpoint repair uses the same redo transaction for the archive
+and replacement. Local cache repair durably installs its archive/index first,
+then the new cache; a failure may leave an unused archive but cannot silently
+lose the original. Oversized or unreadable originals require manual export and
+remain untouched. Normal cache saves never replace an unrecognised cache.
+
+The P1 I/O test seam surrounds actual temporary creation, chunked writes, file
+sync, replacement/no-clobber installation, directory sync, directory creation,
+removal and cleanup. Tests inject permission/disk-full failures on both sides,
+interrupt replay, and kill native child writers at each transaction boundary.
+These tests cover process interruption, not physical power loss or the durability
+of a particular Windows filesystem. See the [acceptance record](../stage-ii-p1-acceptance.md).
+
 
 Apply the existing 1 MiB source and 16 MiB JSON payload bounds from ADR 0010 to
 individual staged payloads. Bound descriptor size to 16 MiB and each transaction

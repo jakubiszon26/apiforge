@@ -273,12 +273,14 @@ name = "apiforge-storage"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-script",
  "dirs",
  "ring",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]

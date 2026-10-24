@@ -5,7 +5,7 @@ mod format;
 pub mod lexer;
 mod lower;
 mod parser;
-pub use lower::{Document, LowerContext, Lowered, lower};
+pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model};
 
 pub use ast::{Diagnostic, Fix, Severity, SyntaxTree};
 pub use format::{format, format_tree};

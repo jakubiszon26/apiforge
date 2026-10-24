@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 documentation prepared, P1–P7 not implemented
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 groundwork only, P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: planning documents on `main`; implementation on `feat/stage-ii-code-workspace`
@@ -255,6 +255,116 @@ verified findings.
 Implement P1/P2 first and pass the P2 round-trip gate before P3. Until P7, folder
 projects are opened explicitly for development; do not enable automatic migration
 in the normal startup path before integration evidence is complete.
+
+### Implementation progress
+
+Open design feedback is tracked in [Stage II review notes](stage-ii-review-notes.md),
+including checkpoint merge ergonomics, Git line-ending conversion and local head
+behaviour during external checkouts.
+
+The first P1 increment provides `apiforge_storage::project`: the version-one
+registry schema, portable managed paths, cloneable exclusive/read-only stores,
+stable-generation reads and staged multi-file transactions with explicit
+roll-forward recovery. Source bytes are saved exactly, including invalid text.
+Published source hashes are checked; existing revisions cannot be overwritten or
+removed through the transaction API. New managed payloads are checked against
+known session secrets.
+
+Storage tests exercise interruption at staging, activation, each operation and
+commit; interrupted replay; foreign target preservation; equal-length edits;
+stable-read retries; directory ordering; path boundaries; and the 1 MiB source
+limit. These are storage-level checks, not the P2 semantic/identity/layout gate.
+
+Verification for this increment (Linux, 2026-10-24): formatting, workspace clippy
+with warnings denied, fixture verification and workspace/all-target tests passed
+(575 passed; one helper test ignored because its parent launches it separately).
+The test run used isolated config/data directories and serial execution. Existing
+HTTP tests required loopback access outside the restricted sandbox. Twenty new
+folder-storage tests are included in those totals. No native GUI or Windows QA
+was performed for this library-only increment.
+
+The next P1 increment adds bounded source recovery with checked backup rotation,
+explicit preview-bound backup restoration, exact invalid/CRLF text, inspector
+drafts and directional UTF-8 selections. Both files and the registry participate
+in conflict checks. Read-only sessions can preview but cannot persist or restore.
+Known-secret checks also cover bytes copied into backups and explicit restoration.
+Encoded JSON limits are enforced while serialising, including escape expansion;
+an oversized payload never becomes a truncated successful save.
+
+Version-one diagram DTOs now preserve core scenario/component snapshots and keep
+working/published keys separate. Serialisation sorts records deterministically.
+Recovery can retain an unsaved checkpoint locally without writing shared diagram
+metadata. These are candidates: the future semantic loader must verify their
+source/context/semantic digests before use. A shared authoring validator permits
+empty/component-only projects while retaining legacy JSON import requirements.
+
+Verification of the recovery/checkpoint increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (598 passed, one parent-launched helper ignored). The
+serial test run used isolated config/data directories and loopback access for
+existing HTTP tests. This adds 23 tests to the first increment's total, including
+backup/restore races and failures, local unsaved-layout recovery, checkpoint
+identity/proxy preservation and authoring/legacy validation separation. This does
+not constitute native GUI/Windows QA or the P2 source/model round-trip gate.
+
+The next P1 increment adds versioned trash/restore for registered working documents.
+One transaction preserves exact saved bytes, checkpoint and dirty source/fields/
+layout before removal, then updates the registry, shared checkpoint set and local
+recovery with checked backup rotation. Restoration retains IDs and registry order,
+requires an unused destination and reinstates unsaved work as recovery instead of
+silently saving it. Published component revisions remain intact; trash has no
+automatic expiry. Preview baselines, source hashes, path boundaries and known
+secrets are checked before activation. Tests interrupt deletion/restoration at
+each transaction boundary and verify restart/replay, occupied destinations,
+multi-document operations, unrelated recovery and foreign metadata preservation.
+
+Verification of the trash/restore increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (615 passed, one parent-launched helper ignored), with
+isolated config/data directories, serial tests and loopback access for existing
+HTTP tests. Seventeen new trash tests are included. Transaction-boundary tests
+exercise every stage/operation in both delete and restore, then restart and
+roll forward. These are storage-service checks; explorer/native QA and the P2
+round-trip gate remain open.
+
+The conflict-resolution increment adds read-only transaction previews and explicit
+Finish intended operation. It preserves foreign bytes and versioned archive indexes
+before recording exact-state approvals in a descriptor-bound receipt. Original
+intent stays unchanged; restart verifies copies/receipts and resumes only an
+already accepted fingerprint. New edits require a new decision. Failure, unknown
+versions, damaged evidence, secret checks or unsafe paths leave recovery blocked.
+Directories/type replacement and unreadable/oversized targets require manual
+correction; preview never turns them into absent/empty data. Copies remain after
+commit. Native recovery dialogs and export controls are not yet integrated.
+
+Verification of the conflict-resolution increment (Linux, 2026-10-24): formatting,
+workspace clippy with warnings denied, fixture verification and all-target
+workspace tests passed (635 passed, one parent-launched helper ignored), using
+isolated config/data directories, serial tests and loopback access for existing
+HTTP tests. Twenty new tests cover read-only export candidates, preservation and
+approval boundaries, restart/repeated interruption, stale decisions, changed
+staging/proof inputs, damaged copies, copy limits, secret refusal and directory/link
+rejection. This does not close native Windows durability or the P2 round-trip gate.
+
+P1 is complete at the storage-service boundary on Linux. The final increment
+adds verified, immutable last-valid candidates with exact source/provenance,
+closed pinned dependencies, public configuration and full snapshot digests.
+Invalid/future cache is preserved and ignored. Explicit cache/checkpoint repair
+preserves original bytes under local metadata history before replacement.
+Ordinary saves cannot bypass that preservation policy.
+
+Persistence tests now inject disk-full and permission failures before and after
+actual filesystem operations, including partial temporary writes, file/directory
+sync, installation, removal and cleanup. Native child-process tests kill a writer
+at every transaction I/O boundary, check stable readers and restart roll-forward.
+See the [P1 acceptance record](stage-ii-p1-acceptance.md) for evidence and limits.
+
+Explorer directory/unregistered-file operations and UI integration remain P5 work.
+P2's shared semantic loader and document sessions remain pending; its round-trip
+gate has not passed. Folder lowering/authoring validation is used only to verify
+P1 cache candidates. Desktop/CLI folder integration and automatic migration are
+not enabled. Windows directory durability remains the P7 release gate. No P2 work
+is included in this completion increment.
 
 Acceptance must cover:
 

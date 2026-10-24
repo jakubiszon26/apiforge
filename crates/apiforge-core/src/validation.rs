@@ -118,6 +118,18 @@ pub(crate) fn workspace(workspace: &Workspace) -> Result {
     Ok(())
 }
 pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
+    validate_project_with_minimum(project, path, 1)
+}
+
+pub(crate) fn validate_authoring_project(project: &Project, path: &str) -> Result {
+    validate_project_with_minimum(project, path, 0)
+}
+
+fn validate_project_with_minimum(
+    project: &Project,
+    path: &str,
+    minimum_scenarios: usize,
+) -> Result {
     require(
         project.version == FORMAT_VERSION,
         path,
@@ -125,9 +137,13 @@ pub(crate) fn validate_project(project: &Project, path: &str) -> Result {
     )?;
     text(&project.name, path)?;
     require(
-        !project.scenarios.is_empty() && project.scenarios.len() <= 100,
+        project.scenarios.len() >= minimum_scenarios && project.scenarios.len() <= 100,
         path,
-        "Expected 1..100 scenarios",
+        if minimum_scenarios == 0 {
+            "Expected 0..100 scenarios"
+        } else {
+            "Expected 1..100 scenarios"
+        },
     )?;
     require(
         project.components.len() <= 200 && project.contracts.len() <= 200,
