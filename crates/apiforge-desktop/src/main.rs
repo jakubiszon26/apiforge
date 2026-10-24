@@ -118,7 +118,8 @@ fn main() -> ExitCode {
         Arguments::Check(path) => match files::read_document(&path) {
             Ok(document) => {
                 println!(
-                    "Valid v1 document: {} project(s)",
+                    "Valid v{} document: {} project(s)",
+                    document.workspace().version,
                     document.workspace().projects.len()
                 );
                 ExitCode::SUCCESS

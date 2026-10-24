@@ -1299,6 +1299,7 @@ mod request_argument_scope_tests {
         let graph = Graph {
             nodes: vec![node.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let context = Context {
             node: &node,

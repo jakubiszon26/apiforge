@@ -7,7 +7,7 @@
 use crate::{
     format::{
         Binding, Component, ConditionPredicate, Graph, Node, NodeConfig, OptionalJson, Port,
-        Position, Project,
+        Position, Project, ProxySource,
     },
     ids::new_id,
     model::{Branch, HttpMethod, NodeKind, Predicate, ValueType},
@@ -567,6 +567,18 @@ pub fn ancestors_and_self(graph: &Graph, node_id: &str) -> IndexSet<String> {
 /// Removes nodes, their ordering edges and every input that references them.
 pub fn delete_nodes(graph: &Graph, ids: &HashSet<&str>) -> Graph {
     Graph {
+        // A variable's proxies are places to take that variable from, so they go
+        // with it. Doing it here makes it part of the same edit, and one undo
+        // brings the variable and its proxies back together.
+        proxies: graph
+            .proxies
+            .iter()
+            .filter(|proxy| match &proxy.source {
+                ProxySource::Variable { node_id } => !ids.contains(node_id.as_str()),
+                ProxySource::Environment { .. } | ProxySource::Parameter { .. } => true,
+            })
+            .cloned()
+            .collect(),
         nodes: graph
             .nodes
             .iter()
@@ -850,6 +862,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![node("a", NodeKind::Request), node("b", NodeKind::Assert)],
             edges: vec![edge("a", "b")],
+            proxies: Vec::new(),
         };
         let expression = Binding::expression(Operator::Equals)
             .replace_at(&["left".into()], Binding::reference("a", "status", ""))
@@ -869,6 +882,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![node("a", NodeKind::Value), node("b", NodeKind::Value)],
             edges: vec![edge("a", "b")],
+            proxies: Vec::new(),
         };
         assert!(!has_cycle(&graph));
         graph.nodes[0]
@@ -882,6 +896,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![node("a", NodeKind::Request), node("b", NodeKind::Value)],
             edges: vec![edge("a", "b")],
+            proxies: Vec::new(),
         };
         graph.nodes[1]
             .inputs
@@ -902,6 +917,7 @@ mod tests {
                 node("d", NodeKind::Request),
             ],
             edges: vec![edge("a", "b")],
+            proxies: Vec::new(),
         };
         graph.nodes[2]
             .inputs

@@ -310,6 +310,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![source.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         for (name, path) in [
             ("capturedPrice", "items[0].price"),
@@ -345,6 +346,7 @@ mod tests {
         let mut graph = Graph {
             nodes: vec![source.clone(), variable.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let before = graph.clone();
         let captured = assign_response_variable(
@@ -399,6 +401,7 @@ mod tests {
             Graph {
                 nodes: vec![start],
                 edges: vec![],
+                proxies: Vec::new(),
             },
             id,
         )
@@ -472,6 +475,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![request.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let from = Some(OutputRef {
             node_id: &request.id,

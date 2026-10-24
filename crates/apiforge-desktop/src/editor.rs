@@ -5,6 +5,7 @@
 //! be undone and marks the workspace for saving.
 
 use apiforge_core::{
+    edit::prune_proxies,
     format::{Binding, Component, Graph, Project, Scenario, Workspace},
     graph::has_cycle,
     handle::{dedupe_handles, graph_handles},
@@ -237,8 +238,7 @@ impl Editor {
     fn context_changed(&mut self) {
         self.generation += 1;
         self.history = History::default();
-        let graph = self.graph();
-        let present: HashSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+        let present = selectable(self.graph());
         let kept: Vec<String> = self
             .selection
             .iter()
@@ -344,11 +344,14 @@ impl Editor {
                 *binding = binding.normalized();
             }
         }
+        // A proxy stands for a variable of this graph. Pruning here, inside the
+        // edit, makes one undo bring a deleted variable and its proxies back.
+        prune_proxies(&mut next);
         let current = self.graph();
         if next == *current {
             return Ok(());
         }
-        let merge_key = single_node_change(current, &next);
+        let merge_key = single_change(current, &next);
         let mergeable = merge_key.is_some()
             && merge_key == self.history.merge_key
             && self
@@ -446,6 +449,7 @@ impl Editor {
                     *binding = binding.normalized();
                 }
             }
+            prune_proxies(graph);
         }
         if &next == self.scenario() {
             return Ok(());
@@ -476,6 +480,7 @@ impl Editor {
                 *binding = binding.normalized();
             }
         }
+        prune_proxies(&mut next.graph);
         if next.graph == draft.graph && next == draft.definition {
             return Ok(());
         }
@@ -567,11 +572,9 @@ impl Editor {
     }
 
     fn prune_selection(&mut self) {
-        let present: HashSet<String> = self
-            .graph()
-            .nodes
-            .iter()
-            .map(|node| node.id.clone())
+        let present: HashSet<String> = selectable(self.graph())
+            .into_iter()
+            .map(str::to_owned)
             .collect();
         self.selection.retain(|id| present.contains(id));
     }
@@ -624,20 +627,45 @@ fn push_bounded(stack: &mut Vec<Snapshot>, snapshot: Snapshot) {
     }
 }
 
-/// The id of the only changed node, when nothing else (node set, edges) changed.
-fn single_node_change(current: &Graph, next: &Graph) -> Option<String> {
-    if current.edges != next.edges || current.nodes.len() != next.nodes.len() {
+/// What the board can have selected: its blocks and the proxies on it.
+fn selectable(graph: &Graph) -> HashSet<&str> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .chain(graph.proxies.iter().map(|proxy| proxy.id.as_str()))
+        .collect()
+}
+
+/// The id of the only changed block or proxy, when nothing else (the blocks and
+/// proxies present, the edges) changed.
+fn single_change(current: &Graph, next: &Graph) -> Option<String> {
+    if current.edges != next.edges
+        || current.nodes.len() != next.nodes.len()
+        || current.proxies.len() != next.proxies.len()
+    {
         return None;
     }
-    let mut changed = next.nodes.iter().filter(|node| {
+    let nodes = next.nodes.iter().filter_map(|node| {
         current
             .nodes
             .iter()
             .find(|old| old.id == node.id)
-            .is_none_or(|old| old != *node)
+            .is_none_or(|old| old != node)
+            .then_some(node.id.as_str())
     });
-    let first = changed.next()?;
-    changed.next().is_none().then(|| first.id.clone())
+    let proxies = next.proxies.iter().filter_map(|proxy| {
+        current
+            .proxies
+            .iter()
+            .find(|old| old.id == proxy.id)
+            .is_none_or(|old| old != proxy)
+            .then_some(proxy.id.as_str())
+    });
+    match nodes.chain(proxies).collect::<Vec<_>>().as_slice() {
+        [only] => Some((*only).to_owned()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

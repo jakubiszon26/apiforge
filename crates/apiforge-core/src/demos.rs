@@ -46,6 +46,7 @@ pub fn empty_scenario(name: impl Into<String>) -> Scenario {
         graph: Graph {
             nodes: vec![create_node(NodeKind::Start, at(80.0, 60.0), None)],
             edges: vec![],
+            proxies: Vec::new(),
         },
         cleanup: empty_graph(),
         parameters: IndexMap::new(),
@@ -658,6 +659,7 @@ pub fn workflow_project() -> Project {
             graph: Graph {
                 nodes: vec![start, prices, branch, cart, body, add, check, otherwise],
                 edges,
+                proxies: Vec::new(),
             },
             cleanup: graph(vec![cleanup]),
         }],
@@ -696,6 +698,7 @@ fn graph(nodes: Vec<Node>) -> Graph {
     Graph {
         nodes,
         edges: vec![],
+        proxies: Vec::new(),
     }
 }
 

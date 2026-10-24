@@ -304,6 +304,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![export],
             edges: vec![],
+            proxies: Vec::new(),
         };
         assert_eq!(
             default_source(&graph, &project, &id),

@@ -183,8 +183,12 @@ Layout is the only part of the document without meaning for a run:
   flag. *Tidy up* moves both kinds and marks them `autoPlaced`.
 - `Graph::proxies: Vec<Proxy>`, with `Proxy { id, source, position }` and
   `source` being `variable { nodeId }`, `environment { name }` or
-  `parameter { name }`, will hold variable proxies. It is an additive field added
-  with them in milestone M3 ([plan](../roadmap.md#variable-proxies)).
+  `parameter { name }`, holds the places a value is also shown
+  ([plan](../roadmap.md#variable-proxies)). The field is additive: it is written
+  only when the graph has proxies, so documents from before M3 are unchanged. A
+  `variable` proxy must stand for a Value of its own graph marked `variable`, and
+  goes when that block or its mark goes; a `parameter` or `environment` name is
+  not checked, because layout must never make a document unreadable.
 
 (Revised during M1: an optional position would have spread "no position yet"
 handling through every view, while a required position plus a flag keeps the

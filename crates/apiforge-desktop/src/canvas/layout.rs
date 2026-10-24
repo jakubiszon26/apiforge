@@ -5,7 +5,7 @@
 use crate::labels;
 use apiforge_core::{
     block::Block,
-    format::{Binding, Graph, Node, Port, Project},
+    format::{Binding, Graph, Node, Port, Project, Proxy, ProxySource},
     graph::{
         FALSE_PORT, ORDER_PORT, TRUE_PORT, URL_INPUT, VALUE_INPUT, condition_predicates,
         input_slots, output_ports, predicate,
@@ -23,6 +23,10 @@ const INPUT_ROW: f32 = 52.0;
 const OUTPUT_ROW: f32 = 28.0;
 const FOOTER: f32 = 36.0;
 const CONTROL: f32 = 28.0;
+/// A proxy chip is a pill, not a card: one line, and as wide as its name needs.
+pub const CHIP_HEIGHT: f32 = 36.0;
+const CHIP_MIN_WIDTH: f32 = 112.0;
+const CHIP_MAX_WIDTH: f32 = 240.0;
 
 pub const OVERLAY_PADDING_LEFT: f32 = 18.0;
 pub const OVERLAY_PADDING_RIGHT: f32 = 14.0;
@@ -458,6 +462,103 @@ impl Card {
         let mut card = self.clone();
         card.origin += offset;
         card
+    }
+}
+
+/// A proxy as drawn on the board: a small chip with one output.
+///
+/// Geometry, like a card's, is derived from the document every frame. A chip's
+/// width follows its label so that routing and hit testing agree without needing
+/// a font.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chip {
+    /// The document's proxy: its identity, what it stands for and where it sits.
+    pub proxy: Proxy,
+    /// The variable's name, or the name of the parameter or environment value.
+    pub label: String,
+    pub caption: &'static str,
+    /// False when nothing on this board or in the project answers to the name.
+    pub known: bool,
+    pub origin: Pos2,
+}
+
+impl Chip {
+    pub fn build(proxy: &Proxy, graph: &Graph, project: &Project, parameters: &[String]) -> Self {
+        let (label, caption, known) = match &proxy.source {
+            ProxySource::Variable { node_id } => {
+                let node = graph
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == node_id && node.is_variable());
+                (
+                    node.map_or(node_id.clone(), |node| node.display_name().to_owned()),
+                    "variable",
+                    node.is_some(),
+                )
+            }
+            ProxySource::Parameter { name } => (
+                name.clone(),
+                "parameter",
+                parameters.iter().any(|parameter| parameter == name),
+            ),
+            ProxySource::Environment { name } => {
+                let environment = &project.environment;
+                (
+                    name.clone(),
+                    "environment",
+                    name == "baseUrl"
+                        || environment.variables.contains_key(name)
+                        || environment.secret_names.contains(name),
+                )
+            }
+        };
+        Self {
+            proxy: proxy.clone(),
+            label,
+            caption,
+            known,
+            origin: pos2(proxy.position.x as f32, proxy.position.y as f32),
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.proxy.id
+    }
+
+    /// The variable this proxy stands for, when it stands for a block.
+    pub fn source_node(&self) -> Option<&str> {
+        match &self.proxy.source {
+            ProxySource::Variable { node_id } => Some(node_id),
+            ProxySource::Parameter { .. } | ProxySource::Environment { .. } => None,
+        }
+    }
+
+    pub fn width(&self) -> f32 {
+        let text = 7.2 * self.label.chars().count() as f32 + 64.0;
+        text.clamp(CHIP_MIN_WIDTH, CHIP_MAX_WIDTH)
+    }
+
+    pub fn rect(&self) -> Rect {
+        Rect::from_min_size(self.origin, vec2(self.width(), CHIP_HEIGHT))
+    }
+
+    /// Where a wire taken from this proxy starts.
+    pub fn output_anchor(&self) -> Pos2 {
+        self.origin + vec2(self.width(), CHIP_HEIGHT / 2.0)
+    }
+
+    /// The button that goes to the variable this proxy stands for.
+    pub fn follow_button(&self) -> Rect {
+        Rect::from_center_size(
+            self.origin + vec2(self.width() - 19.0, CHIP_HEIGHT / 2.0),
+            Vec2::splat(20.0),
+        )
+    }
+
+    pub fn translated(&self, offset: Vec2) -> Self {
+        let mut chip = self.clone();
+        chip.origin += offset;
+        chip
     }
 }
 

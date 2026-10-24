@@ -451,9 +451,9 @@ fn graph(
         "Export blocks belong in components",
     )?;
     require(
-        graph.nodes.len() <= 200 && graph.edges.len() <= 1000,
+        graph.nodes.len() <= 200 && graph.edges.len() <= 1000 && graph.proxies.len() <= 400,
         path,
-        "Graph exceeds node or edge limit",
+        "Graph exceeds node, edge or proxy limit",
     )?;
     unique(
         graph
@@ -557,6 +557,37 @@ fn graph(
                 .insert(&edge.source);
         }
     }
+    for (index, proxy) in graph.proxies.iter().enumerate() {
+        let proxy_path = format!("{path}.proxies[{index}]");
+        id(&proxy.id, &proxy_path)?;
+        require(
+            proxy.position.x.is_finite() && proxy.position.y.is_finite(),
+            &proxy_path,
+            "Non-finite position",
+        )?;
+        match &proxy.source {
+            // A variable's proxies belong to the graph holding the variable, so a
+            // proxy can never outlive its source or point into another graph.
+            ProxySource::Variable { node_id } => {
+                id(node_id, &proxy_path)?;
+                require(
+                    graph
+                        .nodes
+                        .iter()
+                        .any(|node| &node.id == node_id && node.is_variable()),
+                    &proxy_path,
+                    "Proxy source is not a variable of this graph",
+                )?;
+            }
+            // Names are not checked against the scenario or environment: a proxy is
+            // layout, and layout must never make a document unreadable.
+            ProxySource::Parameter { name } | ProxySource::Environment { name } => {
+                id(name, &proxy_path)?;
+            }
+        }
+    }
+    unique(graph.proxies.iter().map(|proxy| proxy.id.as_str()), path)?;
+
     // Iterative topological validation keeps adversarial input off the call stack.
     let mut ready: VecDeque<&str> = dependencies
         .iter()

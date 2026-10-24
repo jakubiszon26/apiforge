@@ -287,11 +287,46 @@ pub struct OrderEdge {
     )]
     pub branch: Option<Branch>,
 }
+/// What a proxy stands for: a variable block, a scenario parameter or component
+/// input, or an environment value.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum ProxySource {
+    Variable {
+        #[serde(rename = "nodeId")]
+        node_id: String,
+    },
+    Environment {
+        name: String,
+    },
+    Parameter {
+        name: String,
+    },
+}
+
+/// A second place on the board to take a variable from.
+///
+/// A proxy is layout and nothing else: it changes where a consumer's wire starts,
+/// never what the consumer is bound to, so code never mentions one and two
+/// documents that differ only in their proxies are the same document
+/// ([ADR 0004](../../../docs/decisions/0004-document-format-v2.md)).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Proxy {
+    pub id: String,
+    pub source: ProxySource,
+    pub position: Position,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub edges: Vec<OrderEdge>,
+    /// Places a variable is also shown. Absent from every document written before
+    /// proxies existed, and from every graph that has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proxies: Vec<Proxy>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

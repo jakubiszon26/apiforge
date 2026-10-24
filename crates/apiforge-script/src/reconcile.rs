@@ -83,7 +83,10 @@ pub fn reconcile(current: &Document, lowered: &Lowered) -> Result<Reconciled, &'
         }
         identities.insert(node.id.clone(), id);
     }
-    for graph in graphs_mut(&mut document) {
+    for (graph, old) in graphs_mut(&mut document).into_iter().zip(graphs(current)) {
+        // Code carries no layout, so the proxies of the document being edited stay
+        // where they are, except those whose variable the text removed or unmarked.
+        graph.proxies = old.proxies.clone();
         for node in &mut graph.nodes {
             node.id = identities[&node.id].clone();
             if let Some(old) = preserved.get(&node.handle) {
@@ -109,6 +112,7 @@ pub fn reconcile(current: &Document, lowered: &Lowered) -> Result<Reconciled, &'
                     .expect("every leaf retained");
             }
         }
+        apiforge_core::edit::prune_proxies(graph);
         for edge in &mut graph.edges {
             edge.source = identities[&edge.source].clone();
             edge.target = identities[&edge.target].clone();

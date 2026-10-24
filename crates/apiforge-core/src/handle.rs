@@ -230,6 +230,7 @@ mod tests {
                 node("if"),
             ],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let reserved = HashSet::from(["b".to_owned()]);
         let handles: Vec<_> = dedupe_handles(&graph, &reserved)

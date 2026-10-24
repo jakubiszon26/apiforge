@@ -131,6 +131,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![node("a", NodeKind::Request), node("b", NodeKind::Request)],
             edges: vec![edge("a", "b")],
+            proxies: Vec::new(),
         };
         let plan = ExecutionPlan::new(&graph);
         assert_eq!(plan.reachable, None);
@@ -159,6 +160,7 @@ mod tests {
                 with_input(node("consumer", NodeKind::Assert), "call"),
             ],
             edges: vec![edge("start", "call")],
+            proxies: Vec::new(),
         };
         let plan = ExecutionPlan::new(&graph);
         let mut reachable: Vec<_> = plan.reachable.clone().unwrap().into_iter().collect();
@@ -179,6 +181,7 @@ mod tests {
                 with_input(node("side-effect", NodeKind::Request), "shared"),
             ],
             edges: vec![edge("start", "active")],
+            proxies: Vec::new(),
         };
         let plan = ExecutionPlan::new(&graph);
         assert!(plan.is_reachable("shared"));
@@ -194,6 +197,7 @@ mod tests {
                 with_input(node("consumer", NodeKind::Request), "value"),
             ],
             edges: vec![edge("start", "value")],
+            proxies: Vec::new(),
         };
         assert!(ExecutionPlan::new(&graph).is_reachable("consumer"));
     }
@@ -207,6 +211,7 @@ mod tests {
                 node("after-second", NodeKind::Request),
             ],
             edges: vec![edge("second", "after-second")],
+            proxies: Vec::new(),
         };
         let plan = ExecutionPlan::new(&graph);
         assert!(plan.is_reachable("first"));

@@ -120,6 +120,8 @@ pub fn connect(
 /// around it. An input whose root reference is removed disappears.
 pub fn remove_connections(graph: &Graph, wire_ids: &HashSet<&str>) -> Graph {
     Graph {
+        // Removing a wire says nothing about where a variable may be taken from.
+        proxies: graph.proxies.clone(),
         edges: graph
             .edges
             .iter()
@@ -268,6 +270,7 @@ mod tests {
         let graph = Graph {
             nodes: vec![start.clone(), branch.clone(), request.clone()],
             edges: vec![],
+            proxies: Vec::new(),
         };
         let connect_order = |graph: &Graph, source: &str, port: &str, target: &str| {
             connect(graph, &project, source, port, target, ORDER_PORT, &[])

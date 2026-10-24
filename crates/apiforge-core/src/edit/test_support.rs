@@ -39,10 +39,12 @@ pub fn empty_project() -> Project {
             graph: Graph {
                 nodes: vec![],
                 edges: vec![],
+                proxies: Vec::new(),
             },
             cleanup: Graph {
                 nodes: vec![],
                 edges: vec![],
+                proxies: Vec::new(),
             },
             parameters: IndexMap::new(),
             error_policy: ErrorPolicy::Continue,
@@ -89,6 +91,7 @@ pub fn trio() -> Trio {
         graph: Graph {
             nodes: vec![request, formula, assertion],
             edges: vec![],
+            proxies: Vec::new(),
         },
     }
 }

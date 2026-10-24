@@ -365,10 +365,9 @@ impl Lower<'_> {
         }
     }
     fn statements(&mut self, statements: &[Statement], cleanup: bool, component: bool) -> Graph {
-        let mut result = Graph {
-            nodes: vec![],
-            edges: vec![],
-        };
+        // Code carries no layout, so lowering produces none. Reconciliation puts
+        // the document's proxies back, as it does positions.
+        let mut result = Graph::default();
         self.walk(statements, cleanup, component, None, &mut result);
         result
     }
