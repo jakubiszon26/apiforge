@@ -18,7 +18,12 @@ pub use migration::{
     migrate_workspace,
 };
 pub use prepare::prepare_project;
-pub use session::{DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome};
+pub use session::{
+    Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
+    ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
+    ProjectSession, Registration, RegistryState, SaveOutcome, SourceSurvey, declaration,
+    rename_handle,
+};
 
 pub use apiforge_script::Document;
 pub use apiforge_storage::project::{DocumentEntry, DocumentKind, ProjectError, ProjectManifest};
@@ -55,6 +60,18 @@ pub enum Error {
     StaleAnalysis,
     #[error("The document source exceeds the 1 MiB limit.")]
     SourceTooLarge,
+    #[error("A registered source must keep the .afs extension outside .apiforge.")]
+    RegisteredSourceExtension,
+    #[error("{} is not UTF-8 text.", .0.display())]
+    NotText(std::path::PathBuf),
+    #[error("The source does not declare the chosen kind of document.")]
+    KindMismatch,
+    #[error("Another component already uses the handle {0}.")]
+    HandleCollision(String),
+    #[error("The file changed outside API Forge; reload it or export your version first.")]
+    ExternalConflict,
+    #[error("The project registry changed outside API Forge; reload the project first.")]
+    RegistryChanged,
     #[error(transparent)]
     Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]

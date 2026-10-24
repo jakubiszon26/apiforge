@@ -3,6 +3,7 @@
 //! Switching a mode or a tab never saves, closes or resets a document.
 
 use apiforge_storage::project::{PanelSizes, TabState, TextSelection, WorkspaceState};
+use std::collections::BTreeSet;
 
 pub use apiforge_storage::project::ViewMode as Mode;
 
@@ -18,6 +19,8 @@ pub struct Workbench {
     tabs: Vec<TabState>,
     active: Option<String>,
     pub panels: PanelSizes,
+    /// Explorer folders shown expanded.
+    pub expanded: BTreeSet<String>,
 }
 
 impl Workbench {
@@ -30,6 +33,7 @@ impl Workbench {
                 tabs: Vec::new(),
                 active: None,
                 panels: DEFAULT_PANELS,
+                expanded: BTreeSet::new(),
             };
         };
         let tabs: Vec<TabState> = state
@@ -46,6 +50,7 @@ impl Workbench {
             tabs,
             active,
             panels: state.panels.unwrap_or(DEFAULT_PANELS),
+            expanded: state.expanded.into_iter().collect(),
         }
     }
 
@@ -55,6 +60,7 @@ impl Workbench {
             tabs: self.tabs.clone(),
             active: self.active.clone(),
             panels: Some(self.panels.clone()),
+            expanded: self.expanded.iter().cloned().collect(),
             ..WorkspaceState::new(project_id)
         }
     }

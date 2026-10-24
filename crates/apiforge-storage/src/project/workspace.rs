@@ -9,6 +9,7 @@ use std::collections::HashSet;
 pub(super) const WORKSPACE_PATH: &str = ".apiforge/local/workspace.json";
 const MAX_WORKSPACE_BYTES: usize = 1024 * 1024;
 const MAX_TABS: usize = 256;
+const MAX_EXPANDED: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +66,9 @@ pub struct WorkspaceState {
     pub active: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panels: Option<PanelSizes>,
+    /// Explorer folders shown expanded, as project-relative paths.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expanded: Vec<String>,
 }
 
 impl WorkspaceState {
@@ -76,6 +80,7 @@ impl WorkspaceState {
             tabs: Vec::new(),
             active: None,
             panels: None,
+            expanded: Vec::new(),
         }
     }
 
@@ -83,8 +88,15 @@ impl WorkspaceState {
         if self.format_version != 1 {
             return Err(ProjectError::UnsupportedVersion);
         }
-        if self.tabs.len() > MAX_TABS {
+        if self.tabs.len() > MAX_TABS || self.expanded.len() > MAX_EXPANDED {
             return Err(ProjectError::Limit);
+        }
+        if self
+            .expanded
+            .iter()
+            .any(|path| super::path::validate_relative(path).is_err())
+        {
+            return Err(ProjectError::InvalidMetadata);
         }
         let mut seen = HashSet::new();
         for tab in &self.tabs {
@@ -190,6 +202,7 @@ mod tests {
                 split_code: 480.0,
                 diagnostics: 140.0,
             }),
+            expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")
         }
     }

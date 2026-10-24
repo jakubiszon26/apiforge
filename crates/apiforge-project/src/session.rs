@@ -13,10 +13,24 @@ use apiforge_storage::project::{
 };
 use std::{path::Path, sync::Arc};
 
+#[path = "external.rs"]
+mod external;
+#[path = "files.rs"]
+mod files;
 #[path = "recovery.rs"]
 mod recovery;
+#[path = "register.rs"]
+mod register;
+pub use external::{
+    ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome, ObservedFile, RegistryState,
+};
+pub use files::DeletePreview;
 pub use recovery::DraftStatus;
 use recovery::RecoveryState;
+pub use register::{
+    Declaration, ImportCandidate, ImportItem, Registration, SourceSurvey, declaration,
+    rename_handle,
+};
 
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 const GITIGNORE_PATH: &str = ".gitignore";
@@ -34,6 +48,14 @@ impl Origin {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind {
     DocumentRegistered,
+    /// The document's registry path changed; its identity did not.
+    DocumentMoved,
+    /// The document was moved to the trash and is no longer registered.
+    DocumentRemoved,
+    /// The document's external conflict started or ended.
+    ExternalConflict,
+    /// The registry on disk changed, became invalid or was restored.
+    RegistryChanged,
     SourceChanged {
         source_version: u64,
     },
@@ -96,6 +118,8 @@ pub struct ProjectSession {
     session_id: String,
     recovery: RecoveryState,
     cache: Option<apiforge_storage::project::LastValidRead>,
+    /// The registry as last observed by an external check.
+    registry: RegistryState,
 }
 
 impl std::fmt::Debug for ProjectSession {
@@ -113,32 +137,7 @@ impl std::fmt::Debug for ProjectSession {
 impl ProjectSession {
     /// Writes a new, empty manifest. The folder must not contain a project.
     pub fn create(root: impl AsRef<Path>, name: &str) -> Result<Self> {
-        let root = root.as_ref();
-        if has_manifest(root)? {
-            return Err(Error::AlreadyAProject);
-        }
-        let store = ProjectStore::open_exclusive(root)?;
-        let manifest = ProjectManifest {
-            format_version: 1,
-            id: uuid::Uuid::new_v4().to_string(),
-            name: name.into(),
-            environment: apiforge_core::format::Environment {
-                base_url: String::new(),
-                variables: Default::default(),
-                secret_names: Vec::new(),
-            },
-            contracts: Vec::new(),
-            documents: Vec::new(),
-            revisions: Vec::new(),
-        };
-        let mut changes = vec![ProjectChange::Write {
-            path: ProjectPath::new(MANIFEST_PATH)?,
-            expected: FileState::Missing,
-            bytes: manifest.to_public_bytes()?,
-        }];
-        changes.extend(ignore_local_data(&store)?);
-        store.commit(changes)?;
-        Self::load(store, Arc::new(FixedPlacer), 1)
+        Self::initialise(root, name, &[])
     }
 
     /// Opens an existing project. A folder without a manifest is left untouched.
@@ -219,6 +218,7 @@ impl ProjectSession {
             session_id: uuid::Uuid::new_v4().to_string(),
             recovery: RecoveryState::default(),
             cache: None,
+            registry: RegistryState::Current,
         };
         for entry in manifest.documents {
             session.documents.push(document_from(&snapshot, entry));
@@ -282,6 +282,7 @@ impl ProjectSession {
         text: &str,
     ) -> Result<String> {
         let path = ProjectPath::working_source(path)?;
+        self.require_current_registry()?;
         if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
             return Err(Error::SourceTooLarge);
         }
@@ -680,6 +681,7 @@ impl ProjectSession {
         if !self.manifest_dirty {
             return Ok(None);
         }
+        self.require_current_registry()?;
         let bytes = self.manifest.to_public_bytes()?;
         let generation = self
             .store
@@ -696,6 +698,10 @@ impl ProjectSession {
     pub fn save(&mut self, document_id: &str) -> Result<SaveOutcome> {
         let index = self.index(document_id)?;
         self.require_no_held_draft(document_id)?;
+        self.require_current_registry()?;
+        if self.documents[index].conflict.is_some() {
+            return Err(Error::ExternalConflict);
+        }
         if self.documents[index].unavailable.is_some() {
             return Err(Error::ModelLocked);
         }
@@ -844,6 +850,22 @@ impl ProjectSession {
             document_id: document_id.map(str::to_owned),
             kind,
         });
+    }
+}
+
+fn empty_manifest(name: &str) -> ProjectManifest {
+    ProjectManifest {
+        format_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.into(),
+        environment: apiforge_core::format::Environment {
+            base_url: String::new(),
+            variables: Default::default(),
+            secret_names: Vec::new(),
+        },
+        contracts: Vec::new(),
+        documents: Vec::new(),
+        revisions: Vec::new(),
     }
 }
 

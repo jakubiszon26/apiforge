@@ -24,6 +24,8 @@ pub enum ModelState {
 pub enum Unavailable {
     Missing,
     NotUtf8,
+    /// Over the 1 MiB source limit.
+    TooLarge,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -64,6 +66,9 @@ pub struct DocumentSession {
     /// Layout differs from the saved checkpoint while semantics do not.
     pub(crate) layout_dirty: bool,
     pub(crate) history: History,
+    /// The saved file changed or disappeared outside the session while this
+    /// document had unsaved work.
+    pub(crate) conflict: Option<crate::session::ExternalConflict>,
 }
 
 impl DocumentSession {
@@ -123,6 +128,9 @@ impl DocumentSession {
     pub fn can_undo(&self) -> bool {
         self.accepts_model_edits() && !self.history.undo.is_empty()
     }
+    pub fn conflict(&self) -> Option<crate::session::ExternalConflict> {
+        self.conflict
+    }
     pub fn can_redo(&self) -> bool {
         self.accepts_model_edits() && !self.history.redo.is_empty()
     }
@@ -147,6 +155,7 @@ impl DocumentSession {
             fields: Vec::new(),
             layout_dirty: false,
             history: History::default(),
+            conflict: None,
         }
     }
 }

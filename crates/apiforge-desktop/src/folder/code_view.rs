@@ -35,18 +35,25 @@ impl FolderApp {
     }
 
     pub(super) fn code_view(&mut self, ui: &mut egui::Ui, document_id: &str, snapshot: &Snapshot) {
+        // A held draft can belong to a missing file; keeping it recreates it.
+        if snapshot.held {
+            self.draft_banner(ui, document_id);
+        }
         if let Some(unavailable) = snapshot.unavailable {
             widgets::hint(
                 ui,
                 match unavailable {
                     Unavailable::Missing => "This file is missing from the project folder.",
                     Unavailable::NotUtf8 => "This file is not UTF-8 text and cannot be edited.",
+                    Unavailable::TooLarge => {
+                        "This file exceeds the 1 MiB source limit and cannot be edited."
+                    }
                 },
             );
             return;
         }
-        if snapshot.held {
-            self.draft_banner(ui, document_id);
+        if let Some(conflict) = snapshot.conflict {
+            self.conflict_banner(ui, document_id, conflict, snapshot);
         }
         let id = editor_id(document_id);
         if self.shown.as_deref() != Some(document_id) {

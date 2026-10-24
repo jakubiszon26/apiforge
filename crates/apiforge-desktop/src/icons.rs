@@ -37,6 +37,8 @@ pub enum Icon {
     Wire,
     /// Angle brackets, for the code view.
     Code,
+    Folder,
+    File,
 }
 
 impl Icon {
@@ -259,6 +261,31 @@ impl Icon {
             Self::Code => {
                 path(&[(9.0, 7.0), (4.0, 12.0), (9.0, 17.0)]);
                 path(&[(15.0, 7.0), (20.0, 12.0), (15.0, 17.0)]);
+            }
+            Self::Folder => {
+                painter.add(Shape::closed_line(
+                    vec![
+                        p(3.0, 5.0),
+                        p(9.0, 5.0),
+                        p(11.0, 7.5),
+                        p(21.0, 7.5),
+                        p(21.0, 19.0),
+                        p(3.0, 19.0),
+                    ],
+                    stroke,
+                ));
+            }
+            Self::File => {
+                path(&[
+                    (14.0, 3.0),
+                    (5.0, 3.0),
+                    (5.0, 21.0),
+                    (19.0, 21.0),
+                    (19.0, 8.0),
+                    (14.0, 3.0),
+                    (14.0, 8.0),
+                    (19.0, 8.0),
+                ]);
             }
             Self::Eye | Self::EyeOff => {
                 let points = [

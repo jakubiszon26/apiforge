@@ -34,6 +34,20 @@ pub struct TrashIndex {
     pub deleted_at_unix_ms: u64,
     pub restored_at_unix_ms: Option<u64>,
     pub entries: Vec<TrashEntry>,
+    /// Unregistered files removed on their own or with a directory. They are
+    /// restored exactly, at their original paths only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<TrashFile>,
+    /// Directories removed after their contents and recreated on restoration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directories: Vec<ProjectPath>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrashFile {
+    pub path: ProjectPath,
+    pub state: FileState,
 }
 
 impl TrashIndex {
@@ -69,14 +83,36 @@ impl TrashIndex {
             return Err(ProjectError::UnsupportedVersion);
         }
         operation_path(&self.operation_id, "index.json")?;
-        if !schema::valid_id(&self.project_id) || self.entries.is_empty() {
+        if !schema::valid_id(&self.project_id)
+            || (self.entries.is_empty() && self.files.is_empty() && self.directories.is_empty())
+        {
             return Err(ProjectError::InvalidTrash);
         }
-        if self.entries.len() > MAX_TRANSACTION_OPERATIONS {
+        if self.entries.len() + self.files.len() + self.directories.len()
+            > MAX_TRANSACTION_OPERATIONS
+        {
             return Err(ProjectError::Limit);
         }
         let mut ids = HashSet::new();
         let mut paths = HashSet::new();
+        for file in &self.files {
+            if !explorable(&file.path)
+                || file.path.as_str() == MANIFEST_PATH
+                || !paths.insert(file.path.as_str().to_lowercase())
+            {
+                return Err(ProjectError::InvalidTrash);
+            }
+            match &file.state {
+                FileState::File { bytes, sha256 }
+                    if *bytes <= MAX_JSON_BYTES as u64 && schema::valid_hash(sha256) => {}
+                _ => return Err(ProjectError::InvalidTrash),
+            }
+        }
+        for directory in &self.directories {
+            if !explorable(directory) || !paths.insert(directory.as_str().to_lowercase()) {
+                return Err(ProjectError::InvalidTrash);
+            }
+        }
         for entry in &self.entries {
             let document = &entry.document;
             ProjectPath::working_source(document.path.as_str())?;
@@ -128,11 +164,21 @@ pub struct TrashPreview {
     manifest: ProjectManifest,
     snapshot: ProjectSnapshot,
     entries: Vec<DocumentEntry>,
+    files: Vec<ProjectPath>,
+    /// Deepest first, the order of removal.
+    directories: Vec<ProjectPath>,
 }
 
 impl TrashPreview {
     pub fn documents(&self) -> &[DocumentEntry] {
         &self.entries
+    }
+    /// Unregistered files, including other file types inside a directory.
+    pub fn files(&self) -> &[ProjectPath] {
+        &self.files
+    }
+    pub fn directories(&self) -> &[ProjectPath] {
+        &self.directories
     }
 }
 
@@ -196,7 +242,149 @@ impl ProjectStore {
             manifest,
             snapshot,
             entries,
+            files: Vec::new(),
+            directories: Vec::new(),
         })
+    }
+
+    /// Previews deleting explorer items: files and whole directories. Registered
+    /// sources keep their document records for restoration; other files are
+    /// preserved byte for byte. The registry and hidden control data cannot be
+    /// deleted this way, and a link inside a directory refuses the operation.
+    pub fn preview_trash_paths(&self, paths: &[ProjectPath]) -> Result<TrashPreview> {
+        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        if paths.is_empty() {
+            return Err(ProjectError::InvalidTrash);
+        }
+        let mut files = std::collections::BTreeSet::new();
+        let mut directories = std::collections::BTreeSet::new();
+        let mut absent = Vec::new();
+        for path in paths {
+            if !explorable(path) || path.as_str() == MANIFEST_PATH {
+                return Err(ProjectError::InvalidTrash);
+            }
+            super::path::resolve(self.root(), path.as_str())?;
+            match self.state(path.as_str())? {
+                FileState::Directory => {
+                    let (inner_files, inner_directories) = self.list_directory(path)?;
+                    files.extend(inner_files);
+                    directories.extend(inner_directories);
+                    directories.insert(path.clone());
+                }
+                FileState::File { .. } => {
+                    files.insert(path.clone());
+                }
+                // Only registered documents (or folders of them) whose files
+                // are missing can be deleted without a file on disk.
+                FileState::Missing => absent.push(path.clone()),
+            }
+        }
+        if files.len() + directories.len() > MAX_TRANSACTION_OPERATIONS {
+            return Err(ProjectError::Limit);
+        }
+        let mut extra = recovery_paths()?;
+        extra.extend(files.iter().cloned());
+        let (manifest, snapshot) = self.load_locked(&extra)?;
+        let inside = |entry: &DocumentEntry, path: &ProjectPath| {
+            entry.path == *path
+                || entry
+                    .path
+                    .as_str()
+                    .strip_prefix(path.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        };
+        for path in &absent {
+            if !manifest.documents.iter().any(|entry| inside(entry, path)) {
+                return Err(ProjectError::Conflict {
+                    path: self.root().join(path.as_str()),
+                });
+            }
+        }
+        // Every registered document in the selection, including those whose
+        // files were removed outside the project: their records and unsaved
+        // work go to the trash as well.
+        let entries: Vec<_> = manifest
+            .documents
+            .iter()
+            .filter(|entry| paths.iter().any(|path| inside(entry, path)))
+            .cloned()
+            .collect();
+        let files: Vec<_> = files
+            .into_iter()
+            .filter(|path| !manifest.documents.iter().any(|entry| &entry.path == path))
+            .collect();
+        for path in &files {
+            if !matches!(snapshot.state(path), Some(FileState::File { .. })) {
+                return Err(ProjectError::Conflict {
+                    path: self.root().join(path.as_str()),
+                });
+            }
+        }
+        let diagram = diagram_from_snapshot(&snapshot)?;
+        let recovery = recovery::recovery_from_snapshot(&snapshot, &manifest.id)?;
+        for entry in &entries {
+            working_checkpoint(&diagram, entry)?;
+            if let Some(draft) = recovery
+                .documents
+                .iter()
+                .find(|draft| draft.document_id == entry.document_id)
+            {
+                validate_recovery_document(draft, entry)?;
+            }
+        }
+        let mut directories: Vec<_> = directories.into_iter().collect();
+        directories.sort_by_key(|path| std::cmp::Reverse(path.as_str().matches('/').count()));
+        Ok(TrashPreview {
+            root: self.root().into(),
+            manifest,
+            snapshot,
+            entries,
+            files,
+            directories,
+        })
+    }
+
+    /// Every readable trash operation, most recent first. Unreadable or future
+    /// indexes are preserved and left out.
+    pub fn trash_operations(&self) -> Result<Vec<TrashIndex>> {
+        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let snapshot = self.stable_read(|| {
+            let directory = super::path::resolve(self.root(), TRASH)?;
+            let listing = match std::fs::read_dir(&directory) {
+                Ok(listing) => listing,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Vec::new());
+                }
+                Err(error) => return Err(ProjectError::io(&directory, error)),
+            };
+            let mut paths = Vec::new();
+            for item in listing {
+                let item = item.map_err(|error| ProjectError::io(&directory, error))?;
+                if let Some(Ok(path)) = item
+                    .file_name()
+                    .to_str()
+                    .map(|name| operation_path(name, "index.json"))
+                {
+                    paths.push(path);
+                }
+            }
+            Ok(paths)
+        })?;
+        let mut operations: Vec<_> = snapshot
+            .files
+            .iter()
+            .filter_map(|(path, bytes)| {
+                let index = TrashIndex::from_bytes(bytes.as_deref()?).ok()?;
+                let expected = operation_path(&index.operation_id, "index.json").ok()?;
+                (&expected == path).then_some(index)
+            })
+            .collect();
+        operations.sort_by(|a, b| {
+            b.deleted_at_unix_ms
+                .cmp(&a.deleted_at_unix_ms)
+                .then_with(|| a.operation_id.cmp(&b.operation_id))
+        });
+        Ok(operations)
     }
 
     /// One transaction captures saved bytes and current drafts before any original
@@ -244,6 +432,8 @@ impl ProjectStore {
             deleted_at_unix_ms: timestamp()?,
             restored_at_unix_ms: None,
             entries: Vec::new(),
+            files: Vec::new(),
+            directories: preview.directories.clone(),
         };
         let mut changes = Vec::new();
         if self.state(TRASH)? == FileState::Missing {
@@ -295,6 +485,23 @@ impl ProjectStore {
                 ));
             }
         }
+        for (number, path) in preview.files.iter().enumerate() {
+            let bytes = preview
+                .snapshot
+                .files
+                .get(path)
+                .and_then(Option::as_ref)
+                .ok_or(ProjectError::InvalidTrash)?;
+            index.files.push(TrashFile {
+                path: path.clone(),
+                state: FileState::of(bytes),
+            });
+            changes.push(write(
+                operation_path(&operation_id, &format!("file-{number}"))?,
+                FileState::Missing,
+                bytes.clone(),
+            ));
+        }
         changes.push(write(
             operation_path(&operation_id, "index.json")?,
             FileState::Missing,
@@ -309,10 +516,12 @@ impl ProjectStore {
                 diagram.to_bytes()?,
             )?);
         }
-        recovery
-            .documents
-            .retain(|document| !ids.contains(document.document_id.as_str()));
-        changes.extend(recovery::recovery_changes(&preview.snapshot, &recovery)?);
+        if !ids.is_empty() {
+            recovery
+                .documents
+                .retain(|document| !ids.contains(document.document_id.as_str()));
+            changes.extend(recovery::recovery_changes(&preview.snapshot, &recovery)?);
+        }
         for entry in &index.entries {
             if matches!(entry.source_state, FileState::File { .. }) {
                 changes.push(ProjectChange::RemoveFile {
@@ -321,15 +530,28 @@ impl ProjectStore {
                 });
             }
         }
-        let mut manifest = preview.manifest.clone();
-        manifest
-            .documents
-            .retain(|entry| !ids.contains(entry.document_id.as_str()));
-        changes.push(write_from_snapshot(
-            &preview.snapshot,
-            MANIFEST_PATH,
-            manifest.to_public_bytes()?,
-        )?);
+        for file in &index.files {
+            changes.push(ProjectChange::RemoveFile {
+                path: file.path.clone(),
+                expected: file.state.clone(),
+            });
+        }
+        for directory in &preview.directories {
+            changes.push(ProjectChange::RemoveDirectory {
+                path: directory.clone(),
+            });
+        }
+        if !ids.is_empty() {
+            let mut manifest = preview.manifest.clone();
+            manifest
+                .documents
+                .retain(|entry| !ids.contains(entry.document_id.as_str()));
+            changes.push(write_from_snapshot(
+                &preview.snapshot,
+                MANIFEST_PATH,
+                manifest.to_public_bytes()?,
+            )?);
+        }
         let generation = self.commit_locked(changes, boundary)?;
         Ok(TrashCommit {
             operation_id,
@@ -354,6 +576,9 @@ impl ProjectStore {
                 if matches!(entry.source_state, FileState::File { .. }) {
                     paths.push(operation_path(operation_id, &format!("{index}.afs"))?);
                 }
+            }
+            for number in 0..index.files.len() {
+                paths.push(operation_path(operation_id, &format!("file-{number}"))?);
             }
             Ok(paths)
         })?;
@@ -416,6 +641,41 @@ impl ProjectStore {
         let mut changes = Vec::new();
         let mut directories = HashSet::new();
         let mut restored_entries = Vec::new();
+        let mut removed = preview.index.directories.clone();
+        removed.sort_by_key(|path| path.as_str().matches('/').count());
+        for directory in &removed {
+            self.create_restore_parents(directory, &mut directories, &mut changes)?;
+            match self.state(directory.as_str())? {
+                FileState::Directory => {}
+                FileState::Missing if directories.insert(directory.as_str().to_owned()) => {
+                    changes.push(ProjectChange::CreateDirectory {
+                        path: directory.clone(),
+                    });
+                }
+                FileState::Missing => {}
+                FileState::File { .. } => {
+                    return Err(ProjectError::Conflict {
+                        path: self.root().join(directory.as_str()),
+                    });
+                }
+            }
+        }
+        for (number, file) in preview.index.files.iter().enumerate() {
+            if self.state(file.path.as_str())? != FileState::Missing {
+                return Err(ProjectError::Conflict {
+                    path: self.root().join(file.path.as_str()),
+                });
+            }
+            self.create_restore_parents(&file.path, &mut directories, &mut changes)?;
+            let payload = operation_path(&preview.index.operation_id, &format!("file-{number}"))?;
+            let bytes = preview
+                .snapshot
+                .files
+                .get(&payload)
+                .and_then(Option::as_ref)
+                .ok_or(ProjectError::InvalidTrash)?;
+            changes.push(write(file.path.clone(), FileState::Missing, bytes.clone()));
+        }
         for (index, entry) in preview.index.entries.iter().enumerate() {
             let mut document = entry.document.clone();
             if let Some(path) = overrides.get(&document.document_id) {
@@ -621,6 +881,12 @@ fn verify_payloads(snapshot: &ProjectSnapshot, index: &TrashIndex) -> Result<()>
             }
         }
     }
+    for (number, file) in index.files.iter().enumerate() {
+        let path = operation_path(&index.operation_id, &format!("file-{number}"))?;
+        if snapshot.state(&path) != Some(file.state.clone()) {
+            return Err(ProjectError::InvalidTrash);
+        }
+    }
     Ok(())
 }
 fn validate_recovery_document(recovery: &RecoveryDocument, entry: &DocumentEntry) -> Result<()> {
@@ -639,6 +905,10 @@ fn validate_recovery_document(recovery: &RecoveryDocument, entry: &DocumentEntry
     }
     .to_bytes()?;
     Ok(())
+}
+/// A path the explorer shows: outside the hidden control directories.
+fn explorable(path: &ProjectPath) -> bool {
+    !path.as_str().split('/').any(super::explorer::is_hidden)
 }
 fn write(path: ProjectPath, expected: FileState, bytes: Vec<u8>) -> ProjectChange {
     ProjectChange::Write {

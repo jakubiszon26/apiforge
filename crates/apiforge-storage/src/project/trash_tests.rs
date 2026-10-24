@@ -877,3 +877,146 @@ fn a_checkpoint_key_with_foreign_entity_context_is_preserved_instead_of_silently
     assert!(directory.path().join("scenarios/main.afs").exists());
     assert!(!directory.path().join(TRASH).exists());
 }
+
+fn paths(values: &[&str]) -> Vec<ProjectPath> {
+    values.iter().map(|value| path(value)).collect()
+}
+
+#[test]
+fn deleting_a_directory_preserves_every_file_and_restores_the_tree_after_restart() {
+    let (directory, store) = setup();
+    let root = directory.path();
+    fs::create_dir_all(root.join("scenarios/empty")).unwrap();
+    fs::create_dir_all(root.join("scenarios/assets")).unwrap();
+    fs::write(root.join("scenarios/assets/payload.json"), b"{\"a\":1}").unwrap();
+    fs::write(root.join("scenarios/notes.md"), b"exact\r\nbytes").unwrap();
+    let preview = store.preview_trash_paths(&paths(&["scenarios"])).unwrap();
+    assert_eq!(preview.documents(), manifest().documents);
+    assert_eq!(
+        preview.files(),
+        paths(&["scenarios/assets/payload.json", "scenarios/notes.md"])
+    );
+    assert_eq!(preview.directories().last().unwrap().as_str(), "scenarios");
+    let deleted = store.trash_documents(&preview, &[]).unwrap();
+    assert!(!root.join("scenarios").exists());
+    assert!(store.load().unwrap().0.documents.is_empty());
+    let operations = store.trash_operations().unwrap();
+    assert_eq!(operations.len(), 1);
+    assert_eq!(operations[0].files.len(), 2);
+    assert_eq!(operations[0].directories.len(), 3);
+    drop(store);
+    let store = ProjectStore::open_exclusive(root).unwrap();
+    let preview = store.preview_trash_restore(&deleted.operation_id).unwrap();
+    store.restore_trash(&preview, &[]).unwrap();
+    assert_eq!(store.load().unwrap().0, manifest());
+    assert_eq!(fs::read(root.join("scenarios/main.afs")).unwrap(), SOURCE);
+    assert_eq!(
+        fs::read(root.join("scenarios/notes.md")).unwrap(),
+        b"exact\r\nbytes"
+    );
+    assert_eq!(
+        fs::read(root.join("scenarios/assets/payload.json")).unwrap(),
+        b"{\"a\":1}"
+    );
+    assert!(root.join("scenarios/empty").is_dir());
+    assert!(
+        store.trash_operations().unwrap()[0]
+            .restored_at_unix_ms
+            .is_some()
+    );
+}
+
+#[test]
+fn a_loose_file_is_deleted_without_touching_the_registry() {
+    let (directory, store) = setup();
+    let root = directory.path();
+    fs::write(root.join("README.md"), b"read me").unwrap();
+    let registry = fs::read(root.join(MANIFEST_PATH)).unwrap();
+    let preview = store.preview_trash_paths(&paths(&["README.md"])).unwrap();
+    assert!(preview.documents().is_empty());
+    let deleted = store.trash_documents(&preview, &[]).unwrap();
+    assert!(!root.join("README.md").exists());
+    assert_eq!(fs::read(root.join(MANIFEST_PATH)).unwrap(), registry);
+    fs::write(root.join("README.md"), b"replacement").unwrap();
+    let preview = store.preview_trash_restore(&deleted.operation_id).unwrap();
+    assert!(matches!(
+        store.restore_trash(&preview, &[]),
+        Err(ProjectError::Conflict { .. })
+    ));
+    assert_eq!(fs::read(root.join("README.md")).unwrap(), b"replacement");
+    fs::remove_file(root.join("README.md")).unwrap();
+    let preview = store.preview_trash_restore(&deleted.operation_id).unwrap();
+    store.restore_trash(&preview, &[]).unwrap();
+    assert_eq!(fs::read(root.join("README.md")).unwrap(), b"read me");
+}
+
+#[test]
+fn the_registry_control_data_and_missing_paths_cannot_be_deleted() {
+    let (directory, store) = setup();
+    for refused in [MANIFEST_PATH, ".apiforge/diagram.json"] {
+        assert!(matches!(
+            store.preview_trash_paths(&paths(&[refused])),
+            Err(ProjectError::InvalidTrash)
+        ));
+    }
+    assert!(matches!(
+        store.preview_trash_paths(&paths(&["absent.md"])),
+        Err(ProjectError::Conflict { .. })
+    ));
+    assert!(matches!(
+        store.preview_trash_paths(&[]),
+        Err(ProjectError::InvalidTrash)
+    ));
+    assert!(directory.path().join(MANIFEST_PATH).exists());
+}
+
+#[test]
+fn a_file_added_to_a_directory_after_preview_stops_the_deletion() {
+    let (directory, store) = setup();
+    let root = directory.path();
+    let preview = store.preview_trash_paths(&paths(&["scenarios"])).unwrap();
+    fs::write(root.join("scenarios/late.md"), b"late").unwrap();
+    assert!(store.trash_documents(&preview, &[]).is_err());
+    assert_eq!(fs::read(root.join("scenarios/main.afs")).unwrap(), SOURCE);
+    assert_eq!(fs::read(root.join("scenarios/late.md")).unwrap(), b"late");
+    assert_eq!(store.load().unwrap().0, manifest());
+}
+
+#[test]
+fn directory_deletion_and_restoration_roll_forward_from_every_boundary() {
+    for stage in ["activation", "operation"] {
+        for occurrence in 0..6 {
+            let (directory, store) = setup();
+            let root = directory.path();
+            fs::create_dir_all(root.join("scenarios/inner")).unwrap();
+            fs::write(root.join("scenarios/inner/data.bin"), [0u8, 1, 2]).unwrap();
+            let preview = store.preview_trash_paths(&paths(&["scenarios"])).unwrap();
+            let mut seen = 0;
+            let result = store.trash_with_hook(&preview, &[], |boundary| {
+                if boundary == stage {
+                    seen += 1;
+                    if seen > occurrence {
+                        return Err(interrupted());
+                    }
+                }
+                Ok(())
+            });
+            drop(store);
+            let store = ProjectStore::open_exclusive(root).unwrap();
+            if result.is_err() {
+                store.recover().unwrap();
+            }
+            assert!(!root.join("scenarios").exists(), "{stage} {occurrence}");
+            let operation = store.trash_operations().unwrap().remove(0);
+            let preview = store
+                .preview_trash_restore(&operation.operation_id)
+                .unwrap();
+            store.restore_trash(&preview, &[]).unwrap();
+            assert_eq!(
+                fs::read(root.join("scenarios/inner/data.bin")).unwrap(),
+                [0u8, 1, 2]
+            );
+            assert_eq!(store.load().unwrap().0, manifest());
+        }
+    }
+}
