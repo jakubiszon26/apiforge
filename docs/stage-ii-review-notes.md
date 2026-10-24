@@ -178,3 +178,64 @@ These points should be handled by the session/explorer work that uses them:
 5. **Storage depends on the language crate.** Cache verification lowers source in
    `apiforge-storage`. This is acceptable while the cache verifies its own
    candidates, but analysis policy otherwise belongs to `apiforge-project`.
+
+## Plan consistency review
+
+- Recorded: 2026-10-24
+- Source: review of the Stage II plan, ADRs 0010–0012, these notes and the roadmap
+  against P5 (`feat/stage-ii-p5-explorer`)
+- Status: open; resolved by package P8, which runs after P6 and before P7
+- Applies to: [Stage II plan](stage-ii-code-workspace.md), ADRs 0002, 0005,
+  0007–0012, [roadmap](roadmap.md)
+
+P8 is documentation only. It corrects the statements below, assigns every
+unowned requirement to one package and gives each open note in this file a
+decided or deferred status. Code changes stay in the packages they are assigned
+to. Format changes, if any, update ADRs 0010/0011 together with their code.
+
+### Requirements without a package
+
+| # | Requirement | Current state | Assign to |
+| --- | --- | --- | --- |
+| A1 | Open Folder, recent projects and project switching, with recovery written before a switch | Only `apiforge-desktop --folder` | P7 |
+| A2 | Editing project settings marks the manifest dirty | `ProjectSession::edit_configuration` exists; the folder window has no settings editor | P7 |
+| A3 | Decision before a graphical edit or publication drops unattached comments | P4 deferred it to P5–P6; P5 does not include it and the P6 row does not list it | P6 |
+| A4 | Export when closing a read-only session or after a failed recovery write | The close dialog offers Keep editing, Try again and Discard only | P6 |
+| A5 | Native transaction-recovery and conflict dialogs with export | Storage services exist; no package integrates them | P7 |
+| A6 | All I/O off the UI thread; one storage worker serialises mutations | Saves, recovery, file operations and reloads run on the UI thread; the P7 row does not list it | P7 |
+
+### Decisions whose precondition has passed
+
+| # | Note | Precondition | Proposed status |
+| --- | --- | --- | --- |
+| B7 | [Shared checkpoint file](#shared-diagram-checkpoint-file-and-git-conflicts) | Decide granularity before implementing checkpoints; P1 implemented one `diagram.json` | Decide in P8; a merge test with realistic snapshots before P7 |
+| B8 | [Line endings](#line-endings-git-checkout-and-source-integrity) | Decide the initialisation policy before cross-platform acceptance; P5 implemented initialisation without it | Blocks P7 acceptance; publication in P6 makes a CRLF checkout of a revision an integrity failure |
+| B9 | [Local head](#local-head-after-an-external-checkout) | P5 follows external changes and reloads without a reload-generation policy | Decide or defer with reason |
+| B10 | [P1 code review](#p1-code-review) item 5 | Storage lowers source to verify its cache | Defer with reason or assign |
+
+### Stale or contradictory statements
+
+- Roadmap: the header says M3 is next while its status table marks M3 complete.
+  It also says Stage II implementation belongs on `feat/stage-ii-code-workspace`
+  and is not implemented, and that delivery remains planned.
+- ADRs 0002, 0005, 0007, 0008 and 0009 call the Stage II amendment planned and
+  not yet implemented; ADR 0010's status says folder/session integration is
+  pending. P1–P5 implement them behind `--folder`.
+- The plan's *Implementation progress* is a chronological log whose earlier
+  statements are no longer true (the P2 round-trip gate has not passed; desktop
+  and CLI do not use folder sessions; explorer operations remain P5 work).
+  Replace it with a current summary per package.
+- The plan still instructs removal of `recenzja.md`, which no longer exists.
+- “Implementation base: `c9c5ba0` plus this planning commit” no longer describes
+  the base of later packages.
+
+### Naming and scope
+
+- Folder CLI commands use `--project <folder>`, the desktop uses `--folder`, and
+  desktop `--project FILE` keeps its JSON-session meaning. Choose one name for
+  folders at the start of P6.
+- F2 renames in the explorer; M7 plans F2 rename from the code panel. Record that
+  F2 follows keyboard focus.
+- “Merged packages stay inactive … until their integration package enables
+  them” does not say how the P6 folder CLI commands relate to it. State whether
+  they are available as soon as P6 merges.
