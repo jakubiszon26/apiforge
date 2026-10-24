@@ -171,6 +171,7 @@ pub(super) enum Action {
     NewDocument { kind: DocumentKind, folder: String },
     NewFolder(String),
     Import(String),
+    Register(String),
 }
 
 impl FolderApp {
@@ -482,7 +483,46 @@ impl FolderApp {
                 });
             }
             Action::Import(folder) => self.pick_imports(folder),
+            Action::Register(path) => {
+                let declared = std::fs::read_to_string(self.root.join(&path))
+                    .ok()
+                    .and_then(|text| apiforge_project::declaration(&text));
+                match declared {
+                    Some(declared) => {
+                        if let Err(message) = self.register(&path, declared.kind) {
+                            self.notify(message, true);
+                        }
+                    }
+                    None => {
+                        self.prompt = Some(Prompt::Register {
+                            path,
+                            kind: DocumentKind::Scenario,
+                            error: None,
+                        })
+                    }
+                }
+            }
         }
+    }
+
+    /// Registers an `.afs` file found in the folder, exactly as it is.
+    pub(super) fn register(&mut self, path: &str, kind: DocumentKind) -> Result<(), String> {
+        let session = self.session.as_mut().ok_or_else(String::new)?;
+        let ids = session
+            .register_existing(
+                &[Registration {
+                    path: path.to_owned(),
+                    kind,
+                }],
+                DIAGRAM,
+            )
+            .map_err(|error| format!("Could not register {}: {error}", file_name(path)))?;
+        if let Some(id) = ids.first() {
+            self.workbench.open(id);
+        }
+        self.watcher.rescan();
+        self.touched();
+        Ok(())
     }
 
     /// Renames or moves, keeping document identity, and reports the result.
@@ -709,6 +749,14 @@ fn explorer_row(
             && ui.button("Open").clicked()
         {
             actions.push(Action::Open(id.clone()));
+        }
+        if row.kind == RowKind::Source
+            && row.portable
+            && ui
+                .add_enabled(writable, egui::Button::new("Register in project"))
+                .clicked()
+        {
+            actions.push(Action::Register(row.path.clone()));
         }
         if ui.button("Reveal in file manager").clicked() {
             actions.push(Action::Reveal(row.path.clone()));

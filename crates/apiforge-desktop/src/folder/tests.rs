@@ -1024,3 +1024,26 @@ fn initialising_registers_the_chosen_existing_sources() {
         "scenario \"Main\" {}\n"
     );
 }
+
+#[test]
+fn a_found_source_is_registered_from_the_explorer() {
+    let directory = shop();
+    std::fs::write(
+        directory.path().join("found.afs"),
+        "scenario \"Found\" {}\n",
+    )
+    .unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    app.explorer_action(explorer::Action::Register("found.afs".into()));
+    frame(&mut app, &context, vec![]);
+    let id = document(&app, "found.afs");
+    assert_eq!(app.workbench.active(), Some(id.as_str()));
+    watch(&mut app, &context);
+    let row = app
+        .explorer_rows()
+        .into_iter()
+        .find(|row| row.path == "found.afs")
+        .unwrap();
+    assert!(matches!(row.kind, explorer::RowKind::Document { .. }));
+}

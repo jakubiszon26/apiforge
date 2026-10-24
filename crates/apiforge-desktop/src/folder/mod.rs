@@ -102,6 +102,12 @@ enum Prompt {
         operations: Vec<TrashIndex>,
         error: Option<String>,
     },
+    /// A found source whose header does not say what it is.
+    Register {
+        path: String,
+        kind: DocumentKind,
+        error: Option<String>,
+    },
 }
 
 /// An `.afs` file in a folder without a project, offered for registration.

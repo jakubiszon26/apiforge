@@ -497,6 +497,50 @@ impl FolderApp {
         Some(Prompt::Import { rows, error })
     }
 
+    pub(super) fn register_prompt(
+        &mut self,
+        context: &egui::Context,
+        path: String,
+        mut kind: DocumentKind,
+        mut error: Option<String>,
+    ) -> Option<Prompt> {
+        let (mut confirm, mut cancel) = (false, false);
+        let response = dialogs::centered_modal(egui::Id::new("folder-register"), context).show(
+            context,
+            |ui| {
+                ui.set_width(420.0);
+                ui.heading(format!("Register {}", file_name(&path)));
+                widgets::hint(
+                    ui,
+                    "The file does not start with a scenario or component declaration. \
+                     Choose what it is; the file is not changed.",
+                );
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut kind, DocumentKind::Scenario, "Scenario");
+                    ui.radio_value(&mut kind, DocumentKind::Component, "Component");
+                });
+                if let Some(error) = &error {
+                    widgets::field_error(ui, error);
+                }
+                ui.add_space(theme::SPACE_MD);
+                ui.horizontal(|ui| {
+                    confirm = ui.add(widgets::primary_button("Register")).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            },
+        );
+        if response.should_close() || cancel {
+            return None;
+        }
+        if confirm {
+            match self.register(&path, kind) {
+                Ok(()) => return None,
+                Err(message) => error = Some(message),
+            }
+        }
+        Some(Prompt::Register { path, kind, error })
+    }
+
     pub(super) fn trash_prompt(
         &mut self,
         context: &egui::Context,

@@ -312,6 +312,9 @@ impl FolderApp {
             } => self.delete_prompt(context, preview, paths, error),
             Prompt::Import { rows, error } => self.import_prompt(context, rows, error),
             Prompt::Trash { operations, error } => self.trash_prompt(context, operations, error),
+            Prompt::Register { path, kind, error } => {
+                self.register_prompt(context, path, kind, error)
+            }
         };
     }
 
