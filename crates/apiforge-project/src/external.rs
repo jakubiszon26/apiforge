@@ -51,6 +51,8 @@ pub struct ExternalCheck {
     epoch: u64,
     manifest: FileState,
     documents: Vec<(String, ProjectPath, FileState)>,
+    /// Open text files, by path: their identity, unlike a document's.
+    texts: Vec<(ProjectPath, FileState)>,
 }
 
 /// What a check found. Applying it to a session of a different epoch, or to
@@ -62,6 +64,7 @@ pub struct ExternalChanges {
     pub scan: TreeScan,
     manifest: Option<ObservedFile>,
     documents: Vec<(String, FileState, ObservedFile)>,
+    texts: Vec<(String, FileState, Option<Vec<u8>>)>,
 }
 
 /// What applying a check changed, for notification.
@@ -71,6 +74,8 @@ pub struct ExternalOutcome {
     pub conflicts: Vec<String>,
     pub renamed: Vec<String>,
     pub missing: Vec<String>,
+    /// Paths of open text files whose unsaved work cannot follow the disk.
+    pub text_conflicts: Vec<String>,
     pub registry: Option<RegistryState>,
     /// The project was reloaded because its registry changed.
     pub project_reloaded: bool,
@@ -144,12 +149,38 @@ impl ExternalCheck {
             };
             documents.push((id.clone(), saved.clone(), observed));
         }
+        let mut texts = Vec::new();
+        // The tree scan hashes only sources and the registry, so an open text
+        // file's state is read directly rather than taken from the scan.
+        for (path, saved) in &self.texts {
+            let current = match self.store.file_state(path) {
+                Ok(state) => state,
+                // Over the payload limit: the next check reports it again.
+                Err(ProjectError::Limit) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if &current == saved {
+                continue;
+            }
+            let bytes = match &current {
+                FileState::File { bytes, .. } if *bytes > MAX_SOURCE_BYTES as u64 => continue,
+                FileState::File { .. } => match self.store.read(std::slice::from_ref(path)) {
+                    Ok(mut snapshot) => snapshot.files.remove(path).flatten(),
+                    Err(ProjectError::Limit) => continue,
+                    Err(error) => return Err(error.into()),
+                },
+                // A directory or link where the file was: treat as removed.
+                _ => None,
+            };
+            texts.push((path.as_str().to_owned(), saved.clone(), bytes));
+        }
         Ok(ExternalChanges {
             epoch: self.epoch,
             manifest_base: self.manifest.clone(),
             scan,
             manifest,
             documents,
+            texts,
         })
     }
 }
@@ -172,6 +203,7 @@ impl ProjectSession {
                     )
                 })
                 .collect(),
+            texts: self.text_baselines(),
         }
     }
 
@@ -275,6 +307,7 @@ impl ProjectSession {
         if !renames.is_empty() {
             outcome.renamed = self.follow_renames(renames)?;
         }
+        outcome.text_conflicts = self.apply_external_texts(changes.texts);
         Ok(outcome)
     }
 
@@ -372,6 +405,7 @@ impl ProjectSession {
                 .documents
                 .iter()
                 .any(|document| document.needs_recovery())
+            || self.has_unsaved_text()
     }
 
     fn conflict(&mut self, index: usize, conflict: ExternalConflict) {

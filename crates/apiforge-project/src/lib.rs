@@ -21,12 +21,14 @@ pub use prepare::prepare_project;
 pub use session::{
     Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
     ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
-    ProjectSession, Registration, RegistryState, SaveOutcome, SourceSurvey, declaration,
-    rename_handle,
+    ProjectSession, Registration, RegistryState, SaveOutcome, SourceSurvey, TextFileSession,
+    declaration, rename_handle,
 };
 
 pub use apiforge_script::Document;
-pub use apiforge_storage::project::{DocumentEntry, DocumentKind, ProjectError, ProjectManifest};
+pub use apiforge_storage::project::{
+    DocumentEntry, DocumentKind, ProjectError, ProjectManifest, RecoveryText,
+};
 
 use thiserror::Error;
 
@@ -42,6 +44,14 @@ pub enum Error {
     AlreadyAProject,
     #[error("No document has this ID.")]
     UnknownDocument,
+    #[error("No text file with this path is open.")]
+    UnknownTextFile,
+    #[error("This file is a registered document; open it as a document.")]
+    RegisteredDocument,
+    #[error("This file is API Forge's own project data and is not edited as text.")]
+    ManagedData,
+    #[error("Save or discard the unsaved text of this file before closing it.")]
+    UnsavedTextFile,
     #[error("The document's source is pending, invalid or unavailable; its model is locked.")]
     ModelLocked,
     #[error("The edited model is not a valid definition for this document.")]

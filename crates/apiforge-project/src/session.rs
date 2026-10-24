@@ -21,6 +21,8 @@ mod files;
 mod recovery;
 #[path = "register.rs"]
 mod register;
+#[path = "text.rs"]
+mod text;
 pub use external::{
     ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome, ObservedFile, RegistryState,
 };
@@ -31,6 +33,7 @@ pub use register::{
     Declaration, ImportCandidate, ImportItem, Registration, SourceSurvey, declaration,
     rename_handle,
 };
+pub use text::TextFileSession;
 
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 const GITIGNORE_PATH: &str = ".gitignore";
@@ -76,6 +79,21 @@ pub enum EventKind {
     ContextChanged {
         generation: u64,
     },
+    /// A project text file, identified by its path rather than a document ID.
+    TextFileOpened {
+        path: String,
+    },
+    TextFileChanged {
+        path: String,
+        version: u64,
+    },
+    TextFileSaved {
+        path: String,
+        generation: u64,
+    },
+    TextFileClosed {
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,6 +129,8 @@ pub struct ProjectSession {
     context: Arc<Project>,
     context_generation: u64,
     documents: Vec<DocumentSession>,
+    /// Project files open as plain text; they are not definitions.
+    texts: Vec<TextFileSession>,
     sequence: u64,
     events: Vec<Event>,
     placer: Arc<dyn Placer>,
@@ -130,6 +150,7 @@ impl std::fmt::Debug for ProjectSession {
             .field("read_only", &self.store.is_read_only())
             .field("epoch", &self.epoch)
             .field("documents", &self.documents.len())
+            .field("texts", &self.texts.len())
             .finish_non_exhaustive()
     }
 }
@@ -220,6 +241,7 @@ impl ProjectSession {
             context: Arc::new(context),
             context_generation: 1,
             documents: Vec::new(),
+            texts: Vec::new(),
             sequence: 0,
             events: Vec::new(),
             placer,

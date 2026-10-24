@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 pub struct DeletePreview {
     trash: TrashPreview,
     unsaved: Vec<String>,
+    unsaved_texts: Vec<String>,
 }
 
 impl DeletePreview {
@@ -34,6 +35,25 @@ impl DeletePreview {
     /// the trash with them and returns on restoration; it is not saved.
     pub fn unsaved_documents(&self) -> &[String] {
         &self.unsaved
+    }
+    /// Open text files with unsaved work among the deleted files. Their work
+    /// stays in the window with a deletion conflict; the trash keeps the file.
+    pub fn unsaved_texts(&self) -> &[String] {
+        &self.unsaved_texts
+    }
+    /// Every loose file this deletion removes, including inside a directory.
+    fn removed_files(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .files()
+            .iter()
+            .map(|path| path.as_str().to_owned())
+            .collect();
+        paths.extend(
+            self.documents()
+                .iter()
+                .map(|entry| entry.path.as_str().to_owned()),
+        );
+        paths
     }
 }
 
@@ -186,6 +206,9 @@ impl ProjectSession {
             self.manifest_saved = FileState::of(&registry.to_public_bytes()?);
             self.manifest.documents = registry.documents;
         }
+        for file in &files {
+            self.text_file_moved(file.as_str(), moved(file)?.as_str());
+        }
         let mut ids = Vec::new();
         for (document_id, path) in documents {
             if let Ok(index) = self.index(&document_id) {
@@ -202,7 +225,7 @@ impl ProjectSession {
         self.refresh_local_baselines();
         // Recovery records each draft's last path. A failure is reported by the
         // next explicit recovery write, which close and project switch require.
-        if !ids.is_empty() && !self.store.is_read_only() {
+        if !self.store.is_read_only() && (!ids.is_empty() || self.has_unsaved_text()) {
             let _ = self.save_recovery();
         }
         Ok(ids)
@@ -229,7 +252,25 @@ impl ProjectSession {
             })
             .map(|entry| entry.document_id.clone())
             .collect();
-        Ok(DeletePreview { trash, unsaved })
+        let unsaved_texts = self
+            .texts
+            .iter()
+            .filter(|file| {
+                file.needs_recovery()
+                    && (trash.files().iter().any(|path| path == &file.path)
+                        || trash.directories().iter().any(|directory| {
+                            file.path
+                                .as_str()
+                                .starts_with(&format!("{}/", directory.as_str()))
+                        }))
+            })
+            .map(|file| file.path.as_str().to_owned())
+            .collect();
+        Ok(DeletePreview {
+            trash,
+            unsaved,
+            unsaved_texts,
+        })
     }
 
     /// Moves the previewed items to the local trash in one transaction, with
@@ -267,6 +308,7 @@ impl ProjectSession {
                 self.emit(origin, Some(id), EventKind::DocumentRemoved);
             }
         }
+        self.text_files_removed(&preview.removed_files());
         self.adopt_recovery_baseline();
         self.refresh_local_baselines();
         Ok(commit)

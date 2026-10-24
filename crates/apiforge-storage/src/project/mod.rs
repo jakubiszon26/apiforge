@@ -26,7 +26,9 @@ pub use explorer::{
 };
 pub use metadata::{DiagramRecoveryPreview, MetadataReplacement};
 pub use path::ProjectPath;
-pub use recovery::{FieldRecovery, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection};
+pub use recovery::{
+    FieldRecovery, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
+};
 pub use schema::{DocumentEntry, DocumentKind, MANIFEST_PATH, ProjectManifest, RevisionEntry};
 pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore};
 pub use trash::{

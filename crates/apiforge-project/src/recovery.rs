@@ -9,7 +9,8 @@ use crate::{
 };
 use apiforge_storage::project::{
     CacheNotice, CacheProvenance, DiagramRecord, DocumentKey, FieldRecovery, FileState,
-    LastValidSnapshot, ProjectError, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection,
+    LastValidSnapshot, ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery,
+    TextSelection,
 };
 
 #[derive(Default)]
@@ -19,6 +20,8 @@ pub(super) struct RecoveryState {
     pub(super) read: Option<RecoveryRead>,
     /// Drafts that are not applied, preserved verbatim in every later write.
     pub(super) held: Vec<RecoveryDocument>,
+    /// Text-file drafts of files that are not open yet, preserved the same way.
+    pub(super) held_texts: Vec<RecoveryText>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,17 +38,20 @@ impl ProjectSession {
         let Ok(read) = self.store.load_source_recovery(&self.manifest.id) else {
             return Ok(());
         };
-        let drafts = if read.is_backup_candidate() {
-            Vec::new()
+        let (drafts, texts) = if read.is_backup_candidate() {
+            (Vec::new(), Vec::new())
         } else {
             read.recovery()
-                .map(|recovery| recovery.documents.clone())
+                .map(|recovery| (recovery.documents.clone(), recovery.texts.clone()))
                 .unwrap_or_default()
         };
         self.recovery.read = Some(read);
         for draft in drafts {
             self.adopt_draft(draft)?;
         }
+        // Unsaved text of files that are not open is preserved; opening the
+        // file restores it, or holds it when the file has changed since.
+        self.recovery.held_texts = texts;
         Ok(())
     }
 
@@ -296,6 +302,7 @@ impl ProjectSession {
             format_version: 1,
             project_id: self.manifest.id.clone(),
             documents,
+            texts: self.text_recovery(),
         }
     }
 
@@ -317,7 +324,7 @@ impl ProjectSession {
         let desired = self.recovery_contents();
         let unchanged = match read.recovery() {
             Some(current) => *current == desired,
-            None => desired.documents.is_empty(),
+            None => desired.documents.is_empty() && desired.texts.is_empty(),
         };
         if unchanged {
             return Ok(false);
@@ -339,7 +346,8 @@ impl ProjectSession {
             || self
                 .documents
                 .iter()
-                .any(|document| document.needs_recovery());
+                .any(|document| document.needs_recovery())
+            || self.has_unsaved_text();
         // Undoing an edit or discarding the final held draft can leave the
         // session clean while the on-disk recovery still contains obsolete work.
         // Synchronise that recovery before acknowledging close. Clean readers
@@ -347,9 +355,9 @@ impl ProjectSession {
         let recovery_needs_clearing = !self.store.is_read_only()
             && self.recovery.read.as_ref().is_some_and(|read| {
                 !read.is_backup_candidate()
-                    && read
-                        .recovery()
-                        .is_some_and(|recovery| !recovery.documents.is_empty())
+                    && read.recovery().is_some_and(|recovery| {
+                        !recovery.documents.is_empty() || !recovery.texts.is_empty()
+                    })
             });
         if !unsaved && !recovery_needs_clearing {
             return Ok(());
@@ -376,6 +384,7 @@ impl ProjectSession {
             format_version: 1,
             project_id: self.manifest.id.clone(),
             documents: Vec::new(),
+            texts: Vec::new(),
         };
         if read.recovery().is_some_and(|current| *current != empty)
             && let Err(error) = self.store.save_source_recovery(read, &empty)

@@ -550,6 +550,8 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
                 format_version: 1,
                 project_id: manifest.id.clone(),
                 documents,
+                // A legacy workspace has no project text files.
+                texts: Vec::new(),
             },
         )?;
     }
