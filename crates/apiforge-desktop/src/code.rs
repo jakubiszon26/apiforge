@@ -40,6 +40,10 @@ pub struct Context<'a> {
     /// Whether a long line folds back under itself. Code scrolls instead.
     pub wrap: bool,
     pub font_size: f32,
+    /// Plain text, not the scenario language: no colouring and no completion.
+    /// A project text file such as `.gitignore` is not a definition, so the
+    /// language's names and shapes say nothing about it.
+    pub plain: bool,
 }
 
 impl Default for Context<'_> {
@@ -51,6 +55,7 @@ impl Default for Context<'_> {
             line_numbers: true,
             wrap: false,
             font_size: 13.0,
+            plain: false,
         }
     }
 }
@@ -336,17 +341,33 @@ impl CodeEditor {
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         // Keys the popup owns must not reach the text edit, so they are taken
         // before it is drawn.
-        let keys = self.completions.take_keys(ui, id);
+        let keys = if context.plain {
+            Keys::default()
+        } else {
+            self.completions.take_keys(ui, id)
+        };
         // Tab is the language's own indentation. Left to the text edit it would
         // insert a tab character the printer never writes, and replace whatever
         // was selected with it.
         let indent = take_indent(ui, id);
-        self.completions.prepare(ui, id, text);
+        if !context.plain {
+            self.completions.prepare(ui, id, text);
+        }
         let diagnostics: Vec<Diagnostic> = context.diagnostics.to_vec();
         let font_for_layout = font.clone();
         let wrap = context.wrap;
+        let plain = context.plain;
         let mut layouter = move |ui: &Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
-            let mut job = layout_job(buffer.as_str(), &diagnostics, font_for_layout.clone());
+            let mut job = if plain {
+                LayoutJob::simple(
+                    buffer.as_str().to_owned(),
+                    font_for_layout.clone(),
+                    theme::TEXT,
+                    f32::INFINITY,
+                )
+            } else {
+                layout_job(buffer.as_str(), &diagnostics, font_for_layout.clone())
+            };
             // Code is read by its indentation, so a long line scrolls rather than
             // folding back under itself. A one-line field wraps as a field does.
             job.wrap.max_width = if wrap { wrap_width } else { f32::INFINITY };
@@ -462,9 +483,11 @@ impl CodeEditor {
             .cursor_range
             .map(|range| byte_offset(text, range.primary.index.0));
         let mut changed = response.changed();
-        changed |= self
-            .completions
-            .update(ui, id, text, context, output, taken.keys);
+        if !context.plain {
+            changed |= self
+                .completions
+                .update(ui, id, text, context, output, taken.keys);
+        }
         if let Some(deeper) = taken.indent.wanted()
             && let Some(range) = output.cursor_range
         {

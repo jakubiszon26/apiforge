@@ -15,6 +15,7 @@ mod diagram;
 mod explorer;
 mod file_prompts;
 mod placement;
+mod text_view;
 mod watcher;
 mod workbench;
 
@@ -63,6 +64,10 @@ const DIAGRAM: Origin = Origin(2);
 const RECOVERY_DELAY: Duration = Duration::from_secs(1);
 /// Split keeps the inspector beside code and diagram only on wide windows.
 const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
+/// A tab shows a registered document, by its ID, or a project text file, by
+/// its path behind this prefix. Documents are resolved first, so a tab key
+/// cannot shadow one.
+const TEXT_TAB: &str = "text:";
 
 enum Prompt {
     /// A tab with unsaved work: save, discard or keep it open.
@@ -163,6 +168,10 @@ pub struct FolderApp {
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
     notice: Option<Notice>,
+    /// The active tab last revealed in the strip, and the strip's last scroll
+    /// offset, so activating a tab can scroll it into view.
+    followed_tab: Option<String>,
+    tabs_offset: f32,
     prompt: Option<Prompt>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
@@ -223,6 +232,8 @@ impl FolderApp {
             inspector: Inspector::default(),
             changed_at: None,
             notice: None,
+            followed_tab: None,
+            tabs_offset: 0.0,
             prompt: None,
             close_error: None,
             close_requested: false,
@@ -264,7 +275,9 @@ impl FolderApp {
             .ok()
             .flatten();
         let first_open = state.is_none();
-        self.workbench = Workbench::restore(state.clone(), |id| session.document(id).is_some());
+        self.workbench = Workbench::restore(state.clone(), |id| {
+            session.document(id).is_some() || id.starts_with(TEXT_TAB)
+        });
         self.saved_view = state;
         // A project opened for the first time shows its first scenario.
         if first_open {
@@ -309,6 +322,7 @@ impl FolderApp {
         self.uninitialised = false;
         self.session = Some(session);
         self.reload_field_drafts();
+        self.restore_text_tabs();
     }
 
     /// Unfinished inspector text comes from the session, which owns it.
@@ -450,7 +464,7 @@ impl FolderApp {
                     });
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(theme::WHITE))
-                    .show(ui, |ui| self.code_area(ui, active.as_deref()));
+                    .show(ui, |ui| self.main_code_area(ui, active.as_deref()));
             }
             Mode::Diagram => {
                 self.inspector_panel(ui, active.as_deref());
@@ -466,7 +480,7 @@ impl FolderApp {
                     .frame(egui::Frame::new().fill(theme::WHITE))
                     .show(ui, |ui| {
                         self.workbench.panels.split_code = ui.available_width();
-                        self.code_area(ui, active.as_deref());
+                        self.main_code_area(ui, active.as_deref());
                     });
                 if width >= SPLIT_INSPECTOR_WIDTH {
                     self.inspector_panel(ui, active.as_deref());
@@ -478,6 +492,14 @@ impl FolderApp {
         }
         self.prompts(ui.ctx());
         self.protect(now);
+    }
+
+    /// Code for the active tab: a definition's source, or a text file.
+    fn main_code_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
+        match active.and_then(|tab| self.text_snapshot(tab)) {
+            Some(snapshot) => self.text_area(ui, &snapshot),
+            None => self.code_area(ui, active),
+        }
     }
 
     /// The folder has no project, or could not be opened.
@@ -593,10 +615,12 @@ impl FolderApp {
         let replaced: Vec<String> = session
             .events_since(self.seen)
             .iter()
-            .filter(|event| {
-                event.origin != CODE && matches!(event.kind, EventKind::SourceChanged { .. })
+            .filter(|event| event.origin != CODE)
+            .filter_map(|event| match &event.kind {
+                EventKind::SourceChanged { .. } => event.document_id.clone(),
+                EventKind::TextFileChanged { path, .. } => Some(text_tab(path)),
+                _ => None,
             })
-            .filter_map(|event| event.document_id.clone())
             .collect();
         self.seen = session.last_sequence();
         for document_id in replaced {
@@ -774,6 +798,9 @@ impl FolderApp {
     }
 
     fn save_document(&mut self, document_id: &str) -> Result<(), String> {
+        if let Some(path) = self.text_of(document_id).map(str::to_owned) {
+            return self.save_text(&path);
+        }
         let session = self.session.as_mut().ok_or_else(String::new)?;
         let name = session
             .document(document_id)
@@ -806,12 +833,19 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let pending: Vec<String> = session
+        let mut pending: Vec<String> = session
             .documents()
             .iter()
             .filter(|document| document.is_dirty() || document.is_layout_dirty())
             .map(|document| document.id().to_owned())
             .collect();
+        pending.extend(
+            session
+                .text_files()
+                .iter()
+                .filter(|file| file.is_dirty())
+                .map(|file| text_tab(file.path())),
+        );
         let mut failures = Vec::new();
         for document_id in &pending {
             if let Err(message) = self.save_document(document_id) {
@@ -828,7 +862,7 @@ impl FolderApp {
         if failures.is_empty() {
             if !pending.is_empty() {
                 let count = pending.len();
-                let noun = if count == 1 { "document" } else { "documents" };
+                let noun = if count == 1 { "file" } else { "files" };
                 self.notify(format!("Saved {count} {noun}."), false);
             }
         } else {
@@ -921,11 +955,18 @@ impl FolderApp {
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
-        let unsaved = self
-            .session
-            .as_ref()
-            .and_then(|session| session.document(document_id))
-            .is_some_and(|document| document.needs_recovery());
+        let unsaved = match self.text_of(document_id) {
+            Some(path) => self
+                .session
+                .as_ref()
+                .and_then(|session| session.text_file(path))
+                .is_some_and(apiforge_project::TextFileSession::needs_recovery),
+            None => self
+                .session
+                .as_ref()
+                .and_then(|session| session.document(document_id))
+                .is_some_and(|document| document.needs_recovery()),
+        };
         if unsaved {
             self.prompt = Some(Prompt::CloseTab(document_id.to_owned()));
         } else {
@@ -934,6 +975,15 @@ impl FolderApp {
     }
 
     fn close_tab(&mut self, document_id: &str) {
+        // Closing never drops unsaved text: the session refuses it until the
+        // work is saved or reverted.
+        if let Some(path) = self.text_of(document_id).map(str::to_owned)
+            && let Some(session) = self.session.as_mut()
+            && let Err(error) = session.close_text_file(&path)
+        {
+            self.notify(error.to_string(), true);
+            return;
+        }
         self.workbench.close(document_id);
         self.canvases.remove(document_id);
         self.selections.remove(document_id);
@@ -968,6 +1018,10 @@ impl FolderApp {
 /// history survives mode and tab switches.
 fn editor_id(document_id: &str) -> egui::Id {
     egui::Id::new(("folder-code", document_id))
+}
+
+fn text_tab(path: &str) -> String {
+    format!("{TEXT_TAB}{path}")
 }
 
 fn context_key(document_id: &str, cleanup: bool) -> String {

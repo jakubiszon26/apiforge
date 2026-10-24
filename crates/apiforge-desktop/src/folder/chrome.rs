@@ -14,12 +14,16 @@ impl FolderApp {
             .documents()
             .iter()
             .any(|document| document.is_dirty() || document.is_layout_dirty())
+            || session.text_files().iter().any(|file| file.is_dirty())
             || session.is_manifest_dirty();
-        let active_unsaved = self
-            .workbench
-            .active()
+        let active = self.workbench.active();
+        let active_unsaved = active
             .and_then(|active| session.document(active))
-            .is_some_and(|document| document.is_dirty() || document.is_layout_dirty());
+            .is_some_and(|document| document.is_dirty() || document.is_layout_dirty())
+            || active
+                .and_then(|active| active.strip_prefix(TEXT_TAB))
+                .and_then(|path| session.text_file(path))
+                .is_some_and(apiforge_project::TextFileSession::is_dirty);
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(name)
@@ -73,71 +77,100 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let tabs: Vec<(String, String, String, bool, bool, bool)> = self
+        let tabs: Vec<TabFace> = self
             .workbench
             .tabs()
             .iter()
             .filter_map(|tab| {
-                let document = session.document(&tab.document_id)?;
-                let path = document.entry().path.as_str().to_owned();
-                Some((
-                    tab.document_id.clone(),
-                    file_name(&path).to_owned(),
-                    path,
-                    document.needs_recovery(),
-                    document.analysis() == AnalysisState::Invalid,
-                    document.conflict().is_some(),
-                ))
+                let key = tab.document_id.clone();
+                if let Some(document) = session.document(&key) {
+                    return Some(TabFace {
+                        path: document.entry().path.as_str().to_owned(),
+                        unsaved: document.needs_recovery(),
+                        invalid: document.analysis() == AnalysisState::Invalid,
+                        conflict: document.conflict().is_some(),
+                        key,
+                    });
+                }
+                let file = session.text_file(key.strip_prefix(TEXT_TAB)?)?;
+                Some(TabFace {
+                    path: file.path().to_owned(),
+                    unsaved: file.needs_recovery(),
+                    invalid: false,
+                    conflict: file.conflict().is_some(),
+                    key,
+                })
             })
             .collect();
         if tabs.is_empty() {
             ui.add_space(theme::CONTROL_HEIGHT - 4.0);
+            self.followed_tab = None;
             return;
         }
         let active = self.workbench.active().map(str::to_owned);
+        // Labels are laid out before anything is drawn, so the strip knows
+        // where the active tab is and can reveal it in this same frame.
+        let labels = tab_labels(&tabs);
+        let font = egui::FontId::proportional(theme::FONT_BODY);
+        let galleys: Vec<Arc<egui::Galley>> = tabs
+            .iter()
+            .zip(&labels)
+            .map(|(tab, label)| {
+                let mut job = egui::text::LayoutJob::single_section(
+                    if tab.unsaved {
+                        format!("{label}  \u{25cf}")
+                    } else {
+                        label.clone()
+                    },
+                    egui::TextFormat::simple(font.clone(), tab.colour()),
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(TAB_LABEL_WIDTH);
+                ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+            })
+            .collect();
+        let widths: Vec<f32> = galleys
+            .iter()
+            .map(|galley| TAB_PADDING * 2.0 + galley.size().x + TAB_GAP + TAB_CLOSE)
+            .collect();
+        let mut scroll = egui::ScrollArea::horizontal()
+            .id_salt("folder-tab-strip")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
+        // The active tab must be reachable, so activating one scrolls it in.
+        if active != self.followed_tab {
+            self.followed_tab = active.clone();
+            if let Some(index) = active
+                .as_deref()
+                .and_then(|active| tabs.iter().position(|tab| tab.key == active))
+            {
+                let left: f32 = widths[..index].iter().sum::<f32>() + index as f32 * TAB_SPACING;
+                let right = left + widths[index];
+                let viewport = ui.available_width();
+                if left < self.tabs_offset {
+                    scroll = scroll.horizontal_scroll_offset(left);
+                } else if right > self.tabs_offset + viewport {
+                    scroll = scroll.horizontal_scroll_offset(right - viewport);
+                }
+            }
+        }
         let mut activate = None;
         let mut close = None;
-        egui::ScrollArea::horizontal()
-            .id_salt("folder-tab-strip")
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (document_id, name, path, unsaved, invalid, conflict) in &tabs {
-                        let selected = active.as_deref() == Some(document_id.as_str());
-                        let mut label = RichText::new(if *unsaved {
-                            format!("{name}  ●")
-                        } else {
-                            name.clone()
-                        })
-                        .size(theme::FONT_BODY);
-                        if *conflict {
-                            label = label.color(theme::WARNING);
-                        } else if *invalid {
-                            label = label.color(theme::DANGER);
-                        }
-                        let response = ui
-                            .add(egui::Button::selectable(selected, label))
-                            .on_hover_text(path);
-                        if response.clicked() {
-                            activate = Some(document_id.clone());
-                        }
-                        if response.middle_clicked() {
-                            close = Some(document_id.clone());
-                        }
-                        if ui
-                            .add(
-                                widgets::icon_button(Icon::Close, &format!("Close {name}"))
-                                    .compact(),
-                            )
-                            .clicked()
-                        {
-                            close = Some(document_id.clone());
-                        }
-                        ui.add_space(theme::SPACE_SM);
+        let output = scroll.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = TAB_SPACING;
+                for ((tab, galley), width) in tabs.iter().zip(galleys).zip(&widths) {
+                    let selected = active.as_deref() == Some(tab.key.as_str());
+                    match tab_face(ui, tab, galley, *width, selected) {
+                        Some(true) => close = Some(tab.key.clone()),
+                        Some(false) => activate = Some(tab.key.clone()),
+                        None => {}
                     }
-                });
+                }
             });
+        });
+        self.tabs_offset = output.state.offset.x.max(0.0);
         if let Some(document_id) = activate {
             self.workbench.open(&document_id);
+            self.followed_tab = Some(document_id);
             self.touched();
         }
         if let Some(document_id) = close {
@@ -523,4 +556,153 @@ impl FolderApp {
         }
         (!keep && !response.should_close()).then_some(Prompt::CloseFailed(message))
     }
+}
+
+/// Tab geometry: the name, its state and the close control share one surface,
+/// so the control is always inside the tab the user is pointing at.
+const TAB_PADDING: f32 = 10.0;
+const TAB_GAP: f32 = 6.0;
+const TAB_CLOSE: f32 = 14.0;
+const TAB_SPACING: f32 = 4.0;
+const TAB_HEIGHT: f32 = 26.0;
+/// A long name is bounded so that the other tabs and controls stay reachable;
+/// the full path is on hover.
+const TAB_LABEL_WIDTH: f32 = 160.0;
+
+/// What one tab shows this frame.
+pub(super) struct TabFace {
+    key: String,
+    path: String,
+    unsaved: bool,
+    invalid: bool,
+    conflict: bool,
+}
+
+impl TabFace {
+    fn colour(&self) -> egui::Color32 {
+        if self.conflict {
+            theme::WARNING
+        } else if self.invalid {
+            theme::DANGER
+        } else {
+            theme::TEXT
+        }
+    }
+}
+
+/// Each tab's label: the file name, plus the least parent path that tells it
+/// apart from another open file of the same name.
+fn tab_labels(tabs: &[TabFace]) -> Vec<String> {
+    let parts: Vec<Vec<&str>> = tabs
+        .iter()
+        .map(|tab| tab.path.split('/').collect())
+        .collect();
+    let suffix = |segments: &[&str], depth: usize| segments[segments.len() - depth..].join("/");
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, segments)| {
+            let mut depth = 1;
+            while depth < segments.len()
+                && parts.iter().enumerate().any(|(other, candidate)| {
+                    other != index
+                        && candidate.len() >= depth
+                        && suffix(candidate, depth) == suffix(segments, depth)
+                })
+            {
+                depth += 1;
+            }
+            suffix(segments, depth)
+        })
+        .collect()
+}
+
+/// Draws one tab. Returns `Some(true)` when its close control was used,
+/// `Some(false)` when the tab itself was activated.
+fn tab_face(
+    ui: &mut egui::Ui,
+    tab: &TabFace,
+    galley: Arc<egui::Galley>,
+    width: f32,
+    selected: bool,
+) -> Option<bool> {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, TAB_HEIGHT), egui::Sense::click_and_drag());
+    let close_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.right() - TAB_PADDING - TAB_CLOSE / 2.0,
+            rect.center().y,
+        ),
+        egui::Vec2::splat(TAB_CLOSE),
+    );
+    let close = ui.interact(
+        close_rect,
+        ui.id().with(("folder-tab-close", &tab.key)),
+        egui::Sense::click(),
+    );
+    close.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!("Close {}", file_name(&tab.path)),
+        )
+    });
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            true,
+            selected,
+            file_name(&tab.path),
+        )
+    });
+    let painter = ui.painter_at(rect.union(close_rect));
+    let fill = if selected {
+        theme::WHITE
+    } else if response.hovered() || close.hovered() {
+        theme::FIELD
+    } else {
+        theme::PANEL
+    };
+    painter.rect_filled(rect, 6.0, fill);
+    if selected {
+        painter.rect_stroke(
+            rect,
+            6.0,
+            egui::Stroke::new(1.0, theme::BORDER),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.galley(
+        egui::pos2(
+            rect.left() + TAB_PADDING,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        tab.colour(),
+    );
+    Icon::Close.paint(
+        &painter,
+        close_rect,
+        if close.hovered() {
+            theme::TEXT
+        } else {
+            theme::MUTED
+        },
+    );
+    let hover = if tab.conflict {
+        format!("{} — changed outside API Forge", tab.path)
+    } else {
+        tab.path.clone()
+    };
+    let response = response.on_hover_text(&hover);
+    let close = close.on_hover_text(format!("Close {} (Ctrl+W)", file_name(&tab.path)));
+    if close.clicked() {
+        return Some(true);
+    }
+    // The close control sits inside the tab, so a click on it is also a click
+    // on the tab; it must not activate the file it is closing.
+    if (response.clicked() && !close.contains_pointer()) || response.middle_clicked() {
+        return Some(false);
+    }
+    None
 }

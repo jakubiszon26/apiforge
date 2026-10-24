@@ -231,6 +231,7 @@ pub fn template_field(
             line_numbers: false,
             wrap: true,
             font_size: 12.0,
+            plain: false,
         },
         &output,
         keys,
@@ -761,6 +762,7 @@ pub fn request_body_editor(
                     line_numbers: false,
                     wrap: true,
                     font_size: 12.0,
+                    plain: false,
                 },
             )
         })

@@ -9,6 +9,16 @@ impl FolderApp {
             centred_hint(ui, "Open a scenario or component to see its diagram.");
             return;
         };
+        if let Some(path) = self.text_of(document_id) {
+            centred_hint(
+                ui,
+                &format!(
+                    "{} is a text file, not a scenario or component, so it has no diagram.",
+                    file_name(path)
+                ),
+            );
+            return;
+        }
         let Some(snapshot) = self.snapshot(document_id) else {
             return;
         };

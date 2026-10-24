@@ -106,6 +106,7 @@ impl FolderApp {
                             line_numbers: true,
                             wrap: false,
                             font_size: 13.0,
+                            plain: false,
                         },
                     )
                 })

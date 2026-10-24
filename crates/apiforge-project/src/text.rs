@@ -355,6 +355,16 @@ impl ProjectSession {
         Ok(())
     }
 
+    /// Paths of unsaved text held in recovery for files that are not open.
+    /// Opening such a file restores or holds its draft.
+    pub fn recovered_text_drafts(&self) -> Vec<&str> {
+        self.recovery
+            .held_texts
+            .iter()
+            .map(|draft| draft.path.as_str())
+            .collect()
+    }
+
     pub(crate) fn text_recovery(&self) -> Vec<RecoveryText> {
         let mut texts = self.recovery.held_texts.clone();
         texts.extend(
