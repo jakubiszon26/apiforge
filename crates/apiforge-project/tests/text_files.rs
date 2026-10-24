@@ -58,6 +58,10 @@ fn managed_data_registered_documents_and_unreadable_files_are_not_text_files() {
     session.save(&id).unwrap();
     assert!(session.open_text_file(".apiforge/diagram.json").is_err());
     assert!(session.open_text_file(".apiforge/local/head.json").is_err());
+    assert!(matches!(
+        session.open_text_file("apiforge.project.json"),
+        Err(Error::ManagedData)
+    ));
     assert!(session.open_text_file("../outside.txt").is_err());
     std::fs::create_dir_all(directory.path().join(".git")).unwrap();
     write(&directory, ".git/config", "[core]\n");

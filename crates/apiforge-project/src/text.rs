@@ -16,7 +16,8 @@
 use super::{EventKind, Origin, ProjectSession};
 use crate::{Error, Result, session::ExternalConflict};
 use apiforge_storage::project::{
-    FileState, MAX_SOURCE_BYTES, ProjectChange, ProjectPath, RecoveryText, TextSelection,
+    FileState, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange, ProjectPath, RecoveryText,
+    TextSelection,
 };
 
 /// One open project text file.
@@ -121,9 +122,12 @@ impl ProjectSession {
             return Err(Error::RegisteredDocument);
         }
         // `ProjectPath` permits the managed files it owns, such as the shared
-        // checkpoint. Those are not project text: editing them raw would need
-        // the validated reload policy that Stage II does not have.
-        if path.as_str().split('/').any(|part| part == ".apiforge") {
+        // checkpoint, and the registry is an ordinary path at the project root.
+        // Neither is project text: editing them raw would need the validated
+        // reload policy that Stage II does not have.
+        if path.as_str() == MANIFEST_PATH
+            || path.as_str().split('/').any(|part| part == ".apiforge")
+        {
             return Err(Error::ManagedData);
         }
         match self.store.file_state(&path)? {
