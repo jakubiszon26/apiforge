@@ -17,6 +17,9 @@ cargo run -p apiforge-desktop --locked -- --check fixtures/workspace.json
 ```
 
 `--project` opens a document in a session that does not touch the saved workspace.
+`--folder <path>` opens a folder project in development (Stage II): Code, Diagram
+and Split over the project's `.afs` sources. A folder without a project is written
+only after choosing Initialise. `--screenshot OUT.png --folder <path>` captures it.
 `--check` validates a document without a window: exit code 0 for a valid document, 1
 for a document or read error and 2 for invalid arguments. Diagnostics never print
 field or secret values. Imports are limited to 16 MiB and perform no HTTP requests.

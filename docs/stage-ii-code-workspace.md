@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 complete at the session-library boundary (round-trip gate passed headless), P4 views complete behind `--folder`, P3 and P5–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -429,6 +429,57 @@ field drafts arrive with P4; the session stores and recovers their drafts but
 does not yet apply them to models. Item 5 of the
 [P1 code review](stage-ii-review-notes.md#p1-code-review) remains open.
 Desktop and CLI do not use folder sessions yet.
+
+P4 adds the folder window, opened explicitly with `apiforge-desktop --folder
+<path>`; the normal startup path is unchanged. A folder without a manifest shows
+an Initialise action and nothing is written before it is chosen. The window owns
+views only: one tab per document ID, each with its own text-edit identity, caret,
+scroll, board selection and diagram camera, over the single `ProjectSession`.
+Code shows a document list (the P5 explorer replaces it), tabs, the editor and a
+Problems panel with save and analysis state; Diagram shows the board and the
+inspector; Split shows code beside the diagram and keeps the inspector at 1440
+points and wider. Ctrl+E toggles Code and Diagram and leaves Split for Code.
+Ctrl+Tab cycles tabs, Ctrl+W closes one, Ctrl+S saves the active source exactly
+and Ctrl+Shift+S saves each dirty document in its own transaction. Ctrl+Z/Ctrl+Y
+use the text history while a text field has the keyboard and the document's model
+history otherwise. Source replaced by a graphical edit, model undo or a revert
+retires the obsolete text history.
+
+Analysis runs on worker threads after a 250 ms pause per document, hidden tabs
+included; the session drops late results by ticket. Pending, invalid and held-
+draft documents lock only their own diagram, which shows the last valid model with
+a banner or an explicit unavailable state. Board commands use the same graph edits
+as the workspace window (`board_edit`). Unsaved work and the view are written to
+local recovery and `.apiforge/local/workspace.json` after one second of quiet.
+Closing a tab with unsaved work offers Save, Discard or Cancel; Discard uses the
+new `ProjectSession::revert`, which rereads the saved file, refuses an external
+change and starts a new model history from the saved checkpoint. Closing the
+window succeeds only after recovery is written; otherwise it stays open with Keep
+editing, Try again or an explicit discard. Inspector field drafts join document
+recovery and return on reopening. New scenarios and components start from valid
+sources at unused paths.
+
+The view state is versioned, validated and local: a damaged, future or foreign
+`workspace.json` is ignored rather than blocking the project, and read-only
+sessions never write it. Tests cover mode and tab switching with unsaved text,
+its text history and caret; model history across switches and focus routing of
+Ctrl+Z; invalid source locking only its own diagram; graphical reprinting that
+retires text history; exact invalid saves and Save All; close-tab discard;
+restoring mode, tabs, active document, caret and unsaved text after closing; a
+read-only second window; inspector field drafts across reopening; and drawing
+every mode at 960 × 540.
+
+P4 does not include runs or reports in folder windows, component publication,
+the comment-loss decision before a destructive reprint, external-change polling,
+explorer file operations or expanded-folder state (P5–P6). Recovery and saves run
+on the UI thread; they are small, but moving them to a storage worker remains
+open for P7. Native QA used screenshots of the window at 1600 × 1000 on Linux; keyboard
+and accessibility review of the new controls and Windows QA remain for P7.
+
+Verification of P4 (Linux, 2026-10-24): formatting, workspace clippy with warnings
+denied, fixture verification and all-target workspace tests passed (724 passed,
+two parent-launched helpers ignored), run serially with isolated config/data
+directories.
 
 Acceptance must cover:
 

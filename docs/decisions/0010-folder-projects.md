@@ -27,7 +27,7 @@ scenarios/**/*.afs               default scenario source location
 components/**/*.afs              default working-component source location
 .apiforge/diagram.json           shared identity/layout checkpoints
 .apiforge/revisions/<id>/<n>.afs  immutable published component sources
-.apiforge/local/                 ignored session, recovery and storage data
+.apiforge/local/                 ignored session, recovery, view and storage data
 ```
 
 Working sources may live elsewhere under the root, outside technical directories.
