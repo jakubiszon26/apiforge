@@ -303,3 +303,30 @@ fn read_only_sessions_cannot_change_files() {
     );
     assert!(directory.path().join("scenarios/main.afs").exists());
 }
+
+#[test]
+fn a_refused_case_only_rename_changes_nothing() {
+    let (directory, mut session, id) = project();
+    let registry = fs::read(directory.path().join("apiforge.project.json")).unwrap();
+    assert!(matches!(
+        session.relocate("scenarios/main.afs", "scenarios/MAIN.AFS", Origin::SESSION),
+        Err(Error::RegisteredSourceExtension)
+    ));
+    assert_eq!(path_of(&session, &id), "scenarios/main.afs");
+    let names: Vec<_> = fs::read_dir(directory.path().join("scenarios"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, ["main.afs"]);
+    assert_eq!(
+        fs::read(directory.path().join("apiforge.project.json")).unwrap(),
+        registry
+    );
+    // The same check covers a folder holding a registered source.
+    session.create_folder("Flows").unwrap();
+    session
+        .relocate("scenarios/main.afs", "Flows/main.afs", Origin::SESSION)
+        .unwrap();
+    session.relocate("Flows", "flows", Origin::SESSION).unwrap();
+    assert_eq!(path_of(&session, &id), "flows/main.afs");
+}

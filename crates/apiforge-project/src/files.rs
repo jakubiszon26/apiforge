@@ -65,6 +65,14 @@ impl ProjectSession {
         if to.as_str().starts_with(&format!("{}/", from.as_str())) {
             return Err(Error::Storage(ProjectError::InvalidPath));
         }
+        // Validate the whole move first: a case-only rename takes two
+        // transactions, and the first must not commit a move the second refuses.
+        for entry in &self.manifest.documents {
+            if let Some(rest) = within(&entry.path, &from) {
+                ProjectPath::working_source(format!("{}{rest}", to.as_str()))
+                    .map_err(|_| Error::RegisteredSourceExtension)?;
+            }
+        }
         if from.as_str().eq_ignore_ascii_case(to.as_str()) {
             let (parent, name) = split(&from);
             let extension = if name.ends_with(".afs") { ".afs" } else { "" };
@@ -73,7 +81,15 @@ impl ProjectSession {
                 uuid::Uuid::new_v4().simple()
             ))?;
             self.relocate_once(&from, &temporary, origin)?;
-            return self.relocate_once(&temporary, &to, origin);
+            return match self.relocate_once(&temporary, &to, origin) {
+                Ok(ids) => Ok(ids),
+                Err(error) => {
+                    // Return to the original name; if that fails too, the
+                    // temporary name is a valid, registered location.
+                    let _ = self.relocate_once(&temporary, &from, origin);
+                    Err(error)
+                }
+            };
         }
         self.relocate_once(&from, &to, origin)
     }
@@ -377,6 +393,12 @@ fn explorer_path(path: &str) -> Result<ProjectPath> {
         return Err(Error::Storage(ProjectError::InvalidPath));
     }
     Ok(path)
+}
+
+/// The rest of `path` below `root` (empty for `root` itself), if inside it.
+fn within<'a>(path: &'a ProjectPath, root: &ProjectPath) -> Option<&'a str> {
+    let rest = path.as_str().strip_prefix(root.as_str())?;
+    (rest.is_empty() || rest.starts_with('/')).then_some(rest)
 }
 
 fn split(path: &ProjectPath) -> (String, &str) {
