@@ -13,7 +13,8 @@ path = "src/main.rs"
 apiforge-core.workspace = true
 serde_json.workspace = true
 apiforge-storage.workspace = true
-apiforge-script = { path = "../apiforge-script" }
+apiforge-layout.workspace = true
+apiforge-script.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
