@@ -167,6 +167,10 @@ cargo run -p apiforge-convert-v1 --locked -- workspace.v1.json workspace-v2.json
 
 ## Conventions
 
+- Stage II's [plan](stage-ii-code-workspace.md) and ADRs are published on `main`
+  before implementation. Develop that stage on `feat/stage-ii-code-workspace`
+  starting at the planning commit; a planning merge does not enable folder mode
+  or automatic migration. Follow P1/P2 and its restart round-trip gate before P3.
 - Production code, comments, documentation and the interface are in English.
 - Work happens on short-lived `feat/…`, `fix/…` or `docs/…` branches with small
   [Conventional Commits](https://www.conventionalcommits.org/), merged into `main`

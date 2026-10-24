@@ -5,6 +5,13 @@
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
+The next project-storage and editor stage is specified in
+[Stage II: folder projects and the code workspace](stage-ii-code-workspace.md).
+Its planning documents live on `main`; implementation belongs on
+`feat/stage-ii-code-workspace`. Stage II is not implemented by this roadmap update.
+This document continues to describe the existing JSON-backed milestones; the
+Stage II ADRs identify which rules change for folder projects only.
+
 ## Goals
 
 1. **Export block** — a component publishes values to its caller by placing Export
@@ -375,9 +382,10 @@ These items are scheduled between milestones and are release gates where noted:
   and *Tidy up* places the new block next to its neighbours.
 - **Read-only board while code is invalid.** It can surprise users. Mitigation: a
   clear banner with *Show errors* and *Discard code changes*.
-- **Notes from comments.** Comments not attached to a statement move to the
-  enclosing block. This is documented, and the formatter makes it visible
-  immediately.
+- **Notes from comments.** Comments attached to a statement become its notes.
+  Unattached comments produce a parser warning and are dropped by canonical
+  formatting; they do not move to an enclosing block. Stage II adds a decision
+  before a graphical reprint would discard these comments from source files.
 - **Model change size.** M1 touches every crate. Mitigation: land it as small,
   individually green commits (model, validation, runner, storage, desktop,
   fixtures).
@@ -385,6 +393,8 @@ These items are scheduled between milestones and are release gates where noted:
 ## Open, non-blocking
 
 - Final language name and file extension.
-- Whether scenarios can later live as `.afs` files in a repository (git-friendly
-  projects).
 - Scenario-level Export (publishing run results for CI or other scenarios).
+
+The repository-friendly `.afs` project question is resolved by the
+[Stage II plan](stage-ii-code-workspace.md) and
+[ADR 0010](decisions/0010-folder-projects.md); delivery remains planned.

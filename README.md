@@ -101,6 +101,10 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 
 ## Limitations
 
+The planned folder-based project format, file explorer and dedicated code workspace
+are specified in the [Stage II implementation plan](docs/stage-ii-code-workspace.md).
+These capabilities are not yet implemented.
+
 - Single user and local only; no collaboration and no hosted runner.
 - Acyclic graphs executed sequentially; no loops, case matrices or scripting.
 - JSON and text bodies; no multipart, automatic OAuth, retries or redirects.

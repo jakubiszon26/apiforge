@@ -6,6 +6,12 @@
 - Scope: `apiforge-desktop` (code panel, editor state), `apiforge-storage`
 - Plan: [scenario code and canvas](../roadmap.md)
 
+Stage II amendment (planned, not yet implemented):
+[ADR 0012](0012-project-sessions.md) defines independent save/analysis/conflict/model
+states and shared per-document sessions for folder projects;
+[ADR 0011](0011-project-transactions.md) defines their durable recovery. The rules
+below continue to describe the implemented JSON-backed editor.
+
 ## Context
 
 [ADR 0005](0005-scenario-language.md) makes the document the truth and code a

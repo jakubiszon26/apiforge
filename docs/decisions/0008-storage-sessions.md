@@ -5,6 +5,11 @@
 - Scope: `apiforge-storage`, desktop persistence, future CLI and code drafts
 - Milestone: S1 of the [code and canvas plan](../roadmap.md)
 
+Stage II amendment (planned, not yet implemented):
+[ADR 0011](0011-project-transactions.md) extends the lock, fingerprint and recovery
+contracts to folder-project transactions. Legacy `WorkspaceStore` sessions keep
+the behaviour below; native Windows verification remains a release gate.
+
 ## Decision
 
 `WorkspaceStore::open_exclusive(path)` holds an exclusive advisory
