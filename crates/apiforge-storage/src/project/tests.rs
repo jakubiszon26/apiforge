@@ -449,3 +449,33 @@ fn transaction_limits_fail_without_activation_or_source_changes() {
         MAX_SOURCE_BYTES
     );
 }
+
+#[test]
+fn readers_can_probe_for_a_live_writer_without_creating_its_lock() {
+    let directory = tempfile::tempdir().unwrap();
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    assert!(!reader.has_live_writer().unwrap());
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    assert!(reader.has_live_writer().unwrap());
+    drop(writer);
+    assert!(!reader.has_live_writer().unwrap());
+    // The probe never prevents a new writer.
+    assert!(!ProjectStore::open(directory.path()).unwrap().is_read_only());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_untouched_folder_opens_read_only_without_local_data() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    // Privileged users bypass directory permissions; nothing to verify then.
+    if fs::create_dir(directory.path().join("probe")).is_ok() {
+        return;
+    }
+    let store = ProjectStore::open(directory.path()).unwrap();
+    assert!(store.is_read_only());
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
