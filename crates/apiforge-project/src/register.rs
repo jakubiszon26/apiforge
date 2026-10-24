@@ -221,6 +221,7 @@ impl ProjectSession {
         if self.store.is_read_only() {
             return Err(Error::Storage(ProjectError::ReadOnly));
         }
+        self.require_current_registry()?;
         let mut handles = self.component_handles();
         let mut destinations = HashSet::new();
         let mut prepared = Vec::new();

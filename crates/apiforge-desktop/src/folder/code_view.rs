@@ -41,6 +41,9 @@ impl FolderApp {
                 match unavailable {
                     Unavailable::Missing => "This file is missing from the project folder.",
                     Unavailable::NotUtf8 => "This file is not UTF-8 text and cannot be edited.",
+                    Unavailable::TooLarge => {
+                        "This file exceeds the 1 MiB source limit and cannot be edited."
+                    }
                 },
             );
             return;

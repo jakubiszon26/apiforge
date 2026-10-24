@@ -19,8 +19,10 @@ pub use migration::{
 };
 pub use prepare::prepare_project;
 pub use session::{
-    Declaration, DeletePreview, DraftStatus, Event, EventKind, ImportCandidate, ImportItem, Origin,
-    ProjectSession, Registration, SaveOutcome, SourceSurvey, declaration, rename_handle,
+    Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
+    ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
+    ProjectSession, Registration, RegistryState, SaveOutcome, SourceSurvey, declaration,
+    rename_handle,
 };
 
 pub use apiforge_script::Document;
@@ -66,6 +68,10 @@ pub enum Error {
     KindMismatch,
     #[error("Another component already uses the handle {0}.")]
     HandleCollision(String),
+    #[error("The file changed outside API Forge; reload it or export your version first.")]
+    ExternalConflict,
+    #[error("The project registry changed outside API Forge; reload the project first.")]
+    RegistryChanged,
     #[error(transparent)]
     Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]

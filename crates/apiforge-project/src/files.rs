@@ -41,6 +41,7 @@ impl ProjectSession {
     /// Creates a directory and any missing parents.
     pub fn create_folder(&mut self, path: &str) -> Result<()> {
         let path = explorer_path(path)?;
+        self.require_current_registry()?;
         if self.store.file_state(&path)? != FileState::Missing {
             return Err(occupied(self, &path));
         }
@@ -86,6 +87,7 @@ impl ProjectSession {
         if self.store.is_read_only() {
             return Err(Error::Storage(ProjectError::ReadOnly));
         }
+        self.require_current_registry()?;
         if self.store.file_state(to)? != FileState::Missing {
             return Err(occupied(self, to));
         }
@@ -222,6 +224,7 @@ impl ProjectSession {
             .iter()
             .map(|entry| entry.document_id.clone())
             .collect();
+        self.require_current_registry()?;
         self.check_saved_manifest()?;
         let mut drafts: Vec<RecoveryDocument> = Vec::new();
         for draft in self.recovery_contents().documents {
@@ -266,6 +269,7 @@ impl ProjectSession {
         operation_id: &str,
         destinations: &[RestoreDestination],
     ) -> Result<Vec<String>> {
+        self.require_current_registry()?;
         self.check_saved_manifest()?;
         let preview = self.store.preview_trash_restore(operation_id)?;
         let ids: Vec<_> = preview

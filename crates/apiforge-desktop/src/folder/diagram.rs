@@ -22,6 +22,9 @@ impl FolderApp {
                     (Some(Unavailable::NotUtf8), _) => {
                         "This file is not UTF-8 text, so it has no diagram."
                     }
+                    (Some(Unavailable::TooLarge), _) => {
+                        "This file exceeds the 1 MiB source limit, so it has no diagram."
+                    }
                     (None, AnalysisState::Pending) => "Checking the code…",
                     _ => {
                         "The code has errors and there is no valid version to show. \
