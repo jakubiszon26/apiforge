@@ -193,6 +193,68 @@ impl ProjectSession {
         Self::load(ProjectStore::open(root)?, placer, 1)
     }
 
+    /// Stable committed definitions only, without local recovery or cache and
+    /// without creating project-local files. Shared with CLI checks and runs.
+    pub fn open_saved_read_only(root: impl AsRef<Path>) -> Result<Self> {
+        if !has_manifest(root.as_ref())? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_saved(
+            ProjectStore::open_read_only(root)?,
+            Arc::new(FixedPlacer),
+            1,
+        )
+    }
+
+    /// Stable saved definitions under the writer lock. Never falls back to a
+    /// read-only session when another writer owns the project.
+    pub fn open_saved_exclusive(root: impl AsRef<Path>) -> Result<Self> {
+        if !has_manifest(root.as_ref())? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_saved(
+            ProjectStore::open_exclusive(root)?,
+            Arc::new(FixedPlacer),
+            1,
+        )
+    }
+
+    /// A verified, closed snapshot of a current scenario and its exact public
+    /// dependencies. Another invalid scenario cannot block this one.
+    pub fn current_snapshot(
+        &mut self,
+        document_id: &str,
+    ) -> Result<apiforge_storage::project::LastValidSnapshot> {
+        self.require_no_held_draft(document_id)?;
+        self.require_current_registry()?;
+        self.settle(document_id)?;
+        let document = &self.documents[self.index(document_id)?];
+        if document.entry.kind != DocumentKind::Scenario
+            || document.analysis != AnalysisState::Valid
+            || document.conflict.is_some()
+            || !document.fields.is_empty()
+        {
+            return Err(Error::ModelLocked);
+        }
+        let model = document.model.as_ref().ok_or(Error::ModelLocked)?;
+        Ok(apiforge_storage::project::LastValidSnapshot::capture(
+            DocumentKey::Working {
+                document_id: document_id.into(),
+            },
+            &document.text,
+            apiforge_storage::project::CacheProvenance {
+                session_epoch: self.session_id.clone(),
+                source_version: document.source_version,
+                saved_source_hash: match &document.saved {
+                    FileState::File { sha256, .. } if !document.is_dirty() => Some(sha256.clone()),
+                    _ => None,
+                },
+            },
+            analysis::identity_base(model),
+            &self.context,
+        )?)
+    }
+
     /// The saved definitions only: no recovery drafts and no last-valid cache.
     /// Used to verify what a writer produced before it is published.
     pub(crate) fn open_without_recovery(root: &Path) -> Result<Self> {

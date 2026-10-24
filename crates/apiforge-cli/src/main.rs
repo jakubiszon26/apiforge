@@ -1,4 +1,5 @@
 mod document;
+mod folder;
 mod run;
 use std::{env, ffi::OsString, fs::File, io::Read, path::Path, process::ExitCode};
 
@@ -31,8 +32,9 @@ fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().skip(1).collect();
     if args.len() == 1 && matches!(args[0].to_str(), Some("--help" | "-h")) {
         println!(
-            "apiforge fmt <file.afs> [--check]\n{}\n{}",
+            "apiforge fmt <file.afs> [--check]\n{}\n{}\n{}",
             document::USAGE,
+            folder::USAGE,
             run::USAGE
         );
         return ExitCode::SUCCESS;
@@ -42,7 +44,11 @@ fn main() -> ExitCode {
         .and_then(|s| s.to_str())
         .is_some_and(|s| matches!(s, "check" | "print" | "apply"))
     {
-        return ExitCode::from(document::run(&args));
+        return ExitCode::from(if args.iter().any(|arg| arg == "--folder") {
+            folder::run(&args)
+        } else {
+            document::run(&args)
+        });
     }
     if args.first().and_then(|a| a.to_str()) == Some("run") {
         return ExitCode::from(run::run(&args));

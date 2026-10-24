@@ -180,17 +180,20 @@ All I/O stays off the UI thread; render only visible explorer rows.
 Add the following alongside the existing JSON `--workspace` commands:
 
 ```text
-apiforge check --project <folder> [--file <relative.afs>]
-apiforge print --project <folder> --file <relative.afs>
-apiforge apply --project <folder> --file <relative.afs> <source.afs>
-apiforge run --project <folder> --scenario <relative.afs|id> [...]
+apiforge check --folder <folder> [--file <relative.afs>]
+apiforge print --folder <folder> --file <relative.afs>
+apiforge apply --folder <folder> --file <relative.afs> <source.afs>
+apiforge run --folder <folder> --scenario <relative.afs|id> [...]
 ```
 
 `print` emits canonical source from a valid definition. `apply` requires valid
 input and an exclusive project lock. `fmt` retains its current single-file
 behaviour. Desktop adds `--folder <path>`; `--project FILE` retains its existing
 session-only JSON meaning. Folder commands use explicit component revisions and
-the same stable-read protocol as the GUI.
+the same stable-read protocol as the GUI. They are available as soon as P6c is
+reviewed and merged, without waiting for P7 startup activation. `--folder` is the
+folder selector in both applications; the earlier proposed CLI `--project`
+spelling is withdrawn. Legacy JSON commands retain `--workspace`.
 
 GUI Run settles pending analysis, then snapshots the selected document and exact
 dependencies/configuration. It can execute valid unsaved work with an indicator.

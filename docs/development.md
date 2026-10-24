@@ -119,6 +119,28 @@ Exit code 0 means the scenario passed, 1 that it did not or could not run, and 2
 that the arguments were wrong. `--live` opens the workspace exclusively, because a
 live run records what it sends in the run journal; a simulation only reads.
 
+## Folder commands
+
+The CLI and desktop both select a folder project with `--folder`:
+
+```bash
+cargo run -p apiforge-cli --locked -- check --folder /path/to/project
+cargo run -p apiforge-cli --locked -- print --folder /path/to/project --file scenarios/main.afs
+cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file scenarios/main.afs incoming.afs
+cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
+```
+
+`check` optionally selects one registered source with `--file`. `print` emits its
+canonical definition; `apply` validates and saves the supplied source exactly under
+the exclusive project lock. Neither changes published component revisions. Folder
+calls must name `Handle@revision(...)`. `run` selects a scenario by registered path
+or entity ID, and supports `--live`, `--secrets` and `--json` as in JSON mode.
+Only the selected scenario and its exact dependencies enter its snapshot; another
+invalid scenario does not block it. Live runs require the writer lock and keep
+their journal under `.apiforge/local/`. Check, print and simulations use stable
+read-only loads without creating local metadata. All folder CLI commands ignore
+local recovery and last-valid cache, and fail on invalid saved definitions.
+
 ## The code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).
