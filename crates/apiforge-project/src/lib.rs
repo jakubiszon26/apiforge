@@ -6,12 +6,17 @@ mod analysis;
 mod context;
 mod document;
 mod layout;
+mod migration;
 mod prepare;
 mod session;
 
 pub use analysis::{Analysis, AnalysisInput, AnalysisTicket, Restored};
 pub use document::{AnalysisState, DocumentSession, ModelState, Unavailable};
 pub use layout::{FixedPlacer, Placer};
+pub use migration::{
+    CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, ProjectCatalogue,
+    migrate_workspace,
+};
 pub use prepare::prepare_project;
 pub use session::{DraftStatus, Event, EventKind, Origin, ProjectSession, SaveOutcome};
 
@@ -50,6 +55,14 @@ pub enum Error {
     StaleAnalysis,
     #[error("The document source exceeds the 1 MiB limit.")]
     SourceTooLarge,
+    #[error(transparent)]
+    Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]
     Unrepresentable(&'static str),
+}
+
+impl From<apiforge_storage::StorageError> for Error {
+    fn from(error: apiforge_storage::StorageError) -> Self {
+        Self::Migration(MigrationError::Workspace(error))
+    }
 }
