@@ -10,6 +10,8 @@ struct Harness {
     text: String,
     top_space: f32,
     request_focus: bool,
+    diagnostics: Vec<Diagnostic>,
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Harness {
@@ -22,6 +24,8 @@ impl Harness {
             text: text.to_owned(),
             top_space: 0.0,
             request_focus: true,
+            diagnostics: Vec::new(),
+            shapes: Vec::new(),
         }
     }
 
@@ -36,6 +40,7 @@ impl Harness {
         ];
         let top_space = self.top_space;
         let request_focus = self.request_focus;
+        let diagnostics = self.diagnostics.clone();
         let text = &mut self.text;
         let editor = &mut self.editor;
         let mut output = self.context.run_ui(
@@ -58,6 +63,7 @@ impl Harness {
                             handles: &handles,
                             ..Scope::default()
                         },
+                        diagnostics: &diagnostics,
                         ..Context::default()
                     },
                 );
@@ -69,7 +75,27 @@ impl Harness {
             },
         );
         output.textures_delta.clear();
+        self.shapes = output.shapes;
         (changed, cursor)
+    }
+
+    /// The line numbers the gutter painted this frame, in the order drawn.
+    fn gutter_numbers(&self) -> Vec<usize> {
+        self.shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => text.galley.text().parse::<usize>().ok(),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How many diagnostic markers the gutter painted this frame.
+    fn gutter_markers(&self) -> usize {
+        self.shapes
+            .iter()
+            .filter(|clipped| matches!(&clipped.shape, egui::Shape::Circle(_)))
+            .count()
     }
 
     /// Several frames with no events, to let focus and layout settle.
@@ -90,6 +116,16 @@ impl Harness {
             pressed: true,
             repeat: false,
             modifiers: Modifiers::NONE,
+        }]);
+    }
+
+    fn shift(&mut self, key: Key) {
+        self.frame(vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::SHIFT,
         }]);
     }
 }
@@ -170,10 +206,6 @@ fn a_warning_underlines_in_its_own_colour() {
 #[test]
 fn lines_are_numbered_from_one_and_marked_where_a_problem_is() {
     let text = "a\nbb\n\nccc";
-    assert_eq!(
-        line_starts(text).collect::<Vec<_>>(),
-        [(1, 0), (2, 2), (3, 5), (4, 6)]
-    );
     assert_eq!(line_of(text, 0), 1);
     assert_eq!(line_of(text, 3), 2);
     assert_eq!(line_of(text, 7), 4);
@@ -200,6 +232,13 @@ fn a_new_line_keeps_the_indentation_and_a_brace_adds_one_level() {
     let at = text.len();
     auto_indent(&mut text, at);
     assert_eq!(text, "scenario \"S\" {\n  ");
+
+    // A request body opens its blocks with brackets, and is printed with the
+    // same two spaces, so they earn a level too.
+    let mut text = "{\n  \"items\": [\n".to_owned();
+    let at = text.len();
+    auto_indent(&mut text, at);
+    assert_eq!(text, "{\n  \"items\": [\n    ");
 
     // No indentation to keep, nothing inserted.
     let mut text = "a = 1\n".to_owned();
@@ -475,4 +514,173 @@ fn typing_immediately_after_a_completion_uses_its_new_caret() {
     harness.press(Key::Enter);
     harness.type_text(".");
     assert!(harness.text.ends_with("products."), "{}", harness.text);
+}
+
+#[test]
+fn backspace_removes_the_indentation_instead_of_writing_it_back() {
+    let mut harness = Harness::new("scenario \"S\" {");
+    harness.settle();
+    harness.press(Key::Enter);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n  ",
+        "a broken line keeps one level of indentation"
+    );
+    harness.press(Key::Backspace);
+    assert_eq!(harness.text, "scenario \"S\" {\n ");
+    harness.press(Key::Backspace);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n",
+        "the last space of the indentation goes too"
+    );
+    harness.press(Key::Backspace);
+    assert_eq!(
+        harness.text, "scenario \"S\" {",
+        "and then the line break itself"
+    );
+}
+
+#[test]
+fn backspace_at_a_line_start_joins_the_lines() {
+    let mut harness = Harness::new("scenario \"S\" {\n  a = 1\n  b");
+    harness.settle();
+    // Back over `b` and the indentation of its line.
+    for _ in 0..3 {
+        harness.press(Key::Backspace);
+    }
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n  a = 1\n",
+        "the indentation of the previous line is not written back"
+    );
+    harness.press(Key::Backspace);
+    assert_eq!(harness.text, "scenario \"S\" {\n  a = 1");
+}
+
+#[test]
+fn pasted_lines_keep_their_own_indentation() {
+    let mut harness = Harness::new("scenario \"S\" {");
+    harness.settle();
+    harness.frame(vec![Event::Paste("\n    a = 1\n".to_owned())]);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n    a = 1\n",
+        "a paste ending in a line break gains no indentation of its own"
+    );
+}
+
+#[test]
+fn tab_indents_by_the_width_the_language_is_printed_at() {
+    let mut harness = Harness::new("scenario \"S\" {\na = 1");
+    harness.settle();
+    harness.press(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\na = 1 ",
+        "a caret on its own moves to the next tab stop, never inserting a tab"
+    );
+    assert!(!harness.text.contains('\t'));
+    harness.press(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\na = 1   ",
+        "and on to the next"
+    );
+}
+
+#[test]
+fn shift_tab_takes_off_exactly_one_level() {
+    let mut harness = Harness::new("scenario \"S\" {\n  a = 1");
+    harness.settle();
+    harness.shift(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\na = 1",
+        "the printer's own two-space indentation comes off"
+    );
+    // Nothing left to take away.
+    harness.shift(Key::Tab);
+    assert_eq!(harness.text, "scenario \"S\" {\na = 1");
+
+    let mut harness = Harness::new("scenario \"S\" {\n    a = 1");
+    harness.settle();
+    harness.shift(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n  a = 1",
+        "four spaces lose one level, not two"
+    );
+}
+
+#[test]
+fn tab_shifts_a_selected_block_instead_of_replacing_it() {
+    let mut harness = Harness::new("scenario \"S\" {\n  a = 1\n  b = 2");
+    harness.settle();
+    // Select the two assignments, from the end of the text backwards.
+    for _ in 0.."  a = 1\n  b = 2".len() {
+        harness.shift(Key::ArrowLeft);
+    }
+    harness.press(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n    a = 1\n    b = 2",
+        "every selected line gains a level and none of the text is lost"
+    );
+    harness.shift(Key::Tab);
+    assert_eq!(
+        harness.text, "scenario \"S\" {\n  a = 1\n  b = 2",
+        "the selection survives the first Tab, so Shift+Tab puts it back"
+    );
+}
+
+#[test]
+fn indenting_a_block_leaves_blank_lines_alone() {
+    let mut harness = Harness::new("a = 1\n\nb = 2");
+    harness.settle();
+    for _ in 0.."a = 1\n\nb = 2".len() {
+        harness.shift(Key::ArrowLeft);
+    }
+    harness.press(Key::Tab);
+    assert_eq!(
+        harness.text, "  a = 1\n\n  b = 2",
+        "a blank line gains no trailing spaces"
+    );
+}
+
+#[test]
+fn reindenting_moves_the_lines_a_selection_touches_and_no_others() {
+    // A selection ending exactly at a line start does not reach into that line.
+    let mut text = "a\nb\nc".to_owned();
+    assert_eq!(reindent(&mut text, (0, 2), true), Some((0, 4)));
+    assert_eq!(text, "  a\nb\nc");
+
+    // A caret part-way along a line goes to the next tab stop.
+    let mut text = "abc".to_owned();
+    assert_eq!(reindent(&mut text, (1, 1), true), Some((2, 2)));
+    assert_eq!(text, "a bc");
+
+    // Nothing to take away leaves the text untouched.
+    let mut text = "a\nb".to_owned();
+    assert_eq!(reindent(&mut text, (0, 3), false), None);
+    assert_eq!(text, "a\nb");
+
+    // A reversed selection keeps its direction.
+    let mut text = "  a".to_owned();
+    assert_eq!(reindent(&mut text, (3, 0), false), Some((1, 0)));
+    assert_eq!(text, "a");
+}
+
+#[test]
+fn the_gutter_numbers_every_line_once_and_marks_the_ones_with_problems() {
+    let mut harness = Harness::new("scenario \"S\" {\n  a = oops\n\n  b = two\n}");
+    harness.settle();
+    assert_eq!(
+        harness.gutter_numbers(),
+        [1, 2, 3, 4, 5],
+        "every line is numbered once, blank lines included"
+    );
+    assert_eq!(harness.gutter_markers(), 0);
+
+    // A problem on the second line marks that line, and only that line.
+    harness.diagnostics = vec![Diagnostic {
+        range: 21..25,
+        severity: Severity::Error,
+        message: "unknown name".into(),
+        fix: None,
+    }];
+    harness.settle();
+    assert_eq!(harness.gutter_numbers(), [1, 2, 3, 4, 5]);
+    assert_eq!(harness.gutter_markers(), 1);
 }

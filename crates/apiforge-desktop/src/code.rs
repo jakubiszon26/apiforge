@@ -85,9 +85,10 @@ pub struct CodeEditor {
 #[derive(Clone, Default)]
 pub struct Completions {
     popup: Option<Popup>,
-    /// Set after an insertion, so the caret can be placed once the text edit has
-    /// been laid out again.
-    pending_caret: Option<usize>,
+    /// Set after an insertion, so the selection can be placed once the text edit
+    /// has been laid out again. Secondary first, then the primary end, which is
+    /// the one that moves and the one scrolled to.
+    pending_caret: Option<(usize, usize)>,
     prepared_scroll: Option<usize>,
 }
 
@@ -104,15 +105,15 @@ struct Popup {
 impl Completions {
     /// Apply a programmatic caret before the widget handles new input.
     pub fn prepare(&mut self, ui: &Ui, id: egui::Id, text: &str) {
-        if let Some(caret) = self.pending_caret.take() {
+        if let Some((secondary, primary)) = self.pending_caret.take() {
             let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-            state
-                .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(epaint_index(char_index(text, caret))),
-                )));
+            state.cursor.set_char_range(Some(egui::text::CCursorRange {
+                primary: egui::text::CCursor::new(epaint_index(char_index(text, primary))),
+                secondary: egui::text::CCursor::new(epaint_index(char_index(text, secondary))),
+                h_pos: None,
+            }));
             state.store(ui.ctx(), id);
-            self.prepared_scroll = Some(caret);
+            self.prepared_scroll = Some(primary);
         }
     }
 
@@ -254,7 +255,8 @@ impl Completions {
         match chosen {
             Some(chosen) => {
                 apply(text, &chosen);
-                self.pending_caret = Some(chosen.replace.start + chosen.caret);
+                let caret = chosen.replace.start + chosen.caret;
+                self.pending_caret = Some((caret, caret));
                 self.popup = None;
                 true
             }
@@ -310,7 +312,7 @@ impl CodeEditor {
     /// Puts the caret at a byte offset on the next frame, for a selection made
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
-        self.completions.pending_caret = Some(at);
+        self.completions.pending_caret = Some((at, at));
     }
 
     /// Draws the editor and returns what the user did.
@@ -329,6 +331,10 @@ impl CodeEditor {
         // Keys the popup owns must not reach the text edit, so they are taken
         // before it is drawn.
         let keys = self.completions.take_keys(ui, id);
+        // Tab is the language's own indentation. Left to the text edit it would
+        // insert a tab character the printer never writes, and replace whatever
+        // was selected with it.
+        let indent = take_indent(ui, id);
         self.completions.prepare(ui, id, text);
         let diagnostics: Vec<Diagnostic> = context.diagnostics.to_vec();
         let font_for_layout = font.clone();
@@ -342,7 +348,11 @@ impl CodeEditor {
         };
 
         let gutter_width = if context.line_numbers {
-            let digits = text.lines().count().max(1).to_string().len().max(2);
+            // The last number is one past the line breaks: text ending in one
+            // has an empty last line, which `lines()` does not count but the
+            // gutter does number.
+            let lines = text.bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let digits = lines.to_string().len().max(2);
             ui.ctx().fonts_mut(|fonts| fonts.glyph_width(&font, '0')) * digits as f32 + 12.0
         } else {
             0.0
@@ -370,7 +380,7 @@ impl CodeEditor {
             if let Some(gutter) = gutter {
                 self.paint_gutter(ui, gutter, text, &output, context);
             }
-            outcome = Some(self.after_edit(ui, text, context, &output, keys, id));
+            outcome = Some(self.after_edit(ui, text, context, &output, Taken { keys, indent }, id));
         });
         outcome.expect("the editor is always drawn")
     }
@@ -395,35 +405,38 @@ impl CodeEditor {
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         let marked = marked_lines(text, context.diagnostics);
-        for (number, start) in line_starts(text) {
-            let top = output.galley_pos.y
-                + output
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
-                        text, start,
-                    ))))
-                    .top();
+        // The galley's own rows are walked rather than the text's lines. Asking
+        // the galley where a line begins scans the text up to it and then every
+        // row before it, which a long scenario pays once per line and per frame:
+        // thirty thousand lines took a third of a second that way.
+        let mut number = 1;
+        let mut begins_a_line = true;
+        for row in &output.galley.rows {
+            let top = output.galley_pos.y + row.min_y();
             if top > visible.bottom() {
                 break;
             }
-            if top + row_height < visible.top() {
-                continue;
-            }
-            let flagged = marked.contains(&number);
-            painter.text(
-                pos2(rect.right() - 8.0, top),
-                egui::Align2::RIGHT_TOP,
-                number.to_string(),
-                font.clone(),
-                if flagged { theme::DANGER } else { theme::MUTED },
-            );
-            if flagged {
-                painter.circle_filled(
-                    pos2(rect.left() + 4.0, top + row_height * 0.5),
-                    3.0,
-                    theme::DANGER,
+            // A wrapped line keeps its number beside its first visual row
+            // instead of repeating it under itself.
+            if begins_a_line && top + row_height >= visible.top() {
+                let flagged = marked.contains(&number);
+                painter.text(
+                    pos2(rect.right() - 8.0, top),
+                    egui::Align2::RIGHT_TOP,
+                    number.to_string(),
+                    font.clone(),
+                    if flagged { theme::DANGER } else { theme::MUTED },
                 );
+                if flagged {
+                    painter.circle_filled(
+                        pos2(rect.left() + 4.0, top + row_height * 0.5),
+                        3.0,
+                        theme::DANGER,
+                    );
+                }
             }
+            begins_a_line = row.ends_with_newline;
+            number += usize::from(row.ends_with_newline);
         }
     }
 
@@ -435,7 +448,7 @@ impl CodeEditor {
         text: &mut String,
         context: &Context<'_>,
         output: &egui::text_edit::TextEditOutput,
-        keys: Keys,
+        taken: Taken,
         id: egui::Id,
     ) -> Outcome {
         let response = output.response.response.clone();
@@ -443,7 +456,22 @@ impl CodeEditor {
             .cursor_range
             .map(|range| byte_offset(text, range.primary.index.0));
         let mut changed = response.changed();
-        changed |= self.completions.update(ui, id, text, context, output, keys);
+        changed |= self
+            .completions
+            .update(ui, id, text, context, output, taken.keys);
+        if let Some(deeper) = taken.indent.wanted()
+            && let Some(range) = output.cursor_range
+        {
+            let selection = (
+                byte_offset(text, range.secondary.index.0),
+                byte_offset(text, range.primary.index.0),
+            );
+            if let Some(moved) = reindent(text, selection, deeper) {
+                self.completions.pending_caret = Some(moved);
+                ui.ctx().request_repaint();
+                changed = true;
+            }
+        }
 
         // Hovering a name explains it, from the same index the popup uses, so
         // the two can never disagree about what a name is.
@@ -478,13 +506,18 @@ impl CodeEditor {
                 response.clone().on_hover_text(message);
             }
         }
-        if changed && self.completions.popup.is_none() {
+        // Indentation is added for a line the user has just broken, never for
+        // one a deletion happened to end at: Backspace over the indentation must
+        // remove it rather than see it written back. The text edit reads its
+        // events without taking them, so the key is still here to be seen; the
+        // popup took it already if it accepted a completion with it.
+        if changed && self.completions.popup.is_none() && breaks_the_line(ui) {
             // Auto-indent happens on the text, not on the layout, so the buffer
             // stays the single source of truth.
             if let Some(cursor) = cursor
                 && let Some(caret) = auto_indent(text, cursor)
             {
-                self.completions.pending_caret = Some(caret);
+                self.completions.pending_caret = Some((caret, caret));
             }
         }
 
@@ -494,6 +527,64 @@ impl CodeEditor {
             changed,
         }
     }
+}
+
+/// Whether this frame's input breaks the line the caret is on, which is the
+/// only edit an indentation follows. Enter is matched the way the text edit
+/// matches it, so Shift+Enter counts and Ctrl+Enter does not.
+fn breaks_the_line(ui: &Ui) -> bool {
+    ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.matches_logically(Modifiers::NONE)
+            )
+        })
+    })
+}
+
+/// The keys taken from this frame before the text edit was drawn.
+#[derive(Default, Clone, Copy)]
+struct Taken {
+    keys: Keys,
+    indent: Indent,
+}
+
+/// Which way Tab was pressed, once the popup has had its chance at it.
+#[derive(Default, Clone, Copy)]
+struct Indent {
+    deeper: bool,
+    shallower: bool,
+}
+
+impl Indent {
+    /// `Some(true)` to indent, `Some(false)` to take a level away.
+    fn wanted(self) -> Option<bool> {
+        (self.deeper || self.shallower).then_some(self.deeper)
+    }
+}
+
+/// Takes Tab from the focused editor, so the text edit never sees it.
+///
+/// Shift is asked about first: `Modifiers::NONE` matches logically, which also
+/// accepts a held Shift, and would otherwise swallow Shift+Tab as a plain one.
+fn take_indent(ui: &Ui, id: egui::Id) -> Indent {
+    if !ui.is_enabled() || !ui.memory(|memory| memory.has_focus(id)) {
+        return Indent::default();
+    }
+    ui.input_mut(|input| {
+        let shallower = input.consume_key(Modifiers::SHIFT, Key::Tab);
+        let deeper = input.consume_key(Modifiers::NONE, Key::Tab);
+        Indent {
+            deeper: deeper && !shallower,
+            shallower,
+        }
+    })
 }
 
 /// Keys the popup takes before the text edit sees them.
@@ -564,8 +655,109 @@ fn opens_completion(text: &str, cursor: usize) -> bool {
             .is_some_and(|last| last.is_alphanumeric() || last == '_')
 }
 
+/// One level of indentation, the width the language is printed at.
+const INDENT: usize = 2;
+
+/// The byte offset the line holding `at` begins at.
+fn line_start(text: &str, at: usize) -> usize {
+    text[..at.min(text.len())]
+        .rfind('\n')
+        .map_or(0, |index| index + 1)
+}
+
+/// An offset after an edit of `change` bytes made at `at`, never dragged in
+/// front of the line the edit belongs to.
+fn shifted(offset: usize, at: usize, change: isize) -> usize {
+    if offset > at {
+        offset.saturating_add_signed(change).max(at)
+    } else {
+        offset
+    }
+}
+
+/// Indents or dedents by one level and returns the selection that is left, or
+/// `None` when there was nothing to take away.
+///
+/// A selection covers every line it touches, so Tab shifts a block instead of
+/// replacing it. A caret on its own moves to the next tab stop, which is what
+/// pressing Tab part-way along a line means; Shift+Tab always takes a level off
+/// the line, wherever on it the caret happens to be.
+fn reindent(text: &mut String, selection: (usize, usize), deeper: bool) -> Option<(usize, usize)> {
+    let reversed = selection.0 > selection.1;
+    let (start, end) = (selection.0.min(selection.1), selection.0.max(selection.1));
+    if start == end && deeper {
+        let column = text[line_start(text, start)..start].chars().count();
+        let spaces = INDENT - column % INDENT;
+        text.insert_str(start, &" ".repeat(spaces));
+        let caret = start + spaces;
+        return Some((caret, caret));
+    }
+    let first = line_start(text, start);
+    // A selection stopping exactly at a line start does not reach into it.
+    let last = line_start(
+        text,
+        if start < end && text[..end].ends_with('\n') {
+            end - 1
+        } else {
+            end
+        },
+    );
+
+    let mut out = String::with_capacity(text.len() + INDENT);
+    out.push_str(&text[..first]);
+    let (mut moved_start, mut moved_end) = (start, end);
+    let mut touched = false;
+    let mut at = first;
+    loop {
+        let line_end = text[at..].find('\n').map_or(text.len(), |index| at + index);
+        let line = &text[at..line_end];
+        // A blank line gains no indentation: it would only be trailing spaces.
+        let dropped = if deeper {
+            if !line.is_empty() {
+                out.push_str(&" ".repeat(INDENT));
+                touched = true;
+                moved_start = shifted(moved_start, at, INDENT as isize);
+                moved_end = shifted(moved_end, at, INDENT as isize);
+            }
+            0
+        } else {
+            let spaces = line
+                .bytes()
+                .take(INDENT)
+                .take_while(|byte| *byte == b' ')
+                .count();
+            if spaces > 0 {
+                touched = true;
+                moved_start = shifted(moved_start, at, -(spaces as isize));
+                moved_end = shifted(moved_end, at, -(spaces as isize));
+            }
+            spaces
+        };
+        out.push_str(&line[dropped..]);
+        if at >= last {
+            out.push_str(&text[line_end..]);
+            break;
+        }
+        out.push('\n');
+        at = line_end + 1;
+    }
+    if !touched {
+        return None;
+    }
+    *text = out;
+    Some(if reversed {
+        (moved_end, moved_start)
+    } else {
+        (moved_start, moved_end)
+    })
+}
+
 /// Keeps the indentation of the previous line after a newline, one level deeper
-/// after an opening brace. Returns the caret that follows the inserted spaces.
+/// after something the line left open. Returns the caret that follows the
+/// inserted spaces.
+///
+/// A brace opens a block of the language; a bracket or a parenthesis opens one
+/// of a request body, which is printed the same way.
 fn auto_indent(text: &mut String, cursor: usize) -> Option<usize> {
     if cursor == 0 || cursor > text.len() || !text.is_char_boundary(cursor) {
         return None;
@@ -575,8 +767,8 @@ fn auto_indent(text: &mut String, cursor: usize) -> Option<usize> {
     }
     let previous = text[..cursor - 1].rsplit('\n').next().unwrap_or_default();
     let indent = previous.len() - previous.trim_start_matches(' ').len();
-    let deeper = previous.trim_end().ends_with('{');
-    let spaces = indent + if deeper { 2 } else { 0 };
+    let deeper = previous.trim_end().ends_with(['{', '[', '(']);
+    let spaces = indent + if deeper { INDENT } else { 0 };
     if spaces == 0 {
         return None;
     }
@@ -606,15 +798,6 @@ fn line_of(text: &str, at: usize) -> usize {
         .filter(|byte| *byte == b'\n')
         .count()
         + 1
-}
-
-/// Every line's number and the byte offset it starts at.
-fn line_starts(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
-    std::iter::once((1, 0)).chain(
-        text.match_indices('\n')
-            .enumerate()
-            .map(|(index, (at, _))| (index + 2, at + 1)),
-    )
 }
 
 /// The layout of one buffer: coloured by token, or plain when the buffer is too

@@ -9,7 +9,8 @@
 //! Secrets are read from the environment or from a file, never from the command
 //! line, where they would survive in shell history and in the process list.
 
-use apiforge_core::run::{RunMode, RunResult, RunStatus, StepStatus};
+use apiforge_core::format::OptionalJson;
+use apiforge_core::run::{RunMode, RunResult, RunStatus, StepResult, StepStatus};
 use apiforge_runner::{RunRequest, RunnerService};
 use apiforge_storage::{JournalStore, WorkspaceStore};
 use indexmap::IndexMap;
@@ -193,9 +194,12 @@ fn report_interrupted(runs: &[apiforge_core::journal::JournalRun]) {
     }
 }
 
-/// One line per step, then the verdict.
-fn print_report(report: &RunResult) {
-    for step in &report.steps {
+/// One line per step, with a component's inner steps indented beneath it.
+///
+/// A component that failed says to look at its inner steps, so they have to be
+/// here: without them the run names the component and nothing that explains it.
+fn print_steps(steps: &[StepResult], depth: usize) {
+    for step in steps {
         let mark = match step.status {
             StepStatus::Passed => "ok",
             StepStatus::Failed => "failed",
@@ -204,13 +208,44 @@ fn print_report(report: &RunResult) {
             StepStatus::Skipped => "skipped",
             StepStatus::Cancelled => "cancelled",
         };
+        let indent = "  ".repeat(depth);
         let message = step.message.as_deref().unwrap_or_default();
         println!(
-            "{mark:>9}  {}{}{message}",
+            "{mark:>9}  {indent}{}{}{message}",
             step.display_name(),
             if message.is_empty() { "" } else { " — " }
         );
+        // What a comparison wanted and what it got: the report carries both, and
+        // a failure that does not say them cannot be acted on.
+        if let (OptionalJson::Present(expected), OptionalJson::Present(actual)) =
+            (&step.expected, &step.actual)
+            && step.status != StepStatus::Passed
+        {
+            println!("{:>9}  {indent}  expected {}", "", compact(expected));
+            println!("{:>9}  {indent}  actual   {}", "", compact(actual));
+        }
+        if let Some(children) = &step.children {
+            print_steps(children, depth + 1);
+        }
     }
+}
+
+/// A value on one line, shortened so a large body cannot bury the verdict.
+fn compact(value: &serde_json::Value) -> String {
+    const LIMIT: usize = 120;
+    let text = match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    match text.char_indices().nth(LIMIT) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text,
+    }
+}
+
+/// One line per step, then the verdict.
+fn print_report(report: &RunResult) {
+    print_steps(&report.steps, 0);
     if let Some(notice) = &report.notice {
         println!("{notice}");
     }

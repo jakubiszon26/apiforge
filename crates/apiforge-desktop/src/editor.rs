@@ -82,6 +82,7 @@ pub struct Editor {
     pub clipboard: Option<BlockClipboard>,
     /// Incremented by every document change; the persistence layer saves on change.
     revision: u64,
+    generation: u64,
 }
 
 impl Editor {
@@ -96,6 +97,7 @@ impl Editor {
             history: History::default(),
             clipboard: None,
             revision: 0,
+            generation: 0,
         }
     }
 
@@ -105,6 +107,14 @@ impl Editor {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Counts the times the editor moved to another document: another scenario,
+    /// another project, or in or out of a component draft. A draft left without
+    /// saving and opened again is the saved definition once more, which no
+    /// revision records, so anything caching a document keys on this too.
+    pub fn context_generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn project(&self) -> &Project {
@@ -225,6 +235,7 @@ impl Editor {
     // ----- Context changes -------------------------------------------------------
 
     fn context_changed(&mut self) {
+        self.generation += 1;
         self.history = History::default();
         let graph = self.graph();
         let present: HashSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();

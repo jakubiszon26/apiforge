@@ -299,3 +299,98 @@ fn a_live_run_refuses_a_workspace_another_window_holds() {
     ]);
     assert!(output.status.success());
 }
+
+/// A component that fails says to look at its inner steps, so the report has to
+/// show them: the only line that explains the failure is one of theirs.
+#[test]
+fn a_failed_component_prints_the_inner_steps_that_explain_it() {
+    use std::net::TcpListener;
+
+    // A port nothing listens on, so every request is refused at once.
+    let closed = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap()
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let mut workspace = fixture();
+    for project in &mut workspace.projects {
+        project.environment.base_url = format!("http://{closed}");
+    }
+    fs::write(&path, serde_json::to_vec_pretty(&workspace).unwrap()).unwrap();
+    let output = run(&[
+        OsStr::new("run"),
+        OsStr::new("--workspace"),
+        path.as_os_str(),
+        OsStr::new("--scenario"),
+        OsStr::new(&scenario()),
+        OsStr::new("--live"),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&output.stdout);
+    let indented: Vec<&str> = text
+        .lines()
+        .filter(|line| line.len() > 11 && line[11..].starts_with(' '))
+        .collect();
+    assert!(
+        !indented.is_empty(),
+        "the component's inner steps are shown beneath it: {text}"
+    );
+    assert!(
+        indented.iter().any(|line| line.contains("Request failed")),
+        "and one of them says the request never reached the API: {text}"
+    );
+}
+
+/// What a comparison wanted and what it got are in the report; a failure that
+/// does not say them leaves nothing to act on.
+#[test]
+fn a_failed_comparison_prints_what_it_wanted_and_what_it_got() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let mut workspace = fixture();
+    let project = workspace
+        .projects
+        .iter_mut()
+        .find(|project| project.id == "shop")
+        .unwrap();
+    // A number the total cannot be, so the comparison fails rather than erroring
+    // on a value it cannot compare at all.
+    for node in &mut project.scenarios[0].graph.nodes {
+        if node.kind == apiforge_core::model::NodeKind::Assert
+            && node.inputs.contains_key("expected")
+        {
+            node.inputs.insert(
+                "expected".into(),
+                apiforge_core::format::Binding::literal(serde_json::json!(-1)),
+            );
+            break;
+        }
+    }
+    fs::write(&path, serde_json::to_vec_pretty(&workspace).unwrap()).unwrap();
+    let output = run(&[
+        OsStr::new("run"),
+        OsStr::new("--workspace"),
+        path.as_os_str(),
+        OsStr::new("--scenario"),
+        OsStr::new(&scenario()),
+    ]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("expected -1"),
+        "the comparison says what it wanted: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.trim_start().starts_with("actual")),
+        "and what it got: {text}"
+    );
+    // A step that passed says nothing of the sort.
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.trim_start().starts_with("expected "))
+            .count(),
+        1,
+        "only the comparison that failed explains itself: {text}"
+    );
+}

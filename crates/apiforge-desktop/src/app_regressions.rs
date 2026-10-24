@@ -668,3 +668,49 @@ fn a_board_reprint_clears_text_undo_that_belongs_to_an_older_document() {
     assert_eq!(app.buffers.get(&app.code_context()).unwrap().text, current);
     assert_eq!(value(&app, false), Binding::literal(json!(2)));
 }
+
+#[test]
+fn a_component_draft_left_unsaved_shows_the_saved_definition_when_opened_again() {
+    // The panel keeps the text it printed, so it must not hand back a draft the
+    // user discarded: leaving and re-entering a component changes no revision.
+    let ctx = egui::Context::default();
+    let mut app = App::new(&ctx, Source::Session(default_workspace()));
+    app.code_open = true;
+    let size = egui::vec2(1600.0, 1000.0);
+    let component = app.editor.project().components[0].clone();
+
+    app.editor.enter_component(component.clone());
+    frame(&mut app, &ctx, size, vec![]);
+    let saved = buffers::print(app.editor.project(), &app.code_document()).unwrap();
+
+    let mut edited = saved.clone();
+    edited.insert_str(edited.rfind('}').unwrap(), "only_in_the_draft = 1\n");
+    apply(&mut app, &edited);
+    frame(&mut app, &ctx, size, vec![]);
+    assert!(
+        app.editor
+            .graph()
+            .nodes
+            .iter()
+            .any(|node| node.handle == "only_in_the_draft")
+    );
+
+    // Leave without saving and open the same revision again, without a frame
+    // in between: nothing else prints, so only the panel's own key can tell
+    // that this is the saved definition once more.
+    app.buffers.discard(&app.code_context());
+    app.editor.leave_component();
+    app.editor.enter_component(component);
+    frame(&mut app, &ctx, size, vec![]);
+
+    assert_eq!(
+        buffers::print(app.editor.project(), &app.code_document()).unwrap(),
+        saved,
+        "the discarded draft is gone"
+    );
+    assert_eq!(
+        app.printed.as_ref().unwrap().text.as_deref(),
+        Some(saved.as_str()),
+        "and the panel prints the saved definition, not the text it kept"
+    );
+}

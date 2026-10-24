@@ -6,6 +6,12 @@ regression tests and selected native UI retests. See the
 [fix verification report](docs/qa/2026-10-24/fixes/verification.md) for coverage and
 limits. A subsequent review fixed **BUG-018–025**, recorded in the
 [additional verification report](docs/qa/2026-10-24/fixes-next/verification.md).
+A third pass, prompted by a report that Backspace does not work in the code
+editor, found and fixed **BUG-026–031** in the editor's own key handling and
+drawing; see the [editor verification report](docs/qa/2026-10-24/fixes-editor/verification.md).
+A fourth pass ran the whole application end to end — the demo API, the command
+line against it and the native window — and fixed **BUG-032–034**, in the
+[end-to-end verification report](docs/qa/2026-10-24/fixes-e2e/verification.md).
 Original reproductions and screenshots are retained below.
 
 Tested revision: `854b44f` (`feat/live-sync` merged). Native release executable:
@@ -47,6 +53,25 @@ review visual polish alongside the locking and panel-layout work.
 | BUG-015 | P2 | Open in code leaves its target outside the visible code |
 | BUG-004 | P3 | Heavy grey invalid-code state makes the board hard to read |
 | BUG-010 | P3 | Completion popup detaches from its caret |
+
+Found in the third pass, on the same areas:
+
+| ID | Priority | Finding |
+| --- | --- | --- |
+| BUG-026 | P1 | Backspace cannot delete indentation; it is written straight back |
+| BUG-027 | P1 | Tab deletes a selected block instead of indenting it |
+| BUG-028 | P2 | Tab and Shift+Tab do not use the language's indentation |
+| BUG-029 | P2 | The line-number gutter makes a long buffer unusable |
+| BUG-030 | P3 | Auto-indent ignores brackets in a request body |
+| BUG-031 | P3 | The code panel reprints the whole document every frame |
+
+Found in the fourth pass, running the application end to end:
+
+| ID | Priority | Finding |
+| --- | --- | --- |
+| BUG-032 | P2 | An ordering wire runs under the block it leaves, so nothing shows where it starts |
+| BUG-033 | P2 | A failed component prints no inner steps, though its message says to read them |
+| BUG-034 | P3 | A failed comparison at the command line never says what it expected |
 
 ## BUG-001 — P1 — The first code edit in a fresh buffer is silently lost
 
@@ -587,6 +612,188 @@ changed. A later run can therefore execute behavior the user believes was undone
 snapshot always stores the active `graph()` and includes the other graph only
 when `phase == Main`. With cleanup active, the old main graph is never captured.
 Whole-scenario history needs both graphs independently of the current phase.
+
+## BUG-026 — P1 — Backspace cannot delete indentation; the editor writes it straight back
+
+**Reported by the user; reproduced in the editor harness.**
+
+1. Open Code on any scenario and put the caret at the end of a line that opens a
+   block, for example `scenario "S" {`.
+2. Press Enter. The editor indents the new line by two spaces, as it should.
+3. Press Backspace twice to take that indentation away again.
+
+**Actual:** the first Backspace removes one space. The second removes the last
+one and the editor immediately puts both back, so the text returns to
+`scenario "S" {\n  ` with the caret after the indentation. The line can never be
+brought back to column zero, and the line break before it can never be deleted,
+so two lines cannot be joined. The same happens at the start of any indented
+line and with the Delete key.
+
+**Expected:** Backspace deletes what is in front of the caret. Indentation is
+added for a line the user has just broken, not for one a deletion happened to
+end at.
+
+**Impact:** every keystroke that would un-indent a line or join two lines is
+silently undone. Restructuring code in the panel is impossible without deleting
+and retyping whole lines.
+
+**Investigation:** `crates/apiforge-desktop/src/code.rs`, `CodeEditor::after_edit`
+ran `auto_indent` for *any* change that left the caret just after a newline. It
+cannot tell an inserted line break from a deletion that uncovered one.
+
+## BUG-027 — P1 — Tab deletes a selected block instead of indenting it
+
+1. Open Code on a scenario with at least two indented statements.
+2. Select those statements.
+3. Press Tab.
+
+**Actual:** the selected statements are **deleted** and replaced by a single tab
+character. The work is gone; only text Undo brings it back.
+
+**Expected:** Tab over a selection indents every line the selection touches and
+keeps the selection, so Tab and Shift+Tab move a block in and out.
+
+**Impact:** the most ordinary code-editor gesture destroys the selected code.
+
+**Investigation:** the editor never handled Tab, so egui's own `TextEdit`
+behaviour applied: `delete_selected` followed by inserting `"\t"`.
+
+## BUG-028 — P2 — Tab and Shift+Tab do not use the indentation the language is written in
+
+1. Open Code and press Tab on an empty line.
+2. On a line indented by the usual two spaces, press Shift+Tab.
+3. On a line indented by four spaces, press Shift+Tab.
+
+**Actual:** step 1 inserts a tab character, which the printer never writes and
+which the editor's own auto-indent does not count — the next line it indents
+loses the indentation. Step 2 does nothing, because egui removes four spaces at a
+time. Step 3 removes all four spaces, two of the editor's levels at once.
+
+**Expected:** Tab moves to the next two-space stop and Shift+Tab takes exactly
+one level off, matching `print_scenario` and the JSON body printer.
+
+**Impact:** code indented with Tab is reformatted the moment it applies, and
+Shift+Tab is unusable on code the application itself produced.
+
+**Investigation:** `format.rs` writes `"  ".repeat(depth)`, while egui's
+`TAB_SIZE` is 4 and its Tab inserts `"\t"`.
+
+## BUG-029 — P2 — The line-number gutter makes a long buffer unusable
+
+1. Open Code and paste a long document — the panel accepts up to the 1 MB the
+   language allows, and keeps the text while it does not parse.
+2. Scroll towards the end.
+
+**Actual:** the window stops responding to typing and scrolling. Measured in the
+editor harness on a 360 KB, 30 000-line buffer scrolled to the end: **921 ms per
+frame**, in a release build. The cost grows with the square of the document, so
+a megabyte takes seconds per frame.
+
+**Expected:** the editor stays responsive at the 1 MB its own documentation sets
+as the target.
+
+**Impact:** pasting a large file into the code panel appears to hang the
+application.
+
+**Investigation:** `CodeEditor::paint_gutter` asked the galley for the position
+of every line from the first one. Each answer scanned the text up to that line to
+convert a byte offset into a character index, and then scanned every row before
+it. Both are linear, once per line, per frame.
+
+## BUG-030 — P3 — Auto-indent ignores brackets, so a body is indented unlike the way the editor prints it
+
+1. Open a request body in the inspector as JSON.
+2. Type `"items": [` and press Enter.
+
+**Actual:** the new line keeps the indentation of the previous one. After `{` in
+the same place it gains a level, as it should.
+
+**Expected:** `[` opens a block of a request body exactly as `{` does, and
+`print_json_body` indents both with two spaces.
+
+**Impact:** a hand-written body does not match the body the editor prints beside
+it, so opening a saved body reindents what was typed.
+
+**Investigation:** `auto_indent` tested only `ends_with('{')`.
+
+## BUG-031 — P3 — The code panel reprints and revalidates the whole document every frame
+
+1. Open Code on a large scenario.
+
+**Actual:** every frame prints the document again, which clones and validates the
+whole project first. Measured: 0.2 ms at ten blocks, 2.0 ms at a hundred and
+**4.5 ms at the two hundred a graph may hold**, in a release build — about a
+quarter of a 60 Hz frame spent producing text that has not changed.
+
+**Expected:** the document is printed again when it changes.
+
+**Impact:** the panel is heaviest exactly where scenarios are largest.
+
+**Investigation:** `App::code_panel` called `buffers::print` unconditionally.
+`Editor::revision` already counts document changes; moving between documents
+needed a counter of its own, because a component draft left unsaved and opened
+again is the saved definition once more without any revision changing.
+
+## BUG-032 — P2 — An ordering wire runs under the block it leaves
+
+**Reported by the user; reproduced in the router and in the native window.**
+
+1. Open the `Przepływ: ceny i koszyk` demo project, whose steps are joined by
+   ordering wires.
+2. Look at the wire between `begin` and `Pobierz ceny produktów`, two cards side
+   by side.
+
+**Actual:** the dashed wire appears above `begin`, with nothing joining it to the
+`Next` port at the bottom of the card. The route is
+`(180,176) → (180,84) → (510,84) → (510,100)`: it leaves the port at the bottom
+edge and goes straight up **through the whole card**, which is painted over it.
+Only the sixteen pixels above the card are visible.
+
+**Expected:** a wire leaves its port perpendicular to the card side and stays in
+the open, as [ADR 0006](docs/decisions/0006-layout-and-wire-routing.md) says. It
+may hug a card; it may not pass behind one.
+
+**Impact:** on a board read for its execution order, an ordering wire cannot be
+traced back to the step it starts at.
+
+**Investigation:** `crates/apiforge-layout/src/route.rs`. The two cards a wire
+joins were excluded from the obstacles altogether, so the search was free to
+cross them. Excluding them is only needed so a port on a card's edge has
+somewhere to start, which the stub already provides.
+
+## BUG-033 — P2 — A failed component prints no inner steps at the command line
+
+1. Point a project's environment at a port nothing listens on.
+2. `apiforge run --workspace <doc.json> --scenario <name> --live`
+
+**Actual:** the component's line reads `error Produkt — Check the results of the
+component's inner steps.` and the inner steps are never printed. The reason the
+run failed — `Connection refused` on the request inside the component — appears
+only with `--json`.
+
+**Expected:** the report names the step that explains the failure.
+
+**Impact:** a failing run in a terminal or in CI tells the reader to look at
+something it does not show.
+
+**Investigation:** `print_report` in `crates/apiforge-cli/src/run.rs` walked
+`report.steps` and never `step.children`.
+
+## BUG-034 — P3 — A failed comparison at the command line never says what it expected
+
+1. Run a scenario whose assertion does not hold.
+
+**Actual:** `failed  Priorytet wysoki — The comparison failed.` The report
+carries `expected` and `actual`, and the window shows both side by side; the
+command line prints neither.
+
+**Expected:** the line that failed says what it wanted and what it got.
+
+**Impact:** the one output a test runner exists to produce has to be re-run with
+`--json` to be read.
+
+**Investigation:** the same printer; `StepResult::expected` and `::actual` were
+not used.
 
 ## Coverage and limits
 
