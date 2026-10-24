@@ -15,8 +15,11 @@ use std::{path::Path, sync::Arc};
 
 #[path = "comments.rs"]
 mod comments;
+#[path = "execution.rs"]
+mod execution;
 #[path = "external.rs"]
 mod external;
+pub use execution::PreparedRun;
 #[path = "files.rs"]
 mod files;
 #[path = "publish.rs"]
@@ -614,6 +617,7 @@ impl ProjectSession {
             }
             None => document.analysis = AnalysisState::Invalid,
         }
+        self.seal_valid(index);
         self.emit(
             Origin::SESSION,
             Some(&analysis.ticket.document_id),
@@ -763,6 +767,7 @@ impl ProjectSession {
             }
             None => document.layout_dirty = true,
         }
+        self.seal_valid(index);
         let version = self.documents[index].source_version;
         self.emit(
             origin,

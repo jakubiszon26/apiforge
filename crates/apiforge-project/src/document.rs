@@ -60,6 +60,8 @@ pub struct DocumentSession {
     /// The source text `model` describes, when known. Differs from `text` while
     /// the current source is pending or invalid.
     pub(crate) model_source: Option<String>,
+    /// Sealed while the model was current, including its original configuration.
+    pub(crate) valid_snapshot: Option<apiforge_storage::project::LastValidSnapshot>,
     /// View state kept for recovery: directional selection and field drafts.
     pub(crate) selection: TextSelection,
     pub(crate) fields: Vec<FieldRecovery>,
@@ -150,6 +152,7 @@ impl DocumentSession {
             analysis: AnalysisState::Pending,
             model: None,
             model_source: None,
+            valid_snapshot: None,
             selection: TextSelection {
                 anchor: 0,
                 caret: 0,

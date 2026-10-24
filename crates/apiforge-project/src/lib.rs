@@ -21,7 +21,7 @@ pub use prepare::prepare_project;
 pub use session::{
     Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
     ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
-    ProjectSession, Published, Registration, RegistryState, SaveOutcome, SourceSurvey,
+    PreparedRun, ProjectSession, Published, Registration, RegistryState, SaveOutcome, SourceSurvey,
     TextFileSession, declaration, rename_handle,
 };
 

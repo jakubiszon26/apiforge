@@ -8,9 +8,8 @@ use crate::{
     document::{AnalysisState, Unavailable},
 };
 use apiforge_storage::project::{
-    CacheNotice, CacheProvenance, DiagramRecord, DocumentKey, FieldRecovery, FileState,
-    LastValidSnapshot, ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery,
-    TextSelection,
+    CacheNotice, DiagramRecord, DocumentKey, FieldRecovery, FileState, LastValidSnapshot,
+    ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
 };
 
 #[derive(Default)]
@@ -424,6 +423,7 @@ impl ProjectSession {
             let document = &mut self.documents[index];
             document.model = Some(model);
             document.model_source = Some(source);
+            document.valid_snapshot = Some(snapshot.clone());
         }
     }
 
@@ -449,25 +449,19 @@ impl ProjectSession {
         }
         let mut snapshots = Vec::new();
         for document in &self.documents {
-            let (Some(model), Some(source)) = (&document.model, &document.model_source) else {
-                continue;
-            };
-            let saved = FileState::of(source.as_bytes()) == document.saved;
-            let snapshot = LastValidSnapshot::capture(
-                DocumentKey::Working {
-                    document_id: document.entry.document_id.clone(),
-                },
-                source,
-                CacheProvenance {
-                    session_epoch: self.session_id.clone(),
-                    source_version: document.source_version,
-                    saved_source_hash: if saved { sha256(&document.saved) } else { None },
-                },
-                identity_base(model),
-                &self.context,
-            );
-            if let Ok(snapshot) = snapshot {
-                snapshots.push(snapshot);
+            if let Some(snapshot) = &document.valid_snapshot {
+                snapshots.push(snapshot.clone());
+            } else {
+                let key = DocumentKey::Working {
+                    document_id: document.id().into(),
+                };
+                if let Some(snapshot) = cache
+                    .snapshots()
+                    .iter()
+                    .find(|snapshot| snapshot.key() == &key)
+                {
+                    snapshots.push(snapshot.clone());
+                }
             }
         }
         if same_snapshots(cache.snapshots(), &snapshots) {
