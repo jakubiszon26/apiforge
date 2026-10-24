@@ -68,6 +68,7 @@ pub struct Context<'a> {
     pub parameters: Vec<String>,
     pub editing_component: bool,
     pub running: bool,
+    pub document_locked: bool,
 }
 
 impl Library {
@@ -190,6 +191,9 @@ impl Library {
             .auto_shrink([false, false])
             .max_height((ui.available_height() - 68.0).max(80.0))
             .show(ui, |ui| {
+                if context.document_locked {
+                    ui.disable();
+                }
                 if show_blocks && !context.editing_component {
                     widgets::action_menu(
                         ui,

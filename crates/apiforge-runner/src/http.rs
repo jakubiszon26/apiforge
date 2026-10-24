@@ -532,7 +532,23 @@ mod tests {
     /// The categories of real failures, not of strings written in this test.
     #[tokio::test]
     async fn real_transport_failures_carry_their_category() {
-        let transport = HttpTransport::new().unwrap();
+        // Exercise reqwest's DNS failure path without depending on the host's
+        // DNS setup: captive resolvers can answer even reserved .invalid names.
+        struct MissingHost;
+        impl reqwest::dns::Resolve for MissingHost {
+            fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                Box::pin(async {
+                    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "no such host").into())
+                })
+            }
+        }
+        let transport = HttpTransport {
+            client: reqwest::Client::builder()
+                .no_proxy()
+                .dns_resolver(std::sync::Arc::new(MissingHost))
+                .build()
+                .unwrap(),
+        };
         let send = async |url: &str| {
             let error = transport
                 .send(
@@ -549,7 +565,7 @@ mod tests {
             }
         };
 
-        // A reserved name (RFC 2606) never resolves, however the host is configured.
+        // The injected resolver produces a real connector DNS error.
         let dns = send("http://host.invalid/orders").await;
         assert_eq!(dns.kind, FailureKind::Dns, "{}", dns.detail);
         assert_eq!(dns.kind.reached_the_api(), Reached::No);

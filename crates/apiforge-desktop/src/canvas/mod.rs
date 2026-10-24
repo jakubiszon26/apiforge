@@ -1078,6 +1078,8 @@ impl Canvas {
     ) {
         let has_selection = !input.selection.is_empty();
         let measured = egui::Area::new(ui.id().with("board-toolbar"))
+            .enabled(ui.is_enabled())
+            .constrain_to(viewport)
             .fixed_pos(overlays.toolbar.right_top())
             .pivot(Align2::RIGHT_TOP)
             .fade_in(false)

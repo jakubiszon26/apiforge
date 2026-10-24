@@ -4,6 +4,7 @@
 //! applies them as undoable edits.
 
 mod binding;
+pub mod drafts;
 mod fields;
 mod response;
 

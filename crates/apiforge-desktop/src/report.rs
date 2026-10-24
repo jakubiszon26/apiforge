@@ -46,6 +46,7 @@ pub struct Context<'a> {
     pub running: bool,
     pub stale: bool,
     pub files_busy: bool,
+    pub document_locked: bool,
 }
 
 /// A step in the flattened step list; component children have `depth > 0` and keep
@@ -364,7 +365,7 @@ impl ReportPanel {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut policy = context.error_policy;
-                ui.add_enabled_ui(!context.running, |ui| {
+                ui.add_enabled_ui(!context.running && !context.document_locked, |ui| {
                     egui::ComboBox::from_id_salt("report-error-policy")
                         .selected_text(error_policy_label(policy))
                         .width(190.0)
@@ -462,7 +463,13 @@ impl ReportPanel {
                         .id_salt("report-step-details")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            self.step_details(ui, &run.id, selected.as_ref(), actions);
+                            self.step_details(
+                                ui,
+                                &run.id,
+                                selected.as_ref(),
+                                !context.document_locked,
+                                actions,
+                            );
                         });
                 },
             );
@@ -507,6 +514,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        editable: bool,
         actions: &mut Vec<Action>,
     ) {
         let Some(selected) = selected else {
@@ -613,7 +621,8 @@ impl ReportPanel {
                         );
                         return;
                     }
-                    let interactive = self.tab == DetailTab::Outputs && selected.depth == 0;
+                    let interactive =
+                        self.tab == DetailTab::Outputs && selected.depth == 0 && editable;
                     for (port, value) in map {
                         let branch = format!("{run_id}:{}:{}:{port}", selected.key, self.tab as u8);
                         let target = interactive.then_some((step.node_id.as_str(), port.as_str()));
@@ -1252,6 +1261,7 @@ mod tests {
             running: false,
             stale: false,
             files_busy: false,
+            document_locked: false,
         };
         let draw = |panel: &mut ReportPanel| {
             let input = egui::RawInput {
@@ -1360,6 +1370,7 @@ mod tests {
                     running: false,
                     stale: false,
                     files_busy: false,
+                    document_locked: false,
                 };
                 assert!(panel.show(ui, &empty).is_empty());
             });
@@ -1374,6 +1385,7 @@ mod tests {
                     running: false,
                     stale: true,
                     files_busy: false,
+                    document_locked: false,
                 };
                 let _ = panel.show(ui, &populated);
             });
@@ -1396,6 +1408,7 @@ mod tests {
                 running: false,
                 stale: false,
                 files_busy: false,
+                document_locked: false,
             };
             let draw = |panel: &mut ReportPanel, events| {
                 let mut id = egui::Id::NULL;

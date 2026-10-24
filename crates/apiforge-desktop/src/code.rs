@@ -88,6 +88,7 @@ pub struct Completions {
     /// Set after an insertion, so the caret can be placed once the text edit has
     /// been laid out again.
     pending_caret: Option<usize>,
+    prepared_scroll: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -101,8 +102,26 @@ struct Popup {
 }
 
 impl Completions {
+    /// Apply a programmatic caret before the widget handles new input.
+    pub fn prepare(&mut self, ui: &Ui, id: egui::Id, text: &str) {
+        if let Some(caret) = self.pending_caret.take() {
+            let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(epaint_index(char_index(text, caret))),
+                )));
+            state.store(ui.ctx(), id);
+            self.prepared_scroll = Some(caret);
+        }
+    }
+
     /// Keys the popup claims this frame, taken before the text edit sees them.
-    pub fn take_keys(&mut self, ui: &Ui) -> Keys {
+    pub fn take_keys(&mut self, ui: &Ui, id: egui::Id) -> Keys {
+        if !ui.is_enabled() || !ui.memory(|memory| memory.has_focus(id)) {
+            self.popup = None;
+            return Keys::default();
+        }
         if self.popup.is_none() {
             return Keys {
                 open: ui.input_mut(|input| {
@@ -136,20 +155,28 @@ impl Completions {
         let cursor = output
             .cursor_range
             .map(|range| byte_offset(text, range.primary.index.0));
-        if let Some(caret) = self.pending_caret.take() {
-            let mut state = output.state.clone();
+        if let Some(caret) = self.prepared_scroll.take() {
             let index = epaint_index(char_index(text, caret));
-            state
-                .cursor
-                .set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(index),
-                )));
-            state.store(ui.ctx(), id);
+            let rect = output
+                .galley
+                .pos_from_cursor(egui::text::CCursor::new(index))
+                .translate(output.galley_pos.to_vec2());
+            ui.scroll_to_rect(rect.expand(8.0), Some(egui::Align::Center));
+            ui.ctx().request_repaint();
+        }
+        if !output.response.has_focus() || !ui.is_enabled() {
+            self.popup = None;
+            return false;
         }
 
-        // A caret that moved back before where the popup opened closes it.
-        if let (Some(popup), Some(cursor)) = (&self.popup, cursor)
-            && cursor < popup.cursor
+        let typed = output.response.response.changed();
+        // Navigation and selection invalidate the replacement range just as blur
+        // does. Only typing may refresh a popup for a new caret position.
+        if let Some(popup) = &self.popup
+            && ((!typed && cursor != Some(popup.cursor))
+                || output
+                    .cursor_range
+                    .is_some_and(|range| range.primary != range.secondary))
         {
             self.popup = None;
         }
@@ -157,7 +184,6 @@ impl Completions {
             self.popup = None;
         }
 
-        let typed = output.response.response.changed();
         let wants_popup = keys.open
             || (typed
                 && cursor
@@ -196,6 +222,15 @@ impl Completions {
         }
 
         if let Some(popup) = &mut self.popup {
+            popup.at = output.galley_pos
+                + output
+                    .galley
+                    .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
+                        text,
+                        cursor.unwrap_or(popup.cursor),
+                    ))))
+                    .left_bottom()
+                    .to_vec2();
             let count = popup.completions.len();
             if keys.down {
                 popup.selected = (popup.selected + 1) % count;
@@ -293,7 +328,8 @@ impl CodeEditor {
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         // Keys the popup owns must not reach the text edit, so they are taken
         // before it is drawn.
-        let keys = self.completions.take_keys(ui);
+        let keys = self.completions.take_keys(ui, id);
+        self.completions.prepare(ui, id, text);
         let diagnostics: Vec<Diagnostic> = context.diagnostics.to_vec();
         let font_for_layout = font.clone();
         let wrap = context.wrap;

@@ -122,7 +122,10 @@ Typing pauses for 250 ms, then the text becomes one document edit: blocks keep
 their identity, and a block the code introduces is placed by the board's layout.
 Text that does not parse keeps the document as it was and holds the board until
 it is fixed or discarded. Unfinished code is written to `drafts.json` beside the
-workspace and comes back at the next start. Ctrl+Z in the panel walks the text;
+workspace and comes back at the next start, including unfinished inspector URL,
+header, query and body fields. Drafts from inactive projects are retained too.
+Conflicting restored text waits for a keep/discard choice. Run settles pending
+code first. Ctrl+Z in the panel walks the text;
 anywhere else it walks the document. [ADR 0007](decisions/0007-code-editing-state.md)
 has the rules.
 

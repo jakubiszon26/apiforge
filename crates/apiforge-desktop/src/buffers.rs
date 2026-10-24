@@ -68,9 +68,11 @@ pub struct Buffer {
     /// on since is reprinted over the text, as ADR 0007 asks.
     pub applied_revision: Option<u64>,
     /// Restored from a draft written against a document that has moved on since.
-    /// The user decides whether to keep it; the hash it was compared against
-    /// belongs to the draft, not to the buffer, and is taken again at each write.
+    /// The user decides whether to keep it; base_hash retains the original
+    /// document until the text is applied or discarded.
     pub stale: bool,
+    /// Base of unfinished text, retained until it is applied or discarded.
+    pub base_hash: Option<String>,
     /// Whether the text is waiting to be applied.
     pending: bool,
 }
@@ -86,7 +88,15 @@ impl Buffer {
     /// Whether the board must stay read-only: a graph edit cannot be merged into
     /// text that does not parse.
     pub fn blocks_the_board(&self) -> bool {
-        self.state == State::Invalid
+        self.pending || self.stale || self.state == State::Invalid
+    }
+
+    pub fn apply_in(&self, now: Instant) -> Option<Duration> {
+        (self.pending && !self.stale).then(|| {
+            self.typed_at.map_or(Duration::ZERO, |typed| {
+                APPLY_DELAY.saturating_sub(now.saturating_duration_since(typed))
+            })
+        })
     }
 
     /// Errors only; warnings do not stop anything.
@@ -145,6 +155,7 @@ impl Buffers {
         focused: bool,
     ) -> Option<&mut Buffer> {
         let keep = match self.open.get(context) {
+            Some(buffer) if buffer.pending || buffer.stale => true,
             Some(buffer) => match buffer.state {
                 State::Invalid => true,
                 State::Applied => focused || buffer.applied_revision == Some(revision),
@@ -163,6 +174,7 @@ impl Buffers {
         buffer.text = printed;
         buffer.state = State::Clean;
         buffer.applied_revision = None;
+        buffer.base_hash = None;
         buffer.diagnostics.clear();
         Some(buffer)
     }
@@ -171,6 +183,7 @@ impl Buffers {
     pub fn applied(&mut self, context: &Context, revision: u64) {
         if let Some(buffer) = self.open.get_mut(context) {
             buffer.applied_revision = Some(revision);
+            buffer.base_hash = None;
         }
     }
 
@@ -216,6 +229,7 @@ impl Buffers {
                 cursor: draft.cursor,
                 applied_revision: None,
                 stale: draft.stale,
+                base_hash: None,
                 typed_at: None,
                 diagnostics: Vec::new(),
                 pending: true,
@@ -228,7 +242,7 @@ impl Buffers {
     pub fn drafts(&self) -> impl Iterator<Item = (&Context, &Buffer)> {
         self.open
             .iter()
-            .filter(|(_, buffer)| buffer.state != State::Clean)
+            .filter(|(_, buffer)| buffer.pending || buffer.stale || buffer.state != State::Clean)
     }
 
     /// Turns a context's text into a document once typing has paused.
@@ -245,7 +259,7 @@ impl Buffers {
         let Some(buffer) = self.open.get_mut(context) else {
             return Apply::Nothing;
         };
-        if !buffer.pending {
+        if !buffer.pending || buffer.stale {
             return Apply::Nothing;
         }
         if buffer
