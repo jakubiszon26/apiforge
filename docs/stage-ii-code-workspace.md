@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 groundwork only, P3–P7 pending
+- Status: approved implementation specification; P0 prepared, P1 complete on Linux, P2 in progress (round-trip gate passed headless), P3–P7 pending
 - Date: 2026-10-24
 - Analysis baseline: `d967a79`; implementation base: `c9c5ba0` plus this planning commit
 - Delivery: one branch per package, merged to `main` after review; P1 merged from `feat/stage-ii-code-workspace`
@@ -367,6 +367,46 @@ gate has not passed. Folder lowering/authoring validation is used only to verify
 P1 cache candidates. Desktop/CLI folder integration and automatic migration are
 not enabled. Windows directory durability remains the P7 release gate. No P2 work
 is included in this completion increment.
+
+The first P2 increment adds the `apiforge-project` crate. `ProjectSession` opens
+an existing manifest (a folder without one is not written), creates a new empty
+project explicitly and owns one `DocumentSession` per registered document.
+Published revisions are derived from their immutable sources in dependency order;
+a revision that does not lower is an integrity error. Documents keep exact text,
+a source version, diagnostics, a current or last-valid model and a bounded model
+history. Missing or non-UTF-8 sources are explicit unavailable states.
+
+Analysis inputs are immutable and can run on a worker. Results apply only when
+session epoch, document ID, source version and context generation all match;
+configuration edits and reloads invalidate outstanding results. Identities come
+from the session's previous model, otherwise from the shared checkpoint (adopted
+as-is only when it describes exactly this source, closed context and semantics),
+otherwise they are fresh and placed by a host-supplied placer. Graphical semantic
+edits reprint canonical folder source; block movement changes layout only. Save
+settles pending analysis, writes exact text (including invalid text), seals the
+document's checkpoint only for valid source and adds dirty configuration. Events
+carry a sequence and an origin, so several views can follow one log.
+
+`prepare_project` writes a model-backed project as a folder in one transaction,
+keeping entity, node and edge IDs, positions, `autoPlaced`, proxies and every
+published revision; each component gets a working document at its latest
+revision. It is the basis for P3 migration and does not touch originals.
+
+The P2 round-trip gate passes headless: every fixture project, plus one with
+variable/environment proxies, cleanup and an unused second revision, reopens with
+identical scenario models and published revisions. Diagram layout and semantic
+edits, then a code edit, survive save, close and reopen with unchanged IDs,
+positions, proxies, cleanup and pinned revisions. Saved invalid source reopens as
+text without a model and regains its identities when fixed. Session tests cover
+stale results after source, configuration and reload changes, hidden pending
+documents, an invalid document not locking another, component-only projects,
+history projection, shared event logs, read-only second sessions and external
+edit conflicts.
+
+Remaining P2 work: field drafts, local recovery integration (source/layout of
+unsaved work), last-valid cache promotion, `.gitignore` handling during explicit
+initialisation and the open items from the [P1 code review](stage-ii-review-notes.md#p1-code-review).
+Desktop and CLI do not use folder sessions yet.
 
 Acceptance must cover:
 
