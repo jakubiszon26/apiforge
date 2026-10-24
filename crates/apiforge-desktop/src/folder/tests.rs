@@ -415,10 +415,10 @@ fn new_documents_start_from_valid_sources_with_unused_paths() {
     let directory = shop();
     let (context, mut app) = open(directory.path());
     for _ in 0..2 {
-        app.create_document(DocumentKind::Scenario, "Checkout \"fast\" path")
+        app.create_document(DocumentKind::Scenario, None, "Checkout \"fast\" path")
             .unwrap();
     }
-    app.create_document(DocumentKind::Component, "3d secure check")
+    app.create_document(DocumentKind::Component, None, "3d secure check")
         .unwrap();
     settle(&mut app, &context);
     let session = app.session.as_ref().unwrap();
@@ -816,5 +816,211 @@ fn discarding_a_tab_clears_unfinished_text_held_by_the_body_field() {
             .field_drafts()
             .is_empty(),
         "Discard must also clear the widget's cached invalid BodyDraft"
+    );
+}
+
+/// Waits for the folder check the watcher started and applies it.
+fn watch(app: &mut FolderApp, context: &egui::Context) {
+    app.watcher.rescan();
+    frame(app, context, vec![]);
+    let session = app.session.as_mut().unwrap();
+    if let Some(outcome) = app.watcher.finish(session) {
+        app.follow_external(outcome);
+    }
+    frame(app, context, vec![]);
+}
+
+fn rows(app: &FolderApp) -> Vec<String> {
+    app.explorer_rows()
+        .into_iter()
+        .map(|row| row.path)
+        .collect()
+}
+
+#[test]
+fn the_explorer_shows_the_real_tree_and_folds_folders() {
+    let directory = shop();
+    std::fs::write(directory.path().join("README.md"), "notes").unwrap();
+    std::fs::write(
+        directory.path().join("loose.afs"),
+        "scenario \"Loose\" {}\n",
+    )
+    .unwrap();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    let shown = rows(&app);
+    assert!(shown.contains(&"components".to_owned()));
+    assert!(shown.contains(&"README.md".to_owned()));
+    assert!(!shown.iter().any(|path| path.starts_with(".apiforge")));
+    assert!(!shown.contains(&COMPONENT.to_owned()), "folded");
+    app.explorer_action(explorer::Action::Toggle("components".into()));
+    assert!(rows(&app).contains(&COMPONENT.to_owned()));
+    let loose = app
+        .explorer_rows()
+        .into_iter()
+        .find(|row| row.path == "loose.afs")
+        .unwrap();
+    assert_eq!(loose.kind, explorer::RowKind::Source, "not registered");
+}
+
+#[test]
+fn renaming_an_open_document_keeps_its_tab_unsaved_text_and_history() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    type_into_code(&mut app, &context, "// note\n");
+    let edited = text(&app, &id);
+    app.relocate(SCENARIO, "flows/renamed.afs").unwrap();
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.workbench.active(), Some(id.as_str()));
+    assert_eq!(text(&app, &id), edited);
+    assert!(app.snapshot(&id).unwrap().dirty);
+    assert_eq!(app.snapshot(&id).unwrap().path, "flows/renamed.afs");
+    assert!(app.workbench.expanded.contains("flows"));
+    watch(&mut app, &context);
+    assert!(rows(&app).contains(&"flows/renamed.afs".to_owned()));
+    // Moving into an occupied path is refused and changes nothing.
+    std::fs::write(directory.path().join("taken.afs"), "x").unwrap();
+    assert!(app.relocate("flows/renamed.afs", "taken.afs").is_err());
+    assert_eq!(app.snapshot(&id).unwrap().path, "flows/renamed.afs");
+}
+
+#[test]
+fn deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    type_into_code(&mut app, &context, "// unsaved\n");
+    let edited = text(&app, &id);
+    app.request_delete(vec!["scenarios".into()]);
+    let Some(Prompt::Delete { preview, .. }) = app.prompt.take() else {
+        panic!("a delete confirmation");
+    };
+    assert_eq!(preview.unsaved_documents(), std::slice::from_ref(&id));
+    app.delete_confirmed(&preview).unwrap();
+    frame(&mut app, &context, vec![]);
+    assert!(app.workbench.tabs().iter().all(|tab| tab.document_id != id));
+    assert!(!directory.path().join("scenarios").exists());
+
+    app.open_trash();
+    let Some(Prompt::Trash { operations, .. }) = app.prompt.take() else {
+        panic!("the trash");
+    };
+    let operation = operations[0].operation_id.clone();
+    app.restore(&operation, &operations).unwrap();
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.workbench.active(), Some(id.as_str()));
+    assert_eq!(text(&app, &id), edited, "unsaved work returns unsaved");
+    assert!(directory.path().join(SCENARIO).exists());
+}
+
+#[test]
+fn external_edits_reload_clean_tabs_and_pause_saving_unsaved_ones() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let scenario = document(&app, SCENARIO);
+    let component = document(&app, COMPONENT);
+    app.workbench.open(&component);
+    let component_file = directory.path().join(COMPONENT);
+    let changed = std::fs::read_to_string(&component_file).unwrap().replacen(
+        '{',
+        "{\n  // edited elsewhere",
+        1,
+    );
+    std::fs::write(&component_file, &changed).unwrap();
+    watch(&mut app, &context);
+    assert_eq!(text(&app, &component), changed);
+
+    app.workbench.open(&scenario);
+    frame(&mut app, &context, vec![]);
+    type_into_code(&mut app, &context, "// mine\n");
+    let scenario_file = directory.path().join(SCENARIO);
+    std::fs::write(&scenario_file, "scenario \"Theirs\" {}\n").unwrap();
+    watch(&mut app, &context);
+    assert_eq!(
+        app.snapshot(&scenario).unwrap().conflict,
+        Some(ExternalConflict::Changed)
+    );
+    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
+    frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    assert_eq!(
+        std::fs::read_to_string(&scenario_file).unwrap(),
+        "scenario \"Theirs\" {}\n",
+        "Ctrl+S never overwrites the external version"
+    );
+    app.session
+        .as_mut()
+        .unwrap()
+        .accept_external(&scenario, DIAGRAM)
+        .unwrap();
+    frame(&mut app, &context, vec![]);
+    assert_eq!(text(&app, &scenario), "scenario \"Theirs\" {}\n");
+}
+
+#[test]
+fn the_explorer_is_driven_by_the_keyboard() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    watch(&mut app, &context);
+    let id = document(&app, COMPONENT);
+    app.explorer.selected = Some("components".into());
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
+    frame(&mut app, &context, vec![]);
+    frame(
+        &mut app,
+        &context,
+        vec![key(Key::ArrowRight, Modifiers::NONE)],
+    );
+    assert!(app.workbench.expanded.contains("components"));
+    frame(
+        &mut app,
+        &context,
+        vec![key(Key::ArrowDown, Modifiers::NONE)],
+    );
+    let selected = app.explorer.selected.clone().unwrap();
+    assert!(selected.starts_with("components/"), "{selected}");
+    app.explorer.selected = Some(COMPONENT.into());
+    frame(&mut app, &context, vec![key(Key::Enter, Modifiers::NONE)]);
+    assert_eq!(app.workbench.active(), Some(id.as_str()));
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
+    frame(&mut app, &context, vec![]);
+    frame(&mut app, &context, vec![key(Key::F2, Modifiers::NONE)]);
+    assert!(matches!(&app.prompt, Some(Prompt::Rename { path, .. }) if path == COMPONENT));
+    // The dialog's field took the keyboard; the explorer gets it back on a click.
+    app.prompt = None;
+    frame(&mut app, &context, vec![]);
+    context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
+    frame(&mut app, &context, vec![]);
+    frame(
+        &mut app,
+        &context,
+        vec![key(Key::ArrowLeft, Modifiers::NONE)],
+    );
+    assert_eq!(app.explorer.selected.as_deref(), Some("components"));
+}
+
+#[test]
+fn initialising_registers_the_chosen_existing_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("main.afs"), "scenario \"Main\" {}\n").unwrap();
+    std::fs::write(directory.path().join("odd.afs"), "?\n").unwrap();
+    let (context, mut app) = open(directory.path());
+    assert_eq!(app.survey.len(), 2);
+    let odd = app
+        .survey
+        .iter()
+        .position(|row| row.path == "odd.afs")
+        .unwrap();
+    assert_eq!(app.survey[odd].kind, None);
+    app.survey[odd].include = false;
+    app.new_name = "Existing".into();
+    app.initialise();
+    frame(&mut app, &context, vec![]);
+    let session = app.session.as_ref().unwrap();
+    assert_eq!(session.documents().len(), 1);
+    assert_eq!(session.documents()[0].entry().path.as_str(), "main.afs");
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("main.afs")).unwrap(),
+        "scenario \"Main\" {}\n"
     );
 }

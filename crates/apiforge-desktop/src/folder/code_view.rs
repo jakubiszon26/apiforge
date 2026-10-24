@@ -51,6 +51,9 @@ impl FolderApp {
         if snapshot.held {
             self.draft_banner(ui, document_id);
         }
+        if let Some(conflict) = snapshot.conflict {
+            self.conflict_banner(ui, document_id, conflict, snapshot);
+        }
         let id = editor_id(document_id);
         if self.shown.as_deref() != Some(document_id) {
             self.code = code::CodeEditor::default();

@@ -12,6 +12,9 @@ mod analysis;
 mod chrome;
 mod code_view;
 mod diagram;
+mod explorer;
+mod file_prompts;
+mod watcher;
 mod workbench;
 
 use crate::icons::Icon;
@@ -30,21 +33,24 @@ use apiforge_core::{
     graph::create_operator_node,
 };
 use apiforge_project::{
-    AnalysisState, Document, DocumentKind, EventKind, ModelState, Origin, ProjectSession,
-    Unavailable,
+    AnalysisState, DeletePreview, Document, DocumentKind, EventKind, ExternalConflict,
+    ExternalOutcome, ModelState, Origin, ProjectSession, Registration, RegistryState, Unavailable,
 };
 use apiforge_script::{Diagnostic, Severity};
 use apiforge_storage::{
     CodeDraft, DraftTarget,
-    project::{CameraState, FieldRecovery, TextSelection, WorkspaceState},
+    project::{CameraState, FieldRecovery, TextSelection, TrashIndex, WorkspaceState},
 };
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
+use explorer::ExplorerState;
+use file_prompts::{ImportRow, Picked};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, mpsc::Receiver},
     time::{Duration, Instant},
 };
+use watcher::Watcher;
 use workbench::{Mode, Workbench};
 
 /// Edits typed into the code view; the view recognises its own changes.
@@ -61,11 +67,49 @@ enum Prompt {
     CloseTab(String),
     NewDocument {
         kind: DocumentKind,
+        /// The explorer folder it goes into; the kind's default folder if none.
+        folder: Option<String>,
         name: String,
         error: Option<String>,
     },
     /// Closing the window could not protect unsaved work.
     CloseFailed(String),
+    Rename {
+        path: String,
+        name: String,
+        error: Option<String>,
+    },
+    MoveTo {
+        path: String,
+        folder: String,
+        error: Option<String>,
+    },
+    NewFolder {
+        parent: String,
+        name: String,
+        error: Option<String>,
+    },
+    Delete {
+        preview: Box<DeletePreview>,
+        paths: Vec<String>,
+        error: Option<String>,
+    },
+    Import {
+        rows: Vec<ImportRow>,
+        error: Option<String>,
+    },
+    Trash {
+        operations: Vec<TrashIndex>,
+        error: Option<String>,
+    },
+}
+
+/// An `.afs` file in a folder without a project, offered for registration.
+struct SurveyRow {
+    path: String,
+    include: bool,
+    /// `None` until chosen when the header is unrecognisable.
+    kind: Option<DocumentKind>,
 }
 
 /// A message under the tabs; errors stay until dismissed.
@@ -81,12 +125,17 @@ pub struct FolderApp {
     /// The folder has no project yet. Nothing is written until the user
     /// initialises it explicitly.
     uninitialised: bool,
+    survey: Vec<SurveyRow>,
     new_name: String,
     open_error: Option<String>,
     workbench: Workbench,
     /// The view state last written, so an unchanged one is not rewritten.
     saved_view: Option<WorkspaceState>,
     analyser: Analyser,
+    watcher: Watcher,
+    explorer: ExplorerState,
+    /// File dialogs running on their own threads.
+    picked: Vec<Receiver<Picked>>,
     /// The last session event this window has followed.
     seen: u64,
     code: code::CodeEditor,
@@ -134,6 +183,7 @@ struct Snapshot {
     held: bool,
     dirty: bool,
     layout_dirty: bool,
+    conflict: Option<ExternalConflict>,
 }
 
 impl FolderApp {
@@ -144,11 +194,15 @@ impl FolderApp {
             root,
             session: None,
             uninitialised: false,
+            survey: Vec::new(),
             new_name: String::new(),
             open_error: None,
             workbench: Workbench::restore(None, |_| false),
             saved_view: None,
             analyser: Analyser::new(Some(context.clone())),
+            watcher: Watcher::new(Some(context.clone())),
+            explorer: ExplorerState::default(),
+            picked: Vec::new(),
             seen: 0,
             code: code::CodeEditor::default(),
             shown: None,
@@ -170,6 +224,19 @@ impl FolderApp {
             Ok(session) => app.install(session),
             Err(apiforge_project::Error::NotAProject) => {
                 app.uninitialised = true;
+                match ProjectSession::survey(&app.root) {
+                    Ok(surveys) => {
+                        app.survey = surveys
+                            .into_iter()
+                            .map(|survey| SurveyRow {
+                                path: survey.path,
+                                include: true,
+                                kind: survey.declaration.map(|declaration| declaration.kind),
+                            })
+                            .collect()
+                    }
+                    Err(error) => app.open_error = Some(error.to_string()),
+                }
                 app.new_name = app
                     .root
                     .file_name()
@@ -297,6 +364,7 @@ impl FolderApp {
             held,
             dirty: document.is_dirty(),
             layout_dirty: document.is_layout_dirty(),
+            conflict: document.conflict(),
         })
     }
 
@@ -327,7 +395,15 @@ impl FolderApp {
         if let Some(wait) = self.analyser.poll(session, now) {
             ui.ctx().request_repaint_after(wait);
         }
+        self.watcher
+            .focus(ui.input(|input| input.viewport().focused.unwrap_or(true)));
+        let (outcome, wait) = self.watcher.poll(session, now);
+        ui.ctx().request_repaint_after(wait);
         self.follow_events();
+        if let Some(outcome) = outcome {
+            self.follow_external(outcome);
+        }
+        self.follow_dialogs();
         if self.prompt.is_none() {
             self.shortcuts(ui.ctx());
         }
@@ -362,7 +438,7 @@ impl FolderApp {
                     )
                     .show(ui, |ui| {
                         self.workbench.panels.documents = ui.available_width() + 24.0;
-                        self.documents_panel(ui);
+                        self.explorer_panel(ui);
                     });
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(theme::WHITE))
@@ -424,10 +500,51 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_MD);
                 widgets::field_label(ui, "Project name");
                 ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0));
+                if !self.survey.is_empty() {
+                    ui.add_space(theme::SPACE_MD);
+                    widgets::field_label(ui, "Register existing sources");
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            for row in &mut self.survey {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut row.include, &row.path);
+                                    if row.include {
+                                        egui::ComboBox::from_id_salt(("survey-kind", &row.path))
+                                            .selected_text(match row.kind {
+                                                Some(kind) => kind_label(kind),
+                                                None => "Choose a kind",
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                for kind in [
+                                                    DocumentKind::Scenario,
+                                                    DocumentKind::Component,
+                                                ] {
+                                                    ui.selectable_value(
+                                                        &mut row.kind,
+                                                        Some(kind),
+                                                        kind_label(kind),
+                                                    );
+                                                }
+                                            });
+                                    }
+                                });
+                            }
+                        });
+                    widgets::hint(
+                        ui,
+                        "Registered files are not changed. A file whose first declaration is \
+                         not recognised needs its kind chosen.",
+                    );
+                }
                 ui.add_space(theme::SPACE_MD);
-                let named = !self.new_name.trim().is_empty();
+                let ready = !self.new_name.trim().is_empty()
+                    && self
+                        .survey
+                        .iter()
+                        .all(|row| !row.include || row.kind.is_some());
                 if ui
-                    .add_enabled(named, widgets::primary_button("Initialise project"))
+                    .add_enabled(ready, widgets::primary_button("Initialise project"))
                     .clicked()
                 {
                     self.initialise();
@@ -437,7 +554,18 @@ impl FolderApp {
 
     /// Writes a new project into the folder: only on this explicit request.
     fn initialise(&mut self) {
-        match ProjectSession::create(&self.root, self.new_name.trim()) {
+        let registrations: Vec<Registration> = self
+            .survey
+            .iter()
+            .filter(|row| row.include)
+            .filter_map(|row| {
+                Some(Registration {
+                    path: row.path.clone(),
+                    kind: row.kind?,
+                })
+            })
+            .collect();
+        match ProjectSession::initialise(&self.root, self.new_name.trim(), &registrations) {
             Ok(session) => self.install(session),
             Err(error) => self.open_error = Some(error.to_string()),
         }
@@ -463,6 +591,57 @@ impl FolderApp {
             if self.shown.as_deref() == Some(document_id.as_str()) {
                 self.code = code::CodeEditor::default();
             }
+        }
+    }
+
+    /// Reports what an external change did; a reloaded project may have lost
+    /// documents, so their tabs close.
+    fn follow_external(&mut self, outcome: ExternalOutcome) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        if outcome.project_reloaded {
+            let gone: Vec<String> = self
+                .workbench
+                .tabs()
+                .iter()
+                .filter(|tab| session.document(&tab.document_id).is_none())
+                .map(|tab| tab.document_id.clone())
+                .collect();
+            for document_id in gone {
+                self.close_tab(&document_id);
+            }
+            self.shown = None;
+            self.reload_field_drafts();
+        }
+        let name = |id: &String| {
+            self.session
+                .as_ref()
+                .and_then(|session| session.document(id))
+                .map(|document| file_name(document.entry().path.as_str()).to_owned())
+                .unwrap_or_default()
+        };
+        if !outcome.conflicts.is_empty() {
+            let names: Vec<String> = outcome.conflicts.iter().map(name).collect();
+            self.notify(
+                format!(
+                    "Changed outside API Forge while unsaved here: {}. Saving them is paused.",
+                    names.join(", ")
+                ),
+                true,
+            );
+        } else if !outcome.renamed.is_empty() {
+            let names: Vec<String> = outcome.renamed.iter().map(name).collect();
+            self.notify(
+                format!("Followed a rename outside API Forge: {}.", names.join(", ")),
+                false,
+            );
+        }
+        if outcome.registry == Some(RegistryState::Current) && outcome.project_reloaded {
+            self.notify(
+                "The project file changed outside API Forge and was reloaded.",
+                false,
+            );
         }
     }
 

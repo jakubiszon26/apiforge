@@ -73,7 +73,7 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let tabs: Vec<(String, String, String, bool, bool)> = self
+        let tabs: Vec<(String, String, String, bool, bool, bool)> = self
             .workbench
             .tabs()
             .iter()
@@ -86,6 +86,7 @@ impl FolderApp {
                     path,
                     document.needs_recovery(),
                     document.analysis() == AnalysisState::Invalid,
+                    document.conflict().is_some(),
                 ))
             })
             .collect();
@@ -100,7 +101,7 @@ impl FolderApp {
             .id_salt("folder-tab-strip")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    for (document_id, name, path, unsaved, invalid) in &tabs {
+                    for (document_id, name, path, unsaved, invalid, conflict) in &tabs {
                         let selected = active.as_deref() == Some(document_id.as_str());
                         let mut label = RichText::new(if *unsaved {
                             format!("{name}  ●")
@@ -108,7 +109,9 @@ impl FolderApp {
                             name.clone()
                         })
                         .size(theme::FONT_BODY);
-                        if *invalid {
+                        if *conflict {
+                            label = label.color(theme::WARNING);
+                        } else if *invalid {
                             label = label.color(theme::DANGER);
                         }
                         let response = ui
@@ -197,6 +200,7 @@ impl FolderApp {
                 }
             });
         }
+        self.registry_notice(ui);
         let mut dismiss = false;
         if let Some(notice) = &self.notice {
             ui.horizontal_wrapped(|ui| {
@@ -218,109 +222,62 @@ impl FolderApp {
         }
     }
 
-    pub(super) fn documents_panel(&mut self, ui: &mut egui::Ui) {
+    /// The project file changed, became invalid or disappeared outside API
+    /// Forge. Writes wait; unsaved work stays in the window and in recovery.
+    fn registry_notice(&mut self, ui: &mut egui::Ui) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let read_only = session.is_read_only();
-        let mut documents: Vec<(String, String, DocumentKind, bool, bool)> = session
-            .documents()
-            .iter()
-            .map(|document| {
-                (
-                    document.id().to_owned(),
-                    document.entry().path.as_str().to_owned(),
-                    document.entry().kind,
-                    document.needs_recovery(),
-                    document.analysis() == AnalysisState::Invalid,
-                )
-            })
-            .collect();
-        documents.sort_by(|left, right| left.1.cmp(&right.1));
-        let active = self.workbench.active().map(str::to_owned);
-        ui.horizontal(|ui| {
-            widgets::caption(ui, "DOCUMENTS");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_enabled_ui(!read_only, |ui| {
-                    widgets::action_menu(
-                        ui,
-                        widgets::icon_button(Icon::Plus, "New document").compact(),
-                        |ui| {
-                            for (kind, label) in [
-                                (DocumentKind::Scenario, "New scenario"),
-                                (DocumentKind::Component, "New component"),
-                            ] {
-                                if ui.button(label).clicked() {
-                                    self.prompt = Some(Prompt::NewDocument {
-                                        kind,
-                                        name: String::new(),
-                                        error: None,
-                                    });
-                                }
-                            }
-                        },
-                    );
-                });
-            });
+        let state = session.registry_state();
+        let dirty_settings = session.is_manifest_dirty();
+        let message = match state {
+            RegistryState::Current => return,
+            RegistryState::Changed => {
+                "The project file changed outside API Forge. Saving is paused until the \
+                 project is reloaded; unsaved work is kept."
+            }
+            RegistryState::Invalid => {
+                "The project file is not valid. Saving and running are paused until it is \
+                 repaired; unsaved work is kept."
+            }
+            RegistryState::Missing => {
+                "The project file is missing. Saving and running are paused until it is \
+                 restored; unsaved work is kept."
+            }
+        };
+        let (mut reload, mut discard) = (false, false);
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(theme::WARNING, message);
+            if state == RegistryState::Changed {
+                if dirty_settings {
+                    discard = ui.button("Discard settings changes and reload").clicked();
+                } else {
+                    reload = ui.button("Reload project").clicked();
+                }
+            }
         });
-        ui.add_space(theme::SPACE_SM);
-        if documents.is_empty() {
-            widgets::hint(ui, "No scenarios or components yet. Create one with +.");
+        if !(reload || discard) {
             return;
         }
-        let mut open = None;
-        egui::ScrollArea::vertical()
-            .id_salt("folder-documents")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for (section, heading) in [
-                    (DocumentKind::Scenario, "Scenarios"),
-                    (DocumentKind::Component, "Components"),
-                ] {
-                    let rows: Vec<_> = documents
-                        .iter()
-                        .filter(|(_, _, kind, _, _)| *kind == section)
-                        .collect();
-                    if rows.is_empty() {
-                        continue;
-                    }
-                    widgets::subcaption(ui, heading);
-                    for (document_id, path, _, unsaved, invalid) in rows {
-                        let selected = active.as_deref() == Some(document_id.as_str());
-                        let response = ui
-                            .add(
-                                egui::Button::selectable(
-                                    selected,
-                                    RichText::new(file_name(path)).size(theme::FONT_BODY),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Truncate)
-                                .min_size(egui::vec2(ui.available_width(), 0.0)),
-                            )
-                            .on_hover_text(path);
-                        // Problems outrank unsaved work; both show as a dot.
-                        let status = match (invalid, unsaved) {
-                            (true, _) => Some(theme::DANGER),
-                            (false, true) => Some(theme::MUTED),
-                            _ => None,
-                        };
-                        if let Some(colour) = status {
-                            let rect = response.rect;
-                            ui.painter().circle_filled(
-                                egui::pos2(rect.right() - 10.0, rect.center().y),
-                                3.5,
-                                colour,
-                            );
-                        }
-                        if response.clicked() {
-                            open = Some(document_id.clone());
-                        }
-                    }
-                    ui.add_space(theme::SPACE_MD);
-                }
-            });
-        if let Some(document_id) = open {
-            self.workbench.open(&document_id);
-            self.touched();
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let result = if discard {
+            session
+                .discard_configuration()
+                .and_then(|()| session.reload_project())
+        } else {
+            session.reload_project()
+        };
+        match result {
+            Ok(()) => {
+                self.follow_external(ExternalOutcome {
+                    project_reloaded: true,
+                    ..Default::default()
+                });
+                self.watcher.rescan();
+            }
+            Err(error) => self.notify(error.to_string(), true),
         }
     }
 
@@ -330,10 +287,31 @@ impl FolderApp {
         };
         self.prompt = match prompt {
             Prompt::CloseTab(document_id) => self.close_tab_prompt(context, document_id),
-            Prompt::NewDocument { kind, name, error } => {
-                self.new_document_prompt(context, kind, name, error)
-            }
+            Prompt::NewDocument {
+                kind,
+                folder,
+                name,
+                error,
+            } => self.new_document_prompt(context, kind, folder, name, error),
             Prompt::CloseFailed(message) => self.close_failed_prompt(context, message),
+            Prompt::Rename { path, name, error } => self.rename_prompt(context, path, name, error),
+            Prompt::MoveTo {
+                path,
+                folder,
+                error,
+            } => self.move_prompt(context, path, folder, error),
+            Prompt::NewFolder {
+                parent,
+                name,
+                error,
+            } => self.new_folder_prompt(context, parent, name, error),
+            Prompt::Delete {
+                preview,
+                paths,
+                error,
+            } => self.delete_prompt(context, preview, paths, error),
+            Prompt::Import { rows, error } => self.import_prompt(context, rows, error),
+            Prompt::Trash { operations, error } => self.trash_prompt(context, operations, error),
         };
     }
 
@@ -403,6 +381,7 @@ impl FolderApp {
         &mut self,
         context: &egui::Context,
         kind: DocumentKind,
+        folder: Option<String>,
         mut name: String,
         mut error: Option<String>,
     ) -> Option<Prompt> {
@@ -438,19 +417,37 @@ impl FolderApp {
             return None;
         }
         if create && !name.trim().is_empty() {
-            match self.create_document(kind, name.trim()) {
+            match self.create_document(kind, folder.as_deref(), name.trim()) {
                 Ok(()) => return None,
                 Err(message) => error = Some(message),
             }
         }
-        Some(Prompt::NewDocument { kind, name, error })
+        Some(Prompt::NewDocument {
+            kind,
+            folder,
+            name,
+            error,
+        })
     }
 
-    pub(super) fn create_document(&mut self, kind: DocumentKind, name: &str) -> Result<(), String> {
+    pub(super) fn create_document(
+        &mut self,
+        kind: DocumentKind,
+        folder: Option<&str>,
+        name: &str,
+    ) -> Result<(), String> {
         let session = self.session.as_mut().ok_or_else(String::new)?;
-        let (folder, source) = match kind {
+        let (default_folder, source) = match kind {
             DocumentKind::Scenario => ("scenarios", scenario_template(name)),
             DocumentKind::Component => ("components", component_template(name)),
+        };
+        let folder = folder.unwrap_or(default_folder);
+        let join = |name: String| {
+            if folder.is_empty() {
+                name
+            } else {
+                format!("{folder}/{name}")
+            }
         };
         let stem = file_stem(name);
         let taken = |path: &str| {
@@ -462,15 +459,20 @@ impl FolderApp {
         };
         let path = (1..)
             .map(|index| match index {
-                1 => format!("{folder}/{stem}.afs"),
-                _ => format!("{folder}/{stem}-{index}.afs"),
+                1 => join(format!("{stem}.afs")),
+                _ => join(format!("{stem}-{index}.afs")),
             })
             .find(|path| !taken(path))
             .expect("an unused name exists");
         let document_id = session
             .create_document(kind, &path, &source)
             .map_err(|error| error.to_string())?;
+        if !folder.is_empty() {
+            self.workbench.expanded.insert(folder.to_owned());
+        }
+        self.explorer.selected = Some(path);
         self.workbench.open(&document_id);
+        self.watcher.rescan();
         self.touched();
         Ok(())
     }
