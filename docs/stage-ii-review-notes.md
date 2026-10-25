@@ -207,7 +207,7 @@ records implemented review branches without implying that a human merged them.
 | A2 | Editing project settings marks the manifest dirty | Implemented in P7b for empty/component-only projects; public settings save independently, secret values stay in memory | P7b complete in review |
 | A3 | Decision before a graphical edit or publication drops unattached comments | Implemented and tested in P6b, including history and obsolete consent | P6b complete in review |
 | A4 | Export when closing a read-only session or after a failed recovery write | Implemented and tested in P6d; exact/public bundle, cancellation/failure and obsolete-export checks | P6d complete in review |
-| A5 | Native transaction-recovery and conflict dialogs with export | Storage services exist; native integration pending | P7c |
+| A5 | Native transaction-recovery and conflict dialogs with export | Implemented in P7c with exact candidates, obsolete-decision refusal, real GTK export and preserved recovery reload; I/O moves to P7d | P7c complete in review |
 | A6 | All I/O off the UI thread; one storage worker serialises mutations | Scans/analysis/dialog export use workers; ordinary project/journal I/O still needs integration | P7d |
 
 ### Decisions and remaining evidence

@@ -149,6 +149,15 @@ session-only, including in a read-only window; only their names belong to public
 configuration. A proposed configuration that breaks immutable published
 revisions is rejected before replacing the current settings.
 
+Source/text conflicts open a modal review with exact exports of both candidates.
+A newer local or foreign edit requires a fresh preview. An interrupted transaction
+opens a separate recovery review before definitions are loaded; Finish first
+preserves changed files, then applies the original intent. Read-only windows can
+inspect/export, while the writer owns completion. Corrupt intent supports an
+opaque transaction-evidence export for manual recovery. Cancel preserves the
+unresolved state. Public settings require explicit discard before recovery reload;
+the latest unsaved source and text are retained as drafts.
+
 ## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).

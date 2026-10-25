@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a project navigation and P7b settings implemented in review; remaining P7 integration, activation and release gates pending
+- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a navigation, P7b settings and P7c native recovery implemented in review; remaining P7 integration, activation and release gates pending
 - Date: 2026-10-24
 - Historical analysis baseline: `d967a79`; initial implementation baseline: `c9c5ba0`. Later package bases are recorded below.
 - Delivery: one branch per package from current `main` or a required unmerged predecessor; a human merges after review. P6 and P8 review branches do not imply a merge to `main`.
@@ -359,7 +359,8 @@ the input findings from `docs/stage-ii-p8-findings` at `cedabc3`.
 | P8 | Documentation-only review: current package summaries/statuses and decisions B7–B10; base unmerged P6d `001414f`, findings input `cedabc3` | 843 tests, two helpers ignored; formatting, clippy and fixtures passed. No runtime/format change. Decision implementation/evidence belongs to P7e; startup remains inactive |
 | P7a | Implemented on `feat/stage-ii-p7-projects`, base unmerged P8 `2939545`: Open Folder, bounded recent metadata and recovery-protected switching | 849 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets passed, and [native switching review](qa/2026-10-24/p7-projects/verification.md). Failed recovery keeps the current project; read-only work can be exported before switching. File-portal native review remains P7f; I/O moves to P7d |
 | P7b | Implemented on `feat/stage-ii-p7-settings`, base unmerged P7a `375ac2b`: project-only settings, contracts/environment and session secrets | 858 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets and [native settings/header review](qa/2026-10-25/p7-settings/verification.md) passed. Apply marks public settings dirty, Save all works without a source tab, and secret-only changes invalidate run inputs without dirtying the manifest. Actual immutable revision sources validate proposed configuration |
-| P7c–g | Pending, in the delivery order above, each on its own branch | Native recovery, storage worker, portability evidence, performance/accessibility/docs, then activation. Linux evidence cannot close Windows QA or Windows durability |
+| P7c | Implemented on `feat/stage-ii-p7-recovery`, base unmerged P7b `1311f42`: preview-bound source/text decisions, native transaction recovery, candidate/evidence export and preserved reload work | 880 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets and [native conflict/recovery review](qa/2026-10-25/p7-recovery/verification.md), including real GTK file export and explicit finish/reopen, passed. Inaccessible targets stay blocked; ordinary I/O moves to P7d |
+| P7d–g | Pending, in the delivery order above, each on its own branch | Storage worker, portability evidence, performance/accessibility/docs, then activation. Linux evidence cannot close Windows QA or Windows durability |
 
 Every completed package runs formatting, all-target workspace clippy with warnings
 denied, serial all-target workspace tests with isolated config/data directories,
