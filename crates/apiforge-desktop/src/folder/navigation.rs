@@ -31,10 +31,24 @@ pub(super) struct RecentProjects {
     writable: bool,
 }
 
+/// Where this computer remembers its projects. Tests never get it: a suite
+/// that writes there edits the developer's own recent projects, and one that
+/// reads there depends on what they happen to have open. The tests that cover
+/// this file pass an explicit path, and managed startup is given its data
+/// directory.
+#[cfg(not(test))]
+fn default_path() -> Option<PathBuf> {
+    dirs::data_dir().map(|data| data.join("apiforge").join(RECENT_FILE))
+}
+
+#[cfg(test)]
+fn default_path() -> Option<PathBuf> {
+    None
+}
+
 impl Default for RecentProjects {
     fn default() -> Self {
-        let path = dirs::data_dir().map(|data| data.join("apiforge").join(RECENT_FILE));
-        Self::load(path)
+        Self::load(default_path())
     }
 }
 
@@ -43,7 +57,7 @@ impl RecentProjects {
         Self {
             entries: Vec::new(),
             active: None,
-            path: dirs::data_dir().map(|data| data.join("apiforge").join(RECENT_FILE)),
+            path: default_path(),
             writable: true,
         }
     }
