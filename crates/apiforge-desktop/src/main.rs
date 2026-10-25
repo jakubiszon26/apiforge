@@ -46,6 +46,9 @@ enum Arguments {
     Window(Option<PathBuf>),
     /// A folder project, opened explicitly.
     Folder(PathBuf),
+    /// Whatever the application data directory holds, migrating or creating a
+    /// folder project as needed.
+    Managed,
     Check(PathBuf),
     SmokeTest(PathBuf),
     /// Captures the window; without a project the demo workspace is shown.
@@ -67,6 +70,7 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
         Some(Some("--help" | "-h")) => Arguments::Help,
         Some(Some("--project")) => Arguments::Window(Some(path("Missing file path")?)),
         Some(Some("--folder")) => Arguments::Folder(path("Missing folder path")?),
+        Some(Some("--managed")) => Arguments::Managed,
         Some(Some("--smoke-test")) => Arguments::SmokeTest(path("Missing file path")?),
         Some(Some("--check")) => Arguments::Check(path("Missing file path")?),
         Some(Some("--screenshot")) => {
@@ -105,11 +109,36 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
     Ok(result)
 }
 
+/// Where managed startup begins, and whether it can.
+///
+/// Opening a folder project is the window's own asynchronous work, so almost
+/// nothing happens here. The exception is a legacy workspace that cannot be
+/// migrated yet: another window owns it, or it needs an explicit backup
+/// decision. Only the workspace window can resolve either, and which window to
+/// build has to be decided before one exists, so that case starts exactly as it
+/// does today.
+fn managed_opening() -> Result<Opening, String> {
+    let data = dirs::data_dir()
+        .ok_or("This system has no application data directory.")?
+        .join("apiforge");
+    match folder::managed_start(&data) {
+        folder::Start::Managed => Ok(Opening::Managed(data)),
+        folder::Start::Legacy(reason) => {
+            if let Some(reason) = reason {
+                eprintln!("Opening the workspace instead: {reason}");
+            }
+            let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
+            Ok(Opening::Workspace(app::Source::Storage(store)))
+        }
+    }
+}
+
 const HELP: &str = "API Forge
 
   apiforge-desktop                      open your workspace (saved automatically)
   apiforge-desktop --project FILE       open a project or workspace for this session only
   apiforge-desktop --folder PATH        open a folder project (in development)
+  apiforge-desktop --managed            open your folder projects, migrating once (in development)
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
   apiforge-desktop --screenshot OUT.png [--project FILE | --folder PATH] [--select NODE]
@@ -152,6 +181,13 @@ fn main() -> ExitCode {
         },
         Arguments::Window(Some(path)) => session(&path, Probe::None),
         Arguments::Folder(path) => run_window(Opening::Folder(path), Probe::None),
+        Arguments::Managed => match managed_opening() {
+            Ok(opening) => run_window(opening, Probe::None),
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        },
         Arguments::SmokeTest(path) => session(&path, Probe::Smoke),
         Arguments::Screenshot {
             output,
@@ -208,6 +244,9 @@ enum Probe {
 enum Opening {
     Workspace(app::Source),
     Folder(PathBuf),
+    /// The application data directory, resolved to a project after the window
+    /// exists so that migrating one does not delay it.
+    Managed(PathBuf),
 }
 
 /// The workspace window, or the folder project window.
@@ -357,6 +396,9 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                 Opening::Folder(root) => {
                     Front::Folder(Box::new(folder::FolderApp::open(&context.egui_ctx, root)))
                 }
+                Opening::Managed(data) => Front::Folder(Box::new(
+                    folder::FolderApp::start_managed(&context.egui_ctx, data),
+                )),
             };
             if let Some(node) = select {
                 app.select_node(&node);
@@ -406,6 +448,11 @@ mod tests {
             Ok(Arguments::Folder("my project".into()))
         );
         assert!(parse(&["--folder"]).is_err());
+        // Managed startup names no path: it is the application data directory
+        // or nothing, and it is not the default.
+        assert_eq!(parse(&["--managed"]), Ok(Arguments::Managed));
+        assert!(parse(&["--managed", "somewhere"]).is_err());
+        assert_ne!(parse(&[]), Ok(Arguments::Managed));
         assert!(
             parse(&[
                 "--screenshot",

@@ -1,8 +1,9 @@
 //! Global recent folders and recovery-protected project switching.
 use super::*;
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::Read};
+use std::{fs::File, io::Read, path::Path};
 
+const RECENT_FILE: &str = "recent-projects.json";
 const RECENT_LIMIT: usize = 32;
 const RECENT_BYTES: usize = 256 * 1024;
 
@@ -32,7 +33,7 @@ pub(super) struct RecentProjects {
 
 impl Default for RecentProjects {
     fn default() -> Self {
-        let path = dirs::data_dir().map(|data| data.join("apiforge/recent-projects.json"));
+        let path = dirs::data_dir().map(|data| data.join("apiforge").join(RECENT_FILE));
         Self::load(path)
     }
 }
@@ -42,10 +43,33 @@ impl RecentProjects {
         Self {
             entries: Vec::new(),
             active: None,
-            path: dirs::data_dir().map(|data| data.join("apiforge/recent-projects.json")),
+            path: dirs::data_dir().map(|data| data.join("apiforge").join(RECENT_FILE)),
             writable: true,
         }
     }
+    /// The recent projects of one application data directory. Managed startup
+    /// is given its directory, and tests give it theirs.
+    pub(super) fn at(data: &Path) -> Self {
+        Self::load(Some(data.join(RECENT_FILE)))
+    }
+
+    /// Adds projects that are known to exist but have not been opened here, so
+    /// everything a migration produced is reachable from the start. An entry
+    /// already remembered keeps its place and its name.
+    pub(super) fn remember_all(&mut self, entries: Vec<Recent>) {
+        for entry in entries {
+            if self
+                .entries
+                .iter()
+                .any(|old| old.id == entry.id || old.path == entry.path)
+            {
+                continue;
+            }
+            self.entries.push(entry);
+        }
+        self.entries.truncate(RECENT_LIMIT);
+    }
+
     fn load(path: Option<PathBuf>) -> Self {
         let mut recent = Self {
             entries: Vec::new(),

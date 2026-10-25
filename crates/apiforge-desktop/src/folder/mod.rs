@@ -8,6 +8,8 @@
 //! Folder projects are opened explicitly with `--folder`; the normal startup
 //! path still opens the workspace.
 
+mod activation;
+pub use activation::{Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;

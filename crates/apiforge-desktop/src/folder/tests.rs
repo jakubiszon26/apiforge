@@ -3,6 +3,8 @@ use crate::buffers::APPLY_DELAY;
 
 #[path = "accessibility_tests.rs"]
 mod accessibility_tests;
+#[path = "activation_tests.rs"]
+mod activation_tests;
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
 #[path = "project_interaction_tests.rs"]

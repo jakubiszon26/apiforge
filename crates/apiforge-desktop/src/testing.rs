@@ -51,6 +51,23 @@ pub fn folder_harness_scaled(root: &Path, size: egui::Vec2, scale: f32) -> Folde
     harness
 }
 
+/// The folder window started from an application data directory, as managed
+/// startup starts it, and settled once it has resolved to a project.
+pub fn managed_harness(data: &Path, size: egui::Vec2) -> FolderHarness {
+    let mut harness = Harness::builder().with_size(size).build_ui_state(
+        |ui, app: &mut Option<FolderApp>| {
+            if let Some(app) = app {
+                app.ui(ui);
+            }
+        },
+        None,
+    );
+    let context = harness.ctx.clone();
+    *harness.state_mut() = Some(FolderApp::start_managed(&context, data.to_owned()));
+    settle(&mut harness);
+    harness
+}
+
 pub fn folder(harness: &FolderHarness) -> &FolderApp {
     harness.state().as_ref().unwrap()
 }

@@ -15,8 +15,8 @@ pub use analysis::{Analysis, AnalysisInput, AnalysisTicket, Restored};
 pub use document::{AnalysisState, DocumentSession, ModelState, Unavailable};
 pub use layout::{FixedPlacer, Placer};
 pub use migration::{
-    CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, ProjectCatalogue,
-    migrate_workspace,
+    CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, PROJECTS_DIRECTORY,
+    ProjectCatalogue, migrate_workspace,
 };
 pub use prepare::prepare_project;
 pub use session::{
