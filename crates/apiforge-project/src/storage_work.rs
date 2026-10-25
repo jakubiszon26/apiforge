@@ -153,6 +153,9 @@ impl ProjectSession {
                     after.selection = current.selection.clone();
                 }
             }
+            candidate.texts.retain(|file| {
+                base.text_file(file.path()).is_none() || self.text_file(file.path()).is_some()
+            });
             if self.manifest != base.manifest || context_changed {
                 candidate.manifest_dirty = if candidate.manifest_saved == base.manifest_saved {
                     self.manifest_dirty
@@ -165,8 +168,12 @@ impl ProjectSession {
             }
             // Keep/discard decisions entered during an older recovery save
             // remain authoritative. Only its durable read baseline is adopted.
-            candidate.recovery.held = self.recovery.held.clone();
-            candidate.recovery.held_texts = self.recovery.held_texts.clone();
+            if self.recovery.held != base.recovery.held {
+                candidate.recovery.held = self.recovery.held.clone();
+            }
+            if self.recovery.held_texts != base.recovery.held_texts {
+                candidate.recovery.held_texts = self.recovery.held_texts.clone();
+            }
         }
         let produced = candidate
             .events

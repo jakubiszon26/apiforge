@@ -392,6 +392,11 @@ impl ProjectStore {
     ) -> Result<u64> {
         self.writable()?;
         let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        self.validate_public_changes(&changes)?;
+        self.commit_locked(changes, boundary)
+    }
+
+    pub(super) fn validate_public_changes(&self, changes: &[ProjectChange]) -> Result<()> {
         // Only the checked recovery/file-operation services may update these
         // files. Replay still validates their complete staged post-images.
         if changes.iter().any(|change| {
@@ -411,7 +416,7 @@ impl ProjectStore {
         {
             DiagramFile::from_bytes(&bytes)?;
         }
-        self.commit_locked(changes, boundary)
+        Ok(())
     }
 
     pub(super) fn commit_locked(

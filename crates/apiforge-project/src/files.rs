@@ -85,6 +85,26 @@ impl ProjectSession {
         if to.as_str().starts_with(&format!("{}/", from.as_str())) {
             return Err(Error::Storage(ProjectError::InvalidPath));
         }
+        let from_folded = from.as_str().to_lowercase();
+        let to_folded = to.as_str().to_lowercase();
+        // An absent file can still own unsaved text. Moving into that path (or
+        // replacing its missing parent with a file) must not merge two editors.
+        for open in self.texts.iter().map(|file| file.path()).chain(
+            self.recovery
+                .held_texts
+                .iter()
+                .map(|draft| draft.path.as_str()),
+        ) {
+            let path = open.to_lowercase();
+            let affected = path == from_folded || path.starts_with(&format!("{from_folded}/"));
+            if !affected
+                && (path == to_folded
+                    || path.starts_with(&format!("{to_folded}/"))
+                    || to_folded.starts_with(&format!("{path}/")))
+            {
+                return Err(occupied(self, &to));
+            }
+        }
         // Validate the whole move first: a case-only rename takes two
         // transactions, and the first must not commit a move the second refuses.
         for entry in &self.manifest.documents {
@@ -201,13 +221,46 @@ impl ProjectSession {
                 bytes: registry.to_public_bytes()?,
             });
         }
-        self.store.commit(changes)?;
+        let mut recovery = self.recovery_contents();
+        for draft in &mut recovery.documents {
+            if within(&draft.path, from).is_some() {
+                draft.path = moved(&draft.path)?;
+            }
+        }
+        for draft in &mut recovery.texts {
+            if within(&draft.path, from).is_some() {
+                draft.path = moved(&draft.path)?;
+            }
+        }
+        let baseline = self
+            .recovery
+            .read
+            .as_ref()
+            .ok_or(Error::RecoveryUnavailable)?;
+        self.recovery.read = Some(
+            self.store
+                .commit_with_source_recovery(changes, baseline, &recovery)?,
+        );
         if !documents.is_empty() {
             self.manifest_saved = FileState::of(&registry.to_public_bytes()?);
             self.manifest.documents = registry.documents;
         }
-        for file in &files {
-            self.text_file_moved(file.as_str(), moved(file)?.as_str());
+        let mut text_paths: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path.clone())
+            .chain(
+                self.recovery
+                    .held_texts
+                    .iter()
+                    .map(|draft| draft.path.clone()),
+            )
+            .filter(|path| within(path, from).is_some())
+            .collect();
+        text_paths.sort();
+        text_paths.dedup();
+        for file in text_paths {
+            self.text_file_moved(file.as_str(), moved(&file)?.as_str());
         }
         let mut ids = Vec::new();
         for (document_id, path) in documents {
@@ -223,11 +276,6 @@ impl ProjectSession {
             ids.push(document_id);
         }
         self.refresh_local_baselines();
-        // Recovery records each draft's last path. A failure is reported by the
-        // next explicit recovery write, which close and project switch require.
-        if !self.store.is_read_only() && (!ids.is_empty() || self.has_unsaved_text()) {
-            let _ = self.save_recovery();
-        }
         Ok(ids)
     }
 

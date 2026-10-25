@@ -338,8 +338,17 @@ impl ProjectSession {
     /// are unusable, returns itself so the caller can offer export or discard.
     /// Configuration is not part of source recovery and must be saved first.
     pub fn close(mut self) -> std::result::Result<(), (Box<Self>, Error)> {
+        match self.protect_close() {
+            Ok(()) => Ok(()),
+            Err(error) => Err((Box::new(self), error)),
+        }
+    }
+
+    /// Performs close protection while the adapter retains the live owner until
+    /// its asynchronous completion is acknowledged.
+    pub fn protect_close(&mut self) -> Result<()> {
         if self.manifest_dirty {
-            return Err((Box::new(self), Error::UnsavedConfiguration));
+            return Err(Error::UnsavedConfiguration);
         }
         let unsaved = !self.recovery.held.is_empty()
             || self
@@ -361,10 +370,7 @@ impl ProjectSession {
         if !unsaved && !recovery_needs_clearing {
             return Ok(());
         }
-        match self.save_recovery() {
-            Ok(_) => Ok(()),
-            Err(error) => Err((Box::new(self), error)),
-        }
+        self.save_recovery().map(|_| ())
     }
 
     /// Explicitly abandons every unsaved change and held draft, then closes.
@@ -373,6 +379,15 @@ impl ProjectSession {
     /// A failed recovery write returns the session unchanged, so the caller can
     /// keep editing or retry.
     pub fn discard_unsaved_and_close(self) -> std::result::Result<(), (Box<Self>, Error)> {
+        match self.discard_protection() {
+            Ok(()) => Ok(()),
+            Err(error) => Err((Box::new(self), error)),
+        }
+    }
+
+    /// Clears durable recovery after an explicit discard decision. Memory is
+    /// retained until the adapter acknowledges completion and releases it.
+    pub fn discard_protection(&self) -> Result<()> {
         let Some(read) = &self.recovery.read else {
             return Ok(());
         };
@@ -388,7 +403,7 @@ impl ProjectSession {
         if read.recovery().is_some_and(|current| *current != empty)
             && let Err(error) = self.store.save_source_recovery(read, &empty)
         {
-            return Err((Box::new(self), error.into()));
+            return Err(error.into());
         }
         Ok(())
     }

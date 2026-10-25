@@ -101,6 +101,8 @@ pub enum Error {
         "The storage result belongs to an obsolete project state; its in-memory result was discarded."
     )]
     StaleStorage,
+    #[error("The storage worker stopped unexpectedly; in-memory work was preserved.")]
+    StorageWorker,
     #[error("The project registry changed outside API Forge; reload the project first.")]
     RegistryChanged,
     #[error(transparent)]

@@ -276,6 +276,29 @@ impl ProjectStore {
         self.save_recovery_with_hook(preview, recovery, |_| Ok(()))
     }
 
+    /// Commits a file operation and the corresponding draft paths together.
+    /// The supplied recovery observation must still match every durable baseline.
+    pub fn commit_with_source_recovery(
+        &self,
+        mut changes: Vec<ProjectChange>,
+        preview: &RecoveryRead,
+        desired: &SourceRecovery,
+    ) -> Result<RecoveryRead> {
+        self.writable()?;
+        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        self.validate_public_changes(&changes)?;
+        if preview.from_backup {
+            return Err(ProjectError::RecoveryDecisionRequired);
+        }
+        if desired.project_id != preview.baseline.project_id {
+            return Err(ProjectError::ForeignRecovery);
+        }
+        let snapshot = self.checked_recovery_snapshot(&preview.baseline)?;
+        changes.extend(recovery_changes(&snapshot, desired)?);
+        self.commit_locked(changes, |_| Ok(()))?;
+        self.read_recovery(&desired.project_id)
+    }
+
     fn save_recovery_with_hook(
         &self,
         preview: &RecoveryRead,

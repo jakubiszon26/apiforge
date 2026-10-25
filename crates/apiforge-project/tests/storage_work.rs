@@ -225,3 +225,110 @@ fn an_older_text_save_does_not_clean_or_replace_newer_exact_text() {
         b"older\r\n"
     );
 }
+
+#[test]
+fn recovery_completion_does_not_resurrect_a_closed_plain_text_file() {
+    let (directory, mut session, _) = project();
+    fs::write(directory.path().join("notes.txt"), "saved\r\n").unwrap();
+    session.open_text_file("notes.txt").unwrap();
+    let snapshot = session.storage_snapshot();
+    session.close_text_file("notes.txt").unwrap();
+    let completion = snapshot.run(StorageMode::PreserveEdits, ProjectSession::save_recovery);
+    session.complete_storage(completion).unwrap().unwrap();
+    assert!(session.text_file("notes.txt").is_none());
+}
+
+#[test]
+fn opening_a_recovered_text_on_a_worker_consumes_its_held_record_exactly_once() {
+    let (directory, mut session, _) = project();
+    fs::write(directory.path().join("notes.txt"), "saved\r\n").unwrap();
+    session.open_text_file("notes.txt").unwrap();
+    session
+        .edit_text("notes.txt", "draft\r\n", Origin(1))
+        .unwrap();
+    assert!(session.close().is_ok());
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(session.recovered_text_drafts(), ["notes.txt"]);
+    let completion = session
+        .storage_snapshot()
+        .run(StorageMode::PreserveEdits, |candidate| {
+            candidate.open_text_file("notes.txt").map(|_| ())
+        });
+    session.complete_storage(completion).unwrap().unwrap();
+    assert!(session.recovered_text_drafts().is_empty());
+    assert_eq!(session.recovery_contents().texts.len(), 1);
+    assert_eq!(session.text_file("notes.txt").unwrap().text(), "draft\r\n");
+}
+
+#[test]
+fn moving_a_directory_keeps_missing_dirty_text_paths_and_durable_recovery_together() {
+    let (directory, mut session, _) = project();
+    fs::create_dir(directory.path().join("notes")).unwrap();
+    fs::write(directory.path().join("notes/draft.txt"), "saved\r\n").unwrap();
+    session.open_text_file("notes/draft.txt").unwrap();
+    session
+        .edit_text("notes/draft.txt", "draft\r\n", Origin(1))
+        .unwrap();
+    fs::remove_file(directory.path().join("notes/draft.txt")).unwrap();
+    session.relocate("notes", "moved", Origin(1)).unwrap();
+    assert!(session.text_file("notes/draft.txt").is_none());
+    assert_eq!(
+        session.text_file("moved/draft.txt").unwrap().text(),
+        "draft\r\n"
+    );
+    drop(session); // No quiet protection or graceful close after the move.
+    let mut reopened = ProjectSession::open(directory.path()).unwrap();
+    assert_eq!(reopened.recovered_text_drafts(), ["moved/draft.txt"]);
+    reopened.open_text_file("moved/draft.txt").unwrap();
+    assert_eq!(
+        reopened.text_file("moved/draft.txt").unwrap().text(),
+        "draft\r\n"
+    );
+}
+
+#[test]
+fn a_move_refuses_foreign_recovery_before_changing_any_file_or_path() {
+    let (directory, mut session, _) = project();
+    fs::write(directory.path().join("notes.txt"), "saved").unwrap();
+    session.open_text_file("notes.txt").unwrap();
+    session.edit_text("notes.txt", "draft", Origin(1)).unwrap();
+    session.save_recovery().unwrap();
+    fs::write(
+        directory.path().join(".apiforge/local/recovery.json"),
+        "foreign",
+    )
+    .unwrap();
+    assert!(
+        session
+            .relocate("notes.txt", "moved.txt", Origin(1))
+            .is_err()
+    );
+    assert_eq!(
+        fs::read(directory.path().join("notes.txt")).unwrap(),
+        b"saved"
+    );
+    assert!(!directory.path().join("moved.txt").exists());
+    assert_eq!(session.text_file("notes.txt").unwrap().text(), "draft");
+}
+
+#[test]
+fn moving_into_an_absent_path_with_an_open_draft_never_merges_two_text_sessions() {
+    let (directory, mut session, _) = project();
+    fs::write(directory.path().join("first.txt"), "first").unwrap();
+    fs::write(directory.path().join("second.txt"), "second").unwrap();
+    session.open_text_file("first.txt").unwrap();
+    session.open_text_file("second.txt").unwrap();
+    session.edit_text("second.txt", "draft", Origin(1)).unwrap();
+    fs::remove_file(directory.path().join("second.txt")).unwrap();
+    assert!(
+        session
+            .relocate("first.txt", "second.txt", Origin(1))
+            .is_err()
+    );
+    assert_eq!(session.text_files().len(), 2);
+    assert_eq!(session.text_file("second.txt").unwrap().text(), "draft");
+    assert_eq!(
+        fs::read(directory.path().join("first.txt")).unwrap(),
+        b"first"
+    );
+}
