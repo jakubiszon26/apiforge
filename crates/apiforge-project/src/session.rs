@@ -18,6 +18,9 @@ mod comments;
 #[path = "conflicts.rs"]
 mod conflicts;
 pub use conflicts::{ConflictDecision, ConflictPreview, ConflictTarget};
+#[path = "storage_work.rs"]
+mod storage_work;
+pub use storage_work::{SessionIdentity, StorageCompletion, StorageMode, StorageSnapshot};
 #[path = "execution.rs"]
 mod execution;
 #[path = "external.rs"]
@@ -277,6 +280,7 @@ impl ProjectSession {
         let next = Self::load(self.store.clone(), placer, self.epoch + 1)?;
         let sequence = self.sequence;
         *self = next;
+        self.events.clear();
         self.sequence = sequence;
         self.emit(
             Origin::SESSION,
@@ -713,7 +717,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        if let Err(error) = self.install_model(index, model.clone(), origin) {
+        if let Err(error) = self.install_model(index, (*model).clone(), origin) {
             let history = &mut self.documents[index].history;
             if undo {
                 history.undo.push(model);
@@ -723,10 +727,11 @@ impl ProjectSession {
             return Err(error);
         }
         let history = &mut self.documents[index].history;
+        history.generation += 1;
         if undo {
-            history.redo.push(current);
+            history.redo.push(Arc::new(current));
         } else {
-            history.undo.push(current);
+            history.undo.push(Arc::new(current));
         }
         Ok(true)
     }

@@ -22,8 +22,8 @@ pub use session::{
     ConflictDecision, ConflictPreview, ConflictTarget, Declaration, DeletePreview, DraftStatus,
     Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome,
     ImportCandidate, ImportItem, ObservedFile, Origin, PreparedRun, ProjectSession, Published,
-    Registration, RegistryState, SaveOutcome, SourceSurvey, TextFileSession, declaration,
-    rename_handle,
+    Registration, RegistryState, SaveOutcome, SessionIdentity, SourceSurvey, StorageCompletion,
+    StorageMode, StorageSnapshot, TextFileSession, declaration, rename_handle,
 };
 
 pub use apiforge_script::Document;
@@ -97,6 +97,10 @@ pub enum Error {
     ExternalConflict,
     #[error("The conflict candidates changed; review a fresh preview before deciding.")]
     StaleConflict,
+    #[error(
+        "The storage result belongs to an obsolete project state; its in-memory result was discarded."
+    )]
+    StaleStorage,
     #[error("The project registry changed outside API Forge; reload the project first.")]
     RegistryChanged,
     #[error(transparent)]

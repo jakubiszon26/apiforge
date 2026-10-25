@@ -2,6 +2,7 @@
 //! history. The text-edit history belongs to the view adapter (ADR 0012).
 use apiforge_script::{Diagnostic, Document};
 use apiforge_storage::project::{DocumentEntry, FieldRecovery, FileState, TextSelection};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnalysisState {
@@ -30,8 +31,9 @@ pub enum Unavailable {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct History {
-    pub undo: Vec<Document>,
-    pub redo: Vec<Document>,
+    pub undo: Vec<Arc<Document>>,
+    pub redo: Vec<Arc<Document>>,
+    pub generation: u64,
 }
 
 const HISTORY_LIMIT: usize = 100;
@@ -41,8 +43,9 @@ impl History {
         if self.undo.len() == HISTORY_LIMIT {
             self.undo.remove(0);
         }
-        self.undo.push(previous);
+        self.undo.push(Arc::new(previous));
         self.redo.clear();
+        self.generation += 1;
     }
 }
 

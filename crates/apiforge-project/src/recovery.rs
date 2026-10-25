@@ -12,7 +12,7 @@ use apiforge_storage::project::{
     ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct RecoveryState {
     /// Baseline for the next write. `None` when the files are unreadable,
     /// unsupported or foreign: they are preserved and never overwritten.
