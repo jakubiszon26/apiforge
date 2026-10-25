@@ -104,6 +104,124 @@ fn a_registered_or_imported_document_keeps_its_block_identities_when_the_project
     );
 }
 
+/// A prepared project, as the window opens one. An explorer file operation and
+/// a source save are separate packages (P5 and P1) over one shared checkpoint
+/// file, so the file operation has to leave the session able to save.
+fn prepared_demo() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+    assert!(
+        directory.path().join(".apiforge/diagram.json").is_file(),
+        "a prepared project has shared checkpoints"
+    );
+    directory
+}
+
+fn only(session: &ProjectSession, kind: DocumentKind) -> String {
+    session
+        .documents()
+        .iter()
+        .find(|document| document.entry().kind == kind)
+        .expect("the demo has one of each")
+        .id()
+        .to_owned()
+}
+
+/// A trash transaction rewrites the shared checkpoint file to carry the
+/// records of the documents it moves. A session that kept its earlier copy
+/// rejects its own next source save as a foreign change.
+#[test]
+fn deleting_a_file_into_the_trash_still_allows_saving_another_document() {
+    let directory = prepared_demo();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let scenario = only(&session, DocumentKind::Scenario);
+    let component_path = session
+        .document(&only(&session, DocumentKind::Component))
+        .unwrap()
+        .entry()
+        .path
+        .as_str()
+        .to_owned();
+
+    let preview = session.preview_delete(&[&component_path]).unwrap();
+    session.delete(&preview, Origin::SESSION).unwrap();
+
+    let edited = format!("{}\n", session.document(&scenario).unwrap().text());
+    session
+        .edit_source(&scenario, &edited, Origin::SESSION)
+        .unwrap();
+    session.settle(&scenario).unwrap();
+    let outcome = session.save(&scenario).expect("the save must not conflict");
+    assert!(outcome.checkpoint);
+    assert_eq!(
+        std::fs::read_to_string(
+            directory
+                .path()
+                .join("scenarios/promotion-and-cart-price.afs")
+        )
+        .unwrap(),
+        edited
+    );
+}
+
+/// The trash preserves each deleted document's checkpoint precisely so that a
+/// restore returns its blocks, not just its bytes.
+#[test]
+fn restoring_a_deleted_document_brings_back_its_block_identities() {
+    let directory = prepared_demo();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let scenario = only(&session, DocumentKind::Scenario);
+    let path = session
+        .document(&scenario)
+        .unwrap()
+        .entry()
+        .path
+        .as_str()
+        .to_owned();
+    let Some(Document::Scenario(before)) = session.document(&scenario).unwrap().model() else {
+        panic!("scenario")
+    };
+    let identities: Vec<_> = before
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect();
+    let positions: Vec<_> = before
+        .graph
+        .nodes
+        .iter()
+        .map(|node| node.position.clone())
+        .collect();
+
+    let preview = session.preview_delete(&[&path]).unwrap();
+    let commit = session.delete(&preview, Origin::SESSION).unwrap();
+    session.restore(&commit.operation_id, &[]).unwrap();
+
+    let Some(Document::Scenario(after)) = session.document(&scenario).unwrap().model() else {
+        panic!("the document is registered again")
+    };
+    assert_eq!(
+        after
+            .graph
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<Vec<_>>(),
+        identities
+    );
+    assert_eq!(
+        after
+            .graph
+            .nodes
+            .iter()
+            .map(|node| node.position.clone())
+            .collect::<Vec<_>>(),
+        positions,
+        "the restored layout is the layout the trash kept"
+    );
+}
+
 /// Publication, project configuration and the trash each have their own
 /// durable records. A project that used all three has to reopen consistent in
 /// all of them at once: a revision that is still immutable, settings that are
