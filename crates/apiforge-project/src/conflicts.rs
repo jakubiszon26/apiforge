@@ -145,7 +145,9 @@ impl ProjectSession {
                         .disk
                         .state(&preview.path)
                         .ok_or(Error::StaleConflict)?;
-                    file.saved_text = text.clone();
+                    // Accepting deletion is a clean, absent file; keeping a
+                    // deletion below instead remains dirty for recreation.
+                    file.saved_text = Some(text.clone().unwrap_or_default());
                     file.text = text.unwrap_or_default();
                     file.version += 1;
                     file.selection = TextSelection {

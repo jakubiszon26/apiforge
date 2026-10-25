@@ -337,14 +337,30 @@ impl ProjectSession {
         }
         // Recovery is bound to the old registry, so carry the work across in
         // memory and protect it against the new registry afterwards.
-        let drafts = self.recovery_contents().documents;
+        let recovery = self.recovery_contents();
+        let open_texts: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path().to_owned())
+            .collect();
         self.reload()?;
         self.registry = RegistryState::Current;
-        for draft in drafts {
+        for draft in recovery.documents {
             self.recovery
                 .held
                 .retain(|held| held.document_id != draft.document_id);
             self.adopt_draft(draft)?;
+        }
+        for draft in recovery.texts {
+            self.recovery
+                .held_texts
+                .retain(|held| held.path != draft.path);
+            self.recovery.held_texts.push(draft);
+        }
+        // A reload can precede the quiet-time recovery write. Carry the newest
+        // in-memory text too, rather than restoring only an older disk draft.
+        for path in open_texts {
+            let _ = self.open_text_file(&path);
         }
         if self.has_unsaved_work() && !self.store.is_read_only() {
             let _ = self.save_recovery();

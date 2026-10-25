@@ -183,3 +183,63 @@ fn text_conflicts_preserve_raw_non_utf8_candidates_and_reject_unseen_deletions()
     assert!(session.keep_deleted_text("README.md").is_err());
     assert_eq!(fs::read_to_string(&file).unwrap(), "reappeared");
 }
+
+#[test]
+fn accepting_a_text_deletion_closes_cleanly_without_recreating_an_empty_file() {
+    let (directory, mut session, _) = conflicted();
+    let file = directory.path().join("notes.txt");
+    fs::write(&file, "saved").unwrap();
+    session.open_text_file("notes.txt").unwrap();
+    session.edit_text("notes.txt", "local", Origin(1)).unwrap();
+    fs::remove_file(&file).unwrap();
+    poll(&mut session);
+    let preview = session
+        .preview_conflict(ConflictTarget::Text("notes.txt".into()))
+        .unwrap();
+    session
+        .resolve_conflict(&preview, ConflictDecision::UseDisk, Origin(2))
+        .unwrap();
+    assert!(!session.text_file("notes.txt").unwrap().needs_recovery());
+    session.close_text_file("notes.txt").unwrap();
+    assert!(!file.exists());
+}
+
+#[test]
+fn a_context_change_invalidates_conflict_consent_without_changing_source() {
+    let (_directory, mut session, id) = conflicted();
+    let preview = session
+        .preview_conflict(ConflictTarget::Document(id.clone()))
+        .unwrap();
+    session.invalidate_runtime_inputs(Origin(1));
+    assert!(matches!(
+        session.resolve_conflict(&preview, ConflictDecision::UseDisk, Origin(2)),
+        Err(Error::StaleConflict)
+    ));
+    assert_eq!(session.document(&id).unwrap().text(), LOCAL);
+}
+
+#[test]
+fn reload_preserves_the_latest_open_text_and_held_drafts_before_any_recovery_write() {
+    let (directory, mut session, _) = conflicted();
+    let file = directory.path().join("notes.txt");
+    fs::write(&file, "saved\r\n").unwrap();
+    session.open_text_file("notes.txt").unwrap();
+    session
+        .edit_text("notes.txt", "latest unsaved\r\n", Origin(1))
+        .unwrap();
+    session.reload_project().unwrap();
+    assert_eq!(
+        session.text_file("notes.txt").unwrap().text(),
+        "latest unsaved\r\n"
+    );
+    assert!(!session.text_file("notes.txt").unwrap().is_held());
+    fs::write(&file, "foreign\n").unwrap();
+    session.reload_project().unwrap();
+    let text = session.text_file("notes.txt").unwrap();
+    assert_eq!(text.text(), "latest unsaved\r\n");
+    assert!(
+        text.is_held(),
+        "changed baseline needs an explicit decision"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), "foreign\n");
+}
