@@ -1089,7 +1089,7 @@ fn has_manifest(root: &Path) -> Result<bool> {
 
 /// Keeps local session data out of Git: appends the rule to an existing
 /// `.gitignore` without rewriting it, or creates one.
-fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChange>> {
+pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChange>> {
     let path = ProjectPath::new(GITIGNORE_PATH)?;
     let current = store.read(std::slice::from_ref(&path))?.files[&path].clone();
     let Some(bytes) = current else {
