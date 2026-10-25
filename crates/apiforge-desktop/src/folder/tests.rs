@@ -3,6 +3,8 @@ use crate::buffers::APPLY_DELAY;
 
 #[path = "recovery_tests.rs"]
 mod recovery_tests;
+#[path = "storage_tests.rs"]
+mod storage_tests;
 
 fn frame(app: &mut FolderApp, context: &egui::Context, events: Vec<egui::Event>) {
     let mut output = context.run_ui(
@@ -55,8 +57,39 @@ fn shop() -> tempfile::TempDir {
 fn open(root: &std::path::Path) -> (egui::Context, FolderApp) {
     let context = egui::Context::default();
     let mut app = FolderApp::open(&context, root.to_owned());
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     (context, app)
+}
+
+fn wait_storage(app: &mut FolderApp, context: &egui::Context) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while (app.storage.is_busy()
+        || app.opening
+        || app.persistence.departure
+        || (app.persistence.closing && !app.persistence.close_ready)
+        || (app.switching() && !app.navigation.failed && app.prompt.is_none()))
+        && Instant::now() < deadline
+    {
+        frame(app, context, vec![]);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!app.storage.is_busy(), "storage did not become idle");
+}
+
+fn await_close(app: &mut FolderApp, context: &egui::Context) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if app.prepare_close() {
+            return true;
+        }
+        frame(app, context, vec![]);
+        if app.close_error.is_some() {
+            return false;
+        }
+        assert!(Instant::now() < deadline, "close did not finish");
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn document(app: &FolderApp, path: &str) -> String {
@@ -129,6 +162,7 @@ fn a_folder_without_a_project_is_written_only_when_initialised() {
 
     app.new_name = "Payments".into();
     app.initialise();
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     let session = app.session.as_ref().unwrap();
     assert_eq!(session.manifest().name, "Payments");
@@ -298,6 +332,7 @@ fn ctrl_s_saves_exact_invalid_text_and_save_all_saves_each_document() {
     type_into_code(&mut app, &context, "}}}");
     let invalid = text(&app, &scenario);
     frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    wait_storage(&mut app, &context);
     assert_eq!(
         std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
         invalid,
@@ -313,6 +348,7 @@ fn ctrl_s_saves_exact_invalid_text_and_save_all_saves_each_document() {
         .unwrap();
     type_into_code(&mut app, &context, "x");
     frame(&mut app, &context, vec![key(Key::S, command_shift())]);
+    wait_storage(&mut app, &context);
     assert_eq!(
         std::fs::read_to_string(directory.path().join(COMPONENT)).unwrap(),
         edited
@@ -347,6 +383,7 @@ fn closing_a_tab_with_unsaved_work_asks_and_discarding_restores_the_saved_file()
 
     app.prompt = None;
     app.close_tab_with(&scenario, false);
+    wait_storage(&mut app, &context);
     assert_eq!(text(&app, &scenario), original);
     assert_eq!(app.workbench.active(), None);
     assert_eq!(
@@ -368,7 +405,10 @@ fn the_view_and_unsaved_work_come_back_after_closing_the_window() {
     let unsaved = text(&app, &component);
     app.workbench.mode = Mode::Split;
     frame(&mut app, &context, vec![]);
-    assert!(app.prepare_close(), "unsaved work is in local recovery");
+    assert!(
+        await_close(&mut app, &context),
+        "unsaved work is in local recovery"
+    );
     assert_eq!(
         std::fs::read_to_string(directory.path().join(COMPONENT)).unwrap(),
         saved,
@@ -403,12 +443,13 @@ fn a_read_only_window_keeps_edits_in_memory_and_refuses_to_close_silently() {
     type_into_code(&mut reader, &context, "// mine\n");
     reader.notice = None;
     frame(&mut reader, &context, vec![key(Key::S, COMMAND)]);
+    wait_storage(&mut reader, &context);
     assert!(reader.notice.as_ref().is_some_and(|notice| notice.error));
     assert_eq!(
         std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
         original
     );
-    assert!(!reader.prepare_close());
+    assert!(!await_close(&mut reader, &context));
     assert!(reader.close_error().is_some());
     assert!(text(&reader, &scenario).starts_with("// mine"));
 }
@@ -420,9 +461,11 @@ fn new_documents_start_from_valid_sources_with_unused_paths() {
     for _ in 0..2 {
         app.create_document(DocumentKind::Scenario, None, "Checkout \"fast\" path")
             .unwrap();
+        wait_storage(&mut app, &context);
     }
     app.create_document(DocumentKind::Component, None, "3d secure check")
         .unwrap();
+    wait_storage(&mut app, &context);
     settle(&mut app, &context);
     let session = app.session.as_ref().unwrap();
     let paths: Vec<_> = session
@@ -537,7 +580,7 @@ fn unfinished_inspector_text_joins_recovery_and_returns_on_reopening() {
         .to_vec();
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].text, draft.text);
-    let closed = app.prepare_close();
+    let closed = await_close(&mut app, &context);
     assert!(closed, "{:?}", app.close_error());
 
     let (reopened_context, _reopened) = open(directory.path());
@@ -582,6 +625,7 @@ fn discarding_a_tab_also_forgets_its_unfinished_inspector_text() {
     );
 
     app.close_tab_with(&scenario, false);
+    wait_storage(&mut app, &context);
     assert!(
         app.session
             .as_ref()
@@ -617,7 +661,7 @@ fn keeping_a_stale_draft_keeps_its_unfinished_inspector_text() {
     let project_id = draft.project_id.clone();
     inspector::drafts::restore_entries(&context, vec![draft.clone()]);
     app.sync_field_drafts(&scenario, &project_id);
-    assert!(app.prepare_close());
+    assert!(await_close(&mut app, &context));
     let path = directory.path().join(SCENARIO);
     let source = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, format!("// external change\n{source}")).unwrap();
@@ -669,7 +713,7 @@ fn a_failed_discard_on_close_keeps_the_window_usable() {
     type_into_code(&mut app, &context, "// later work\n");
     // A foreign edit makes both the protective close and clearing recovery fail.
     std::fs::write(directory.path().join(".apiforge/local/recovery.json"), b"{").unwrap();
-    assert!(!app.prepare_close());
+    assert!(!await_close(&mut app, &context));
     let error = app.close_error().unwrap();
     app.abort_close(error);
 
@@ -764,6 +808,7 @@ fn discarding_a_tab_clears_unfinished_text_held_by_the_url_field() {
         "The actual URL widget must contain an unfinished draft before discard"
     );
     app.close_tab_with(&component, false);
+    wait_storage(&mut app, &context);
     assert!(
         app.session
             .as_ref()
@@ -827,6 +872,7 @@ fn discarding_a_tab_clears_unfinished_text_held_by_the_body_field() {
         "The actual body widget must contain an unfinished draft before discard"
     );
     app.close_tab_with(&component, false);
+    wait_storage(&mut app, &context);
     assert!(
         app.session
             .as_ref()
@@ -860,6 +906,7 @@ fn watch(app: &mut FolderApp, context: &egui::Context) {
         app.follow_external(outcome);
     }
     frame(app, context, vec![]);
+    wait_storage(app, context);
 }
 
 fn rows(app: &FolderApp) -> Vec<String> {
@@ -886,6 +933,7 @@ fn the_explorer_shows_the_real_tree_and_folds_folders() {
     assert!(!shown.iter().any(|path| path.starts_with(".apiforge")));
     assert!(!shown.contains(&COMPONENT.to_owned()), "folded");
     app.explorer_action(explorer::Action::Toggle("components".into()));
+    wait_storage(&mut app, &context);
     assert!(rows(&app).contains(&COMPONENT.to_owned()));
     let loose = app
         .explorer_rows()
@@ -903,6 +951,7 @@ fn renaming_an_open_document_keeps_its_tab_unsaved_text_and_history() {
     type_into_code(&mut app, &context, "// note\n");
     let edited = text(&app, &id);
     app.relocate(SCENARIO, "flows/renamed.afs").unwrap();
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert_eq!(app.workbench.active(), Some(id.as_str()));
     assert_eq!(text(&app, &id), edited);
@@ -913,7 +962,9 @@ fn renaming_an_open_document_keeps_its_tab_unsaved_text_and_history() {
     assert!(rows(&app).contains(&"flows/renamed.afs".to_owned()));
     // Moving into an occupied path is refused and changes nothing.
     std::fs::write(directory.path().join("taken.afs"), "x").unwrap();
-    assert!(app.relocate("flows/renamed.afs", "taken.afs").is_err());
+    app.relocate("flows/renamed.afs", "taken.afs").unwrap();
+    wait_storage(&mut app, &context);
+    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
     assert_eq!(app.snapshot(&id).unwrap().path, "flows/renamed.afs");
 }
 
@@ -925,21 +976,25 @@ fn deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work() {
     type_into_code(&mut app, &context, "// unsaved\n");
     let edited = text(&app, &id);
     app.request_delete(vec!["scenarios".into()]);
+    wait_storage(&mut app, &context);
     let Some(Prompt::Delete { preview, .. }) = app.prompt.take() else {
         panic!("a delete confirmation");
     };
     assert_eq!(preview.unsaved_documents(), std::slice::from_ref(&id));
     app.delete_confirmed(&preview).unwrap();
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert!(app.workbench.tabs().iter().all(|tab| tab.document_id != id));
     assert!(!directory.path().join("scenarios").exists());
 
     app.open_trash();
+    wait_storage(&mut app, &context);
     let Some(Prompt::Trash { operations, .. }) = app.prompt.take() else {
         panic!("the trash");
     };
     let operation = operations[0].operation_id.clone();
     app.restore(&operation, &operations).unwrap();
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert_eq!(app.workbench.active(), Some(id.as_str()));
     assert_eq!(text(&app, &id), edited, "unsaved work returns unsaved");
@@ -975,6 +1030,7 @@ fn external_edits_reload_clean_tabs_and_pause_saving_unsaved_ones() {
     );
     assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
     frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    wait_storage(&mut app, &context);
     assert_eq!(
         std::fs::read_to_string(&scenario_file).unwrap(),
         "scenario \"Theirs\" {}\n",
@@ -1047,6 +1103,7 @@ fn initialising_registers_the_chosen_existing_sources() {
     app.survey[odd].include = false;
     app.new_name = "Existing".into();
     app.initialise();
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     let session = app.session.as_ref().unwrap();
     assert_eq!(session.documents().len(), 1);
@@ -1068,6 +1125,7 @@ fn a_found_source_is_registered_from_the_explorer() {
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
     app.explorer_action(explorer::Action::Register("found.afs".into()));
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     let id = document(&app, "found.afs");
     assert_eq!(app.workbench.active(), Some(id.as_str()));
@@ -1224,6 +1282,7 @@ fn click(app: &mut FolderApp, context: &egui::Context, at: egui::Pos2) {
             ],
         );
     }
+    wait_storage(app, context);
 }
 
 #[test]
@@ -1315,6 +1374,7 @@ fn a_project_text_file_is_edited_saved_exactly_and_recovered() {
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
     app.open_text(".gitignore");
+    wait_storage(&mut app, &context);
     let tab = text_tab(".gitignore");
     frame(&mut app, &context, vec![]);
     assert_eq!(app.workbench.active(), Some(tab.as_str()));
@@ -1336,6 +1396,7 @@ fn a_project_text_file_is_edited_saved_exactly_and_recovered() {
 
     // The saved bytes are exactly what the editor holds.
     frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
+    wait_storage(&mut app, &context);
     let text = app
         .session
         .as_ref()
@@ -1354,7 +1415,10 @@ fn a_project_text_file_is_edited_saved_exactly_and_recovered() {
     frame(&mut app, &context, vec![]);
     app.changed_at = Some(Instant::now() - RECOVERY_DELAY * 2);
     frame(&mut app, &context, vec![]);
-    assert!(app.prepare_close(), "recovery protects the unsaved text");
+    assert!(
+        await_close(&mut app, &context),
+        "recovery protects the unsaved text"
+    );
     drop(app);
     let (context, mut app) = open(directory.path());
     frame(&mut app, &context, vec![]);
@@ -1382,6 +1446,7 @@ fn a_project_text_file_is_edited_saved_exactly_and_recovered() {
     app.request_close_tab(&tab);
     assert!(matches!(app.prompt, Some(Prompt::CloseTab(_))));
     app.close_tab_with(&tab, false);
+    wait_storage(&mut app, &context);
     assert!(
         app.session
             .as_ref()
@@ -1399,6 +1464,7 @@ fn a_text_file_has_no_diagram_and_cannot_be_registered_as_one() {
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
     app.open_text("README.md");
+    wait_storage(&mut app, &context);
     app.workbench.mode = Mode::Diagram;
     let texts = painted(&mut app, &context, egui::vec2(1600.0, 1000.0));
     assert!(
@@ -1409,6 +1475,7 @@ fn a_text_file_has_no_diagram_and_cannot_be_registered_as_one() {
     );
     // API Forge's own data is never a text file.
     app.open_text(".apiforge/diagram.json");
+    wait_storage(&mut app, &context);
     assert!(
         app.session
             .as_ref()
@@ -1825,7 +1892,7 @@ fn close_export_keeps_read_only_and_failed_recovery_work_until_export_succeeds()
         .unwrap()
         .edit_source(&id, &edited, CODE)
         .unwrap();
-    assert!(!reader.prepare_close());
+    assert!(!await_close(&mut reader, &context));
     reader.abort_close("Read-only recovery".into());
     let _ = painted(&mut reader, &context, egui::vec2(960.0, 540.0));
     let labels = painted(&mut reader, &context, egui::vec2(960.0, 540.0));
@@ -1850,8 +1917,18 @@ fn close_export_keeps_read_only_and_failed_recovery_work_until_export_succeeds()
     let output = directory.path().join("export.json");
     apiforge_storage::write_atomic(&output, &latest).unwrap();
     reader.complete_close_export(Some(Ok(output)), &latest);
-    assert!(reader.session.is_none());
-    assert!(reader.close_requested);
+    wait_storage(&mut reader, &context);
+    assert!(
+        reader.session.is_none(),
+        "{}; {:?}; busy={}",
+        reader
+            .notice
+            .as_ref()
+            .map_or("", |notice| notice.text.as_str()),
+        reader.close_error,
+        reader.storage.is_busy()
+    );
+    assert!(reader.persistence.close_ready);
 }
 
 #[test]
@@ -1892,7 +1969,7 @@ fn project_and_legacy_interrupted_runs_are_reviewed_under_their_own_locks() {
             .as_str(),
         "main.afs"
     );
-    assert!(app.prepare_close());
+    assert!(await_close(&mut app, &context));
     let (context, mut app) = open(directory.path());
     let at = label_position(&mut app, &context, "Mark as handled");
     click(&mut app, &context, at);
@@ -1931,6 +2008,7 @@ fn project_and_legacy_interrupted_runs_are_reviewed_under_their_own_locks() {
     drop(journal);
     drop(legacy);
     app.review_legacy_runs_from(legacy_data.path());
+    wait_storage(&mut app, &context);
     assert!(matches!(app.prompt, Some(Prompt::Journal(_))));
     let _ = painted(&mut app, &context, egui::vec2(960.0, 540.0));
     let labels = painted(&mut app, &context, egui::vec2(960.0, 540.0));
@@ -1978,7 +2056,7 @@ fn folder_close_cancels_the_run_and_retains_its_project_lock_until_cleanup_finis
         .unwrap();
     let id = session.create_document(DocumentKind::Scenario, "main.afs", "scenario \"Main\" {\n  response = GET \"/slow\"\n  cleanup {\n    cleanup_value = 1\n  }\n}\n").unwrap();
     drop(session);
-    let (_context, mut app) = open(directory.path());
+    let (context, mut app) = open(directory.path());
     app.request_run(&id, true);
     waiting.recv_timeout(Duration::from_secs(3)).unwrap();
     assert!(
@@ -1993,7 +2071,7 @@ fn folder_close_cancels_the_run_and_retains_its_project_lock_until_cleanup_finis
     );
     let _ = release.send(());
     finish_folder_run(&mut app);
-    assert!(app.prepare_close());
+    assert!(await_close(&mut app, &context));
     assert!(
         !apiforge_storage::project::ProjectStore::open_read_only(directory.path())
             .unwrap()
@@ -2006,7 +2084,7 @@ fn folder_close_cancels_the_run_and_retains_its_project_lock_until_cleanup_finis
 #[test]
 fn exporting_after_failed_recovery_keeps_the_foreign_recovery_file_intact() {
     let (directory, id) = run_project();
-    let (_context, mut app) = open(directory.path());
+    let (context, mut app) = open(directory.path());
     let edited = format!("{}\n// latest unsaved work", text(&app, &id));
     app.session
         .as_mut()
@@ -2018,12 +2096,23 @@ fn exporting_after_failed_recovery_keeps_the_foreign_recovery_file_intact() {
         b"foreign recovery",
     )
     .unwrap();
-    assert!(!app.prepare_close());
+    assert!(!await_close(&mut app, &context));
+    settle(&mut app, &context);
+    wait_storage(&mut app, &context);
     let contents = app.session.as_ref().unwrap().export_unsaved().unwrap();
     let output = directory.path().join("export.json");
     apiforge_storage::write_atomic(&output, &contents).unwrap();
     app.complete_close_export(Some(Ok(output.clone())), &contents);
-    assert!(app.session.is_none());
+    wait_storage(&mut app, &context);
+    assert!(
+        app.session.is_none(),
+        "{}; {:?}; busy={}",
+        app.notice
+            .as_ref()
+            .map_or("", |notice| notice.text.as_str()),
+        app.close_error,
+        app.storage.is_busy()
+    );
     let export: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
     assert_eq!(export["recovery"]["documents"][0]["text"], edited);
@@ -2073,6 +2162,7 @@ fn recent_project_switching_writes_recovery_and_returns_exact_unsaved_work() {
         .set_field_drafts(&id, vec![field.clone()])
         .unwrap();
     app.request_switch(beta.path().into());
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert_eq!(
         app.session.as_ref().unwrap().manifest().name,
@@ -2120,6 +2210,7 @@ fn failed_switch_recovery_preserves_the_current_project_and_recent_active_path()
     )
     .unwrap();
     app.request_switch(beta.path().into());
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert_eq!(app.root, alpha.path());
     assert_eq!(text(&app, &id), edited);
@@ -2140,9 +2231,11 @@ fn opening_an_uninitialised_folder_writes_no_project_and_bad_targets_keep_the_cu
     let target = tempfile::tempdir().unwrap();
     let (context, mut app) = open(alpha.path());
     app.request_switch(target.path().join("missing"));
+    wait_storage(&mut app, &context);
     assert_eq!(app.root, alpha.path());
     assert!(app.session.as_ref().unwrap().document(&id).is_some());
     app.request_switch(target.path().into());
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert!(app.uninitialised);
     assert!(app.session.is_none());
@@ -2163,6 +2256,7 @@ fn exporting_a_read_only_project_allows_the_pending_folder_switch() {
         .edit_source(&id, &edited, CODE)
         .unwrap();
     app.request_switch(beta.path().into());
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     assert!(app.switching());
     let _ = label_position(&mut app, &context, "Export and open folder");
@@ -2170,6 +2264,7 @@ fn exporting_a_read_only_project_allows_the_pending_folder_switch() {
     let path = alpha.path().join("export.json");
     apiforge_storage::write_atomic(&path, &contents).unwrap();
     app.complete_close_export(Some(Ok(path)), &contents);
+    wait_storage(&mut app, &context);
     assert_eq!(
         app.session.as_ref().unwrap().manifest().name,
         "Navigation read-only Beta"
@@ -2225,7 +2320,7 @@ fn empty_project_settings_apply_without_saving_and_save_all_persists_only_the_ma
 #[test]
 fn environment_public_changes_save_separately_and_secret_values_do_not_survive_restart() {
     let (directory, id) = named_folder("Environment settings");
-    let (_context, mut app) = open(directory.path());
+    let (context, mut app) = open(directory.path());
     let original = text(&app, &id);
     let mut environment = app.session.as_ref().unwrap().manifest().environment.clone();
     environment.base_url = "https://api.example.test".into();
@@ -2234,12 +2329,14 @@ fn environment_public_changes_save_separately_and_secret_values_do_not_survive_r
         .into_iter()
         .collect();
     app.apply_environment(environment.clone(), secrets).unwrap();
+    wait_storage(&mut app, &context);
     app.session
         .as_mut()
         .unwrap()
         .edit_source(&id, &format!("{original}\n// unfinished"), CODE)
         .unwrap();
     app.save_configuration();
+    wait_storage(&mut app, &context);
     assert_eq!(
         std::fs::read_to_string(directory.path().join("main.afs")).unwrap(),
         original
@@ -2262,6 +2359,7 @@ fn environment_public_changes_save_separately_and_secret_values_do_not_survive_r
             .collect(),
     )
     .unwrap();
+    wait_storage(&mut app, &context);
     assert!(!app.session.as_ref().unwrap().is_manifest_dirty());
     assert!(
         app.session
@@ -2270,7 +2368,7 @@ fn environment_public_changes_save_separately_and_secret_values_do_not_survive_r
             .validate_run(&prepared)
             .is_err()
     );
-    assert!(app.prepare_close());
+    assert!(await_close(&mut app, &context));
     let (_context, reopened) = open(directory.path());
     assert!(reopened.runs.secrets.is_empty());
     assert_eq!(
@@ -2297,7 +2395,7 @@ fn read_only_environment_accepts_session_values_without_writing_public_settings(
         .unwrap();
     writer.save_configuration().unwrap();
     let before = std::fs::read(directory.path().join("apiforge.project.json")).unwrap();
-    let (_context, mut app) = open(directory.path());
+    let (context, mut app) = open(directory.path());
     assert!(app.session.as_ref().unwrap().is_read_only());
     let prepared = app.session.as_mut().unwrap().prepare_run(&id).unwrap();
     let environment = app.session.as_ref().unwrap().manifest().environment.clone();
@@ -2308,6 +2406,7 @@ fn read_only_environment_accepts_session_values_without_writing_public_settings(
             .collect(),
     )
     .unwrap();
+    wait_storage(&mut app, &context);
     assert!(!app.session.as_ref().unwrap().is_manifest_dirty());
     assert!(
         app.session

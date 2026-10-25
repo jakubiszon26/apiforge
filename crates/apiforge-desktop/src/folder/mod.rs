@@ -16,10 +16,13 @@ mod diagram;
 mod explorer;
 mod file_prompts;
 mod navigation;
+mod opening;
 mod placement;
 mod publication;
 mod runs;
+mod saving;
 mod settings;
+mod storage;
 mod text_view;
 mod transaction_view;
 mod watcher;
@@ -76,6 +79,10 @@ const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
 const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    Working {
+        ticket: u64,
+        label: &'static str,
+    },
     Conflict(Box<conflict_view::ConflictView>),
     Transaction(Box<transaction_view::TransactionView>),
     Settings(Box<dialogs::SettingsDialog>),
@@ -206,6 +213,13 @@ pub struct FolderApp {
     preferences: Preferences,
     runs: runs::Runs,
     navigation: navigation::Navigation,
+    storage: storage::Storage,
+    open_generation: u64,
+    opening: bool,
+    persistence: saving::Persistence,
+    activation_generation: u64,
+    operation_sequence: u64,
+    picked_ready: Vec<Picked>,
 }
 
 struct Clipboard {
@@ -268,59 +282,26 @@ impl FolderApp {
             prompt: None,
             close_error: None,
             close_requested: false,
-            preferences: Preferences::load(),
+            preferences: Preferences::default(),
             runs: runs::Runs::default(),
             navigation: navigation::Navigation::default(),
+            storage: storage::Storage::new(context.clone()),
+            open_generation: 0,
+            opening: false,
+            persistence: saving::Persistence::default(),
+            activation_generation: 0,
+            operation_sequence: 0,
+            picked_ready: Vec::new(),
         }
     }
 
     pub fn open(context: &egui::Context, root: PathBuf) -> Self {
         let mut app = Self::shell(context, root);
-        match ProjectSession::open_with(&app.root, Arc::new(CardPlacer)) {
-            Ok(session) => app.install(session),
-            Err(apiforge_project::Error::NotAProject) => {
-                app.uninitialised = true;
-                match ProjectSession::survey(&app.root) {
-                    Ok(surveys) => {
-                        app.survey = surveys
-                            .into_iter()
-                            .map(|survey| SurveyRow {
-                                path: survey.path,
-                                include: true,
-                                kind: survey.declaration.map(|declaration| declaration.kind),
-                            })
-                            .collect()
-                    }
-                    Err(error) => app.open_error = Some(error.to_string()),
-                }
-                app.new_name = app
-                    .root
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-            }
-            Err(error) => {
-                app.open_error = Some(error.to_string());
-                if matches!(
-                    error,
-                    apiforge_project::Error::Storage(
-                        apiforge_project::ProjectError::RecoveryRequired
-                    )
-                ) {
-                    app.review_transaction(app.root.clone());
-                }
-            }
-        }
+        app.begin_open();
         app
     }
 
-    fn install(&mut self, session: ProjectSession) {
-        let project_id = session.manifest().id.clone();
-        let state = session
-            .store()
-            .load_workspace_state(&project_id)
-            .ok()
-            .flatten();
+    fn install(&mut self, session: ProjectSession, state: Option<WorkspaceState>) {
         let first_open = state.is_none();
         self.workbench = Workbench::restore(state.clone(), |id| {
             session.document(id).is_some() || id.starts_with(TEXT_TAB)
@@ -336,7 +317,7 @@ impl FolderApp {
                 )
             });
             if let Some(document) = documents.first() {
-                self.workbench.open(document.id());
+                self.activate_tab(document.id());
             }
         }
         // Unsaved work comes back with its own caret.
@@ -415,6 +396,11 @@ impl FolderApp {
         canvas
     }
 
+    fn activate_tab(&mut self, id: &str) {
+        self.activation_generation += 1;
+        self.workbench.open(id);
+    }
+
     fn snapshot(&self, document_id: &str) -> Option<Snapshot> {
         let session = self.session.as_ref()?;
         let document = session.document(document_id)?;
@@ -431,7 +417,10 @@ impl FolderApp {
             model: document.model().cloned(),
             model_state: document.model_state(),
             unavailable: document.unavailable(),
-            editable: document.accepts_model_edits() && !held,
+            editable: document.accepts_model_edits()
+                && !held
+                && !self.persistence.closing
+                && !self.storage.blocks_edits(),
             held,
             dirty: document.is_dirty(),
             layout_dirty: document.is_layout_dirty(),
@@ -454,8 +443,10 @@ impl FolderApp {
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.poll_storage();
         self.poll_run();
         self.follow_dialogs();
+        self.advance_departure();
         self.advance_switch();
         if self.close_requested {
             self.close_requested = false;
@@ -467,16 +458,34 @@ impl FolderApp {
             return;
         };
         let now = Instant::now();
-        if let Some(wait) = self.analyser.poll(session, now) {
+        if !self.persistence.closing
+            && !self.storage.owns_session()
+            && let Some(wait) = self.analyser.poll(session, now)
+        {
             ui.ctx().request_repaint_after(wait);
         }
-        self.watcher
-            .focus(ui.input(|input| input.viewport().focused.unwrap_or(true)));
-        let (outcome, wait) = self.watcher.poll(session, now);
+        let (outcome, wait) = if self.persistence.closing {
+            self.watcher.drain_stopped();
+            (None, Duration::from_millis(16))
+        } else {
+            self.watcher
+                .focus(ui.input(|input| input.viewport().focused.unwrap_or(true)));
+            self.watcher.poll(session, now)
+        };
         ui.ctx().request_repaint_after(wait);
         self.follow_events();
-        if let Some(outcome) = outcome {
-            self.follow_external(outcome);
+        if let Some(changes) = outcome {
+            self.storage_project(
+                "Checking external changes…",
+                apiforge_project::StorageMode::Exclusive,
+                false,
+                move |session| session.apply_external(changes),
+                |app, result| match result {
+                    Ok(outcome) => app.follow_external(outcome),
+                    Err(apiforge_project::Error::StaleStorage) => app.watcher.rescan(),
+                    Err(error) => app.watcher.problem = Some(error.to_string()),
+                },
+            );
         }
         if self.watcher.recovery_required {
             self.transaction_screen(ui);
@@ -493,7 +502,12 @@ impl FolderApp {
                     .fill(theme::WHITE)
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
-            .show(ui, |ui| self.header(ui));
+            .show(ui, |ui| {
+                ui.add_enabled_ui(
+                    !self.persistence.closing && !self.storage.blocks_edits(),
+                    |ui| self.header(ui),
+                );
+            });
         egui::Panel::top("folder-tabs")
             .frame(
                 egui::Frame::new()
@@ -501,7 +515,10 @@ impl FolderApp {
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ui, |ui| {
-                self.tab_strip(ui);
+                ui.add_enabled_ui(
+                    !self.persistence.closing && !self.storage.blocks_edits(),
+                    |ui| self.tab_strip(ui),
+                );
                 self.notices(ui);
             });
         let active = self.workbench.active().map(str::to_owned);
@@ -518,7 +535,10 @@ impl FolderApp {
                     )
                     .show(ui, |ui| {
                         self.workbench.panels.documents = ui.available_width() + 24.0;
-                        self.explorer_panel(ui);
+                        ui.add_enabled_ui(
+                            !self.persistence.closing && !self.storage.blocks_edits(),
+                            |ui| self.explorer_panel(ui),
+                        );
                     });
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(theme::WHITE))
@@ -575,6 +595,20 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_SM);
                 widgets::hint(ui, self.root.display().to_string());
                 ui.add_space(theme::SPACE_LG);
+                if self.opening || self.persistence.closing {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        widgets::hint(
+                            ui,
+                            if self.persistence.closing {
+                                "Closing project…"
+                            } else {
+                                "Opening project…"
+                            },
+                        );
+                    });
+                    return;
+                }
                 if let Some(error) = &self.open_error {
                     widgets::error_box(ui, std::slice::from_ref(error));
                     if ui.button("Review transaction recovery…").clicked() {
@@ -660,15 +694,32 @@ impl FolderApp {
                 })
             })
             .collect();
-        match ProjectSession::initialise_with(
-            &self.root,
-            self.new_name.trim(),
-            &registrations,
-            Arc::new(CardPlacer),
-        ) {
-            Ok(session) => self.install(session),
-            Err(error) => self.open_error = Some(error.to_string()),
-        }
+        self.open_generation += 1;
+        self.opening = true;
+        let generation = self.open_generation;
+        let root = self.root.clone();
+        let name = self.new_name.trim().to_owned();
+        self.storage_io(
+            "Creating project…",
+            move || {
+                ProjectSession::initialise_with(&root, &name, &registrations, Arc::new(CardPlacer))
+            },
+            move |app, result| {
+                if app.open_generation != generation {
+                    return;
+                }
+                if app.persistence.closing {
+                    app.opening = false;
+                    return;
+                }
+                app.opening = false;
+                match result {
+                    Ok(Ok(session)) => app.install(session, None),
+                    Ok(Err(error)) => app.open_error = Some(error.to_string()),
+                    Err(error) => app.open_error = Some(error),
+                }
+            },
+        );
     }
 
     /// Source replaced from outside the code view makes its text history
@@ -757,6 +808,9 @@ impl FolderApp {
     // ----- Shortcuts -------------------------------------------------------------
 
     fn shortcuts(&mut self, context: &egui::Context) {
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let shortcut = |modifiers, key| {
             context
                 .input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
@@ -772,9 +826,11 @@ impl FolderApp {
         }
         if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab) {
             self.workbench.cycle(false);
+            self.activation_generation += 1;
             self.touched();
         } else if shortcut(Modifiers::COMMAND, Key::Tab) {
             self.workbench.cycle(true);
+            self.activation_generation += 1;
             self.touched();
         }
         if shortcut(Modifiers::COMMAND, Key::W)
@@ -842,204 +898,6 @@ impl FolderApp {
         self.component_action(document_id, publication::Action::History { undo });
     }
 
-    // ----- Saving ----------------------------------------------------------------
-
-    /// Ctrl+S: the active document's exact text, errors included, plus dirty
-    /// configuration. Without an active document, configuration alone.
-    fn save_active(&mut self) {
-        match self.workbench.active().map(str::to_owned) {
-            Some(active) => {
-                if let Err(message) = self.save_document(&active) {
-                    self.notify(message, true);
-                }
-            }
-            None => self.save_configuration(),
-        }
-    }
-
-    fn save_document(&mut self, document_id: &str) -> Result<(), String> {
-        if let Some(path) = self.text_of(document_id).map(str::to_owned) {
-            return self.save_text(&path);
-        }
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let name = session
-            .document(document_id)
-            .map(|document| file_name(document.entry().path.as_str()).to_owned())
-            .unwrap_or_default();
-        match session.save(document_id) {
-            Ok(_) => {
-                self.touched();
-                Ok(())
-            }
-            Err(error) => Err(format!("Could not save {name}: {error}")),
-        }
-    }
-
-    fn save_configuration(&mut self) {
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        if let Err(error) = session.save_configuration() {
-            self.notify(
-                format!("Could not save the project settings: {error}"),
-                true,
-            );
-        }
-    }
-
-    /// Ctrl+Shift+S: each document with unsaved work in its own transaction,
-    /// then configuration. Every failure is reported; none stops the others.
-    fn save_all(&mut self) {
-        let Some(session) = self.session.as_ref() else {
-            return;
-        };
-        let mut pending: Vec<String> = session
-            .documents()
-            .iter()
-            .filter(|document| document.is_dirty() || document.is_layout_dirty())
-            .map(|document| document.id().to_owned())
-            .collect();
-        pending.extend(
-            session
-                .text_files()
-                .iter()
-                .filter(|file| file.is_dirty())
-                .map(|file| text_tab(file.path())),
-        );
-        let mut failures = Vec::new();
-        for document_id in &pending {
-            if let Err(message) = self.save_document(document_id) {
-                failures.push(message);
-            }
-        }
-        if self
-            .session
-            .as_ref()
-            .is_some_and(ProjectSession::is_manifest_dirty)
-        {
-            self.save_configuration();
-        }
-        if failures.is_empty() {
-            if !pending.is_empty() {
-                let count = pending.len();
-                let noun = if count == 1 { "file" } else { "files" };
-                self.notify(format!("Saved {count} {noun}."), false);
-            }
-        } else {
-            self.notify(failures.join("\n"), true);
-        }
-    }
-
-    /// Writes unsaved work to local recovery after a pause, and the view state
-    /// with it. Neither ever saves a source file.
-    fn protect(&mut self, now: Instant) {
-        let Some(changed) = self.changed_at else {
-            return;
-        };
-        let due = changed + RECOVERY_DELAY;
-        if now < due {
-            self.ui_context.request_repaint_after(due - now);
-            return;
-        }
-        self.changed_at = None;
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        if session.is_read_only() {
-            return;
-        }
-        let failure = session.save_recovery().err();
-        let _ = session.save_last_valid();
-        if let Some(error) = failure {
-            self.notify(format!("Unsaved work is not protected: {error}"), true);
-        }
-        self.save_view();
-    }
-
-    fn save_view(&mut self) {
-        let Some(session) = self.session.as_ref() else {
-            return;
-        };
-        if session.is_read_only() {
-            return;
-        }
-        let ids: Vec<String> = self
-            .workbench
-            .tabs()
-            .iter()
-            .map(|tab| tab.document_id.clone())
-            .collect();
-        for document_id in ids {
-            let camera = self
-                .canvases
-                .get(&document_id)
-                .and_then(Canvas::camera)
-                .map(|(x, y, zoom)| CameraState { x, y, zoom });
-            if let Some(tab) = self.workbench.tab_mut(&document_id)
-                && camera.is_some()
-            {
-                tab.camera = camera;
-            }
-        }
-        let state = self.workbench.state(&session.manifest().id);
-        if self.saved_view.as_ref() != Some(&state)
-            && session.store().save_workspace_state(&state).is_ok()
-        {
-            self.saved_view = Some(state);
-        }
-    }
-
-    // ----- Closing ---------------------------------------------------------------
-
-    /// Closing succeeds once unsaved work is in local recovery; it never saves
-    /// a source file. A failure keeps the window open with the reason.
-    pub fn prepare_close(&mut self) -> bool {
-        self.poll_run();
-        if self.runs.handle.is_some() {
-            if let Some(handle) = &self.runs.handle {
-                handle.cancel();
-            }
-            return false;
-        }
-        self.save_view();
-        if let Some(session) = self.session.as_mut()
-            && !session.is_read_only()
-        {
-            let _ = session.save_last_valid();
-        }
-        let Some(session) = self.session.take() else {
-            return true;
-        };
-        match session.close() {
-            Ok(()) => {
-                self.runs = runs::Runs::default();
-                true
-            }
-            Err((session, error)) => {
-                self.session = Some(*session);
-                self.close_error = Some(error.to_string());
-                false
-            }
-        }
-    }
-
-    pub fn close_error(&mut self) -> Option<String> {
-        self.close_error.take()
-    }
-
-    pub fn abort_close(&mut self, error: String) {
-        self.prompt = Some(Prompt::CloseFailed(error));
-    }
-
-    pub fn save_pending(&self) -> bool {
-        self.runs.handle.is_some()
-            || self
-                .runs
-                .runner
-                .as_ref()
-                .is_some_and(|runner| runner.active_runs() > 0)
-    }
-
     fn request_close_tab(&mut self, document_id: &str) {
         let unsaved = match self.text_of(document_id) {
             Some(path) => self
@@ -1070,7 +928,11 @@ impl FolderApp {
             self.notify(error.to_string(), true);
             return;
         }
+        let active = self.workbench.active().map(str::to_owned);
         self.workbench.close(document_id);
+        if self.workbench.active() != active.as_deref() {
+            self.activation_generation += 1;
+        }
         self.canvases.remove(document_id);
         self.selections.remove(document_id);
         if self.shown.as_deref() == Some(document_id) {

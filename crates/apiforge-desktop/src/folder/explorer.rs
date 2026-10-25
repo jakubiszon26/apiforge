@@ -589,7 +589,7 @@ impl FolderApp {
                 self.touched();
             }
             Action::Open(document_id) => {
-                self.workbench.open(&document_id);
+                self.activate_tab(&document_id);
                 self.touched();
             }
             Action::OpenText(path) => self.open_text(&path),
@@ -640,119 +640,218 @@ impl FolderApp {
             }
             Action::Import(folder) => self.pick_imports(folder),
             Action::Register(path) => {
-                let declared = std::fs::read_to_string(self.root.join(&path))
-                    .ok()
-                    .and_then(|text| apiforge_project::declaration(&text));
-                match declared {
-                    Some(declared) => {
-                        if let Err(message) = self.register(&path, declared.kind) {
-                            self.notify(message, true);
+                let target = path.clone();
+                self.storage_project(
+                    "Reading source header…",
+                    apiforge_project::StorageMode::Read,
+                    false,
+                    move |session| {
+                        let relative =
+                            apiforge_storage::project::ProjectPath::working_source(target)?;
+                        let snapshot = session.store().read(std::slice::from_ref(&relative))?;
+                        Ok(snapshot.files[&relative]
+                            .as_deref()
+                            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                            .and_then(apiforge_project::declaration)
+                            .map(|declared| declared.kind))
+                    },
+                    move |app, result| match result {
+                        Ok(Some(kind)) => {
+                            if let Err(error) = app.register(&path, kind) {
+                                app.notify(error, true);
+                            }
                         }
-                    }
-                    None => {
-                        self.prompt = Some(Prompt::Register {
-                            path,
-                            kind: DocumentKind::Scenario,
-                            error: None,
-                        })
-                    }
-                }
+                        Ok(None) => {
+                            app.prompt = Some(Prompt::Register {
+                                path,
+                                kind: DocumentKind::Scenario,
+                                error: None,
+                            })
+                        }
+                        Err(error) => {
+                            app.notify(format!("Cannot inspect this source: {error}"), true)
+                        }
+                    },
+                );
             }
         }
     }
 
-    /// Registers an `.afs` file found in the folder, exactly as it is.
+    /// Queues registration; success is acknowledged only after its transaction.
     pub(super) fn register(&mut self, path: &str, kind: DocumentKind) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let ids = session
-            .register_existing(
-                &[Registration {
-                    path: path.to_owned(),
-                    kind,
-                }],
-                DIAGRAM,
-            )
-            .map_err(|error| format!("Could not register {}: {error}", file_name(path)))?;
-        if let Some(id) = ids.first() {
-            self.workbench.open(id);
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
-        self.watcher.rescan();
-        self.touched();
+        let path = path.to_owned();
+        let target = path.clone();
+        self.working_project(
+            "Registering source…",
+            move |session| {
+                session.register_existing(&[Registration { path: target, kind }], DIAGRAM)
+            },
+            move |app, result| match result {
+                Ok(ids) => {
+                    if let Some(id) = ids.first() {
+                        app.activate_tab(id);
+                    }
+                    app.watcher.rescan();
+                    app.touched();
+                }
+                Err(error) => app.restore_prompt(
+                    Prompt::Register {
+                        path,
+                        kind,
+                        error: None,
+                    },
+                    error.to_string(),
+                ),
+            },
+        );
         Ok(())
     }
 
-    /// Renames or moves, keeping document identity, and reports the result.
     pub(super) fn relocate(&mut self, from: &str, to: &str) -> Result<(), String> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        match session.relocate(from, to, DIAGRAM) {
-            Ok(_) => {
-                if self
-                    .explorer
-                    .selected
-                    .as_deref()
-                    .is_some_and(|selected| selected == from)
-                {
-                    self.explorer.selected = Some(to.to_owned());
-                }
-                // Keep moved folders expanded under their new names.
-                let prefix = format!("{from}/");
-                let moved: Vec<String> = self
-                    .workbench
-                    .expanded
-                    .iter()
-                    .filter(|path| *path == from || path.starts_with(&prefix))
-                    .cloned()
-                    .collect();
-                for path in moved {
-                    self.workbench.expanded.remove(&path);
-                    self.workbench
-                        .expanded
-                        .insert(format!("{to}{}", &path[from.len()..]));
-                }
-                let parent = parent(to);
-                if !parent.is_empty() {
-                    self.workbench.expanded.insert(parent.to_owned());
-                }
-                self.watcher.rescan();
-                self.touched();
-                Ok(())
-            }
-            Err(error) => Err(error.to_string()),
+        self.relocate_with(from, to, None)
+    }
+
+    pub(super) fn relocate_with(
+        &mut self,
+        from: &str,
+        to: &str,
+        failed: Option<Prompt>,
+    ) -> Result<(), String> {
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
+        let from = from.to_owned();
+        let to = to.to_owned();
+        let source = from.clone();
+        let target = to.clone();
+        self.working_project(
+            "Moving file…",
+            move |session| session.relocate(&source, &target, DIAGRAM),
+            move |app, result| match result {
+                Ok(_) => app.finish_relocation(&from, &to),
+                Err(error) => {
+                    if let Some(prompt) = failed {
+                        app.restore_prompt(prompt, error.to_string());
+                    } else {
+                        app.notify(
+                            format!("Could not move {}: {error}", file_name(&from)),
+                            true,
+                        );
+                    }
+                }
+            },
+        );
+        Ok(())
+    }
+
+    fn finish_relocation(&mut self, from: &str, to: &str) {
+        if self.explorer.selected.as_deref() == Some(from) {
+            self.explorer.selected = Some(to.to_owned());
+        }
+        let prefix = format!("{from}/");
+        let moved: Vec<_> = self
+            .workbench
+            .expanded
+            .iter()
+            .filter(|path| *path == from || path.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for path in moved {
+            self.workbench.expanded.remove(&path);
+            self.workbench
+                .expanded
+                .insert(format!("{to}{}", &path[from.len()..]));
+        }
+        let tabs: Vec<_> = self
+            .workbench
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.document(&tab.document_id).is_some())
+                {
+                    return None;
+                }
+                let path = tab.document_id.strip_prefix(TEXT_TAB)?;
+                (path == from || path.starts_with(&prefix)).then(|| {
+                    (
+                        tab.document_id.clone(),
+                        text_tab(&format!("{to}{}", &path[from.len()..])),
+                    )
+                })
+            })
+            .collect();
+        for (old, new) in tabs {
+            if let Some(state) =
+                egui::text_edit::TextEditState::load(&self.ui_context, editor_id(&old))
+            {
+                self.ui_context.data_mut(|data| {
+                    data.remove::<egui::text_edit::TextEditState>(editor_id(&old))
+                });
+                state.store(&self.ui_context, editor_id(&new));
+            }
+            self.workbench.rename_tab(&old, &new);
+            if self.shown.as_deref() == Some(old.as_str()) {
+                self.shown = None;
+            }
+        }
+        let parent = parent(to);
+        if !parent.is_empty() {
+            self.workbench.expanded.insert(parent.to_owned());
+        }
+        self.watcher.rescan();
+        self.touched();
     }
 
     pub(super) fn request_delete(&mut self, paths: Vec<String>) {
-        let Some(session) = self.session.as_ref() else {
+        if self.session.is_none() {
             return;
-        };
-        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-        match session.preview_delete(&refs) {
-            Ok(preview) => {
-                self.prompt = Some(Prompt::Delete {
-                    preview: Box::new(preview),
-                    paths,
-                    error: None,
-                })
-            }
-            Err(error) => self.notify(format!("Cannot delete: {error}"), true),
         }
+        let target = paths.clone();
+        self.storage_project(
+            "Inspecting items to delete…",
+            apiforge_project::StorageMode::Read,
+            false,
+            move |session| {
+                session.preview_delete(&target.iter().map(String::as_str).collect::<Vec<_>>())
+            },
+            move |app, result| match result {
+                Ok(preview) => {
+                    app.prompt = Some(Prompt::Delete {
+                        preview: Box::new(preview),
+                        paths,
+                        error: None,
+                    })
+                }
+                Err(error) => app.notify(format!("Cannot delete: {error}"), true),
+            },
+        );
     }
 
     pub(super) fn open_trash(&mut self) {
-        let Some(session) = self.session.as_ref() else {
+        if self.session.is_none() {
             return;
-        };
-        match session.trash_operations() {
-            Ok(operations) => {
-                self.prompt = Some(Prompt::Trash {
-                    operations,
-                    error: None,
-                })
-            }
-            Err(error) => self.notify(format!("Cannot read the trash: {error}"), true),
         }
+        self.storage_project(
+            "Reading trash…",
+            apiforge_project::StorageMode::Read,
+            false,
+            |session| session.trash_operations(),
+            |app, result| match result {
+                Ok(operations) => {
+                    app.prompt = Some(Prompt::Trash {
+                        operations,
+                        error: None,
+                    })
+                }
+                Err(error) => app.notify(format!("Cannot read the trash: {error}"), true),
+            },
+        );
     }
 }
 
@@ -1008,28 +1107,31 @@ fn explorer_row(
 
 /// Shows a file or folder in the system file manager.
 pub fn reveal(path: &std::path::Path) {
-    #[cfg(target_os = "windows")]
-    let command = std::process::Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .spawn();
-    #[cfg(target_os = "macos")]
-    let command = std::process::Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .spawn();
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let command = {
-        let target = if path.is_dir() {
-            path
-        } else {
-            path.parent().unwrap_or(path)
+    let path = path.to_owned();
+    std::thread::spawn(move || {
+        let path = path.as_path();
+        #[cfg(target_os = "windows")]
+        let command = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn();
+        #[cfg(target_os = "macos")]
+        let command = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let command = {
+            let target = if path.is_dir() {
+                path
+            } else {
+                path.parent().unwrap_or(path)
+            };
+            std::process::Command::new("xdg-open").arg(target).spawn()
         };
-        std::process::Command::new("xdg-open").arg(target).spawn()
-    };
-    // Reap the child off the UI thread; a missing opener is not an error here.
-    if let Ok(mut child) = command {
-        std::thread::spawn(move || child.wait());
-    }
+        if let Ok(mut child) = command {
+            let _ = child.wait();
+        }
+    });
 }
 
 #[cfg(test)]

@@ -8,20 +8,6 @@ pub(super) struct ConflictView {
     error: Option<String>,
 }
 
-impl ConflictView {
-    fn refresh(&mut self, session: &ProjectSession) {
-        match session.preview_conflict(self.target.clone()) {
-            Ok(preview) => {
-                self.preview = Some(preview);
-                self.error = None;
-            }
-            Err(error) => {
-                self.error = Some(error.to_string());
-            }
-        }
-    }
-}
-
 impl FolderApp {
     pub(super) fn conflict_notice(
         &mut self,
@@ -46,14 +32,29 @@ impl FolderApp {
 
     pub(super) fn review_conflict(&mut self, target: ConflictTarget) {
         self.export_status = None;
-        let Some(session) = &self.session else { return };
-        let mut view = ConflictView {
+        self.refresh_conflict(ConflictView {
             target,
             preview: None,
             error: None,
-        };
-        view.refresh(session);
-        self.prompt = Some(Prompt::Conflict(Box::new(view)));
+        });
+    }
+
+    fn refresh_conflict(&mut self, mut view: ConflictView) {
+        let target = view.target.clone();
+        self.working_project(
+            "Reading conflict candidates…",
+            move |session| session.preview_conflict(target),
+            move |app, result| {
+                match result {
+                    Ok(preview) => {
+                        view.preview = Some(preview);
+                        view.error = None;
+                    }
+                    Err(error) => view.error = Some(error.to_string()),
+                }
+                app.prompt = Some(Prompt::Conflict(Box::new(view)));
+            },
+        );
     }
 
     pub(super) fn conflict_prompt(
@@ -113,44 +114,61 @@ impl FolderApp {
                 );
             }
         }
-        if refresh && let Some(session) = &self.session {
-            view.refresh(session);
+        if refresh {
+            self.refresh_conflict(view);
+            return self.prompt.take();
         }
         if let Some(decision) = decision
-            && let (Some(session), Some(preview)) = (&mut self.session, &view.preview)
+            && let Some(preview) = view.preview.clone()
         {
-            match session.resolve_conflict(preview, decision, DIAGRAM) {
-                Ok(()) => {
-                    let tab = match preview.target() {
-                        ConflictTarget::Document(id) => id.clone(),
-                        ConflictTarget::Text(path) => text_tab(path),
-                    };
+            let reviewed = preview.clone();
+            self.working_project(
+                "Resolving file conflict…",
+                move |session| {
+                    session.resolve_conflict(&reviewed, decision, DIAGRAM)?;
                     if decision == ConflictDecision::UseDisk
-                        && preview.is_deleted()
-                        && let ConflictTarget::Text(path) = preview.target()
-                        && session.close_text_file(path).is_ok()
+                        && reviewed.is_deleted()
+                        && let ConflictTarget::Text(path) = reviewed.target()
                     {
-                        self.workbench.close(&tab);
+                        session.close_text_file(path)?;
                     }
-                    code::clear_history(context, editor_id(&tab));
-                    self.shown = None;
-                    self.reload_field_drafts();
-                    self.touched();
-                    self.watcher.rescan();
-                    self.notify(
-                        if decision == ConflictDecision::KeepDeleted {
-                            "Kept your version. Use Save to recreate the file."
-                        } else if preview.is_deleted() {
-                            "Accepted the file deletion."
-                        } else {
-                            "Loaded the reviewed version on disk."
-                        },
-                        false,
-                    );
-                    return None;
-                }
-                Err(error) => view.error = Some(error.to_string()),
-            }
+                    Ok(())
+                },
+                move |app, result| match result {
+                    Ok(()) => {
+                        let tab = match preview.target() {
+                            ConflictTarget::Document(id) => id.clone(),
+                            ConflictTarget::Text(path) => text_tab(path),
+                        };
+                        if decision == ConflictDecision::UseDisk
+                            && preview.is_deleted()
+                            && matches!(preview.target(), ConflictTarget::Text(_))
+                        {
+                            app.workbench.close(&tab);
+                        }
+                        code::clear_history(&app.ui_context, editor_id(&tab));
+                        app.shown = None;
+                        app.reload_field_drafts();
+                        app.touched();
+                        app.watcher.rescan();
+                        app.notify(
+                            if decision == ConflictDecision::KeepDeleted {
+                                "Kept your version. Use Save to recreate the file."
+                            } else if preview.is_deleted() {
+                                "Accepted the file deletion."
+                            } else {
+                                "Loaded the reviewed version on disk."
+                            },
+                            false,
+                        );
+                    }
+                    Err(error) => {
+                        view.error = Some(error.to_string());
+                        app.prompt = Some(Prompt::Conflict(Box::new(view)));
+                    }
+                },
+            );
+            return self.prompt.take();
         }
         Some(Prompt::Conflict(Box::new(view)))
     }

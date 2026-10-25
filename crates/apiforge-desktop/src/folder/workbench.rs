@@ -84,6 +84,15 @@ impl Workbench {
             .find(|tab| tab.document_id == document_id)
     }
 
+    pub fn rename_tab(&mut self, from: &str, to: &str) {
+        if let Some(tab) = self.tab_mut(from) {
+            tab.document_id = to.to_owned();
+        }
+        if self.active.as_deref() == Some(from) {
+            self.active = Some(to.to_owned());
+        }
+    }
+
     /// Ctrl+E: Code and Diagram swap; Split goes to Code.
     pub fn toggle(&mut self) {
         self.mode = match self.mode {

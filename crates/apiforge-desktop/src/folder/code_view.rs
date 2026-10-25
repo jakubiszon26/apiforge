@@ -94,25 +94,31 @@ impl FolderApp {
             scroll = scroll.vertical_scroll_offset(offset);
         }
         let output = ui
-            .add_enabled_ui(!snapshot.held, |ui| {
-                scroll.show(ui, |ui| {
-                    self.code.show(
-                        ui,
-                        id,
-                        &mut text,
-                        &code::Context {
-                            mode: apiforge_script::complete::Mode::Script,
-                            scope: names.scope(&shapes),
-                            diagnostics: &snapshot.diagnostics,
-                            line_numbers: true,
-                            wrap: false,
-                            font_size: 13.0,
-                            plain: false,
-                        },
-                    )
-                })
-            })
+            .add_enabled_ui(
+                !snapshot.held && !self.persistence.closing && !self.storage.blocks_edits(),
+                |ui| {
+                    scroll.show(ui, |ui| {
+                        self.code.show(
+                            ui,
+                            id,
+                            &mut text,
+                            &code::Context {
+                                mode: apiforge_script::complete::Mode::Script,
+                                scope: names.scope(&shapes),
+                                diagnostics: &snapshot.diagnostics,
+                                line_numbers: true,
+                                wrap: false,
+                                font_size: 13.0,
+                                plain: false,
+                            },
+                        )
+                    })
+                },
+            )
             .inner;
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let offset = output.state.offset.y.max(0.0);
         let outcome = output.inner;
         let Some(session) = self.session.as_mut() else {

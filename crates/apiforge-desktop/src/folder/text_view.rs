@@ -45,19 +45,39 @@ impl FolderApp {
     /// Opens a project file as text in its own tab, or activates the tab it
     /// already has. A file that cannot be edited as text says so.
     pub(super) fn open_text(&mut self, path: &str) {
-        let Some(session) = self.session.as_mut() else {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.text_file(path).is_some())
+        {
+            self.activate_tab(&text_tab(path));
+            self.touched();
             return;
-        };
-        match session.open_text_file(path) {
-            Ok(_) => {
-                self.workbench.open(&text_tab(path));
-                self.touched();
-            }
-            Err(error) => self.notify(
-                format!("Cannot open {} as text: {error}", file_name(path)),
-                true,
-            ),
         }
+        let path = path.to_owned();
+        let target = path.clone();
+        self.activation_generation += 1;
+        let generation = self.activation_generation;
+        self.storage_project(
+            "Opening text file…",
+            apiforge_project::StorageMode::PreserveEdits,
+            false,
+            move |session| session.open_text_file(&target).map(|_| ()),
+            move |app, result| match result {
+                Ok(()) => {
+                    if app.activation_generation == generation {
+                        app.activate_tab(&text_tab(&path));
+                    } else {
+                        app.workbench.ensure(&text_tab(&path));
+                    }
+                    app.touched();
+                }
+                Err(error) => app.notify(
+                    format!("Cannot open {} as text: {error}", file_name(&path)),
+                    true,
+                ),
+            },
+        );
     }
 
     /// Opens the text files of restored tabs and of unsaved work held in
@@ -67,37 +87,29 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let mut paths: Vec<String> = self
+        let paths: Vec<_> = self
             .workbench
             .tabs()
             .iter()
-            .filter_map(|tab| tab.document_id.strip_prefix(TEXT_TAB))
-            .map(str::to_owned)
+            .filter_map(|tab| {
+                if session.document(&tab.document_id).is_some() {
+                    return None;
+                }
+                tab.document_id.strip_prefix(TEXT_TAB).map(str::to_owned)
+            })
             .collect();
-        for draft in session.recovered_text_drafts() {
-            if !paths.iter().any(|path| path == draft) {
-                paths.push(draft.to_owned());
-            }
-        }
         for path in paths {
-            let Some(session) = self.session.as_mut() else {
-                return;
-            };
-            match session.open_text_file(&path) {
-                // Restoring must not take activation from the document that
-                // had it when the view was saved.
-                Ok(_) => self.workbench.ensure(&text_tab(&path)),
-                Err(_) => self.workbench.close(&text_tab(&path)),
+            if session.text_file(&path).is_none() {
+                self.workbench.close(&text_tab(&path));
             }
         }
-    }
-
-    pub(super) fn save_text(&mut self, path: &str) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        session
-            .save_text_file(path)
-            .map(|_| ())
-            .map_err(|error| format!("Could not save {}: {error}", file_name(path)))
+        for file in session
+            .text_files()
+            .iter()
+            .filter(|file| file.needs_recovery())
+        {
+            self.workbench.ensure(&text_tab(file.path()));
+        }
     }
 
     /// The active text file, with its state below and its decisions above.
@@ -179,23 +191,29 @@ impl FolderApp {
             scroll = scroll.vertical_scroll_offset(offset);
         }
         let output = ui
-            .add_enabled_ui(!snapshot.held, |ui| {
-                scroll.show(ui, |ui| {
-                    self.code.show(
-                        ui,
-                        id,
-                        &mut text,
-                        &code::Context {
-                            plain: true,
-                            line_numbers: true,
-                            wrap: false,
-                            font_size: 13.0,
-                            ..code::Context::default()
-                        },
-                    )
-                })
-            })
+            .add_enabled_ui(
+                !snapshot.held && !self.persistence.closing && !self.storage.blocks_edits(),
+                |ui| {
+                    scroll.show(ui, |ui| {
+                        self.code.show(
+                            ui,
+                            id,
+                            &mut text,
+                            &code::Context {
+                                plain: true,
+                                line_numbers: true,
+                                wrap: false,
+                                font_size: 13.0,
+                                ..code::Context::default()
+                            },
+                        )
+                    })
+                },
+            )
             .inner;
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let offset = output.state.offset.y.max(0.0);
         let Some(session) = self.session.as_mut() else {
             return;
@@ -252,23 +270,26 @@ impl FolderApp {
         let Some(keep) = decision else {
             return;
         };
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if keep {
-            session.keep_text_draft(path)
-        } else {
-            session.discard_text_draft(path)
-        };
-        match result {
-            Ok(()) => {
-                // The text changes under the editor; start it afresh.
-                self.shown = None;
-                code::clear_history(ui.ctx(), editor_id(&text_tab(path)));
-                self.touched();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        let path = path.to_owned();
+        let tab = text_tab(&path);
+        self.working_project(
+            "Resolving recovered text…",
+            move |session| {
+                if keep {
+                    session.keep_text_draft(&path)
+                } else {
+                    session.discard_text_draft(&path)
+                }
+            },
+            move |app, result| match result {
+                Ok(()) => {
+                    app.shown = None;
+                    code::clear_history(&app.ui_context, editor_id(&tab));
+                    app.touched();
+                }
+                Err(error) => app.notify(error.to_string(), true),
+            },
+        );
     }
 
     /// The file changed or disappeared outside API Forge while it had unsaved

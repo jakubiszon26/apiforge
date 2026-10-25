@@ -1,4 +1,4 @@
-// Include from folder/tests.rs in an isolated P5 checkout (see run.sh).
+// Include from folder/tests.rs in an isolated checkout (see run.sh).
 // These are acceptance probes: failures identify unmet UI requirements.
 mod ui_quality {
     use super::*;
@@ -68,6 +68,12 @@ mod ui_quality {
         render(app, ctx, vec![egui::Event::PointerMoved(p)]);
         pointer(app, ctx, p, true);
         pointer(app, ctx, p, false);
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while app.storage.is_busy() && Instant::now() < deadline {
+            render(app, ctx, vec![]);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!app.storage.is_busy(), "file opening did not complete");
     }
 
     fn fixture() -> (tempfile::TempDir, egui::Context, FolderApp, String) {

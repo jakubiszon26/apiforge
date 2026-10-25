@@ -199,7 +199,8 @@ impl FolderApp {
             Command::TidyUp(selection) => board.tidy_up(&selection).map(|graph| Ok(graph.into())),
             Command::SetWireStyle(style) => {
                 self.preferences.wire_style = style;
-                self.preferences.save();
+                let preferences = self.preferences.clone();
+                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
                 for canvas in self.canvases.values_mut() {
                     canvas.wire_style = style;
                 }
@@ -207,7 +208,8 @@ impl FolderApp {
             }
             Command::SetBridges(bridges) => {
                 self.preferences.bridges = bridges;
-                self.preferences.save();
+                let preferences = self.preferences.clone();
+                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
                 for canvas in self.canvases.values_mut() {
                     canvas.bridges = bridges;
                 }
@@ -365,7 +367,7 @@ impl FolderApp {
         });
         match document {
             Some(document_id) => {
-                self.workbench.open(&document_id);
+                self.activate_tab(&document_id);
                 self.touched();
             }
             None => self.notify(
@@ -498,6 +500,9 @@ impl FolderApp {
 
     /// Unfinished inspector text joins the document's local recovery.
     pub(super) fn sync_field_drafts(&mut self, document_id: &str, project_id: &str) {
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };

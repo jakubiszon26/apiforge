@@ -34,12 +34,18 @@ impl TransactionView {
 impl FolderApp {
     pub(super) fn review_transaction(&mut self, root: PathBuf) {
         self.export_status = None;
-        let store = match &self.session {
-            Some(session) if session.store().root() == root => Ok(session.store().clone()),
-            _ => ProjectStore::open(&root),
-        };
-        match store {
-            Ok(store) => {
+        let existing = self
+            .session
+            .as_ref()
+            .filter(|session| session.store().root() == root)
+            .map(|session| session.store().clone());
+        self.working_io(
+            "Reading transaction recovery…",
+            move || {
+                let store = match existing {
+                    Some(store) => Ok(store),
+                    None => ProjectStore::open(&root),
+                }?;
                 let mut view = TransactionView {
                     root,
                     store,
@@ -49,10 +55,14 @@ impl FolderApp {
                     archives: 0,
                 };
                 view.refresh();
-                self.prompt = Some(Prompt::Transaction(Box::new(view)));
-            }
-            Err(error) => self.notify(format!("Cannot inspect recovery: {error}"), true),
-        }
+                Ok::<_, apiforge_storage::project::ProjectError>(view)
+            },
+            |app, result| match result {
+                Ok(Ok(view)) => app.prompt = Some(Prompt::Transaction(Box::new(view))),
+                Ok(Err(error)) => app.notify(format!("Cannot inspect recovery: {error}"), true),
+                Err(error) => app.notify(error, true),
+            },
+        );
     }
 
     pub(super) fn transaction_screen(&mut self, ui: &mut egui::Ui) {
@@ -152,12 +162,6 @@ impl FolderApp {
             dialogs::Action::Apply => finish = true,
             dialogs::Action::None => {}
         }
-        if evidence {
-            match view.store.export_transaction_evidence() {
-                Ok(bytes) => self.export_bytes("apiforge-transaction-evidence.json".into(), bytes),
-                Err(error) => view.error = Some(format!("Cannot prepare evidence export: {error}")),
-            }
-        }
         if let Some((index, intended)) = export
             && let Some(preview) = &view.preview
         {
@@ -178,53 +182,61 @@ impl FolderApp {
                 );
             }
         }
-        if refresh {
-            view.refresh();
-        }
-        if finish && let Some(preview) = &view.preview {
-            match view.store.finish_transaction_recovery(preview) {
-                Ok(completed) => {
-                    view.finished = true;
-                    view.archives = completed.archives.len();
-                    view.preview = None;
-                    view.error = None;
+        if evidence || refresh || finish {
+            self.working_io(if finish { "Finishing transaction recovery…" } else { "Reading transaction recovery…" }, move || {
+                let bytes = if evidence { Some(view.store.export_transaction_evidence().map_err(|error| error.to_string())) } else { None };
+                if refresh { view.refresh(); }
+                if finish && let Some(preview) = &view.preview {
+                    match view.store.finish_transaction_recovery(preview) {
+                        Ok(completed) => { view.finished = true; view.archives = completed.archives.len(); view.preview = None; view.error = None; },
+                        Err(error) => view.error = Some(format!("Recovery did not finish. Refresh and review the candidates again: {error}")),
+                    }
                 }
-                Err(error) => {
-                    view.error = Some(format!(
-                        "Recovery did not finish. Refresh and review the candidates again: {error}"
-                    ))
+                (view, bytes)
+            }, |app, result| match result {
+                Ok((mut view, bytes)) => {
+                    if let Some(bytes) = bytes { match bytes {
+                        Ok(bytes) => app.export_bytes("apiforge-transaction-evidence.json".into(), bytes),
+                        Err(error) => view.error = Some(format!("Cannot prepare evidence export: {error}")),
+                    } }
+                    app.prompt = Some(Prompt::Transaction(Box::new(view)));
                 }
-            }
+                Err(error) => app.notify(error, true),
+            });
+            return self.prompt.take();
         }
         if reopen || discard {
             if same_session {
-                let session = self.session.as_mut()?;
-                let result = if discard {
-                    session.discard_configuration()
-                } else {
-                    Ok(())
-                }
-                .and_then(|()| session.reload_project());
-                match result {
-                    Ok(()) => {
-                        self.watcher.recovery_required = false;
-                        self.follow_external(ExternalOutcome {
-                            project_reloaded: true,
-                            ..Default::default()
-                        });
-                        self.watcher.rescan();
-                        self.notify(
-                            "Recovered the file operation and reloaded the project.",
-                            false,
-                        );
-                        return None;
-                    }
-                    Err(error) => {
-                        view.error = Some(format!(
-                            "The operation finished, but reload failed: {error}"
-                        ))
-                    }
-                }
+                self.working_project(
+                    "Reloading recovered project…",
+                    move |session| {
+                        if discard {
+                            session.discard_configuration()?;
+                        }
+                        session.reload_project()
+                    },
+                    move |app, result| match result {
+                        Ok(()) => {
+                            app.watcher.recovery_required = false;
+                            app.follow_external(ExternalOutcome {
+                                project_reloaded: true,
+                                ..Default::default()
+                            });
+                            app.watcher.rescan();
+                            app.notify(
+                                "Recovered the file operation and reloaded the project.",
+                                false,
+                            );
+                        }
+                        Err(error) => {
+                            view.error = Some(format!(
+                                "The operation finished, but reload failed: {error}"
+                            ));
+                            app.prompt = Some(Prompt::Transaction(Box::new(view)));
+                        }
+                    },
+                );
+                return self.prompt.take();
             } else {
                 let root = view.root.clone();
                 // Release the temporary writer before the normal opener acquires

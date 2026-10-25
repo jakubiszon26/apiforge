@@ -22,13 +22,34 @@ impl FolderApp {
             );
             return;
         }
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
+        if matches!(action, Action::Publish) {
+            let document_id = id.to_owned();
+            let target = document_id.clone();
+            self.storage_project(
+                "Publishing component…",
+                apiforge_project::StorageMode::Exclusive,
+                true,
+                move |session| session.publish(&target, DIAGRAM),
+                move |app, result| {
+                    app.finish_component_action(
+                        &document_id,
+                        Action::Publish,
+                        result.map(|published| {
+                            Some(format!("Published revision {}.", published.revision))
+                        }),
+                    )
+                },
+            );
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
         let result = match &action {
-            Action::Publish => session
-                .publish(id, DIAGRAM)
-                .map(|published| Some(format!("Published revision {}.", published.revision))),
+            Action::Publish => unreachable!("publication is queued before borrowing the session"),
             Action::Model { next, .. } => session
                 .apply_model_edit(id, *next.clone(), DIAGRAM)
                 .map(|()| None),
@@ -39,6 +60,15 @@ impl FolderApp {
             }
             .map(|_| None),
         };
+        self.finish_component_action(id, action, result);
+    }
+
+    fn finish_component_action(
+        &mut self,
+        id: &str,
+        action: Action,
+        result: apiforge_project::Result<Option<String>>,
+    ) {
         match result {
             Ok(message) => {
                 if let Action::Model {
@@ -54,7 +84,9 @@ impl FolderApp {
                 self.touched();
             }
             Err(apiforge_project::Error::CommentsWouldBeLost { .. }) => {
-                if let Ok(input) = session.analysis_for(id) {
+                if let Some(session) = &self.session
+                    && let Ok(input) = session.analysis_for(id)
+                {
                     self.prompt = Some(Prompt::CommentLoss {
                         ticket: input.ticket,
                         action: Box::new(action),

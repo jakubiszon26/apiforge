@@ -43,23 +43,37 @@ impl FolderApp {
         if session.is_read_only() {
             return;
         }
-        match JournalStore::open_project(session.store().clone()) {
-            Ok(loaded) => {
-                let journal = Arc::new(loaded.store);
-                if !loaded.interrupted.is_empty() {
-                    self.runs.pending_review = Some(JournalReview {
-                        journal: journal.clone(),
-                        runs: loaded.interrupted,
-                        legacy: false,
-                    });
+        let identity = session.storage_identity();
+        let store = session.store().clone();
+        self.storage_io(
+            "Loading run journal…",
+            move || JournalStore::open_project(store),
+            move |app, result| {
+                if !app.session_matches(&identity) {
+                    return;
                 }
-                if loaded.unreadable {
-                    self.notify("An unreadable run journal was preserved for review.", true);
+                match result {
+                    Ok(Ok(loaded)) => {
+                        let journal = Arc::new(loaded.store);
+                        if !loaded.interrupted.is_empty() {
+                            app.runs.pending_review = Some(JournalReview {
+                                journal: journal.clone(),
+                                runs: loaded.interrupted,
+                                legacy: false,
+                            });
+                        }
+                        if loaded.unreadable {
+                            app.notify("An unreadable run journal was preserved for review.", true);
+                        }
+                        app.runs.journal = Some(journal);
+                    }
+                    Ok(Err(error)) => {
+                        app.notify(format!("Live runs cannot be journalled: {error}"), true)
+                    }
+                    Err(error) => app.notify(error, true),
                 }
-                self.runs.journal = Some(journal);
-            }
-            Err(error) => self.notify(format!("Live runs cannot be journalled: {error}"), true),
-        }
+            },
+        );
     }
 
     pub(super) fn request_run(&mut self, id: &str, live: bool) {
@@ -428,30 +442,36 @@ impl FolderApp {
     }
 
     pub(super) fn review_legacy_runs_from(&mut self, data: &std::path::Path) {
-        let result = (|| {
-            let catalogue = apiforge_project::ProjectCatalogue::load(data)
-                .map_err(|error| error.to_string())?
-                .ok_or("No migrated legacy journal".to_owned())?;
-            let path = catalogue
-                .legacy_journal
-                .ok_or("No migrated legacy journal".to_owned())?;
-            let owner = apiforge_storage::WorkspaceStore::open_exclusive(
-                path.with_file_name("workspace.json"),
-            )
-            .map_err(|error| error.to_string())?;
-            JournalStore::open(owner).map_err(|error| error.to_string())
-        })();
-        match result {
-            Ok(loaded) if !loaded.interrupted.is_empty() => {
-                self.prompt = Some(Prompt::Journal(Box::new(JournalReview {
-                    journal: Arc::new(loaded.store),
-                    runs: loaded.interrupted,
-                    legacy: true,
-                })))
-            }
-            Ok(_) => self.notify("There are no unresolved legacy runs.", false),
-            Err(error) => self.notify(error, true),
-        }
+        let data = data.to_owned();
+        self.working_io(
+            "Loading legacy journal…",
+            move || {
+                (|| {
+                    let catalogue = apiforge_project::ProjectCatalogue::load(&data)
+                        .map_err(|error| error.to_string())?
+                        .ok_or("No migrated legacy journal".to_owned())?;
+                    let path = catalogue
+                        .legacy_journal
+                        .ok_or("No migrated legacy journal".to_owned())?;
+                    let owner = apiforge_storage::WorkspaceStore::open_exclusive(
+                        path.with_file_name("workspace.json"),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    JournalStore::open(owner).map_err(|error| error.to_string())
+                })()
+            },
+            |app, result| match result {
+                Ok(Ok(loaded)) if !loaded.interrupted.is_empty() => {
+                    app.prompt = Some(Prompt::Journal(Box::new(JournalReview {
+                        journal: Arc::new(loaded.store),
+                        runs: loaded.interrupted,
+                        legacy: true,
+                    })))
+                }
+                Ok(Ok(_)) => app.notify("There are no unresolved legacy runs.", false),
+                Ok(Err(error)) | Err(error) => app.notify(error, true),
+            },
+        );
     }
 
     pub(super) fn journal_prompt(
@@ -485,12 +505,18 @@ impl FolderApp {
                 .iter()
                 .map(|run| run.run_id.clone())
                 .collect::<Vec<_>>();
-            match review.journal.discard(&ids) {
-                Ok(()) => return None,
-                Err(error) => {
-                    self.notify(format!("Could not acknowledge these runs: {error}"), true)
-                }
-            }
+            let journal = review.journal.clone();
+            self.working_io(
+                "Acknowledging reviewed runs…",
+                move || journal.discard(&ids).map_err(|error| error.to_string()),
+                move |app, result| {
+                    if let Err(error) = result.and_then(|result| result) {
+                        app.notify(format!("Could not acknowledge these runs: {error}"), true);
+                        app.prompt = Some(Prompt::Journal(Box::new(review)));
+                    }
+                },
+            );
+            return self.prompt.take();
         }
         if later || response.should_close() {
             None

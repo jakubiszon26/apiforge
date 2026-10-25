@@ -245,7 +245,7 @@ impl FolderApp {
         });
         self.tabs_offset = output.state.offset.x.max(0.0);
         if let Some(document_id) = activate {
-            self.workbench.open(&document_id);
+            self.activate_tab(&document_id);
             self.followed_tab = Some(document_id);
             self.touched();
         }
@@ -255,6 +255,12 @@ impl FolderApp {
     }
 
     pub(super) fn notices(&mut self, ui: &mut egui::Ui) {
+        if let Some(label) = self.storage.label() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                widgets::hint(ui, label);
+            });
+        }
         let Some(session) = self.session.as_ref() else {
             return;
         };
@@ -272,18 +278,19 @@ impl FolderApp {
                     theme::WARNING,
                     "Unsaved work from an earlier session is in the recovery backup.",
                 );
-                if ui.button("Restore backup").clicked()
-                    && let Some(session) = self.session.as_mut()
-                {
-                    match session.restore_recovery_backup() {
-                        Ok(()) => self.shown = None,
-                        Err(error) => {
-                            self.notice = Some(Notice {
-                                text: error.to_string(),
-                                error: true,
-                            })
-                        }
-                    }
+                if ui.button("Restore backup").clicked() {
+                    self.working_project(
+                        "Restoring recovery backup…",
+                        ProjectSession::restore_recovery_backup,
+                        |app, result| match result {
+                            Ok(()) => {
+                                app.shown = None;
+                                app.reload_field_drafts();
+                                app.restore_text_tabs();
+                            }
+                            Err(error) => app.notify(error.to_string(), true),
+                        },
+                    );
                 }
             });
         } else if unavailable {
@@ -368,26 +375,25 @@ impl FolderApp {
         if !(reload || discard) {
             return;
         }
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if discard {
-            session
-                .discard_configuration()
-                .and_then(|()| session.reload_project())
-        } else {
-            session.reload_project()
-        };
-        match result {
-            Ok(()) => {
-                self.follow_external(ExternalOutcome {
-                    project_reloaded: true,
-                    ..Default::default()
-                });
-                self.watcher.rescan();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        self.working_project(
+            "Reloading project…",
+            move |session| {
+                if discard {
+                    session.discard_configuration()?;
+                }
+                session.reload_project()
+            },
+            |app, result| match result {
+                Ok(()) => {
+                    app.follow_external(ExternalOutcome {
+                        project_reloaded: true,
+                        ..Default::default()
+                    });
+                    app.watcher.rescan();
+                }
+                Err(error) => app.notify(error.to_string(), true),
+            },
+        );
     }
 
     pub(super) fn prompts(&mut self, context: &egui::Context) {
@@ -395,6 +401,19 @@ impl FolderApp {
             return;
         };
         self.prompt = match prompt {
+            Prompt::Working { ticket, label } => {
+                dialogs::centered_modal(egui::Id::new("folder-working"), context).show(
+                    context,
+                    |ui| {
+                        ui.set_width(340.0);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(label);
+                        });
+                    },
+                );
+                Some(Prompt::Working { ticket, label })
+            }
             Prompt::Conflict(view) => self.conflict_prompt(context, *view),
             Prompt::Transaction(view) => self.transaction_prompt(context, *view),
             Prompt::Settings(dialog) => self.project_settings_prompt(context, *dialog),
@@ -485,25 +504,49 @@ impl FolderApp {
     /// Closes a tab after saving its document, or after discarding its unsaved
     /// work. A failure keeps the tab open and says why.
     pub(super) fn close_tab_with(&mut self, document_id: &str, save: bool) {
-        let text = self.text_of(document_id).map(str::to_owned);
-        let result = if save {
-            self.save_document(document_id)
+        let id = document_id.to_owned();
+        if save {
+            self.save_document_with(document_id, move |app, result| match result {
+                Ok(saved)
+                    if app
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| saved.matches(session, &id)) =>
+                {
+                    app.close_tab(&id)
+                }
+                Ok(_) => {
+                    app.notify(
+                        "Newer changes remain unsaved. Save them before closing this tab.",
+                        true,
+                    );
+                    app.prompt = Some(Prompt::CloseTab(id));
+                }
+                Err(error) => app.notify(format!("Could not save before closing: {error}"), true),
+            });
         } else {
-            let document_id = document_id.to_owned();
-            self.session
-                .as_mut()
-                .ok_or_else(String::new)
-                .and_then(|session| {
-                    match &text {
-                        Some(path) => session.revert_text_file(path, DIAGRAM),
-                        None => session.revert(&document_id, DIAGRAM),
+            let text = self.text_of(document_id).map(str::to_owned);
+            let target = id.clone();
+            self.storage_project(
+                "Discarding file changes…",
+                apiforge_project::StorageMode::Exclusive,
+                true,
+                move |session| match text {
+                    Some(path) => session.revert_text_file(&path, DIAGRAM),
+                    None => session.revert(&target, DIAGRAM),
+                },
+                move |app, result| match result {
+                    Ok(()) => {
+                        app.shown = None;
+                        inspector::forget_field_text(&app.ui_context);
+                        app.reload_field_drafts();
+                        app.close_tab(&id);
                     }
-                    .map_err(|error| format!("Could not discard the changes: {error}"))
-                })
-        };
-        match result {
-            Ok(()) => self.close_tab(document_id),
-            Err(message) => self.notify(message, true),
+                    Err(error) => {
+                        app.notify(format!("Could not discard the changes: {error}"), true)
+                    }
+                },
+            );
         }
     }
 
@@ -548,7 +591,7 @@ impl FolderApp {
         }
         if create && !name.trim().is_empty() {
             match self.create_document(kind, folder.as_deref(), name.trim()) {
-                Ok(()) => return None,
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -566,44 +609,63 @@ impl FolderApp {
         folder: Option<&str>,
         name: &str,
     ) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let (default_folder, source) = match kind {
-            DocumentKind::Scenario => ("scenarios", scenario_template(name)),
-            DocumentKind::Component => ("components", component_template(name)),
-        };
-        let folder = folder.unwrap_or(default_folder);
-        let join = |name: String| {
-            if folder.is_empty() {
-                name
-            } else {
-                format!("{folder}/{name}")
-            }
-        };
-        let stem = file_stem(name);
-        let taken = |path: &str| {
-            session
-                .documents()
-                .iter()
-                .any(|document| document.entry().path.as_str().eq_ignore_ascii_case(path))
-                || session.store().root().join(path).exists()
-        };
-        let path = (1..)
-            .map(|index| match index {
-                1 => join(format!("{stem}.afs")),
-                _ => join(format!("{stem}-{index}.afs")),
-            })
-            .find(|path| !taken(path))
-            .expect("an unused name exists");
-        let document_id = session
-            .create_document(kind, &path, &source)
-            .map_err(|error| error.to_string())?;
-        if !folder.is_empty() {
-            self.workbench.expanded.insert(folder.to_owned());
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
-        self.explorer.selected = Some(path);
-        self.workbench.open(&document_id);
-        self.watcher.rescan();
-        self.touched();
+        let name = name.to_owned();
+        let selected_folder = folder.map(str::to_owned);
+        let failed = Prompt::NewDocument {
+            kind,
+            folder: selected_folder.clone(),
+            name: name.clone(),
+            error: None,
+        };
+        self.working_project(
+            "Creating document…",
+            move |session| {
+                let (default_folder, source) = match kind {
+                    DocumentKind::Scenario => ("scenarios", scenario_template(&name)),
+                    DocumentKind::Component => ("components", component_template(&name)),
+                };
+                let folder = selected_folder.unwrap_or_else(|| default_folder.into());
+                let stem = file_stem(&name);
+                let path = (1..=apiforge_storage::project::MAX_TREE_ENTRIES)
+                    .map(|index| {
+                        let name = if index == 1 {
+                            format!("{stem}.afs")
+                        } else {
+                            format!("{stem}-{index}.afs")
+                        };
+                        if folder.is_empty() {
+                            name
+                        } else {
+                            format!("{folder}/{name}")
+                        }
+                    })
+                    .find(|path| {
+                        !session
+                            .documents()
+                            .iter()
+                            .any(|doc| doc.entry().path.as_str().eq_ignore_ascii_case(path))
+                            && !session.store().root().join(path).exists()
+                    })
+                    .ok_or(apiforge_project::ProjectError::Limit)?;
+                let id = session.create_document(kind, &path, &source)?;
+                Ok((id, path, folder))
+            },
+            move |app, result| match result {
+                Ok((id, path, folder)) => {
+                    if !folder.is_empty() {
+                        app.workbench.expanded.insert(folder);
+                    }
+                    app.explorer.selected = Some(path);
+                    app.activate_tab(&id);
+                    app.watcher.rescan();
+                    app.touched();
+                }
+                Err(error) => app.restore_prompt(failed, error.to_string()),
+            },
+        );
         Ok(())
     }
 
@@ -660,16 +722,13 @@ impl FolderApp {
             return None;
         }
         if discard {
-            if let Some(session) = self.session.take()
-                && let Err((session, error)) = session.discard_unsaved_and_close()
-            {
-                // Nothing was discarded: the window stays usable for Keep
-                // editing or Try again.
-                self.session = Some(*session);
-                return Some(Prompt::CloseFailed(error.to_string()));
-            }
-            self.runs = runs::Runs::default();
-            self.finish_departure();
+            self.persistence.discard = true;
+            self.persistence.departure = true;
+            self.persistence.approved_export = None;
+            self.persistence.departure_generation += 1;
+            self.runs.exporting = false;
+            self.navigation.failed = false;
+            self.advance_departure();
             return self.prompt.take();
         }
         if keep || response.should_close() {

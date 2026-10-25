@@ -38,6 +38,14 @@ impl Default for RecentProjects {
 }
 
 impl RecentProjects {
+    pub(super) fn empty() -> Self {
+        Self {
+            entries: Vec::new(),
+            active: None,
+            path: dirs::data_dir().map(|data| data.join("apiforge/recent-projects.json")),
+            writable: true,
+        }
+    }
     fn load(path: Option<PathBuf>) -> Self {
         let mut recent = Self {
             entries: Vec::new(),
@@ -79,7 +87,7 @@ impl RecentProjects {
         recent
     }
 
-    pub fn remember(&mut self, session: &ProjectSession) -> Result<(), String> {
+    fn record(&mut self, session: &ProjectSession) {
         let entry = Recent {
             id: session.manifest().id.clone(),
             name: session.manifest().name.clone(),
@@ -90,6 +98,9 @@ impl RecentProjects {
         self.active = Some(entry.path.clone());
         self.entries.insert(0, entry);
         self.entries.truncate(RECENT_LIMIT);
+    }
+
+    fn save(&self, store: &apiforge_storage::project::ProjectStore) -> Result<(), String> {
         if !self.writable {
             return Err("Recent-project metadata is unreadable or unsupported; its existing bytes were preserved.".into());
         }
@@ -105,8 +116,7 @@ impl RecentProjects {
         if bytes.len() > RECENT_BYTES {
             return Err("Recent-project metadata exceeds its size limit.".into());
         }
-        session
-            .store()
+        store
             .validate_managed_payload(&bytes)
             .map_err(|error| error.to_string())?;
         if let Some(parent) = path.parent() {
@@ -114,19 +124,30 @@ impl RecentProjects {
         }
         apiforge_storage::write_atomic(path, &bytes).map_err(|error| error.to_string())
     }
+
+    #[cfg(test)]
+    fn remember(&mut self, session: &ProjectSession) -> Result<(), String> {
+        self.record(session);
+        self.save(session.store())
+    }
 }
 
-pub(super) struct Destination {
-    root: PathBuf,
-    session: Option<ProjectSession>,
-    survey: Vec<SurveyRow>,
-}
+pub(super) use super::opening::Destination;
 
-#[derive(Default)]
 pub(super) struct Navigation {
     pub recent: RecentProjects,
     pending: Option<Destination>,
     pub failed: bool,
+}
+
+impl Default for Navigation {
+    fn default() -> Self {
+        Self {
+            recent: RecentProjects::empty(),
+            pending: None,
+            failed: false,
+        }
+    }
 }
 
 impl FolderApp {
@@ -173,13 +194,15 @@ impl FolderApp {
     }
 
     fn pick_folder(&mut self) {
+        self.open_generation += 1;
+        let generation = self.open_generation;
         let (sender, receiver) = std::sync::mpsc::channel();
         let context = self.ui_context.clone();
         std::thread::spawn(move || {
             let path = rfd::FileDialog::new()
                 .set_title("Open project folder")
                 .pick_folder();
-            let _ = sender.send(Picked::Folder(path));
+            let _ = sender.send(Picked::Folder { generation, path });
             context.request_repaint();
         });
         self.picked.push(receiver);
@@ -187,9 +210,17 @@ impl FolderApp {
 
     pub(super) fn remember_project(&mut self) {
         let Some(session) = &self.session else { return };
-        if let Err(error) = self.navigation.recent.remember(session) {
-            self.notify(error, true);
-        }
+        self.navigation.recent.record(session);
+        let recent = self.navigation.recent.clone();
+        let store = session.store().clone();
+        self.storage_io(
+            "Remembering project…",
+            move || recent.save(&store),
+            |app, result| match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) | Err(error) => app.notify(error, true),
+            },
+        );
     }
 
     pub(super) fn request_switch(&mut self, root: PathBuf) {
@@ -208,48 +239,40 @@ impl FolderApp {
         {
             return;
         }
-        let destination = match ProjectSession::open_with(&root, Arc::new(CardPlacer)) {
-            Ok(session) => Destination {
-                root,
-                session: Some(session),
-                survey: Vec::new(),
-            },
-            Err(apiforge_project::Error::NotAProject) => match ProjectSession::survey(&root) {
-                Ok(survey) => Destination {
-                    root,
-                    session: None,
-                    survey: survey
-                        .into_iter()
-                        .map(|source| SurveyRow {
-                            path: source.path,
-                            include: true,
-                            kind: source.declaration.map(|declaration| declaration.kind),
-                        })
-                        .collect(),
-                },
-                Err(error) => {
-                    self.notify(error.to_string(), true);
+        self.open_generation += 1;
+        self.opening = true;
+        let generation = self.open_generation;
+        let requested = root.clone();
+        self.storage_io(
+            "Opening folder…",
+            move || super::opening::load(root),
+            move |app, result| {
+                if app.open_generation != generation {
                     return;
                 }
+                if app.persistence.closing {
+                    app.opening = false;
+                    return;
+                }
+                app.opening = false;
+                match result {
+                    Ok(Ok(destination)) => {
+                        app.navigation.pending = Some(destination);
+                        app.navigation.failed = false;
+                        app.ui_context.request_repaint();
+                    }
+                    Ok(Err(apiforge_project::Error::Storage(
+                        apiforge_project::ProjectError::RecoveryRequired,
+                    ))) => app.review_transaction(requested),
+                    Ok(Err(error)) => app.notify(format!("Cannot open folder: {error}"), true),
+                    Err(error) => app.notify(error, true),
+                }
             },
-            Err(apiforge_project::Error::Storage(
-                apiforge_project::ProjectError::RecoveryRequired,
-            )) => {
-                self.review_transaction(root);
-                return;
-            }
-            Err(error) => {
-                self.notify(format!("Cannot open folder: {error}"), true);
-                return;
-            }
-        };
-        self.navigation.pending = Some(destination);
-        self.navigation.failed = false;
-        self.ui_context.request_repaint();
+        );
     }
 
     pub(super) fn advance_switch(&mut self) {
-        if self.navigation.pending.is_none() || self.navigation.failed {
+        if self.navigation.pending.is_none() || self.navigation.failed || self.prompt.is_some() {
             return;
         }
         if self.prepare_close() {
@@ -267,6 +290,14 @@ impl FolderApp {
     pub(super) fn cancel_switch(&mut self) {
         self.navigation.pending = None;
         self.navigation.failed = false;
+        self.persistence.closing = false;
+        self.persistence.close_ready = false;
+        self.persistence.discard = false;
+        self.persistence.departure = false;
+        self.persistence.approved_export = None;
+        self.persistence.departure_generation += 1;
+        self.runs.exporting = false;
+        self.watcher.resume();
     }
 
     pub(super) fn finish_departure(&mut self) {
@@ -281,19 +312,10 @@ impl FolderApp {
         }
         inspector::forget_field_text(&self.ui_context);
         inspector::drafts::restore_entries(&self.ui_context, Vec::new());
-        let mut next = Self::shell(&self.ui_context, destination.root);
+        let mut next = Self::shell(&self.ui_context, destination.root.clone());
+        next.preferences = self.preferences.clone();
         next.navigation.recent = self.navigation.recent.clone();
-        if let Some(session) = destination.session {
-            next.install(session);
-        } else {
-            next.uninitialised = true;
-            next.survey = destination.survey;
-            next.new_name = next
-                .root
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-        }
+        next.install_destination(destination);
         *self = next;
     }
 }

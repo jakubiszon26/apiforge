@@ -37,6 +37,7 @@ fn source_project() -> (tempfile::TempDir, String) {
 }
 
 fn choose(app: &mut FolderApp, context: &egui::Context, label: &str) {
+    wait_storage(app, context);
     // A different dialog body changes the modal's measured size; let egui place
     // it at its new centre before choosing a painted action.
     frame(app, context, vec![]);
@@ -106,6 +107,7 @@ fn escaping_a_conflict_review_preserves_source_fields_and_disk() {
     fs::write(directory.path().join("main.afs"), FOREIGN).unwrap();
     watch(&mut app, &context);
     app.review_conflict(apiforge_project::ConflictTarget::Document(id.clone()));
+    wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
     assert!(app.prompt.is_none());
@@ -122,6 +124,7 @@ fn a_text_deletion_can_be_accepted_in_the_dialog_without_leaving_a_dirty_tab() {
     fs::write(directory.path().join("notes.txt"), "saved\r\n").unwrap();
     let (context, mut app) = open(directory.path());
     app.open_text("notes.txt");
+    wait_storage(&mut app, &context);
     app.session
         .as_mut()
         .unwrap()
@@ -280,6 +283,7 @@ fn recovering_a_switch_target_protects_the_current_projects_work_before_departur
         .edit_source(&id, LOCAL, CODE)
         .unwrap();
     app.request_switch(target.path().to_owned());
+    wait_storage(&mut app, &context);
     assert_eq!(app.root, directory.path());
     choose(&mut app, &context, "Finish intended operation");
     choose(&mut app, &context, "Open project");
@@ -299,6 +303,7 @@ fn recovery_reload_retains_unsaved_source_and_text_and_requires_explicit_setting
     fs::write(directory.path().join("notes.txt"), "saved").unwrap();
     let (context, mut app) = open(directory.path());
     app.open_text("notes.txt");
+    wait_storage(&mut app, &context);
     let session = app.session.as_mut().unwrap();
     session.edit_source(&id, LOCAL, CODE).unwrap();
     session.edit_text("notes.txt", "latest text", CODE).unwrap();
@@ -311,6 +316,7 @@ fn recovery_reload_retains_unsaved_source_and_text_and_requires_explicit_setting
     interrupt(directory.path());
     app.watcher.recovery_required = true;
     app.review_transaction(directory.path().to_owned());
+    wait_storage(&mut app, &context);
     choose(&mut app, &context, "Finish intended operation");
     choose(&mut app, &context, "Reload project");
     assert!(app.watcher.recovery_required);
