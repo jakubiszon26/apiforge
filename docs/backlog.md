@@ -39,6 +39,7 @@ work does not start.
 | --- | --- | --- | --- |
 | KTLO-01 | Process documents: lifecycle, planning, estimation, testing, retrospective, board, PR template | M (docs) · 30 min — estimated S, ~730 lines written | `docs/process` |
 | KTLO-02 | Stage II retrospective in the repository | S (docs) · 15 min | `docs/process` |
+| KTLO-05a | Block library in the folder mode: analysis and mock-up (pilot of the planning procedure); [ticket](tickets/KTLO-05a.md) | S · 20 min · `visible UI` | `docs/ktlo-05a-library-analysis` |
 
 ### In progress
 
@@ -50,7 +51,6 @@ work does not start.
 | ID | Ticket | Estimate | Owner decision |
 | --- | --- | --- | --- |
 | KTLO-03 | Migration refuses a real six-project workspace: isolate the cause with an anonymised fixture, add the acceptance test, fix | M · 30 min · `migration` | How a refused migration should behave |
-| KTLO-05a | Block palette in the folder mode: analysis and mock-up (pilot of the planning procedure) | S · 20 min · `visible UI` | Mock-up approval |
 | KTLO-08 | CI: upload the Linux and Windows captures of every push as artifacts, named by branch, so QA reports can cite Windows evidence | S · 10 min | — |
 
 ### Backlog
