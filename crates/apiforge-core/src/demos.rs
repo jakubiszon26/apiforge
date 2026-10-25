@@ -262,7 +262,7 @@ pub fn shop_project() -> Project {
             "field",
             NodeKind::Assert,
             "Field inna_nazwa",
-            at(680.0, 290.0),
+            at(680.0, 350.0),
             vec![(
                 "actual",
                 reference("product", "product", "promotion.inna_nazwa"),
