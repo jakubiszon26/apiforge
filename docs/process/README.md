@@ -102,9 +102,12 @@ links to it; the issue body is the summary, not a copy.
 
 | Stage | Model | Note |
 | --- | --- | --- |
-| Planning and analysis: tickets, mock-ups, estimates, questions to the owner, retrospectives | Fable | Always. If Fable is unavailable, Opus may plan and the ticket records it |
-| Programming: code, tests, refactoring, QA reports | Opus 5.5 or newer | Never a smaller model for code |
+| Analysis that sets the bar: ticket analysis, mock-ups, estimates, decisions put to the owner, retrospectives, process changes | Fable | If Fable is unavailable, Opus may analyse and the ticket records it |
+| Everything else by default: programming, tests, refactoring, QA reports, coordination, status, ordinary conversation | Opus 5.5 or newer | The working default; never a smaller model for code |
 | Mechanical edits: a typo, a one-line change, formatting | Sonnet | Changes that contain no decision |
+
+Fable is reserved for the work where the quality of the thinking decides the
+outcome; a session that only coordinates, answers or implements runs on Opus.
 
 Subagents follow the same split: a planning agent delegates implementation to an
 Opus subagent and trivia to a Sonnet subagent; an implementing agent never

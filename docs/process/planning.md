@@ -76,6 +76,18 @@ A mock-up is approved as a whole or sent back; approval is noted in the
 ticket's state. The implementation is then measured against the mock-up in the
 QA report.
 
+The owner looks at mock-ups in the issue, not in the repository tree. Once
+the captures are committed on the ticket's branch, post them to the issue as
+images by their immutable raw URL, one per view with its caption:
+
+```markdown
+![Diagram at 960 × 540](https://raw.githubusercontent.com/jakubiszon26/apiforge/<commit>/docs/qa/<date>/<ID>/<view>.png)
+```
+
+`<commit>` is the commit that added them, so the link survives the branch
+being deleted after merge. The same applies to the captures of a QA report
+when the pull request asks for a decision.
+
 ## Stop conditions
 
 The agent stops analysis and asks the owner when any of these appears:
