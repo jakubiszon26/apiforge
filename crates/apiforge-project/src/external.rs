@@ -378,16 +378,32 @@ impl ProjectSession {
         if !self.manifest_dirty {
             return Ok(());
         }
-        let saved = self.read_manifest()?;
-        self.edit_configuration(
-            |manifest| {
-                manifest.name = saved.name.clone();
-                manifest.environment = saved.environment.clone();
-                manifest.contracts = saved.contracts.clone();
-            },
-            Origin::SESSION,
+        let path = ProjectPath::new(MANIFEST_PATH)?;
+        let snapshot = self.store.read(std::slice::from_ref(&path))?;
+        let saved = ProjectManifest::from_bytes(
+            snapshot.files[&path]
+                .as_deref()
+                .ok_or(ProjectError::InvalidMetadata)?,
         )?;
+        let changed = snapshot.state(&path) != Some(self.manifest_saved.clone());
+        // This explicit discard precedes reload of a changed registry. It does
+        // not author a configuration against the old save baseline or approve
+        // changed dependencies; the registry guard still blocks writes/runs
+        // until reload validates the complete saved project.
+        let mut manifest = self.manifest.clone();
+        manifest.name = saved.name;
+        manifest.environment = saved.environment;
+        manifest.contracts = saved.contracts;
+        manifest.validate()?;
+        let mut project = crate::context::base_project(&manifest);
+        project.components = self.published.clone();
+        self.manifest = manifest;
+        self.context = std::sync::Arc::new(project);
         self.manifest_dirty = false;
+        if changed {
+            self.registry = RegistryState::Changed;
+        }
+        self.invalidate_runtime_inputs(Origin::SESSION);
         Ok(())
     }
 

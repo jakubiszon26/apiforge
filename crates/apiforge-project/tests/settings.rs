@@ -69,3 +69,20 @@ fn configuration_validation_uses_actual_published_source_including_contract_name
     ));
     assert_eq!(session.manifest(), &manifest);
 }
+
+#[test]
+fn discarding_settings_after_an_unpolled_registry_change_requires_a_validated_reload() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Original").unwrap();
+    session
+        .edit_configuration(|manifest| manifest.name = "Unsaved".into(), Origin::SESSION)
+        .unwrap();
+    let path = directory.path().join(MANIFEST_PATH);
+    let original = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, original.replace("Original", "External")).unwrap();
+    session.discard_configuration().unwrap();
+    assert_eq!(session.registry_state(), RegistryState::Changed);
+    assert!(!session.is_manifest_dirty());
+    session.reload_project().unwrap();
+    assert_eq!(session.manifest().name, "External");
+}
