@@ -264,7 +264,7 @@ impl FolderApp {
         let snapshot = self.snapshot(id);
         let policy = snapshot
             .as_ref()
-            .and_then(|snapshot| match &snapshot.model {
+            .and_then(|snapshot| match snapshot.model.as_deref() {
                 Some(Document::Scenario(scenario)) => Some(scenario.error_policy),
                 _ => None,
             })
@@ -323,7 +323,7 @@ impl FolderApp {
             }
             _ if stale || !snapshot.editable => {}
             Action::SetErrorPolicy(policy) => {
-                if let Document::Scenario(mut scenario) = model {
+                if let Document::Scenario(mut scenario) = Arc::unwrap_or_clone(model) {
                     scenario.error_policy = policy;
                     self.component_action(
                         id,

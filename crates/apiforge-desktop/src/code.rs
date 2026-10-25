@@ -24,10 +24,11 @@ use std::ops::Range;
 /// Rows the completion popup shows at once.
 const POPUP_ROWS: usize = 8;
 
-/// Text above this size is coloured as plain text: colouring every token of a
-/// very large buffer on every frame costs more than it is worth, and the editor
-/// has to stay responsive at 1 MB.
-const MAX_COLOURED_BYTES: usize = 256 * 1024;
+/// A source above this size is large: work that reads the whole text costs
+/// more per frame or keystroke than it is worth, and the editor has to stay
+/// responsive at 1 MB. Such text is laid out plainly, completion opens only on
+/// Ctrl+Space, and views avoid whole-source work while it is being typed.
+pub const MAX_COLOURED_BYTES: usize = 256 * 1024;
 
 /// What the editor is editing and what exists around it.
 pub struct Context<'a> {
@@ -190,10 +191,14 @@ impl Completions {
             self.popup = None;
         }
 
+        // Offers come from analysing the whole source, so a large one waits to
+        // be asked; a popup already open keeps following the typing.
         let wants_popup = keys.open
             || (typed
-                && cursor
-                    .is_some_and(|cursor| opens_completion(text, cursor) || self.popup.is_some()));
+                && cursor.is_some_and(|cursor| {
+                    self.popup.is_some()
+                        || (text.len() <= MAX_COLOURED_BYTES && opens_completion(text, cursor))
+                }));
         if wants_popup && let Some(cursor) = cursor {
             let found = complete::complete(&Request {
                 source: text,

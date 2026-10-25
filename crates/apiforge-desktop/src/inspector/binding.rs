@@ -6,7 +6,7 @@ use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, Port, Project, TemplatePart},
-    graph::{ancestors_and_self, compatible, output_ports},
+    graph::{compatible, dependants_and_self, output_ports},
     model::ValueType,
     operator::{Operator, OperatorGroup},
     path,
@@ -92,14 +92,16 @@ impl Kind {
 
 /// Steps whose outputs this node may use without creating a cycle.
 fn sources<'a>(context: &Context<'a>) -> Vec<&'a Node> {
+    // A dependant of this node would close a cycle. One walk finds them all,
+    // where asking each candidate for its ancestors walks the graph per block.
+    let dependants = dependants_and_self(context.graph, &context.node.id);
     context
         .graph
         .nodes
         .iter()
         .filter(|candidate| {
-            candidate.id != context.node.id
+            !dependants.contains(&candidate.id)
                 && !output_ports(candidate, context.project).is_empty()
-                && !ancestors_and_self(context.graph, &candidate.id).contains(&context.node.id)
         })
         .collect()
 }

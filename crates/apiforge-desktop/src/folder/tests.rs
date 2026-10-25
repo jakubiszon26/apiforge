@@ -2421,3 +2421,184 @@ fn read_only_environment_accepts_session_values_without_writing_public_settings(
     );
     assert_eq!(app.runs.secrets["token"], "read-only-session-value");
 }
+
+/// A valid scenario of `steps` requests with `rows` sample rows each: two
+/// blocks per step, so it stays under the block limit at any size.
+fn large_scenario(steps: usize, rows: usize) -> String {
+    let mut text = "scenario \"Large\" {\n  begin = start\n".to_owned();
+    for index in 0..steps {
+        let after = if index == 0 {
+            "begin".to_owned()
+        } else {
+            format!("ok_{}", index - 1)
+        };
+        text.push_str(&format!(
+            "  @after({after})\n  item_{index} = POST \"/items/{index}\" {{\n    body {{\n      \
+             name: \"item {index}\",\n      price: 12.5\n    }}\n    sample 200 {{\n      rows: [\n"
+        ));
+        for row in 0..rows {
+            let comma = if row + 1 < rows { "," } else { "" };
+            text.push_str(&format!(
+                "        {{ id: \"r-{index}-{row}\", price: {row}.5 }}{comma}\n"
+            ));
+        }
+        text.push_str(&format!(
+            "      ]\n    }}\n  }}\n  ok_{index} = assert item_{index}.status == 200\n"
+        ));
+    }
+    text.push_str("}\n");
+    text
+}
+
+/// A project whose only document is `text`, opened in the code view.
+fn open_source(text: &str) -> (tempfile::TempDir, egui::Context, FolderApp, String) {
+    let directory = tempfile::tempdir().unwrap();
+    ProjectSession::create(directory.path(), "Large")
+        .unwrap()
+        .create_document(DocumentKind::Scenario, "large.afs", text)
+        .unwrap();
+    let (context, app) = open(directory.path());
+    let id = app.workbench.active().unwrap().to_owned();
+    (directory, context, app, id)
+}
+
+fn node_id(app: &FolderApp, document_id: &str, handle: &str) -> String {
+    let model = model(app, document_id);
+    graph_of(&model, false)
+        .nodes
+        .iter()
+        .find(|node| node.handle == handle)
+        .unwrap()
+        .id
+        .clone()
+}
+
+/// Puts the caret into the editor at `at` and draws a few frames.
+fn caret_at(app: &mut FolderApp, context: &egui::Context, document_id: &str, at: usize) {
+    context.memory_mut(|memory| memory.request_focus(editor_id(document_id)));
+    app.code.select(at, at);
+    for _ in 0..3 {
+        frame(app, context, vec![]);
+    }
+}
+
+#[test]
+fn a_large_source_follows_the_caret_once_its_edit_is_analysed() {
+    // Finding the statement under the caret parses the whole source. A large
+    // source being typed into keeps its board selection until analysis settles.
+    let text = large_scenario(12, 700);
+    assert!(text.len() > crate::code::MAX_COLOURED_BYTES);
+    let (_directory, context, mut app, id) = open_source(&text);
+    let inside = |handle: &str| text.find(&format!("  {handle} = assert")).unwrap() + 4;
+    caret_at(&mut app, &context, &id, inside("ok_3"));
+    assert_eq!(app.selections[&id], vec![node_id(&app, &id, "ok_3")]);
+
+    let edited = text.replacen("price: 12.5", "price: 12.75", 1);
+    let session = app.session.as_mut().unwrap();
+    session.edit_source(&id, &edited, Origin(1)).unwrap();
+    caret_at(&mut app, &context, &id, inside("ok_5") + 1);
+    assert_eq!(
+        app.selections[&id],
+        vec![node_id(&app, &id, "ok_3")],
+        "not searched while the edit is pending"
+    );
+
+    settle(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.selections[&id], vec![node_id(&app, &id, "ok_5")]);
+}
+
+#[test]
+fn completion_names_follow_a_newly_analysed_model() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    let handles = |app: &FolderApp| -> Vec<String> {
+        let names = app.completion_names.as_ref().expect("drawn");
+        names
+            .names
+            .handles
+            .iter()
+            .map(|handle| handle.name.clone())
+            .collect()
+    };
+    frame(&mut app, &context, vec![]);
+    assert!(!handles(&app).contains(&"extra_total".to_owned()));
+
+    let source = text(&app, &id);
+    let end = source.rfind('}').unwrap();
+    let edited = format!("{}  extra_total = 1\n{}", &source[..end], &source[end..]);
+    let session = app.session.as_mut().unwrap();
+    session.edit_source(&id, &edited, Origin(1)).unwrap();
+    settle(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    assert!(handles(&app).contains(&"extra_total".to_owned()));
+}
+
+/// Frame budgets for the code view at the sizes the plan names: a 1000-line
+/// source and one at the 1 MiB limit, idle and while typing. Timing needs a
+/// release build:
+///
+/// ```text
+/// cargo test -p apiforge-desktop --release --locked frame_budgets -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "timing; run in release"]
+fn frame_budgets() {
+    let budget = |milliseconds: u64| Duration::from_millis(milliseconds);
+    let mut over = Vec::new();
+    for (name, text, budgets) in [
+        (
+            "1000 lines",
+            large_scenario(71, 2),
+            [(Mode::Code, 16, 16), (Mode::Split, 16, 16)],
+        ),
+        (
+            "1 MiB",
+            large_scenario(90, 260),
+            [(Mode::Code, 16, 33), (Mode::Split, 16, 50)],
+        ),
+    ] {
+        let (_directory, context, mut app, id) = open_source(&text);
+        assert!(
+            app.session
+                .as_ref()
+                .unwrap()
+                .document(&id)
+                .unwrap()
+                .model()
+                .is_some()
+        );
+        for (mode, idle_budget, typing_budget) in budgets {
+            app.workbench.mode = mode;
+            // On an assertion mid-source: the inspector then shows a small
+            // block, so the frame measures the source rather than one sample.
+            let middle = text[text.len() / 2..].find(" = assert").unwrap() + text.len() / 2;
+            caret_at(&mut app, &context, &id, middle);
+            let start = Instant::now();
+            for _ in 0..10 {
+                frame(&mut app, &context, vec![]);
+            }
+            let idle = start.elapsed() / 10;
+            let start = Instant::now();
+            for _ in 0..10 {
+                frame(&mut app, &context, vec![egui::Event::Text("a".into())]);
+            }
+            let typing = start.elapsed() / 10;
+            println!(
+                "{name} ({} lines, {} bytes) {mode:?}: idle {idle:.2?} / {idle_budget} ms, \
+                 typing {typing:.2?} / {typing_budget} ms",
+                text.lines().count(),
+                text.len()
+            );
+            if idle > budget(idle_budget) || typing > budget(typing_budget) {
+                over.push(format!("{name} {mode:?}"));
+            }
+            // Undo the typing so each mode starts from the same source.
+            let session = app.session.as_mut().unwrap();
+            session.edit_source(&id, &text, Origin(1)).unwrap();
+            settle(&mut app, &context);
+        }
+    }
+    assert!(over.is_empty(), "over budget: {over:?}");
+}

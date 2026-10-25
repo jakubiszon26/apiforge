@@ -57,7 +57,7 @@ impl FolderApp {
                             .family(theme::bold_family()),
                     );
                     widgets::hint(ui, kind_label(snapshot.kind));
-                    if matches!(model, Document::Scenario(_)) {
+                    if matches!(*model, Document::Scenario(_)) {
                         ui.add_space(theme::SPACE_LG);
                         widgets::tab_value(ui, &mut cleanup, false, "Main");
                         widgets::tab_value(ui, &mut cleanup, true, "Cleanup");
@@ -111,8 +111,8 @@ impl FolderApp {
                 .cloned()
                 .collect::<Vec<_>>()
         });
-        let graph = graph_of(&model, cleanup).clone();
-        let reference = graph_of(&model, false).clone();
+        let graph = graph_of(&model, cleanup);
+        let reference = graph_of(&model, false);
         let parameters = parameters_of(&model);
         let selection = self
             .selections
@@ -139,8 +139,8 @@ impl FolderApp {
                 canvas.show(
                     ui,
                     &canvas::Input {
-                        graph: &graph,
-                        reference_graph: &reference,
+                        graph,
+                        reference_graph: reference,
                         project: &project,
                         parameters: &parameters,
                         selection: &selection,
@@ -388,7 +388,7 @@ impl FolderApp {
             return;
         };
         let cleanup = self.cleanup(document_id);
-        let graph = graph_of(&model, cleanup).clone();
+        let graph = graph_of(&model, cleanup);
         let Some(node) = self
             .selections
             .get(document_id)
@@ -404,7 +404,7 @@ impl FolderApp {
             .as_ref()
             .map(|session| session.manifest().id.clone())
             .unwrap_or_default();
-        let reference = graph_of(&model, false).clone();
+        let reference = graph_of(&model, false);
         let parameters = parameters_of(&model);
         let run = self.fresh_run(document_id);
         let step = run
@@ -429,8 +429,8 @@ impl FolderApp {
                         ui,
                         &inspector::Context {
                             node: &node,
-                            graph: &reference,
-                            board: &graph,
+                            graph: reference,
+                            board: graph,
                             project: &project,
                             parameters: &parameters,
                             run: run.as_ref(),
@@ -458,7 +458,7 @@ impl FolderApp {
                 inspector::Action::UpdateGraph(next) => {
                     self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
                 }
-                inspector::Action::EditComponent => self.open_component(&graph, &node.id),
+                inspector::Action::EditComponent => self.open_component(graph, &node.id),
                 inspector::Action::AssertField { port, path, value } => {
                     if let Some(run) = &run {
                         self.folder_report_action(

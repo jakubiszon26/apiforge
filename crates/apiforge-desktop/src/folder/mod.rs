@@ -190,6 +190,13 @@ pub struct FolderApp {
     scroll_restore: Option<f32>,
     /// The block whose statement the code view last revealed.
     revealed: Option<String>,
+    /// The statement under the caret, for a document, source version and caret:
+    /// finding it parses the whole source, which a large one cannot afford
+    /// every frame.
+    caret_statement: Option<CaretStatement>,
+    /// What completion offers in the code view, kept while its model and
+    /// context are the same: deriving it reads every block and sample.
+    completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
     selections: HashMap<String, Vec<String>>,
     /// Each document's field drafts as the inspector and the session last
@@ -228,6 +235,65 @@ struct Clipboard {
     pastes: u32,
 }
 
+/// The statement found under the caret, for one source version.
+struct CaretStatement {
+    document_id: String,
+    version: u64,
+    cursor: usize,
+    handle: Option<String>,
+}
+
+/// Completion's names for one model, context and graph.
+struct CompletionNames {
+    document_id: String,
+    model: Option<Arc<Document>>,
+    project: Arc<Project>,
+    cleanup: bool,
+    nodes: Vec<apiforge_core::format::Node>,
+    names: crate::shapes::Names,
+}
+
+impl CompletionNames {
+    fn of(
+        document_id: &str,
+        model: Option<Arc<Document>>,
+        project: Arc<Project>,
+        cleanup: bool,
+    ) -> Self {
+        let nodes = model
+            .as_deref()
+            .map(|model| graph_of(model, cleanup).nodes.clone())
+            .unwrap_or_default();
+        let parameters = model.as_deref().map(parameters_of).unwrap_or_default();
+        let names = crate::shapes::Names::of_board(&project, &nodes, &parameters, None);
+        Self {
+            document_id: document_id.to_owned(),
+            model,
+            project,
+            cleanup,
+            nodes,
+            names,
+        }
+    }
+
+    fn describes(
+        &self,
+        document_id: &str,
+        model: Option<&Arc<Document>>,
+        project: &Arc<Project>,
+        cleanup: bool,
+    ) -> bool {
+        self.document_id == document_id
+            && self.cleanup == cleanup
+            && Arc::ptr_eq(&self.project, project)
+            && match (&self.model, model) {
+                (Some(cached), Some(model)) => Arc::ptr_eq(cached, model),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
 /// A frame's copy of what one document shows, so views can change the window
 /// while they read it.
 struct Snapshot {
@@ -236,7 +302,7 @@ struct Snapshot {
     text: String,
     diagnostics: Vec<Diagnostic>,
     analysis: AnalysisState,
-    model: Option<Document>,
+    model: Option<Arc<Document>>,
     model_state: ModelState,
     unavailable: Option<Unavailable>,
     editable: bool,
@@ -269,6 +335,8 @@ impl FolderApp {
             shown: None,
             scroll_restore: None,
             revealed: None,
+            caret_statement: None,
+            completion_names: None,
             canvases: HashMap::new(),
             selections: HashMap::new(),
             agreed_fields: HashMap::new(),
@@ -414,7 +482,7 @@ impl FolderApp {
             text: document.text().to_owned(),
             diagnostics: document.diagnostics().to_vec(),
             analysis: document.analysis(),
-            model: document.model().cloned(),
+            model: document.shared_model().cloned(),
             model_state: document.model_state(),
             unavailable: document.unavailable(),
             editable: document.accepts_model_edits()
@@ -495,7 +563,6 @@ impl FolderApp {
         if self.prompt.is_none() {
             self.shortcuts(ui.ctx());
         }
-
         egui::Panel::top("folder-header")
             .frame(
                 egui::Frame::new()

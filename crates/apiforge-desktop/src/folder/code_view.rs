@@ -68,21 +68,26 @@ impl FolderApp {
         }
         let project = self.context_project();
         let cleanup = self.cleanup(document_id);
-        let nodes = snapshot
-            .model
-            .as_ref()
-            .map(|model| graph_of(model, cleanup).nodes.clone())
-            .unwrap_or_default();
-        let parameters = snapshot
-            .model
-            .as_ref()
-            .map(parameters_of)
-            .unwrap_or_default();
-        let names = crate::shapes::Names::of_board(&project, &nodes, &parameters, None);
+        // Taken for this frame and put back after drawing: a model is replaced,
+        // never changed in place, so an identical one has the same names.
+        let completion = self
+            .completion_names
+            .take()
+            .filter(|names| {
+                names.describes(document_id, snapshot.model.as_ref(), &project, cleanup)
+            })
+            .unwrap_or_else(|| {
+                CompletionNames::of(
+                    document_id,
+                    snapshot.model.clone(),
+                    project.clone(),
+                    cleanup,
+                )
+            });
         let run = self.fresh_run(document_id);
         let shapes = crate::shapes::BoardShapes {
             project: &project,
-            nodes: &nodes,
+            nodes: &completion.nodes,
             steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
         let mut text = snapshot.text.clone();
@@ -104,7 +109,7 @@ impl FolderApp {
                             &mut text,
                             &code::Context {
                                 mode: apiforge_script::complete::Mode::Script,
-                                scope: names.scope(&shapes),
+                                scope: completion.names.scope(&shapes),
                                 diagnostics: &snapshot.diagnostics,
                                 line_numbers: true,
                                 wrap: false,
@@ -116,6 +121,7 @@ impl FolderApp {
                 },
             )
             .inner;
+        self.completion_names = Some(completion);
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }
@@ -176,7 +182,7 @@ impl FolderApp {
             return;
         };
         if let Some(cursor) = cursor {
-            let Some(handle) = apiforge_script::complete::statement_at(text, cursor) else {
+            let Some(handle) = self.statement_at(document_id, text, cursor) else {
                 return;
             };
             let found = [false, true].into_iter().find_map(|cleanup| {
@@ -189,7 +195,7 @@ impl FolderApp {
             if let Some((cleanup, node_id)) = found {
                 if let Some(tab) = self.workbench.tab_mut(document_id)
                     && tab.cleanup != cleanup
-                    && matches!(model, Document::Scenario(_))
+                    && matches!(model.as_ref(), Document::Scenario(_))
                 {
                     tab.cleanup = cleanup;
                 }
@@ -221,6 +227,32 @@ impl FolderApp {
             self.code.reveal(range.start);
             self.revealed = Some(handle);
         }
+    }
+
+    /// The handle of the statement under the caret, found again only when the
+    /// source or the caret changed. Finding it parses the whole source, so a
+    /// large one being typed into is not searched until its analysis settles.
+    fn statement_at(&mut self, document_id: &str, text: &str, cursor: usize) -> Option<String> {
+        let document = self.session.as_ref()?.document(document_id)?;
+        let version = document.source_version();
+        if text.len() > code::MAX_COLOURED_BYTES && document.analysis() == AnalysisState::Pending {
+            return None;
+        }
+        if let Some(found) = &self.caret_statement
+            && found.document_id == document_id
+            && found.version == version
+            && found.cursor == cursor
+        {
+            return found.handle.clone();
+        }
+        let handle = apiforge_script::complete::statement_at(text, cursor);
+        self.caret_statement = Some(CaretStatement {
+            document_id: document_id.to_owned(),
+            version,
+            cursor,
+            handle: handle.clone(),
+        });
+        handle
     }
 
     pub(super) fn draft_banner(&mut self, ui: &mut egui::Ui, document_id: &str) {

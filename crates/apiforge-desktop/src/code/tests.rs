@@ -684,3 +684,35 @@ fn the_gutter_numbers_every_line_once_and_marks_the_ones_with_problems() {
     assert_eq!(harness.gutter_numbers(), [1, 2, 3, 4, 5]);
     assert_eq!(harness.gutter_markers(), 1);
 }
+
+#[test]
+fn a_large_buffer_opens_completion_only_when_asked() {
+    // Offers analyse the whole source; above the large-source size typing does
+    // not pay for that on every keystroke, but Ctrl+Space still asks.
+    let filler = "// filler line\n".repeat(MAX_COLOURED_BYTES / 15 + 1);
+    let mut harness = Harness::new(&format!("{filler}scenario \"S\" {{\n  total = pro"));
+    assert!(harness.text.len() > MAX_COLOURED_BYTES);
+    harness.settle();
+    harness.press(Key::End);
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_none());
+    harness.frame(vec![Event::Key {
+        key: Key::Space,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::COMMAND,
+    }]);
+    let popup = harness
+        .editor
+        .completions
+        .popup
+        .as_ref()
+        .expect("asked for");
+    assert!(
+        popup
+            .completions
+            .iter()
+            .any(|offer| offer.insert == "products")
+    );
+}
