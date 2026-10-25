@@ -154,7 +154,7 @@ needs a kind choice. Existing source collisions are never overwritten. Opening
 any project does not run its requests.
 
 P8 retains deterministic single-file checkpoint storage and exact-byte hashes.
-P7e owns the independent-document merge gate and narrowly scoped LF Git attributes
+P7e verified the independent-document checkpoint merge gate and installs narrow LF Git attributes
 on explicit initialisation/migration. These documented decisions do not implement
 a new storage format or a normalised-hash policy; see the
 [review decisions](../stage-ii-review-notes.md#decisions-and-remaining-evidence).

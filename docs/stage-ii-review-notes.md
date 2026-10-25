@@ -4,8 +4,8 @@
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: B7 decided in P8: retain one deterministic checkpoint file; the
-  independent-document merge gate belongs to P7e
+- Status: B7 verified in P7e: deterministic single-file independent-document
+  merge and exact model reload passed; no format change
 - Applies to: [ADR 0010](decisions/0010-folder-projects.md), P1 diagram schema
 
 Stage II makes `.afs` files the durable definitions so that projects work well
@@ -29,8 +29,10 @@ serialization layout suitable for `git merge-file`. Deterministic output removes
 ordering noise, but its effectiveness for independent edits still needs a merge
 test with realistic full snapshots.
 
-P8 retains the implemented single-file granularity. P7e must verify a merge
-of two branches that edit different scenarios before activation. If the format changes, update
+P8 retained the implemented single-file granularity. P7e verified a real merge
+of two branches that edit different scenarios, followed by exact model reload.
+The [portability evidence](qa/2026-10-25/p7-portability/verification.md) records
+its covered case and limits. If the format changes, update
 ADRs 0010/0011, managed-path validation and transaction/load coverage together.
 This note records the concern and proposals; it does not amend the accepted
 format by itself.
@@ -44,8 +46,9 @@ roll-forward architecture or require a format change on its own.
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: B8 decided in P8: LF attributes on explicit initialisation/migration;
-  code and checkout tests assigned to P7e, Windows native evidence still open
+- Status: B8 implemented in P7e: narrow LF attributes on explicit creation/
+  migration, exact-save/index/original preservation and actual Git checkout tests;
+  Windows native evidence still open
 - Applies to: [ADR 0010](decisions/0010-folder-projects.md),
   [ADR 0011](decisions/0011-project-transactions.md),
   [ADR 0012](decisions/0012-project-sessions.md)
@@ -58,7 +61,7 @@ revision recorded with an LF source hash can fail the folder loader's integrity
 check after a CRLF checkout. Changes to JSON line endings also change raw storage
 fingerprints, although a parsed JSON field's stored digest string is unaffected.
 
-The review proposes emitting canonical/generated project files with LF and
+The original review proposed emitting canonical/generated project files with LF and
 creating or appending the following rules during explicit folder initialisation,
 preserving existing `.gitattributes` content:
 
@@ -92,8 +95,9 @@ a line-ending-only foreign edit.
 
 - Recorded: 2026-10-24
 - Source: user review
-- Status: B9 deferred in P8: no durable reload-generation bump; retain the
-  best-effort external-writer boundary and ticket invalidation, tested in P7e
+- Status: B9 verified/deferred in P7e: no durable reload-generation bump;
+  paused replacement tests with/without a writer demonstrate the best-effort
+  external-writer boundary and ticket invalidation
 - Applies to: [ADR 0011](decisions/0011-project-transactions.md),
   [ADR 0012](decisions/0012-project-sessions.md)
 
@@ -214,9 +218,9 @@ records implemented review branches without implying that a human merged them.
 
 | # | Decision | Reason and remaining work |
 | --- | --- | --- |
-| B7 | Retain one deterministically ordered `.apiforge/diagram.json` | Avoid a format migration before measuring the actual merge problem. P7e adds a realistic Git merge test for independent scenario edits, including identity/layout snapshots. Failure blocks activation and requires revisiting granularity with ADR/path/transaction coverage together; P8 does not claim the test passed |
-| B8 | Emit canonical/generated files with LF; append LF attributes during explicit initialisation and migration; preserve existing attributes and exact source saves | P7e owns code and checkout tests. Use `*.afs text eol=lf` plus root `apiforge.project.json` and API Forge's shared diagram JSON, rather than changing every user JSON file. No index edits, renormalisation, original-source rewrite or newline-normalised hashes |
-| B9 | Defer a durable local-head bump after external reload | It cannot prove an atomic uncoordinated Git checkout and adds another write/failure boundary. Keep exact fingerprint checks, analysis context/session invalidation and explicit dirty conflicts. P7e tests paused external replacement with and without a writer, documenting the limitation rather than claiming atomic checkout |
+| B7 | Retain one deterministically ordered `.apiforge/diagram.json` | P7e passed a realistic Git merge test for independent scenario edits, including full identity/layout/proxy/cleanup snapshots and exact saved reload. No format migration is needed for this measured case; same-record/context conflicts remain possible |
+| B8 | Emit canonical/generated files with LF; append LF attributes during explicit initialisation and migration; preserve existing attributes and exact source saves | P7e implemented code and real checkout tests. Use `*.afs text eol=lf` plus root `apiforge.project.json` and API Forge's shared diagram JSON, rather than changing every user JSON file. No index edits, renormalisation, original-source rewrite or newline-normalised hashes |
+| B9 | Defer a durable local-head bump after external reload | It cannot prove an atomic uncoordinated Git checkout and adds another write/failure boundary. Keep exact fingerprint checks, analysis context/session invalidation and explicit dirty conflicts. P7e passed channel-controlled paused external replacement tests with and without a writer, documenting the limitation rather than claiming atomic checkout |
 | B10 | Keep storage's language dependency for verified cache candidates; defer crate extraction | The dependency checks the cache's exact source/model equivalence, while general analysis policy remains in `apiforge-project`. Extract only when a concrete architectural change removes that verification need without duplicating policy; no Stage II gate depends on a crate split |
 
 B7's recommendation is to keep the accepted format with measured merge evidence,

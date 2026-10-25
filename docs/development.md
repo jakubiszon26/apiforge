@@ -158,6 +158,13 @@ opaque transaction-evidence export for manual recovery. Cancel preserves the
 unresolved state. Public settings require explicit discard before recovery reload;
 the latest unsaved source and text are retained as drafts.
 
+Explicit folder creation/migration appends narrow LF rules to `.gitattributes`
+for `.afs`, the root project manifest and the shared diagram JSON. Existing bytes,
+sources and index entries are preserved. Opening a project does not repair Git
+attributes, and ordinary Save preserves exact LF/CRLF editor text. Review nested
+overrides before checkout: a converted immutable revision fails its exact-byte
+integrity check. See the [Git portability evidence](qa/2026-10-25/p7-portability/verification.md).
+
 ## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).

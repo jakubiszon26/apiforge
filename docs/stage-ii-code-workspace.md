@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a navigation, P7b settings, P7c native recovery and P7d asynchronous storage implemented in review; remaining P7 integration, activation and release gates pending
+- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a navigation, P7b settings, P7c native recovery and P7d asynchronous storage and P7e portability implemented in review; remaining P7 integration, activation and release gates pending
 - Date: 2026-10-24
 - Historical analysis baseline: `d967a79`; initial implementation baseline: `c9c5ba0`. Later package bases are recorded below.
 - Delivery: one branch per package from current `main` or a required unmerged predecessor; a human merges after review. P6 and P8 review branches do not imply a merge to `main`.
@@ -361,7 +361,8 @@ the input findings from `docs/stage-ii-p8-findings` at `cedabc3`.
 | P7b | Implemented on `feat/stage-ii-p7-settings`, base unmerged P7a `375ac2b`: project-only settings, contracts/environment and session secrets | 858 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets and [native settings/header review](qa/2026-10-25/p7-settings/verification.md) passed. Apply marks public settings dirty, Save all works without a source tab, and secret-only changes invalidate run inputs without dirtying the manifest. Actual immutable revision sources validate proposed configuration |
 | P7c | Implemented on `feat/stage-ii-p7-recovery`, base unmerged P7b `1311f42`: preview-bound source/text decisions, native transaction recovery, candidate/evidence export and preserved reload work | 880 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets and [native conflict/recovery review](qa/2026-10-25/p7-recovery/verification.md), including real GTK file export and explicit finish/reopen, passed. Inaccessible targets stay blocked; ordinary I/O moves to P7d |
 | P7d | Implemented on `feat/stage-ii-p7-storage-worker`, base unmerged P7c `fec1a43`: serial storage queue, version-aware completion, asynchronous opening/saves/recovery/file operations/journal review and protected close | 901 workspace tests, two helpers ignored; UI gate 10/10, release layout budgets and [native worker/I/O review](qa/2026-10-25/p7-storage-worker/verification.md) passed. Slow storage permits real text input, later versions stay dirty, queued saves capture current baselines, and close retains ownership through acknowledgement. Dirty text move recovery is part of the file transaction |
-| P7e–g | Pending, in the delivery order above, each on its own branch | Portability evidence, performance/accessibility/docs, then activation. Linux evidence cannot close Windows QA or Windows durability |
+| P7e | Implemented on `feat/stage-ii-p7-portability`, base unmerged P7d `84e8177`: deterministic checkpoint merge evidence, narrow creation/migration LF attributes and external-writer boundary tests | 906 workspace tests, two helpers ignored; UI gate 10/10 and [Git/replay evidence](qa/2026-10-25/p7-portability/verification.md). Real autocrlf/nested-override checkouts retain exact integrity policy; no original/index rewrite or automatic attributes repair on open |
+| P7f–g | Pending, in the delivery order above, each on its own branch | Performance/accessibility/docs, then activation. Linux evidence cannot close Windows QA or Windows durability |
 
 Every completed package runs formatting, all-target workspace clippy with warnings
 denied, serial all-target workspace tests with isolated config/data directories,
@@ -370,10 +371,10 @@ directory. Counts above exclude that ten-probe gate. Language changes also run
 both sustained smoke fuzzers; layout algorithm changes run release benchmarks.
 
 P8 decisions are in [review notes](stage-ii-review-notes.md#plan-consistency-review).
-B7 retains one deterministically ordered `diagram.json`, with a realistic
-independent-document merge gate assigned to P7e. B8 adds LF Git attributes during
+B7 retains one deterministically ordered `diagram.json`; P7e passed a realistic
+independent-document merge and exact reload test. B8 adds LF Git attributes during
 explicit initialisation/migration without rewriting source or the Git index;
-P7e carries the code and tests. B9 defers a local-head reload bump because it
+P7e implements and verifies that policy. B9 defers a local-head reload bump because it
 cannot make Git checkout atomic; existing ticket invalidation and best-effort
 fingerprint checks remain. B10 keeps cache verification in storage, deferring a
 crate split until it has a concrete architectural benefit.
@@ -392,7 +393,8 @@ Acceptance must cover:
 - Context changes discard late analysis even if source did not change. Two test
   view subscribers observe the same version without feedback loops.
 - Crashes before/after transaction activation, each file operation, commit and
-  cleanup; stable readers never consume a mixed generation.
+  cleanup; stable readers never consume a mixed API Forge transaction generation.
+  Uncoordinated external replacement retains ADR 0011's best-effort boundary.
 - External equal-length edits, deletes, renames and manifest changes, including
   races with saves and recovery. No automatic overwrite of a foreign version.
 - Rename/move/delete/restore of dirty open tabs, directory deletion, case-only
