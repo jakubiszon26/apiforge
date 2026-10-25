@@ -1,6 +1,8 @@
 use super::*;
 use crate::buffers::APPLY_DELAY;
 
+#[path = "acceptance_tests.rs"]
+mod acceptance_tests;
 #[path = "accessibility_tests.rs"]
 mod accessibility_tests;
 #[path = "activation_tests.rs"]

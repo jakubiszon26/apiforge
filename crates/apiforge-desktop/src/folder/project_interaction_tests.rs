@@ -11,14 +11,14 @@ use std::{fs, path::Path, sync::mpsc};
 
 const EDITOR: &str = "Contents of main.afs";
 
-fn app(harness: &mut FolderHarness) -> &mut FolderApp {
+pub(super) fn app(harness: &mut FolderHarness) -> &mut FolderApp {
     harness.state_mut().as_mut().unwrap()
 }
 
 /// Lists `root` after the open project as the only recent projects, as an
 /// earlier session would have. Recent projects are global metadata, so the
 /// list other tests left in the shared data directory is replaced.
-fn remember(harness: &mut FolderHarness, root: &Path) {
+pub(super) fn remember(harness: &mut FolderHarness, root: &Path) {
     let bytes = fs::read(root.join("apiforge.project.json")).unwrap();
     let manifest = apiforge_project::ProjectManifest::from_bytes(&bytes).unwrap();
     let current = folder(harness).root.clone();
@@ -39,12 +39,12 @@ fn recent(harness: &mut FolderHarness, entries: Vec<navigation::Recent>) {
 
 /// Scrolls a named widget into view, as a user would before using it. A click
 /// goes to the centre of its rectangle, which may be clipped by a scroll area.
-fn reveal(harness: &mut FolderHarness, label: &str) {
+pub(super) fn reveal(harness: &mut FolderHarness, label: &str) {
     harness.get_by_label(label).scroll_to_me();
     settle(harness);
 }
 
-fn type_into(harness: &mut FolderHarness, label: &str, text: &str) {
+pub(super) fn type_into(harness: &mut FolderHarness, label: &str, text: &str) {
     reveal(harness, label);
     harness.get_by_label(label).focus();
     harness.step();
@@ -53,7 +53,7 @@ fn type_into(harness: &mut FolderHarness, label: &str, text: &str) {
 }
 
 /// Replaces the whole value of the focused-by-name field.
-fn replace_text(harness: &mut FolderHarness, label: &str, text: &str) {
+pub(super) fn replace_text(harness: &mut FolderHarness, label: &str, text: &str) {
     reveal(harness, label);
     harness.get_by_label(label).focus();
     harness.step();
@@ -65,18 +65,18 @@ fn replace_text(harness: &mut FolderHarness, label: &str, text: &str) {
     settle(harness);
 }
 
-fn choose(harness: &mut FolderHarness, label: &str) {
+pub(super) fn choose(harness: &mut FolderHarness, label: &str) {
     reveal(harness, label);
     harness.get_by_label(label).click();
     settle(harness);
 }
 
-fn open_project_menu(harness: &mut FolderHarness, item: &str) {
+pub(super) fn open_project_menu(harness: &mut FolderHarness, item: &str) {
     choose(harness, "Project");
     choose(harness, item);
 }
 
-fn has_label(harness: &FolderHarness, label: &str) -> bool {
+pub(super) fn has_label(harness: &FolderHarness, label: &str) -> bool {
     harness.query_by_label(label).is_some()
 }
 
@@ -92,7 +92,7 @@ fn saved_name(root: &Path) -> String {
 }
 
 /// Makes the watcher read the folder now instead of on its next tick.
-fn follow_disk(harness: &mut FolderHarness) {
+pub(super) fn follow_disk(harness: &mut FolderHarness) {
     let app = app(harness);
     app.watcher.rescan();
     harness.step();
