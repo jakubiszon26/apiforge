@@ -1,13 +1,15 @@
 //! Placement of blocks that source analysis could not match to an existing
 //! identity. Card sizes belong to the renderer, so hosts supply their own
 //! placer; the fixed placer keeps headless sessions and the CLI deterministic.
-use apiforge_core::format::{Graph, Position};
+use apiforge_core::format::{Graph, Position, Project};
 use apiforge_script::Document;
 use std::collections::HashSet;
 
 pub trait Placer: Send + Sync {
     /// Positions the nodes named in `fresh`, leaving every other node in place.
-    fn place(&self, document: &mut Document, fresh: &[String]);
+    /// The project context is the one the document was analysed in, so a host
+    /// can measure a card the way it draws it.
+    fn place(&self, document: &mut Document, fresh: &[String], context: &Project);
 }
 
 /// Uniform card sizes and the shared incremental layered layout.
@@ -15,7 +17,7 @@ pub trait Placer: Send + Sync {
 pub struct FixedPlacer;
 
 impl Placer for FixedPlacer {
-    fn place(&self, document: &mut Document, fresh: &[String]) {
+    fn place(&self, document: &mut Document, fresh: &[String], _context: &Project) {
         let fresh: HashSet<_> = fresh.iter().map(String::as_str).collect();
         let graphs = match document {
             Document::Scenario(scenario) => vec![&mut scenario.graph, &mut scenario.cleanup],

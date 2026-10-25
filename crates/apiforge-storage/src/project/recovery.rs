@@ -104,12 +104,55 @@ impl RecoveryDocument {
     }
 }
 
+/// An open project text file, such as `.gitignore`: exact unsaved text and the
+/// disk baseline it was edited from. A text file is not a definition, so it has
+/// no entity, kind, revision or checkpoint; its identity is its path.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecoveryText {
+    pub path: ProjectPath,
+    /// Hash of exact disk bytes at the editing baseline; null means absent.
+    pub base_hash: Option<String>,
+    pub text: String,
+    pub selection: TextSelection,
+}
+
+impl RecoveryText {
+    /// As for a document, a matching baseline alone does not authorise applying
+    /// the draft; the session still decides.
+    pub fn matches_base(&self, state: &FileState) -> bool {
+        match (&self.base_hash, state) {
+            (None, FileState::Missing) => true,
+            (Some(expected), FileState::File { sha256, .. }) => expected == sha256,
+            _ => false,
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        // The path type already refuses .git and managed .apiforge data; a text
+        // file may not address the project's own control files either.
+        if self.path.as_str().starts_with(".apiforge/")
+            || self
+                .base_hash
+                .as_ref()
+                .is_some_and(|hash| !schema::valid_hash(hash))
+        {
+            return Err(ProjectError::InvalidRecovery);
+        }
+        validate_buffer(&self.text, &self.selection)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceRecovery {
     pub format_version: u32,
     pub project_id: String,
     pub documents: Vec<RecoveryDocument>,
+    /// Open text files with unsaved work. Absent in a recovery file written
+    /// before project text files could be edited.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub texts: Vec<RecoveryText>,
 }
 
 impl SourceRecovery {
@@ -166,6 +209,19 @@ impl SourceRecovery {
                 return Err(ProjectError::Limit);
             }
         }
+        let mut texts = HashSet::new();
+        for text in &self.texts {
+            if !texts.insert(&text.path) {
+                return Err(ProjectError::InvalidRecovery);
+            }
+            text.validate()?;
+            total_text_bytes = total_text_bytes
+                .checked_add(text.text.len())
+                .ok_or(ProjectError::Limit)?;
+            if total_text_bytes > MAX_JSON_BYTES {
+                return Err(ProjectError::Limit);
+            }
+        }
         Ok(())
     }
 }
@@ -218,6 +274,29 @@ impl ProjectStore {
         recovery: &SourceRecovery,
     ) -> Result<RecoveryRead> {
         self.save_recovery_with_hook(preview, recovery, |_| Ok(()))
+    }
+
+    /// Commits a file operation and the corresponding draft paths together.
+    /// The supplied recovery observation must still match every durable baseline.
+    pub fn commit_with_source_recovery(
+        &self,
+        mut changes: Vec<ProjectChange>,
+        preview: &RecoveryRead,
+        desired: &SourceRecovery,
+    ) -> Result<RecoveryRead> {
+        self.writable()?;
+        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        self.validate_public_changes(&changes)?;
+        if preview.from_backup {
+            return Err(ProjectError::RecoveryDecisionRequired);
+        }
+        if desired.project_id != preview.baseline.project_id {
+            return Err(ProjectError::ForeignRecovery);
+        }
+        let snapshot = self.checked_recovery_snapshot(&preview.baseline)?;
+        changes.extend(recovery_changes(&snapshot, desired)?);
+        self.commit_locked(changes, |_| Ok(()))?;
+        self.read_recovery(&desired.project_id)
     }
 
     fn save_recovery_with_hook(
@@ -456,6 +535,7 @@ pub(super) fn recovery_from_snapshot(
             format_version: 1,
             project_id: project_id.into(),
             documents: Vec::new(),
+            texts: Vec::new(),
         }),
     }
 }

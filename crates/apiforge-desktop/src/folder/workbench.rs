@@ -84,6 +84,15 @@ impl Workbench {
             .find(|tab| tab.document_id == document_id)
     }
 
+    pub fn rename_tab(&mut self, from: &str, to: &str) {
+        if let Some(tab) = self.tab_mut(from) {
+            tab.document_id = to.to_owned();
+        }
+        if self.active.as_deref() == Some(from) {
+            self.active = Some(to.to_owned());
+        }
+    }
+
     /// Ctrl+E: Code and Diagram swap; Split goes to Code.
     pub fn toggle(&mut self) {
         self.mode = match self.mode {
@@ -116,6 +125,24 @@ impl Workbench {
             );
         }
         self.active = Some(document_id.to_owned());
+    }
+
+    /// Opens a tab without activating it: a restored view keeps the document
+    /// that was active when it was saved.
+    pub fn ensure(&mut self, document_id: &str) {
+        if self.tabs.iter().any(|tab| tab.document_id == document_id) {
+            return;
+        }
+        self.tabs.push(TabState {
+            document_id: document_id.to_owned(),
+            selection: TextSelection {
+                anchor: 0,
+                caret: 0,
+            },
+            scroll: 0.0,
+            cleanup: false,
+            camera: None,
+        });
     }
 
     /// Closes a tab; the tab to its right becomes active, else the one to its left.

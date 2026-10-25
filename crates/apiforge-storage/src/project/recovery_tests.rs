@@ -33,6 +33,7 @@ fn recovery() -> SourceRecovery {
             }],
             checkpoint: None,
         }],
+        texts: Vec::new(),
     }
 }
 
@@ -507,4 +508,60 @@ fn an_external_replacement_after_primary_write_is_not_acknowledged_as_the_reques
             .recovery(),
         Some(&foreign)
     );
+}
+
+#[test]
+fn text_file_drafts_round_trip_and_cannot_address_managed_data() {
+    let (directory, store, preview) = setup();
+    let mut desired = recovery();
+    desired.texts = vec![RecoveryText {
+        path: path(".gitignore"),
+        base_hash: match FileState::of(b"/.apiforge/local/\n") {
+            FileState::File { sha256, .. } => Some(sha256),
+            _ => unreachable!(),
+        },
+        text: "/.apiforge/local/\r\ntarget\n".into(),
+        selection: TextSelection {
+            anchor: 19,
+            caret: 25,
+        },
+    }];
+    let saved = store.save_source_recovery(&preview, &desired).unwrap();
+    assert_eq!(saved.recovery(), Some(&desired));
+    let reread = store.load_source_recovery(&manifest().id).unwrap();
+    assert_eq!(reread.recovery().unwrap().texts, desired.texts);
+    assert!(
+        reread.recovery().unwrap().texts[0].matches_base(&FileState::of(b"/.apiforge/local/\n"))
+    );
+
+    // A draft of a file that does not exist yet records an absent baseline.
+    let mut absent = desired.clone();
+    absent.texts[0].base_hash = None;
+    store
+        .save_source_recovery(
+            &store.load_source_recovery(&manifest().id).unwrap(),
+            &absent,
+        )
+        .unwrap();
+
+    // The project's own data is never a text draft, and neither is a duplicate.
+    let mut managed = desired.clone();
+    managed.texts[0].path = path(".apiforge/diagram.json");
+    assert!(matches!(
+        managed.to_bytes(),
+        Err(ProjectError::InvalidRecovery)
+    ));
+    let mut duplicate = desired.clone();
+    duplicate.texts.push(duplicate.texts[0].clone());
+    assert!(matches!(
+        duplicate.to_bytes(),
+        Err(ProjectError::InvalidRecovery)
+    ));
+    let mut misplaced = desired;
+    misplaced.texts[0].selection.caret = 999;
+    assert!(matches!(
+        misplaced.to_bytes(),
+        Err(ProjectError::InvalidRecovery)
+    ));
+    drop(directory);
 }

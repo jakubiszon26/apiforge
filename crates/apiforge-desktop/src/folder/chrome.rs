@@ -14,18 +14,50 @@ impl FolderApp {
             .documents()
             .iter()
             .any(|document| document.is_dirty() || document.is_layout_dirty())
+            || session.text_files().iter().any(|file| file.is_dirty())
             || session.is_manifest_dirty();
-        let active_unsaved = self
-            .workbench
-            .active()
+        let active = self.workbench.active();
+        let run_document = active
+            .and_then(|id| session.document(id))
+            .filter(|document| document.entry().kind == DocumentKind::Scenario)
+            .map(|document| document.id().to_owned());
+        let publish = active
+            .and_then(|id| session.document(id))
+            .filter(|document| document.entry().kind == DocumentKind::Component)
+            .map(|document| {
+                (
+                    document.id().to_owned(),
+                    session.publishable(document.id()).is_ok(),
+                )
+            });
+        let active_unsaved = active
             .and_then(|active| session.document(active))
-            .is_some_and(|document| document.is_dirty() || document.is_layout_dirty());
+            .is_some_and(|document| document.is_dirty() || document.is_layout_dirty())
+            || active
+                .and_then(|active| active.strip_prefix(TEXT_TAB))
+                .and_then(|path| session.text_file(path))
+                .is_some_and(apiforge_project::TextFileSession::is_dirty);
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(name)
-                    .size(theme::FONT_TITLE)
-                    .family(theme::bold_family()),
+            self.navigation_menu(ui);
+            // Keep room for the full scenario toolbar and the read-only badge.
+            // A long project name must not paint into the Code tab at 960 px.
+            let reserved = 620.0 + if read_only { 80.0 } else { 0.0 };
+            let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(title_width, theme::CONTROL_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(name)
+                                .size(theme::FONT_BODY)
+                                .family(egui::FontFamily::Proportional),
+                        )
+                        .truncate(),
+                    )
+                },
             )
+            .inner
             .on_hover_text(self.root.display().to_string());
             if read_only {
                 ui.label(
@@ -35,6 +67,52 @@ impl FolderApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.runs.handle.is_some() {
+                    if ui.button("Cancel run").clicked()
+                        && let Some(handle) = &self.runs.handle
+                    {
+                        handle.cancel();
+                    }
+                } else if let Some(id) = &run_document {
+                    if ui
+                        .add(widgets::action(Icon::Play, "Run").primary())
+                        .on_hover_text(
+                            "Simulate the selected scenario, including unsaved valid code",
+                        )
+                        .clicked()
+                    {
+                        self.request_run(id, false);
+                    }
+                    ui.menu_button("Run options", |ui| {
+                        widgets::name_menu(ui, "Run options menu");
+                        if ui.button("Run live requests").clicked() {
+                            ui.close();
+                            self.request_run(id, true);
+                        }
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            self.review_legacy_runs();
+                        }
+                    });
+                } else {
+                    ui.menu_button("Runs", |ui| {
+                        widgets::name_menu(ui, "Runs menu");
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            self.review_legacy_runs();
+                        }
+                    });
+                }
+                if let Some((id, enabled)) = &publish
+                    && ui
+                        .add_enabled(*enabled, egui::Button::new("Publish"))
+                        .on_hover_text(
+                            "Save this component and publish its next immutable revision",
+                        )
+                        .clicked()
+                {
+                    self.component_action(id, publication::Action::Publish);
+                }
                 if ui
                     .add_enabled(
                         !read_only && unsaved,
@@ -73,71 +151,104 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let tabs: Vec<(String, String, String, bool, bool, bool)> = self
+        let tabs: Vec<TabFace> = self
             .workbench
             .tabs()
             .iter()
             .filter_map(|tab| {
-                let document = session.document(&tab.document_id)?;
-                let path = document.entry().path.as_str().to_owned();
-                Some((
-                    tab.document_id.clone(),
-                    file_name(&path).to_owned(),
-                    path,
-                    document.needs_recovery(),
-                    document.analysis() == AnalysisState::Invalid,
-                    document.conflict().is_some(),
-                ))
+                let key = tab.document_id.clone();
+                if let Some(document) = session.document(&key) {
+                    return Some(TabFace {
+                        path: document.entry().path.as_str().to_owned(),
+                        unsaved: document.needs_recovery(),
+                        invalid: document.analysis() == AnalysisState::Invalid,
+                        conflict: document.conflict().is_some(),
+                        key,
+                    });
+                }
+                let file = session.text_file(key.strip_prefix(TEXT_TAB)?)?;
+                Some(TabFace {
+                    path: file.path().to_owned(),
+                    unsaved: file.needs_recovery(),
+                    invalid: false,
+                    conflict: file.conflict().is_some(),
+                    key,
+                })
             })
             .collect();
         if tabs.is_empty() {
             ui.add_space(theme::CONTROL_HEIGHT - 4.0);
+            self.followed_tab = None;
             return;
         }
         let active = self.workbench.active().map(str::to_owned);
+        // Labels are laid out before anything is drawn, so the strip knows
+        // where the active tab is and can reveal it in this same frame.
+        let labels = tab_labels(&tabs);
+        let font = egui::FontId::proportional(theme::FONT_BODY);
+        let galleys: Vec<Arc<egui::Galley>> = tabs
+            .iter()
+            .zip(&labels)
+            .map(|(tab, label)| {
+                let mut job = egui::text::LayoutJob::single_section(
+                    if tab.unsaved {
+                        format!("{label}  \u{25cf}")
+                    } else {
+                        label.clone()
+                    },
+                    egui::TextFormat::simple(font.clone(), tab.colour()),
+                );
+                job.wrap = egui::text::TextWrapping::truncate_at_width(TAB_LABEL_WIDTH);
+                ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+            })
+            .collect();
+        let widths: Vec<f32> = galleys
+            .iter()
+            .map(|galley| TAB_PADDING * 2.0 + galley.size().x + TAB_GAP + TAB_CLOSE)
+            .collect();
+        let mut scroll = egui::ScrollArea::horizontal()
+            .id_salt("folder-tab-strip")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
+        // The active tab must be reachable, so activating one scrolls it in.
+        // A narrower window can push it out of view just as activation can.
+        let width = ui.available_width();
+        let resized = (width - self.tabs_width).abs() > 0.5;
+        self.tabs_width = width;
+        if active != self.followed_tab || resized {
+            self.followed_tab = active.clone();
+            if let Some(index) = active
+                .as_deref()
+                .and_then(|active| tabs.iter().position(|tab| tab.key == active))
+            {
+                let left: f32 = widths[..index].iter().sum::<f32>() + index as f32 * TAB_SPACING;
+                let right = left + widths[index];
+                let viewport = width;
+                if left < self.tabs_offset {
+                    scroll = scroll.horizontal_scroll_offset(left);
+                } else if right > self.tabs_offset + viewport {
+                    scroll = scroll.horizontal_scroll_offset(right - viewport);
+                }
+            }
+        }
         let mut activate = None;
         let mut close = None;
-        egui::ScrollArea::horizontal()
-            .id_salt("folder-tab-strip")
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (document_id, name, path, unsaved, invalid, conflict) in &tabs {
-                        let selected = active.as_deref() == Some(document_id.as_str());
-                        let mut label = RichText::new(if *unsaved {
-                            format!("{name}  ●")
-                        } else {
-                            name.clone()
-                        })
-                        .size(theme::FONT_BODY);
-                        if *conflict {
-                            label = label.color(theme::WARNING);
-                        } else if *invalid {
-                            label = label.color(theme::DANGER);
-                        }
-                        let response = ui
-                            .add(egui::Button::selectable(selected, label))
-                            .on_hover_text(path);
-                        if response.clicked() {
-                            activate = Some(document_id.clone());
-                        }
-                        if response.middle_clicked() {
-                            close = Some(document_id.clone());
-                        }
-                        if ui
-                            .add(
-                                widgets::icon_button(Icon::Close, &format!("Close {name}"))
-                                    .compact(),
-                            )
-                            .clicked()
-                        {
-                            close = Some(document_id.clone());
-                        }
-                        ui.add_space(theme::SPACE_SM);
+        let output = scroll.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = TAB_SPACING;
+                for ((tab, galley), width) in tabs.iter().zip(galleys).zip(&widths) {
+                    let selected = active.as_deref() == Some(tab.key.as_str());
+                    match tab_face(ui, tab, galley, *width, selected) {
+                        Some(true) => close = Some(tab.key.clone()),
+                        Some(false) => activate = Some(tab.key.clone()),
+                        None => {}
                     }
-                });
+                }
             });
+        });
+        self.tabs_offset = output.state.offset.x.max(0.0);
         if let Some(document_id) = activate {
-            self.workbench.open(&document_id);
+            self.activate_tab(&document_id);
+            self.followed_tab = Some(document_id);
             self.touched();
         }
         if let Some(document_id) = close {
@@ -146,6 +257,12 @@ impl FolderApp {
     }
 
     pub(super) fn notices(&mut self, ui: &mut egui::Ui) {
+        if let Some(label) = self.storage.label() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                widgets::hint(ui, label);
+            });
+        }
         let Some(session) = self.session.as_ref() else {
             return;
         };
@@ -163,18 +280,19 @@ impl FolderApp {
                     theme::WARNING,
                     "Unsaved work from an earlier session is in the recovery backup.",
                 );
-                if ui.button("Restore backup").clicked()
-                    && let Some(session) = self.session.as_mut()
-                {
-                    match session.restore_recovery_backup() {
-                        Ok(()) => self.shown = None,
-                        Err(error) => {
-                            self.notice = Some(Notice {
-                                text: error.to_string(),
-                                error: true,
-                            })
-                        }
-                    }
+                if ui.button("Restore backup").clicked() {
+                    self.working_project(
+                        "Restoring recovery backup…",
+                        ProjectSession::restore_recovery_backup,
+                        |app, result| match result {
+                            Ok(()) => {
+                                app.shown = None;
+                                app.reload_field_drafts();
+                                app.restore_text_tabs();
+                            }
+                            Err(error) => app.notify(error.to_string(), true),
+                        },
+                    );
                 }
             });
         } else if unavailable {
@@ -259,26 +377,25 @@ impl FolderApp {
         if !(reload || discard) {
             return;
         }
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if discard {
-            session
-                .discard_configuration()
-                .and_then(|()| session.reload_project())
-        } else {
-            session.reload_project()
-        };
-        match result {
-            Ok(()) => {
-                self.follow_external(ExternalOutcome {
-                    project_reloaded: true,
-                    ..Default::default()
-                });
-                self.watcher.rescan();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        self.working_project(
+            "Reloading project…",
+            move |session| {
+                if discard {
+                    session.discard_configuration()?;
+                }
+                session.reload_project()
+            },
+            |app, result| match result {
+                Ok(()) => {
+                    app.follow_external(ExternalOutcome {
+                        project_reloaded: true,
+                        ..Default::default()
+                    });
+                    app.watcher.rescan();
+                }
+                Err(error) => app.notify(error.to_string(), true),
+            },
+        );
     }
 
     pub(super) fn prompts(&mut self, context: &egui::Context) {
@@ -286,6 +403,33 @@ impl FolderApp {
             return;
         };
         self.prompt = match prompt {
+            Prompt::Working { ticket, label } => {
+                dialogs::centered_modal(egui::Id::new("folder-working"), context).show(
+                    context,
+                    |ui| {
+                        ui.set_width(340.0);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(label);
+                        });
+                    },
+                );
+                Some(Prompt::Working { ticket, label })
+            }
+            Prompt::Conflict(view) => self.conflict_prompt(context, *view),
+            Prompt::Transaction(view) => self.transaction_prompt(context, *view),
+            Prompt::Settings(dialog) => self.project_settings_prompt(context, *dialog),
+            Prompt::Environment(dialog) => self.environment_prompt(context, *dialog),
+            Prompt::Run { prepared, live } => self.run_prompt(context, *prepared, live),
+            Prompt::Journal(review) => self.journal_prompt(context, *review),
+            Prompt::AssignResult {
+                document_id,
+                cleanup,
+                dialog,
+            } => self.assign_result_prompt(context, document_id, cleanup, *dialog),
+            Prompt::CommentLoss { ticket, action } => {
+                self.comment_loss_prompt(context, ticket, action)
+            }
             Prompt::CloseTab(document_id) => self.close_tab_prompt(context, document_id),
             Prompt::NewDocument {
                 kind,
@@ -362,21 +506,49 @@ impl FolderApp {
     /// Closes a tab after saving its document, or after discarding its unsaved
     /// work. A failure keeps the tab open and says why.
     pub(super) fn close_tab_with(&mut self, document_id: &str, save: bool) {
-        let result = if save {
-            self.save_document(document_id)
+        let id = document_id.to_owned();
+        if save {
+            self.save_document_with(document_id, move |app, result| match result {
+                Ok(saved)
+                    if app
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| saved.matches(session, &id)) =>
+                {
+                    app.close_tab(&id)
+                }
+                Ok(_) => {
+                    app.notify(
+                        "Newer changes remain unsaved. Save them before closing this tab.",
+                        true,
+                    );
+                    app.prompt = Some(Prompt::CloseTab(id));
+                }
+                Err(error) => app.notify(format!("Could not save before closing: {error}"), true),
+            });
         } else {
-            self.session
-                .as_mut()
-                .ok_or_else(String::new)
-                .and_then(|session| {
-                    session
-                        .revert(document_id, DIAGRAM)
-                        .map_err(|error| format!("Could not discard the changes: {error}"))
-                })
-        };
-        match result {
-            Ok(()) => self.close_tab(document_id),
-            Err(message) => self.notify(message, true),
+            let text = self.text_of(document_id).map(str::to_owned);
+            let target = id.clone();
+            self.storage_project(
+                "Discarding file changes…",
+                apiforge_project::StorageMode::Exclusive,
+                true,
+                move |session| match text {
+                    Some(path) => session.revert_text_file(&path, DIAGRAM),
+                    None => session.revert(&target, DIAGRAM),
+                },
+                move |app, result| match result {
+                    Ok(()) => {
+                        app.shown = None;
+                        inspector::forget_field_text(&app.ui_context);
+                        app.reload_field_drafts();
+                        app.close_tab(&id);
+                    }
+                    Err(error) => {
+                        app.notify(format!("Could not discard the changes: {error}"), true)
+                    }
+                },
+            );
         }
     }
 
@@ -398,8 +570,10 @@ impl FolderApp {
                     DocumentKind::Component => "New component",
                 });
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     create = true;
                 }
@@ -421,7 +595,7 @@ impl FolderApp {
         }
         if create && !name.trim().is_empty() {
             match self.create_document(kind, folder.as_deref(), name.trim()) {
-                Ok(()) => return None,
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -439,44 +613,63 @@ impl FolderApp {
         folder: Option<&str>,
         name: &str,
     ) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let (default_folder, source) = match kind {
-            DocumentKind::Scenario => ("scenarios", scenario_template(name)),
-            DocumentKind::Component => ("components", component_template(name)),
-        };
-        let folder = folder.unwrap_or(default_folder);
-        let join = |name: String| {
-            if folder.is_empty() {
-                name
-            } else {
-                format!("{folder}/{name}")
-            }
-        };
-        let stem = file_stem(name);
-        let taken = |path: &str| {
-            session
-                .documents()
-                .iter()
-                .any(|document| document.entry().path.as_str().eq_ignore_ascii_case(path))
-                || session.store().root().join(path).exists()
-        };
-        let path = (1..)
-            .map(|index| match index {
-                1 => join(format!("{stem}.afs")),
-                _ => join(format!("{stem}-{index}.afs")),
-            })
-            .find(|path| !taken(path))
-            .expect("an unused name exists");
-        let document_id = session
-            .create_document(kind, &path, &source)
-            .map_err(|error| error.to_string())?;
-        if !folder.is_empty() {
-            self.workbench.expanded.insert(folder.to_owned());
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
-        self.explorer.selected = Some(path);
-        self.workbench.open(&document_id);
-        self.watcher.rescan();
-        self.touched();
+        let name = name.to_owned();
+        let selected_folder = folder.map(str::to_owned);
+        let failed = Prompt::NewDocument {
+            kind,
+            folder: selected_folder.clone(),
+            name: name.clone(),
+            error: None,
+        };
+        self.working_project(
+            "Creating document…",
+            move |session| {
+                let (default_folder, source) = match kind {
+                    DocumentKind::Scenario => ("scenarios", scenario_template(&name)),
+                    DocumentKind::Component => ("components", component_template(&name)),
+                };
+                let folder = selected_folder.unwrap_or_else(|| default_folder.into());
+                let stem = file_stem(&name);
+                let path = (1..=apiforge_storage::project::MAX_TREE_ENTRIES)
+                    .map(|index| {
+                        let name = if index == 1 {
+                            format!("{stem}.afs")
+                        } else {
+                            format!("{stem}-{index}.afs")
+                        };
+                        if folder.is_empty() {
+                            name
+                        } else {
+                            format!("{folder}/{name}")
+                        }
+                    })
+                    .find(|path| {
+                        !session
+                            .documents()
+                            .iter()
+                            .any(|doc| doc.entry().path.as_str().eq_ignore_ascii_case(path))
+                            && !session.store().root().join(path).exists()
+                    })
+                    .ok_or(apiforge_project::ProjectError::Limit)?;
+                let id = session.create_document(kind, &path, &source)?;
+                Ok((id, path, folder))
+            },
+            move |app, result| match result {
+                Ok((id, path, folder)) => {
+                    if !folder.is_empty() {
+                        app.workbench.expanded.insert(folder);
+                    }
+                    app.explorer.selected = Some(path);
+                    app.activate_tab(&id);
+                    app.watcher.rescan();
+                    app.touched();
+                }
+                Err(error) => app.restore_prompt(failed, error.to_string()),
+            },
+        );
         Ok(())
     }
 
@@ -485,7 +678,8 @@ impl FolderApp {
         context: &egui::Context,
         message: String,
     ) -> Option<Prompt> {
-        let (mut retry, mut discard, mut keep) = (false, false, false);
+        let (mut retry, mut discard, mut keep, mut export) = (false, false, false, false);
+        let switching = self.switching();
         let response = dialogs::centered_modal(egui::Id::new("folder-close-failed"), context).show(
             context,
             |ui| {
@@ -494,33 +688,205 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_SM);
                 ui.label(&message);
                 ui.label(
-                    "Save your documents, try again, or close and discard every unsaved \
-                     change.",
+                    "Save your documents, export your work, retry, or discard unsaved changes.",
                 );
                 ui.add_space(theme::SPACE_MD);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     keep = ui.add(widgets::primary_button("Keep editing")).clicked();
                     retry = ui.button("Try again").clicked();
-                    discard = ui.button("Discard unsaved work and close").clicked();
+                    export = ui
+                        .add_enabled(
+                            !self.runs.exporting,
+                            egui::Button::new(if switching {
+                                "Export and open folder"
+                            } else {
+                                "Export and close"
+                            }),
+                        )
+                        .clicked();
+                    discard = ui
+                        .button(if switching {
+                            "Discard unsaved work and open folder"
+                        } else {
+                            "Discard unsaved work and close"
+                        })
+                        .clicked();
                 });
             },
         );
+        if export {
+            self.export_before_close();
+        }
         if retry {
-            self.close_requested = true;
+            if switching {
+                self.navigation.failed = false;
+            } else {
+                self.close_requested = true;
+            }
             return None;
         }
         if discard {
-            if let Some(session) = self.session.take()
-                && let Err((session, error)) = session.discard_unsaved_and_close()
-            {
-                // Nothing was discarded: the window stays usable for Keep
-                // editing or Try again.
-                self.session = Some(*session);
-                return Some(Prompt::CloseFailed(error.to_string()));
-            }
-            self.close_requested = true;
-            return None;
+            self.persistence.discard = true;
+            self.persistence.departure = true;
+            self.persistence.approved_export = None;
+            self.persistence.departure_generation += 1;
+            self.runs.exporting = false;
+            self.navigation.failed = false;
+            self.advance_departure();
+            return self.prompt.take();
+        }
+        if keep || response.should_close() {
+            self.cancel_switch();
         }
         (!keep && !response.should_close()).then_some(Prompt::CloseFailed(message))
     }
+}
+
+/// Tab geometry: the name, its state and the close control share one surface,
+/// so the control is always inside the tab the user is pointing at.
+const TAB_PADDING: f32 = 10.0;
+const TAB_GAP: f32 = 6.0;
+pub(super) const TAB_CLOSE: f32 = 14.0;
+const TAB_SPACING: f32 = 4.0;
+const TAB_HEIGHT: f32 = 26.0;
+/// A long name is bounded so that the other tabs and controls stay reachable;
+/// the full path is on hover.
+pub(super) const TAB_LABEL_WIDTH: f32 = 160.0;
+
+/// What one tab shows this frame.
+pub(super) struct TabFace {
+    key: String,
+    path: String,
+    unsaved: bool,
+    invalid: bool,
+    conflict: bool,
+}
+
+impl TabFace {
+    fn colour(&self) -> egui::Color32 {
+        if self.conflict {
+            theme::WARNING
+        } else if self.invalid {
+            theme::DANGER
+        } else {
+            theme::TEXT
+        }
+    }
+}
+
+/// Each tab's label: the file name, plus the least parent path that tells it
+/// apart from another open file of the same name.
+fn tab_labels(tabs: &[TabFace]) -> Vec<String> {
+    let parts: Vec<Vec<&str>> = tabs
+        .iter()
+        .map(|tab| tab.path.split('/').collect())
+        .collect();
+    let suffix = |segments: &[&str], depth: usize| segments[segments.len() - depth..].join("/");
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, segments)| {
+            let mut depth = 1;
+            while depth < segments.len()
+                && parts.iter().enumerate().any(|(other, candidate)| {
+                    other != index
+                        && candidate.len() >= depth
+                        && suffix(candidate, depth) == suffix(segments, depth)
+                })
+            {
+                depth += 1;
+            }
+            suffix(segments, depth)
+        })
+        .collect()
+}
+
+/// Draws one tab. Returns `Some(true)` when its close control was used,
+/// `Some(false)` when the tab itself was activated.
+fn tab_face(
+    ui: &mut egui::Ui,
+    tab: &TabFace,
+    galley: Arc<egui::Galley>,
+    width: f32,
+    selected: bool,
+) -> Option<bool> {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, TAB_HEIGHT), egui::Sense::click_and_drag());
+    let close_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            rect.right() - TAB_PADDING - TAB_CLOSE / 2.0,
+            rect.center().y,
+        ),
+        egui::Vec2::splat(TAB_CLOSE),
+    );
+    let close = ui.interact(
+        close_rect,
+        ui.id().with(("folder-tab-close", &tab.key)),
+        egui::Sense::click(),
+    );
+    close.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            format!("Close {}", file_name(&tab.path)),
+        )
+    });
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            true,
+            selected,
+            file_name(&tab.path),
+        )
+    });
+    let painter = ui.painter_at(rect.union(close_rect));
+    let fill = if selected {
+        theme::WHITE
+    } else if response.hovered() || close.hovered() {
+        theme::FIELD
+    } else {
+        theme::PANEL
+    };
+    painter.rect_filled(rect, 6.0, fill);
+    if selected {
+        painter.rect_stroke(
+            rect,
+            6.0,
+            egui::Stroke::new(1.0, theme::BORDER),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.galley(
+        egui::pos2(
+            rect.left() + TAB_PADDING,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        tab.colour(),
+    );
+    Icon::Close.paint(
+        &painter,
+        close_rect,
+        if close.hovered() {
+            theme::TEXT
+        } else {
+            theme::MUTED
+        },
+    );
+    let hover = if tab.conflict {
+        format!("{} — changed outside API Forge", tab.path)
+    } else {
+        tab.path.clone()
+    };
+    let response = response.on_hover_text(&hover);
+    let close = close.on_hover_text(format!("Close {} (Ctrl+W)", file_name(&tab.path)));
+    if close.clicked() {
+        return Some(true);
+    }
+    // The close control sits inside the tab, so a click on it is also a click
+    // on the tab; it must not activate the file it is closing.
+    if (response.clicked() && !close.contains_pointer()) || response.middle_clicked() {
+        return Some(false);
+    }
+    None
 }

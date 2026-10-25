@@ -23,15 +23,54 @@ use std::{
     fs::{self, File},
     io::{self, Read},
     path::{Path, PathBuf},
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
 };
 
 /// The journal of one workspace session, and the writer the runner uses.
-#[derive(Debug)]
 pub struct JournalStore {
     // The clone keeps the session's lock alive for as long as the journal is written.
-    store: WorkspaceStore,
+    store: Arc<dyn WriterSession>,
+    path: PathBuf,
     journal: Mutex<Journal>,
+}
+
+/// A shared writer owner keeps its OS lock alive and serialises project I/O.
+/// Journal persistence does not depend on a particular workspace container.
+trait WriterSession: Send + Sync {
+    fn access(
+        &self,
+        action: &mut dyn FnMut(&Path) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError>;
+}
+
+impl std::fmt::Debug for JournalStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JournalStore")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WriterSession for WorkspaceStore {
+    fn access(
+        &self,
+        action: &mut dyn FnMut(&Path) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        if self.is_read_only() {
+            return Err(StorageError::ReadOnly);
+        }
+        action(&journal_path(self.path()))
+    }
+}
+
+impl WriterSession for crate::project::ProjectStore {
+    fn access(
+        &self,
+        action: &mut dyn FnMut(&Path) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        self.journal_access(action)
+    }
 }
 
 /// An opened journal together with what the previous session left behind.
@@ -52,31 +91,49 @@ impl JournalStore {
     /// Fails for a read-only session, which must not write files another window owns,
     /// and for a journal written by an unknown version, which is preserved untouched.
     pub fn open(store: WorkspaceStore) -> Result<LoadedJournal, StorageError> {
-        if store.is_read_only() {
-            return Err(StorageError::ReadOnly);
-        }
-        let path = journal_path(store.path());
-        let (journal, unreadable) = match read(&path) {
-            Ok(Some(journal)) => (journal, false),
-            Ok(None) => (Journal::default(), false),
-            Err(error @ StorageError::UnsupportedJournalVersion) => return Err(error),
-            Err(_) => {
-                preserve_unreadable(&path)?;
-                (Journal::default(), true)
-            }
-        };
+        Self::open_owner(Arc::new(store))
+    }
+
+    pub fn open_project(
+        store: crate::project::ProjectStore,
+    ) -> Result<LoadedJournal, StorageError> {
+        Self::open_owner(Arc::new(store))
+    }
+
+    fn open_owner(store: Arc<dyn WriterSession>) -> Result<LoadedJournal, StorageError> {
+        let mut loaded = None;
+        let mut location = PathBuf::new();
+        store.access(&mut |path| {
+            location = path.to_owned();
+            loaded = Some(Self::read_or_preserve(path)?);
+            Ok(())
+        })?;
+        let (journal, unreadable) = loaded.expect("the owner completed journal access");
         Ok(LoadedJournal {
             interrupted: journal.runs.clone(),
             unreadable,
             store: Self {
                 store,
+                path: location,
                 journal: Mutex::new(journal),
             },
         })
     }
 
+    fn read_or_preserve(path: &Path) -> Result<(Journal, bool), StorageError> {
+        Ok(match read(path) {
+            Ok(Some(journal)) => (journal, false),
+            Ok(None) => (Journal::default(), false),
+            Err(error @ StorageError::UnsupportedJournalVersion) => return Err(error),
+            Err(_) => {
+                preserve_unreadable(path)?;
+                (Journal::default(), true)
+            }
+        })
+    }
+
     pub fn path(&self) -> PathBuf {
-        journal_path(self.store.path())
+        self.path.clone()
     }
 
     /// What the file holds now.
@@ -87,10 +144,12 @@ impl JournalStore {
     /// Forgets runs the user has acknowledged. Unknown identifiers are ignored.
     pub fn discard(&self, run_ids: &[String]) -> Result<(), StorageError> {
         let mut journal = self.locked();
-        journal
-            .runs
+        let mut next = journal.clone();
+        next.runs
             .retain(|run| !run_ids.iter().any(|id| id == &run.run_id));
-        self.write(&journal)
+        self.write(&next)?;
+        *journal = next;
+        Ok(())
     }
 
     fn locked(&self) -> std::sync::MutexGuard<'_, Journal> {
@@ -99,15 +158,20 @@ impl JournalStore {
 
     /// Writes the journal, or removes the file once no run is recorded.
     fn write(&self, journal: &Journal) -> Result<(), StorageError> {
-        let path = self.path();
+        self.store.access(&mut |path| Self::write_at(path, journal))
+    }
+
+    fn write_at(path: &Path, journal: &Journal) -> Result<(), StorageError> {
         if journal.is_empty() {
-            return remove(&path);
+            return remove(path);
         }
         let bytes = serde_json::to_vec_pretty(journal).map_err(file::StorageError::Serialise)?;
         if bytes.len() > MAX_BYTES {
-            return Err(StorageError::TooLarge { path });
+            return Err(StorageError::TooLarge {
+                path: path.to_owned(),
+            });
         }
-        write_atomic(&path, &bytes).map_err(StorageError::Document)
+        write_atomic(path, &bytes).map_err(StorageError::Document)
     }
 
     fn update(
@@ -115,8 +179,11 @@ impl JournalStore {
         change: impl FnOnce(&mut Journal) -> Result<(), JournalSinkError>,
     ) -> Result<(), JournalSinkError> {
         let mut journal = self.locked();
-        change(&mut journal)?;
-        self.write(&journal).map_err(sink_error)
+        let mut next = journal.clone();
+        change(&mut next)?;
+        self.write(&next).map_err(sink_error)?;
+        *journal = next;
+        Ok(())
     }
 }
 

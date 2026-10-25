@@ -5,7 +5,7 @@
 //! applies the result: clean documents follow the disk, unsaved work gets a
 //! conflict. The latest scan also feeds the explorer.
 
-use apiforge_project::{ExternalChanges, ExternalOutcome, ProjectError, ProjectSession};
+use apiforge_project::{ExternalChanges, ProjectError, ProjectSession};
 use apiforge_storage::project::TreeScan;
 use eframe::egui;
 use std::{
@@ -29,6 +29,7 @@ pub struct Watcher {
     pub scan: Option<TreeScan>,
     /// Why the folder could not be checked, until a check succeeds.
     pub problem: Option<String>,
+    pub recovery_required: bool,
 }
 
 impl Watcher {
@@ -43,6 +44,7 @@ impl Watcher {
             repaint,
             scan: None,
             problem: None,
+            recovery_required: false,
         }
     }
 
@@ -59,9 +61,25 @@ impl Watcher {
         self.focused = focused;
     }
 
-    #[cfg(test)]
     pub fn is_busy(&self) -> bool {
         self.running
+    }
+
+    pub fn stop(&mut self) {
+        self.focused = false;
+    }
+
+    pub fn resume(&mut self) {
+        self.focused = true;
+        self.due = None;
+    }
+
+    /// Close waits for the current reader to release its owner, without applying
+    /// its obsolete result or starting another check.
+    pub fn drain_stopped(&mut self) {
+        for _ in self.results.try_iter() {
+            self.running = false;
+        }
     }
 
     /// Applies a finished check, then starts the next one when it is due.
@@ -70,28 +88,24 @@ impl Watcher {
         &mut self,
         session: &mut ProjectSession,
         now: Instant,
-    ) -> (Option<ExternalOutcome>, Duration) {
+    ) -> (Option<ExternalChanges>, Duration) {
         let mut outcome = None;
         for result in self.results.try_iter() {
             self.running = false;
             match result {
                 Ok(changes) => {
+                    // A readable generation is not permission to resume a
+                    // session that still needs an explicit reload decision.
                     self.scan = Some(changes.scan.clone());
-                    match session.apply_external(changes) {
-                        Ok(applied) => {
-                            self.problem = None;
-                            if !applied.is_empty() {
-                                outcome = Some(applied);
-                            }
-                        }
-                        Err(error) => self.problem = Some(error.to_string()),
-                    }
+                    self.problem = None;
+                    outcome = Some(changes);
                 }
                 // A transaction in progress (this or another writer); the next
                 // check sees its result.
-                Err(apiforge_project::Error::Storage(
-                    ProjectError::Busy | ProjectError::RecoveryRequired,
-                )) => {}
+                Err(apiforge_project::Error::Storage(ProjectError::Busy)) => {}
+                Err(apiforge_project::Error::Storage(ProjectError::RecoveryRequired)) => {
+                    self.recovery_required = true;
+                }
                 Err(error) => self.problem = Some(error.to_string()),
             }
         }
@@ -119,7 +133,10 @@ impl Watcher {
 
     /// Waits for the running check and applies it, for tests.
     #[cfg(test)]
-    pub fn finish(&mut self, session: &mut ProjectSession) -> Option<ExternalOutcome> {
+    pub fn finish(
+        &mut self,
+        session: &mut ProjectSession,
+    ) -> Option<apiforge_project::ExternalOutcome> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while self.running && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));

@@ -8,12 +8,25 @@
 //! Folder projects are opened explicitly with `--folder`; the normal startup
 //! path still opens the workspace.
 
+mod activation;
+pub use activation::{Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;
+mod conflict_view;
 mod diagram;
 mod explorer;
 mod file_prompts;
+mod navigation;
+mod opening;
+mod placement;
+mod publication;
+mod runs;
+mod saving;
+mod settings;
+mod storage;
+mod text_view;
+mod transaction_view;
 mod watcher;
 mod workbench;
 
@@ -44,6 +57,7 @@ use apiforge_storage::{
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
+use placement::CardPlacer;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -61,8 +75,34 @@ const DIAGRAM: Origin = Origin(2);
 const RECOVERY_DELAY: Duration = Duration::from_secs(1);
 /// Split keeps the inspector beside code and diagram only on wide windows.
 const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
+/// A tab shows a registered document, by its ID, or a project text file, by
+/// its path behind this prefix. Documents are resolved first, so a tab key
+/// cannot shadow one.
+const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    Working {
+        ticket: u64,
+        label: &'static str,
+    },
+    Conflict(Box<conflict_view::ConflictView>),
+    Transaction(Box<transaction_view::TransactionView>),
+    Settings(Box<dialogs::SettingsDialog>),
+    Environment(Box<dialogs::EnvironmentDialog>),
+    Run {
+        prepared: Box<apiforge_project::PreparedRun>,
+        live: bool,
+    },
+    Journal(Box<runs::JournalReview>),
+    AssignResult {
+        document_id: String,
+        cleanup: bool,
+        dialog: Box<dialogs::AssignVariableDialog>,
+    },
+    CommentLoss {
+        ticket: apiforge_project::AnalysisTicket,
+        action: Box<publication::Action>,
+    },
     /// A tab with unsaved work: save, discard or keep it open.
     CloseTab(String),
     NewDocument {
@@ -142,6 +182,8 @@ pub struct FolderApp {
     explorer: ExplorerState,
     /// File dialogs running on their own threads.
     picked: Vec<Receiver<Picked>>,
+    /// The most recent candidate export; it never resolves the pending decision.
+    export_status: Option<String>,
     /// The last session event this window has followed.
     seen: u64,
     code: code::CodeEditor,
@@ -150,6 +192,13 @@ pub struct FolderApp {
     scroll_restore: Option<f32>,
     /// The block whose statement the code view last revealed.
     revealed: Option<String>,
+    /// The statement under the caret, for a document, source version and caret:
+    /// finding it parses the whole source, which a large one cannot afford
+    /// every frame.
+    caret_statement: Option<CaretStatement>,
+    /// What completion offers in the code view, kept while its model and
+    /// context are the same: deriving it reads every block and sample.
+    completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
     selections: HashMap<String, Vec<String>>,
     /// Each document's field drafts as the inspector and the session last
@@ -161,17 +210,90 @@ pub struct FolderApp {
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
     notice: Option<Notice>,
+    /// The active tab last revealed in the strip, and the strip's last scroll
+    /// offset, so activating a tab can scroll it into view.
+    followed_tab: Option<String>,
+    tabs_offset: f32,
+    tabs_width: f32,
     prompt: Option<Prompt>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
     preferences: Preferences,
+    runs: runs::Runs,
+    navigation: navigation::Navigation,
+    storage: storage::Storage,
+    open_generation: u64,
+    opening: bool,
+    persistence: saving::Persistence,
+    activation_generation: u64,
+    operation_sequence: u64,
+    picked_ready: Vec<Picked>,
 }
 
 struct Clipboard {
     context: String,
     fragment: Graph,
     pastes: u32,
+}
+
+/// The statement found under the caret, for one source version.
+struct CaretStatement {
+    document_id: String,
+    version: u64,
+    cursor: usize,
+    handle: Option<String>,
+}
+
+/// Completion's names for one model, context and graph.
+struct CompletionNames {
+    document_id: String,
+    model: Option<Arc<Document>>,
+    project: Arc<Project>,
+    cleanup: bool,
+    nodes: Vec<apiforge_core::format::Node>,
+    names: crate::shapes::Names,
+}
+
+impl CompletionNames {
+    fn of(
+        document_id: &str,
+        model: Option<Arc<Document>>,
+        project: Arc<Project>,
+        cleanup: bool,
+    ) -> Self {
+        let nodes = model
+            .as_deref()
+            .map(|model| graph_of(model, cleanup).nodes.clone())
+            .unwrap_or_default();
+        let parameters = model.as_deref().map(parameters_of).unwrap_or_default();
+        let names = crate::shapes::Names::of_board(&project, &nodes, &parameters, None);
+        Self {
+            document_id: document_id.to_owned(),
+            model,
+            project,
+            cleanup,
+            nodes,
+            names,
+        }
+    }
+
+    fn describes(
+        &self,
+        document_id: &str,
+        model: Option<&Arc<Document>>,
+        project: &Arc<Project>,
+        cleanup: bool,
+    ) -> bool {
+        self.document_id == document_id
+            && self.cleanup == cleanup
+            && Arc::ptr_eq(&self.project, project)
+            && match (&self.model, model) {
+                (Some(cached), Some(model)) => Arc::ptr_eq(cached, model),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 /// A frame's copy of what one document shows, so views can change the window
@@ -182,7 +304,7 @@ struct Snapshot {
     text: String,
     diagnostics: Vec<Diagnostic>,
     analysis: AnalysisState,
-    model: Option<Document>,
+    model: Option<Arc<Document>>,
     model_state: ModelState,
     unavailable: Option<Unavailable>,
     editable: bool,
@@ -193,9 +315,9 @@ struct Snapshot {
 }
 
 impl FolderApp {
-    pub fn open(context: &egui::Context, root: PathBuf) -> Self {
+    fn shell(context: &egui::Context, root: PathBuf) -> Self {
         theme::apply(context);
-        let mut app = Self {
+        Self {
             ui_context: context.clone(),
             root,
             session: None,
@@ -209,11 +331,14 @@ impl FolderApp {
             watcher: Watcher::new(Some(context.clone())),
             explorer: ExplorerState::default(),
             picked: Vec::new(),
+            export_status: None,
             seen: 0,
             code: code::CodeEditor::default(),
             shown: None,
             scroll_restore: None,
             revealed: None,
+            caret_statement: None,
+            completion_names: None,
             canvases: HashMap::new(),
             selections: HashMap::new(),
             agreed_fields: HashMap::new(),
@@ -221,48 +346,36 @@ impl FolderApp {
             inspector: Inspector::default(),
             changed_at: None,
             notice: None,
+            followed_tab: None,
+            tabs_offset: 0.0,
+            tabs_width: 0.0,
             prompt: None,
             close_error: None,
             close_requested: false,
-            preferences: Preferences::load(),
-        };
-        match ProjectSession::open(&app.root) {
-            Ok(session) => app.install(session),
-            Err(apiforge_project::Error::NotAProject) => {
-                app.uninitialised = true;
-                match ProjectSession::survey(&app.root) {
-                    Ok(surveys) => {
-                        app.survey = surveys
-                            .into_iter()
-                            .map(|survey| SurveyRow {
-                                path: survey.path,
-                                include: true,
-                                kind: survey.declaration.map(|declaration| declaration.kind),
-                            })
-                            .collect()
-                    }
-                    Err(error) => app.open_error = Some(error.to_string()),
-                }
-                app.new_name = app
-                    .root
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-            }
-            Err(error) => app.open_error = Some(error.to_string()),
+            preferences: Preferences::default(),
+            runs: runs::Runs::default(),
+            navigation: navigation::Navigation::default(),
+            storage: storage::Storage::new(context.clone()),
+            open_generation: 0,
+            opening: false,
+            persistence: saving::Persistence::default(),
+            activation_generation: 0,
+            operation_sequence: 0,
+            picked_ready: Vec::new(),
         }
+    }
+
+    pub fn open(context: &egui::Context, root: PathBuf) -> Self {
+        let mut app = Self::shell(context, root);
+        app.begin_open();
         app
     }
 
-    fn install(&mut self, session: ProjectSession) {
-        let project_id = session.manifest().id.clone();
-        let state = session
-            .store()
-            .load_workspace_state(&project_id)
-            .ok()
-            .flatten();
+    fn install(&mut self, session: ProjectSession, state: Option<WorkspaceState>) {
         let first_open = state.is_none();
-        self.workbench = Workbench::restore(state.clone(), |id| session.document(id).is_some());
+        self.workbench = Workbench::restore(state.clone(), |id| {
+            session.document(id).is_some() || id.starts_with(TEXT_TAB)
+        });
         self.saved_view = state;
         // A project opened for the first time shows its first scenario.
         if first_open {
@@ -274,7 +387,7 @@ impl FolderApp {
                 )
             });
             if let Some(document) = documents.first() {
-                self.workbench.open(document.id());
+                self.activate_tab(document.id());
             }
         }
         // Unsaved work comes back with its own caret.
@@ -306,7 +419,10 @@ impl FolderApp {
         self.seen = session.last_sequence();
         self.uninitialised = false;
         self.session = Some(session);
+        self.open_run_journal();
         self.reload_field_drafts();
+        self.restore_text_tabs();
+        self.remember_project();
     }
 
     /// Unfinished inspector text comes from the session, which owns it.
@@ -343,11 +459,26 @@ impl FolderApp {
         self.session.is_some()
     }
 
+    /// No storage work, opening, departure, close or project switch is in flight.
+    #[cfg(test)]
+    pub(crate) fn is_settled(&self) -> bool {
+        !(self.storage.is_busy()
+            || self.opening
+            || self.persistence.departure
+            || (self.persistence.closing && !self.persistence.close_ready)
+            || (self.switching() && !self.navigation.failed && self.prompt.is_none()))
+    }
+
     fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
         canvas.bridges = self.preferences.bridges;
         canvas
+    }
+
+    fn activate_tab(&mut self, id: &str) {
+        self.activation_generation += 1;
+        self.workbench.open(id);
     }
 
     fn snapshot(&self, document_id: &str) -> Option<Snapshot> {
@@ -363,10 +494,13 @@ impl FolderApp {
             text: document.text().to_owned(),
             diagnostics: document.diagnostics().to_vec(),
             analysis: document.analysis(),
-            model: document.model().cloned(),
+            model: document.shared_model().cloned(),
             model_state: document.model_state(),
             unavailable: document.unavailable(),
-            editable: document.accepts_model_edits() && !held,
+            editable: document.accepts_model_edits()
+                && !held
+                && !self.persistence.closing
+                && !self.storage.blocks_edits(),
             held,
             dirty: document.is_dirty(),
             layout_dirty: document.is_layout_dirty(),
@@ -389,38 +523,70 @@ impl FolderApp {
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.poll_storage();
+        self.poll_run();
+        self.follow_dialogs();
+        self.advance_departure();
+        self.advance_switch();
         if self.close_requested {
             self.close_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let Some(session) = self.session.as_mut() else {
             self.start_screen(ui);
+            self.prompts(ui.ctx());
             return;
         };
         let now = Instant::now();
-        if let Some(wait) = self.analyser.poll(session, now) {
+        if !self.persistence.closing
+            && !self.storage.owns_session()
+            && let Some(wait) = self.analyser.poll(session, now)
+        {
             ui.ctx().request_repaint_after(wait);
         }
-        self.watcher
-            .focus(ui.input(|input| input.viewport().focused.unwrap_or(true)));
-        let (outcome, wait) = self.watcher.poll(session, now);
+        let (outcome, wait) = if self.persistence.closing {
+            self.watcher.drain_stopped();
+            (None, Duration::from_millis(16))
+        } else {
+            self.watcher
+                .focus(ui.input(|input| input.viewport().focused.unwrap_or(true)));
+            self.watcher.poll(session, now)
+        };
         ui.ctx().request_repaint_after(wait);
         self.follow_events();
-        if let Some(outcome) = outcome {
-            self.follow_external(outcome);
+        if let Some(changes) = outcome {
+            self.storage_project(
+                "Checking external changes…",
+                apiforge_project::StorageMode::Exclusive,
+                false,
+                move |session| session.apply_external(changes),
+                |app, result| match result {
+                    Ok(outcome) => app.follow_external(outcome),
+                    Err(apiforge_project::Error::StaleStorage) => app.watcher.rescan(),
+                    Err(error) => app.watcher.problem = Some(error.to_string()),
+                },
+            );
         }
-        self.follow_dialogs();
+        if self.watcher.recovery_required {
+            self.transaction_screen(ui);
+            self.prompts(ui.ctx());
+            return;
+        }
         if self.prompt.is_none() {
             self.shortcuts(ui.ctx());
         }
-
         egui::Panel::top("folder-header")
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
-            .show(ui, |ui| self.header(ui));
+            .show(ui, |ui| {
+                ui.add_enabled_ui(
+                    !self.persistence.closing && !self.storage.blocks_edits(),
+                    |ui| self.header(ui),
+                );
+            });
         egui::Panel::top("folder-tabs")
             .frame(
                 egui::Frame::new()
@@ -428,10 +594,14 @@ impl FolderApp {
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ui, |ui| {
-                self.tab_strip(ui);
+                ui.add_enabled_ui(
+                    !self.persistence.closing && !self.storage.blocks_edits(),
+                    |ui| self.tab_strip(ui),
+                );
                 self.notices(ui);
             });
         let active = self.workbench.active().map(str::to_owned);
+        self.run_report(ui, active.as_deref());
         match self.workbench.mode {
             Mode::Code => {
                 egui::Panel::left("folder-documents")
@@ -444,11 +614,19 @@ impl FolderApp {
                     )
                     .show(ui, |ui| {
                         self.workbench.panels.documents = ui.available_width() + 24.0;
-                        self.explorer_panel(ui);
+                        ui.add_enabled_ui(
+                            !self.persistence.closing && !self.storage.blocks_edits(),
+                            |ui| self.explorer_panel(ui),
+                        );
                     });
+                widgets::name_resize_handle(
+                    ui.ctx(),
+                    egui::Id::new("folder-documents"),
+                    "Resize project files",
+                );
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(theme::WHITE))
-                    .show(ui, |ui| self.code_area(ui, active.as_deref()));
+                    .show(ui, |ui| self.main_code_area(ui, active.as_deref()));
             }
             Mode::Diagram => {
                 self.inspector_panel(ui, active.as_deref());
@@ -464,8 +642,13 @@ impl FolderApp {
                     .frame(egui::Frame::new().fill(theme::WHITE))
                     .show(ui, |ui| {
                         self.workbench.panels.split_code = ui.available_width();
-                        self.code_area(ui, active.as_deref());
+                        self.main_code_area(ui, active.as_deref());
                     });
+                widgets::name_resize_handle(
+                    ui.ctx(),
+                    egui::Id::new("folder-split-code"),
+                    "Resize code",
+                );
                 if width >= SPLIT_INSPECTOR_WIDTH {
                     self.inspector_panel(ui, active.as_deref());
                 }
@@ -478,12 +661,21 @@ impl FolderApp {
         self.protect(now);
     }
 
+    /// Code for the active tab: a definition's source, or a text file.
+    fn main_code_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
+        match active.and_then(|tab| self.text_snapshot(tab)) {
+            Some(snapshot) => self.text_area(ui, &snapshot),
+            None => self.code_area(ui, active),
+        }
+    }
+
     /// The folder has no project, or could not be opened.
     fn start_screen(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(theme::BG).inner_margin(48))
             .show(ui, |ui| {
                 ui.set_max_width(560.0);
+                self.navigation_menu(ui);
                 ui.label(
                     RichText::new("Open a folder project")
                         .size(theme::FONT_TITLE)
@@ -492,8 +684,28 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_SM);
                 widgets::hint(ui, self.root.display().to_string());
                 ui.add_space(theme::SPACE_LG);
+                if self.opening || self.persistence.closing {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        widgets::hint(
+                            ui,
+                            if self.persistence.closing {
+                                "Closing project…"
+                            } else {
+                                "Opening project…"
+                            },
+                        );
+                    });
+                    return;
+                }
                 if let Some(error) = &self.open_error {
                     widgets::error_box(ui, std::slice::from_ref(error));
+                    if ui.button("Review transaction recovery…").clicked() {
+                        self.review_transaction(self.root.clone());
+                    }
+                    if ui.button("Try opening again").clicked() {
+                        *self = Self::open(&self.ui_context.clone(), self.root.clone());
+                    }
                     return;
                 }
                 if !self.uninitialised {
@@ -504,8 +716,9 @@ impl FolderApp {
                      project file and keeps existing files as they are.",
                 );
                 ui.add_space(theme::SPACE_MD);
-                widgets::field_label(ui, "Project name");
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0));
+                let label = widgets::field_name(ui, "Project name");
+                ui.add(widgets::text_edit(&mut self.new_name).desired_width(320.0))
+                    .labelled_by(label.id);
                 if !self.survey.is_empty() {
                     ui.add_space(theme::SPACE_MD);
                     widgets::field_label(ui, "Register existing sources");
@@ -516,23 +729,27 @@ impl FolderApp {
                                 ui.horizontal(|ui| {
                                     ui.checkbox(&mut row.include, &row.path);
                                     if row.include {
-                                        egui::ComboBox::from_id_salt(("survey-kind", &row.path))
-                                            .selected_text(match row.kind {
-                                                Some(kind) => kind_label(kind),
-                                                None => "Choose a kind",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                for kind in [
-                                                    DocumentKind::Scenario,
-                                                    DocumentKind::Component,
-                                                ] {
-                                                    ui.selectable_value(
-                                                        &mut row.kind,
-                                                        Some(kind),
-                                                        kind_label(kind),
-                                                    );
-                                                }
-                                            });
+                                        let name = format!("Kind of {}", row.path);
+                                        let kind = egui::ComboBox::from_id_salt((
+                                            "survey-kind",
+                                            &row.path,
+                                        ))
+                                        .selected_text(match row.kind {
+                                            Some(kind) => kind_label(kind),
+                                            None => "Choose a kind",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for kind in
+                                                [DocumentKind::Scenario, DocumentKind::Component]
+                                            {
+                                                ui.selectable_value(
+                                                    &mut row.kind,
+                                                    Some(kind),
+                                                    kind_label(kind),
+                                                );
+                                            }
+                                        });
+                                        widgets::named(kind.response, name);
                                     }
                                 });
                             }
@@ -571,10 +788,32 @@ impl FolderApp {
                 })
             })
             .collect();
-        match ProjectSession::initialise(&self.root, self.new_name.trim(), &registrations) {
-            Ok(session) => self.install(session),
-            Err(error) => self.open_error = Some(error.to_string()),
-        }
+        self.open_generation += 1;
+        self.opening = true;
+        let generation = self.open_generation;
+        let root = self.root.clone();
+        let name = self.new_name.trim().to_owned();
+        self.storage_io(
+            "Creating project…",
+            move || {
+                ProjectSession::initialise_with(&root, &name, &registrations, Arc::new(CardPlacer))
+            },
+            move |app, result| {
+                if app.open_generation != generation {
+                    return;
+                }
+                if app.persistence.closing {
+                    app.opening = false;
+                    return;
+                }
+                app.opening = false;
+                match result {
+                    Ok(Ok(session)) => app.install(session, None),
+                    Ok(Err(error)) => app.open_error = Some(error.to_string()),
+                    Err(error) => app.open_error = Some(error),
+                }
+            },
+        );
     }
 
     /// Source replaced from outside the code view makes its text history
@@ -586,10 +825,12 @@ impl FolderApp {
         let replaced: Vec<String> = session
             .events_since(self.seen)
             .iter()
-            .filter(|event| {
-                event.origin != CODE && matches!(event.kind, EventKind::SourceChanged { .. })
+            .filter(|event| event.origin != CODE)
+            .filter_map(|event| match &event.kind {
+                EventKind::SourceChanged { .. } => event.document_id.clone(),
+                EventKind::TextFileChanged { path, .. } => Some(text_tab(path)),
+                _ => None,
             })
-            .filter_map(|event| event.document_id.clone())
             .collect();
         self.seen = session.last_sequence();
         for document_id in replaced {
@@ -611,7 +852,13 @@ impl FolderApp {
                 .workbench
                 .tabs()
                 .iter()
-                .filter(|tab| session.document(&tab.document_id).is_none())
+                .filter(|tab| {
+                    session.document(&tab.document_id).is_none()
+                        && tab.document_id.strip_prefix(TEXT_TAB).is_none_or(|path| {
+                            session.text_file(path).is_none()
+                                && !session.recovered_text_drafts().contains(&path)
+                        })
+                })
                 .map(|tab| tab.document_id.clone())
                 .collect();
             for document_id in gone {
@@ -619,6 +866,7 @@ impl FolderApp {
             }
             self.shown = None;
             self.reload_field_drafts();
+            self.restore_text_tabs();
         }
         let name = |id: &String| {
             self.session
@@ -654,6 +902,9 @@ impl FolderApp {
     // ----- Shortcuts -------------------------------------------------------------
 
     fn shortcuts(&mut self, context: &egui::Context) {
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let shortcut = |modifiers, key| {
             context
                 .input_mut(|input| input.consume_shortcut(&KeyboardShortcut::new(modifiers, key)))
@@ -669,9 +920,11 @@ impl FolderApp {
         }
         if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab) {
             self.workbench.cycle(false);
+            self.activation_generation += 1;
             self.touched();
         } else if shortcut(Modifiers::COMMAND, Key::Tab) {
             self.workbench.cycle(true);
+            self.activation_generation += 1;
             self.touched();
         }
         if shortcut(Modifiers::COMMAND, Key::W)
@@ -736,189 +989,22 @@ impl FolderApp {
     }
 
     fn step_model_history(&mut self, document_id: &str, undo: bool) {
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if undo {
-            session.undo(document_id, DIAGRAM)
-        } else {
-            session.redo(document_id, DIAGRAM)
-        };
-        match result {
-            Ok(true) => self.touched(),
-            Ok(false) => {}
-            Err(error) => self.notify(error.to_string(), false),
-        }
-    }
-
-    // ----- Saving ----------------------------------------------------------------
-
-    /// Ctrl+S: the active document's exact text, errors included, plus dirty
-    /// configuration. Without an active document, configuration alone.
-    fn save_active(&mut self) {
-        match self.workbench.active().map(str::to_owned) {
-            Some(active) => {
-                if let Err(message) = self.save_document(&active) {
-                    self.notify(message, true);
-                }
-            }
-            None => self.save_configuration(),
-        }
-    }
-
-    fn save_document(&mut self, document_id: &str) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let name = session
-            .document(document_id)
-            .map(|document| file_name(document.entry().path.as_str()).to_owned())
-            .unwrap_or_default();
-        match session.save(document_id) {
-            Ok(_) => {
-                self.touched();
-                Ok(())
-            }
-            Err(error) => Err(format!("Could not save {name}: {error}")),
-        }
-    }
-
-    fn save_configuration(&mut self) {
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        if let Err(error) = session.save_configuration() {
-            self.notify(
-                format!("Could not save the project settings: {error}"),
-                true,
-            );
-        }
-    }
-
-    /// Ctrl+Shift+S: each document with unsaved work in its own transaction,
-    /// then configuration. Every failure is reported; none stops the others.
-    fn save_all(&mut self) {
-        let Some(session) = self.session.as_ref() else {
-            return;
-        };
-        let pending: Vec<String> = session
-            .documents()
-            .iter()
-            .filter(|document| document.is_dirty() || document.is_layout_dirty())
-            .map(|document| document.id().to_owned())
-            .collect();
-        let mut failures = Vec::new();
-        for document_id in &pending {
-            if let Err(message) = self.save_document(document_id) {
-                failures.push(message);
-            }
-        }
-        if self
-            .session
-            .as_ref()
-            .is_some_and(ProjectSession::is_manifest_dirty)
-        {
-            self.save_configuration();
-        }
-        if failures.is_empty() {
-            if !pending.is_empty() {
-                let count = pending.len();
-                let noun = if count == 1 { "document" } else { "documents" };
-                self.notify(format!("Saved {count} {noun}."), false);
-            }
-        } else {
-            self.notify(failures.join("\n"), true);
-        }
-    }
-
-    /// Writes unsaved work to local recovery after a pause, and the view state
-    /// with it. Neither ever saves a source file.
-    fn protect(&mut self, now: Instant) {
-        let Some(changed) = self.changed_at else {
-            return;
-        };
-        let due = changed + RECOVERY_DELAY;
-        if now < due {
-            self.ui_context.request_repaint_after(due - now);
-            return;
-        }
-        self.changed_at = None;
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        if session.is_read_only() {
-            return;
-        }
-        if let Err(error) = session.save_recovery() {
-            self.notify(format!("Unsaved work is not protected: {error}"), true);
-        }
-        self.save_view();
-    }
-
-    fn save_view(&mut self) {
-        let Some(session) = self.session.as_ref() else {
-            return;
-        };
-        if session.is_read_only() {
-            return;
-        }
-        let ids: Vec<String> = self
-            .workbench
-            .tabs()
-            .iter()
-            .map(|tab| tab.document_id.clone())
-            .collect();
-        for document_id in ids {
-            let camera = self
-                .canvases
-                .get(&document_id)
-                .and_then(Canvas::camera)
-                .map(|(x, y, zoom)| CameraState { x, y, zoom });
-            if let Some(tab) = self.workbench.tab_mut(&document_id)
-                && camera.is_some()
-            {
-                tab.camera = camera;
-            }
-        }
-        let state = self.workbench.state(&session.manifest().id);
-        if self.saved_view.as_ref() != Some(&state)
-            && session.store().save_workspace_state(&state).is_ok()
-        {
-            self.saved_view = Some(state);
-        }
-    }
-
-    // ----- Closing ---------------------------------------------------------------
-
-    /// Closing succeeds once unsaved work is in local recovery; it never saves
-    /// a source file. A failure keeps the window open with the reason.
-    pub fn prepare_close(&mut self) -> bool {
-        self.save_view();
-        let Some(session) = self.session.take() else {
-            return true;
-        };
-        match session.close() {
-            Ok(()) => true,
-            Err((session, error)) => {
-                self.session = Some(*session);
-                self.close_error = Some(error.to_string());
-                false
-            }
-        }
-    }
-
-    pub fn close_error(&mut self) -> Option<String> {
-        self.close_error.take()
-    }
-
-    pub fn abort_close(&mut self, error: String) {
-        self.prompt = Some(Prompt::CloseFailed(error));
+        self.component_action(document_id, publication::Action::History { undo });
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
-        let unsaved = self
-            .session
-            .as_ref()
-            .and_then(|session| session.document(document_id))
-            .is_some_and(|document| document.needs_recovery());
+        let unsaved = match self.text_of(document_id) {
+            Some(path) => self
+                .session
+                .as_ref()
+                .and_then(|session| session.text_file(path))
+                .is_some_and(apiforge_project::TextFileSession::needs_recovery),
+            None => self
+                .session
+                .as_ref()
+                .and_then(|session| session.document(document_id))
+                .is_some_and(|document| document.needs_recovery()),
+        };
         if unsaved {
             self.prompt = Some(Prompt::CloseTab(document_id.to_owned()));
         } else {
@@ -927,7 +1013,20 @@ impl FolderApp {
     }
 
     fn close_tab(&mut self, document_id: &str) {
+        // Closing never drops unsaved text: the session refuses it until the
+        // work is saved or reverted.
+        if let Some(path) = self.text_of(document_id).map(str::to_owned)
+            && let Some(session) = self.session.as_mut()
+            && let Err(error) = session.close_text_file(&path)
+        {
+            self.notify(error.to_string(), true);
+            return;
+        }
+        let active = self.workbench.active().map(str::to_owned);
         self.workbench.close(document_id);
+        if self.workbench.active() != active.as_deref() {
+            self.activation_generation += 1;
+        }
         self.canvases.remove(document_id);
         self.selections.remove(document_id);
         if self.shown.as_deref() == Some(document_id) {
@@ -961,6 +1060,10 @@ impl FolderApp {
 /// history survives mode and tab switches.
 fn editor_id(document_id: &str) -> egui::Id {
     egui::Id::new(("folder-code", document_id))
+}
+
+fn text_tab(path: &str) -> String {
+    format!("{TEXT_TAB}{path}")
 }
 
 fn context_key(document_id: &str, cleanup: bool) -> String {

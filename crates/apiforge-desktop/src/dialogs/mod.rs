@@ -112,7 +112,7 @@ pub fn json_text(value: &serde_json::Value) -> String {
 
 /// What the user did with the dialog chrome during a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Action {
+pub(crate) enum Action {
     None,
     Cancel,
     Apply,
@@ -121,14 +121,14 @@ enum Action {
 /// A modal with a header, a scrolling body and a footer with Cancel and the primary
 /// button. `body` draws the form; `can_apply` is evaluated after the body so the
 /// button reflects this frame's edits.
-struct Chrome<'a> {
-    id: &'static str,
-    eyebrow: &'a str,
-    title: &'a str,
-    width: f32,
-    apply_label: &'a str,
+pub(crate) struct Chrome<'a> {
+    pub(crate) id: &'static str,
+    pub(crate) eyebrow: &'a str,
+    pub(crate) title: &'a str,
+    pub(crate) width: f32,
+    pub(crate) apply_label: &'a str,
     /// A short note on the left of the footer.
-    note: Option<&'a str>,
+    pub(crate) note: Option<&'a str>,
 }
 
 /// Creates a modal anchored to the center of the current `ctx.content_rect()` on every
@@ -148,15 +148,40 @@ pub(crate) fn centered_modal(id: egui::Id, ctx: &egui::Context) -> egui::Modal {
 }
 
 impl Chrome<'_> {
-    fn show<S>(
+    pub(crate) fn show<S>(
         self,
         ctx: &egui::Context,
         state: &mut S,
         body: impl FnOnce(&mut Ui, &mut S),
         can_apply: impl FnOnce(&S) -> bool,
     ) -> Action {
+        self.show_inner(ctx, state, body, can_apply, None::<fn(&mut Ui, &mut S)>)
+    }
+
+    /// Additional decisions stay outside the scrolling body. Reserve their row
+    /// before measuring the body so recovery actions remain visible at 540 px.
+    pub(crate) fn show_with_footer<S>(
+        self,
+        ctx: &egui::Context,
+        state: &mut S,
+        body: impl FnOnce(&mut Ui, &mut S),
+        can_apply: impl FnOnce(&S) -> bool,
+        footer: impl FnOnce(&mut Ui, &mut S),
+    ) -> Action {
+        self.show_inner(ctx, state, body, can_apply, Some(footer))
+    }
+
+    fn show_inner<S>(
+        self,
+        ctx: &egui::Context,
+        state: &mut S,
+        body: impl FnOnce(&mut Ui, &mut S),
+        can_apply: impl FnOnce(&S) -> bool,
+        footer: Option<impl FnOnce(&mut Ui, &mut S)>,
+    ) -> Action {
         let width = self.width.min(ctx.content_rect().width() - 48.0).max(320.0);
-        let body_height = (ctx.content_rect().height() - 236.0).max(140.0);
+        let footer_height = if footer.is_some() { 40.0 } else { 0.0 };
+        let body_height = (ctx.content_rect().height() - 236.0 - footer_height).max(100.0);
         let frame = egui::Frame::popup(&ctx.global_style())
             .fill(theme::WHITE)
             .inner_margin(egui::Margin::same(20));
@@ -202,10 +227,15 @@ impl Chrome<'_> {
             ui.separator();
             ui.add_space(4.0);
             let ready = can_apply(state);
+            if let Some(note) = self.note {
+                widgets::hint(ui, note);
+                ui.add_space(4.0);
+            }
+            if let Some(footer) = footer {
+                footer(ui, state);
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
-                if let Some(note) = self.note {
-                    widgets::hint(ui, note);
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled(ready, widgets::primary_button(self.apply_label))
@@ -276,8 +306,8 @@ fn labelled_field(
     hint: &str,
     error: Option<&str>,
 ) -> egui::Response {
-    widgets::field_label(ui, label);
-    let response = text_field(ui, text, hint, f32::INFINITY, error.is_some());
+    let label = widgets::field_name(ui, label);
+    let response = text_field(ui, text, hint, f32::INFINITY, error.is_some()).labelled_by(label.id);
     if let Some(error) = error {
         widgets::field_error(ui, error);
     }

@@ -59,7 +59,7 @@ pub fn empty_literal(value_type: ValueType) -> Value {
 
 pub fn type_combo(ui: &mut Ui, id: Id, value: &mut ValueType) -> bool {
     let before = *value;
-    egui::ComboBox::from_id_salt(id)
+    let combo = egui::ComboBox::from_id_salt(id)
         .selected_text(value_type_label(*value))
         .width(ui.available_width().min(160.0))
         .show_ui(ui, |ui| {
@@ -67,6 +67,7 @@ pub fn type_combo(ui: &mut Ui, id: Id, value: &mut ValueType) -> bool {
                 ui.selectable_value(value, option, value_type_label(option));
             }
         });
+    widgets::named(combo.response, "Value type");
     *value != before
 }
 
@@ -85,7 +86,7 @@ pub fn assertion_type_combo(ui: &mut Ui, id: Id, value: &mut String) -> bool {
         .iter()
         .find(|(name, _)| name == value)
         .map_or("Choose a type", |(_, label)| label);
-    egui::ComboBox::from_id_salt(id)
+    let combo = egui::ComboBox::from_id_salt(id)
         .selected_text(selected)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -93,6 +94,7 @@ pub fn assertion_type_combo(ui: &mut Ui, id: Id, value: &mut String) -> bool {
                 ui.selectable_value(value, name.to_owned(), label);
             }
         });
+    widgets::named(combo.response, "Expected type");
     *value != before
 }
 
@@ -174,6 +176,7 @@ struct TemplateDraft {
 pub fn template_field(
     ui: &mut Ui,
     id: Id,
+    name: &str,
     binding: &Binding,
     scope: Scope<'_>,
     hint: &str,
@@ -218,6 +221,7 @@ pub fn template_field(
         .font(egui::TextStyle::Monospace)
         .desired_width(f32::INFINITY)
         .show(ui);
+    widgets::named(output.response.response.clone(), name);
     let response = output.response.clone();
     let mut changed = response.changed();
     changed |= completions.update(
@@ -231,6 +235,7 @@ pub fn template_field(
             line_numbers: false,
             wrap: true,
             font_size: 12.0,
+            plain: false,
         },
         &output,
         keys,
@@ -337,6 +342,7 @@ pub fn template_map(
         if let Some(next) = template_field(
             ui,
             id.with(("value", key.as_str())),
+            &format!("{label}: {key}"),
             value,
             scope,
             "Value or {{block.field}}",
@@ -363,10 +369,13 @@ pub fn template_map(
         .data_mut(|data| data.get_temp(new_id))
         .unwrap_or_default();
     ui.horizontal(|ui| {
-        let field = ui.add(
-            crate::widgets::text_edit(&mut name)
-                .hint_text("Name")
-                .desired_width(ui.available_width() - 80.0),
+        let field = widgets::named(
+            ui.add(
+                crate::widgets::text_edit(&mut name)
+                    .hint_text("Name")
+                    .desired_width(ui.available_width() - 80.0),
+            ),
+            format!("New name in {label}"),
         );
         let trimmed = name.trim().to_owned();
         let valid = !trimmed.is_empty() && !fields.contains_key(&trimmed);
@@ -761,10 +770,12 @@ pub fn request_body_editor(
                     line_numbers: false,
                     wrap: true,
                     font_size: 12.0,
+                    plain: false,
                 },
             )
         })
         .inner;
+    widgets::named(outcome.response.clone(), "Request body");
     ui.data_mut(|data| data.insert_temp(id.with("editor"), editor));
     let mut result = None;
     if (outcome.changed || restored) && !conflict {
@@ -956,6 +967,7 @@ mod draft_regressions {
                     template_field(
                         ui,
                         Id::new("url-draft"),
+                        "URL",
                         &Binding::literal(Value::String(url.into())),
                         scope,
                         "URL",

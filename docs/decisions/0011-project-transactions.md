@@ -150,8 +150,8 @@ This action handles file contents and absence, not recursive directory recovery
 or file/directory kind replacement. A directory conflict, link, oversized foreign
 file or inaccessible path needs manual correction/export; it is never treated as
 an empty file or silently overwritten. Intended bytes can still be previewed when
-a current target cannot be safely inspected. Native dialogs/export controls remain
-later integration work.
+a current target cannot be safely inspected. Native transaction/conflict dialogs and their export controls remain P7c
+integration work; P6d separately implements export of unsaved work on close.
 
 Do not overwrite a foreign edit automatically, discard a transaction because its
 PID is gone, or load a partial set of files as a writable session. The native GUI

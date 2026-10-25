@@ -55,11 +55,13 @@ impl Analyser {
             let _ = session.apply_analysis(analysis);
         }
         let mut next: Option<Duration> = None;
-        for input in session.pending_analyses() {
-            if self.running.contains(&input.ticket) {
+        // Tickets first: an input copies the source and model, which a large
+        // document cannot afford on every frame of its pause.
+        for ticket in session.pending_tickets() {
+            if self.running.contains(&ticket) {
                 continue;
             }
-            let document_id = &input.ticket.document_id;
+            let document_id = &ticket.document_id;
             let wait = self.typed.get(document_id).map_or(Duration::ZERO, |typed| {
                 (*typed + APPLY_DELAY).saturating_duration_since(now)
             });
@@ -67,6 +69,9 @@ impl Analyser {
                 next = Some(next.map_or(wait, |next| next.min(wait)));
                 continue;
             }
+            let Ok(input) = session.analysis_for(document_id) else {
+                continue;
+            };
             self.typed.remove(document_id);
             self.running.insert(input.ticket.clone());
             let sender = self.sender.clone();

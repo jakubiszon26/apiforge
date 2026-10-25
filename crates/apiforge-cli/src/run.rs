@@ -16,7 +16,7 @@ use apiforge_storage::{JournalStore, WorkspaceStore};
 use indexmap::IndexMap;
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
-pub const USAGE: &str = "apiforge run --workspace <doc.json> --scenario <name|id> [--live] [--secrets <file.json>] [--json]";
+pub const USAGE: &str = "apiforge run (--workspace <doc.json> | --folder <directory>) --scenario <name|id|relative.afs> [--live] [--secrets <file.json>] [--json]";
 
 /// The prefix of an environment variable holding one session secret.
 const SECRET_PREFIX: &str = "APIFORGE_SECRET_";
@@ -26,6 +26,7 @@ const DEADLINE: Duration = Duration::from_secs(600);
 
 pub struct Args {
     pub path: PathBuf,
+    pub folder: bool,
     pub scenario: String,
     pub live: bool,
     pub secrets: Option<PathBuf>,
@@ -37,11 +38,15 @@ pub fn arguments(args: &[OsString]) -> Option<Args> {
         return None;
     }
     let (mut path, mut scenario, mut secrets) = (None, None, None);
-    let (mut live, mut json) = (false, false);
+    let (mut live, mut json, mut folder) = (false, false, false);
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
         match arg.to_str()? {
             "--workspace" if path.is_none() => path = Some(PathBuf::from(rest.next()?)),
+            "--folder" if path.is_none() => {
+                path = Some(PathBuf::from(rest.next()?));
+                folder = true;
+            }
             "--scenario" if scenario.is_none() => {
                 scenario = Some(rest.next()?.to_str()?.to_owned());
             }
@@ -53,6 +58,7 @@ pub fn arguments(args: &[OsString]) -> Option<Args> {
     }
     Some(Args {
         path: path?,
+        folder,
         scenario: scenario?,
         live,
         secrets,
@@ -75,6 +81,9 @@ pub fn run(args: &[OsString]) -> u8 {
 }
 
 fn execute(args: Args) -> Result<RunStatus, String> {
+    if args.folder {
+        return super::folder::execute_run(args);
+    }
     // A live run writes a journal, which only the window holding the workspace
     // lock may do. A simulation changes nothing and reads.
     let store = if args.live {
@@ -102,14 +111,11 @@ fn execute(args: Args) -> Result<RunStatus, String> {
     let scenario = &project.scenarios[index];
     let secrets = secrets(args.secrets.as_deref())?;
 
-    let mut service = RunnerService::new(Arc::new(|| {}))
-        .map_err(|error| format!("Cannot start the runner: {error}"))?;
-    if args.live {
-        let journal = JournalStore::open(store)
-            .map_err(|error| format!("{error} A live run must be able to record what it sends."))?;
-        report_interrupted(&journal.interrupted);
-        service = service.with_journal(Arc::new(journal.store));
-    }
+    let journal = if args.live {
+        Some(JournalStore::open(store).map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
     let request = RunRequest {
         project: project.clone(),
         scenario_id: scenario.id.clone(),
@@ -123,6 +129,23 @@ fn execute(args: Args) -> Result<RunStatus, String> {
         previous_run: None,
         secrets,
     };
+    execute_request(request, journal, args.json)
+}
+
+pub(super) fn execute_request(
+    request: RunRequest,
+    journal: Option<apiforge_storage::LoadedJournal>,
+    json: bool,
+) -> Result<RunStatus, String> {
+    let mut service = RunnerService::new(Arc::new(|| {}))
+        .map_err(|error| format!("Cannot start the runner: {error}"))?;
+    if let Some(journal) = journal {
+        report_interrupted(&journal.interrupted);
+        if journal.unreadable {
+            eprintln!("An unreadable interrupted-run journal was preserved for review.");
+        }
+        service = service.with_journal(Arc::new(journal.store));
+    }
     let handle = service.start(request).map_err(|error| error.to_string())?;
     let deadline = std::time::Instant::now() + DEADLINE;
     let mut report: Option<RunResult> = None;
@@ -141,7 +164,7 @@ fn execute(args: Args) -> Result<RunStatus, String> {
     }
     let report = report.ok_or("The run produced no report")?;
     service.shutdown(Duration::from_secs(10));
-    if args.json {
+    if json {
         let text = serde_json::to_string_pretty(&report).map_err(|_| "Cannot print the report")?;
         println!("{text}");
     } else {
@@ -152,7 +175,7 @@ fn execute(args: Args) -> Result<RunStatus, String> {
 
 /// Session secrets, from a file and from the environment. A name in both takes
 /// its value from the environment, which belongs to this invocation.
-fn secrets(path: Option<&std::path::Path>) -> Result<IndexMap<String, String>, String> {
+pub(super) fn secrets(path: Option<&std::path::Path>) -> Result<IndexMap<String, String>, String> {
     let mut found = IndexMap::new();
     if let Some(path) = path {
         let bytes = std::fs::read(path).map_err(|error| format!("Cannot read secrets: {error}"))?;

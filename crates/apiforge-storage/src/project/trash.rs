@@ -150,6 +150,7 @@ impl TrashIndex {
                 .iter()
                 .filter_map(|entry| entry.recovery.clone())
                 .collect(),
+            texts: Vec::new(),
         }
         .to_bytes()?;
         Ok(())
@@ -902,6 +903,7 @@ fn validate_recovery_document(recovery: &RecoveryDocument, entry: &DocumentEntry
         format_version: 1,
         project_id: "validation".into(),
         documents: vec![recovery.clone()],
+        texts: Vec::new(),
     }
     .to_bytes()?;
     Ok(())

@@ -14,21 +14,20 @@ impl FolderApp {
         let Some(snapshot) = self.snapshot(document_id) else {
             return;
         };
-        egui::Panel::bottom(egui::Id::new((
-            "folder-diagnostics",
-            self.workbench.mode as u8,
-        )))
-        .default_size(self.workbench.panels.diagnostics)
-        .size_range(72.0..=360.0)
-        .frame(
-            egui::Frame::new()
-                .fill(theme::PANEL)
-                .inner_margin(egui::Margin::symmetric(12, 8)),
-        )
-        .show(ui, |ui| {
-            self.workbench.panels.diagnostics = ui.available_height() + 16.0;
-            self.diagnostics_panel(ui, document_id, &snapshot);
-        });
+        let diagnostics = egui::Id::new(("folder-diagnostics", self.workbench.mode as u8));
+        egui::Panel::bottom(diagnostics)
+            .default_size(self.workbench.panels.diagnostics)
+            .size_range(72.0..=360.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
+            .show(ui, |ui| {
+                self.workbench.panels.diagnostics = ui.available_height() + 16.0;
+                self.diagnostics_panel(ui, document_id, &snapshot);
+            });
+        widgets::name_resize_handle(ui.ctx(), diagnostics, "Resize problems");
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 6)))
             .show(ui, |ui| self.code_view(ui, document_id, &snapshot));
@@ -68,21 +67,27 @@ impl FolderApp {
         }
         let project = self.context_project();
         let cleanup = self.cleanup(document_id);
-        let nodes = snapshot
-            .model
-            .as_ref()
-            .map(|model| graph_of(model, cleanup).nodes.clone())
-            .unwrap_or_default();
-        let parameters = snapshot
-            .model
-            .as_ref()
-            .map(parameters_of)
-            .unwrap_or_default();
-        let names = crate::shapes::Names::of_board(&project, &nodes, &parameters, None);
+        // Taken for this frame and put back after drawing: a model is replaced,
+        // never changed in place, so an identical one has the same names.
+        let completion = self
+            .completion_names
+            .take()
+            .filter(|names| {
+                names.describes(document_id, snapshot.model.as_ref(), &project, cleanup)
+            })
+            .unwrap_or_else(|| {
+                CompletionNames::of(
+                    document_id,
+                    snapshot.model.clone(),
+                    project.clone(),
+                    cleanup,
+                )
+            });
+        let run = self.fresh_run(document_id);
         let shapes = crate::shapes::BoardShapes {
             project: &project,
-            nodes: &nodes,
-            steps: &[],
+            nodes: &completion.nodes,
+            steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
         let mut text = snapshot.text.clone();
         let mut scroll = egui::ScrollArea::both()
@@ -93,24 +98,33 @@ impl FolderApp {
             scroll = scroll.vertical_scroll_offset(offset);
         }
         let output = ui
-            .add_enabled_ui(!snapshot.held, |ui| {
-                scroll.show(ui, |ui| {
-                    self.code.show(
-                        ui,
-                        id,
-                        &mut text,
-                        &code::Context {
-                            mode: apiforge_script::complete::Mode::Script,
-                            scope: names.scope(&shapes),
-                            diagnostics: &snapshot.diagnostics,
-                            line_numbers: true,
-                            wrap: false,
-                            font_size: 13.0,
-                        },
-                    )
-                })
-            })
+            .add_enabled_ui(
+                !snapshot.held && !self.persistence.closing && !self.storage.blocks_edits(),
+                |ui| {
+                    scroll.show(ui, |ui| {
+                        self.code.show(
+                            ui,
+                            id,
+                            &mut text,
+                            &code::Context {
+                                mode: apiforge_script::complete::Mode::Script,
+                                scope: completion.names.scope(&shapes),
+                                diagnostics: &snapshot.diagnostics,
+                                line_numbers: true,
+                                wrap: false,
+                                font_size: 13.0,
+                                plain: false,
+                            },
+                        )
+                    })
+                },
+            )
             .inner;
+        self.completion_names = Some(completion);
+        widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let offset = output.state.offset.y.max(0.0);
         let outcome = output.inner;
         let Some(session) = self.session.as_mut() else {
@@ -168,7 +182,7 @@ impl FolderApp {
             return;
         };
         if let Some(cursor) = cursor {
-            let Some(handle) = apiforge_script::complete::statement_at(text, cursor) else {
+            let Some(handle) = self.statement_at(document_id, text, cursor) else {
                 return;
             };
             let found = [false, true].into_iter().find_map(|cleanup| {
@@ -181,7 +195,7 @@ impl FolderApp {
             if let Some((cleanup, node_id)) = found {
                 if let Some(tab) = self.workbench.tab_mut(document_id)
                     && tab.cleanup != cleanup
-                    && matches!(model, Document::Scenario(_))
+                    && matches!(model.as_ref(), Document::Scenario(_))
                 {
                     tab.cleanup = cleanup;
                 }
@@ -213,6 +227,32 @@ impl FolderApp {
             self.code.reveal(range.start);
             self.revealed = Some(handle);
         }
+    }
+
+    /// The handle of the statement under the caret, found again only when the
+    /// source or the caret changed. Finding it parses the whole source, so a
+    /// large one being typed into is not searched until its analysis settles.
+    fn statement_at(&mut self, document_id: &str, text: &str, cursor: usize) -> Option<String> {
+        let document = self.session.as_ref()?.document(document_id)?;
+        let version = document.source_version();
+        if text.len() > code::MAX_COLOURED_BYTES && document.analysis() == AnalysisState::Pending {
+            return None;
+        }
+        if let Some(found) = &self.caret_statement
+            && found.document_id == document_id
+            && found.version == version
+            && found.cursor == cursor
+        {
+            return found.handle.clone();
+        }
+        let handle = apiforge_script::complete::statement_at(text, cursor);
+        self.caret_statement = Some(CaretStatement {
+            document_id: document_id.to_owned(),
+            version,
+            cursor,
+            handle: handle.clone(),
+        });
+        handle
     }
 
     pub(super) fn draft_banner(&mut self, ui: &mut egui::Ui, document_id: &str) {
@@ -321,11 +361,12 @@ impl FolderApp {
             return;
         }
         let mut reveal = None;
+        let mut fix = None;
         egui::ScrollArea::vertical()
             .id_salt(("folder-problems", document_id))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for diagnostic in &snapshot.diagnostics {
+                for (index, diagnostic) in snapshot.diagnostics.iter().enumerate() {
                     let (line, column) = line_column(&snapshot.text, diagnostic.range.start);
                     let colour = if diagnostic.severity == Severity::Error {
                         theme::DANGER
@@ -335,7 +376,7 @@ impl FolderApp {
                     let response = ui
                         .horizontal(|ui| {
                             ui.label(RichText::new("●").color(colour));
-                            ui.add(
+                            let response = ui.add(
                                 egui::Label::new(
                                     RichText::new(format!(
                                         "Line {line}, column {column}   {}",
@@ -344,7 +385,21 @@ impl FolderApp {
                                     .size(theme::FONT_LABEL),
                                 )
                                 .sense(egui::Sense::click()),
-                            )
+                            );
+                            if diagnostic.fix.is_some()
+                                && ui
+                                    .add_enabled(
+                                        snapshot.analysis != AnalysisState::Pending
+                                            && !read_only
+                                            && !snapshot.held
+                                            && snapshot.conflict.is_none(),
+                                        egui::Button::new("Apply fix"),
+                                    )
+                                    .clicked()
+                            {
+                                fix = Some(index);
+                            }
+                            response
                         })
                         .inner;
                     if response.clicked() {
@@ -352,6 +407,9 @@ impl FolderApp {
                     }
                 }
             });
+        if let Some(index) = fix {
+            self.apply_source_fix(document_id, index);
+        }
         if let Some(range) = reveal {
             let start = range.start.min(snapshot.text.len());
             let end = range.end.clamp(start, snapshot.text.len());

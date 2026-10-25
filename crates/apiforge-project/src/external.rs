@@ -51,6 +51,8 @@ pub struct ExternalCheck {
     epoch: u64,
     manifest: FileState,
     documents: Vec<(String, ProjectPath, FileState)>,
+    /// Open text files, by path: their identity, unlike a document's.
+    texts: Vec<(ProjectPath, FileState)>,
 }
 
 /// What a check found. Applying it to a session of a different epoch, or to
@@ -62,6 +64,7 @@ pub struct ExternalChanges {
     pub scan: TreeScan,
     manifest: Option<ObservedFile>,
     documents: Vec<(String, FileState, ObservedFile)>,
+    texts: Vec<(String, FileState, Option<Vec<u8>>)>,
 }
 
 /// What applying a check changed, for notification.
@@ -71,6 +74,8 @@ pub struct ExternalOutcome {
     pub conflicts: Vec<String>,
     pub renamed: Vec<String>,
     pub missing: Vec<String>,
+    /// Paths of open text files whose unsaved work cannot follow the disk.
+    pub text_conflicts: Vec<String>,
     pub registry: Option<RegistryState>,
     /// The project was reloaded because its registry changed.
     pub project_reloaded: bool,
@@ -144,12 +149,38 @@ impl ExternalCheck {
             };
             documents.push((id.clone(), saved.clone(), observed));
         }
+        let mut texts = Vec::new();
+        // The tree scan hashes only sources and the registry, so an open text
+        // file's state is read directly rather than taken from the scan.
+        for (path, saved) in &self.texts {
+            let current = match self.store.file_state(path) {
+                Ok(state) => state,
+                // Over the payload limit: the next check reports it again.
+                Err(ProjectError::Limit) => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if &current == saved {
+                continue;
+            }
+            let bytes = match &current {
+                FileState::File { bytes, .. } if *bytes > MAX_SOURCE_BYTES as u64 => continue,
+                FileState::File { .. } => match self.store.read(std::slice::from_ref(path)) {
+                    Ok(mut snapshot) => snapshot.files.remove(path).flatten(),
+                    Err(ProjectError::Limit) => continue,
+                    Err(error) => return Err(error.into()),
+                },
+                // A directory or link where the file was: treat as removed.
+                _ => None,
+            };
+            texts.push((path.as_str().to_owned(), saved.clone(), bytes));
+        }
         Ok(ExternalChanges {
             epoch: self.epoch,
             manifest_base: self.manifest.clone(),
             scan,
             manifest,
             documents,
+            texts,
         })
     }
 }
@@ -172,6 +203,7 @@ impl ProjectSession {
                     )
                 })
                 .collect(),
+            texts: self.text_baselines(),
         }
     }
 
@@ -275,45 +307,25 @@ impl ProjectSession {
         if !renames.is_empty() {
             outcome.renamed = self.follow_renames(renames)?;
         }
+        outcome.text_conflicts = self.apply_external_texts(changes.texts);
         Ok(outcome)
     }
 
-    /// Replaces unsaved work with the file on disk, resolving a conflict.
+    /// Resolves immediately against a fresh preview. UI adapters should retain
+    /// and confirm their displayed `ConflictPreview` with `resolve_conflict`.
     pub fn accept_external(&mut self, document_id: &str, origin: Origin) -> Result<()> {
-        let index = self.index(document_id)?;
-        self.require_no_held_draft(document_id)?;
-        let path = self.documents[index].entry.path.clone();
-        let observed = match self.store.read(std::slice::from_ref(&path)) {
-            Ok(mut snapshot) => snapshot
-                .files
-                .remove(&path)
-                .flatten()
-                .map_or(ObservedFile::Missing, ObservedFile::Bytes),
-            Err(ProjectError::Limit) => {
-                ObservedFile::TooLarge(self.store.file_state(&path).unwrap_or(FileState::Missing))
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let document = &mut self.documents[index];
-        document.layout_dirty = false;
-        document.fields.clear();
-        document.history = Default::default();
-        self.follow_disk(index, observed, origin)
+        let preview = self.preview_conflict(super::ConflictTarget::Document(document_id.into()))?;
+        self.resolve_conflict(&preview, super::ConflictDecision::UseDisk, origin)
     }
 
-    /// Keeps unsaved work over a deleted file: the next save recreates it.
-    /// A changed file is never overwritten this way.
+    /// Keeps local work only if the previewed deletion is still on disk.
     pub fn keep_deleted(&mut self, document_id: &str) -> Result<()> {
-        let index = self.index(document_id)?;
-        if self.documents[index].conflict != Some(ExternalConflict::Deleted) {
-            return Err(Error::ExternalConflict);
-        }
-        let document = &mut self.documents[index];
-        document.saved = FileState::Missing;
-        document.conflict = None;
-        let id = document.entry.document_id.clone();
-        self.emit(Origin::SESSION, Some(&id), EventKind::ExternalConflict);
-        Ok(())
+        let preview = self.preview_conflict(super::ConflictTarget::Document(document_id.into()))?;
+        self.resolve_conflict(
+            &preview,
+            super::ConflictDecision::KeepDeleted,
+            Origin::SESSION,
+        )
     }
 
     /// Rereads the whole project after an external registry change, keeping
@@ -325,14 +337,30 @@ impl ProjectSession {
         }
         // Recovery is bound to the old registry, so carry the work across in
         // memory and protect it against the new registry afterwards.
-        let drafts = self.recovery_contents().documents;
+        let recovery = self.recovery_contents();
+        let open_texts: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path().to_owned())
+            .collect();
         self.reload()?;
         self.registry = RegistryState::Current;
-        for draft in drafts {
+        for draft in recovery.documents {
             self.recovery
                 .held
                 .retain(|held| held.document_id != draft.document_id);
             self.adopt_draft(draft)?;
+        }
+        for draft in recovery.texts {
+            self.recovery
+                .held_texts
+                .retain(|held| held.path != draft.path);
+            self.recovery.held_texts.push(draft);
+        }
+        // A reload can precede the quiet-time recovery write. Carry the newest
+        // in-memory text too, rather than restoring only an older disk draft.
+        for path in open_texts {
+            let _ = self.open_text_file(&path);
         }
         if self.has_unsaved_work() && !self.store.is_read_only() {
             let _ = self.save_recovery();
@@ -345,16 +373,32 @@ impl ProjectSession {
         if !self.manifest_dirty {
             return Ok(());
         }
-        let saved = self.read_manifest()?;
-        self.edit_configuration(
-            |manifest| {
-                manifest.name = saved.name.clone();
-                manifest.environment = saved.environment.clone();
-                manifest.contracts = saved.contracts.clone();
-            },
-            Origin::SESSION,
+        let path = ProjectPath::new(MANIFEST_PATH)?;
+        let snapshot = self.store.read(std::slice::from_ref(&path))?;
+        let saved = ProjectManifest::from_bytes(
+            snapshot.files[&path]
+                .as_deref()
+                .ok_or(ProjectError::InvalidMetadata)?,
         )?;
+        let changed = snapshot.state(&path) != Some(self.manifest_saved.clone());
+        // This explicit discard precedes reload of a changed registry. It does
+        // not author a configuration against the old save baseline or approve
+        // changed dependencies; the registry guard still blocks writes/runs
+        // until reload validates the complete saved project.
+        let mut manifest = self.manifest.clone();
+        manifest.name = saved.name;
+        manifest.environment = saved.environment;
+        manifest.contracts = saved.contracts;
+        manifest.validate()?;
+        let mut project = crate::context::base_project(&manifest);
+        project.components = self.published.clone();
+        self.manifest = manifest;
+        self.context = std::sync::Arc::new(project);
         self.manifest_dirty = false;
+        if changed {
+            self.registry = RegistryState::Changed;
+        }
+        self.invalidate_runtime_inputs(Origin::SESSION);
         Ok(())
     }
 
@@ -372,6 +416,7 @@ impl ProjectSession {
                 .documents
                 .iter()
                 .any(|document| document.needs_recovery())
+            || self.has_unsaved_text()
     }
 
     fn conflict(&mut self, index: usize, conflict: ExternalConflict) {
@@ -384,7 +429,12 @@ impl ProjectSession {
     }
 
     /// Adopts the observed file as the saved and current source.
-    fn follow_disk(&mut self, index: usize, observed: ObservedFile, origin: Origin) -> Result<()> {
+    pub(super) fn follow_disk(
+        &mut self,
+        index: usize,
+        observed: ObservedFile,
+        origin: Origin,
+    ) -> Result<()> {
         let document = &mut self.documents[index];
         document.conflict = None;
         document.diagnostics.clear();
@@ -394,12 +444,12 @@ impl ProjectSession {
                 match String::from_utf8(bytes) {
                     Ok(text) => {
                         document.unavailable = None;
-                        document.text = text;
+                        document.set_text(text);
                         document.analysis = AnalysisState::Pending;
                     }
                     Err(_) => {
                         document.unavailable = Some(Unavailable::NotUtf8);
-                        document.text.clear();
+                        document.set_text(String::new());
                         document.analysis = AnalysisState::Invalid;
                     }
                 }
@@ -407,13 +457,13 @@ impl ProjectSession {
             ObservedFile::TooLarge(state) => {
                 document.saved = state;
                 document.unavailable = Some(Unavailable::TooLarge);
-                document.text.clear();
+                document.set_text(String::new());
                 document.analysis = AnalysisState::Invalid;
             }
             ObservedFile::Missing | ObservedFile::Unreadable => {
                 document.saved = FileState::Missing;
                 document.unavailable = Some(Unavailable::Missing);
-                document.text.clear();
+                document.set_text(String::new());
                 document.analysis = AnalysisState::Invalid;
             }
         }

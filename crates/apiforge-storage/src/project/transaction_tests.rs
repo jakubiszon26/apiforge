@@ -397,3 +397,52 @@ fn unactivated_staging_is_removed_after_a_failure_and_when_reopening() {
     assert_eq!(fs::read_dir(&staging).unwrap().count(), 0);
     assert_eq!(writer.load().unwrap().0, crate::project::tests::manifest());
 }
+
+#[test]
+fn a_newline_only_foreign_replacement_requires_preservation_before_transaction_replay() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    writer
+        .commit_with_hook(save_plan(), |boundary| {
+            if boundary == "activation" {
+                Err(interrupted())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+    let foreign = b"scenario \"Main\" {}\r\n";
+    fs::write(directory.path().join("scenarios/main.afs"), foreign).unwrap();
+    assert!(matches!(
+        writer.recover(),
+        Err(ProjectError::Conflict { .. })
+    ));
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/main.afs")).unwrap(),
+        foreign
+    );
+    let preview = writer.preview_transaction_recovery().unwrap().unwrap();
+    let source = preview
+        .candidates()
+        .iter()
+        .find(|candidate| candidate.path().as_str() == "scenarios/main.afs")
+        .unwrap();
+    assert_eq!(source.status(), RecoveryCandidateStatus::Conflict);
+    assert_eq!(source.current_bytes(), Some(foreign.as_slice()));
+    let finished = writer.finish_transaction_recovery(&preview).unwrap();
+    assert_eq!(finished.archives.len(), 1);
+    assert_eq!(
+        fs::read(
+            directory
+                .path()
+                .join(finished.archives[0].copy_path.as_ref().unwrap().as_str())
+        )
+        .unwrap(),
+        foreign
+    );
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/main.afs")).unwrap(),
+        b"scenario \"Saved\" {}\n"
+    );
+}

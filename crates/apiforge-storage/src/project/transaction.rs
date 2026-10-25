@@ -270,6 +270,12 @@ impl ProjectStore {
         Ok(())
     }
 
+    /// Protect additional managed application metadata with this session's
+    /// known-secret policy. This performs no filesystem I/O.
+    pub fn validate_managed_payload(&self, bytes: &[u8]) -> Result<()> {
+        self.check_secrets(bytes)
+    }
+
     /// Stable raw reads for storage clients. Definitions are loaded with `load`,
     /// which discovers all registered sources inside the same read protocol.
     pub fn read(&self, paths: &[ProjectPath]) -> Result<ProjectSnapshot> {
@@ -386,6 +392,11 @@ impl ProjectStore {
     ) -> Result<u64> {
         self.writable()?;
         let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        self.validate_public_changes(&changes)?;
+        self.commit_locked(changes, boundary)
+    }
+
+    pub(super) fn validate_public_changes(&self, changes: &[ProjectChange]) -> Result<()> {
         // Only the checked recovery/file-operation services may update these
         // files. Replay still validates their complete staged post-images.
         if changes.iter().any(|change| {
@@ -405,7 +416,7 @@ impl ProjectStore {
         {
             DiagramFile::from_bytes(&bytes)?;
         }
-        self.commit_locked(changes, boundary)
+        Ok(())
     }
 
     pub(super) fn commit_locked(

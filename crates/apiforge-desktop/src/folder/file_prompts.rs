@@ -19,12 +19,94 @@ pub(super) struct ImportRow {
 
 /// Work done by a file dialog on its own thread.
 pub(super) enum Picked {
-    Imports { folder: String, files: Vec<PathBuf> },
+    Folder {
+        generation: u64,
+        path: Option<PathBuf>,
+    },
+    Imports {
+        identity: apiforge_project::SessionIdentity,
+        folder: String,
+        files: Vec<PathBuf>,
+    },
     Exported(Result<PathBuf, String>),
+    CloseExported {
+        generation: u64,
+        result: Option<Result<PathBuf, String>>,
+        contents: Vec<u8>,
+    },
 }
 
 impl FolderApp {
+    pub(super) fn export_before_close(&mut self) {
+        if self.runs.exporting {
+            return;
+        }
+        let Some(session) = &self.session else { return };
+        let contents = match session.export_unsaved() {
+            Ok(contents) => contents,
+            Err(error) => {
+                self.notify(format!("Could not prepare export: {error}"), true);
+                return;
+            }
+        };
+        let (sender, receiver) = channel();
+        let repaint = self.ui_context.clone();
+        self.runs.exporting = true;
+        self.persistence.departure_generation += 1;
+        let generation = self.persistence.departure_generation;
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .set_title("Export unsaved project work")
+                .set_file_name("apiforge-recovery-export.json")
+                .save_file()
+                .map(|path| {
+                    apiforge_storage::write_atomic(&path, &contents)
+                        .map(|()| path)
+                        .map_err(|error| error.to_string())
+                });
+            let _ = sender.send(Picked::CloseExported {
+                generation,
+                result,
+                contents,
+            });
+            repaint.request_repaint();
+        });
+        self.picked.push(receiver);
+    }
+
+    pub(super) fn complete_close_export(
+        &mut self,
+        result: Option<Result<PathBuf, String>>,
+        contents: &[u8],
+    ) {
+        self.runs.exporting = false;
+        match result {
+            Some(Ok(_))
+                if self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.export_unsaved().ok())
+                    .as_deref()
+                    == Some(contents) =>
+            {
+                self.persistence.approved_export = Some(contents.to_vec());
+                self.persistence.departure = true;
+                self.navigation.failed = false;
+                self.prompt = None;
+                self.advance_departure();
+            }
+            Some(Ok(_)) => self.notify(
+                "Work changed during export. Export the current work before closing.",
+                true,
+            ),
+            Some(Err(error)) => self.notify(format!("Could not export: {error}"), true),
+            None => {}
+        }
+    }
+
     pub(super) fn pick_imports(&mut self, folder: String) {
+        let Some(session) = &self.session else { return };
+        let identity = session.storage_identity();
         let (sender, receiver) = channel();
         let repaint = self.ui_context.clone();
         std::thread::spawn(move || {
@@ -33,23 +115,32 @@ impl FolderApp {
                 .add_filter("API Forge source", &["afs"])
                 .pick_files()
                 .unwrap_or_default();
-            let _ = sender.send(Picked::Imports { folder, files });
+            let _ = sender.send(Picked::Imports {
+                identity,
+                folder,
+                files,
+            });
             repaint.request_repaint();
         });
         self.picked.push(receiver);
     }
 
-    /// Saves a copy of a document's unsaved text anywhere the user chooses.
+    /// Saves an exact copy without acknowledging a conflict or a save baseline.
     pub(super) fn export_text(&mut self, name: String, text: String) {
+        self.export_bytes(name, text.into_bytes());
+    }
+
+    pub(super) fn export_bytes(&mut self, name: String, bytes: Vec<u8>) {
+        self.export_status = None;
         let (sender, receiver) = channel();
         let repaint = self.ui_context.clone();
         std::thread::spawn(move || {
             let result = match rfd::FileDialog::new()
-                .set_title("Export your version")
+                .set_title("Export recovery candidate")
                 .set_file_name(name)
                 .save_file()
             {
-                Some(path) => std::fs::write(&path, text)
+                Some(path) => apiforge_storage::write_atomic(&path, &bytes)
                     .map(|()| path)
                     .map_err(|error| error.to_string()),
                 None => return,
@@ -62,7 +153,7 @@ impl FolderApp {
 
     /// Results of file dialogs that finished since the last frame.
     pub(super) fn follow_dialogs(&mut self) {
-        let mut finished = Vec::new();
+        let mut finished = std::mem::take(&mut self.picked_ready);
         self.picked
             .retain(|receiver: &Receiver<Picked>| match receiver.try_recv() {
                 Ok(picked) => {
@@ -73,39 +164,87 @@ impl FolderApp {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
             });
         for picked in finished {
+            if matches!(self.prompt, Some(Prompt::Working { .. }))
+                && matches!(picked, Picked::Folder { .. } | Picked::Imports { .. })
+            {
+                self.picked_ready.push(picked);
+                continue;
+            }
             match picked {
+                Picked::Folder { generation, path } => {
+                    if !self.persistence.closing
+                        && generation == self.open_generation
+                        && let Some(path) = path
+                    {
+                        self.request_switch(path);
+                    }
+                }
+                Picked::CloseExported {
+                    generation,
+                    result,
+                    contents,
+                } => {
+                    if generation == self.persistence.departure_generation {
+                        self.complete_close_export(result, &contents)
+                    }
+                }
                 Picked::Imports { files, .. } if files.is_empty() => {}
-                Picked::Imports { folder, files } => self.prepare_import(&files, &folder),
+                Picked::Imports {
+                    identity,
+                    folder,
+                    files,
+                } => {
+                    if !self.persistence.closing && self.session_matches(&identity) {
+                        self.prepare_import(&files, &folder);
+                    }
+                }
                 Picked::Exported(Ok(path)) => {
-                    self.notify(format!("Exported to {}.", path.display()), false)
+                    let message = format!("Exported to {}.", path.display());
+                    self.export_status = Some(message.clone());
+                    self.notify(message, false)
                 }
                 Picked::Exported(Err(error)) => {
-                    self.notify(format!("Could not export: {error}"), true)
+                    let message = format!("Could not export: {error}");
+                    self.export_status = Some(message.clone());
+                    self.notify(message, true)
                 }
             }
         }
     }
 
     fn prepare_import(&mut self, files: &[PathBuf], folder: &str) {
-        let Some(session) = self.session.as_ref() else {
+        if self.session.is_none() {
             return;
-        };
-        match session.prepare_import(files, folder) {
-            Ok(candidates) => {
-                let rows = candidates
-                    .into_iter()
-                    .map(|candidate| ImportRow {
-                        include: true,
-                        kind: candidate.declaration.as_ref().map(|d| d.kind),
-                        destination: candidate.destination.clone(),
-                        handle: String::new(),
-                        candidate,
-                    })
-                    .collect();
-                self.prompt = Some(Prompt::Import { rows, error: None });
-            }
-            Err(error) => self.notify(format!("Cannot import: {error}"), true),
         }
+        let files = files.to_vec();
+        let folder = folder.to_owned();
+        self.storage_project(
+            "Reading import files…",
+            apiforge_project::StorageMode::Read,
+            false,
+            move |session| session.prepare_import(&files, &folder),
+            |app, result| match result {
+                Ok(candidates) => {
+                    app.prompt = Some(Prompt::Import {
+                        rows: candidates
+                            .into_iter()
+                            .map(|candidate| ImportRow {
+                                include: true,
+                                kind: candidate
+                                    .declaration
+                                    .as_ref()
+                                    .map(|declaration| declaration.kind),
+                                destination: candidate.destination.clone(),
+                                handle: String::new(),
+                                candidate,
+                            })
+                            .collect(),
+                        error: None,
+                    })
+                }
+                Err(error) => app.notify(format!("Cannot import: {error}"), true),
+            },
+        );
     }
 
     pub(super) fn rename_prompt(
@@ -127,8 +266,10 @@ impl FolderApp {
                 );
                 ui.add_space(theme::SPACE_SM);
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     confirm = true;
                 }
@@ -157,8 +298,13 @@ impl FolderApp {
             } else {
                 format!("{folder}/{}", name.trim())
             };
-            match self.relocate(&path, &target) {
-                Ok(()) => return None,
+            let failed = Prompt::Rename {
+                path: path.clone(),
+                name: name.clone(),
+                error: None,
+            };
+            match self.relocate_with(&path, &target, Some(failed)) {
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -191,7 +337,7 @@ impl FolderApp {
                 ui.set_width(420.0);
                 ui.heading(format!("Move {}", file_name(&path)));
                 widgets::field_label(ui, "Into folder");
-                egui::ComboBox::from_id_salt("folder-move-target")
+                let target = egui::ComboBox::from_id_salt("folder-move-target")
                     .width(ui.available_width())
                     .selected_text(display_folder(&folder))
                     .show_ui(ui, |ui| {
@@ -203,6 +349,7 @@ impl FolderApp {
                             );
                         }
                     });
+                widgets::named(target.response, "Into folder");
                 if let Some(error) = &error {
                     widgets::field_error(ui, error);
                 }
@@ -218,8 +365,13 @@ impl FolderApp {
             return None;
         }
         if confirm {
-            match self.relocate(&path, &moved_path(&path, &folder)) {
-                Ok(()) => return None,
+            let failed = Prompt::MoveTo {
+                path: path.clone(),
+                folder: folder.clone(),
+                error: None,
+            };
+            match self.relocate_with(&path, &moved_path(&path, &folder), Some(failed)) {
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -235,7 +387,7 @@ impl FolderApp {
         context: &egui::Context,
         parent: String,
         mut name: String,
-        mut error: Option<String>,
+        error: Option<String>,
     ) -> Option<Prompt> {
         let (mut confirm, mut cancel) = (false, false);
         let response = dialogs::centered_modal(egui::Id::new("folder-new-folder"), context).show(
@@ -245,8 +397,10 @@ impl FolderApp {
                 ui.heading("New folder");
                 widgets::hint(ui, format!("In {}", display_folder(&parent)));
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     confirm = true;
                 }
@@ -268,23 +422,28 @@ impl FolderApp {
         }
         if confirm && !name.trim().is_empty() {
             let path = moved_path(name.trim(), &parent);
-            match self
-                .session
-                .as_mut()
-                .map(|session| session.create_folder(&path))
-            {
-                Some(Ok(())) => {
-                    if !parent.is_empty() {
-                        self.workbench.expanded.insert(parent.clone());
+            let target = path.clone();
+            let failed = Prompt::NewFolder {
+                parent: parent.clone(),
+                name: name.clone(),
+                error: None,
+            };
+            self.working_project(
+                "Creating folder…",
+                move |session| session.create_folder(&target),
+                move |app, result| match result {
+                    Ok(()) => {
+                        if !parent.is_empty() {
+                            app.workbench.expanded.insert(parent);
+                        }
+                        app.explorer.selected = Some(path);
+                        app.watcher.rescan();
+                        app.touched();
                     }
-                    self.explorer.selected = Some(path);
-                    self.watcher.rescan();
-                    self.touched();
-                    return None;
-                }
-                Some(Err(failure)) => error = Some(failure.to_string()),
-                None => return None,
-            }
+                    Err(error) => app.restore_prompt(failed, error.to_string()),
+                },
+            );
+            return self.prompt.take();
         }
         Some(Prompt::NewFolder {
             parent,
@@ -298,7 +457,7 @@ impl FolderApp {
         context: &egui::Context,
         preview: Box<DeletePreview>,
         paths: Vec<String>,
-        mut error: Option<String>,
+        error: Option<String>,
     ) -> Option<Prompt> {
         let names: HashMap<&str, String> = self
             .session
@@ -383,10 +542,13 @@ impl FolderApp {
             return None;
         }
         if confirm {
-            match self.delete_confirmed(&preview) {
-                Ok(()) => return None,
-                Err(message) => error = Some(message),
-            }
+            let failed = Prompt::Delete {
+                preview: preview.clone(),
+                paths: paths.clone(),
+                error: None,
+            };
+            self.queue_delete(*preview, Some(failed));
+            return self.prompt.take();
         }
         Some(Prompt::Delete {
             preview,
@@ -395,33 +557,46 @@ impl FolderApp {
         })
     }
 
-    /// Moves the previewed items to the trash and closes their tabs.
+    #[cfg(test)]
     pub(super) fn delete_confirmed(&mut self, preview: &DeletePreview) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        session
-            .delete(preview, DIAGRAM)
-            .map_err(|error| error.to_string())?;
-        let removed: Vec<String> = self
-            .workbench
-            .tabs()
-            .iter()
-            .filter(|tab| session.document(&tab.document_id).is_none())
-            .map(|tab| tab.document_id.clone())
-            .collect();
-        for document_id in removed {
-            self.close_tab(&document_id);
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
-        self.explorer.selected = None;
-        self.watcher.rescan();
-        self.notify("Moved to the trash.", false);
+        self.queue_delete(preview.clone(), None);
         Ok(())
+    }
+
+    fn queue_delete(&mut self, preview: DeletePreview, failed: Option<Prompt>) {
+        self.working_project(
+            "Moving items to trash…",
+            move |session| session.delete(&preview, DIAGRAM),
+            move |app, result| match result {
+                Ok(_) => {
+                    app.follow_external(ExternalOutcome {
+                        project_reloaded: true,
+                        ..Default::default()
+                    });
+                    app.explorer.selected = None;
+                    app.watcher.rescan();
+                    app.notify("Moved to the trash.", false);
+                    app.touched();
+                }
+                Err(error) => {
+                    if let Some(prompt) = failed {
+                        app.restore_prompt(prompt, error.to_string());
+                    } else {
+                        app.notify(format!("Could not delete: {error}"), true);
+                    }
+                }
+            },
+        );
     }
 
     pub(super) fn import_prompt(
         &mut self,
         context: &egui::Context,
         mut rows: Vec<ImportRow>,
-        mut error: Option<String>,
+        error: Option<String>,
     ) -> Option<Prompt> {
         let (mut confirm, mut cancel) = (false, false);
         let response =
@@ -461,7 +636,7 @@ impl FolderApp {
         if response.should_close() || cancel {
             return None;
         }
-        if confirm && let Some(session) = self.session.as_mut() {
+        if confirm {
             let items: Vec<ImportItem> = rows
                 .iter()
                 .filter(|row| row.include)
@@ -470,29 +645,37 @@ impl FolderApp {
                         text: row.candidate.text.clone(),
                         kind: row.kind?,
                         destination: row.destination.trim().to_owned(),
-                        handle: (row.candidate.handle_collision)
+                        handle: row
+                            .candidate
+                            .handle_collision
                             .then(|| row.handle.trim().to_owned()),
                     })
                 })
                 .collect();
-            match session.import(&items, DIAGRAM) {
-                Ok(ids) => {
-                    if let Some(first) = ids.first() {
-                        self.workbench.open(first);
-                    }
-                    for item in &items {
-                        let folder = parent(&item.destination);
-                        if !folder.is_empty() {
-                            self.workbench.expanded.insert(folder.to_owned());
+            let folders: Vec<_> = items
+                .iter()
+                .map(|item| parent(&item.destination).to_owned())
+                .filter(|folder| !folder.is_empty())
+                .collect();
+            self.working_project(
+                "Importing files…",
+                move |session| session.import(&items, DIAGRAM),
+                move |app, result| match result {
+                    Ok(ids) => {
+                        if let Some(id) = ids.first() {
+                            app.activate_tab(id);
                         }
+                        app.workbench.expanded.extend(folders);
+                        app.watcher.rescan();
+                        app.notify(format!("Imported {}.", count(ids.len(), "file")), false);
+                        app.touched();
                     }
-                    self.watcher.rescan();
-                    self.notify(format!("Imported {}.", count(ids.len(), "file")), false);
-                    self.touched();
-                    return None;
-                }
-                Err(failure) => error = Some(failure.to_string()),
-            }
+                    Err(error) => {
+                        app.restore_prompt(Prompt::Import { rows, error: None }, error.to_string())
+                    }
+                },
+            );
+            return self.prompt.take();
         }
         Some(Prompt::Import { rows, error })
     }
@@ -534,7 +717,7 @@ impl FolderApp {
         }
         if confirm {
             match self.register(&path, kind) {
-                Ok(()) => return None,
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -616,7 +799,7 @@ impl FolderApp {
         }
         if let Some(operation_id) = restore {
             match self.restore(&operation_id, &operations) {
-                Ok(()) => return None,
+                Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
@@ -629,39 +812,54 @@ impl FolderApp {
         operation_id: &str,
         operations: &[TrashIndex],
     ) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
+        if self.session.is_none() {
+            return Err("No project is open.".into());
+        }
         let operation = operations
             .iter()
             .find(|operation| operation.operation_id == operation_id)
-            .ok_or_else(String::new)?;
-        let root = session.store().root().to_owned();
-        let mut destinations = Vec::new();
-        for entry in &operation.entries {
-            let path = entry.document.path.as_str();
-            if !root.join(path).exists() {
-                continue;
-            }
-            let stem = path.trim_end_matches(".afs");
-            let free = (2..)
-                .map(|number| format!("{stem}-{number}.afs"))
-                .find(|candidate| !root.join(candidate).exists())
-                .expect("an unused name exists");
-            destinations.push(RestoreDestination {
-                document_id: entry.document.document_id.clone(),
-                path: apiforge_storage::project::ProjectPath::new(free)
-                    .map_err(|error| error.to_string())?,
-            });
-        }
-        let ids = session
-            .restore(operation_id, &destinations)
-            .map_err(|error| error.to_string())?;
-        if let Some(first) = ids.first() {
-            self.workbench.open(first);
-        }
-        self.reload_field_drafts();
-        self.watcher.rescan();
-        self.notify("Restored from the trash.", false);
-        self.touched();
+            .cloned()
+            .ok_or("This trash operation is no longer available.")?;
+        let failed = Prompt::Trash {
+            operations: operations.to_vec(),
+            error: None,
+        };
+        self.working_project(
+            "Restoring items…",
+            move |session| {
+                let root = session.store().root();
+                let mut destinations = Vec::new();
+                for entry in &operation.entries {
+                    let path = entry.document.path.as_str();
+                    if !root.join(path).exists() {
+                        continue;
+                    }
+                    let stem = path.trim_end_matches(".afs");
+                    let free = (2..=apiforge_storage::project::MAX_TREE_ENTRIES)
+                        .map(|number| format!("{stem}-{number}.afs"))
+                        .find(|path| !root.join(path).exists())
+                        .ok_or(apiforge_project::ProjectError::Limit)?;
+                    destinations.push(RestoreDestination {
+                        document_id: entry.document.document_id.clone(),
+                        path: apiforge_storage::project::ProjectPath::new(free)?,
+                    });
+                }
+                session.restore(&operation.operation_id, &destinations)
+            },
+            move |app, result| match result {
+                Ok(ids) => {
+                    if let Some(id) = ids.first() {
+                        app.activate_tab(id);
+                    }
+                    app.reload_field_drafts();
+                    app.restore_text_tabs();
+                    app.watcher.rescan();
+                    app.notify("Restored from the trash.", false);
+                    app.touched();
+                }
+                Err(error) => app.restore_prompt(failed, error.to_string()),
+            },
+        );
         Ok(())
     }
 
@@ -673,60 +871,13 @@ impl FolderApp {
         conflict: ExternalConflict,
         snapshot: &Snapshot,
     ) {
-        let (mut accept, mut keep, mut export) = (false, false, false);
-        egui::Frame::new()
-            .fill(theme::ACCENT_SOFT)
-            .corner_radius(8)
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(match conflict {
-                    ExternalConflict::Changed => {
-                        "This file changed outside API Forge while it had unsaved changes. \
-                         Saving is paused: use the version on disk, or export your version \
-                         first."
-                    }
-                    ExternalConflict::Deleted => {
-                        "This file was deleted outside API Forge while it had unsaved \
-                         changes. Keep your version to recreate the file when you save, or \
-                         accept the deletion."
-                    }
-                });
-                ui.horizontal(|ui| {
-                    match conflict {
-                        ExternalConflict::Changed => {
-                            accept = ui.button("Use the version on disk").clicked();
-                        }
-                        ExternalConflict::Deleted => {
-                            keep = ui.add(widgets::primary_button("Keep my version")).clicked();
-                            accept = ui.button("Accept the deletion").clicked();
-                        }
-                    }
-                    export = ui.button("Export my version…").clicked();
-                });
-            });
-        if export {
-            self.export_text(file_name(&snapshot.path).to_owned(), snapshot.text.clone());
-        }
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if accept {
-            session.accept_external(document_id, DIAGRAM)
-        } else if keep {
-            session.keep_deleted(document_id)
-        } else {
-            return;
-        };
-        match result {
-            Ok(()) => {
-                self.shown = None;
-                code::clear_history(ui.ctx(), editor_id(document_id));
-                self.reload_field_drafts();
-                self.touched();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        self.conflict_notice(
+            ui,
+            apiforge_project::ConflictTarget::Document(document_id.into()),
+            conflict,
+            &snapshot.path,
+            &snapshot.text,
+        );
     }
 }
 
@@ -758,7 +909,10 @@ fn import_row(ui: &mut egui::Ui, row: &mut ImportRow) {
             });
         }
         widgets::field_label(ui, "Destination");
-        ui.add(egui::TextEdit::singleline(&mut row.destination).desired_width(f32::INFINITY));
+        widgets::named(
+            ui.add(egui::TextEdit::singleline(&mut row.destination).desired_width(f32::INFINITY)),
+            "Destination",
+        );
         if row.candidate.handle_collision {
             let current = row
                 .candidate
@@ -770,10 +924,13 @@ fn import_row(ui: &mut egui::Ui, row: &mut ImportRow) {
                 theme::WARNING,
                 format!("Another component is already called {current}. Choose a new name."),
             );
-            ui.add(
-                egui::TextEdit::singleline(&mut row.handle)
-                    .hint_text(format!("{current}Copy"))
-                    .desired_width(f32::INFINITY),
+            widgets::named(
+                ui.add(
+                    egui::TextEdit::singleline(&mut row.handle)
+                        .hint_text(format!("{current}Copy"))
+                        .desired_width(f32::INFINITY),
+                ),
+                "New component name",
             );
         }
     });

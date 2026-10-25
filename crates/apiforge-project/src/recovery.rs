@@ -8,17 +8,20 @@ use crate::{
     document::{AnalysisState, Unavailable},
 };
 use apiforge_storage::project::{
-    CacheNotice, CacheProvenance, DiagramRecord, DocumentKey, FieldRecovery, FileState,
-    LastValidSnapshot, ProjectError, RecoveryDocument, RecoveryRead, SourceRecovery, TextSelection,
+    CacheNotice, DiagramRecord, DocumentKey, FieldRecovery, FileState, LastValidSnapshot,
+    ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
 };
+use std::sync::Arc;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct RecoveryState {
     /// Baseline for the next write. `None` when the files are unreadable,
     /// unsupported or foreign: they are preserved and never overwritten.
     pub(super) read: Option<RecoveryRead>,
     /// Drafts that are not applied, preserved verbatim in every later write.
     pub(super) held: Vec<RecoveryDocument>,
+    /// Text-file drafts of files that are not open yet, preserved the same way.
+    pub(super) held_texts: Vec<RecoveryText>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,17 +38,20 @@ impl ProjectSession {
         let Ok(read) = self.store.load_source_recovery(&self.manifest.id) else {
             return Ok(());
         };
-        let drafts = if read.is_backup_candidate() {
-            Vec::new()
+        let (drafts, texts) = if read.is_backup_candidate() {
+            (Vec::new(), Vec::new())
         } else {
             read.recovery()
-                .map(|recovery| recovery.documents.clone())
+                .map(|recovery| (recovery.documents.clone(), recovery.texts.clone()))
                 .unwrap_or_default()
         };
         self.recovery.read = Some(read);
         for draft in drafts {
             self.adopt_draft(draft)?;
         }
+        // Unsaved text of files that are not open is preserved; opening the
+        // file restores it, or holds it when the file has changed since.
+        self.recovery.held_texts = texts;
         Ok(())
     }
 
@@ -78,13 +84,13 @@ impl ProjectSession {
         document.unavailable = None;
         document.selection = draft.selection;
         document.fields = draft.fields;
-        if document.text != draft.text {
-            document.text = draft.text;
+        if document.text() != draft.text {
+            document.set_text(draft.text);
             document.source_version += 1;
         }
         if let Some(candidate) = candidate {
             document.layout_dirty = true;
-            if let Some(previous) = document.model.replace(candidate) {
+            if let Some(previous) = document.model.replace(Arc::new(candidate)) {
                 document.history.record(previous);
             }
         }
@@ -249,8 +255,8 @@ impl ProjectSession {
     pub fn recovery_contents(&self) -> SourceRecovery {
         let mut documents = self.recovery.held.clone();
         for document in self.documents.iter().filter(|d| d.needs_recovery()) {
-            let selection = if document.text.is_char_boundary(document.selection.anchor)
-                && document.text.is_char_boundary(document.selection.caret)
+            let selection = if document.text().is_char_boundary(document.selection.anchor)
+                && document.text().is_char_boundary(document.selection.caret)
             {
                 document.selection.clone()
             } else {
@@ -260,8 +266,8 @@ impl ProjectSession {
                 }
             };
             let source = match document.analysis {
-                AnalysisState::Valid => Some(&document.text),
-                _ => document.model_source.as_ref(),
+                AnalysisState::Valid => Some(document.text()),
+                _ => document.model_source.as_deref(),
             };
             let checkpoint = document
                 .model
@@ -286,7 +292,7 @@ impl ProjectSession {
                 path: document.entry.path.clone(),
                 base_hash: sha256(&document.saved),
                 source_version: document.source_version,
-                text: document.text.clone(),
+                text: document.text().to_owned(),
                 selection,
                 fields: document.fields.clone(),
                 checkpoint,
@@ -296,6 +302,7 @@ impl ProjectSession {
             format_version: 1,
             project_id: self.manifest.id.clone(),
             documents,
+            texts: self.text_recovery(),
         }
     }
 
@@ -317,7 +324,7 @@ impl ProjectSession {
         let desired = self.recovery_contents();
         let unchanged = match read.recovery() {
             Some(current) => *current == desired,
-            None => desired.documents.is_empty(),
+            None => desired.documents.is_empty() && desired.texts.is_empty(),
         };
         if unchanged {
             return Ok(false);
@@ -332,14 +339,24 @@ impl ProjectSession {
     /// are unusable, returns itself so the caller can offer export or discard.
     /// Configuration is not part of source recovery and must be saved first.
     pub fn close(mut self) -> std::result::Result<(), (Box<Self>, Error)> {
+        match self.protect_close() {
+            Ok(()) => Ok(()),
+            Err(error) => Err((Box::new(self), error)),
+        }
+    }
+
+    /// Performs close protection while the adapter retains the live owner until
+    /// its asynchronous completion is acknowledged.
+    pub fn protect_close(&mut self) -> Result<()> {
         if self.manifest_dirty {
-            return Err((Box::new(self), Error::UnsavedConfiguration));
+            return Err(Error::UnsavedConfiguration);
         }
         let unsaved = !self.recovery.held.is_empty()
             || self
                 .documents
                 .iter()
-                .any(|document| document.needs_recovery());
+                .any(|document| document.needs_recovery())
+            || self.has_unsaved_text();
         // Undoing an edit or discarding the final held draft can leave the
         // session clean while the on-disk recovery still contains obsolete work.
         // Synchronise that recovery before acknowledging close. Clean readers
@@ -347,17 +364,14 @@ impl ProjectSession {
         let recovery_needs_clearing = !self.store.is_read_only()
             && self.recovery.read.as_ref().is_some_and(|read| {
                 !read.is_backup_candidate()
-                    && read
-                        .recovery()
-                        .is_some_and(|recovery| !recovery.documents.is_empty())
+                    && read.recovery().is_some_and(|recovery| {
+                        !recovery.documents.is_empty() || !recovery.texts.is_empty()
+                    })
             });
         if !unsaved && !recovery_needs_clearing {
             return Ok(());
         }
-        match self.save_recovery() {
-            Ok(_) => Ok(()),
-            Err(error) => Err((Box::new(self), error)),
-        }
+        self.save_recovery().map(|_| ())
     }
 
     /// Explicitly abandons every unsaved change and held draft, then closes.
@@ -366,6 +380,15 @@ impl ProjectSession {
     /// A failed recovery write returns the session unchanged, so the caller can
     /// keep editing or retry.
     pub fn discard_unsaved_and_close(self) -> std::result::Result<(), (Box<Self>, Error)> {
+        match self.discard_protection() {
+            Ok(()) => Ok(()),
+            Err(error) => Err((Box::new(self), error)),
+        }
+    }
+
+    /// Clears durable recovery after an explicit discard decision. Memory is
+    /// retained until the adapter acknowledges completion and releases it.
+    pub fn discard_protection(&self) -> Result<()> {
         let Some(read) = &self.recovery.read else {
             return Ok(());
         };
@@ -376,11 +399,12 @@ impl ProjectSession {
             format_version: 1,
             project_id: self.manifest.id.clone(),
             documents: Vec::new(),
+            texts: Vec::new(),
         };
         if read.recovery().is_some_and(|current| *current != empty)
             && let Err(error) = self.store.save_source_recovery(read, &empty)
         {
-            return Err((Box::new(self), error.into()));
+            return Err(error.into());
         }
         Ok(())
     }
@@ -413,8 +437,9 @@ impl ProjectSession {
             analysis::normalise(&mut model, &target);
             let source = snapshot.source().to_owned();
             let document = &mut self.documents[index];
-            document.model = Some(model);
+            document.model = Some(Arc::new(model));
             document.model_source = Some(source);
+            document.valid_snapshot = Some(snapshot.clone());
         }
     }
 
@@ -440,25 +465,19 @@ impl ProjectSession {
         }
         let mut snapshots = Vec::new();
         for document in &self.documents {
-            let (Some(model), Some(source)) = (&document.model, &document.model_source) else {
-                continue;
-            };
-            let saved = FileState::of(source.as_bytes()) == document.saved;
-            let snapshot = LastValidSnapshot::capture(
-                DocumentKey::Working {
-                    document_id: document.entry.document_id.clone(),
-                },
-                source,
-                CacheProvenance {
-                    session_epoch: self.session_id.clone(),
-                    source_version: document.source_version,
-                    saved_source_hash: if saved { sha256(&document.saved) } else { None },
-                },
-                identity_base(model),
-                &self.context,
-            );
-            if let Ok(snapshot) = snapshot {
-                snapshots.push(snapshot);
+            if let Some(snapshot) = &document.valid_snapshot {
+                snapshots.push(snapshot.clone());
+            } else {
+                let key = DocumentKey::Working {
+                    document_id: document.id().into(),
+                };
+                if let Some(snapshot) = cache
+                    .snapshots()
+                    .iter()
+                    .find(|snapshot| snapshot.key() == &key)
+                {
+                    snapshots.push(snapshot.clone());
+                }
             }
         }
         if same_snapshots(cache.snapshots(), &snapshots) {

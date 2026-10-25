@@ -1152,9 +1152,7 @@ fn attach_comments(
             diagnostics.push(Diagnostic {
                 range: token.range.clone(),
                 severity: Severity::Warning,
-                message:
-                    "This comment is not attached to a statement and will be dropped by formatting"
-                        .into(),
+                message: crate::UNATTACHED_COMMENT.into(),
                 fix: None,
             });
         }

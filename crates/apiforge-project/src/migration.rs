@@ -22,7 +22,10 @@ use std::{
 use thiserror::Error as ThisError;
 
 pub const CATALOGUE_FILE: &str = "projects.json";
-const PROJECTS_DIRECTORY: &str = "projects";
+/// Managed projects live here, beside the catalogue, in the application data
+/// directory; migration writes its destinations into it and startup creates a
+/// new project there.
+pub const PROJECTS_DIRECTORY: &str = "projects";
 const MIGRATION_DIRECTORY: &str = "migration";
 const INDEX_FILE: &str = "index.json";
 /// Inside each prepared folder; identifies the migration that wrote it.
@@ -79,7 +82,10 @@ fn io(path: &Path) -> impl FnOnce(io::Error) -> Error + '_ {
 }
 
 /// Every migrated project and the inputs it was derived from. Its presence
-/// means the migration completed; folder mode reads projects only from here.
+/// means the migration completed, and it is the record of which projects that
+/// migration produced. It is not a registry of every folder project: one can
+/// be opened from anywhere, and projects created later are not part of any
+/// migration, so neither is written back here.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectCatalogue {
@@ -550,6 +556,8 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
                 format_version: 1,
                 project_id: manifest.id.clone(),
                 documents,
+                // A legacy workspace has no project text files.
+                texts: Vec::new(),
             },
         )?;
     }

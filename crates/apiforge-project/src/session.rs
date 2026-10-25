@@ -13,26 +13,43 @@ use apiforge_storage::project::{
 };
 use std::{path::Path, sync::Arc};
 
+#[path = "comments.rs"]
+mod comments;
+#[path = "conflicts.rs"]
+mod conflicts;
+pub use conflicts::{ConflictDecision, ConflictPreview, ConflictTarget};
+#[path = "storage_work.rs"]
+mod storage_work;
+pub use storage_work::{SessionIdentity, StorageCompletion, StorageMode, StorageSnapshot};
+#[path = "execution.rs"]
+mod execution;
 #[path = "external.rs"]
 mod external;
+pub use execution::PreparedRun;
 #[path = "files.rs"]
 mod files;
+#[path = "publish.rs"]
+mod publish;
 #[path = "recovery.rs"]
 mod recovery;
 #[path = "register.rs"]
 mod register;
+#[path = "text.rs"]
+mod text;
 pub use external::{
     ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome, ObservedFile, RegistryState,
 };
 pub use files::DeletePreview;
+pub use publish::Published;
 pub use recovery::DraftStatus;
 use recovery::RecoveryState;
 pub use register::{
     Declaration, ImportCandidate, ImportItem, Registration, SourceSurvey, declaration,
     rename_handle,
 };
+pub use text::TextFileSession;
 
-const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
+pub(crate) const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 const GITIGNORE_PATH: &str = ".gitignore";
 const LOCAL_RULE: &str = "/.apiforge/local/";
 
@@ -76,6 +93,26 @@ pub enum EventKind {
     ContextChanged {
         generation: u64,
     },
+    /// A working component became an immutable published revision.
+    Published {
+        component_id: String,
+        revision: u32,
+    },
+    /// A project text file, identified by its path rather than a document ID.
+    TextFileOpened {
+        path: String,
+    },
+    TextFileChanged {
+        path: String,
+        version: u64,
+    },
+    TextFileSaved {
+        path: String,
+        generation: u64,
+    },
+    TextFileClosed {
+        path: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,6 +148,8 @@ pub struct ProjectSession {
     context: Arc<Project>,
     context_generation: u64,
     documents: Vec<DocumentSession>,
+    /// Project files open as plain text; they are not definitions.
+    texts: Vec<TextFileSession>,
     sequence: u64,
     events: Vec<Event>,
     placer: Arc<dyn Placer>,
@@ -130,6 +169,7 @@ impl std::fmt::Debug for ProjectSession {
             .field("read_only", &self.store.is_read_only())
             .field("epoch", &self.epoch)
             .field("documents", &self.documents.len())
+            .field("texts", &self.texts.len())
             .finish_non_exhaustive()
     }
 }
@@ -138,6 +178,14 @@ impl ProjectSession {
     /// Writes a new, empty manifest. The folder must not contain a project.
     pub fn create(root: impl AsRef<Path>, name: &str) -> Result<Self> {
         Self::initialise(root, name, &[])
+    }
+
+    pub fn create_with(
+        root: impl AsRef<Path>,
+        name: &str,
+        placer: Arc<dyn Placer>,
+    ) -> Result<Self> {
+        Self::initialise_with(root, name, &[], placer)
     }
 
     /// Opens an existing project. A folder without a manifest is left untouched.
@@ -152,6 +200,68 @@ impl ProjectSession {
             return Err(Error::NotAProject);
         }
         Self::load(ProjectStore::open(root)?, placer, 1)
+    }
+
+    /// Stable committed definitions only, without local recovery or cache and
+    /// without creating project-local files. Shared with CLI checks and runs.
+    pub fn open_saved_read_only(root: impl AsRef<Path>) -> Result<Self> {
+        if !has_manifest(root.as_ref())? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_saved(
+            ProjectStore::open_read_only(root)?,
+            Arc::new(FixedPlacer),
+            1,
+        )
+    }
+
+    /// Stable saved definitions under the writer lock. Never falls back to a
+    /// read-only session when another writer owns the project.
+    pub fn open_saved_exclusive(root: impl AsRef<Path>) -> Result<Self> {
+        if !has_manifest(root.as_ref())? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_saved(
+            ProjectStore::open_exclusive(root)?,
+            Arc::new(FixedPlacer),
+            1,
+        )
+    }
+
+    /// A verified, closed snapshot of a current scenario and its exact public
+    /// dependencies. Another invalid scenario cannot block this one.
+    pub fn current_snapshot(
+        &mut self,
+        document_id: &str,
+    ) -> Result<apiforge_storage::project::LastValidSnapshot> {
+        self.require_no_held_draft(document_id)?;
+        self.require_current_registry()?;
+        self.settle(document_id)?;
+        let document = &self.documents[self.index(document_id)?];
+        if document.entry.kind != DocumentKind::Scenario
+            || document.analysis != AnalysisState::Valid
+            || document.conflict.is_some()
+            || !document.fields.is_empty()
+        {
+            return Err(Error::ModelLocked);
+        }
+        let model = document.model.as_ref().ok_or(Error::ModelLocked)?;
+        Ok(apiforge_storage::project::LastValidSnapshot::capture(
+            DocumentKey::Working {
+                document_id: document_id.into(),
+            },
+            document.text(),
+            apiforge_storage::project::CacheProvenance {
+                session_epoch: self.session_id.clone(),
+                source_version: document.source_version,
+                saved_source_hash: match &document.saved {
+                    FileState::File { sha256, .. } if !document.is_dirty() => Some(sha256.clone()),
+                    _ => None,
+                },
+            },
+            analysis::identity_base(model),
+            &self.context,
+        )?)
     }
 
     /// The saved definitions only: no recovery drafts and no last-valid cache.
@@ -170,6 +280,7 @@ impl ProjectSession {
         let next = Self::load(self.store.clone(), placer, self.epoch + 1)?;
         let sequence = self.sequence;
         *self = next;
+        self.events.clear();
         self.sequence = sequence;
         self.emit(
             Origin::SESSION,
@@ -212,6 +323,7 @@ impl ProjectSession {
             context: Arc::new(context),
             context_generation: 1,
             documents: Vec::new(),
+            texts: Vec::new(),
             sequence: 0,
             events: Vec::new(),
             placer,
@@ -318,7 +430,9 @@ impl ProjectSession {
             Some(&entry.document_id),
             EventKind::DocumentRegistered,
         );
-        self.analyse_now(self.documents.len() - 1)?;
+        let index = self.documents.len() - 1;
+        self.analyse_now(index)?;
+        self.seal_new_checkpoint(index);
         Ok(entry.document_id)
     }
 
@@ -334,10 +448,10 @@ impl ProjectSession {
         if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
             return Err(Error::SourceTooLarge);
         }
-        if document.text == text {
+        if document.text() == text {
             return Ok(document.source_version);
         }
-        document.text = text.into();
+        document.set_text(text.into());
         document.source_version += 1;
         document.analysis = AnalysisState::Pending;
         let version = document.source_version;
@@ -356,6 +470,39 @@ impl ProjectSession {
             },
         );
         Ok(version)
+    }
+
+    /// Applies one diagnostic's suggested fix to the source, as an ordinary
+    /// edit, so it joins the document's history and can be undone. The
+    /// explicit pin for an unqualified component call is such a fix.
+    ///
+    /// The diagnostic is named by its position, and a document whose analysis
+    /// has not settled has none to offer: a range taken from an earlier text
+    /// could otherwise cut this one apart.
+    pub fn apply_fix(
+        &mut self,
+        document_id: &str,
+        diagnostic: usize,
+        origin: Origin,
+    ) -> Result<u64> {
+        let index = self.index(document_id)?;
+        if self.documents[index].analysis == AnalysisState::Pending {
+            return Err(Error::StaleAnalysis);
+        }
+        let fix = self.documents[index]
+            .diagnostics
+            .get(diagnostic)
+            .and_then(|diagnostic| diagnostic.fix.clone())
+            .ok_or(Error::NoFix)?;
+        let mut text = self.documents[index].text().to_owned();
+        if fix.range.end > text.len()
+            || !text.is_char_boundary(fix.range.start)
+            || !text.is_char_boundary(fix.range.end)
+        {
+            return Err(Error::StaleAnalysis);
+        }
+        text.replace_range(fix.range, &fix.replacement);
+        self.edit_source(document_id, &text, origin)
     }
 
     /// Replaces a document's unsaved work with its saved source: text, unsaved
@@ -383,7 +530,7 @@ impl ProjectSession {
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .ok_or(Error::ModelLocked)?;
         let document = &mut self.documents[index];
-        document.text = text;
+        document.set_text(text);
         document.source_version += 1;
         document.analysis = AnalysisState::Pending;
         document.diagnostics.clear();
@@ -411,6 +558,15 @@ impl ProjectSession {
             .collect()
     }
 
+    /// The ticket of every pending document: what `pending_analyses` would
+    /// return, without copying any source or model into an input.
+    pub fn pending_tickets(&self) -> Vec<AnalysisTicket> {
+        (0..self.documents.len())
+            .filter(|index| self.documents[*index].analysis == AnalysisState::Pending)
+            .map(|index| self.ticket(index))
+            .collect()
+    }
+
     pub fn analysis_for(&self, document_id: &str) -> Result<AnalysisInput> {
         Ok(self.analysis_input(self.index(document_id)?))
     }
@@ -423,7 +579,7 @@ impl ProjectSession {
         AnalysisInput {
             ticket: self.ticket(index),
             target: self.target(&document.entry),
-            text: document.text.as_str().into(),
+            text: document.text().into(),
             context: self.context.clone(),
             base: document.model.clone(),
             checkpoint: self
@@ -463,9 +619,9 @@ impl ProjectSession {
         match analysis.model {
             Some((model, _)) => {
                 document.analysis = AnalysisState::Valid;
-                document.model_source = Some(document.text.clone());
-                if document.model.as_ref() != Some(&model) {
-                    if let Some(previous) = document.model.replace(model) {
+                document.model_source = Some(document.text().to_owned());
+                if document.model.as_deref() != Some(&model) {
+                    if let Some(previous) = document.model.replace(Arc::new(model)) {
                         document.history.record(previous);
                     }
                     self.emit(
@@ -479,6 +635,7 @@ impl ProjectSession {
             }
             None => document.analysis = AnalysisState::Invalid,
         }
+        self.seal_valid(index);
         self.emit(
             Origin::SESSION,
             Some(&analysis.ticket.document_id),
@@ -538,7 +695,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        if previous == model {
+        if *previous == model {
             return Ok(());
         }
         self.install_model(index, model, origin)?;
@@ -571,7 +728,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        if let Err(error) = self.install_model(index, model.clone(), origin) {
+        if let Err(error) = self.install_model(index, (*model).clone(), origin) {
             let history = &mut self.documents[index].history;
             if undo {
                 history.undo.push(model);
@@ -581,6 +738,7 @@ impl ProjectSession {
             return Err(error);
         }
         let history = &mut self.documents[index].history;
+        history.generation += 1;
         if undo {
             history.redo.push(current);
         } else {
@@ -597,6 +755,9 @@ impl ProjectSession {
         let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, &self.context)
             != apiforge_script::semantic(&model, &self.context);
+        if semantic {
+            self.require_comment_decision(index)?;
+        }
         let text = if semantic {
             Some(
                 apiforge_script::print_folder_document(&self.context, &model)
@@ -607,11 +768,11 @@ impl ProjectSession {
         };
         let document_id = document.entry.document_id.clone();
         let document = &mut self.documents[index];
-        document.model = Some(model);
+        document.model = Some(Arc::new(model));
         match text {
             Some(text) => {
                 document.model_source = Some(text.clone());
-                document.text = text;
+                document.set_text(text);
                 document.source_version += 1;
                 document.diagnostics.clear();
                 let version = document.source_version;
@@ -625,6 +786,7 @@ impl ProjectSession {
             }
             None => document.layout_dirty = true,
         }
+        self.seal_valid(index);
         let version = self.documents[index].source_version;
         self.emit(
             origin,
@@ -654,11 +816,33 @@ impl ProjectSession {
                 apiforge_storage::project::ProjectError::InvalidMetadata,
             ));
         }
-        let mut project = context::base_project(&manifest);
-        project.components = self.published.clone();
+        if manifest == self.manifest {
+            return Ok(());
+        }
+        // Validate immutable revision sources against the proposed settings,
+        // including sources that use a display name instead of a stable
+        // contract ID. A failed edit never changes memory or the save baseline.
+        let (_, snapshot) = self.store.load()?;
+        if snapshot.state(&ProjectPath::new(MANIFEST_PATH)?) != Some(self.manifest_saved.clone()) {
+            return Err(Error::RegistryChanged);
+        }
+        let project = context::resolve(
+            &manifest,
+            &snapshot,
+            self.diagram.as_ref(),
+            self.placer.as_ref(),
+        )?;
+        self.published = project.components.clone();
         self.manifest = manifest;
         self.manifest_dirty = true;
         self.context = Arc::new(project);
+        self.invalidate_runtime_inputs(origin);
+        Ok(())
+    }
+
+    /// Session-only execution inputs changed (for example secret values).
+    /// Invalidate analysis/run tickets without making public settings dirty.
+    pub fn invalidate_runtime_inputs(&mut self, origin: Origin) {
         self.context_generation += 1;
         for index in 0..self.documents.len() {
             if self.documents[index].unavailable.is_none() {
@@ -672,7 +856,6 @@ impl ProjectSession {
                 generation: self.context_generation,
             },
         );
-        Ok(())
     }
 
     /// Saves shared configuration without saving any document, including when
@@ -711,7 +894,7 @@ impl ProjectSession {
         }
         let document = &self.documents[index];
         let version = document.source_version;
-        let bytes = document.text.as_bytes().to_vec();
+        let bytes = document.text().as_bytes().to_vec();
         let mut changes = Vec::new();
         if FileState::of(&bytes) != document.saved {
             changes.push(ProjectChange::Write {
@@ -720,28 +903,9 @@ impl ProjectSession {
                 bytes: bytes.clone(),
             });
         }
-        let mut diagram = self.diagram.clone();
-        let mut checkpoint = false;
-        if document.analysis == AnalysisState::Valid
-            && let (Some(model), Some(file)) = (&document.model, diagram.as_mut())
-        {
-            let key = DocumentKey::Working {
-                document_id: document_id.into(),
-            };
-            let record = DiagramRecord::capture(
-                key.clone(),
-                &document.text,
-                analysis::identity_base(model),
-                &self.context,
-            )?;
-            file.records.retain(|existing| existing.key != key);
-            file.records.push(record);
-            checkpoint = true;
-        }
-        let diagram_bytes = match &diagram {
-            Some(file) if checkpoint => Some(file.to_bytes()?),
-            _ => None,
-        };
+        let diagram = self.checkpoint(index)?;
+        let checkpoint = diagram.is_some();
+        let diagram_bytes = diagram.as_ref().map(DiagramFile::to_bytes).transpose()?;
         if let Some(bytes) = &diagram_bytes
             && FileState::of(bytes) != self.diagram_saved
         {
@@ -791,6 +955,64 @@ impl ProjectSession {
             source_version: version,
             checkpoint,
         })
+    }
+
+    /// The shared diagram file with this document's identity/layout record
+    /// merged in, or `None` when the document has no valid model to describe.
+    fn checkpoint(&self, index: usize) -> Result<Option<DiagramFile>> {
+        let document = &self.documents[index];
+        if document.analysis != AnalysisState::Valid {
+            return Ok(None);
+        }
+        let (Some(model), Some(file)) = (&document.model, &self.diagram) else {
+            return Ok(None);
+        };
+        let key = DocumentKey::Working {
+            document_id: document.id().into(),
+        };
+        let record = DiagramRecord::capture(
+            key.clone(),
+            document.text(),
+            analysis::identity_base(model),
+            &self.context,
+        )?;
+        let mut file = file.clone();
+        file.records.retain(|existing| existing.key != key);
+        file.records.push(record);
+        Ok(Some(file))
+    }
+
+    /// Seals the checkpoint of a document whose source was just written. Its
+    /// text already matches the file exactly, so nothing marks it dirty and no
+    /// save is owed; without a record every later load would allocate fresh
+    /// identities for its blocks. ADR 0010 forbids failing valid source over a
+    /// missing checkpoint, so a write that cannot be made is left to the next
+    /// save rather than failing the registration that already succeeded.
+    fn seal_new_checkpoint(&mut self, index: usize) {
+        let Ok(Some(file)) = self.checkpoint(index) else {
+            return;
+        };
+        let Ok(bytes) = file.to_bytes() else { return };
+        if FileState::of(&bytes) == self.diagram_saved {
+            return;
+        }
+        let Ok(path) = ProjectPath::new(DIAGRAM_PATH) else {
+            return;
+        };
+        if self
+            .store
+            .commit(vec![ProjectChange::Write {
+                path,
+                expected: self.diagram_saved.clone(),
+                bytes: bytes.clone(),
+            }])
+            .is_err()
+        {
+            return;
+        }
+        self.refresh_local_baselines();
+        self.diagram_saved = FileState::of(&bytes);
+        self.diagram = Some(file);
     }
 
     fn manifest_change(&self, manifest: &ProjectManifest) -> Result<ProjectChange> {
@@ -881,7 +1103,7 @@ fn working_revision(manifest: &ProjectManifest, entry: &DocumentEntry) -> u32 {
         .map(|revision| revision.revision)
         .max()
         .unwrap_or(0)
-        + 1
+        .saturating_add(1)
 }
 
 fn document_from(snapshot: &ProjectSnapshot, entry: DocumentEntry) -> DocumentSession {
@@ -908,7 +1130,7 @@ fn has_manifest(root: &Path) -> Result<bool> {
 
 /// Keeps local session data out of Git: appends the rule to an existing
 /// `.gitignore` without rewriting it, or creates one.
-fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChange>> {
+pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChange>> {
     let path = ProjectPath::new(GITIGNORE_PATH)?;
     let current = store.read(std::slice::from_ref(&path))?.files[&path].clone();
     let Some(bytes) = current else {

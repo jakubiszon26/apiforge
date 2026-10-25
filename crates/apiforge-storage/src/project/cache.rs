@@ -57,6 +57,16 @@ pub struct LastValidSnapshot {
     entry: CacheEntry,
 }
 
+impl std::fmt::Debug for LastValidSnapshot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LastValidSnapshot")
+            .field("key", self.key())
+            .field("digest", &self.snapshot_digest())
+            .finish_non_exhaustive()
+    }
+}
+
 impl LastValidSnapshot {
     pub fn capture(
         key: DocumentKey,

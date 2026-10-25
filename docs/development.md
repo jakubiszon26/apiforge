@@ -21,6 +21,10 @@ cargo run -p apiforge-desktop --locked -- --check fixtures/workspace.json
 and Split over the project's `.afs` sources, with an explorer of the folder and
 external changes followed once a second. A folder without a project is written
 only after choosing Initialise, which can register its existing sources. `--screenshot OUT.png --folder <path>` captures it.
+`--managed` starts from the application data directory instead of a named folder
+(Stage II): it opens the project recorded there, migrates a legacy workspace the
+first time, or creates one project if the directory holds neither. It is not the
+default start; without it the saved JSON workspace opens as before.
 `--check` validates a document without a window: exit code 0 for a valid document, 1
 for a document or read error and 2 for invalid arguments. Diagnostics never print
 field or secret values. Imports are limited to 16 MiB and perform no HTTP requests.
@@ -71,6 +75,19 @@ cargo run -p apiforge-layout --example bench --release --locked [-- --strict]
 It prints each measurement against its budget. `--strict` makes an exceeded budget
 an error, which only makes sense on a machine whose speed is known.
 
+Changes to analysis, the code view or folder sessions also check the source
+budgets of the [Stage II plan](stage-ii-code-workspace.md#delivery-and-acceptance)
+in release mode: parse, lower and validate a 1000-line scenario in 5 ms, and keep
+code and split frames within their budgets at 1000 lines and at the 1 MiB limit.
+
+```bash
+cargo run -p apiforge-project --example analysis --release --locked [-- --strict]
+cargo test -p apiforge-desktop --release --locked frame_budgets -- --ignored --nocapture
+```
+
+The frame test is ignored in the ordinary suite because a debug build says nothing
+about time; it fails when a budget is exceeded.
+
 Changes to the scenario language also run both fuzzers for a sustained period. They
 are dependency-free mutational smoke fuzzers, not coverage-guided fuzzing:
 
@@ -83,9 +100,11 @@ cargo run -p apiforge-script --example fuzz_semantics --release --locked -- 60 2
 formatting idempotence. `fuzz_semantics` mutates generated scenario graphs and checks
 that every successful lowering prints, round-trips, prints identically and reconciles.
 
-The egui tests lay out the interface without a GPU; they do not test the native
-backend. Changes to the interface are also reviewed in the running application,
-including the minimum supported window of 960 × 540.
+Changes to the interface follow [GUI testing](gui-testing.md): interaction tests
+through named widgets, measurable layout assertions and a design review of the
+views the change touches, at the minimum supported window of 960 × 540 and larger.
+These run without a display or GPU and do not test the native backend; native
+checks remain where a change or its plan requires them.
 
 ## Fixtures
 
@@ -119,7 +138,53 @@ Exit code 0 means the scenario passed, 1 that it did not or could not run, and 2
 that the arguments were wrong. `--live` opens the workspace exclusively, because a
 live run records what it sends in the run journal; a simulation only reads.
 
-## The code panel
+## Folder commands
+
+The CLI and desktop both select a folder project with `--folder`:
+
+```bash
+cargo run -p apiforge-cli --locked -- check --folder /path/to/project
+cargo run -p apiforge-cli --locked -- print --folder /path/to/project --file scenarios/main.afs
+cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file scenarios/main.afs incoming.afs
+cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
+```
+
+`check` optionally selects one registered source with `--file`. `print` emits its
+canonical definition; `apply` validates and saves the supplied source exactly under
+the exclusive project lock. Neither changes published component revisions. Folder
+calls must name `Handle@revision(...)`. `run` selects a scenario by registered path
+or entity ID, and supports `--live`, `--secrets` and `--json` as in JSON mode.
+Only the selected scenario and its exact dependencies enter its snapshot; another
+invalid scenario does not block it. Live runs require the writer lock and keep
+their journal under `.apiforge/local/`. Check, print and simulations use stable
+read-only loads without creating local metadata. All folder CLI commands ignore
+local recovery and last-valid cache, and fail on invalid saved definitions.
+
+The folder window's Project menu opens folders, recent projects, project settings
+and the test environment. Apply keeps public configuration dirty until Save all
+(or a source save that includes it). Save all also works with no source tab and
+does not save another tab merely because configuration changed. Secret values are
+session-only, including in a read-only window; only their names belong to public
+configuration. A proposed configuration that breaks immutable published
+revisions is rejected before replacing the current settings.
+
+Source/text conflicts open a modal review with exact exports of both candidates.
+A newer local or foreign edit requires a fresh preview. An interrupted transaction
+opens a separate recovery review before definitions are loaded; Finish first
+preserves changed files, then applies the original intent. Read-only windows can
+inspect/export, while the writer owns completion. Corrupt intent supports an
+opaque transaction-evidence export for manual recovery. Cancel preserves the
+unresolved state. Public settings require explicit discard before recovery reload;
+the latest unsaved source and text are retained as drafts.
+
+Explicit folder creation/migration appends narrow LF rules to `.gitattributes`
+for `.afs`, the root project manifest and the shared diagram JSON. Existing bytes,
+sources and index entries are preserved. Opening a project does not repair Git
+attributes, and ordinary Save preserves exact LF/CRLF editor text. Review nested
+overrides before checkout: a converted immutable revision fails its exact-byte
+integrity check. See the [Git portability evidence](qa/2026-10-25/p7-portability/verification.md).
+
+## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).
 Typing pauses for 250 ms, then the text becomes one document edit: blocks keep
@@ -142,8 +207,17 @@ simulation would use, then the output of the last run — so a path offered afte
 `handle.` says where its shape came from. Environment variables are offered by
 name; no value, secret or not, reaches a completion list.
 
-A buffer above 256 KiB is laid out without colouring, which keeps a very large
-body responsive; the text is unaffected.
+A buffer above 256 KiB is large: it is laid out without colouring, completion
+opens only on Ctrl+Space, and a folder code view looks up the statement under the
+caret only once the edited source has been analysed. Views share the session's
+model rather than copying it, and keep derived names until the model is replaced,
+so an idle frame does no whole-source work. The text is unaffected.
+
+Every folder control has an accessible name: fields and choices are named by
+`widgets::named`, menus by `widgets::name_menu`, and canvas hit areas by their
+widget info. `folder/accessibility_tests.rs` audits each Stage II screen, dialog,
+menu and demo block for unnamed focusable nodes and checks keyboard order; extend
+it with each new control.
 
 ## Storage behaviour
 
@@ -169,12 +243,26 @@ To convert a version-one document during development:
 cargo run -p apiforge-convert-v1 --locked -- workspace.v1.json workspace-v2.json
 ```
 
+Folder windows perform project, configuration, recovery and journal I/O on storage
+workers. UI commands accept a queued request; only its completion acknowledges
+success. The serial queue takes session snapshots at dequeue, preserves edits
+entered during ordinary saves and binds results to the current session/epoch.
+Destructive operations display a working dialog and temporarily disable editing.
+Close/project switch waits for storage and Run cleanup before releasing ownership.
+Use the controlled slow-I/O tests in `folder/storage_tests.rs` and the
+[P7d native audit](qa/2026-10-25/p7-storage-worker/verification.md) when changing
+these boundaries. The UI quality probe waits for asynchronous opening while
+retaining the 960 × 540 assertions.
+
 ## Conventions
 
 - Stage II's [plan](stage-ii-code-workspace.md) and ADRs are published on `main`
-  before implementation. Develop that stage on `feat/stage-ii-code-workspace`
-  starting at the planning commit; a planning merge does not enable folder mode
-  or automatic migration. Follow P1/P2 and its restart round-trip gate before P3.
+  before implementation. P1–P5 are merged and P6 uses separate review branches.
+  Each later package starts at the latest `main` or a required unmerged
+  predecessor, records that base and its verification in a final docs commit, and
+  is pushed for human review. Default folder startup/migration waits for P7;
+  explicit `--folder` commands are available independently. The P2 restart
+  round-trip gate passed before P3 migration work.
 - Production code, comments, documentation and the interface are in English.
 - Work happens on short-lived `feat/…`, `fix/…` or `docs/…` branches with small
   [Conventional Commits](https://www.conventionalcommits.org/), merged into `main`

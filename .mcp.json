@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "egui": {
+      "type": "stdio",
+      "command": "tools/gui/egui-mcp.sh",
+      "args": []
+    }
+  }
+}

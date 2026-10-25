@@ -1,7 +1,6 @@
 # ADR 0012: Shared document sessions, analysis versions and execution snapshots
 
-- Status: accepted for Stage II; P1 cache and P2 sessions implemented; desktop views
-  behind `--folder` (P4); CLI and run integration pending
+- Status: accepted for Stage II; shared sessions/views implemented; P6 CLI/run and P7 storage worker integration in review branches; startup and release gates pending
 - Date: 2026-10-24
 - Scope: new `apiforge-project`, desktop, language context and CLI integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -159,7 +158,8 @@ no placeholder scenario. A full snapshot digest also binds identities, positions
 proxies and provenance; the wire DTO is private and exposed snapshots are
 immutable. Capture and load both validate these invariants. Cache matching helpers
 report equality only: they never promote a snapshot to a current model. Session
-analysis tickets and GUI run confirmation remain P2/P6 integration work.
+analysis tickets are implemented in P2 and GUI run confirmation in P6d. Normal
+startup activation and asynchronous project I/O remain P7 integration work.
 
 
 If current source is valid, derive its current model from that source/context.

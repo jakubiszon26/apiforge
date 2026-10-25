@@ -12,6 +12,11 @@ const INDENT: f32 = 14.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowKind {
+    /// The project itself, at the empty path: the explicit destination for new
+    /// files, folders, imports and drops that belong at the top level.
+    Root {
+        name: String,
+    },
     Directory,
     Document {
         id: String,
@@ -36,10 +41,21 @@ pub struct Row {
 
 impl Row {
     pub fn name(&self) -> &str {
-        file_name(&self.path)
+        match &self.kind {
+            RowKind::Root { name } => name,
+            _ => file_name(&self.path),
+        }
     }
+    /// A real directory: the subject of renames, moves and deletion.
     pub fn is_directory(&self) -> bool {
         self.kind == RowKind::Directory
+    }
+    /// Anything that contains rows: a directory or the project root.
+    pub fn is_folder(&self) -> bool {
+        self.is_directory() || self.is_root()
+    }
+    pub fn is_root(&self) -> bool {
+        matches!(self.kind, RowKind::Root { .. })
     }
 }
 
@@ -55,6 +71,15 @@ pub struct ExplorerState {
     reveal: bool,
     /// The active document last revealed, so a newly activated one is.
     followed: Option<String>,
+    /// The project row collapsed, hiding the tree. Not part of the saved view
+    /// state: a project opens showing itself.
+    root_collapsed: bool,
+    /// Height of the row viewport last frame. A resize can push the active
+    /// row out of view without the user scrolling, so it is revealed again.
+    viewport: f32,
+    /// How many rows there were last frame. The folder scan arrives after the
+    /// first frames and moves every row down, which has the same effect.
+    rows: usize,
 }
 
 /// A registered document as the explorer lists it.
@@ -67,8 +92,9 @@ pub struct Registered {
     pub missing: bool,
 }
 
-/// Every row of the tree, in explorer order, before folding.
-pub fn tree(scan: Option<&TreeScan>, documents: &[Registered]) -> Vec<Row> {
+/// Every row of the tree, in explorer order, before folding. The first row is
+/// the project itself.
+pub fn tree(scan: Option<&TreeScan>, documents: &[Registered], name: &str) -> Vec<Row> {
     let mut entries: Vec<TreeEntry> = scan.map(|scan| scan.entries.clone()).unwrap_or_default();
     let mut known: HashSet<String> = entries.iter().map(|entry| entry.path.clone()).collect();
     let missing: HashSet<&str> = documents
@@ -105,39 +131,51 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[Registered]) -> Vec<Row> {
         });
     }
     entries.sort_by(tree_order);
-    entries
-        .into_iter()
-        .map(|entry| {
-            let document = documents
-                .iter()
-                .find(|document| document.path == entry.path);
-            let kind = match (&entry.kind, document) {
-                (_, Some(document)) => RowKind::Document {
-                    id: document.id.clone(),
-                    kind: document.kind,
-                },
-                (TreeEntryKind::Directory, None) => RowKind::Directory,
-                (TreeEntryKind::Link, None) => RowKind::Link,
-                (TreeEntryKind::File { .. }, None) if entry.path.ends_with(".afs") => {
-                    RowKind::Source
-                }
-                (TreeEntryKind::File { .. }, None) => RowKind::File,
-            };
-            Row {
-                depth: entry.path.matches('/').count(),
-                missing: missing.contains(entry.path.as_str()),
-                path: entry.path,
-                kind,
-                portable: entry.portable,
-            }
-        })
-        .collect()
+    std::iter::once(Row {
+        path: String::new(),
+        depth: 0,
+        kind: RowKind::Root {
+            name: name.to_owned(),
+        },
+        portable: false,
+        missing: false,
+    })
+    .chain(entries.into_iter().map(|entry| {
+        let document = documents
+            .iter()
+            .find(|document| document.path == entry.path);
+        let kind = match (&entry.kind, document) {
+            (_, Some(document)) => RowKind::Document {
+                id: document.id.clone(),
+                kind: document.kind,
+            },
+            (TreeEntryKind::Directory, None) => RowKind::Directory,
+            (TreeEntryKind::Link, None) => RowKind::Link,
+            (TreeEntryKind::File { .. }, None) if entry.path.ends_with(".afs") => RowKind::Source,
+            (TreeEntryKind::File { .. }, None) => RowKind::File,
+        };
+        Row {
+            depth: entry.path.matches('/').count() + 1,
+            missing: missing.contains(entry.path.as_str()),
+            path: entry.path,
+            kind,
+            portable: entry.portable,
+        }
+    }))
+    .collect()
 }
 
-/// The rows whose every ancestor folder is expanded.
-pub fn visible(rows: Vec<Row>, expanded: &BTreeSet<String>) -> Vec<Row> {
+/// The rows whose every ancestor folder is expanded. A collapsed project row
+/// hides the whole tree.
+pub fn visible(rows: Vec<Row>, expanded: &BTreeSet<String>, root_collapsed: bool) -> Vec<Row> {
     rows.into_iter()
         .filter(|row| {
+            if row.is_root() {
+                return true;
+            }
+            if root_collapsed {
+                return false;
+            }
             let mut ancestor = row.path.as_str();
             while let Some((parent, _)) = ancestor.rsplit_once('/') {
                 if !expanded.contains(parent) {
@@ -157,7 +195,7 @@ pub fn parent(path: &str) -> &str {
 /// The folder new items go into for a selected row.
 pub fn folder_of(row: Option<&Row>) -> String {
     match row {
-        Some(row) if row.is_directory() => row.path.clone(),
+        Some(row) if row.is_folder() => row.path.clone(),
         Some(row) => parent(&row.path).to_owned(),
         None => String::new(),
     }
@@ -178,12 +216,20 @@ pub(super) enum Action {
     Select(String),
     Toggle(String),
     Open(String),
+    /// Open a project file as text, by path.
+    OpenText(String),
     Reveal(String),
     Rename(String),
     MoveTo(String),
-    Drop { path: String, folder: String },
+    Drop {
+        path: String,
+        folder: String,
+    },
     Delete(String),
-    NewDocument { kind: DocumentKind, folder: String },
+    NewDocument {
+        kind: DocumentKind,
+        folder: String,
+    },
     NewFolder(String),
     Import(String),
     Register(String),
@@ -205,8 +251,13 @@ impl FolderApp {
             })
             .collect();
         visible(
-            tree(self.watcher.scan.as_ref(), &documents),
+            tree(
+                self.watcher.scan.as_ref(),
+                &documents,
+                &session.manifest().name,
+            ),
             &self.workbench.expanded,
+            self.explorer.root_collapsed,
         )
     }
 
@@ -217,12 +268,16 @@ impl FolderApp {
             return;
         }
         self.explorer.followed = active.clone();
-        let Some(path) = active.and_then(|id| {
-            let document = self.session.as_ref()?.document(&id)?;
-            Some(document.entry().path.as_str().to_owned())
+        let Some(path) = active.and_then(|tab| match self.text_of(&tab) {
+            Some(path) => Some(path.to_owned()),
+            None => {
+                let document = self.session.as_ref()?.document(&tab)?;
+                Some(document.entry().path.as_str().to_owned())
+            }
         }) else {
             return;
         };
+        self.explorer.root_collapsed = false;
         let mut folder = parent(&path);
         while !folder.is_empty() {
             self.workbench.expanded.insert(folder.to_owned());
@@ -230,6 +285,27 @@ impl FolderApp {
         }
         self.explorer.selected = Some(path);
         self.explorer.reveal = true;
+    }
+
+    /// The path of the file the active tab shows, document or text.
+    fn active_path(&self) -> Option<String> {
+        let tab = self.workbench.active()?;
+        if let Some(path) = self.text_of(tab) {
+            return Some(path.to_owned());
+        }
+        let document = self.session.as_ref()?.document(tab)?;
+        Some(document.entry().path.as_str().to_owned())
+    }
+
+    /// What activating a row does: a registered document opens as a document,
+    /// any other file as text, and a folder folds.
+    fn activate(row: &Row) -> Action {
+        match &row.kind {
+            RowKind::Root { .. } | RowKind::Directory => Action::Toggle(row.path.clone()),
+            RowKind::Document { id, .. } => Action::Open(id.clone()),
+            RowKind::Link => Action::Reveal(row.path.clone()),
+            RowKind::Source | RowKind::File => Action::OpenText(row.path.clone()),
+        }
     }
 
     pub(super) fn explorer_panel(&mut self, ui: &mut egui::Ui) {
@@ -288,6 +364,10 @@ impl FolderApp {
         // the project root and offers the root's context menu. Rows drawn later
         // are on top of it.
         let background = ui.interact(ui.available_rect_before_wrap(), id, egui::Sense::click());
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(egui::accesskit::Role::Tree);
+            node.set_label("Project files");
+        });
         let focused = ui.memory(|memory| memory.has_focus(id));
         if focused {
             ui.memory_mut(|memory| {
@@ -303,31 +383,91 @@ impl FolderApp {
             });
             self.explorer_keys(ui.ctx(), &rows, &mut actions);
         }
-        let reveal = std::mem::take(&mut self.explorer.reveal);
         let selected = self.explorer.selected.clone();
         let status = self.row_status();
+        let root_expanded = !self.explorer.root_collapsed;
+        let focus = focused;
+        // The rows get what is left of the panel; measuring it here, before
+        // they are drawn, lets the offset be corrected in this same frame.
+        let viewport = ui.available_height();
+        let resized = (viewport - self.explorer.viewport).abs() > 0.5;
+        let grew = rows.len() != self.explorer.rows;
+        self.explorer.viewport = viewport;
+        self.explorer.rows = rows.len();
+        // Neither a resize nor a changed tree may leave the active file's row
+        // off screen.
+        let reveal = std::mem::take(&mut self.explorer.reveal)
+            || ((resized || grew) && selected == self.active_path());
+        let revealed = reveal
+            .then(|| {
+                selected
+                    .as_deref()
+                    .and_then(|path| rows.iter().position(|row| row.path == path))
+            })
+            .flatten();
+        // A file activated before the folder was scanned has no row yet. Keep
+        // the request until its row exists, instead of losing it silently.
+        self.explorer.reveal = reveal && revealed.is_none();
+        // The scroll takes effect in the next frame, so the row is checked
+        // against the range that was actually drawn.
+        let mut drawn = 0..0;
+        // A row is exactly `ROW_HEIGHT` tall with nothing between rows. The
+        // list derives its own row pitch from this spacing, so setting it
+        // afterwards would leave its index arithmetic out of step with the
+        // rows it draws, and the last rows unreachable.
+        ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::vertical()
             .id_salt("folder-explorer-rows")
+            // Revealing a row must land in the next frame, not drift towards
+            // the row over several.
+            .animated(false)
             .auto_shrink([false, true])
             .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+                drawn = range.clone();
+                // A row outside the drawn range cannot ask to be scrolled to, so
+                // its place is worked out from its index and the range's own top.
+                if let Some(index) = revealed {
+                    let top = ui.cursor().top() + (index as f32 - range.start as f32) * ROW_HEIGHT;
+
+                    // Without an animation the row is in view in the next
+                    // frame rather than several frames later.
+                    ui.scroll_to_rect_animation(
+                        egui::Rect::from_min_size(
+                            egui::pos2(ui.cursor().left(), top),
+                            egui::vec2(ui.available_width(), ROW_HEIGHT),
+                        ),
+                        None,
+                        egui::style::ScrollAnimation::none(),
+                    );
+                }
                 for row in &rows[range] {
                     let response = explorer_row(
                         ui,
                         row,
-                        selected.as_deref() == Some(row.path.as_str()),
-                        self.workbench.expanded.contains(&row.path),
-                        status.get(&row.path),
-                        writable,
+                        &RowFace {
+                            selected: selected.as_deref() == Some(row.path.as_str()),
+                            expanded: if row.is_root() {
+                                root_expanded
+                            } else {
+                                self.workbench.expanded.contains(&row.path)
+                            },
+                            status: status.get(&row.path),
+                            writable,
+                            focused: focus,
+                        },
                         &mut actions,
                     );
-                    if reveal && selected.as_deref() == Some(row.path.as_str()) {
-                        response.scroll_to_me(None);
-                    }
                     if response.clicked() || response.secondary_clicked() {
                         ui.memory_mut(|memory| memory.request_focus(id));
                     }
                 }
             });
+        // Asked for, but still outside what the list drew: ask again.
+        if let Some(index) = revealed
+            && !drawn.contains(&index)
+        {
+            self.explorer.reveal = true;
+        }
         if let Some(dragged) = background.dnd_release_payload::<Dragged>()
             && writable
             && !parent(&dragged.0).is_empty()
@@ -341,6 +481,7 @@ impl FolderApp {
             background.request_focus();
         }
         background.context_menu(|ui| {
+            widgets::name_menu(ui, "Project folder menu");
             ui.add_enabled_ui(writable, |ui| new_items_menu(ui, "", &mut actions));
         });
         for action in actions {
@@ -370,29 +511,30 @@ impl FolderApp {
             }
         }
         let Some(row) = row else { return };
-        let expanded = self.workbench.expanded.contains(&row.path);
-        if pressed(Key::ArrowRight) && row.is_directory() && !expanded {
+        let expanded = if row.is_root() {
+            !self.explorer.root_collapsed
+        } else {
+            self.workbench.expanded.contains(&row.path)
+        };
+        if pressed(Key::ArrowRight) && row.is_folder() && !expanded {
             actions.push(Action::Toggle(row.path.clone()));
         }
         if pressed(Key::ArrowLeft) {
-            if row.is_directory() && expanded {
+            if row.is_folder() && expanded {
                 actions.push(Action::Toggle(row.path.clone()));
-            } else if !parent(&row.path).is_empty() {
+            } else if !row.is_root() {
+                // Every row's parent is a row, the project itself included.
                 actions.push(Action::Select(parent(&row.path).to_owned()));
             }
         }
         if pressed(Key::Enter) {
-            actions.push(match &row.kind {
-                RowKind::Directory => Action::Toggle(row.path.clone()),
-                RowKind::Document { id, .. } => Action::Open(id.clone()),
-                _ => Action::Reveal(row.path.clone()),
-            });
+            actions.push(Self::activate(row));
         }
         let writable = self
             .session
             .as_ref()
             .is_some_and(|session| !session.is_read_only());
-        if writable && row.portable {
+        if writable && row.portable && !row.is_root() {
             if pressed(Key::F2) && !row.missing {
                 actions.push(Action::Rename(row.path.clone()));
             }
@@ -443,16 +585,19 @@ impl FolderApp {
                 self.explorer.reveal = true;
             }
             Action::Toggle(path) => {
-                if !self.workbench.expanded.remove(&path) {
+                if path.is_empty() {
+                    self.explorer.root_collapsed = !self.explorer.root_collapsed;
+                } else if !self.workbench.expanded.remove(&path) {
                     self.workbench.expanded.insert(path.clone());
                 }
                 self.explorer.selected = Some(path);
                 self.touched();
             }
             Action::Open(document_id) => {
-                self.workbench.open(&document_id);
+                self.activate_tab(&document_id);
                 self.touched();
             }
+            Action::OpenText(path) => self.open_text(&path),
             Action::Reveal(path) => reveal(&self.root.join(&path)),
             Action::Rename(path) => {
                 let name = file_name(&path).to_owned();
@@ -500,119 +645,218 @@ impl FolderApp {
             }
             Action::Import(folder) => self.pick_imports(folder),
             Action::Register(path) => {
-                let declared = std::fs::read_to_string(self.root.join(&path))
-                    .ok()
-                    .and_then(|text| apiforge_project::declaration(&text));
-                match declared {
-                    Some(declared) => {
-                        if let Err(message) = self.register(&path, declared.kind) {
-                            self.notify(message, true);
+                let target = path.clone();
+                self.storage_project(
+                    "Reading source header…",
+                    apiforge_project::StorageMode::Read,
+                    false,
+                    move |session| {
+                        let relative =
+                            apiforge_storage::project::ProjectPath::working_source(target)?;
+                        let snapshot = session.store().read(std::slice::from_ref(&relative))?;
+                        Ok(snapshot.files[&relative]
+                            .as_deref()
+                            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                            .and_then(apiforge_project::declaration)
+                            .map(|declared| declared.kind))
+                    },
+                    move |app, result| match result {
+                        Ok(Some(kind)) => {
+                            if let Err(error) = app.register(&path, kind) {
+                                app.notify(error, true);
+                            }
                         }
-                    }
-                    None => {
-                        self.prompt = Some(Prompt::Register {
-                            path,
-                            kind: DocumentKind::Scenario,
-                            error: None,
-                        })
-                    }
-                }
+                        Ok(None) => {
+                            app.prompt = Some(Prompt::Register {
+                                path,
+                                kind: DocumentKind::Scenario,
+                                error: None,
+                            })
+                        }
+                        Err(error) => {
+                            app.notify(format!("Cannot inspect this source: {error}"), true)
+                        }
+                    },
+                );
             }
         }
     }
 
-    /// Registers an `.afs` file found in the folder, exactly as it is.
+    /// Queues registration; success is acknowledged only after its transaction.
     pub(super) fn register(&mut self, path: &str, kind: DocumentKind) -> Result<(), String> {
-        let session = self.session.as_mut().ok_or_else(String::new)?;
-        let ids = session
-            .register_existing(
-                &[Registration {
-                    path: path.to_owned(),
-                    kind,
-                }],
-                DIAGRAM,
-            )
-            .map_err(|error| format!("Could not register {}: {error}", file_name(path)))?;
-        if let Some(id) = ids.first() {
-            self.workbench.open(id);
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
-        self.watcher.rescan();
-        self.touched();
+        let path = path.to_owned();
+        let target = path.clone();
+        self.working_project(
+            "Registering source…",
+            move |session| {
+                session.register_existing(&[Registration { path: target, kind }], DIAGRAM)
+            },
+            move |app, result| match result {
+                Ok(ids) => {
+                    if let Some(id) = ids.first() {
+                        app.activate_tab(id);
+                    }
+                    app.watcher.rescan();
+                    app.touched();
+                }
+                Err(error) => app.restore_prompt(
+                    Prompt::Register {
+                        path,
+                        kind,
+                        error: None,
+                    },
+                    error.to_string(),
+                ),
+            },
+        );
         Ok(())
     }
 
-    /// Renames or moves, keeping document identity, and reports the result.
     pub(super) fn relocate(&mut self, from: &str, to: &str) -> Result<(), String> {
-        let Some(session) = self.session.as_mut() else {
-            return Ok(());
-        };
-        match session.relocate(from, to, DIAGRAM) {
-            Ok(_) => {
-                if self
-                    .explorer
-                    .selected
-                    .as_deref()
-                    .is_some_and(|selected| selected == from)
-                {
-                    self.explorer.selected = Some(to.to_owned());
-                }
-                // Keep moved folders expanded under their new names.
-                let prefix = format!("{from}/");
-                let moved: Vec<String> = self
-                    .workbench
-                    .expanded
-                    .iter()
-                    .filter(|path| *path == from || path.starts_with(&prefix))
-                    .cloned()
-                    .collect();
-                for path in moved {
-                    self.workbench.expanded.remove(&path);
-                    self.workbench
-                        .expanded
-                        .insert(format!("{to}{}", &path[from.len()..]));
-                }
-                let parent = parent(to);
-                if !parent.is_empty() {
-                    self.workbench.expanded.insert(parent.to_owned());
-                }
-                self.watcher.rescan();
-                self.touched();
-                Ok(())
-            }
-            Err(error) => Err(error.to_string()),
+        self.relocate_with(from, to, None)
+    }
+
+    pub(super) fn relocate_with(
+        &mut self,
+        from: &str,
+        to: &str,
+        failed: Option<Prompt>,
+    ) -> Result<(), String> {
+        if self.session.is_none() {
+            return Err("No project is open.".into());
         }
+        let from = from.to_owned();
+        let to = to.to_owned();
+        let source = from.clone();
+        let target = to.clone();
+        self.working_project(
+            "Moving file…",
+            move |session| session.relocate(&source, &target, DIAGRAM),
+            move |app, result| match result {
+                Ok(_) => app.finish_relocation(&from, &to),
+                Err(error) => {
+                    if let Some(prompt) = failed {
+                        app.restore_prompt(prompt, error.to_string());
+                    } else {
+                        app.notify(
+                            format!("Could not move {}: {error}", file_name(&from)),
+                            true,
+                        );
+                    }
+                }
+            },
+        );
+        Ok(())
+    }
+
+    fn finish_relocation(&mut self, from: &str, to: &str) {
+        if self.explorer.selected.as_deref() == Some(from) {
+            self.explorer.selected = Some(to.to_owned());
+        }
+        let prefix = format!("{from}/");
+        let moved: Vec<_> = self
+            .workbench
+            .expanded
+            .iter()
+            .filter(|path| *path == from || path.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for path in moved {
+            self.workbench.expanded.remove(&path);
+            self.workbench
+                .expanded
+                .insert(format!("{to}{}", &path[from.len()..]));
+        }
+        let tabs: Vec<_> = self
+            .workbench
+            .tabs()
+            .iter()
+            .filter_map(|tab| {
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.document(&tab.document_id).is_some())
+                {
+                    return None;
+                }
+                let path = tab.document_id.strip_prefix(TEXT_TAB)?;
+                (path == from || path.starts_with(&prefix)).then(|| {
+                    (
+                        tab.document_id.clone(),
+                        text_tab(&format!("{to}{}", &path[from.len()..])),
+                    )
+                })
+            })
+            .collect();
+        for (old, new) in tabs {
+            if let Some(state) =
+                egui::text_edit::TextEditState::load(&self.ui_context, editor_id(&old))
+            {
+                self.ui_context.data_mut(|data| {
+                    data.remove::<egui::text_edit::TextEditState>(editor_id(&old))
+                });
+                state.store(&self.ui_context, editor_id(&new));
+            }
+            self.workbench.rename_tab(&old, &new);
+            if self.shown.as_deref() == Some(old.as_str()) {
+                self.shown = None;
+            }
+        }
+        let parent = parent(to);
+        if !parent.is_empty() {
+            self.workbench.expanded.insert(parent.to_owned());
+        }
+        self.watcher.rescan();
+        self.touched();
     }
 
     pub(super) fn request_delete(&mut self, paths: Vec<String>) {
-        let Some(session) = self.session.as_ref() else {
+        if self.session.is_none() {
             return;
-        };
-        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-        match session.preview_delete(&refs) {
-            Ok(preview) => {
-                self.prompt = Some(Prompt::Delete {
-                    preview: Box::new(preview),
-                    paths,
-                    error: None,
-                })
-            }
-            Err(error) => self.notify(format!("Cannot delete: {error}"), true),
         }
+        let target = paths.clone();
+        self.storage_project(
+            "Inspecting items to delete…",
+            apiforge_project::StorageMode::Read,
+            false,
+            move |session| {
+                session.preview_delete(&target.iter().map(String::as_str).collect::<Vec<_>>())
+            },
+            move |app, result| match result {
+                Ok(preview) => {
+                    app.prompt = Some(Prompt::Delete {
+                        preview: Box::new(preview),
+                        paths,
+                        error: None,
+                    })
+                }
+                Err(error) => app.notify(format!("Cannot delete: {error}"), true),
+            },
+        );
     }
 
     pub(super) fn open_trash(&mut self) {
-        let Some(session) = self.session.as_ref() else {
+        if self.session.is_none() {
             return;
-        };
-        match session.trash_operations() {
-            Ok(operations) => {
-                self.prompt = Some(Prompt::Trash {
-                    operations,
-                    error: None,
-                })
-            }
-            Err(error) => self.notify(format!("Cannot read the trash: {error}"), true),
         }
+        self.storage_project(
+            "Reading trash…",
+            apiforge_project::StorageMode::Read,
+            false,
+            |session| session.trash_operations(),
+            |app, result| match result {
+                Ok(operations) => {
+                    app.prompt = Some(Prompt::Trash {
+                        operations,
+                        error: None,
+                    })
+                }
+                Err(error) => app.notify(format!("Cannot read the trash: {error}"), true),
+            },
+        );
     }
 }
 
@@ -625,6 +869,14 @@ pub(super) enum Status {
 }
 
 fn new_items_menu(ui: &mut egui::Ui, folder: &str, actions: &mut Vec<Action>) {
+    widgets::hint(
+        ui,
+        &if folder.is_empty() {
+            "In the project folder".to_owned()
+        } else {
+            format!("In {folder}")
+        },
+    );
     if ui.button("New scenario").clicked() {
         actions.push(Action::NewDocument {
             kind: DocumentKind::Scenario,
@@ -646,27 +898,62 @@ fn new_items_menu(ui: &mut egui::Ui, folder: &str, actions: &mut Vec<Action>) {
     }
 }
 
+/// How a row is shown this frame: its state in the tree and what the session
+/// allows, apart from the row itself.
+pub(super) struct RowFace<'a> {
+    selected: bool,
+    expanded: bool,
+    status: Option<&'a Status>,
+    writable: bool,
+    /// The list has the keyboard, so the selected row shows the focus.
+    focused: bool,
+}
+
 fn explorer_row(
     ui: &mut egui::Ui,
     row: &Row,
-    selected: bool,
-    expanded: bool,
-    status: Option<&Status>,
-    writable: bool,
+    face: &RowFace<'_>,
     actions: &mut Vec<Action>,
 ) -> egui::Response {
+    let RowFace {
+        selected,
+        expanded,
+        status,
+        writable,
+        focused,
+    } = *face;
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), ROW_HEIGHT),
         egui::Sense::click_and_drag(),
     );
+    // Named, with its role and state, so keyboard and assistive navigation can
+    // follow the tree that is otherwise only painted.
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            if row.is_folder() {
+                egui::WidgetType::CollapsingHeader
+            } else {
+                egui::WidgetType::SelectableLabel
+            },
+            true,
+            selected,
+            row.name(),
+        )
+    });
+    if row.is_folder() {
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_expanded(expanded);
+        });
+    }
     let response = response.on_hover_text(match (&row.kind, row.missing) {
+        (RowKind::Root { .. }, _) => "The project folder".to_owned(),
         (_, true) => format!("{} — missing from the folder", row.path),
         (RowKind::Source, _) => format!("{} — not registered in this project", row.path),
         (RowKind::Link, _) => format!("{} — a link; not followed", row.path),
         _ => row.path.clone(),
     });
     let painter = ui.painter_at(rect);
-    let drop_target = row.is_directory()
+    let drop_target = row.is_folder()
         && response
             .dnd_hover_payload::<Dragged>()
             .is_some_and(|dragged| dragged.0 != row.path);
@@ -675,20 +962,31 @@ fn explorer_row(
     } else if response.hovered() {
         painter.rect_filled(rect, 4.0, theme::FIELD);
     }
+    // Keyboard focus is in the list as a whole, so the selected row shows it.
+    if selected && focused {
+        painter.rect_stroke(
+            rect.shrink(1.0),
+            4.0,
+            egui::Stroke::new(1.0, theme::ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    }
     let mut x = rect.left() + 4.0 + row.depth as f32 * INDENT;
     let icon_rect = |x: f32| {
         egui::Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), egui::vec2(14.0, 14.0))
     };
-    if row.is_directory() {
-        let chevron = if expanded {
+    let chevron = row.is_folder().then(|| icon_rect(x));
+    if let Some(chevron) = chevron {
+        if expanded {
             Icon::ChevronDown
         } else {
             Icon::ChevronRight
-        };
-        chevron.paint(&painter, icon_rect(x), theme::MUTED);
+        }
+        .paint(&painter, chevron, theme::MUTED);
     }
     x += 16.0;
     let (icon, colour) = match &row.kind {
+        RowKind::Root { .. } => (Icon::Folder, theme::TEXT),
         RowKind::Directory => (Icon::Folder, theme::MUTED),
         RowKind::Document {
             kind: DocumentKind::Component,
@@ -701,7 +999,7 @@ fn explorer_row(
     x += 20.0;
     let text_colour = match (&row.kind, row.missing) {
         (_, true) => theme::MUTED,
-        (RowKind::Document { .. } | RowKind::Directory, _) => theme::TEXT,
+        (RowKind::Document { .. } | RowKind::Directory | RowKind::Root { .. }, _) => theme::TEXT,
         _ => theme::MUTED,
     };
     let badge_width = if status.is_some() { 16.0 } else { 0.0 };
@@ -732,23 +1030,21 @@ fn explorer_row(
             }
         }
     }
+    // One click selects and activates: a file opens, a folder folds. A second
+    // click on an open file activates its existing tab rather than a new one.
+    // Folding the project hides every row, so the project row does that only
+    // through its chevron, Enter or the arrow keys.
     if response.clicked() {
         actions.push(Action::Select(row.path.clone()));
-        if row.is_directory() {
-            actions.push(Action::Toggle(row.path.clone()));
+        let on_chevron = chevron.zip(response.interact_pointer_pos());
+        if !row.is_root() || on_chevron.is_some_and(|(chevron, at)| chevron.contains(at)) {
+            actions.push(FolderApp::activate(row));
         }
     }
-    if response.double_clicked() {
-        match &row.kind {
-            RowKind::Document { id, .. } => actions.push(Action::Open(id.clone())),
-            RowKind::Directory => {}
-            _ => actions.push(Action::Reveal(row.path.clone())),
-        }
-    }
-    if writable && row.portable && !row.missing && response.drag_started() {
+    if writable && row.portable && !row.missing && !row.is_root() && response.drag_started() {
         response.dnd_set_drag_payload(Dragged(row.path.clone()));
     }
-    if row.is_directory()
+    if row.is_folder()
         && writable
         && let Some(dragged) = response.dnd_release_payload::<Dragged>()
         && dragged.0 != row.path
@@ -760,11 +1056,16 @@ fn explorer_row(
         });
     }
     response.context_menu(|ui| {
+        widgets::name_menu(ui, &format!("{} menu", row.name()));
         actions.push(Action::Select(row.path.clone()));
-        if let RowKind::Document { id, .. } = &row.kind
-            && ui.button("Open").clicked()
-        {
-            actions.push(Action::Open(id.clone()));
+        match &row.kind {
+            RowKind::Document { id, .. } if ui.button("Open").clicked() => {
+                actions.push(Action::Open(id.clone()));
+            }
+            RowKind::Source | RowKind::File if ui.button("Open as text").clicked() => {
+                actions.push(Action::OpenText(row.path.clone()));
+            }
+            _ => {}
         }
         if row.kind == RowKind::Source
             && row.portable
@@ -779,8 +1080,15 @@ fn explorer_row(
         }
         ui.separator();
         ui.add_enabled_ui(writable, |ui| {
-            if row.is_directory() {
+            if row.is_folder() {
                 new_items_menu(ui, &row.path, actions);
+            }
+            // The project itself is not renamed, moved or deleted through
+            // ordinary explorer file actions.
+            if row.is_root() {
+                return;
+            }
+            if row.is_directory() {
                 ui.separator();
             }
             ui.add_enabled_ui(row.portable && !row.missing, |ui| {
@@ -805,28 +1113,31 @@ fn explorer_row(
 
 /// Shows a file or folder in the system file manager.
 pub fn reveal(path: &std::path::Path) {
-    #[cfg(target_os = "windows")]
-    let command = std::process::Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .spawn();
-    #[cfg(target_os = "macos")]
-    let command = std::process::Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .spawn();
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let command = {
-        let target = if path.is_dir() {
-            path
-        } else {
-            path.parent().unwrap_or(path)
+    let path = path.to_owned();
+    std::thread::spawn(move || {
+        let path = path.as_path();
+        #[cfg(target_os = "windows")]
+        let command = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn();
+        #[cfg(target_os = "macos")]
+        let command = std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn();
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let command = {
+            let target = if path.is_dir() {
+                path
+            } else {
+                path.parent().unwrap_or(path)
+            };
+            std::process::Command::new("xdg-open").arg(target).spawn()
         };
-        std::process::Command::new("xdg-open").arg(target).spawn()
-    };
-    // Reap the child off the UI thread; a missing opener is not an error here.
-    if let Ok(mut child) = command {
-        std::thread::spawn(move || child.wait());
-    }
+        if let Ok(mut child) = command {
+            let _ = child.wait();
+        }
+    });
 }
 
 #[cfg(test)]
@@ -884,7 +1195,7 @@ mod tests {
                 missing: false,
             },
         ];
-        let rows = tree(Some(&scan), &documents);
+        let rows = tree(Some(&scan), &documents, "Shop");
         let summary: Vec<_> = rows
             .iter()
             .map(|row| (row.path.as_str(), row.depth, row.missing))
@@ -892,30 +1203,35 @@ mod tests {
         assert_eq!(
             summary,
             [
-                ("deep", 0, false),
-                ("deep/far.afs", 1, false),
-                ("flows", 0, false),
-                ("flows/loose.afs", 1, false),
-                ("flows/main.afs", 1, false),
-                ("lost", 0, false),
-                ("lost/gone.afs", 1, true),
-                ("README.md", 0, false),
+                ("", 0, false),
+                ("deep", 1, false),
+                ("deep/far.afs", 2, false),
+                ("flows", 1, false),
+                ("flows/loose.afs", 2, false),
+                ("flows/main.afs", 2, false),
+                ("lost", 1, false),
+                ("lost/gone.afs", 2, true),
+                ("README.md", 1, false),
             ]
         );
-        assert_eq!(rows[3].kind, RowKind::Source);
-        assert!(matches!(&rows[4].kind, RowKind::Document { id, .. } if id == "main"));
-        assert_eq!(rows[7].kind, RowKind::File);
+        assert_eq!(rows[0].name(), "Shop", "the project is the first row");
+        assert!(rows[0].is_root() && !rows[0].portable);
+        assert_eq!(rows[4].kind, RowKind::Source);
+        assert!(matches!(&rows[5].kind, RowKind::Document { id, .. } if id == "main"));
+        assert_eq!(rows[8].kind, RowKind::File);
 
-        let folded = visible(rows.clone(), &BTreeSet::new());
+        let folded = visible(rows.clone(), &BTreeSet::new(), false);
         assert_eq!(
             folded
                 .iter()
                 .map(|row| row.path.as_str())
                 .collect::<Vec<_>>(),
-            ["deep", "flows", "lost", "README.md"]
+            ["", "deep", "flows", "lost", "README.md"]
         );
-        let open = visible(rows, &BTreeSet::from(["flows".to_owned()]));
-        assert_eq!(open.len(), 6);
+        let open = visible(rows.clone(), &BTreeSet::from(["flows".to_owned()]), false);
+        assert_eq!(open.len(), 7);
+        let collapsed = visible(rows, &BTreeSet::new(), true);
+        assert_eq!(collapsed.len(), 1, "a collapsed project hides its tree");
     }
 
     #[test]
@@ -923,10 +1239,12 @@ mod tests {
         let rows = tree(
             Some(&scan(&[("a", true), ("a/b.afs", false), ("c.md", false)])),
             &[],
+            "Shop",
         );
-        assert_eq!(folder_of(Some(&rows[0])), "a");
+        assert_eq!(folder_of(Some(&rows[0])), "", "the project row");
         assert_eq!(folder_of(Some(&rows[1])), "a");
-        assert_eq!(folder_of(Some(&rows[2])), "");
+        assert_eq!(folder_of(Some(&rows[2])), "a");
+        assert_eq!(folder_of(Some(&rows[3])), "");
         assert_eq!(folder_of(None), "");
         assert_eq!(moved_path("a/b.afs", ""), "b.afs");
         assert_eq!(moved_path("c.md", "a"), "a/c.md");

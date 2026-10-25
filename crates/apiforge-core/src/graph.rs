@@ -564,6 +564,27 @@ pub fn ancestors_and_self(graph: &Graph, node_id: &str) -> IndexSet<String> {
     selected
 }
 
+/// The node and every node that depends on it, directly or through others:
+/// exactly the nodes whose `ancestors_and_self` contain it, found in one walk.
+pub fn dependants_and_self(graph: &Graph, node_id: &str) -> IndexSet<String> {
+    let mut dependants: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (target, sources) in dependency_index(graph) {
+        for source in sources {
+            dependants.entry(source).or_default().push(target);
+        }
+    }
+    let mut selected = IndexSet::new();
+    let mut stack = vec![node_id];
+    while let Some(id) = stack.pop() {
+        if selected.insert(id.to_owned())
+            && let Some(targets) = dependants.get(id)
+        {
+            stack.extend(targets.iter().copied());
+        }
+    }
+    selected
+}
+
 /// Removes nodes, their ordering edges and every input that references them.
 pub fn delete_nodes(graph: &Graph, ids: &HashSet<&str>) -> Graph {
     Graph {
@@ -925,6 +946,34 @@ mod tests {
         let selected = ancestors_and_self(&graph, "c");
         assert_eq!(selected.len(), 3);
         assert!(!selected.contains("d"));
+    }
+
+    #[test]
+    fn dependants_are_the_nodes_whose_ancestors_contain_a_node() {
+        let mut graph = Graph {
+            nodes: vec![
+                node("a", NodeKind::Request),
+                node("b", NodeKind::Value),
+                node("c", NodeKind::Assert),
+                node("d", NodeKind::Request),
+            ],
+            edges: vec![edge("a", "b"), edge("d", "c")],
+            proxies: Vec::new(),
+        };
+        graph.nodes[2]
+            .inputs
+            .insert("actual".into(), Binding::reference("b", "value", ""));
+        for target in ["a", "b", "c", "d"] {
+            let dependants = dependants_and_self(&graph, target);
+            for candidate in ["a", "b", "c", "d"] {
+                assert_eq!(
+                    dependants.contains(candidate),
+                    ancestors_and_self(&graph, candidate).contains(target),
+                    "{candidate} depends on {target}"
+                );
+            }
+        }
+        assert_eq!(dependants_and_self(&graph, "a").len(), 3);
     }
 
     #[test]

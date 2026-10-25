@@ -16,6 +16,8 @@ const MAX_CODE_BYTES: usize = 1024 * 1024;
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error(transparent)]
+    Project(#[from] crate::project::ProjectError),
+    #[error(transparent)]
     Document(#[from] file::StorageError),
     #[error("This workspace is open in another API Forge window ({path}).")]
     Locked { path: PathBuf },

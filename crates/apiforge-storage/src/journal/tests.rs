@@ -192,3 +192,74 @@ fn the_journal_is_shared_with_the_workspace_directory_lock() {
         Err(StorageError::Locked { .. })
     ));
 }
+
+#[test]
+fn a_project_journal_keeps_its_writer_lock_and_its_interrupted_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = crate::project::ProjectStore::open_exclusive(directory.path()).unwrap();
+    let loaded = JournalStore::open_project(project.clone()).unwrap();
+    loaded.store.begin_run(&run("project-run")).unwrap();
+    loaded
+        .store
+        .record("project-run", &entry(1, EffectState::InFlight))
+        .unwrap();
+    assert!(
+        directory
+            .path()
+            .join(".apiforge/local/journal.json")
+            .is_file()
+    );
+    assert!(!directory.path().join("journal.json").exists());
+    drop(project);
+    assert!(matches!(
+        crate::project::ProjectStore::open_exclusive(directory.path()),
+        Err(crate::project::ProjectError::Locked)
+    ));
+    drop(loaded);
+    let project = crate::project::ProjectStore::open_exclusive(directory.path()).unwrap();
+    let reopened = JournalStore::open_project(project).unwrap();
+    assert_eq!(reopened.interrupted.len(), 1);
+    assert_eq!(reopened.interrupted[0].run_id, "project-run");
+    reopened.store.discard(&["project-run".into()]).unwrap();
+    assert!(
+        !directory
+            .path()
+            .join(".apiforge/local/journal.json")
+            .exists()
+    );
+}
+
+#[test]
+fn a_read_only_project_cannot_open_or_create_a_journal() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = crate::project::ProjectStore::open_read_only(directory.path()).unwrap();
+    assert!(JournalStore::open_project(project).is_err());
+    assert!(!directory.path().join(".apiforge").exists());
+}
+
+#[test]
+fn a_failed_journal_acknowledgement_keeps_the_in_memory_evidence() {
+    let (directory, loaded) = open();
+    loaded.store.begin_run(&run("interrupted")).unwrap();
+    let path = directory.path().join("journal.json");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    assert!(loaded.store.discard(&["interrupted".into()]).is_err());
+    assert_eq!(loaded.store.snapshot().runs.len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_project_journal_refuses_a_link_to_a_foreign_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let project = crate::project::ProjectStore::open_exclusive(directory.path()).unwrap();
+    let foreign = directory.path().join("foreign.json");
+    fs::write(&foreign, b"preserve").unwrap();
+    std::os::unix::fs::symlink(
+        &foreign,
+        directory.path().join(".apiforge/local/journal.json"),
+    )
+    .unwrap();
+    assert!(JournalStore::open_project(project).is_err());
+    assert_eq!(fs::read(&foreign).unwrap(), b"preserve");
+}

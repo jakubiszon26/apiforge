@@ -1,16 +1,17 @@
 # Roadmap: scenario code, Export, variables and wire routing
 
-- Status: in progress; M0, M1, S1, M4, the run journal, M2, M5 and M6 are
-  complete; M3 is next
+- Status: M0, M1, S1, M4, the run journal, M2, M5, M6 and M3 complete; M7 pending
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, `apiforge-desktop`,
   new crates `apiforge-script`, `apiforge-layout` and `apiforge-cli`
 
-The next project-storage and editor stage is specified in
+Folder-project delivery is tracked by
 [Stage II: folder projects and the code workspace](stage-ii-code-workspace.md).
-Its planning documents live on `main`; implementation belongs on
-`feat/stage-ii-code-workspace`. Stage II is not implemented by this roadmap update.
-This document continues to describe the existing JSON-backed milestones; the
-Stage II ADRs identify which rules change for folder projects only.
+P1–P5 are merged; P6a–P6d and P7a–P7g are implemented on separate review
+branches, including explicit `--folder` CLI/desktop integration and `--managed`
+startup. P8 aligned their documentation. Startup activation is implemented but
+not the default: the Windows release gates decide when it becomes one.
+This roadmap retains the JSON-backed milestones; folder amendments are in ADRs
+0010–0012. Stage II does not complete M7's general editor features.
 
 ## Goals
 
@@ -397,4 +398,7 @@ These items are scheduled between milestones and are release gates where noted:
 
 The repository-friendly `.afs` project question is resolved by the
 [Stage II plan](stage-ii-code-workspace.md) and
-[ADR 0010](decisions/0010-folder-projects.md); delivery remains planned.
+[ADR 0010](decisions/0010-folder-projects.md). Folder storage/sessions and explicit
+`--folder` integration are implemented; default startup activation remains P7.
+F2 follows focus: it renames files in the explorer, while symbol rename from the
+code panel remains M7 work.

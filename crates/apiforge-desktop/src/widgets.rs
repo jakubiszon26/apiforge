@@ -75,14 +75,45 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) {
     );
 }
 
-/// The label above a form field.
+/// Gives a control the accessible name a screen reader announces. A field's
+/// visible label is a separate widget, and a hint or tooltip is not a name.
+pub fn named(response: egui::Response, name: impl Into<String>) -> egui::Response {
+    let name = name.into();
+    response
+        .ctx
+        .accesskit_node_builder(response.id, |node| node.set_label(name));
+    response
+}
+
+/// Names the resize handle of a panel shown this frame. egui gives the
+/// handle, which keyboard focus can reach, an ID derived from the panel's and
+/// no name; one it did not draw is left alone rather than invented.
+pub fn name_resize_handle(ctx: &egui::Context, panel: egui::Id, name: &str) {
+    let handle = panel.with("__resize");
+    if ctx.read_response(handle).is_some() {
+        ctx.accesskit_node_builder(handle, |node| node.set_label(name));
+    }
+}
+
 pub fn field_label(ui: &mut Ui, text: &str) {
+    let _ = field_name(ui, text);
+}
+
+/// The label above a form field; the field is named by it with
+/// `labelled_by(response.id)`.
+pub fn field_name(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add_space(theme::SPACE_SM);
     ui.label(
         RichText::new(text)
             .size(theme::FONT_LABEL)
             .color(theme::MUTED),
-    );
+    )
+}
+
+/// The accessible name of a widget without a visible label.
+pub fn name(ui: &Ui, id: egui::Id, name: &str) {
+    ui.ctx()
+        .accesskit_node_builder(id, |node| node.set_label(name));
 }
 
 /// A titled block of a form.
@@ -401,9 +432,18 @@ impl Widget for ActionButton<'_> {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label)
         });
         if ui.is_rect_visible(rect) {
-            let engaged = response.hovered() || response.is_pointer_button_down_on();
+            // A disabled button must look disabled: it is painted here, so egui
+            // does not fade it, and a full-strength accent reads as live.
+            let enabled = ui.is_enabled();
+            let engaged = enabled && (response.hovered() || response.is_pointer_button_down_on());
             let primary = self.style == ButtonStyle::Primary;
-            let fill = if primary {
+            let fill = if !enabled {
+                if primary {
+                    theme::FIELD
+                } else {
+                    egui::Color32::TRANSPARENT
+                }
+            } else if primary {
                 if response.is_pointer_button_down_on() {
                     theme::ACCENT_PRESSED
                 } else if response.hovered() {
@@ -416,16 +456,18 @@ impl Widget for ActionButton<'_> {
             } else {
                 egui::Color32::TRANSPARENT
             };
-            let border = if response.has_focus() {
+            let border = if enabled && response.has_focus() {
                 Stroke::new(1.5, theme::ACCENT)
-            } else if self.style == ButtonStyle::Secondary {
+            } else if self.style == ButtonStyle::Secondary || (!enabled && primary) {
                 Stroke::new(1.0, theme::BORDER)
             } else {
                 Stroke::NONE
             };
             ui.painter()
                 .rect(rect.shrink(0.5), 5, fill, border, egui::StrokeKind::Inside);
-            let color = if primary {
+            let color = if !enabled {
+                theme::MUTED
+            } else if primary {
                 theme::WHITE
             } else if self.style == ButtonStyle::Danger {
                 theme::DANGER
@@ -474,9 +516,23 @@ pub fn action_menu(
     button: ActionButton<'_>,
     content: impl FnOnce(&mut Ui),
 ) -> Response {
+    let name = format!("{} menu", button.label.trim_end_matches('…'));
     let response = ui.add(button);
-    egui::Popup::menu(&response).show(content);
+    egui::Popup::menu(&response).show(|ui| {
+        name_menu(ui, &name);
+        content(ui)
+    });
     response
+}
+
+/// Names the open menu or popup whose contents `ui` draws. egui lets its
+/// area take keyboard focus, so it is a focus stop that needs a name.
+pub fn name_menu(ui: &Ui, name: &str) {
+    ui.ctx()
+        .accesskit_node_builder(ui.layer_id().id.with("move"), |node| {
+            node.set_role(egui::accesskit::Role::Menu);
+            node.set_label(name);
+        });
 }
 
 /// Tabs use a thin active indicator instead of looking like action buttons.

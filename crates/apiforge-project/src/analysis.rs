@@ -36,7 +36,7 @@ pub struct AnalysisInput {
     pub(crate) text: Arc<str>,
     pub(crate) context: Arc<Project>,
     /// The session's previous model of this document, whose identities win.
-    pub(crate) base: Option<Document>,
+    pub(crate) base: Option<Arc<Document>>,
     /// The shared checkpoint, used only when the session has no model yet.
     pub(crate) checkpoint: Option<DiagramRecord>,
     pub(crate) placer: Arc<dyn Placer>,
@@ -77,7 +77,7 @@ impl AnalysisInput {
             &self.target,
             &self.text,
             &self.context,
-            self.base.as_ref(),
+            self.base.as_deref(),
             self.checkpoint.as_ref(),
             self.placer.as_ref(),
         );
@@ -158,7 +158,7 @@ pub(crate) fn derive(
     };
     let mut document = reconciled.document;
     normalise(&mut document, target);
-    placer.place(&mut document, &reconciled.unpositioned);
+    placer.place(&mut document, &reconciled.unpositioned, context);
     if apiforge_script::validate_document_model(&document, &LowerContext::folder(context)).is_err()
     {
         diagnostics.push(Diagnostic::error(

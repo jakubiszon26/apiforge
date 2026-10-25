@@ -5,7 +5,7 @@
 - Scope: `apiforge-core`, `apiforge-runner`, `apiforge-storage`, desktop
 - Milestone: the run journal release gate of the [code and canvas plan](../roadmap.md)
 
-Stage II integration (planned, not yet implemented):
+Stage II integration (implemented in P6c/P6d review branches; startup activation pending):
 [ADR 0011](0011-project-transactions.md) moves new folder-run journals under the
 project writer session and preserves unresolved legacy entries for global review.
 [ADR 0012](0012-project-sessions.md) preserves immutable execution snapshots. The

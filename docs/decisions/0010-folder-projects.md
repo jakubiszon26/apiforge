@@ -1,6 +1,6 @@
 # ADR 0010: Folder projects, source identity and component revisions
 
-- Status: accepted for Stage II; P1 storage implemented; folder/session integration pending
+- Status: accepted for Stage II; P1–P5 merged, P6 publication/CLI/runs implemented in review branches; P7 startup and release gates pending
 - Date: 2026-10-24
 - Scope: core authoring validation, new `apiforge-project`, storage, desktop and CLI
 - Plan: [Stage II](../stage-ii-code-workspace.md)
@@ -152,6 +152,12 @@ initialisation. Initialisation registers sources, creates configuration and adop
 safe default locations without rewriting existing `.afs`. An unparseable header
 needs a kind choice. Existing source collisions are never overwritten. Opening
 any project does not run its requests.
+
+P8 retains deterministic single-file checkpoint storage and exact-byte hashes.
+P7e verified the independent-document checkpoint merge gate and installs narrow LF Git attributes
+on explicit initialisation/migration. These documented decisions do not implement
+a new storage format or a normalised-hash policy; see the
+[review decisions](../stage-ii-review-notes.md#decisions-and-remaining-evidence).
 
 ## Consequences and acceptance
 

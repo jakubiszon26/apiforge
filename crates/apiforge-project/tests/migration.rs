@@ -180,6 +180,24 @@ fn every_project_and_draft_migrates_into_an_activated_catalogue() {
         .unwrap();
     assert_eq!(catalogue, outcome.catalogue);
     assert_eq!(catalogue.projects.len(), legacy.workspace.projects.len());
+    for entry in &catalogue.projects {
+        // A migrated project is a Git working tree like any other, so this
+        // computer's lock, recovery and run journal stay out of it.
+        let ignore = std::fs::read_to_string(entry.path.join(".gitignore"))
+            .unwrap_or_else(|error| panic!("{}: {error}", entry.project_id));
+        assert!(
+            ignore
+                .lines()
+                .any(|line| line.trim() == "/.apiforge/local/"),
+            "{}: {ignore:?}",
+            entry.project_id
+        );
+        assert!(
+            entry.path.join(".gitattributes").exists(),
+            "{}",
+            entry.project_id
+        );
+    }
     assert_eq!(
         catalogue.active_project_id.as_deref(),
         Some(legacy.workspace.active_id.as_str())
@@ -375,6 +393,7 @@ fn every_fixture_document_migrates_and_verifies() {
         let outcome = migrate_workspace(&store).unwrap();
         assert_eq!(outcome.catalogue.projects.len(), workspace.projects.len());
         for project in &outcome.catalogue.projects {
+            assert_eq!(fs::read(project.path.join(".gitattributes")).unwrap(), b"*.afs text eol=lf\n/apiforge.project.json text eol=lf\n/.apiforge/diagram.json text eol=lf\n");
             let session = ProjectSession::open(&project.path).unwrap();
             assert!(session.documents().iter().all(|d| !d.is_dirty()));
         }

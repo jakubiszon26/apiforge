@@ -158,6 +158,8 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
         expected: FileState::Missing,
         bytes: manifest.to_public_bytes()?,
     });
+    changes.extend(crate::session::ignore_local_data(&store)?);
+    changes.extend(crate::git_rules::lf_attributes(&store)?);
     store.commit(changes)?;
     Ok(manifest)
 }

@@ -45,6 +45,9 @@ url = "=2.5.8"
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 rfd = "=0.17.2"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# Interface tests and agent inspection (ADR 0013); same egui release as eframe.
+egui_kittest = { version = "=0.36.2", default-features = false, features = ["wgpu"] }
+egui_inspection = { version = "=0.36.2", default-features = false, features = ["plugin"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

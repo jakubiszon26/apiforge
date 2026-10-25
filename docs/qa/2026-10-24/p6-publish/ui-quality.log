@@ -1,0 +1,14 @@
+running 10 tests
+test folder::tests::ui_quality::ui_quality_active_file_is_revealed_in_a_long_explorer ... ok
+test folder::tests::ui_quality::ui_quality_active_tab_stays_visible_with_many_open_files ... ok
+test folder::tests::ui_quality::ui_quality_close_icon_is_inside_its_tab_surface ... ok
+test folder::tests::ui_quality::ui_quality_control_double_click_opens_a_registered_file ... ok
+test folder::tests::ui_quality::ui_quality_control_enter_opens_the_selected_file ... ok
+test folder::tests::ui_quality::ui_quality_explorer_files_have_named_accessibility_nodes ... ok
+test folder::tests::ui_quality::ui_quality_gitignore_opens_as_text_inside_the_application ... ok
+test folder::tests::ui_quality::ui_quality_one_click_opens_a_registered_file_without_refresh ... ok
+test folder::tests::ui_quality::ui_quality_project_root_is_a_selectable_explorer_row ... ok
+test folder::tests::ui_quality::ui_quality_tabs_disambiguate_equal_names_from_different_folders ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 237 filtered out; finished in 3.26s
+

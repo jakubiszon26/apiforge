@@ -244,6 +244,7 @@ fn recovery() -> SourceRecovery {
             fields: Vec::new(),
             checkpoint: None,
         }],
+        texts: Vec::new(),
     }
 }
 fn recovery_setup() -> (

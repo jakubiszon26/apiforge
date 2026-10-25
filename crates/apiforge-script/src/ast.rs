@@ -14,6 +14,12 @@ pub struct Fix {
     pub replacement: String,
 }
 
+/// The warning a comment gets when it belongs to no statement: canonical
+/// printing keeps notes attached to statements and drops the rest. Callers
+/// recognise it by this constant rather than by its wording.
+pub const UNATTACHED_COMMENT: &str =
+    "This comment is not attached to a statement and will be dropped by formatting";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub range: Range<usize>,

@@ -5,8 +5,8 @@
 use super::{EventKind, Origin, ProjectSession, document_from};
 use crate::{Error, Result};
 use apiforge_storage::project::{
-    FileState, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath,
-    RecoveryDocument, RestoreDestination, TrashCommit, TrashIndex, TrashPreview,
+    DiagramFile, FileState, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest,
+    ProjectPath, RecoveryDocument, RestoreDestination, TrashCommit, TrashIndex, TrashPreview,
 };
 use std::collections::BTreeSet;
 
@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 pub struct DeletePreview {
     trash: TrashPreview,
     unsaved: Vec<String>,
+    unsaved_texts: Vec<String>,
 }
 
 impl DeletePreview {
@@ -34,6 +35,25 @@ impl DeletePreview {
     /// the trash with them and returns on restoration; it is not saved.
     pub fn unsaved_documents(&self) -> &[String] {
         &self.unsaved
+    }
+    /// Open text files with unsaved work among the deleted files. Their work
+    /// stays in the window with a deletion conflict; the trash keeps the file.
+    pub fn unsaved_texts(&self) -> &[String] {
+        &self.unsaved_texts
+    }
+    /// Every loose file this deletion removes, including inside a directory.
+    fn removed_files(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .files()
+            .iter()
+            .map(|path| path.as_str().to_owned())
+            .collect();
+        paths.extend(
+            self.documents()
+                .iter()
+                .map(|entry| entry.path.as_str().to_owned()),
+        );
+        paths
     }
 }
 
@@ -64,6 +84,26 @@ impl ProjectSession {
         }
         if to.as_str().starts_with(&format!("{}/", from.as_str())) {
             return Err(Error::Storage(ProjectError::InvalidPath));
+        }
+        let from_folded = from.as_str().to_lowercase();
+        let to_folded = to.as_str().to_lowercase();
+        // An absent file can still own unsaved text. Moving into that path (or
+        // replacing its missing parent with a file) must not merge two editors.
+        for open in self.texts.iter().map(|file| file.path()).chain(
+            self.recovery
+                .held_texts
+                .iter()
+                .map(|draft| draft.path.as_str()),
+        ) {
+            let path = open.to_lowercase();
+            let affected = path == from_folded || path.starts_with(&format!("{from_folded}/"));
+            if !affected
+                && (path == to_folded
+                    || path.starts_with(&format!("{to_folded}/"))
+                    || to_folded.starts_with(&format!("{path}/")))
+            {
+                return Err(occupied(self, &to));
+            }
         }
         // Validate the whole move first: a case-only rename takes two
         // transactions, and the first must not commit a move the second refuses.
@@ -181,10 +221,46 @@ impl ProjectSession {
                 bytes: registry.to_public_bytes()?,
             });
         }
-        self.store.commit(changes)?;
+        let mut recovery = self.recovery_contents();
+        for draft in &mut recovery.documents {
+            if within(&draft.path, from).is_some() {
+                draft.path = moved(&draft.path)?;
+            }
+        }
+        for draft in &mut recovery.texts {
+            if within(&draft.path, from).is_some() {
+                draft.path = moved(&draft.path)?;
+            }
+        }
+        let baseline = self
+            .recovery
+            .read
+            .as_ref()
+            .ok_or(Error::RecoveryUnavailable)?;
+        self.recovery.read = Some(
+            self.store
+                .commit_with_source_recovery(changes, baseline, &recovery)?,
+        );
         if !documents.is_empty() {
             self.manifest_saved = FileState::of(&registry.to_public_bytes()?);
             self.manifest.documents = registry.documents;
+        }
+        let mut text_paths: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path.clone())
+            .chain(
+                self.recovery
+                    .held_texts
+                    .iter()
+                    .map(|draft| draft.path.clone()),
+            )
+            .filter(|path| within(path, from).is_some())
+            .collect();
+        text_paths.sort();
+        text_paths.dedup();
+        for file in text_paths {
+            self.text_file_moved(file.as_str(), moved(&file)?.as_str());
         }
         let mut ids = Vec::new();
         for (document_id, path) in documents {
@@ -200,11 +276,6 @@ impl ProjectSession {
             ids.push(document_id);
         }
         self.refresh_local_baselines();
-        // Recovery records each draft's last path. A failure is reported by the
-        // next explicit recovery write, which close and project switch require.
-        if !ids.is_empty() && !self.store.is_read_only() {
-            let _ = self.save_recovery();
-        }
         Ok(ids)
     }
 
@@ -229,7 +300,25 @@ impl ProjectSession {
             })
             .map(|entry| entry.document_id.clone())
             .collect();
-        Ok(DeletePreview { trash, unsaved })
+        let unsaved_texts = self
+            .texts
+            .iter()
+            .filter(|file| {
+                file.needs_recovery()
+                    && (trash.files().iter().any(|path| path == &file.path)
+                        || trash.directories().iter().any(|directory| {
+                            file.path
+                                .as_str()
+                                .starts_with(&format!("{}/", directory.as_str()))
+                        }))
+            })
+            .map(|file| file.path.as_str().to_owned())
+            .collect();
+        Ok(DeletePreview {
+            trash,
+            unsaved,
+            unsaved_texts,
+        })
     }
 
     /// Moves the previewed items to the local trash in one transaction, with
@@ -253,6 +342,7 @@ impl ProjectSession {
             }
         }
         let commit = self.store.trash_documents(&preview.trash, &drafts)?;
+        self.adopt_saved_diagram()?;
         if !ids.is_empty() {
             self.documents
                 .retain(|document| !ids.contains(document.id()));
@@ -267,6 +357,7 @@ impl ProjectSession {
                 self.emit(origin, Some(id), EventKind::DocumentRemoved);
             }
         }
+        self.text_files_removed(&preview.removed_files());
         self.adopt_recovery_baseline();
         self.refresh_local_baselines();
         Ok(commit)
@@ -298,6 +389,9 @@ impl ProjectSession {
             return Err(Error::Storage(ProjectError::InvalidTrash));
         }
         self.store.restore_trash(&preview, destinations)?;
+        // Before the restored documents are analysed, so that they reconcile
+        // against the checkpoints the restore put back.
+        self.adopt_saved_diagram()?;
         if ids.is_empty() {
             self.refresh_local_baselines();
             return Ok(ids);
@@ -376,6 +470,25 @@ impl ProjectSession {
         let path = ProjectPath::new(MANIFEST_PATH)?;
         let snapshot = self.store.read(std::slice::from_ref(&path))?;
         self.manifest_saved = snapshot.state(&path).unwrap_or(FileState::Missing);
+        Ok(())
+    }
+
+    /// Adopts the shared checkpoint file a trash transaction just rewrote.
+    /// Trash operations carry the checkpoints of the documents they move, so a
+    /// session holding its earlier copy would both reject its own next source
+    /// save as a foreign change and reconcile a restored document against a
+    /// record the restore had already put back.
+    fn adopt_saved_diagram(&mut self) -> Result<()> {
+        let path = ProjectPath::new(super::DIAGRAM_PATH)?;
+        let snapshot = self.store.read(std::slice::from_ref(&path))?;
+        self.diagram_saved = snapshot.state(&path).unwrap_or(FileState::Missing);
+        self.diagram = match snapshot.files.get(&path).and_then(Option::as_deref) {
+            Some(bytes) => DiagramFile::from_bytes(bytes).ok(),
+            None => Some(DiagramFile {
+                format_version: 1,
+                records: Vec::new(),
+            }),
+        };
         Ok(())
     }
 }

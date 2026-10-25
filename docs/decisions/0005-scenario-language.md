@@ -5,7 +5,7 @@
 - Scope: new crate `apiforge-script`, `apiforge-cli`, the desktop code panel
 - Plan: [scenario code and canvas](../roadmap.md)
 
-Stage II amendment (planned, not yet implemented):
+Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0010](0010-folder-projects.md) makes `.afs` the durable definition and requires
 explicit component-call revisions in folder projects. This decision's language,
 semantic equivalence and reconciliation remain the foundation. Legacy JSON mode

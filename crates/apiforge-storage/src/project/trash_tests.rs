@@ -86,6 +86,7 @@ fn with_layout_and_recovery() -> (
                 format_version: 1,
                 project_id: manifest().id,
                 documents: vec![dirty.clone()],
+                texts: Vec::new(),
             },
         )
         .unwrap();
@@ -728,6 +729,7 @@ fn multi_document_operations_keep_registry_order_and_unrelated_recovery() {
         format_version: 1,
         project_id: manifest().id,
         documents: drafts.clone(),
+        texts: Vec::new(),
     };
     store
         .save_source_recovery(

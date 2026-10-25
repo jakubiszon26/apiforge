@@ -79,6 +79,8 @@ pub struct EnvironmentDialog {
     new_variable: String,
     new_secret: String,
     focused: bool,
+    folder: bool,
+    error: Option<String>,
 }
 
 impl EnvironmentDialog {
@@ -107,7 +109,19 @@ impl EnvironmentDialog {
             new_variable: String::new(),
             new_secret: String::new(),
             focused: false,
+            folder: false,
+            error: None,
         }
+    }
+
+    pub fn folder(environment: &Environment, secrets: &SessionSecrets) -> Self {
+        let mut dialog = Self::new(environment, secrets);
+        dialog.folder = true;
+        dialog
+    }
+
+    pub fn set_error(&mut self, error: String) {
+        self.error = Some(error);
     }
 
     fn names(&self) -> Vec<&str> {
@@ -165,8 +179,14 @@ impl EnvironmentDialog {
             eyebrow: "PROJECT SETTINGS",
             title: "Test environment",
             width: 580.0,
-            apply_label: "Save environment",
-            note: None,
+            apply_label: if self.folder {
+                "Apply environment"
+            } else {
+                "Save environment"
+            },
+            note: self.folder.then_some(
+                "Public settings are saved with Save all. Secret values stay in this session.",
+            ),
         };
         let mut submit = false;
         let action = chrome.show(
@@ -186,6 +206,9 @@ impl EnvironmentDialog {
     /// Draws the form; returns whether Enter was pressed in the base URL field.
     fn body(&mut self, ui: &mut Ui) -> bool {
         let problems = self.problems();
+        if let Some(error) = &self.error {
+            widgets::field_error(ui, error);
+        }
         let field = super::labelled_field(
             ui,
             "Base URL",
@@ -243,11 +266,19 @@ impl EnvironmentDialog {
             let error = errors.get(index).copied().flatten();
             ui.push_id(("variable", index), |ui| {
                 ui.horizontal(|ui| {
-                    super::text_field(ui, &mut variable.name, "name", NAME_WIDTH, error.is_some())
-                        .on_hover_text("Variable name");
+                    let field = super::text_field(
+                        ui,
+                        &mut variable.name,
+                        "name",
+                        NAME_WIDTH,
+                        error.is_some(),
+                    );
+                    widgets::name(ui, field.id, "Variable name");
+                    field.on_hover_text("Variable name");
                     let width = ui.available_width() - 32.0;
-                    super::text_field(ui, &mut variable.value, "value", width, false)
-                        .on_hover_text("Value");
+                    let field = super::text_field(ui, &mut variable.value, "value", width, false);
+                    widgets::name(ui, field.id, &format!("Value of {}", variable.name));
+                    field.on_hover_text("Value");
                     if ui
                         .add(
                             widgets::icon_button(Icon::Trash, "Remove variable")
@@ -278,15 +309,23 @@ impl EnvironmentDialog {
             let error = errors.get(index).copied().flatten();
             ui.push_id(("secret", index), |ui| {
                 ui.horizontal(|ui| {
-                    super::text_field(ui, &mut secret.name, "name", NAME_WIDTH, error.is_some())
-                        .on_hover_text("Secret name");
+                    let field = super::text_field(
+                        ui,
+                        &mut secret.name,
+                        "name",
+                        NAME_WIDTH,
+                        error.is_some(),
+                    );
+                    widgets::name(ui, field.id, "Secret name");
+                    field.on_hover_text("Secret name");
                     let width = ui.available_width() - 90.0;
-                    ui.add(
+                    let field = ui.add(
                         crate::widgets::text_edit(&mut secret.value)
                             .password(!secret.revealed)
                             .hint_text("Value for this session")
                             .desired_width(width),
                     );
+                    widgets::name(ui, field.id, &format!("Value of {}", secret.name));
                     let (icon, toggle) = if secret.revealed {
                         (Icon::EyeOff, "Hide secret")
                     } else {
@@ -318,9 +357,17 @@ impl EnvironmentDialog {
 
     /// The field and button that add a variable or a secret; Enter adds as well.
     fn add_row(&mut self, ui: &mut Ui, entry: Entry) {
-        let (hint, label) = match entry {
-            Entry::Variable => ("New variable name, e.g. apiVersion", "Add variable"),
-            Entry::Secret => ("New secret name, e.g. apiToken", "Add secret"),
+        let (hint, label, field_name) = match entry {
+            Entry::Variable => (
+                "New variable name, e.g. apiVersion",
+                "Add variable",
+                "New variable name",
+            ),
+            Entry::Secret => (
+                "New secret name, e.g. apiToken",
+                "Add secret",
+                "New secret name",
+            ),
         };
         let mut name = match entry {
             Entry::Variable => std::mem::take(&mut self.new_variable),
@@ -331,8 +378,9 @@ impl EnvironmentDialog {
         let mut add = false;
         ui.push_id(("add", label), |ui| {
             ui.horizontal(|ui| {
-                let width = ui.available_width() - 120.0;
+                let width = (ui.available_width() - 150.0).max(80.0);
                 let field = super::text_field(ui, &mut name, hint, width, typed && error.is_some());
+                widgets::name(ui, field.id, field_name);
                 let clicked = ui
                     .add_enabled(error.is_none(), widgets::action(Icon::Plus, label))
                     .clicked();

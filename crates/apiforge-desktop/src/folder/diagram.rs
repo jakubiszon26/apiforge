@@ -9,6 +9,16 @@ impl FolderApp {
             centred_hint(ui, "Open a scenario or component to see its diagram.");
             return;
         };
+        if let Some(path) = self.text_of(document_id) {
+            centred_hint(
+                ui,
+                &format!(
+                    "{} is a text file, not a scenario or component, so it has no diagram.",
+                    file_name(path)
+                ),
+            );
+            return;
+        }
         let Some(snapshot) = self.snapshot(document_id) else {
             return;
         };
@@ -47,7 +57,7 @@ impl FolderApp {
                             .family(theme::bold_family()),
                     );
                     widgets::hint(ui, kind_label(snapshot.kind));
-                    if matches!(model, Document::Scenario(_)) {
+                    if matches!(*model, Document::Scenario(_)) {
                         ui.add_space(theme::SPACE_LG);
                         widgets::tab_value(ui, &mut cleanup, false, "Main");
                         widgets::tab_value(ui, &mut cleanup, true, "Cleanup");
@@ -88,8 +98,21 @@ impl FolderApp {
                 });
         }
         let project = self.context_project();
-        let graph = graph_of(&model, cleanup).clone();
-        let reference = graph_of(&model, false).clone();
+        let run = self.fresh_run(document_id);
+        let phase = if cleanup {
+            apiforge_core::run::Phase::Cleanup
+        } else {
+            apiforge_core::run::Phase::Main
+        };
+        let steps = run.as_ref().map(|run| {
+            run.steps
+                .iter()
+                .filter(|step| step.phase == phase)
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        let graph = graph_of(&model, cleanup);
+        let reference = graph_of(&model, false);
         let parameters = parameters_of(&model);
         let selection = self
             .selections
@@ -116,12 +139,12 @@ impl FolderApp {
                 canvas.show(
                     ui,
                     &canvas::Input {
-                        graph: &graph,
-                        reference_graph: &reference,
+                        graph,
+                        reference_graph: reference,
                         project: &project,
                         parameters: &parameters,
                         selection: &selection,
-                        steps: None,
+                        steps: steps.as_deref(),
                         can_paste,
                         context: &context,
                     },
@@ -176,7 +199,8 @@ impl FolderApp {
             Command::TidyUp(selection) => board.tidy_up(&selection).map(|graph| Ok(graph.into())),
             Command::SetWireStyle(style) => {
                 self.preferences.wire_style = style;
-                self.preferences.save();
+                let preferences = self.preferences.clone();
+                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
                 for canvas in self.canvases.values_mut() {
                     canvas.wire_style = style;
                 }
@@ -184,7 +208,8 @@ impl FolderApp {
             }
             Command::SetBridges(bridges) => {
                 self.preferences.bridges = bridges;
-                self.preferences.save();
+                let preferences = self.preferences.clone();
+                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
                 for canvas in self.canvases.values_mut() {
                     canvas.bridges = bridges;
                 }
@@ -302,21 +327,14 @@ impl FolderApp {
         cleanup: bool,
         result: Result<Edit, String>,
     ) {
-        let outcome = result.and_then(|edit| {
-            let next = with_graph(model, cleanup, edit.graph);
-            let session = self.session.as_mut().ok_or_else(String::new)?;
-            session
-                .apply_model_edit(document_id, next, DIAGRAM)
-                .map_err(|error| error.to_string())?;
-            Ok(edit.selection)
-        });
-        match outcome {
-            Ok(selection) => {
-                if let Some(selection) = selection {
-                    self.selections.insert(document_id.to_owned(), selection);
-                }
-                self.touched();
-            }
+        match result {
+            Ok(edit) => self.component_action(
+                document_id,
+                publication::Action::Model {
+                    next: Box::new(with_graph(model, cleanup, edit.graph)),
+                    selection: edit.selection,
+                },
+            ),
             Err(message) => {
                 if let Some(canvas) = self.canvases.get_mut(document_id) {
                     canvas.set_error(message);
@@ -349,7 +367,7 @@ impl FolderApp {
         });
         match document {
             Some(document_id) => {
-                self.workbench.open(&document_id);
+                self.activate_tab(&document_id);
                 self.touched();
             }
             None => self.notify(
@@ -370,7 +388,7 @@ impl FolderApp {
             return;
         };
         let cleanup = self.cleanup(document_id);
-        let graph = graph_of(&model, cleanup).clone();
+        let graph = graph_of(&model, cleanup);
         let Some(node) = self
             .selections
             .get(document_id)
@@ -386,8 +404,12 @@ impl FolderApp {
             .as_ref()
             .map(|session| session.manifest().id.clone())
             .unwrap_or_default();
-        let reference = graph_of(&model, false).clone();
+        let reference = graph_of(&model, false);
         let parameters = parameters_of(&model);
+        let run = self.fresh_run(document_id);
+        let step = run
+            .as_ref()
+            .and_then(|run| run.steps.iter().find(|step| step.node_id == node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
@@ -407,18 +429,23 @@ impl FolderApp {
                         ui,
                         &inspector::Context {
                             node: &node,
-                            graph: &reference,
-                            board: &graph,
+                            graph: reference,
+                            board: graph,
                             project: &project,
                             parameters: &parameters,
-                            run: None,
-                            step: None,
+                            run: run.as_ref(),
+                            step,
                         },
                     )
                 })
                 .inner
             })
             .inner;
+        widgets::name_resize_handle(
+            ui.ctx(),
+            egui::Id::new("folder-inspector"),
+            "Resize inspector",
+        );
         if close {
             self.selections.remove(document_id);
         }
@@ -436,12 +463,35 @@ impl FolderApp {
                 inspector::Action::UpdateGraph(next) => {
                     self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
                 }
-                inspector::Action::EditComponent => self.open_component(&graph, &node.id),
-                inspector::Action::AssertField { .. } | inspector::Action::AssignField { .. } => {
-                    self.notify(
-                        "Run results are not available in folder projects yet.",
-                        false,
-                    )
+                inspector::Action::EditComponent => self.open_component(graph, &node.id),
+                inspector::Action::AssertField { port, path, value } => {
+                    if let Some(run) = &run {
+                        self.folder_report_action(
+                            document_id,
+                            run,
+                            false,
+                            crate::report::Action::AssertField {
+                                node_id: node.id.clone(),
+                                port,
+                                path,
+                                value,
+                            },
+                        );
+                    }
+                }
+                inspector::Action::AssignField { port, path } => {
+                    if let Some(run) = &run {
+                        self.folder_report_action(
+                            document_id,
+                            run,
+                            false,
+                            crate::report::Action::AssignField {
+                                node_id: node.id.clone(),
+                                port,
+                                path,
+                            },
+                        );
+                    }
                 }
                 inspector::Action::Error(message) => {
                     if let Some(canvas) = self.canvases.get_mut(document_id) {
@@ -455,6 +505,9 @@ impl FolderApp {
 
     /// Unfinished inspector text joins the document's local recovery.
     pub(super) fn sync_field_drafts(&mut self, document_id: &str, project_id: &str) {
+        if self.persistence.closing || self.storage.blocks_edits() {
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
