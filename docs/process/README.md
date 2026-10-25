@@ -115,4 +115,7 @@ the analysis and which did the implementation.
 
 Tickets, decisions, evidence and the code. It does not contain the content of
 conversations between the owner and an agent: a decision is recorded as the
-decision and its reason, not as who said what.
+decision and its reason, not as who said what. Nor does it point at them: a
+commit made with an agent ends with `Co-Authored-By: Claude <model>
+<noreply@anthropic.com>` and nothing more — no session trailer and no link to
+a conversation, in commits or in pull requests.

@@ -36,4 +36,5 @@ Coding agents and people follow the same rules in this repository.
    mechanical edits to Sonnet. An implementing agent does not delegate
    analysis downwards.
 9. **The repository holds tickets, decisions and evidence**, never the content
-   of conversations.
+   of conversations, and never a link to one: a commit ends with
+   `Co-Authored-By: Claude <model> <noreply@anthropic.com>` and nothing else.
