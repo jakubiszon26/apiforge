@@ -5,8 +5,8 @@
 use super::{EventKind, Origin, ProjectSession, document_from};
 use crate::{Error, Result};
 use apiforge_storage::project::{
-    FileState, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath,
-    RecoveryDocument, RestoreDestination, TrashCommit, TrashIndex, TrashPreview,
+    DiagramFile, FileState, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest,
+    ProjectPath, RecoveryDocument, RestoreDestination, TrashCommit, TrashIndex, TrashPreview,
 };
 use std::collections::BTreeSet;
 
@@ -342,6 +342,7 @@ impl ProjectSession {
             }
         }
         let commit = self.store.trash_documents(&preview.trash, &drafts)?;
+        self.adopt_saved_diagram()?;
         if !ids.is_empty() {
             self.documents
                 .retain(|document| !ids.contains(document.id()));
@@ -388,6 +389,9 @@ impl ProjectSession {
             return Err(Error::Storage(ProjectError::InvalidTrash));
         }
         self.store.restore_trash(&preview, destinations)?;
+        // Before the restored documents are analysed, so that they reconcile
+        // against the checkpoints the restore put back.
+        self.adopt_saved_diagram()?;
         if ids.is_empty() {
             self.refresh_local_baselines();
             return Ok(ids);
@@ -466,6 +470,25 @@ impl ProjectSession {
         let path = ProjectPath::new(MANIFEST_PATH)?;
         let snapshot = self.store.read(std::slice::from_ref(&path))?;
         self.manifest_saved = snapshot.state(&path).unwrap_or(FileState::Missing);
+        Ok(())
+    }
+
+    /// Adopts the shared checkpoint file a trash transaction just rewrote.
+    /// Trash operations carry the checkpoints of the documents they move, so a
+    /// session holding its earlier copy would both reject its own next source
+    /// save as a foreign change and reconcile a restored document against a
+    /// record the restore had already put back.
+    fn adopt_saved_diagram(&mut self) -> Result<()> {
+        let path = ProjectPath::new(super::DIAGRAM_PATH)?;
+        let snapshot = self.store.read(std::slice::from_ref(&path))?;
+        self.diagram_saved = snapshot.state(&path).unwrap_or(FileState::Missing);
+        self.diagram = match snapshot.files.get(&path).and_then(Option::as_deref) {
+            Some(bytes) => DiagramFile::from_bytes(bytes).ok(),
+            None => Some(DiagramFile {
+                format_version: 1,
+                records: Vec::new(),
+            }),
+        };
         Ok(())
     }
 }

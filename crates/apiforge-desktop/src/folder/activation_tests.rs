@@ -11,7 +11,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 /// A data directory holding a legacy workspace of the demo projects, exactly
 /// as a version-two installation left one.
-fn legacy(data: &Path) -> Workspace {
+pub(super) fn legacy(data: &Path) -> Workspace {
     let workspace = apiforge_core::import_document(
         include_bytes!("../../../../fixtures/workspace.json"),
         &apiforge_core::ImportLimits::default(),
@@ -24,7 +24,7 @@ fn legacy(data: &Path) -> Workspace {
     workspace
 }
 
-fn catalogue(data: &Path) -> ProjectCatalogue {
+pub(super) fn catalogue(data: &Path) -> ProjectCatalogue {
     ProjectCatalogue::load(data).unwrap().expect("catalogue")
 }
 

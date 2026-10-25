@@ -430,7 +430,9 @@ impl ProjectSession {
             Some(&entry.document_id),
             EventKind::DocumentRegistered,
         );
-        self.analyse_now(self.documents.len() - 1)?;
+        let index = self.documents.len() - 1;
+        self.analyse_now(index)?;
+        self.seal_new_checkpoint(index);
         Ok(entry.document_id)
     }
 
@@ -901,28 +903,9 @@ impl ProjectSession {
                 bytes: bytes.clone(),
             });
         }
-        let mut diagram = self.diagram.clone();
-        let mut checkpoint = false;
-        if document.analysis == AnalysisState::Valid
-            && let (Some(model), Some(file)) = (&document.model, diagram.as_mut())
-        {
-            let key = DocumentKey::Working {
-                document_id: document_id.into(),
-            };
-            let record = DiagramRecord::capture(
-                key.clone(),
-                document.text(),
-                analysis::identity_base(model),
-                &self.context,
-            )?;
-            file.records.retain(|existing| existing.key != key);
-            file.records.push(record);
-            checkpoint = true;
-        }
-        let diagram_bytes = match &diagram {
-            Some(file) if checkpoint => Some(file.to_bytes()?),
-            _ => None,
-        };
+        let diagram = self.checkpoint(index)?;
+        let checkpoint = diagram.is_some();
+        let diagram_bytes = diagram.as_ref().map(DiagramFile::to_bytes).transpose()?;
         if let Some(bytes) = &diagram_bytes
             && FileState::of(bytes) != self.diagram_saved
         {
@@ -972,6 +955,64 @@ impl ProjectSession {
             source_version: version,
             checkpoint,
         })
+    }
+
+    /// The shared diagram file with this document's identity/layout record
+    /// merged in, or `None` when the document has no valid model to describe.
+    fn checkpoint(&self, index: usize) -> Result<Option<DiagramFile>> {
+        let document = &self.documents[index];
+        if document.analysis != AnalysisState::Valid {
+            return Ok(None);
+        }
+        let (Some(model), Some(file)) = (&document.model, &self.diagram) else {
+            return Ok(None);
+        };
+        let key = DocumentKey::Working {
+            document_id: document.id().into(),
+        };
+        let record = DiagramRecord::capture(
+            key.clone(),
+            document.text(),
+            analysis::identity_base(model),
+            &self.context,
+        )?;
+        let mut file = file.clone();
+        file.records.retain(|existing| existing.key != key);
+        file.records.push(record);
+        Ok(Some(file))
+    }
+
+    /// Seals the checkpoint of a document whose source was just written. Its
+    /// text already matches the file exactly, so nothing marks it dirty and no
+    /// save is owed; without a record every later load would allocate fresh
+    /// identities for its blocks. ADR 0010 forbids failing valid source over a
+    /// missing checkpoint, so a write that cannot be made is left to the next
+    /// save rather than failing the registration that already succeeded.
+    fn seal_new_checkpoint(&mut self, index: usize) {
+        let Ok(Some(file)) = self.checkpoint(index) else {
+            return;
+        };
+        let Ok(bytes) = file.to_bytes() else { return };
+        if FileState::of(&bytes) == self.diagram_saved {
+            return;
+        }
+        let Ok(path) = ProjectPath::new(DIAGRAM_PATH) else {
+            return;
+        };
+        if self
+            .store
+            .commit(vec![ProjectChange::Write {
+                path,
+                expected: self.diagram_saved.clone(),
+                bytes: bytes.clone(),
+            }])
+            .is_err()
+        {
+            return;
+        }
+        self.refresh_local_baselines();
+        self.diagram_saved = FileState::of(&bytes);
+        self.diagram = Some(file);
     }
 
     fn manifest_change(&self, manifest: &ProjectManifest) -> Result<ProjectChange> {
