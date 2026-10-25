@@ -155,8 +155,33 @@ impl Chrome<'_> {
         body: impl FnOnce(&mut Ui, &mut S),
         can_apply: impl FnOnce(&S) -> bool,
     ) -> Action {
+        self.show_inner(ctx, state, body, can_apply, None::<fn(&mut Ui, &mut S)>)
+    }
+
+    /// Additional decisions stay outside the scrolling body. Reserve their row
+    /// before measuring the body so recovery actions remain visible at 540 px.
+    pub(crate) fn show_with_footer<S>(
+        self,
+        ctx: &egui::Context,
+        state: &mut S,
+        body: impl FnOnce(&mut Ui, &mut S),
+        can_apply: impl FnOnce(&S) -> bool,
+        footer: impl FnOnce(&mut Ui, &mut S),
+    ) -> Action {
+        self.show_inner(ctx, state, body, can_apply, Some(footer))
+    }
+
+    fn show_inner<S>(
+        self,
+        ctx: &egui::Context,
+        state: &mut S,
+        body: impl FnOnce(&mut Ui, &mut S),
+        can_apply: impl FnOnce(&S) -> bool,
+        footer: Option<impl FnOnce(&mut Ui, &mut S)>,
+    ) -> Action {
         let width = self.width.min(ctx.content_rect().width() - 48.0).max(320.0);
-        let body_height = (ctx.content_rect().height() - 236.0).max(140.0);
+        let footer_height = if footer.is_some() { 40.0 } else { 0.0 };
+        let body_height = (ctx.content_rect().height() - 236.0 - footer_height).max(100.0);
         let frame = egui::Frame::popup(&ctx.global_style())
             .fill(theme::WHITE)
             .inner_margin(egui::Margin::same(20));
@@ -204,6 +229,10 @@ impl Chrome<'_> {
             let ready = can_apply(state);
             if let Some(note) = self.note {
                 widgets::hint(ui, note);
+                ui.add_space(4.0);
+            }
+            if let Some(footer) = footer {
+                footer(ui, state);
                 ui.add_space(4.0);
             }
             ui.horizontal(|ui| {

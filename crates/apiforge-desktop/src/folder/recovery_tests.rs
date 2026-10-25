@@ -70,6 +70,19 @@ fn native_conflict_decision_requires_refresh_after_another_foreign_change() {
     choose(&mut app, &context, "Use version on disk");
     assert_eq!(text(&app, &id), LOCAL);
     assert!(matches!(app.prompt, Some(Prompt::Conflict(_))));
+    for _ in 0..3 {
+        let _ = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+    }
+    let labels = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+    let refresh = labels
+        .iter()
+        .find(|(label, _)| label == "Refresh preview")
+        .expect("refresh remains outside the scrolling error body")
+        .1;
+    assert!(
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 540.0))
+            .contains_rect(refresh)
+    );
     choose(&mut app, &context, "Refresh preview");
     choose(&mut app, &context, "Use version on disk");
     assert_eq!(text(&app, &id), latest);

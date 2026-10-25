@@ -100,7 +100,9 @@ impl FolderApp {
             width: 620.0,
             apply_label: if view.finished { if same_session { "Reload project" } else { "Open project" } } else { "Finish intended operation" },
             note: Some("Cancel preserves the files and leaves recovery unresolved until the project can be reloaded."),
-        }.show(context, &mut view, |ui, view| {
+        }.show_with_footer(context, &mut view, |ui, view| {
+            if let Some(error) = &view.error { widgets::field_error(ui, error); }
+            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
             widgets::hint(ui, view.root.display().to_string());
             if view.store.is_read_only() {
                 ui.colored_label(theme::WARNING, "Read-only: another writer must finish recovery. Candidates can still be exported.");
@@ -132,19 +134,17 @@ impl FolderApp {
                 ui.label("The recovery data cannot be interpreted safely. Export the original evidence for manual recovery; existing files remain untouched.");
             }
             if running { widgets::hint(ui, "Cancel the active run and wait for cleanup before finishing or reopening the project."); }
-            if let Some(error) = &view.error { widgets::field_error(ui, error); }
-            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
             if dirty_settings && view.finished { widgets::hint(ui, "Public settings are unsaved. Export your work first, or explicitly discard those settings to reload."); }
-            ui.add_space(theme::SPACE_SM);
+        }, |view| {
+            if view.finished { !dirty_settings && !running } else {
+                !view.store.is_read_only() && !running && view.error.is_none() && view.preview.as_ref().is_some_and(|preview| preview.candidates().iter().all(|candidate| candidate.status() != RecoveryCandidateStatus::Unavailable))
+            }
+        }, |ui, view| {
             ui.horizontal_wrapped(|ui| {
                 refresh = ui.button("Refresh preview").clicked();
                 evidence = ui.button("Export recovery evidence…").clicked();
                 if view.finished && dirty_settings { discard = ui.add_enabled(!running, egui::Button::new("Discard settings and reload")).clicked(); }
             });
-        }, |view| {
-            if view.finished { !dirty_settings && !running } else {
-                !view.store.is_read_only() && !running && view.error.is_none() && view.preview.as_ref().is_some_and(|preview| preview.candidates().iter().all(|candidate| candidate.status() != RecoveryCandidateStatus::Unavailable))
-            }
         });
         match action {
             dialogs::Action::Cancel => return None,

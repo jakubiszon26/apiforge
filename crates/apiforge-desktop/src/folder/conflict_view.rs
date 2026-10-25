@@ -73,7 +73,9 @@ impl FolderApp {
             width: 560.0,
             apply_label: if deleted { "Accept deletion" } else { "Use version on disk" },
             note: Some("Cancel keeps your unsaved work and leaves the conflict unresolved."),
-        }.show(context, &mut view, |ui, view| {
+        }.show_with_footer(context, &mut view, |ui, view| {
+            if let Some(error) = &view.error { widgets::field_error(ui, error); }
+            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
             if let Some(preview) = &view.preview {
                 widgets::hint(ui, preview.path());
                 ui.label("Your unsaved work is kept until you choose a version. Exporting a copy leaves this conflict unresolved.");
@@ -84,16 +86,14 @@ impl FolderApp {
                     disk = ui.add_enabled(preview.disk_bytes().is_some(), egui::Button::new("Export disk version…")).clicked();
                 });
             }
-            if let Some(error) = &view.error { widgets::field_error(ui, error); }
-            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
-            ui.add_space(theme::SPACE_SM);
+        }, |view| view.preview.is_some() && view.error.is_none(), |ui, view| {
             ui.horizontal_wrapped(|ui| {
                 refresh = ui.button("Refresh preview").clicked();
                 if deleted && ui.add_enabled(view.error.is_none(), egui::Button::new("Keep my version")).on_hover_text("Recreate this file on the next explicit save").clicked() {
                     decision = Some(ConflictDecision::KeepDeleted);
                 }
             });
-        }, |view| view.preview.is_some() && view.error.is_none());
+        });
         match action {
             dialogs::Action::Cancel => return None,
             dialogs::Action::Apply => decision = Some(ConflictDecision::UseDisk),
