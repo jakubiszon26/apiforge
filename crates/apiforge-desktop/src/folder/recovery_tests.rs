@@ -2,12 +2,12 @@ use super::*;
 use apiforge_storage::project::FileState;
 use std::{fs, path::Path};
 
-const ORIGINAL: &str = "scenario \"Main\" { answer = 1 }\n";
+pub(super) const ORIGINAL: &str = "scenario \"Main\" { answer = 1 }\n";
 const INTENDED: &str = "scenario \"Main\" { answer = 3 }\n";
-const FOREIGN: &str = "scenario \"Main\" { answer = 5 }\n";
-const LOCAL: &str = "scenario \"Main\" { answer = 7 }\n";
+pub(super) const FOREIGN: &str = "scenario \"Main\" { answer = 5 }\n";
+pub(super) const LOCAL: &str = "scenario \"Main\" { answer = 7 }\n";
 
-fn interrupt(root: &Path) -> PathBuf {
+pub(super) fn interrupt(root: &Path) -> PathBuf {
     let head_path = root.join(".apiforge/local/head.json");
     let mut head: serde_json::Value =
         serde_json::from_slice(&fs::read(&head_path).unwrap()).unwrap();
@@ -26,7 +26,7 @@ fn interrupt(root: &Path) -> PathBuf {
     directory
 }
 
-fn source_project() -> (tempfile::TempDir, String) {
+pub(super) fn source_project() -> (tempfile::TempDir, String) {
     let directory = tempfile::tempdir().unwrap();
     let mut session = ProjectSession::create(directory.path(), "Recovery review").unwrap();
     let id = session

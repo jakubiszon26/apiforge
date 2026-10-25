@@ -607,6 +607,11 @@ impl FolderApp {
                             |ui| self.explorer_panel(ui),
                         );
                     });
+                widgets::name_resize_handle(
+                    ui.ctx(),
+                    egui::Id::new("folder-documents"),
+                    "Resize project files",
+                );
                 egui::CentralPanel::default()
                     .frame(egui::Frame::new().fill(theme::WHITE))
                     .show(ui, |ui| self.main_code_area(ui, active.as_deref()));
@@ -627,6 +632,11 @@ impl FolderApp {
                         self.workbench.panels.split_code = ui.available_width();
                         self.main_code_area(ui, active.as_deref());
                     });
+                widgets::name_resize_handle(
+                    ui.ctx(),
+                    egui::Id::new("folder-split-code"),
+                    "Resize code",
+                );
                 if width >= SPLIT_INSPECTOR_WIDTH {
                     self.inspector_panel(ui, active.as_deref());
                 }
@@ -695,7 +705,10 @@ impl FolderApp {
                 );
                 ui.add_space(theme::SPACE_MD);
                 widgets::field_label(ui, "Project name");
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0));
+                widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0)),
+                    "Project name",
+                );
                 if !self.survey.is_empty() {
                     ui.add_space(theme::SPACE_MD);
                     widgets::field_label(ui, "Register existing sources");
@@ -706,23 +719,27 @@ impl FolderApp {
                                 ui.horizontal(|ui| {
                                     ui.checkbox(&mut row.include, &row.path);
                                     if row.include {
-                                        egui::ComboBox::from_id_salt(("survey-kind", &row.path))
-                                            .selected_text(match row.kind {
-                                                Some(kind) => kind_label(kind),
-                                                None => "Choose a kind",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                for kind in [
-                                                    DocumentKind::Scenario,
-                                                    DocumentKind::Component,
-                                                ] {
-                                                    ui.selectable_value(
-                                                        &mut row.kind,
-                                                        Some(kind),
-                                                        kind_label(kind),
-                                                    );
-                                                }
-                                            });
+                                        let name = format!("Kind of {}", row.path);
+                                        let kind = egui::ComboBox::from_id_salt((
+                                            "survey-kind",
+                                            &row.path,
+                                        ))
+                                        .selected_text(match row.kind {
+                                            Some(kind) => kind_label(kind),
+                                            None => "Choose a kind",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for kind in
+                                                [DocumentKind::Scenario, DocumentKind::Component]
+                                            {
+                                                ui.selectable_value(
+                                                    &mut row.kind,
+                                                    Some(kind),
+                                                    kind_label(kind),
+                                                );
+                                            }
+                                        });
+                                        widgets::named(kind.response, name);
                                     }
                                 });
                             }

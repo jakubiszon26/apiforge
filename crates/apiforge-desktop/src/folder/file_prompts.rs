@@ -266,8 +266,10 @@ impl FolderApp {
                 );
                 ui.add_space(theme::SPACE_SM);
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     confirm = true;
                 }
@@ -335,7 +337,7 @@ impl FolderApp {
                 ui.set_width(420.0);
                 ui.heading(format!("Move {}", file_name(&path)));
                 widgets::field_label(ui, "Into folder");
-                egui::ComboBox::from_id_salt("folder-move-target")
+                let target = egui::ComboBox::from_id_salt("folder-move-target")
                     .width(ui.available_width())
                     .selected_text(display_folder(&folder))
                     .show_ui(ui, |ui| {
@@ -347,6 +349,7 @@ impl FolderApp {
                             );
                         }
                     });
+                widgets::named(target.response, "Into folder");
                 if let Some(error) = &error {
                     widgets::field_error(ui, error);
                 }
@@ -394,8 +397,10 @@ impl FolderApp {
                 ui.heading("New folder");
                 widgets::hint(ui, format!("In {}", display_folder(&parent)));
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     confirm = true;
                 }
@@ -904,7 +909,10 @@ fn import_row(ui: &mut egui::Ui, row: &mut ImportRow) {
             });
         }
         widgets::field_label(ui, "Destination");
-        ui.add(egui::TextEdit::singleline(&mut row.destination).desired_width(f32::INFINITY));
+        widgets::named(
+            ui.add(egui::TextEdit::singleline(&mut row.destination).desired_width(f32::INFINITY)),
+            "Destination",
+        );
         if row.candidate.handle_collision {
             let current = row
                 .candidate
@@ -916,10 +924,13 @@ fn import_row(ui: &mut egui::Ui, row: &mut ImportRow) {
                 theme::WARNING,
                 format!("Another component is already called {current}. Choose a new name."),
             );
-            ui.add(
-                egui::TextEdit::singleline(&mut row.handle)
-                    .hint_text(format!("{current}Copy"))
-                    .desired_width(f32::INFINITY),
+            widgets::named(
+                ui.add(
+                    egui::TextEdit::singleline(&mut row.handle)
+                        .hint_text(format!("{current}Copy"))
+                        .desired_width(f32::INFINITY),
+                ),
+                "New component name",
             );
         }
     });

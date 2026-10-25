@@ -364,6 +364,10 @@ impl FolderApp {
         // the project root and offers the root's context menu. Rows drawn later
         // are on top of it.
         let background = ui.interact(ui.available_rect_before_wrap(), id, egui::Sense::click());
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(egui::accesskit::Role::Tree);
+            node.set_label("Project files");
+        });
         let focused = ui.memory(|memory| memory.has_focus(id));
         if focused {
             ui.memory_mut(|memory| {

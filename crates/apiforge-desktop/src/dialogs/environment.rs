@@ -266,11 +266,23 @@ impl EnvironmentDialog {
             let error = errors.get(index).copied().flatten();
             ui.push_id(("variable", index), |ui| {
                 ui.horizontal(|ui| {
-                    super::text_field(ui, &mut variable.name, "name", NAME_WIDTH, error.is_some())
-                        .on_hover_text("Variable name");
+                    widgets::named(
+                        super::text_field(
+                            ui,
+                            &mut variable.name,
+                            "name",
+                            NAME_WIDTH,
+                            error.is_some(),
+                        ),
+                        "Variable name",
+                    )
+                    .on_hover_text("Variable name");
                     let width = ui.available_width() - 32.0;
-                    super::text_field(ui, &mut variable.value, "value", width, false)
-                        .on_hover_text("Value");
+                    widgets::named(
+                        super::text_field(ui, &mut variable.value, "value", width, false),
+                        format!("Value of {}", variable.name),
+                    )
+                    .on_hover_text("Value");
                     if ui
                         .add(
                             widgets::icon_button(Icon::Trash, "Remove variable")
@@ -301,14 +313,27 @@ impl EnvironmentDialog {
             let error = errors.get(index).copied().flatten();
             ui.push_id(("secret", index), |ui| {
                 ui.horizontal(|ui| {
-                    super::text_field(ui, &mut secret.name, "name", NAME_WIDTH, error.is_some())
-                        .on_hover_text("Secret name");
+                    widgets::named(
+                        super::text_field(
+                            ui,
+                            &mut secret.name,
+                            "name",
+                            NAME_WIDTH,
+                            error.is_some(),
+                        ),
+                        "Secret name",
+                    )
+                    .on_hover_text("Secret name");
                     let width = ui.available_width() - 90.0;
-                    ui.add(
-                        crate::widgets::text_edit(&mut secret.value)
-                            .password(!secret.revealed)
-                            .hint_text("Value for this session")
-                            .desired_width(width),
+                    let name = format!("Session value of {}", secret.name);
+                    widgets::named(
+                        ui.add(
+                            crate::widgets::text_edit(&mut secret.value)
+                                .password(!secret.revealed)
+                                .hint_text("Value for this session")
+                                .desired_width(width),
+                        ),
+                        name,
                     );
                     let (icon, toggle) = if secret.revealed {
                         (Icon::EyeOff, "Hide secret")
@@ -355,7 +380,16 @@ impl EnvironmentDialog {
         ui.push_id(("add", label), |ui| {
             ui.horizontal(|ui| {
                 let width = (ui.available_width() - 150.0).max(80.0);
-                let field = super::text_field(ui, &mut name, hint, width, typed && error.is_some());
+                let field = widgets::named(
+                    super::text_field(ui, &mut name, hint, width, typed && error.is_some()),
+                    format!(
+                        "New {} name",
+                        match entry {
+                            Entry::Variable => "variable",
+                            Entry::Secret => "secret",
+                        }
+                    ),
+                );
                 let clicked = ui
                     .add_enabled(error.is_none(), widgets::action(Icon::Plus, label))
                     .clicked();

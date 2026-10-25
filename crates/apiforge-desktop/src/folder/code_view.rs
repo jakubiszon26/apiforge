@@ -14,21 +14,20 @@ impl FolderApp {
         let Some(snapshot) = self.snapshot(document_id) else {
             return;
         };
-        egui::Panel::bottom(egui::Id::new((
-            "folder-diagnostics",
-            self.workbench.mode as u8,
-        )))
-        .default_size(self.workbench.panels.diagnostics)
-        .size_range(72.0..=360.0)
-        .frame(
-            egui::Frame::new()
-                .fill(theme::PANEL)
-                .inner_margin(egui::Margin::symmetric(12, 8)),
-        )
-        .show(ui, |ui| {
-            self.workbench.panels.diagnostics = ui.available_height() + 16.0;
-            self.diagnostics_panel(ui, document_id, &snapshot);
-        });
+        let diagnostics = egui::Id::new(("folder-diagnostics", self.workbench.mode as u8));
+        egui::Panel::bottom(diagnostics)
+            .default_size(self.workbench.panels.diagnostics)
+            .size_range(72.0..=360.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
+            .show(ui, |ui| {
+                self.workbench.panels.diagnostics = ui.available_height() + 16.0;
+                self.diagnostics_panel(ui, document_id, &snapshot);
+            });
+        widgets::name_resize_handle(ui.ctx(), diagnostics, "Resize problems");
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 6)))
             .show(ui, |ui| self.code_view(ui, document_id, &snapshot));
@@ -127,6 +126,10 @@ impl FolderApp {
         }
         let offset = output.state.offset.y.max(0.0);
         let outcome = output.inner;
+        widgets::named(
+            outcome.response.clone(),
+            format!("Source of {}", file_name(&snapshot.path)),
+        );
         let Some(session) = self.session.as_mut() else {
             return;
         };

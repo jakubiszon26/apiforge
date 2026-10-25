@@ -229,7 +229,7 @@ fn kind_combo(
     let current = Kind::of(value.as_ref());
     let mut chosen = current;
     let available_sources = sources(context);
-    egui::ComboBox::from_id_salt(id.with("kind"))
+    let combo = egui::ComboBox::from_id_salt(id.with("kind"))
         .selected_text(current.label())
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -247,6 +247,7 @@ fn kind_combo(
                 });
             }
         });
+    widgets::named(combo.response, format!("{} source", port.display_name()));
     if chosen == current {
         return false;
     }
@@ -433,13 +434,15 @@ fn literal_editor(
     }
     match literal {
         Value::String(text) => {
-            changed |= ui
-                .add(
+            changed |= widgets::named(
+                ui.add(
                     crate::widgets::text_edit(text)
                         .id(id.with("text"))
                         .desired_width(f32::INFINITY),
-                )
-                .changed();
+                ),
+                format!("{} value", port.display_name()),
+            )
+            .changed();
         }
         Value::Number(number) => {
             let key = id.with("number");
@@ -448,10 +451,13 @@ fn literal_editor(
             let mut text: String = ui
                 .data_mut(|data| data.get_temp(key))
                 .unwrap_or_else(|| shown.clone());
-            let field = ui.add(
-                crate::widgets::text_edit(&mut text)
-                    .id(key)
-                    .desired_width(f32::INFINITY),
+            let field = widgets::named(
+                ui.add(
+                    crate::widgets::text_edit(&mut text)
+                        .id(key)
+                        .desired_width(f32::INFINITY),
+                ),
+                format!("{} value", port.display_name()),
             );
             let parsed = text
                 .trim()
@@ -477,13 +483,14 @@ fn literal_editor(
             }
         }
         Value::Bool(flag) => {
-            egui::ComboBox::from_id_salt(id.with("bool"))
+            let combo = egui::ComboBox::from_id_salt(id.with("bool"))
                 .selected_text(if *flag { "Yes (true)" } else { "No (false)" })
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
                     changed |= ui.selectable_value(flag, true, "Yes (true)").changed();
                     changed |= ui.selectable_value(flag, false, "No (false)").changed();
                 });
+            widgets::named(combo.response, format!("{} value", port.display_name()));
         }
         Value::Null => {
             widgets::hint(ui, "An explicit null value.");
@@ -849,7 +856,7 @@ fn template_editor(
 
 /// Operators grouped by catalogue group.
 pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
-    egui::ComboBox::from_id_salt(id)
+    let combo = egui::ComboBox::from_id_salt(id)
         .selected_text(value.label())
         .width(ui.available_width())
         .height(360.0)
@@ -868,6 +875,7 @@ pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
                 }
             }
         });
+    widgets::named(combo.response, "Operator");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -885,7 +893,7 @@ fn reference_editor(
     let source = context.graph.nodes.iter().find(|node| &node.id == node_id);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Step").size(11.0).color(theme::MUTED));
-        egui::ComboBox::from_id_salt(id.with("source"))
+        let combo = egui::ComboBox::from_id_salt(id.with("source"))
             .selected_text(source.map_or("Unavailable source", |node| node.display_name()))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
@@ -904,6 +912,7 @@ fn reference_editor(
                     }
                 }
             });
+        widgets::named(combo.response, format!("{} step", port.display_name()));
     });
     // Resolve again after the selection: output choices and response fields
     // must describe the source chosen in this frame, not the previous one.
@@ -913,7 +922,7 @@ fn reference_editor(
         .unwrap_or_default();
     ui.horizontal(|ui| {
         ui.label(RichText::new("Output").size(11.0).color(theme::MUTED));
-        egui::ComboBox::from_id_salt(id.with("output"))
+        let combo = egui::ComboBox::from_id_salt(id.with("output"))
             .selected_text(
                 outputs
                     .iter()
@@ -928,6 +937,7 @@ fn reference_editor(
                         .changed();
                 }
             });
+        widgets::named(combo.response, format!("{} output", port.display_name()));
     });
     if let Some(source) = source {
         let data = response::source(source, output, context.project, context.run);
@@ -978,14 +988,16 @@ fn reference_editor(
     egui::CollapsingHeader::new(RichText::new("Edit path manually").size(11.0))
         .id_salt(id.with("manual-path"))
         .show(ui, |ui| {
-            changed |= ui
-                .add(
+            changed |= widgets::named(
+                ui.add(
                     crate::widgets::text_edit(field)
                         .hint_text("e.g. data.items[0].name; empty = whole value")
                         .font(egui::TextStyle::Monospace)
                         .desired_width(f32::INFINITY),
-                )
-                .changed();
+                ),
+                format!("{} field path", port.display_name()),
+            )
+            .changed();
         });
     if field.is_empty()
         && let Some(output_port) = outputs.iter().find(|candidate| &candidate.name == output)

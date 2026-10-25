@@ -568,8 +568,10 @@ impl FolderApp {
                     DocumentKind::Component => "New component",
                 });
                 widgets::field_label(ui, "Name");
-                let field =
-                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+                let field = widgets::named(
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)),
+                    "Name",
+                );
                 if field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
                     create = true;
                 }

@@ -76,6 +76,26 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) {
 }
 
 /// The label above a form field.
+/// Gives a control the accessible name a screen reader announces. A field's
+/// visible label is a separate widget, and a hint or tooltip is not a name.
+pub fn named(response: egui::Response, name: impl Into<String>) -> egui::Response {
+    let name = name.into();
+    response
+        .ctx
+        .accesskit_node_builder(response.id, |node| node.set_label(name));
+    response
+}
+
+/// Names the resize handle of a panel shown this frame. egui gives the
+/// handle, which keyboard focus can reach, an ID derived from the panel's and
+/// no name; one it did not draw is left alone rather than invented.
+pub fn name_resize_handle(ctx: &egui::Context, panel: egui::Id, name: &str) {
+    let handle = panel.with("__resize");
+    if ctx.read_response(handle).is_some() {
+        ctx.accesskit_node_builder(handle, |node| node.set_label(name));
+    }
+}
+
 pub fn field_label(ui: &mut Ui, text: &str) {
     ui.add_space(theme::SPACE_SM);
     ui.label(

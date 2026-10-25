@@ -441,6 +441,11 @@ impl FolderApp {
                 .inner
             })
             .inner;
+        widgets::name_resize_handle(
+            ui.ctx(),
+            egui::Id::new("folder-inspector"),
+            "Resize inspector",
+        );
         if close {
             self.selections.remove(document_id);
         }

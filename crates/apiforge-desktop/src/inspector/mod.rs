@@ -145,14 +145,16 @@ impl Inspector {
         let id = Id::new(("inspector", &context.node.id));
         widgets::field_label(ui, "Block name");
         let mut label = node.label.clone().unwrap_or_default();
-        if ui
-            .add(
+        if widgets::named(
+            ui.add(
                 crate::widgets::text_edit(&mut label)
                     .id(id.with("name"))
                     .hint_text(node.handle.as_str())
                     .desired_width(f32::INFINITY),
-            )
-            .changed()
+            ),
+            "Block name",
+        )
+        .changed()
         {
             node.label = (!label.trim().is_empty()).then_some(label);
         }
@@ -504,7 +506,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
             for (port, label) in ports {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(*label).size(12.0));
-                    egui::ComboBox::from_id_salt(("flow", &node.id, *port))
+                    let combo = egui::ComboBox::from_id_salt(("flow", &node.id, *port))
                         .selected_text("Connect to…")
                         .width(ui.available_width())
                         .show_ui(ui, |ui| {
@@ -529,6 +531,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
                                 }
                             }
                         });
+                    widgets::named(combo.response, format!("{label}: connect to a step"));
                 });
             }
             for edge in board.edges.iter().filter(|edge| edge.source == node.id) {
@@ -589,7 +592,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         .config
         .method
         .unwrap_or(apiforge_core::model::HttpMethod::Get);
-    egui::ComboBox::from_id_salt(id.with("method"))
+    let combo = egui::ComboBox::from_id_salt(id.with("method"))
         .selected_text(labels::method(method))
         .width(86.0)
         .show_ui(ui, |ui| {
@@ -597,6 +600,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
                 ui.selectable_value(&mut method, option, labels::method(option));
             }
         });
+    widgets::named(combo.response, "Method");
     node.config.method = Some(method);
     let url = node
         .inputs
@@ -606,6 +610,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     if let Some(next) = fields::template_field(
         ui,
         id.with("url"),
+        "URL or path",
         &url,
         scope,
         "/orders/{{order.body.id}}",
@@ -620,20 +625,22 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
 
     widgets::field_label(ui, "Timeout (ms)");
     let mut timeout = node.config.timeout_ms.unwrap_or(10_000.0);
-    if ui
-        .add(
+    if widgets::named(
+        ui.add(
             egui::DragValue::new(&mut timeout)
                 .range(1.0..=60_000.0)
                 .speed(100.0),
-        )
-        .changed()
+        ),
+        "Timeout (ms)",
+    )
+    .changed()
     {
         node.config.timeout_ms = Some(timeout.round());
     }
 
     widgets::field_label(ui, "Body format");
     let mut format = node.config.body_format.unwrap_or_default();
-    egui::ComboBox::from_id_salt(id.with("body-format"))
+    let combo = egui::ComboBox::from_id_salt(id.with("body-format"))
         .selected_text(body_format_label(format))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -641,6 +648,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
                 ui.selectable_value(&mut format, option, body_format_label(option));
             }
         });
+    widgets::named(combo.response, "Body format");
     node.config.body_format = (format != BodyFormat::default()).then_some(format);
 
     ui.add_space(6.0);
@@ -790,7 +798,7 @@ fn check(ui: &mut Ui, id: Id, node: &mut Node) {
     widgets::field_label(ui, "Check");
     let current = predicate(node);
     let mut chosen = current;
-    egui::ComboBox::from_id_salt(id.with("predicate"))
+    let combo = egui::ComboBox::from_id_salt(id.with("predicate"))
         .selected_text(predicate_label(current))
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -798,6 +806,7 @@ fn check(ui: &mut Ui, id: Id, node: &mut Node) {
                 ui.selectable_value(&mut chosen, option, predicate_label(option));
             }
         });
+    widgets::named(combo.response, "Check");
     if chosen != current {
         node.config.predicate = Some(chosen);
         if chosen == Predicate::Type
@@ -812,13 +821,15 @@ fn check(ui: &mut Ui, id: Id, node: &mut Node) {
     if chosen == Predicate::Approximately {
         widgets::field_label(ui, "Allowed difference");
         let mut tolerance = node.config.tolerance.unwrap_or(0.01);
-        if ui
-            .add(
+        if widgets::named(
+            ui.add(
                 egui::DragValue::new(&mut tolerance)
                     .range(0.0..=f64::MAX)
                     .speed(0.01),
-            )
-            .changed()
+            ),
+            "Allowed difference",
+        )
+        .changed()
         {
             node.config.tolerance = Some(tolerance.max(0.0));
         }
@@ -950,13 +961,15 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
     if predicates.contains(&Predicate::Approximately) {
         widgets::field_label(ui, "Allowed difference");
         let mut tolerance = node.config.tolerance.unwrap_or(0.01);
-        if ui
-            .add(
+        if widgets::named(
+            ui.add(
                 egui::DragValue::new(&mut tolerance)
                     .range(0.0..=f64::MAX)
                     .speed(0.01),
-            )
-            .changed()
+            ),
+            "Allowed difference",
+        )
+        .changed()
         {
             node.config.tolerance = Some(tolerance.max(0.0));
         }
@@ -1090,11 +1103,14 @@ fn handle_field(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     let mut draft: String = ui
         .data_mut(|data| data.get_temp(id))
         .unwrap_or_else(|| node.handle.clone());
-    let field = ui.add(
-        crate::widgets::text_edit(&mut draft)
-            .id(id.with("field"))
-            .font(egui::TextStyle::Monospace)
-            .desired_width(f32::INFINITY),
+    let field = widgets::named(
+        ui.add(
+            crate::widgets::text_edit(&mut draft)
+                .id(id.with("field"))
+                .font(egui::TextStyle::Monospace)
+                .desired_width(f32::INFINITY),
+        ),
+        "Name in code",
     );
     let taken = |handle: &str| {
         context
@@ -1129,11 +1145,14 @@ fn request_argument_controls(ui: &mut Ui, id: Id, node: &mut Node) -> egui::Resp
     let mut name: String = ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
     let button = ui
         .horizontal(|ui| {
-            let edit = ui.add(
-                crate::widgets::text_edit(&mut name)
-                    .id(id.with("name"))
-                    .hint_text("Argument name")
-                    .desired_width((ui.available_width() - 72.0).max(40.0)),
+            let edit = widgets::named(
+                ui.add(
+                    crate::widgets::text_edit(&mut name)
+                        .id(id.with("name"))
+                        .hint_text("Argument name")
+                        .desired_width((ui.available_width() - 72.0).max(40.0)),
+                ),
+                "New argument name",
             );
             let valid = valid_request_argument_name(node, name.trim());
             let button = ui.add_enabled(valid, widgets::action(Icon::Plus, "Add").quiet());

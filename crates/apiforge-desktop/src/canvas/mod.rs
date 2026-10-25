@@ -283,6 +283,9 @@ impl Canvas {
             ui.available_size().max(vec2(1.0, 1.0)),
             Sense::click_and_drag(),
         );
+        background.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Diagram board")
+        });
         let painter = ui.painter().with_clip_rect(viewport);
         painter.rect_filled(viewport, 0.0, theme::BG);
 
@@ -636,6 +639,9 @@ impl Canvas {
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .on_hover_text("Click or drag to pan the board");
+            mm_response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Board overview")
+            });
             if (mm_response.clicked() || mm_response.dragged())
                 && let Some(pos) = mm_response.interact_pointer_pos()
                 && scale > 0.0
@@ -786,6 +792,9 @@ impl Canvas {
                     Sense::drag(),
                 )
                 .on_hover_cursor(egui::CursorIcon::Crosshair);
+            let name = format!("Output {port} of {}", card.name);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name));
             if response.drag_started() {
                 self.drag = Some(Drag::Wire {
                     start: WireStart::Output {
@@ -803,11 +812,12 @@ impl Canvas {
 
         // Footer buttons.
         let action = camera.rect(card.action_button());
-        if ui
+        let response = ui
             .interact(action, ui.id().with(("action", &card.id)), Sense::click())
-            .on_hover_text("Add a connected step")
-            .clicked()
-        {
+            .on_hover_text("Add a connected step");
+        let name = format!("Add a step connected to {}", card.name);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        if response.clicked() {
             let source = menu::default_source(input.graph, input.project, &card.id);
             self.menu = Some(ActionMenu::new(
                 action.left_bottom(),
@@ -817,18 +827,21 @@ impl Canvas {
         }
         for (index, (port, label)) in card.controls.iter().enumerate() {
             let rect = camera.rect(card.control_button(index));
-            if ui
+            let next = format!(
+                "Add the next step ({})",
+                label.trim_end_matches(" →").to_lowercase()
+            );
+            let response = ui
                 .interact(
                     rect,
                     ui.id().with(("control", &card.id, *port)),
                     Sense::click(),
                 )
-                .on_hover_text(format!(
-                    "Add the next step ({})",
-                    label.trim_end_matches(" →").to_lowercase()
-                ))
-                .clicked()
-            {
+                .on_hover_text(&next);
+            let name = format!("{next} after {}", card.name);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+            if response.clicked() {
                 self.menu = Some(ActionMenu::new(
                     rect.center_bottom(),
                     camera.to_world(rect.center_bottom()),
@@ -838,11 +851,13 @@ impl Canvas {
         }
         if card.kind == NodeKind::Component {
             let rect = camera.rect(card.open_button());
-            if ui
+            let response = ui
                 .interact(rect, ui.id().with(("open", &card.id)), Sense::click())
-                .on_hover_text("Open the component's steps")
-                .clicked()
-            {
+                .on_hover_text("Open the component's steps");
+            let name = format!("Open the steps of {}", card.name);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+            if response.clicked() {
                 commands.push(Command::EditComponent(card.id.clone()));
             }
         }
@@ -874,6 +889,8 @@ impl Canvas {
                                 theme::TEXT
                             }),
                     );
+                    let response =
+                        crate::widgets::named(response, format!("{} of {}", row.label, card.name));
                     let response = match &invalid {
                         Some(message) => response.on_hover_text(message),
                         None => response.on_hover_text(&row.label),
@@ -964,10 +981,13 @@ impl Canvas {
             && layout::CardDetail::at_zoom(camera.zoom) == layout::CardDetail::Full
         {
             let rect = camera.rect(chip.follow_button());
-            if ui
+            let response = ui
                 .interact(rect, ui.id().with(("follow", chip.id())), Sense::click())
-                .on_hover_text("Go to the variable this stands for")
-                .clicked()
+                .on_hover_text("Go to the variable this stands for");
+            let name = format!("Go to the variable {}", chip.label);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+            if response.clicked()
                 && let Some(node) = chip.source_node()
             {
                 self.reveal(node.to_owned());
@@ -986,6 +1006,8 @@ impl Canvas {
                 Sense::drag(),
             )
             .on_hover_cursor(egui::CursorIcon::Crosshair);
+        let name = format!("Output of {}", chip.label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name));
         if response.drag_started() {
             self.drag = Some(Drag::Wire {
                 start: WireStart::Proxy {

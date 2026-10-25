@@ -356,14 +356,17 @@ impl SettingsDialog {
             problems.scenario_name,
         );
         widgets::field_label(ui, "Description");
-        ui.add(
-            crate::widgets::text_area(&mut self.description)
-                .hint_text("What does this scenario check?")
-                .desired_rows(3)
-                .desired_width(f32::INFINITY),
+        widgets::named(
+            ui.add(
+                crate::widgets::text_area(&mut self.description)
+                    .hint_text("What does this scenario check?")
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            ),
+            "Description",
         );
         widgets::field_label(ui, "After an error");
-        egui::ComboBox::from_id_salt("settings-error-policy")
+        let policy = egui::ComboBox::from_id_salt("settings-error-policy")
             .width(260.0)
             .selected_text(policy_label(self.error_policy))
             .show_ui(ui, |ui| {
@@ -371,8 +374,12 @@ impl SettingsDialog {
                     ui.selectable_value(&mut self.error_policy, policy, policy_label(policy));
                 }
             });
+        widgets::named(policy.response, "After an error");
         widgets::field_label(ui, "Scenario parameters (JSON object)");
-        super::json_field(ui, &mut self.parameters, 5, problems.parameters.is_some());
+        widgets::named(
+            super::json_field(ui, &mut self.parameters, 5, problems.parameters.is_some()),
+            "Scenario parameters (JSON object)",
+        );
         if let Some(error) = &problems.parameters {
             widgets::field_error(ui, error.clone());
         }
@@ -420,7 +427,10 @@ impl SettingsDialog {
                 });
                 super::labelled_field(ui, "Contract name", &mut row.name, "e.g. Cart", name_error);
                 widgets::field_label(ui, "Sample structure");
-                super::json_field(ui, &mut row.sample, 4, sample_error.is_some());
+                widgets::named(
+                    super::json_field(ui, &mut row.sample, 4, sample_error.is_some()),
+                    "Sample structure",
+                );
                 if let Some(error) = sample_error {
                     widgets::field_error(ui, error);
                 }
