@@ -11,6 +11,7 @@ use apiforge_storage::project::{
     CacheNotice, DiagramRecord, DocumentKey, FieldRecovery, FileState, LastValidSnapshot,
     ProjectError, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub(super) struct RecoveryState {
@@ -83,13 +84,13 @@ impl ProjectSession {
         document.unavailable = None;
         document.selection = draft.selection;
         document.fields = draft.fields;
-        if document.text != draft.text {
-            document.text = draft.text;
+        if document.text() != draft.text {
+            document.set_text(draft.text);
             document.source_version += 1;
         }
         if let Some(candidate) = candidate {
             document.layout_dirty = true;
-            if let Some(previous) = document.model.replace(candidate) {
+            if let Some(previous) = document.model.replace(Arc::new(candidate)) {
                 document.history.record(previous);
             }
         }
@@ -254,8 +255,8 @@ impl ProjectSession {
     pub fn recovery_contents(&self) -> SourceRecovery {
         let mut documents = self.recovery.held.clone();
         for document in self.documents.iter().filter(|d| d.needs_recovery()) {
-            let selection = if document.text.is_char_boundary(document.selection.anchor)
-                && document.text.is_char_boundary(document.selection.caret)
+            let selection = if document.text().is_char_boundary(document.selection.anchor)
+                && document.text().is_char_boundary(document.selection.caret)
             {
                 document.selection.clone()
             } else {
@@ -265,8 +266,8 @@ impl ProjectSession {
                 }
             };
             let source = match document.analysis {
-                AnalysisState::Valid => Some(&document.text),
-                _ => document.model_source.as_ref(),
+                AnalysisState::Valid => Some(document.text()),
+                _ => document.model_source.as_deref(),
             };
             let checkpoint = document
                 .model
@@ -291,7 +292,7 @@ impl ProjectSession {
                 path: document.entry.path.clone(),
                 base_hash: sha256(&document.saved),
                 source_version: document.source_version,
-                text: document.text.clone(),
+                text: document.text().to_owned(),
                 selection,
                 fields: document.fields.clone(),
                 checkpoint,
@@ -436,7 +437,7 @@ impl ProjectSession {
             analysis::normalise(&mut model, &target);
             let source = snapshot.source().to_owned();
             let document = &mut self.documents[index];
-            document.model = Some(model);
+            document.model = Some(Arc::new(model));
             document.model_source = Some(source);
             document.valid_snapshot = Some(snapshot.clone());
         }

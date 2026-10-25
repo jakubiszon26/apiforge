@@ -411,7 +411,7 @@ impl ProjectSession {
             .collect();
         for document in &self.documents {
             if document.entry.kind == DocumentKind::Component
-                && let Some(handle) = declaration(&document.text).and_then(|d| d.handle)
+                && let Some(handle) = declaration(document.text()).and_then(|d| d.handle)
             {
                 handles.insert(handle);
             }

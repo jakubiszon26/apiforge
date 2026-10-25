@@ -87,7 +87,7 @@ impl ProjectSession {
         }
         // Settling can invalidate what was valid a moment ago.
         self.publishable(document_id)?;
-        let Some(Document::Component(component)) = self.documents[index].model.clone() else {
+        let Some(Document::Component(component)) = self.documents[index].model().cloned() else {
             return Err(Error::InvalidModel);
         };
         // Canonical printing drops comments that belong to no statement, so the
@@ -185,7 +185,7 @@ impl ProjectSession {
             file.records.retain(|record| record.key != working);
             file.records.push(DiagramRecord::capture(
                 working,
-                &self.documents[index].text,
+                self.documents[index].text(),
                 identity_base(&Document::Component(component.clone())),
                 &self.context,
             )?);
@@ -201,7 +201,7 @@ impl ProjectSession {
                 changes.push(ProjectChange::CreateDirectory { path });
             }
         }
-        let working_bytes = self.documents[index].text.as_bytes().to_vec();
+        let working_bytes = self.documents[index].text().as_bytes().to_vec();
         // Include an unchanged source too: its expected state must participate
         // in transaction preflight when an external editor changed it.
         changes.push(ProjectChange::Write {

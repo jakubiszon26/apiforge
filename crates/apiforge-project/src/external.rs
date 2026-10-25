@@ -444,12 +444,12 @@ impl ProjectSession {
                 match String::from_utf8(bytes) {
                     Ok(text) => {
                         document.unavailable = None;
-                        document.text = text;
+                        document.set_text(text);
                         document.analysis = AnalysisState::Pending;
                     }
                     Err(_) => {
                         document.unavailable = Some(Unavailable::NotUtf8);
-                        document.text.clear();
+                        document.set_text(String::new());
                         document.analysis = AnalysisState::Invalid;
                     }
                 }
@@ -457,13 +457,13 @@ impl ProjectSession {
             ObservedFile::TooLarge(state) => {
                 document.saved = state;
                 document.unavailable = Some(Unavailable::TooLarge);
-                document.text.clear();
+                document.set_text(String::new());
                 document.analysis = AnalysisState::Invalid;
             }
             ObservedFile::Missing | ObservedFile::Unreadable => {
                 document.saved = FileState::Missing;
                 document.unavailable = Some(Unavailable::Missing);
-                document.text.clear();
+                document.set_text(String::new());
                 document.analysis = AnalysisState::Invalid;
             }
         }

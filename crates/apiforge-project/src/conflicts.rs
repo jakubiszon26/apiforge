@@ -184,10 +184,10 @@ impl ProjectSession {
                     document.entry.path.clone(),
                     LocalVersion {
                         version: document.source_version,
-                        text: document.text.clone(),
+                        text: document.text().to_owned(),
                         saved: document.saved.clone(),
                         fields: document.fields.clone(),
-                        model: document.model.clone(),
+                        model: document.model().cloned(),
                         layout_dirty: document.layout_dirty,
                         held: false,
                         conflict: document.conflict.ok_or(Error::ExternalConflict)?,

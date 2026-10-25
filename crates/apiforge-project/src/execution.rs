@@ -34,7 +34,7 @@ impl ProjectSession {
         self.index(prepared.document_id()).map_or(true, |index| {
             let document = &self.documents[index];
             prepared.last_valid
-                || !prepared.snapshot.matches_source(&document.text)
+                || !prepared.snapshot.matches_source(document.text())
                 || self.ticket(index) != prepared.ticket
                 || document.fields != prepared.fields
                 || document.conflict.is_some()
@@ -93,7 +93,7 @@ impl ProjectSession {
         };
         let document = &self.documents[index];
         Ok(PreparedRun {
-            unsaved: !snapshot.matches_source(&document.text) || document.is_dirty() || last_valid,
+            unsaved: !snapshot.matches_source(document.text()) || document.is_dirty() || last_valid,
             snapshot,
             last_valid,
             ticket: self.ticket(index),
@@ -127,7 +127,7 @@ impl ProjectSession {
             DocumentKey::Working {
                 document_id: document.id().into(),
             },
-            &document.text,
+            document.text(),
             CacheProvenance {
                 session_epoch: self.session_id.clone(),
                 source_version: document.source_version,

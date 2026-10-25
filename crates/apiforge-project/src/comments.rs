@@ -55,7 +55,7 @@ impl ProjectSession {
             .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.message == apiforge_script::UNATTACHED_COMMENT)
-            .filter_map(|diagnostic| document.text.get(diagnostic.range.clone()))
+            .filter_map(|diagnostic| document.text().get(diagnostic.range.clone()))
             .map(str::to_owned)
             .collect()
     }

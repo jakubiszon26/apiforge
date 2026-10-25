@@ -250,7 +250,7 @@ impl ProjectSession {
             DocumentKey::Working {
                 document_id: document_id.into(),
             },
-            &document.text,
+            document.text(),
             apiforge_storage::project::CacheProvenance {
                 session_epoch: self.session_id.clone(),
                 source_version: document.source_version,
@@ -446,10 +446,10 @@ impl ProjectSession {
         if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
             return Err(Error::SourceTooLarge);
         }
-        if document.text == text {
+        if document.text() == text {
             return Ok(document.source_version);
         }
-        document.text = text.into();
+        document.set_text(text.into());
         document.source_version += 1;
         document.analysis = AnalysisState::Pending;
         let version = document.source_version;
@@ -492,7 +492,7 @@ impl ProjectSession {
             .get(diagnostic)
             .and_then(|diagnostic| diagnostic.fix.clone())
             .ok_or(Error::NoFix)?;
-        let mut text = self.documents[index].text.clone();
+        let mut text = self.documents[index].text().to_owned();
         if fix.range.end > text.len()
             || !text.is_char_boundary(fix.range.start)
             || !text.is_char_boundary(fix.range.end)
@@ -528,7 +528,7 @@ impl ProjectSession {
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .ok_or(Error::ModelLocked)?;
         let document = &mut self.documents[index];
-        document.text = text;
+        document.set_text(text);
         document.source_version += 1;
         document.analysis = AnalysisState::Pending;
         document.diagnostics.clear();
@@ -556,6 +556,15 @@ impl ProjectSession {
             .collect()
     }
 
+    /// The ticket of every pending document: what `pending_analyses` would
+    /// return, without copying any source or model into an input.
+    pub fn pending_tickets(&self) -> Vec<AnalysisTicket> {
+        (0..self.documents.len())
+            .filter(|index| self.documents[*index].analysis == AnalysisState::Pending)
+            .map(|index| self.ticket(index))
+            .collect()
+    }
+
     pub fn analysis_for(&self, document_id: &str) -> Result<AnalysisInput> {
         Ok(self.analysis_input(self.index(document_id)?))
     }
@@ -568,7 +577,7 @@ impl ProjectSession {
         AnalysisInput {
             ticket: self.ticket(index),
             target: self.target(&document.entry),
-            text: document.text.as_str().into(),
+            text: document.text().into(),
             context: self.context.clone(),
             base: document.model.clone(),
             checkpoint: self
@@ -608,9 +617,9 @@ impl ProjectSession {
         match analysis.model {
             Some((model, _)) => {
                 document.analysis = AnalysisState::Valid;
-                document.model_source = Some(document.text.clone());
-                if document.model.as_ref() != Some(&model) {
-                    if let Some(previous) = document.model.replace(model) {
+                document.model_source = Some(document.text().to_owned());
+                if document.model.as_deref() != Some(&model) {
+                    if let Some(previous) = document.model.replace(Arc::new(model)) {
                         document.history.record(previous);
                     }
                     self.emit(
@@ -684,7 +693,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        if previous == model {
+        if *previous == model {
             return Ok(());
         }
         self.install_model(index, model, origin)?;
@@ -729,9 +738,9 @@ impl ProjectSession {
         let history = &mut self.documents[index].history;
         history.generation += 1;
         if undo {
-            history.redo.push(Arc::new(current));
+            history.redo.push(current);
         } else {
-            history.undo.push(Arc::new(current));
+            history.undo.push(current);
         }
         Ok(true)
     }
@@ -757,11 +766,11 @@ impl ProjectSession {
         };
         let document_id = document.entry.document_id.clone();
         let document = &mut self.documents[index];
-        document.model = Some(model);
+        document.model = Some(Arc::new(model));
         match text {
             Some(text) => {
                 document.model_source = Some(text.clone());
-                document.text = text;
+                document.set_text(text);
                 document.source_version += 1;
                 document.diagnostics.clear();
                 let version = document.source_version;
@@ -883,7 +892,7 @@ impl ProjectSession {
         }
         let document = &self.documents[index];
         let version = document.source_version;
-        let bytes = document.text.as_bytes().to_vec();
+        let bytes = document.text().as_bytes().to_vec();
         let mut changes = Vec::new();
         if FileState::of(&bytes) != document.saved {
             changes.push(ProjectChange::Write {
@@ -902,7 +911,7 @@ impl ProjectSession {
             };
             let record = DiagramRecord::capture(
                 key.clone(),
-                &document.text,
+                document.text(),
                 analysis::identity_base(model),
                 &self.context,
             )?;
