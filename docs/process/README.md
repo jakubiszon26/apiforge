@@ -11,7 +11,8 @@ whose findings every rule below answers.
 | [Estimation](estimation.md) | Size classes, review time, risk flags, splitting |
 | [Testing](testing.md) | Acceptance tests first, the QA report, the regression smoke list |
 | [Retrospective](retrospective.md) | The sprint review and its three actions |
-| [Backlog](../backlog.md) | The board: every ticket, its state and its estimate |
+| [Backlog](../backlog.md) | The sprint: its goal, exit criteria and the issues in it |
+| [Issues](https://github.com/jakubiszon26/apiforge/issues) | The tickets: one issue each, with state, estimate and discussion |
 | [Development guide](../development.md) | Toolchain, verification commands, branch rules |
 | [GUI testing](../gui-testing.md) | Interaction tests, design review captures, native probes |
 
@@ -22,8 +23,12 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
         → QA report → Owner acceptance → Merge to main → Retrospective
 ```
 
-1. **Backlog.** A ticket is a row in [`docs/backlog.md`](../backlog.md) with an
-   ID (`KTLO-03`, `S1-07`, …), a one-line goal in the owner's words and a size.
+1. **Backlog.** A ticket is a GitHub issue titled `<ID>: <goal>` (`KTLO-03`,
+   `S1-07`, …) with the goal in the owner's words, the estimate and the labels
+   below. The issue is where the ticket's state lives: open or closed, and
+   `decision-needed` or `awaiting-acceptance` while it waits for the owner.
+   [`docs/backlog.md`](../backlog.md) names the sprint, its exit criteria and
+   the issues in it; it does not repeat their state.
 2. **Analysis.** Written for the owner, one page at most: what changes on
    screen, what disappears, what migrates, what the acceptance criteria are.
    A change that touches the interface includes a mock-up. Technical detail
@@ -76,6 +81,22 @@ the ticket before implementation.
   tickets before review.
 - **Ignored tests:** `#[ignore = "KTLO-04: …"]` names the ticket that will
   resolve it; an ignore without a ticket is a defect.
+
+## Labels
+
+| Label | Meaning |
+| --- | --- |
+| `sprint:<name>` | The sprint the issue belongs to |
+| `size:S`, `size:M`, `size:L` | The [size class](estimation.md#size); `L` is not scheduled |
+| `risk:format`, `risk:migration`, `risk:default`, `risk:visible-ui`, `risk:removal` | The [risk flags](estimation.md#risk-flags) |
+| `decision-needed` | Waits for an owner decision named in the issue |
+| `awaiting-acceptance` | A pull request is open and waits for the owner |
+| `process` | Changes the process itself |
+
+A pull request says `Closes #<issue>` so that the merge closes the ticket.
+Anything that must be versioned — the analysis, mock-ups, the owner's
+decisions, acceptance criteria — is in `docs/tickets/<ID>.md` and the issue
+links to it; the issue body is the summary, not a copy.
 
 ## Which model does what
 

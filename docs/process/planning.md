@@ -8,9 +8,12 @@ the stage had shipped.
 
 ## The ticket
 
-A ticket is a row in [`docs/backlog.md`](../backlog.md). When the row is not
-enough — anything above `S`, or anything with a risk flag — the ticket gets a
-file `docs/tickets/<ID>.md` with these sections, in this order:
+A ticket is a GitHub issue titled `<ID>: <goal>`, labelled as the
+[process](README.md#labels) says, created with `gh issue create` when the
+ticket is accepted into a sprint. When the issue is not enough — anything
+above `S`, or anything with a risk flag — the ticket also gets a file
+`docs/tickets/<ID>.md`, linked from the issue, with these sections, in this
+order:
 
 ```markdown
 # KTLO-05a: Block palette in the folder mode
