@@ -475,6 +475,35 @@ fn every_mode_draws_at_the_minimum_window_with_an_invalid_document() {
 }
 
 #[test]
+fn long_project_names_do_not_overlap_header_actions_in_writable_or_read_only_windows() {
+    let name = "Customer integration and contract verification workspace";
+    let (directory, _) = named_folder(name);
+    let (context, mut writer) = open(directory.path());
+    let (read_context, mut reader) = open(directory.path());
+    assert!(reader.session.as_ref().unwrap().is_read_only());
+    for (app, context) in [(&mut writer, &context), (&mut reader, &read_context)] {
+        for size in [egui::vec2(960.0, 540.0), egui::vec2(1600.0, 1000.0)] {
+            let _ = painted(app, context, size);
+            let labels = painted(app, context, size);
+            let title = labels
+                .iter()
+                .find(|(text, rect)| text == name && rect.top() < 40.0)
+                .expect("the project name is visible")
+                .1;
+            assert!(title.height() <= 18.0, "the header uses compact UI text");
+            let project = labels.iter().find(|(text, _)| text == "Project").unwrap().1;
+            let code = labels.iter().find(|(text, _)| text == "Code").unwrap().1;
+            assert!(project.right() + 8.0 <= title.left());
+            assert!(title.right() + 8.0 <= code.left(), "{title:?}, {code:?}");
+            for action in ["Save", "Save all", "Run options", "Run"] {
+                let rect = labels.iter().find(|(text, _)| text == action).unwrap().1;
+                assert!(rect.right() <= size.x, "{action} remains visible");
+            }
+        }
+    }
+}
+
+#[test]
 fn unfinished_inspector_text_joins_recovery_and_returns_on_reopening() {
     let directory = shop();
     let (context, mut app) = open(directory.path());

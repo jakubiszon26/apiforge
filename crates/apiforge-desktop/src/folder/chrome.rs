@@ -39,7 +39,10 @@ impl FolderApp {
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
-            let title_width = (ui.available_width() - 550.0).clamp(80.0, 320.0);
+            // Keep room for the full scenario toolbar and the read-only badge.
+            // A long project name must not paint into the Code tab at 960 px.
+            let reserved = 620.0 + if read_only { 80.0 } else { 0.0 };
+            let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
