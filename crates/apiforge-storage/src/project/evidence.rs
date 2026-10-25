@@ -194,4 +194,22 @@ mod tests {
         assert_eq!(exported["unavailable"].as_array().unwrap().len(), 1);
         assert!(!String::from_utf8(bytes).unwrap().contains("outside bytes"));
     }
+
+    #[test]
+    fn oversized_evidence_is_refused_without_truncating_or_modifying_its_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let transaction = directory.path().join(".apiforge/local/transactions/id");
+        fs::create_dir_all(&transaction).unwrap();
+        let file = fs::File::create(transaction.join("0")).unwrap();
+        file.set_len(MAX_TRANSACTION_BYTES as u64 + 1).unwrap();
+        let store = ProjectStore::open_read_only(directory.path()).unwrap();
+        assert!(matches!(
+            store.export_transaction_evidence(),
+            Err(ProjectError::Limit)
+        ));
+        assert_eq!(
+            file.metadata().unwrap().len(),
+            MAX_TRANSACTION_BYTES as u64 + 1
+        );
+    }
 }
