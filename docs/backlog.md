@@ -58,7 +58,7 @@ work does not start.
 | ID | Ticket | Estimate | Owner decision |
 | --- | --- | --- | --- |
 | KTLO-04 | Identity checkpoint at `initialise`/`register_existing`/`import`: recommendation, decision, un-ignore the acceptance test | S–M · 30 min · `format` | Seal at registration, at first analysis, or at first save |
-| KTLO-05b | Block palette in the folder mode: acceptance tests, implementation reusing `library.rs` and `Command::AddNode`, QA report (pilot of the full procedure) | M · 45 min · `visible UI` | Acceptance |
+| KTLO-05b | Block library panel in the folder mode: acceptance tests, implementation reusing `library.rs`, the canvas drop handling and `Command::AddNode`, QA report (pilot of the full procedure) | M · 45 min · `visible UI` | Acceptance |
 | KTLO-06 | Legacy JSON mode sunset: parity list folder vs legacy, deprecation notice in README and roadmap | S (docs) · 20 min · `removal` | Approve the parity list |
 | KTLO-07 | Regression smoke list: first run on Linux (agent) and Windows (owner's build), results recorded | S · 45 min | Run the Windows pass |
 | KTLO-09 | Orphaned code audit: list every symbol reachable only from the legacy window; output is the list, not a removal | S · 10 min | — |
