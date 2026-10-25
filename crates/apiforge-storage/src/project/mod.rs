@@ -5,6 +5,7 @@ mod cache;
 mod codec;
 mod conflict;
 mod diagram;
+mod evidence;
 mod explorer;
 mod io;
 mod journal;
