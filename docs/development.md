@@ -255,19 +255,32 @@ Use the controlled slow-I/O tests in `folder/storage_tests.rs` and the
 these boundaries. The UI quality probe waits for asynchronous opening while
 retaining the 960 × 540 assertions.
 
+## Branches and pull requests
+
+The [development process](process/README.md) governs what is built and in what
+order; these are the mechanics.
+
+- Every branch starts at `main`: `feat/<ticket>-…`, `fix/<ticket>-…`,
+  `docs/…`. A branch is never based on an unmerged branch, and no integration
+  branch collects several tickets before review. Stage II's chain of fifteen
+  branches is the counter-example that produced this rule.
+- One ticket, one branch, one pull request, within the ticket's
+  [size class](process/estimation.md#size). A pull request that outgrows its
+  class is split, not explained.
+- Small [Conventional Commits](https://www.conventionalcommits.org/).
+  Acceptance tests are committed before the implementation
+  ([testing](process/testing.md#1-acceptance-tests-first)).
+- The pull request follows `.github/PULL_REQUEST_TEMPLATE.md` and links its
+  QA report. At most three pull requests await owner acceptance at a time.
+- Only the owner merges to `main`. Passing the verification commands above is
+  necessary and never sufficient.
+- `#[ignore = "<ticket>: <reason>"]` is the only accepted form of an ignored
+  test. A change to a default, a format or a migration path cites the ticket in
+  which the owner decided it.
+
 ## Conventions
 
-- Stage II's [plan](stage-ii-code-workspace.md) and ADRs are published on `main`
-  before implementation. P1–P5 are merged and P6 uses separate review branches.
-  Each later package starts at the latest `main` or a required unmerged
-  predecessor, records that base and its verification in a final docs commit, and
-  is pushed for human review. Default folder startup/migration waits for P7;
-  explicit `--folder` commands are available independently. The P2 restart
-  round-trip gate passed before P3 migration work.
 - Production code, comments, documentation and the interface are in English.
-- Work happens on short-lived `feat/…`, `fix/…` or `docs/…` branches with small
-  [Conventional Commits](https://www.conventionalcommits.org/), merged into `main`
-  after verification.
 - Decisions that change the document format, semantics or architecture are recorded as
   ADRs in [docs/decisions](decisions). Deliberate behaviour changes visible in the
   fixtures are explained in the commit that makes them.

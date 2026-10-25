@@ -13,6 +13,12 @@ Windows.
 This roadmap retains the JSON-backed milestones; folder amendments are in ADRs
 0010–0012. Stage II does not complete M7's general editor features.
 
+Current work is tracked on the [backlog](backlog.md) under the
+[development process](process/README.md). The sprint after Stage II is
+keep-the-lights-on: no roadmap feature starts before its exit criteria are met.
+The legacy JSON mode is sunset and will be removed once the folder mode reaches
+parity with it (KTLO-06); M7 then continues on the folder mode only.
+
 ## Goals
 
 1. **Export block** — a component publishes values to its caller by placing Export
