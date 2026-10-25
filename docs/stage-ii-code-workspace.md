@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a navigation, P7b settings, P7c native recovery, P7d asynchronous storage, P7e portability, interface testing through the accessibility tree, the P7 interface tests and P7f budgets/accessibility/user guide implemented in review and integrated on one branch; P7g activation and the Windows release gates pending
+- Status: P1–P5 merged; P6a–P6d implemented and pushed for review; P8 documentation consistency in review; P7a navigation, P7b settings, P7c native recovery, P7d asynchronous storage, P7e portability, interface testing through the accessibility tree, the P7 interface tests and P7f budgets/accessibility/user guide implemented in review and integrated on one branch; P7g startup activation implemented behind `--managed`; the default start and the Windows release gates pending
 - Date: 2026-10-24
 - Historical analysis baseline: `d967a79`; initial implementation baseline: `c9c5ba0`. Later package bases are recorded below.
 - Delivery: one branch per package from current `main` or a required unmerged predecessor; a human merges after review. P6 and P8 review branches do not imply a merge to `main`.
@@ -245,8 +245,10 @@ package uses a separate branch from the latest `main`, or from the tip of an
 unmerged predecessor it requires. Record that dependency/base in its final docs
 commit, together with implementation, limits and verification. Push the branch;
 merging belongs to human review. Folder CLI commands become available behind
-`--folder` with P6c. Default folder startup and automatic migration stay disabled
-until P7's activation package passes its integration gates.
+`--folder` with P6c, and managed startup behind `--managed` with P7g. P7g passed
+its integration gates on Linux, so what remains before either becomes the default
+start is the Windows release QA and directory durability that no Linux evidence
+can close.
 
 | Package | Implementation | Required exit evidence |
 | --- | --- | --- |
@@ -366,7 +368,7 @@ the input findings from `docs/stage-ii-p8-findings` at `cedabc3`.
 | P7 tests | Implemented on `feat/stage-ii-p7-tests`, base unmerged GUI testing `ac906e6`: interaction tests through named widgets for P7a switching and failed recovery, P7b settings and session secrets, P7c conflict and transaction decisions, P7d responsiveness and queued storage work, and P7e initialisation attributes; design review views of the project dialogs. Project form fields, environment fields and the source editor are named; the start screen name field has the form height; a full recent-project list scrolls inside the window | 929 workspace tests, seventeen ignored (two helpers, fourteen review views, the inspection host); formatting, clippy with and without `inspection`, fixtures and UI gate 10/10 passed, built without debug information. Behaviour was explored with `egui_mcp` on the headless host. The native file portal and exports remain P7f |
 | P7f | Implemented on `feat/stage-ii-p7-performance`, base unmerged P7e `3c71e38`: shared session models and memoised dirty state, cached caret/completion work, a large-source mode, named controls and menus, keyboard tests and the [folder projects guide](folder-projects.md) | 916 workspace tests, three ignored (two helpers, the release frame test); UI gate 10/10, analysis 1.7/5 ms, release frame budgets at 1000 lines and 1 MiB and [native keyboard/portal/large-source review](qa/2026-10-25/p7-performance/verification.md). No screen-reader session; Windows remains open |
 | P7 integration | Implemented on `feat/stage-ii-p7-integration`, merging unmerged P7 tests `8eaa5bc` into unmerged P7f `8701928`, both based on P7e `3c71e38`: one naming scheme for the two parallel accessibility passes, one status table, and the demo card overlap the GUI-testing package measured | 940 workspace tests, eighteen ignored (two helpers, fourteen review views, the inspection host, the release frame test); formatting, clippy with and without `inspection`, fixtures and UI gate 10/10 passed, and the release frame budgets hold at 1000 lines and 1 MiB. A code or text editor carries one accessible name, `Contents of <path>`; the audit resolves names through `labelled_by`, as AccessKit computes them. The demo's overlapping card moves in both frozen version-one sources, with the fixtures regenerated and a board-wide disjointness test. Tests no longer read the developer's own preferences |
-| P7g | Pending, on its own branch | Startup activation. Linux evidence cannot close Windows QA or Windows durability |
+| P7g | Implemented on `feat/stage-ii-p7-activation`, base unmerged P7 integration `09387b0`: `--managed` resolves the application data directory to one project, calling `migrate_workspace` from the application for the first time, creating one managed project when there is nothing to migrate, and leaving a locked or recovery-bound workspace to the workspace window. Preparation writes both Git rules, so a migrated project excludes its local session data | 949 workspace tests, eighteen ignored (two helpers, fourteen review views, the inspection host, the release frame test); UI gate 10/10, release frame budgets, and [native activation evidence](qa/2026-10-25/p7g-activation/verification.md) with byte-identical originals and a restart that does not migrate again. [Acceptance matrix](stage-ii-p7g-acceptance.md). The default start is unchanged; Windows QA and Windows durability remain the gates that decide when it changes |
 
 Every completed package runs formatting, all-target workspace clippy with warnings
 denied, serial all-target workspace tests with isolated config/data directories,

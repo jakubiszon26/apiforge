@@ -37,6 +37,13 @@ current project. A folder that is not a project yet offers to initialise it and 
 register the `.afs` files found in it; nothing is written until you confirm.
 **Recent projects** in the same menu reopen earlier folders.
 
+Started with `--managed`, API Forge opens the projects it keeps for you rather
+than a folder you name. The first time, an existing workspace becomes folder
+projects: the originals are left exactly as they were, the window says where the
+projects now live, and an interrupted attempt continues rather than making a
+second copy. With nothing to migrate you get one project to start from. This is
+not yet how API Forge starts by default.
+
 Switching first protects the current project's unsaved work. If that protection
 fails, you stay in the current project. Only one window can change a project at a
 time; a second window opens it read-only, says so, and can still export its work.
