@@ -113,6 +113,7 @@ impl FolderApp {
     }
 
     pub(super) fn export_bytes(&mut self, name: String, bytes: Vec<u8>) {
+        self.export_status = None;
         let (sender, receiver) = channel();
         let repaint = self.ui_context.clone();
         std::thread::spawn(move || {
@@ -154,10 +155,14 @@ impl FolderApp {
                 Picked::Imports { files, .. } if files.is_empty() => {}
                 Picked::Imports { folder, files } => self.prepare_import(&files, &folder),
                 Picked::Exported(Ok(path)) => {
-                    self.notify(format!("Exported to {}.", path.display()), false)
+                    let message = format!("Exported to {}.", path.display());
+                    self.export_status = Some(message.clone());
+                    self.notify(message, false)
                 }
                 Picked::Exported(Err(error)) => {
-                    self.notify(format!("Could not export: {error}"), true)
+                    let message = format!("Could not export: {error}");
+                    self.export_status = Some(message.clone());
+                    self.notify(message, true)
                 }
             }
         }

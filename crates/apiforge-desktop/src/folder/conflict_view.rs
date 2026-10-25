@@ -45,6 +45,7 @@ impl FolderApp {
     }
 
     pub(super) fn review_conflict(&mut self, target: ConflictTarget) {
+        self.export_status = None;
         let Some(session) = &self.session else { return };
         let mut view = ConflictView {
             target,
@@ -84,6 +85,7 @@ impl FolderApp {
                 });
             }
             if let Some(error) = &view.error { widgets::field_error(ui, error); }
+            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
             ui.add_space(theme::SPACE_SM);
             ui.horizontal_wrapped(|ui| {
                 refresh = ui.button("Refresh preview").clicked();

@@ -33,6 +33,7 @@ impl TransactionView {
 
 impl FolderApp {
     pub(super) fn review_transaction(&mut self, root: PathBuf) {
+        self.export_status = None;
         let store = match &self.session {
             Some(session) if session.store().root() == root => Ok(session.store().clone()),
             _ => ProjectStore::open(&root),
@@ -132,6 +133,7 @@ impl FolderApp {
             }
             if running { widgets::hint(ui, "Cancel the active run and wait for cleanup before finishing or reopening the project."); }
             if let Some(error) = &view.error { widgets::field_error(ui, error); }
+            if let Some(status) = &self.export_status { widgets::hint(ui, status); }
             if dirty_settings && view.finished { widgets::hint(ui, "Public settings are unsaved. Export your work first, or explicitly discard those settings to reload."); }
             ui.add_space(theme::SPACE_SM);
             ui.horizontal_wrapped(|ui| {

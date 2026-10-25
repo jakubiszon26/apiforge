@@ -322,3 +322,32 @@ fn recovery_reload_retains_unsaved_source_and_text_and_requires_explicit_setting
         "saved"
     );
 }
+
+#[test]
+fn candidate_export_success_and_failure_stay_visible_without_resolving_recovery() {
+    let (directory, _) = source_project();
+    interrupt(directory.path());
+    let (context, mut app) = open(directory.path());
+    for result in [
+        Ok(PathBuf::from("/tmp/exported-candidate.afs")),
+        Err("destination is unavailable".into()),
+    ] {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.picked.push(receiver);
+        sender.send(Picked::Exported(result)).unwrap();
+        frame(&mut app, &context, vec![]);
+        assert!(app.export_status.is_some());
+        let labels = painted(&mut app, &context, egui::vec2(960.0, 540.0));
+        assert!(
+            labels
+                .iter()
+                .any(|(label, _)| Some(label) == app.export_status.as_ref())
+        );
+        assert!(matches!(app.prompt, Some(Prompt::Transaction(_))));
+        assert_active(directory.path(), true);
+        assert_eq!(
+            fs::read_to_string(directory.path().join("main.afs")).unwrap(),
+            FOREIGN
+        );
+    }
+}

@@ -173,6 +173,8 @@ pub struct FolderApp {
     explorer: ExplorerState,
     /// File dialogs running on their own threads.
     picked: Vec<Receiver<Picked>>,
+    /// The most recent candidate export; it never resolves the pending decision.
+    export_status: Option<String>,
     /// The last session event this window has followed.
     seen: u64,
     code: code::CodeEditor,
@@ -247,6 +249,7 @@ impl FolderApp {
             watcher: Watcher::new(Some(context.clone())),
             explorer: ExplorerState::default(),
             picked: Vec::new(),
+            export_status: None,
             seen: 0,
             code: code::CodeEditor::default(),
             shown: None,
