@@ -178,6 +178,11 @@ pub struct FolderApp {
     workbench: Workbench,
     /// The view state last written, so an unchanged one is not rewritten.
     saved_view: Option<WorkspaceState>,
+    /// A mode to show instead of the folder's own once the project is open.
+    mode_request: Option<Mode>,
+    /// The requested mode shown, and the folder's own, which is what the view
+    /// state keeps while the requested one is still shown.
+    shown_instead: Option<(Mode, Mode)>,
     analyser: Analyser,
     watcher: Watcher,
     explorer: ExplorerState,
@@ -328,6 +333,8 @@ impl FolderApp {
             open_error: None,
             workbench: Workbench::restore(None, |_| false),
             saved_view: None,
+            mode_request: None,
+            shown_instead: None,
             analyser: Analyser::new(Some(context.clone())),
             watcher: Watcher::new(Some(context.clone())),
             explorer: ExplorerState::default(),
@@ -378,6 +385,11 @@ impl FolderApp {
             session.document(id).is_some() || id.starts_with(TEXT_TAB)
         });
         self.saved_view = state;
+        self.shown_instead = None;
+        if let Some(mode) = self.mode_request.take() {
+            self.shown_instead = Some((mode, self.workbench.mode));
+            self.workbench.mode = mode;
+        }
         // A project opened for the first time shows its first scenario.
         if first_open {
             let mut documents: Vec<_> = session.documents().iter().collect();
@@ -458,7 +470,9 @@ impl FolderApp {
 
     /// Shows `mode` once the project is open instead of the folder's own,
     /// for `--screenshot --mode` (KTLO-08).
-    pub fn request_mode(&mut self, _mode: Mode) {}
+    pub fn request_mode(&mut self, mode: Mode) {
+        self.mode_request = Some(mode);
+    }
 
     pub fn has_document(&self) -> bool {
         self.session.is_some()
