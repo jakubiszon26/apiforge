@@ -269,3 +269,27 @@ helpers ignored, serially with isolated config/data directories. Runtime code is
 unchanged from P6d. The separate UI quality gate passed 10/10 with
 `CARGO_TARGET_DIR=/tmp/apiforge-gate`.
 Windows QA and Windows directory durability remain open.
+
+## Identity checkpoints at registration and import
+
+- Recorded: 2026-10-25
+- Status: open decision; a failing test is committed as `#[ignore]`
+
+`prepare_project` and `create_document` seal a record in the shared
+`.apiforge/diagram.json` describing a document's block identities and layout.
+`initialise`, `register_existing` and `import` do not. A document that entered a
+project through any of them is therefore given fresh block identities on every
+load until something saves it: stored layout stops matching, and a diagram
+selection can name a block that no longer exists.
+
+Sealing at those four call sites would write a Git-tracked file while
+registering sources the project did not author, which is what
+"initialisation registers existing `.afs` without rewriting their content" was
+written to avoid, and it touches B7's single deterministic checkpoint file and
+the P7e portability policy together. The alternatives are to seal on first
+successful analysis instead, or to accept the current behaviour and have the
+first save settle it.
+
+`a_registered_or_imported_document_keeps_its_block_identities_when_the_project_is_reopened`
+in `crates/apiforge-project/tests/acceptance.rs` states the contract and is
+ignored until this is decided.
