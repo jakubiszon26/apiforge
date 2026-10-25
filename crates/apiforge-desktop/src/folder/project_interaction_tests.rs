@@ -15,19 +15,25 @@ fn app(harness: &mut FolderHarness) -> &mut FolderApp {
     harness.state_mut().as_mut().unwrap()
 }
 
-/// Lists `root` among the recent projects, as an earlier session would have.
+/// Lists `root` after the open project as the only recent projects, as an
+/// earlier session would have. Recent projects are global metadata, so the
+/// list other tests left in the shared data directory is replaced.
 fn remember(harness: &mut FolderHarness, root: &Path) {
     let bytes = fs::read(root.join("apiforge.project.json")).unwrap();
     let manifest = apiforge_project::ProjectManifest::from_bytes(&bytes).unwrap();
-    app(harness)
-        .navigation
-        .recent
-        .entries
-        .push(navigation::Recent {
-            id: manifest.id,
-            name: manifest.name,
-            path: root.to_owned(),
-        });
+    let current = folder(harness).root.clone();
+    let mut entries = folder(harness).navigation.recent.entries.clone();
+    entries.retain(|entry| entry.path == current);
+    entries.push(navigation::Recent {
+        id: manifest.id,
+        name: manifest.name,
+        path: root.to_owned(),
+    });
+    recent(harness, entries);
+}
+
+fn recent(harness: &mut FolderHarness, entries: Vec<navigation::Recent>) {
+    app(harness).navigation.recent.entries = entries;
     harness.step();
 }
 
@@ -35,7 +41,7 @@ fn remember(harness: &mut FolderHarness, root: &Path) {
 /// goes to the centre of its rectangle, which may be clipped by a scroll area.
 fn reveal(harness: &mut FolderHarness, label: &str) {
     harness.get_by_label(label).scroll_to_me();
-    harness.step();
+    settle(harness);
 }
 
 fn type_into(harness: &mut FolderHarness, label: &str, text: &str) {
@@ -137,6 +143,39 @@ fn the_project_menu_lists_recent_projects_inside_the_window() {
 }
 
 #[test]
+fn a_full_recent_list_keeps_the_menu_inside_the_window() {
+    let (alpha, _) = named_folder("Full Alpha");
+    let (last, _) = named_folder("Full Last");
+    let mut entries: Vec<_> = (1..32)
+        .map(|index| navigation::Recent {
+            id: format!("recent-{index}"),
+            name: format!("Recent project {index}"),
+            path: alpha.path().join(format!("missing-{index}")),
+        })
+        .collect();
+    let bytes = fs::read(last.path().join("apiforge.project.json")).unwrap();
+    entries.push(navigation::Recent {
+        id: apiforge_project::ProjectManifest::from_bytes(&bytes)
+            .unwrap()
+            .id,
+        name: "Full Last".into(),
+        path: last.path().to_owned(),
+    });
+    for size in [MINIMUM, WIDE] {
+        let mut harness = folder_harness(alpha.path(), size);
+        recent(&mut harness, entries.clone());
+        choose(&mut harness, "Project");
+        let items = ["Open Folder…", "Project settings…", "Test environment…"];
+        assert_within_window(&harness, &items);
+        reveal(&mut harness, "Full Last");
+        assert_within_window(&harness, &["Full Last"]);
+        assert_disjoint(&harness, &["Full Last", "Test environment…"]);
+        choose(&mut harness, "Full Last");
+        assert_eq!(folder(&harness).root, last.path());
+    }
+}
+
+#[test]
 fn switching_to_a_recent_project_protects_and_returns_unsaved_work() {
     let (alpha, _) = named_folder("Switch Alpha");
     let (beta, _) = named_folder("Switch Beta");
@@ -227,15 +266,14 @@ fn a_recent_folder_without_a_project_is_written_only_by_initialise() {
     let (alpha, _) = named_folder("Start Alpha");
     let empty = tempfile::tempdir().unwrap();
     let mut harness = folder_harness(alpha.path(), MINIMUM);
-    app(&mut harness)
-        .navigation
-        .recent
-        .entries
-        .push(navigation::Recent {
+    recent(
+        &mut harness,
+        vec![navigation::Recent {
             id: "empty-folder".into(),
             name: "Empty folder".into(),
             path: empty.path().to_owned(),
-        });
+        }],
+    );
     open_project_menu(&mut harness, "Empty folder");
     assert!(folder(&harness).uninitialised);
     assert!(fs::read_dir(empty.path()).unwrap().next().is_none());
