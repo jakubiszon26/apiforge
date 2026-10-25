@@ -232,6 +232,12 @@ impl FolderApp {
                     return;
                 }
             },
+            Err(apiforge_project::Error::Storage(
+                apiforge_project::ProjectError::RecoveryRequired,
+            )) => {
+                self.review_transaction(root);
+                return;
+            }
             Err(error) => {
                 self.notify(format!("Cannot open folder: {error}"), true);
                 return;

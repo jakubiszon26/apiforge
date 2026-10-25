@@ -395,6 +395,8 @@ impl FolderApp {
             return;
         };
         self.prompt = match prompt {
+            Prompt::Conflict(view) => self.conflict_prompt(context, *view),
+            Prompt::Transaction(view) => self.transaction_prompt(context, *view),
             Prompt::Settings(dialog) => self.project_settings_prompt(context, *dialog),
             Prompt::Environment(dialog) => self.environment_prompt(context, *dialog),
             Prompt::Run { prepared, live } => self.run_prompt(context, *prepared, live),

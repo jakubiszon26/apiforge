@@ -279,63 +279,12 @@ impl FolderApp {
         snapshot: &TextSnapshot,
         conflict: ExternalConflict,
     ) {
-        let (mut accept, mut keep, mut export) = (false, false, false);
-        egui::Frame::new()
-            .fill(theme::ACCENT_SOFT)
-            .corner_radius(8)
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(match conflict {
-                    ExternalConflict::Changed => {
-                        "This file changed outside API Forge while it had unsaved changes here. \
-                         Saving is paused."
-                    }
-                    ExternalConflict::Deleted => {
-                        "This file was deleted outside API Forge while it had unsaved changes \
-                         here. Saving is paused."
-                    }
-                });
-                ui.horizontal(|ui| {
-                    match conflict {
-                        ExternalConflict::Changed => {
-                            accept = ui.button("Use the version on disk").clicked();
-                        }
-                        ExternalConflict::Deleted => {
-                            keep = ui
-                                .add(widgets::primary_button("Keep my version"))
-                                .on_hover_text("Saving recreates the file")
-                                .clicked();
-                            accept = ui.button("Accept the deletion").clicked();
-                        }
-                    }
-                    export = ui.button("Export a copy…").clicked();
-                });
-            });
-        if export {
-            self.export_text(file_name(&snapshot.path).to_owned(), snapshot.text.clone());
-        }
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if accept {
-            session.accept_external_text(&snapshot.path, DIAGRAM)
-        } else if keep {
-            session.keep_deleted_text(&snapshot.path)
-        } else {
-            return;
-        };
-        match result {
-            Ok(()) => {
-                self.shown = None;
-                code::clear_history(ui.ctx(), editor_id(&text_tab(&snapshot.path)));
-                // An accepted deletion leaves nothing to edit.
-                if accept && conflict == ExternalConflict::Deleted {
-                    self.close_tab(&text_tab(&snapshot.path));
-                }
-                self.touched();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        self.conflict_notice(
+            ui,
+            apiforge_project::ConflictTarget::Text(snapshot.path.clone()),
+            conflict,
+            &snapshot.path,
+            &snapshot.text,
+        );
     }
 }

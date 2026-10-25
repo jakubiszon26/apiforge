@@ -11,6 +11,7 @@
 mod analysis;
 mod chrome;
 mod code_view;
+mod conflict_view;
 mod diagram;
 mod explorer;
 mod file_prompts;
@@ -20,6 +21,7 @@ mod publication;
 mod runs;
 mod settings;
 mod text_view;
+mod transaction_view;
 mod watcher;
 mod workbench;
 
@@ -74,6 +76,8 @@ const SPLIT_INSPECTOR_WIDTH: f32 = 1440.0;
 const TEXT_TAB: &str = "text:";
 
 enum Prompt {
+    Conflict(Box<conflict_view::ConflictView>),
+    Transaction(Box<transaction_view::TransactionView>),
     Settings(Box<dialogs::SettingsDialog>),
     Environment(Box<dialogs::EnvironmentDialog>),
     Run {
@@ -292,7 +296,17 @@ impl FolderApp {
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default();
             }
-            Err(error) => app.open_error = Some(error.to_string()),
+            Err(error) => {
+                app.open_error = Some(error.to_string());
+                if matches!(
+                    error,
+                    apiforge_project::Error::Storage(
+                        apiforge_project::ProjectError::RecoveryRequired
+                    )
+                ) {
+                    app.review_transaction(app.root.clone());
+                }
+            }
         }
         app
     }
@@ -438,6 +452,7 @@ impl FolderApp {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll_run();
+        self.follow_dialogs();
         self.advance_switch();
         if self.close_requested {
             self.close_requested = false;
@@ -445,6 +460,7 @@ impl FolderApp {
         }
         let Some(session) = self.session.as_mut() else {
             self.start_screen(ui);
+            self.prompts(ui.ctx());
             return;
         };
         let now = Instant::now();
@@ -459,7 +475,11 @@ impl FolderApp {
         if let Some(outcome) = outcome {
             self.follow_external(outcome);
         }
-        self.follow_dialogs();
+        if self.watcher.recovery_required {
+            self.transaction_screen(ui);
+            self.prompts(ui.ctx());
+            return;
+        }
         if self.prompt.is_none() {
             self.shortcuts(ui.ctx());
         }
@@ -554,6 +574,12 @@ impl FolderApp {
                 ui.add_space(theme::SPACE_LG);
                 if let Some(error) = &self.open_error {
                     widgets::error_box(ui, std::slice::from_ref(error));
+                    if ui.button("Review transaction recovery…").clicked() {
+                        self.review_transaction(self.root.clone());
+                    }
+                    if ui.button("Try opening again").clicked() {
+                        *self = Self::open(&self.ui_context.clone(), self.root.clone());
+                    }
                     return;
                 }
                 if !self.uninitialised {
@@ -678,7 +704,13 @@ impl FolderApp {
                 .workbench
                 .tabs()
                 .iter()
-                .filter(|tab| session.document(&tab.document_id).is_none())
+                .filter(|tab| {
+                    session.document(&tab.document_id).is_none()
+                        && tab.document_id.strip_prefix(TEXT_TAB).is_none_or(|path| {
+                            session.text_file(path).is_none()
+                                && !session.recovered_text_drafts().contains(&path)
+                        })
+                })
                 .map(|tab| tab.document_id.clone())
                 .collect();
             for document_id in gone {
@@ -686,6 +718,7 @@ impl FolderApp {
             }
             self.shown = None;
             self.reload_field_drafts();
+            self.restore_text_tabs();
         }
         let name = |id: &String| {
             self.session

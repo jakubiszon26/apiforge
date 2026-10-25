@@ -63,6 +63,10 @@ impl FolderApp {
     }
 
     pub(super) fn request_run(&mut self, id: &str, live: bool) {
+        if self.watcher.recovery_required {
+            self.notify("Resolve project recovery and reload before running.", true);
+            return;
+        }
         if self.runs.handle.is_some() {
             return;
         }
@@ -89,6 +93,10 @@ impl FolderApp {
     }
 
     pub(super) fn start_prepared_run(&mut self, prepared: PreparedRun, live: bool) {
+        if self.watcher.recovery_required {
+            self.notify("Resolve project recovery and reload before running.", true);
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };

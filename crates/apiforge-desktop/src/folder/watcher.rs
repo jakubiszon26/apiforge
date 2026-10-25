@@ -29,6 +29,7 @@ pub struct Watcher {
     pub scan: Option<TreeScan>,
     /// Why the folder could not be checked, until a check succeeds.
     pub problem: Option<String>,
+    pub recovery_required: bool,
 }
 
 impl Watcher {
@@ -43,6 +44,7 @@ impl Watcher {
             repaint,
             scan: None,
             problem: None,
+            recovery_required: false,
         }
     }
 
@@ -76,6 +78,8 @@ impl Watcher {
             self.running = false;
             match result {
                 Ok(changes) => {
+                    // A readable generation is not permission to resume a
+                    // session that still needs an explicit reload decision.
                     self.scan = Some(changes.scan.clone());
                     match session.apply_external(changes) {
                         Ok(applied) => {
@@ -89,9 +93,10 @@ impl Watcher {
                 }
                 // A transaction in progress (this or another writer); the next
                 // check sees its result.
-                Err(apiforge_project::Error::Storage(
-                    ProjectError::Busy | ProjectError::RecoveryRequired,
-                )) => {}
+                Err(apiforge_project::Error::Storage(ProjectError::Busy)) => {}
+                Err(apiforge_project::Error::Storage(ProjectError::RecoveryRequired)) => {
+                    self.recovery_required = true;
+                }
                 Err(error) => self.problem = Some(error.to_string()),
             }
         }

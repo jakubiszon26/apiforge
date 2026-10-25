@@ -107,17 +107,21 @@ impl FolderApp {
         self.picked.push(receiver);
     }
 
-    /// Saves a copy of a document's unsaved text anywhere the user chooses.
+    /// Saves an exact copy without acknowledging a conflict or a save baseline.
     pub(super) fn export_text(&mut self, name: String, text: String) {
+        self.export_bytes(name, text.into_bytes());
+    }
+
+    pub(super) fn export_bytes(&mut self, name: String, bytes: Vec<u8>) {
         let (sender, receiver) = channel();
         let repaint = self.ui_context.clone();
         std::thread::spawn(move || {
             let result = match rfd::FileDialog::new()
-                .set_title("Export your version")
+                .set_title("Export recovery candidate")
                 .set_file_name(name)
                 .save_file()
             {
-                Some(path) => std::fs::write(&path, text)
+                Some(path) => apiforge_storage::write_atomic(&path, &bytes)
                     .map(|()| path)
                     .map_err(|error| error.to_string()),
                 None => return,
@@ -746,60 +750,13 @@ impl FolderApp {
         conflict: ExternalConflict,
         snapshot: &Snapshot,
     ) {
-        let (mut accept, mut keep, mut export) = (false, false, false);
-        egui::Frame::new()
-            .fill(theme::ACCENT_SOFT)
-            .corner_radius(8)
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(match conflict {
-                    ExternalConflict::Changed => {
-                        "This file changed outside API Forge while it had unsaved changes. \
-                         Saving is paused: use the version on disk, or export your version \
-                         first."
-                    }
-                    ExternalConflict::Deleted => {
-                        "This file was deleted outside API Forge while it had unsaved \
-                         changes. Keep your version to recreate the file when you save, or \
-                         accept the deletion."
-                    }
-                });
-                ui.horizontal(|ui| {
-                    match conflict {
-                        ExternalConflict::Changed => {
-                            accept = ui.button("Use the version on disk").clicked();
-                        }
-                        ExternalConflict::Deleted => {
-                            keep = ui.add(widgets::primary_button("Keep my version")).clicked();
-                            accept = ui.button("Accept the deletion").clicked();
-                        }
-                    }
-                    export = ui.button("Export my version…").clicked();
-                });
-            });
-        if export {
-            self.export_text(file_name(&snapshot.path).to_owned(), snapshot.text.clone());
-        }
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-        let result = if accept {
-            session.accept_external(document_id, DIAGRAM)
-        } else if keep {
-            session.keep_deleted(document_id)
-        } else {
-            return;
-        };
-        match result {
-            Ok(()) => {
-                self.shown = None;
-                code::clear_history(ui.ctx(), editor_id(document_id));
-                self.reload_field_drafts();
-                self.touched();
-            }
-            Err(error) => self.notify(error.to_string(), true),
-        }
+        self.conflict_notice(
+            ui,
+            apiforge_project::ConflictTarget::Document(document_id.into()),
+            conflict,
+            &snapshot.path,
+            &snapshot.text,
+        );
     }
 }
 

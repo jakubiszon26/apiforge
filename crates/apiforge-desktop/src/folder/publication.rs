@@ -15,6 +15,13 @@ pub(super) enum Action {
 
 impl FolderApp {
     pub(super) fn component_action(&mut self, id: &str, action: Action) {
+        if self.watcher.recovery_required {
+            self.notify(
+                "Resolve project recovery and reload before changing the diagram.",
+                true,
+            );
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };

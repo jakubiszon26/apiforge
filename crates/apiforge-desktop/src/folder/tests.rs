@@ -1,6 +1,9 @@
 use super::*;
 use crate::buffers::APPLY_DELAY;
 
+#[path = "recovery_tests.rs"]
+mod recovery_tests;
+
 fn frame(app: &mut FolderApp, context: &egui::Context, events: Vec<egui::Event>) {
     let mut output = context.run_ui(
         egui::RawInput {
