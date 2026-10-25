@@ -128,6 +128,11 @@ successfully; the probe step verifies that its capture exists and is not empty. 
 probes detect startup, rendering, capture and exit failures; they are not pixel-diff or
 end-to-end editing tests.
 
+The Linux probe needs the runtime library `libxkbcommon-x11-0`, which winit loads
+under X11 and `libxkbcommon-dev` does not pull in; the root `.gitattributes` keeps
+every `.json` and `.afs` file at LF on checkout, so the byte-for-byte fixture check
+also passes on Windows.
+
 ## Running a scenario from the command line
 
 ```bash
