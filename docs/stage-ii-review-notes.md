@@ -204,7 +204,7 @@ records implemented review branches without implying that a human merged them.
 | # | Requirement | Current state | Assign to |
 | --- | --- | --- | --- |
 | A1 | Open Folder, recent projects and project switching, with recovery written before a switch | Implemented in P7a with failed-recovery retention and read-only export; native chooser review remains P7f | P7a complete in review |
-| A2 | Editing project settings marks the manifest dirty | Session API exists; native editor pending | P7b |
+| A2 | Editing project settings marks the manifest dirty | Implemented in P7b for empty/component-only projects; public settings save independently, secret values stay in memory | P7b complete in review |
 | A3 | Decision before a graphical edit or publication drops unattached comments | Implemented and tested in P6b, including history and obsolete consent | P6b complete in review |
 | A4 | Export when closing a read-only session or after a failed recovery write | Implemented and tested in P6d; exact/public bundle, cancellation/failure and obsolete-export checks | P6d complete in review |
 | A5 | Native transaction-recovery and conflict dialogs with export | Storage services exist; native integration pending | P7c |

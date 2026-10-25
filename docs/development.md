@@ -141,6 +141,14 @@ their journal under `.apiforge/local/`. Check, print and simulations use stable
 read-only loads without creating local metadata. All folder CLI commands ignore
 local recovery and last-valid cache, and fail on invalid saved definitions.
 
+The folder window's Project menu opens folders, recent projects, project settings
+and the test environment. Apply keeps public configuration dirty until Save all
+(or a source save that includes it). Save all also works with no source tab and
+does not save another tab merely because configuration changed. Secret values are
+session-only, including in a read-only window; only their names belong to public
+configuration. A proposed configuration that breaks immutable published
+revisions is rejected before replacing the current settings.
+
 ## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).
