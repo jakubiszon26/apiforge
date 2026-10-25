@@ -22,6 +22,8 @@ mod persistence;
 mod preferences;
 mod report;
 mod shapes;
+#[cfg(test)]
+mod testing;
 mod theme;
 mod widgets;
 

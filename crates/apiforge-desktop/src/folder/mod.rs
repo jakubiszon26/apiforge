@@ -389,6 +389,16 @@ impl FolderApp {
         self.session.is_some()
     }
 
+    /// No storage work, opening, departure, close or project switch is in flight.
+    #[cfg(test)]
+    pub(crate) fn is_settled(&self) -> bool {
+        !(self.storage.is_busy()
+            || self.opening
+            || self.persistence.departure
+            || (self.persistence.closing && !self.persistence.close_ready)
+            || (self.switching() && !self.navigation.failed && self.prompt.is_none()))
+    }
+
     fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;

@@ -20,8 +20,14 @@ eframe.workspace = true
 rfd.workspace = true
 image.workspace = true
 
+[features]
+# Serves egui_inspection when EGUI_INSPECTION is set (ADR 0013). Never enabled in releases.
+inspection = ["eframe/inspection"]
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+egui_kittest.workspace = true
+egui_inspection.workspace = true

@@ -1,6 +1,8 @@
 use super::*;
 use crate::buffers::APPLY_DELAY;
 
+#[path = "interaction_tests.rs"]
+mod interaction_tests;
 #[path = "recovery_tests.rs"]
 mod recovery_tests;
 #[path = "storage_tests.rs"]
@@ -64,13 +66,7 @@ fn open(root: &std::path::Path) -> (egui::Context, FolderApp) {
 
 fn wait_storage(app: &mut FolderApp, context: &egui::Context) {
     let deadline = Instant::now() + Duration::from_secs(15);
-    while (app.storage.is_busy()
-        || app.opening
-        || app.persistence.departure
-        || (app.persistence.closing && !app.persistence.close_ready)
-        || (app.switching() && !app.navigation.failed && app.prompt.is_none()))
-        && Instant::now() < deadline
-    {
+    while !app.is_settled() && Instant::now() < deadline {
         frame(app, context, vec![]);
         std::thread::sleep(Duration::from_millis(1));
     }
