@@ -505,9 +505,23 @@ pub fn action_menu(
     button: ActionButton<'_>,
     content: impl FnOnce(&mut Ui),
 ) -> Response {
+    let name = format!("{} menu", button.label.trim_end_matches('…'));
     let response = ui.add(button);
-    egui::Popup::menu(&response).show(content);
+    egui::Popup::menu(&response).show(|ui| {
+        name_menu(ui, &name);
+        content(ui)
+    });
     response
+}
+
+/// Names the open menu or popup whose contents `ui` draws. egui lets its
+/// area take keyboard focus, so it is a focus stop that needs a name.
+pub fn name_menu(ui: &Ui, name: &str) {
+    ui.ctx()
+        .accesskit_node_builder(ui.layer_id().id.with("move"), |node| {
+            node.set_role(egui::accesskit::Role::Menu);
+            node.set_label(name);
+        });
 }
 
 /// Tabs use a thin active indicator instead of looking like action buttons.

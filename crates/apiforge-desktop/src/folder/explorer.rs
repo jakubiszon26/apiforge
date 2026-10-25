@@ -481,6 +481,7 @@ impl FolderApp {
             background.request_focus();
         }
         background.context_menu(|ui| {
+            widgets::name_menu(ui, "Project folder menu");
             ui.add_enabled_ui(writable, |ui| new_items_menu(ui, "", &mut actions));
         });
         for action in actions {
@@ -1055,6 +1056,7 @@ fn explorer_row(
         });
     }
     response.context_menu(|ui| {
+        widgets::name_menu(ui, &format!("{} menu", row.name()));
         actions.push(Action::Select(row.path.clone()));
         match &row.kind {
             RowKind::Document { id, .. } if ui.button("Open").clicked() => {

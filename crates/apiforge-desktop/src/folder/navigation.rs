@@ -154,6 +154,7 @@ impl FolderApp {
     pub(super) fn navigation_menu(&mut self, ui: &mut egui::Ui) {
         let entries = self.navigation.recent.entries.clone();
         ui.menu_button("Project", |ui| {
+            widgets::name_menu(ui, "Project menu");
             if ui.button("Open Folder…").clicked() {
                 ui.close();
                 self.pick_folder();
@@ -198,10 +199,15 @@ impl FolderApp {
         let generation = self.open_generation;
         let (sender, receiver) = std::sync::mpsc::channel();
         let context = self.ui_context.clone();
+        // Projects tend to sit side by side, so the chooser starts next to this
+        // one rather than in a recent-files view that may list nothing.
+        let start = self.root.parent().map(std::path::Path::to_path_buf);
         std::thread::spawn(move || {
-            let path = rfd::FileDialog::new()
-                .set_title("Open project folder")
-                .pick_folder();
+            let mut dialog = rfd::FileDialog::new().set_title("Open project folder");
+            if let Some(start) = start {
+                dialog = dialog.set_directory(start);
+            }
+            let path = dialog.pick_folder();
             let _ = sender.send(Picked::Folder { generation, path });
             context.request_repaint();
         });

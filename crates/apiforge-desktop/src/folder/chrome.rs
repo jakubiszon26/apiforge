@@ -84,6 +84,7 @@ impl FolderApp {
                         self.request_run(id, false);
                     }
                     ui.menu_button("Run options", |ui| {
+                        widgets::name_menu(ui, "Run options menu");
                         if ui.button("Run live requests").clicked() {
                             ui.close();
                             self.request_run(id, true);
@@ -95,6 +96,7 @@ impl FolderApp {
                     });
                 } else {
                     ui.menu_button("Runs", |ui| {
+                        widgets::name_menu(ui, "Runs menu");
                         if ui.button("Review legacy runs").clicked() {
                             ui.close();
                             self.review_legacy_runs();

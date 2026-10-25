@@ -295,3 +295,39 @@ fn tab_indents_in_the_editor_and_escape_then_tab_leaves_it() {
         "the editor is not a keyboard trap"
     );
 }
+
+/// Tabs to the control named `name` and presses Space on it, as a keyboard
+/// user opens a menu.
+fn open_by_keyboard(app: &mut FolderApp, context: &egui::Context, name: &str) {
+    context.memory_mut(|memory| memory.surrender_focus(memory.focused().unwrap_or(egui::Id::NULL)));
+    for _ in 0..40 {
+        if tab_order(app, context, 1)[0] == name {
+            frame(app, context, vec![key(Key::Space, Modifiers::NONE)]);
+            frame(app, context, vec![]);
+            return;
+        }
+    }
+    panic!("Tab never reached {name}");
+}
+
+#[test]
+fn menus_opened_from_the_keyboard_are_named_and_reachable() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    for (button, menu, first) in [
+        ("Project", "Project menu", "Open Folder…"),
+        ("Run options", "Run options menu", "Run live requests"),
+        ("New", "New menu", "New scenario"),
+    ] {
+        open_by_keyboard(&mut app, &context, button);
+        assert_named(button, &mut app, &context);
+        let visited = tab_order(&mut app, &context, 3);
+        assert_eq!(visited[0], menu, "{visited:?}");
+        assert!(
+            visited.iter().any(|name| name.starts_with(first)),
+            "{visited:?}"
+        );
+        frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
+        frame(&mut app, &context, vec![]);
+    }
+}
