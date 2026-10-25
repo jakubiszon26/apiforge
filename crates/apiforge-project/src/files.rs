@@ -478,7 +478,7 @@ impl ProjectSession {
     /// session holding its earlier copy would both reject its own next source
     /// save as a foreign change and reconcile a restored document against a
     /// record the restore had already put back.
-    pub(super) fn adopt_saved_diagram(&mut self) -> Result<()> {
+    fn adopt_saved_diagram(&mut self) -> Result<()> {
         let path = ProjectPath::new(super::DIAGRAM_PATH)?;
         let snapshot = self.store.read(std::slice::from_ref(&path))?;
         self.diagram_saved = snapshot.state(&path).unwrap_or(FileState::Missing);
