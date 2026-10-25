@@ -354,11 +354,12 @@ jobs:
             # Keep the process handle so ExitCode remains available after exit.
             $null = $process.Handle
             $deadline = (Get-Date).AddSeconds(60)
-            $ready = $false
+            # Not $ready: PowerShell names ignore case, so that is the parameter.
+            $owed = $false
             try {
               while ((Get-Date) -lt $deadline) {
                 if (& $Ready) {
-                  $ready = $true
+                  $owed = $true
                   break
                 }
                 if ($process.HasExited) {
@@ -366,7 +367,7 @@ jobs:
                 }
                 Start-Sleep -Seconds 1
               }
-              if ($ready) {
+              if ($owed) {
                 # Let the storage worker finish the commit around those files
                 # before the window is taken away.
                 Start-Sleep -Seconds 3
@@ -383,7 +384,7 @@ jobs:
                 }
               }
             }
-            if (-not $ready) {
+            if (-not $owed) {
               throw "Managed startup ($Label) did not write what it owes within 60 seconds."
             }
           }
