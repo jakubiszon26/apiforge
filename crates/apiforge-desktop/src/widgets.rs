@@ -97,12 +97,24 @@ pub fn name_resize_handle(ctx: &egui::Context, panel: egui::Id, name: &str) {
 }
 
 pub fn field_label(ui: &mut Ui, text: &str) {
+    let _ = field_name(ui, text);
+}
+
+/// The label above a form field; the field is named by it with
+/// `labelled_by(response.id)`.
+pub fn field_name(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add_space(theme::SPACE_SM);
     ui.label(
         RichText::new(text)
             .size(theme::FONT_LABEL)
             .color(theme::MUTED),
-    );
+    )
+}
+
+/// The accessible name of a widget without a visible label.
+pub fn name(ui: &Ui, id: egui::Id, name: &str) {
+    ui.ctx()
+        .accesskit_node_builder(id, |node| node.set_label(name));
 }
 
 /// A titled block of a form.

@@ -457,6 +457,16 @@ impl FolderApp {
         self.session.is_some()
     }
 
+    /// No storage work, opening, departure, close or project switch is in flight.
+    #[cfg(test)]
+    pub(crate) fn is_settled(&self) -> bool {
+        !(self.storage.is_busy()
+            || self.opening
+            || self.persistence.departure
+            || (self.persistence.closing && !self.persistence.close_ready)
+            || (self.switching() && !self.navigation.failed && self.prompt.is_none()))
+    }
+
     fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
@@ -704,11 +714,9 @@ impl FolderApp {
                      project file and keeps existing files as they are.",
                 );
                 ui.add_space(theme::SPACE_MD);
-                widgets::field_label(ui, "Project name");
-                widgets::named(
-                    ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0)),
-                    "Project name",
-                );
+                let label = widgets::field_name(ui, "Project name");
+                ui.add(widgets::text_edit(&mut self.new_name).desired_width(320.0))
+                    .labelled_by(label.id);
                 if !self.survey.is_empty() {
                     ui.add_space(theme::SPACE_MD);
                     widgets::field_label(ui, "Register existing sources");

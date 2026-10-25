@@ -121,15 +121,12 @@ impl FolderApp {
             )
             .inner;
         self.completion_names = Some(completion);
+        widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }
         let offset = output.state.offset.y.max(0.0);
         let outcome = output.inner;
-        widgets::named(
-            outcome.response.clone(),
-            format!("Source of {}", file_name(&snapshot.path)),
-        );
         let Some(session) = self.session.as_mut() else {
             return;
         };

@@ -180,16 +180,24 @@ impl FolderApp {
             if !entries.is_empty() {
                 ui.separator();
                 widgets::caption(ui, "RECENT PROJECTS");
-                for entry in entries {
-                    if ui
-                        .button(&entry.name)
-                        .on_hover_text(entry.path.display().to_string())
-                        .clicked()
-                    {
-                        ui.close();
-                        self.request_switch(entry.path);
-                    }
-                }
+                // Up to RECENT_LIMIT entries: the list scrolls in the space
+                // the window leaves below the menu's own actions.
+                let room = ui.ctx().content_rect().bottom() - ui.cursor().top() - 16.0;
+                egui::ScrollArea::vertical()
+                    .id_salt("recent-projects")
+                    .max_height(room.max(4.0 * theme::CONTROL_HEIGHT))
+                    .show(ui, |ui| {
+                        for entry in entries {
+                            if ui
+                                .button(&entry.name)
+                                .on_hover_text(entry.path.display().to_string())
+                                .clicked()
+                            {
+                                ui.close();
+                                self.request_switch(entry.path);
+                            }
+                        }
+                    });
             }
         });
     }

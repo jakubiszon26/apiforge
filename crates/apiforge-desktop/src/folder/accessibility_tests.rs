@@ -224,7 +224,7 @@ fn tab_visits_the_window_in_reading_order_with_named_stops() {
         "New",
         "Project files",
         "Resize project files",
-        "Source of promotion-and-cart-price.afs",
+        "Contents of promotion-and-cart-price.afs",
     ];
     let mut at = 0;
     for name in expected {

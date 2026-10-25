@@ -211,10 +211,7 @@ impl FolderApp {
                 },
             )
             .inner;
-        widgets::named(
-            output.inner.response.clone(),
-            format!("Text of {}", file_name(&snapshot.path)),
-        );
+        widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }

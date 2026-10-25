@@ -3,7 +3,7 @@ use apiforge_storage::project::FileState;
 use std::{fs, path::Path};
 
 pub(super) const ORIGINAL: &str = "scenario \"Main\" { answer = 1 }\n";
-const INTENDED: &str = "scenario \"Main\" { answer = 3 }\n";
+pub(super) const INTENDED: &str = "scenario \"Main\" { answer = 3 }\n";
 pub(super) const FOREIGN: &str = "scenario \"Main\" { answer = 5 }\n";
 pub(super) const LOCAL: &str = "scenario \"Main\" { answer = 7 }\n";
 
@@ -46,7 +46,7 @@ fn choose(app: &mut FolderApp, context: &egui::Context, label: &str) {
     click(app, context, at);
 }
 
-fn assert_active(root: &Path, active: bool) {
+pub(super) fn assert_active(root: &Path, active: bool) {
     let head: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join(".apiforge/local/head.json")).unwrap()).unwrap();
     assert_eq!(!head["activeTransactionId"].is_null(), active);
