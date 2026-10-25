@@ -40,16 +40,21 @@ impl FolderApp {
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             let title_width = (ui.available_width() - 550.0).clamp(80.0, 320.0);
-            ui.add_sized(
-                [title_width, theme::CONTROL_HEIGHT],
-                egui::Label::new(
-                    RichText::new(name)
-                        .size(theme::FONT_BODY)
-                        .family(egui::FontFamily::Proportional),
-                )
-                .halign(egui::Align::Min)
-                .truncate(),
+            ui.allocate_ui_with_layout(
+                egui::vec2(title_width, theme::CONTROL_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(name)
+                                .size(theme::FONT_BODY)
+                                .family(egui::FontFamily::Proportional),
+                        )
+                        .truncate(),
+                    )
+                },
             )
+            .inner
             .on_hover_text(self.root.display().to_string());
             if read_only {
                 ui.label(
