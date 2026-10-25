@@ -104,8 +104,18 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 Folder projects, with their file explorer and code workspace, are the default
 start and are described in the [folder projects guide](docs/folder-projects.md).
 An existing JSON workspace is migrated once, and `--legacy` opens it instead.
+The legacy JSON mode is being retired: it stays until the folder mode matches
+it feature for feature, then it is removed ([backlog](docs/backlog.md), KTLO-06).
 Windows has not been reviewed: it builds and its tests run in continuous
 integration, but no one has used the application there.
+
+Known regressions of the current default, tracked in the
+[backlog](docs/backlog.md):
+
+- The folder mode has no block palette yet; blocks can only be added through
+  the code view (KTLO-05).
+- Migration can refuse a real workspace with "a scenario differs after
+  reloading" and then opens the legacy window instead (KTLO-03).
 
 - Single user and local only; no collaboration and no hosted runner.
 - Acyclic graphs executed sequentially; no loops, case matrices or scripting.
