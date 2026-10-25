@@ -155,7 +155,7 @@ jobs:
       # projects, and the real one of the runner account is never used.
       - name: Exercise folder projects and managed startup (Linux)
         if: runner.os == 'Linux'
-        timeout-minutes: 6
+        timeout-minutes: 11
         env:
           WGPU_BACKEND: vulkan
           WINIT_UNIX_BACKEND: x11
@@ -280,6 +280,26 @@ jobs:
             --folder "$data/projects/tickets"
           test -s test-results/native-folder.png
 
+          # 5. QA captures (KTLO-08): the migrated demo shop in every mode at
+          # both standard sizes, for QA reports to cite. Xvfb draws at a scale
+          # of one, so each capture must be exactly the size asked for.
+          mkdir -p test-results/qa
+          png_size() {
+            python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(24); print("%dx%d" % struct.unpack(">II", d[16:24]))' "$1"
+          }
+          for mode in code diagram split; do
+            for size in 960x540 1600x1000; do
+              capture="test-results/qa/$mode-$size.png"
+              xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+                timeout --kill-after=5s 45s env XDG_DATA_HOME="$migrated" "$binary" \
+                --screenshot "$capture" --folder "$data/projects/shop" \
+                --mode "$mode" --size "$size"
+              test -s "$capture"
+              test "$(png_size "$capture")" = "$size"
+              echo "captured: $capture"
+            done
+          done
+
       # The same cover on Windows. `dirs::data_dir()` resolves
       # FOLDERID_RoamingAppData through SHGetKnownFolderPath, which ignores
       # %APPDATA%, so `--managed` cannot be pointed at a scratch directory here:
@@ -287,7 +307,7 @@ jobs:
       # instead. Nothing else in the job writes folder projects into it.
       - name: Exercise folder projects and managed startup (Windows)
         if: runner.os == 'Windows'
-        timeout-minutes: 6
+        timeout-minutes: 11
         env:
           WGPU_BACKEND: dx12
         shell: pwsh
@@ -486,6 +506,42 @@ jobs:
             throw 'The folder-window capture is empty.'
           }
 
+          # 5. QA captures (KTLO-08): the migrated demo shop in every mode at
+          # both standard sizes, for QA reports to cite. The runner's display
+          # can be smaller than a window, so a capture of another size is
+          # reported rather than failed.
+          New-Item -ItemType Directory -Force 'test-results/qa' | Out-Null
+          foreach ($mode in @('code', 'diagram', 'split')) {
+            foreach ($size in @('960x540', '1600x1000')) {
+              $capture = "test-results/qa/$mode-$size.png"
+              $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -ArgumentList @(
+                '--screenshot', $capture,
+                '--folder', (Join-Path $projects 'shop'),
+                '--mode', $mode,
+                '--size', $size
+              )
+              $null = $process.Handle
+              if (-not $process.WaitForExit(45000)) {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+                throw "The $mode $size capture exceeded 45 seconds."
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "The $mode $size capture failed with exit code $($process.ExitCode)."
+              }
+              if (-not (Test-Path $capture -PathType Leaf) -or (Get-Item $capture).Length -eq 0) {
+                throw "The $mode $size capture is missing or empty."
+              }
+              # PNG width and height: big-endian at bytes 16 and 20.
+              $bytes = [System.IO.File]::ReadAllBytes($capture)
+              $width = ([int]$bytes[16] -shl 24) + ([int]$bytes[17] -shl 16) + ([int]$bytes[18] -shl 8) + $bytes[19]
+              $height = ([int]$bytes[20] -shl 24) + ([int]$bytes[21] -shl 16) + ([int]$bytes[22] -shl 8) + $bytes[23]
+              if ("${width}x${height}" -ne $size) {
+                Write-Host "::warning::$capture is ${width}x${height}, not $size."
+              }
+              Write-Host "captured: $capture (${width}x${height})"
+            }
+          }
+
       - name: Upload native window captures
         if: always()
         uses: actions/upload-artifact@v4
@@ -494,6 +550,16 @@ jobs:
           path: |
             test-results/native-window.png
             test-results/native-folder.png
+          if-no-files-found: warn
+
+      # KTLO-08: the folder window in each mode at both standard sizes, which
+      # QA reports cite as the evidence of this platform.
+      - name: Upload QA captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-captures-${{ matrix.os }}
+          path: test-results/qa/*.png
           if-no-files-found: warn
 
       # These binaries are build artifacts, not signed production installers.
