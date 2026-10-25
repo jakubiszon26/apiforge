@@ -44,9 +44,10 @@ impl FolderApp {
                 [title_width, theme::CONTROL_HEIGHT],
                 egui::Label::new(
                     RichText::new(name)
-                        .size(theme::FONT_TITLE)
-                        .family(theme::bold_family()),
+                        .size(theme::FONT_BODY)
+                        .family(egui::FontFamily::Proportional),
                 )
+                .halign(egui::Align::Min)
                 .truncate(),
             )
             .on_hover_text(self.root.display().to_string());
