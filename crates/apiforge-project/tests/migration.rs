@@ -375,6 +375,7 @@ fn every_fixture_document_migrates_and_verifies() {
         let outcome = migrate_workspace(&store).unwrap();
         assert_eq!(outcome.catalogue.projects.len(), workspace.projects.len());
         for project in &outcome.catalogue.projects {
+            assert_eq!(fs::read(project.path.join(".gitattributes")).unwrap(), b"*.afs text eol=lf\n/apiforge.project.json text eol=lf\n/.apiforge/diagram.json text eol=lf\n");
             let session = ProjectSession::open(&project.path).unwrap();
             assert!(session.documents().iter().all(|d| !d.is_dirty()));
         }

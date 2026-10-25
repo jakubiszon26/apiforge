@@ -5,6 +5,7 @@
 mod analysis;
 mod context;
 mod document;
+mod git_rules;
 mod layout;
 mod migration;
 mod prepare;

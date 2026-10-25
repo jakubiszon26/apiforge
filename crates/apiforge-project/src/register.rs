@@ -169,6 +169,7 @@ impl ProjectSession {
             bytes: manifest.to_public_bytes()?,
         }];
         changes.extend(ignore_local_data(&store)?);
+        changes.extend(crate::git_rules::lf_attributes(&store)?);
         store.commit(changes)?;
         Self::load(store, placer, 1)
     }
