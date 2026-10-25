@@ -1,7 +1,25 @@
 use super::recovery_tests::{FOREIGN, LOCAL, interrupt, source_project};
 use super::*;
-use eframe::egui::accesskit::{Action, Role};
+use eframe::egui::accesskit::{Action, Node, Role};
 use std::fs;
+
+/// A node's accessible name. AccessKit computes it from the node's own label
+/// or, when the visible label is a separate widget, from the `labelled_by`
+/// relation; a node with the label role carries its text in `value`.
+fn accessible_name(tree: &eframe::egui::accesskit::TreeUpdate, node: &Node) -> Option<String> {
+    if let Some(label) = node.label().filter(|label| !label.trim().is_empty()) {
+        return Some(label.to_owned());
+    }
+    let parts: Vec<String> = node
+        .labelled_by()
+        .iter()
+        .filter_map(|wanted| tree.nodes.iter().find(|(id, _)| id == wanted))
+        .filter_map(|(_, label)| label.value().or_else(|| label.label()))
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
 
 /// Every interactive accessibility node of one frame without a name, as
 /// `role (value)`, at `size`.
@@ -38,7 +56,7 @@ fn unnamed(app: &mut FolderApp, context: &egui::Context, size: egui::Vec2) -> Ve
                     | Role::ListBoxOption
                     | Role::TreeItem
             ) || node.supports_action(Action::Focus))
-                && node.label().is_none_or(|label| label.trim().is_empty())
+                && accessible_name(&tree, node).is_none()
         })
         .map(|(_, node)| {
             format!(
@@ -178,7 +196,7 @@ fn tab_order(app: &mut FolderApp, context: &egui::Context, presses: usize) -> Ve
             .nodes
             .iter()
             .find(|(id, _)| *id == tree.focus && *id != tree.tree.as_ref().map_or(*id, |t| t.root))
-            .map(|(_, node)| node.label().unwrap_or("<unnamed>").to_owned())
+            .map(|(_, node)| accessible_name(&tree, node).unwrap_or_else(|| "<unnamed>".to_owned()))
             .unwrap_or_else(|| "<window>".to_owned());
         visited.push(name);
     }
@@ -224,7 +242,7 @@ fn tab_visits_the_window_in_reading_order_with_named_stops() {
         "New",
         "Project files",
         "Resize project files",
-        "Contents of promotion-and-cart-price.afs",
+        "Contents of scenarios/promotion-and-cart-price.afs",
     ];
     let mut at = 0;
     for name in expected {

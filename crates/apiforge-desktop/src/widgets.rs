@@ -75,7 +75,6 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) {
     );
 }
 
-/// The label above a form field.
 /// Gives a control the accessible name a screen reader announces. A field's
 /// visible label is a separate widget, and a hint or tooltip is not a name.
 pub fn named(response: egui::Response, name: impl Into<String>) -> egui::Response {
