@@ -99,7 +99,7 @@ impl ProjectSession {
         self.texts.iter().find(|file| file.path.as_str() == path)
     }
 
-    fn text_index(&self, path: &str) -> Result<usize> {
+    pub(super) fn text_index(&self, path: &str) -> Result<usize> {
         self.texts
             .iter()
             .position(|file| file.path.as_str() == path)
@@ -339,24 +339,21 @@ impl ProjectSession {
         self.reread_text(index, Origin::SESSION)
     }
 
-    /// Replaces unsaved work with the file on disk, resolving a conflict.
+    /// Resolves immediately against a fresh preview; UI adapters confirm the
+    /// exact preview they displayed through `resolve_conflict` instead.
     pub fn accept_external_text(&mut self, path: &str, origin: Origin) -> Result<()> {
-        let index = self.text_index(path)?;
-        self.reread_text(index, origin)
+        let preview = self.preview_conflict(super::ConflictTarget::Text(path.into()))?;
+        self.resolve_conflict(&preview, super::ConflictDecision::UseDisk, origin)
     }
 
-    /// Keeps the local text of a file deleted outside API Forge; the next save
-    /// recreates it.
+    /// Keeps local text only if the previewed deletion is still on disk.
     pub fn keep_deleted_text(&mut self, path: &str) -> Result<()> {
-        let index = self.text_index(path)?;
-        let file = &mut self.texts[index];
-        if file.conflict != Some(ExternalConflict::Deleted) {
-            return Err(Error::UnknownTextFile);
-        }
-        file.conflict = None;
-        file.saved = FileState::Missing;
-        file.saved_text = None;
-        Ok(())
+        let preview = self.preview_conflict(super::ConflictTarget::Text(path.into()))?;
+        self.resolve_conflict(
+            &preview,
+            super::ConflictDecision::KeepDeleted,
+            Origin::SESSION,
+        )
     }
 
     /// Paths of unsaved text held in recovery for files that are not open.
@@ -418,7 +415,7 @@ impl ProjectSession {
         );
     }
 
-    fn drop_text_draft(&mut self, path: &str) {
+    pub(super) fn drop_text_draft(&mut self, path: &str) {
         self.recovery
             .held_texts
             .retain(|draft| draft.path.as_str() != path);

@@ -19,10 +19,11 @@ pub use migration::{
 };
 pub use prepare::prepare_project;
 pub use session::{
-    Declaration, DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck,
-    ExternalConflict, ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin,
-    PreparedRun, ProjectSession, Published, Registration, RegistryState, SaveOutcome, SourceSurvey,
-    TextFileSession, declaration, rename_handle,
+    ConflictDecision, ConflictPreview, ConflictTarget, Declaration, DeletePreview, DraftStatus,
+    Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome,
+    ImportCandidate, ImportItem, ObservedFile, Origin, PreparedRun, ProjectSession, Published,
+    Registration, RegistryState, SaveOutcome, SourceSurvey, TextFileSession, declaration,
+    rename_handle,
 };
 
 pub use apiforge_script::Document;
@@ -94,6 +95,8 @@ pub enum Error {
     HandleCollision(String),
     #[error("The file changed outside API Forge; reload it or export your version first.")]
     ExternalConflict,
+    #[error("The conflict candidates changed; review a fresh preview before deciding.")]
+    StaleConflict,
     #[error("The project registry changed outside API Forge; reload the project first.")]
     RegistryChanged,
     #[error(transparent)]

@@ -15,6 +15,9 @@ use std::{path::Path, sync::Arc};
 
 #[path = "comments.rs"]
 mod comments;
+#[path = "conflicts.rs"]
+mod conflicts;
+pub use conflicts::{ConflictDecision, ConflictPreview, ConflictTarget};
 #[path = "execution.rs"]
 mod execution;
 #[path = "external.rs"]

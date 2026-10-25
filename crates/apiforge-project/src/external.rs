@@ -311,42 +311,21 @@ impl ProjectSession {
         Ok(outcome)
     }
 
-    /// Replaces unsaved work with the file on disk, resolving a conflict.
+    /// Resolves immediately against a fresh preview. UI adapters should retain
+    /// and confirm their displayed `ConflictPreview` with `resolve_conflict`.
     pub fn accept_external(&mut self, document_id: &str, origin: Origin) -> Result<()> {
-        let index = self.index(document_id)?;
-        self.require_no_held_draft(document_id)?;
-        let path = self.documents[index].entry.path.clone();
-        let observed = match self.store.read(std::slice::from_ref(&path)) {
-            Ok(mut snapshot) => snapshot
-                .files
-                .remove(&path)
-                .flatten()
-                .map_or(ObservedFile::Missing, ObservedFile::Bytes),
-            Err(ProjectError::Limit) => {
-                ObservedFile::TooLarge(self.store.file_state(&path).unwrap_or(FileState::Missing))
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let document = &mut self.documents[index];
-        document.layout_dirty = false;
-        document.fields.clear();
-        document.history = Default::default();
-        self.follow_disk(index, observed, origin)
+        let preview = self.preview_conflict(super::ConflictTarget::Document(document_id.into()))?;
+        self.resolve_conflict(&preview, super::ConflictDecision::UseDisk, origin)
     }
 
-    /// Keeps unsaved work over a deleted file: the next save recreates it.
-    /// A changed file is never overwritten this way.
+    /// Keeps local work only if the previewed deletion is still on disk.
     pub fn keep_deleted(&mut self, document_id: &str) -> Result<()> {
-        let index = self.index(document_id)?;
-        if self.documents[index].conflict != Some(ExternalConflict::Deleted) {
-            return Err(Error::ExternalConflict);
-        }
-        let document = &mut self.documents[index];
-        document.saved = FileState::Missing;
-        document.conflict = None;
-        let id = document.entry.document_id.clone();
-        self.emit(Origin::SESSION, Some(&id), EventKind::ExternalConflict);
-        Ok(())
+        let preview = self.preview_conflict(super::ConflictTarget::Document(document_id.into()))?;
+        self.resolve_conflict(
+            &preview,
+            super::ConflictDecision::KeepDeleted,
+            Origin::SESSION,
+        )
     }
 
     /// Rereads the whole project after an external registry change, keeping
@@ -434,7 +413,12 @@ impl ProjectSession {
     }
 
     /// Adopts the observed file as the saved and current source.
-    fn follow_disk(&mut self, index: usize, observed: ObservedFile, origin: Origin) -> Result<()> {
+    pub(super) fn follow_disk(
+        &mut self,
+        index: usize,
+        observed: ObservedFile,
+        origin: Origin,
+    ) -> Result<()> {
         let document = &mut self.documents[index];
         document.conflict = None;
         document.diagnostics.clear();

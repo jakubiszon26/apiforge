@@ -127,7 +127,9 @@ impl DocumentSession {
     }
     /// Graph mutations are allowed only on a model derived from current source.
     pub fn accepts_model_edits(&self) -> bool {
-        self.unavailable.is_none() && self.model_state() == ModelState::Current
+        self.unavailable.is_none()
+            && self.conflict.is_none()
+            && self.model_state() == ModelState::Current
     }
     pub fn can_undo(&self) -> bool {
         self.accepts_model_edits() && !self.history.undo.is_empty()
