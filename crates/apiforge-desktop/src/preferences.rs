@@ -128,6 +128,15 @@ impl Preferences {
     }
 }
 
+/// Tests never read the developer's own preferences: a suite whose result
+/// depends on the machine it runs on measures nothing. The tests that cover
+/// persistence pass an explicit path instead.
+#[cfg(test)]
+fn default_path() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(test))]
 fn default_path() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("apiforge/preferences.json"))
 }
