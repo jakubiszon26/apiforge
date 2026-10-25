@@ -1,7 +1,9 @@
 # KTLO-05a: Block library beside the board in the folder mode
 
 - Size: S (analysis) · Owner review: 20 min · Risk: `visible UI`
-- State: Awaiting owner decision
+- State: Approved 2026-10-25 — option A; the *Examples* entry is left out of
+  the folder panel; scenario navigation in Diagram mode is a separate ticket
+  after KTLO. KTLO-05b implements the acceptance criteria below
 - Analysis model: Fable · Implementation model: — (KTLO-05b: Opus 5.5)
 - Mock-up branch: `mock/ktlo-05a-library` (throwaway; deleted after the decision)
 
