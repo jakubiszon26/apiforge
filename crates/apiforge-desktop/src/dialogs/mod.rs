@@ -202,10 +202,11 @@ impl Chrome<'_> {
             ui.separator();
             ui.add_space(4.0);
             let ready = can_apply(state);
+            if let Some(note) = self.note {
+                widgets::hint(ui, note);
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
-                if let Some(note) = self.note {
-                    widgets::hint(ui, note);
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_enabled(ready, widgets::primary_button(self.apply_label))

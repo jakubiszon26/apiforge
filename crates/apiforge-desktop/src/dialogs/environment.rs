@@ -354,7 +354,7 @@ impl EnvironmentDialog {
         let mut add = false;
         ui.push_id(("add", label), |ui| {
             ui.horizontal(|ui| {
-                let width = ui.available_width() - 120.0;
+                let width = (ui.available_width() - 150.0).max(80.0);
                 let field = super::text_field(ui, &mut name, hint, width, typed && error.is_some());
                 let clicked = ui
                     .add_enabled(error.is_none(), widgets::action(Icon::Plus, label))
