@@ -74,6 +74,11 @@ fn native_conflict_decision_requires_refresh_after_another_foreign_change() {
     choose(&mut app, &context, "Use version on disk");
     assert_eq!(text(&app, &id), latest);
     assert!(app.prompt.is_none());
+    assert!(
+        app.notice
+            .as_ref()
+            .is_some_and(|notice| !notice.error && notice.text.contains("reviewed version"))
+    );
 }
 
 #[test]

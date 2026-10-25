@@ -213,6 +213,10 @@ impl FolderApp {
                             ..Default::default()
                         });
                         self.watcher.rescan();
+                        self.notify(
+                            "Recovered the file operation and reloaded the project.",
+                            false,
+                        );
                         return None;
                     }
                     Err(error) => {

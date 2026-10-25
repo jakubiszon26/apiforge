@@ -137,6 +137,16 @@ impl FolderApp {
                     self.reload_field_drafts();
                     self.touched();
                     self.watcher.rescan();
+                    self.notify(
+                        if decision == ConflictDecision::KeepDeleted {
+                            "Kept your version. Use Save to recreate the file."
+                        } else if preview.is_deleted() {
+                            "Accepted the file deletion."
+                        } else {
+                            "Loaded the reviewed version on disk."
+                        },
+                        false,
+                    );
                     return None;
                 }
                 Err(error) => view.error = Some(error.to_string()),
