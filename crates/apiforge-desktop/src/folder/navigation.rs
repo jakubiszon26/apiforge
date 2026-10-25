@@ -335,6 +335,11 @@ impl FolderApp {
         self.persistence.approved_export = None;
         self.persistence.departure_generation += 1;
         self.runs.exporting = false;
+        // A refusal belongs to the attempt being abandoned. Protecting work
+        // can be attempted more than once before its dialog appears, so one
+        // can still be waiting; reporting it against the next departure would
+        // refuse that one for a cause the user has since dealt with.
+        self.close_error = None;
         self.watcher.resume();
     }
 
