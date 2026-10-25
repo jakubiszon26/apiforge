@@ -83,9 +83,11 @@ cargo run -p apiforge-script --example fuzz_semantics --release --locked -- 60 2
 formatting idempotence. `fuzz_semantics` mutates generated scenario graphs and checks
 that every successful lowering prints, round-trips, prints identically and reconciles.
 
-The egui tests lay out the interface without a GPU; they do not test the native
-backend. Changes to the interface are also reviewed in the running application,
-including the minimum supported window of 960 × 540.
+Changes to the interface follow [GUI testing](gui-testing.md): interaction tests
+through named widgets, measurable layout assertions and a design review of the
+views the change touches, at the minimum supported window of 960 × 540 and larger.
+These run without a display or GPU and do not test the native backend; native
+checks remain where a change or its plan requires them.
 
 ## Fixtures
 
