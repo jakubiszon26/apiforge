@@ -293,3 +293,29 @@ first save settle it.
 `a_registered_or_imported_document_keeps_its_block_identities_when_the_project_is_reopened`
 in `crates/apiforge-project/tests/acceptance.rs` states the contract and is
 ignored until this is decided.
+
+## A real workspace that migration refuses
+
+- Recorded: 2026-10-25
+- Status: open; startup falls back rather than stranding the session
+
+Migration verifies every prepared project by reloading it through the new
+loader and comparing it with the workspace it came from. On a real six-project
+workspace it rejected one project with
+`Verification { project_id, reason: "a scenario differs after reloading" }`,
+so no catalogue was activated and the four already-prepared projects stayed in
+staging. The originals were untouched, as the design requires.
+
+What differs has not been isolated. The obvious comparison — lowering the
+printed source and diffing it against the original — proves nothing, because
+the format deliberately keeps node identities and positions out of code
+(ADR 0004) and restores them from the shared checkpoint. The difference must
+therefore be in what the checkpoint restores, which makes
+[identity checkpoints at registration and import](#identity-checkpoints-at-registration-and-import)
+a candidate: a document whose identities were never sealed is given fresh ones
+on reload, which is exactly what verification would reject.
+
+Until it is understood, startup treats a failed migration as a reason to open
+the previous workspace window rather than to show an error with no way back.
+Reproduce with a workspace in an application data directory and no catalogue:
+the reason is printed to standard error before the workspace window opens.

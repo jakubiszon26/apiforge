@@ -42,13 +42,16 @@ use std::{
 
 #[derive(Debug, PartialEq)]
 enum Arguments {
-    /// The user's workspace, or a document opened for this session only.
-    Window(Option<PathBuf>),
+    /// A document opened for this session only, which is never written back.
+    Window(PathBuf),
     /// A folder project, opened explicitly.
     Folder(PathBuf),
     /// Whatever the application data directory holds, migrating or creating a
-    /// folder project as needed.
+    /// folder project as needed. This is what starting without arguments does.
     Managed,
+    /// The saved JSON workspace, for a session that wants the previous
+    /// application after folder projects became the default.
+    Legacy,
     Check(PathBuf),
     SmokeTest(PathBuf),
     /// Captures the window; without a project the demo workspace is shown.
@@ -66,11 +69,12 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
     let first = values.next();
     let mut path = |message| values.next().map(PathBuf::from).ok_or(message);
     let result = match first.as_ref().map(|value| value.to_str()) {
-        None => Arguments::Window(None),
+        None => Arguments::Managed,
         Some(Some("--help" | "-h")) => Arguments::Help,
-        Some(Some("--project")) => Arguments::Window(Some(path("Missing file path")?)),
+        Some(Some("--project")) => Arguments::Window(path("Missing file path")?),
         Some(Some("--folder")) => Arguments::Folder(path("Missing folder path")?),
         Some(Some("--managed")) => Arguments::Managed,
+        Some(Some("--legacy")) => Arguments::Legacy,
         Some(Some("--smoke-test")) => Arguments::SmokeTest(path("Missing file path")?),
         Some(Some("--check")) => Arguments::Check(path("Missing file path")?),
         Some(Some("--screenshot")) => {
@@ -135,10 +139,11 @@ fn managed_opening() -> Result<Opening, String> {
 
 const HELP: &str = "API Forge
 
-  apiforge-desktop                      open your workspace (saved automatically)
+  apiforge-desktop                      open your projects (saved automatically)
   apiforge-desktop --project FILE       open a project or workspace for this session only
-  apiforge-desktop --folder PATH        open a folder project (in development)
-  apiforge-desktop --managed            open your folder projects, migrating once (in development)
+  apiforge-desktop --folder PATH        open one folder project
+  apiforge-desktop --managed            the same as no arguments, stated explicitly
+  apiforge-desktop --legacy             open the previous JSON workspace instead
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
   apiforge-desktop --screenshot OUT.png [--project FILE | --folder PATH] [--select NODE]
@@ -172,14 +177,14 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Arguments::Window(None) => match WorkspaceStore::default_location() {
+        Arguments::Legacy => match WorkspaceStore::default_location() {
             Ok(store) => run_window(Opening::Workspace(app::Source::Storage(store)), Probe::None),
             Err(error) => {
                 eprintln!("{error}");
                 ExitCode::FAILURE
             }
         },
-        Arguments::Window(Some(path)) => session(&path, Probe::None),
+        Arguments::Window(path) => session(&path, Probe::None),
         Arguments::Folder(path) => run_window(Opening::Folder(path), Probe::None),
         Arguments::Managed => match managed_opening() {
             Ok(opening) => run_window(opening, Probe::None),
@@ -435,7 +440,11 @@ mod tests {
 
     #[test]
     fn arguments_are_explicit_and_reject_ambiguous_input() {
-        assert_eq!(parse(&[]), Ok(Arguments::Window(None)));
+        // Starting with no arguments is managed startup: folder projects are
+        // the application, and the JSON workspace is what `--legacy` asks for.
+        assert_eq!(parse(&[]), Ok(Arguments::Managed));
+        assert_eq!(parse(&["--legacy"]), Ok(Arguments::Legacy));
+        assert!(parse(&["--legacy", "somewhere"]).is_err());
         assert_eq!(
             parse(&["--check", "a b.json"]),
             Ok(Arguments::Check("a b.json".into()))
@@ -452,7 +461,6 @@ mod tests {
         // or nothing, and it is not the default.
         assert_eq!(parse(&["--managed"]), Ok(Arguments::Managed));
         assert!(parse(&["--managed", "somewhere"]).is_err());
-        assert_ne!(parse(&[]), Ok(Arguments::Managed));
         assert!(
             parse(&[
                 "--screenshot",

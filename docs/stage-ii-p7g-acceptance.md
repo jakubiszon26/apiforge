@@ -7,7 +7,8 @@
   creating a managed folder project. No change to the default start
 - Result: implemented and verified on Linux, and exercised on both platforms by
   continuous integration; Windows QA and Windows directory durability remain
-  release gates, and the default start still opens the legacy workspace
+  release gates. The default start was flipped to managed startup after this
+  package, with `--legacy` retained
 
 ## Implemented contracts
 
@@ -88,9 +89,12 @@ if it already holds a workspace or projects.
   Windows. Nor does a CI job observe directory durability: the runner does not
   lose power, so a missing directory sync would pass every run. Both remain
   release gates before the default start can change.
-- **The default start.** `apiforge-desktop` with no arguments opens the legacy
-  workspace, unchanged. Managed startup is reachable through `--managed` only.
-  Flipping it is a change to the `Arguments::Window(None)` arm in
-  `crates/apiforge-desktop/src/main.rs`, and belongs to the release that closes
-  the Windows gates, not to this package.
+- **The default start was flipped after this package.** `apiforge-desktop` with
+  no arguments is now managed startup; `--legacy` opens the previous JSON
+  workspace. The Windows gates above were not closed first: the decision was to
+  let the only platform in use benefit now and to treat Windows as a gate on
+  shipping to Windows rather than on the default here. Migration therefore moved
+  from the storage worker to the pre-window decision, because a window cannot
+  change which application it runs, and a failed migration must be able to open
+  the workspace window instead of stranding the session.
 - No screen-reader session has been run against the managed start.

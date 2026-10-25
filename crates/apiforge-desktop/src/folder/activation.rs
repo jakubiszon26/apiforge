@@ -43,13 +43,14 @@ pub(super) struct Activated {
     pub known: Vec<navigation::Recent>,
 }
 
-/// Whether managed startup can proceed, decided without doing any of its work.
+/// Whether managed startup can proceed, and the migration it needs first.
 ///
-/// The slow part belongs on the storage worker, but two conditions have to be
-/// answered before a window exists, because the answer is that the legacy
-/// window should open instead and only it can resolve them: another window
-/// already owns the workspace, or the workspace needs an explicit backup
-/// decision that migration refuses to guess at.
+/// Opening a project is the window's own asynchronous work. Migrating a legacy
+/// workspace is not: it happens once in the life of an installation, and if it
+/// fails the answer is that the workspace window should open instead. A window
+/// cannot change which application it is running once it exists, so that has to
+/// be known before one is built, and a migration that leaves the user with an
+/// error screen and no way back is worse than one that makes them wait.
 pub enum Start {
     /// Managed startup; the slow work runs in the folder window.
     Managed,
@@ -73,16 +74,33 @@ pub fn decide(data: &Path) -> Start {
         // Anything else is the legacy window's own error to explain.
         Err(error) => return Start::Legacy(Some(error.to_string())),
     };
-    let decision = match store.load() {
+    let ready = match store.load() {
         Ok(Some(loaded)) if loaded.recovered.is_some() => {
-            Start::Legacy(Some(MigrationError::WorkspaceRecoveryRequired.to_string()))
+            Err(MigrationError::WorkspaceRecoveryRequired.to_string())
         }
         Ok(_) => match store.load_drafts() {
-            Ok(None) => Start::Managed,
-            Ok(Some(drafts)) if !drafts.recovered => Start::Managed,
-            _ => Start::Legacy(Some(MigrationError::DraftsUnreadable.to_string())),
+            Ok(None) => Ok(()),
+            Ok(Some(drafts)) if !drafts.recovered => Ok(()),
+            _ => Err(MigrationError::DraftsUnreadable.to_string()),
         },
-        Err(error) => Start::Legacy(Some(error.to_string())),
+        Err(error) => Err(error.to_string()),
+    };
+    let decision = match ready {
+        Err(reason) => Start::Legacy(Some(reason)),
+        // Migrating here rather than on the worker, so that a workspace which
+        // cannot be migrated still opens the window that can work with it.
+        // A migration that succeeded leaves a catalogue, so every later start
+        // takes the fast path and reads it instead.
+        Ok(()) => match migrate_workspace(&store) {
+            Ok(_) => Start::Managed,
+            Err(apiforge_project::Error::Migration(MigrationError::InputsChanged)) => {
+                match migrate_workspace(&store) {
+                    Ok(_) => Start::Managed,
+                    Err(error) => Start::Legacy(Some(error.to_string())),
+                }
+            }
+            Err(error) => Start::Legacy(Some(error.to_string())),
+        },
     };
     // The worker takes the lock again for the work itself; holding it here
     // across window creation would keep it for the whole session.

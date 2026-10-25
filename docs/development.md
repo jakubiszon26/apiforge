@@ -17,14 +17,15 @@ cargo run -p apiforge-desktop --locked -- --check fixtures/workspace.json
 ```
 
 `--project` opens a document in a session that does not touch the saved workspace.
-`--folder <path>` opens a folder project in development (Stage II): Code, Diagram
+`--folder <path>` opens one folder project by path: Code, Diagram
 and Split over the project's `.afs` sources, with an explorer of the folder and
 external changes followed once a second. A folder without a project is written
 only after choosing Initialise, which can register its existing sources. `--screenshot OUT.png --folder <path>` captures it.
-`--managed` starts from the application data directory instead of a named folder
-(Stage II): it opens the project recorded there, migrates a legacy workspace the
-first time, or creates one project if the directory holds neither. It is not the
-default start; without it the saved JSON workspace opens as before.
+Starting with no arguments works from the application data directory: it opens
+the project recorded there, migrates a legacy workspace the first time, or
+creates one project if the directory holds neither. `--managed` asks for the
+same thing explicitly. A migration that fails reports why and opens the previous
+workspace window instead, which `--legacy` also does on request.
 `--check` validates a document without a window: exit code 0 for a valid document, 1
 for a document or read error and 2 for invalid arguments. Diagnostics never print
 field or secret values. Imports are limited to 16 MiB and perform no HTTP requests.

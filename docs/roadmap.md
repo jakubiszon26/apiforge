@@ -6,10 +6,10 @@
 
 Folder-project delivery is tracked by
 [Stage II: folder projects and the code workspace](stage-ii-code-workspace.md).
-P1–P5 are merged; P6a–P6d and P7a–P7g are implemented on separate review
-branches, including explicit `--folder` CLI/desktop integration and `--managed`
-startup. P8 aligned their documentation. Startup activation is implemented but
-not the default: the Windows release gates decide when it becomes one.
+P1–P7g are merged. Folder projects are the default start, with `--legacy` for
+the previous JSON workspace, and the folder CLI is available behind `--folder`.
+Windows QA and Windows directory durability remain release gates for shipping to
+Windows.
 This roadmap retains the JSON-backed milestones; folder amendments are in ADRs
 0010–0012. Stage II does not complete M7's general editor features.
 

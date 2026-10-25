@@ -1,6 +1,6 @@
 # Stage II: folder projects and the code workspace
 
-- Status: P1–P7g complete and merged to `main` after a cross-package acceptance suite; the default start still opens the legacy JSON workspace, and the Windows release gates remain open. One identity defect at registration and import is recorded below as an open decision
+- Status: P1–P7g complete and merged to `main`; folder projects are the default start, with `--legacy` for the previous JSON workspace. Windows QA and Windows directory durability remain open, and one real workspace is refused by migration; both are recorded in the review notes
 - Date: 2026-10-24
 - Historical analysis baseline: `d967a79`; initial implementation baseline: `c9c5ba0`. Later package bases are recorded below.
 - Delivery: one branch per package from current `main` or a required unmerged predecessor; a human merges after review. P6 and P8 review branches do not imply a merge to `main`.
@@ -245,10 +245,10 @@ package uses a separate branch from the latest `main`, or from the tip of an
 unmerged predecessor it requires. Record that dependency/base in its final docs
 commit, together with implementation, limits and verification. Push the branch;
 merging belongs to human review. Folder CLI commands become available behind
-`--folder` with P6c, and managed startup behind `--managed` with P7g. P7g passed
-its integration gates on Linux, so what remains before either becomes the default
-start is the Windows release QA and directory durability that no Linux evidence
-can close. Continuous integration now runs folder projects and managed startup
+`--folder` with P6c, and managed startup with P7g. Folder projects became the
+default start once P7g passed its integration gates on Linux; the Windows release
+QA and directory durability that no Linux evidence can close remain open, and are
+tracked as release gates rather than as blockers of the default. Continuous integration now runs folder projects and managed startup
 on `windows-2022` as well, asserting the layout that migration and creation
 write and that the original workspace stays byte-identical. Interactive native
 QA and durability are a different kind of evidence; neither is closed by it.

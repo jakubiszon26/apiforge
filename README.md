@@ -101,11 +101,11 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 
 ## Limitations
 
-Folder projects, with their file explorer and code workspace, open with `--folder`
-and are described in the [folder projects guide](docs/folder-projects.md). They are
-not yet the default start: automatic migration of an existing workspace waits for
-the last package of the [Stage II implementation plan](docs/stage-ii-code-workspace.md),
-and Windows has not been reviewed.
+Folder projects, with their file explorer and code workspace, are the default
+start and are described in the [folder projects guide](docs/folder-projects.md).
+An existing JSON workspace is migrated once, and `--legacy` opens it instead.
+Windows has not been reviewed: it builds and its tests run in continuous
+integration, but no one has used the application there.
 
 - Single user and local only; no collaboration and no hosted runner.
 - Acyclic graphs executed sequentially; no loops, case matrices or scripting.
