@@ -116,6 +116,7 @@ impl FolderApp {
                 },
             )
             .inner;
+        widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }

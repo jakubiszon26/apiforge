@@ -306,8 +306,8 @@ fn labelled_field(
     hint: &str,
     error: Option<&str>,
 ) -> egui::Response {
-    widgets::field_label(ui, label);
-    let response = text_field(ui, text, hint, f32::INFINITY, error.is_some());
+    let label = widgets::field_name(ui, label);
+    let response = text_field(ui, text, hint, f32::INFINITY, error.is_some()).labelled_by(label.id);
     if let Some(error) = error {
         widgets::field_error(ui, error);
     }

@@ -637,8 +637,9 @@ impl FolderApp {
                      project file and keeps existing files as they are.",
                 );
                 ui.add_space(theme::SPACE_MD);
-                widgets::field_label(ui, "Project name");
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).desired_width(320.0));
+                let label = widgets::field_name(ui, "Project name");
+                ui.add(widgets::text_edit(&mut self.new_name).desired_width(320.0))
+                    .labelled_by(label.id);
                 if !self.survey.is_empty() {
                     ui.add_space(theme::SPACE_MD);
                     widgets::field_label(ui, "Register existing sources");
