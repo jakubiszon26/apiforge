@@ -24,6 +24,9 @@ end to end once. No new features. Exit criteria:
 - [ ] The process documents were followed once end to end, and amended where
       the pilot required it.
 - [ ] The regression smoke list has run on Linux and on Windows (KTLO-07, #10).
+- [ ] The two interface findings the owner raised on the mock-ups — one header
+      above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
+      #17) — are accepted through the same mock-up → test → report path.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -42,6 +45,8 @@ work does not start.
 | [#11](https://github.com/jakubiszon26/apiforge/issues/11) | KTLO-08 CI uploads QA captures per platform; [ticket](tickets/KTLO-08.md) | S · 10 min; actual 471 lines (M), 1 round |
 | [#12](https://github.com/jakubiszon26/apiforge/issues/12) | KTLO-09 Orphaned code audit | S · 10 min |
 | [#13](https://github.com/jakubiszon26/apiforge/issues/13) | KTLO-10 KTLO retrospective | S (docs) · 30 min |
+| [#16](https://github.com/jakubiszon26/apiforge/issues/16) | KTLO-12 One header above the board: title and Main/Cleanup beside Add step | S · 15 min · `visible UI` |
+| [#17](https://github.com/jakubiszon26/apiforge/issues/17) | KTLO-13 The code editor fills its panel without a bordered box | S · 15 min · `visible UI` |
 
 ## Later
 
