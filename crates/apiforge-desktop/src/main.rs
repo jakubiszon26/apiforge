@@ -60,6 +60,10 @@ enum Arguments {
         project: Option<PathBuf>,
         folder: Option<PathBuf>,
         select: Option<String>,
+        /// The folder window's mode; without it, the one the folder restores.
+        mode: Option<folder::Mode>,
+        /// The window's inner size in logical points, width and height.
+        size: Option<(u32, u32)>,
     },
     Help,
 }
@@ -103,6 +107,8 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
                 project,
                 folder,
                 select,
+                mode: None,
+                size: None,
             }
         }
         _ => return Err("Unknown argument; use --help"),
@@ -472,5 +478,142 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    fn screenshot(
+        folder: Option<&str>,
+        project: Option<&str>,
+        mode: Option<folder::Mode>,
+        size: Option<(u32, u32)>,
+    ) -> Arguments {
+        Arguments::Screenshot {
+            output: "a.png".into(),
+            project: project.map(PathBuf::from),
+            folder: folder.map(PathBuf::from),
+            select: None,
+            mode,
+            size,
+        }
+    }
+
+    /// KTLO-08: QA captures of the folder window in each mode at both
+    /// standard sizes.
+    #[test]
+    fn screenshot_takes_a_folder_mode_and_a_window_size() {
+        use folder::Mode;
+        for (word, mode) in [
+            ("code", Mode::Code),
+            ("diagram", Mode::Diagram),
+            ("split", Mode::Split),
+        ] {
+            for (text, size) in [("960x540", (960, 540)), ("1600x1000", (1600, 1000))] {
+                assert_eq!(
+                    parse(&[
+                        "--screenshot",
+                        "a.png",
+                        "--folder",
+                        "p",
+                        "--mode",
+                        word,
+                        "--size",
+                        text
+                    ]),
+                    Ok(screenshot(Some("p"), None, Some(mode), Some(size)))
+                );
+            }
+        }
+        // Options come in any order, and each one stays optional.
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--size",
+                "960x540",
+                "--mode",
+                "split",
+                "--folder",
+                "p"
+            ]),
+            Ok(screenshot(
+                Some("p"),
+                None,
+                Some(Mode::Split),
+                Some((960, 540))
+            ))
+        );
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--folder",
+                "p",
+                "--mode",
+                "diagram"
+            ]),
+            Ok(screenshot(Some("p"), None, Some(Mode::Diagram), None))
+        );
+        // Without either option nothing changes: the folder's own mode, the
+        // usual window.
+        assert_eq!(
+            parse(&["--screenshot", "a.png", "--folder", "p"]),
+            Ok(screenshot(Some("p"), None, None, None))
+        );
+        // The legacy window has a size but no modes.
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--project",
+                "x.json",
+                "--size",
+                "960x540"
+            ]),
+            Ok(screenshot(None, Some("x.json"), None, Some((960, 540))))
+        );
+    }
+
+    #[test]
+    fn screenshot_rejects_a_mode_without_a_folder_and_a_malformed_size() {
+        for legacy in [
+            &[
+                "--screenshot",
+                "a.png",
+                "--project",
+                "x.json",
+                "--mode",
+                "code",
+            ][..],
+            &["--screenshot", "a.png", "--mode", "split"][..],
+        ] {
+            let error = parse(legacy).expect_err("the legacy window has no modes");
+            assert!(
+                error.contains("--mode") && error.contains("--folder"),
+                "the error says --mode needs --folder: {error}"
+            );
+        }
+        for mode in ["Code", "board", ""] {
+            assert!(
+                parse(&["--screenshot", "a.png", "--folder", "p", "--mode", mode]).is_err(),
+                "{mode:?} is not a mode"
+            );
+        }
+        assert!(parse(&["--screenshot", "a.png", "--folder", "p", "--mode"]).is_err());
+        for size in [
+            "960",
+            "960x",
+            "x540",
+            "960x540x2",
+            "wxh",
+            "-960x540",
+            "960 x 540",
+            "0x0",
+            // Below the window's minimum the capture would not have that size.
+            "959x540",
+            "960x539",
+        ] {
+            let error =
+                parse(&["--screenshot", "a.png", "--folder", "p", "--size", size]).expect_err(size);
+            assert!(error.contains("--size"), "the error names --size: {error}");
+        }
     }
 }

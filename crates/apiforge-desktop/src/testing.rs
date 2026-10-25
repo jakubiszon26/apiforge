@@ -1,7 +1,7 @@
 //! Shared harnesses for interface tests, design review captures and the
 //! headless inspection host (ADR 0013, docs/gui-testing.md).
 use crate::app::{App, Source, default_workspace};
-use crate::folder::FolderApp;
+use crate::folder::{FolderApp, Mode};
 use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
@@ -32,6 +32,20 @@ pub fn folder_harness(root: &Path, size: egui::Vec2) -> FolderHarness {
 }
 
 pub fn folder_harness_scaled(root: &Path, size: egui::Vec2, scale: f32) -> FolderHarness {
+    folder_harness_with(root, size, scale, None)
+}
+
+/// The folder window asked for a mode at startup, as `--screenshot --mode` asks.
+pub fn folder_harness_in(root: &Path, size: egui::Vec2, mode: Mode) -> FolderHarness {
+    folder_harness_with(root, size, 1.0, Some(mode))
+}
+
+fn folder_harness_with(
+    root: &Path,
+    size: egui::Vec2,
+    scale: f32,
+    mode: Option<Mode>,
+) -> FolderHarness {
     // The builder draws one frame before the application exists.
     let mut harness = Harness::builder()
         .with_size(size)
@@ -46,7 +60,11 @@ pub fn folder_harness_scaled(root: &Path, size: egui::Vec2, scale: f32) -> Folde
         );
     // The application keeps its context, so it must be the harness's own.
     let context = harness.ctx.clone();
-    *harness.state_mut() = Some(FolderApp::open(&context, root.to_owned()));
+    let mut app = FolderApp::open(&context, root.to_owned());
+    if let Some(mode) = mode {
+        app.request_mode(mode);
+    }
+    *harness.state_mut() = Some(app);
     settle(&mut harness);
     harness
 }

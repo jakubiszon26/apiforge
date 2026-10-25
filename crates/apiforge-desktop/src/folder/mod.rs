@@ -65,7 +65,8 @@ use std::{
     time::{Duration, Instant},
 };
 use watcher::Watcher;
-use workbench::{Mode, Workbench};
+pub use workbench::Mode;
+use workbench::Workbench;
 
 /// Edits typed into the code view; the view recognises its own changes.
 const CODE: Origin = Origin(1);
@@ -454,6 +455,10 @@ impl FolderApp {
             .collect();
         inspector::drafts::restore_entries(&self.ui_context, fields);
     }
+
+    /// Shows `mode` once the project is open instead of the folder's own,
+    /// for `--screenshot --mode` (KTLO-08).
+    pub fn request_mode(&mut self, _mode: Mode) {}
 
     pub fn has_document(&self) -> bool {
         self.session.is_some()
