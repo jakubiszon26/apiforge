@@ -112,8 +112,9 @@ integration, but no one has used the application there.
 Known regressions of the current default, tracked in the
 [backlog](docs/backlog.md):
 
-- The folder mode has no block palette yet; blocks can only be added through
-  the code view (KTLO-05).
+- The folder mode has no block library panel yet. Blocks are added one at a
+  time through the board's `Add step` menu; search, operator chips, the
+  variables list and dragging a block onto the board are missing (KTLO-05).
 - Migration can refuse a real workspace with "a scenario differs after
   reloading" and then opens the legacy window instead (KTLO-03).
 
