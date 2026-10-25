@@ -71,6 +71,19 @@ cargo run -p apiforge-layout --example bench --release --locked [-- --strict]
 It prints each measurement against its budget. `--strict` makes an exceeded budget
 an error, which only makes sense on a machine whose speed is known.
 
+Changes to analysis, the code view or folder sessions also check the source
+budgets of the [Stage II plan](stage-ii-code-workspace.md#delivery-and-acceptance)
+in release mode: parse, lower and validate a 1000-line scenario in 5 ms, and keep
+code and split frames within their budgets at 1000 lines and at the 1 MiB limit.
+
+```bash
+cargo run -p apiforge-project --example analysis --release --locked [-- --strict]
+cargo test -p apiforge-desktop --release --locked frame_budgets -- --ignored --nocapture
+```
+
+The frame test is ignored in the ordinary suite because a debug build says nothing
+about time; it fails when a budget is exceeded.
+
 Changes to the scenario language also run both fuzzers for a sustained period. They
 are dependency-free mutational smoke fuzzers, not coverage-guided fuzzing:
 
@@ -188,8 +201,17 @@ simulation would use, then the output of the last run — so a path offered afte
 `handle.` says where its shape came from. Environment variables are offered by
 name; no value, secret or not, reaches a completion list.
 
-A buffer above 256 KiB is laid out without colouring, which keeps a very large
-body responsive; the text is unaffected.
+A buffer above 256 KiB is large: it is laid out without colouring, completion
+opens only on Ctrl+Space, and a folder code view looks up the statement under the
+caret only once the edited source has been analysed. Views share the session's
+model rather than copying it, and keep derived names until the model is replaced,
+so an idle frame does no whole-source work. The text is unaffected.
+
+Every folder control has an accessible name: fields and choices are named by
+`widgets::named`, menus by `widgets::name_menu`, and canvas hit areas by their
+widget info. `folder/accessibility_tests.rs` audits each Stage II screen, dialog,
+menu and demo block for unnamed focusable nodes and checks keyboard order; extend
+it with each new control.
 
 ## Storage behaviour
 

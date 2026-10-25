@@ -97,13 +97,15 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 | `crates/apiforge-demo-api` | Local HTTP API used by the demo projects |
 | `tools/convert-v1` | Development tool converting version-one documents and regenerating fixtures |
 | `fixtures` | Projects, recorded runs, the semantic corpus and example scripts |
-| `docs` | [Development guide](docs/development.md), [roadmap](docs/roadmap.md) and [architecture decisions](docs/decisions) |
+| `docs` | [Folder projects guide](docs/folder-projects.md), [development guide](docs/development.md), [roadmap](docs/roadmap.md) and [architecture decisions](docs/decisions) |
 
 ## Limitations
 
-The planned folder-based project format, file explorer and dedicated code workspace
-are specified in the [Stage II implementation plan](docs/stage-ii-code-workspace.md).
-These capabilities are not yet implemented.
+Folder projects, with their file explorer and code workspace, open with `--folder`
+and are described in the [folder projects guide](docs/folder-projects.md). They are
+not yet the default start: automatic migration of an existing workspace waits for
+the last package of the [Stage II implementation plan](docs/stage-ii-code-workspace.md),
+and Windows has not been reviewed.
 
 - Single user and local only; no collaboration and no hosted runner.
 - Acyclic graphs executed sequentially; no loops, case matrices or scripting.
