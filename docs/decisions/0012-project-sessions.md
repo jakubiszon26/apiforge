@@ -1,6 +1,6 @@
 # ADR 0012: Shared document sessions, analysis versions and execution snapshots
 
-- Status: accepted for Stage II; shared sessions/views implemented; P6 CLI/run integration in review branches; P7 storage worker, startup and release gates pending
+- Status: accepted for Stage II; shared sessions/views implemented; P6 CLI/run and P7 storage worker integration in review branches; startup and release gates pending
 - Date: 2026-10-24
 - Scope: new `apiforge-project`, desktop, language context and CLI integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)

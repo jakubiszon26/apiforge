@@ -208,7 +208,7 @@ records implemented review branches without implying that a human merged them.
 | A3 | Decision before a graphical edit or publication drops unattached comments | Implemented and tested in P6b, including history and obsolete consent | P6b complete in review |
 | A4 | Export when closing a read-only session or after a failed recovery write | Implemented and tested in P6d; exact/public bundle, cancellation/failure and obsolete-export checks | P6d complete in review |
 | A5 | Native transaction-recovery and conflict dialogs with export | Implemented in P7c with exact candidates, obsolete-decision refusal, real GTK export and preserved recovery reload; I/O moves to P7d | P7c complete in review |
-| A6 | All I/O off the UI thread; one storage worker serialises mutations | Scans/analysis/dialog export use workers; ordinary project/journal I/O still needs integration | P7d |
+| A6 | All I/O off the UI thread; one storage worker serialises mutations | Implemented in P7d: dequeue-time session snapshots, newer-edit preservation, asynchronous folder/journal/recovery operations, close ownership and stale chooser rejection; slow-I/O input tests and native syscall evidence | P7d complete in review |
 
 ### Decisions and remaining evidence
 

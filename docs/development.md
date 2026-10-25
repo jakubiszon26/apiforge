@@ -208,6 +208,17 @@ To convert a version-one document during development:
 cargo run -p apiforge-convert-v1 --locked -- workspace.v1.json workspace-v2.json
 ```
 
+Folder windows perform project, configuration, recovery and journal I/O on storage
+workers. UI commands accept a queued request; only its completion acknowledges
+success. The serial queue takes session snapshots at dequeue, preserves edits
+entered during ordinary saves and binds results to the current session/epoch.
+Destructive operations display a working dialog and temporarily disable editing.
+Close/project switch waits for storage and Run cleanup before releasing ownership.
+Use the controlled slow-I/O tests in `folder/storage_tests.rs` and the
+[P7d native audit](qa/2026-10-25/p7-storage-worker/verification.md) when changing
+these boundaries. The UI quality probe waits for asynchronous opening while
+retaining the 960 × 540 assertions.
+
 ## Conventions
 
 - Stage II's [plan](stage-ii-code-workspace.md) and ADRs are published on `main`
