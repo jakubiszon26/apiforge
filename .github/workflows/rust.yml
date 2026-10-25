@@ -146,12 +146,354 @@ jobs:
             throw 'Native screenshot is empty.'
           }
 
-      - name: Upload native window capture
+      # The steps above stay inside one JSON document. Folder projects and
+      # managed startup instead write, rename and sync directories, which is
+      # where the two platforms differ most, so both runners exercise them
+      # against a real filesystem and assert on what reaches disk.
+      #
+      # Each phase gets its own XDG_DATA_HOME, so none of them sees another's
+      # projects, and the real one of the runner account is never used.
+      - name: Exercise folder projects and managed startup (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 6
+        env:
+          WGPU_BACKEND: vulkan
+          WINIT_UNIX_BACKEND: x11
+        shell: bash
+        run: |
+          set -euo pipefail
+          for icd in /usr/share/vulkan/icd.d/lvp_icd*.json; do
+            if test -f "$icd"; then
+              export VK_DRIVER_FILES="$icd"
+              break
+            fi
+          done
+          test -n "${VK_DRIVER_FILES:-}"
+          mkdir -p test-results
+          binary="$PWD/${{ matrix.binary_path }}"
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$XDG_RUNTIME_DIR" "$scratch"' EXIT
+          created="$scratch/created"
+          migrated="$scratch/migrated"
+          mkdir -p "$created" "$migrated/apiforge"
+
+          # Managed startup opens a window and never exits by itself, so each
+          # run is stopped once what it owes is on disk. A run that writes
+          # nothing, or that exits early, fails on its own deadline instead of
+          # hanging the job.
+          managed() {
+            # Prefixed names, because a `local` would otherwise shadow the
+            # variables the readiness predicate reads from this script.
+            local run_label="$1" run_home="$2" run_ready="$3"
+            local run_log="$scratch/$run_label.log" run_waited=0 run_pid run_group
+            setsid xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+              env XDG_DATA_HOME="$run_home" "$binary" --managed >"$run_log" 2>&1 &
+            run_pid=$!
+            # The whole group, so the X server goes with the application.
+            run_group="$(ps -o pgid= -p "$run_pid" | tr -d ' ')"
+            test -n "$run_group"
+            until "$run_ready"; do
+              if ! kill -0 "$run_pid" 2>/dev/null; then
+                echo "Managed startup ($run_label) exited before writing what it owes:" >&2
+                sed 's/^/  /' "$run_log" >&2
+                return 1
+              fi
+              if test "$run_waited" -ge 60; then
+                echo "Managed startup ($run_label) wrote nothing within 60 s:" >&2
+                sed 's/^/  /' "$run_log" >&2
+                kill -TERM -- "-$run_group" 2>/dev/null || true
+                return 1
+              fi
+              sleep 1
+              run_waited=$((run_waited + 1))
+            done
+            # Let the storage worker finish the commit around those files
+            # before the window is taken away.
+            sleep 3
+            kill -TERM -- "-$run_group" 2>/dev/null || true
+            wait "$run_pid" 2>/dev/null || true
+            sed 's/^/  /' "$run_log"
+          }
+
+          # 1. An empty data directory: one project is created, nothing migrated.
+          project_prepared() {
+            compgen -G "$created/apiforge/projects/*/apiforge.project.json" >/dev/null
+          }
+          managed created "$created" project_prepared
+
+          data="$created/apiforge"
+          mapfile -t roots < <(find "$data/projects" -mindepth 1 -maxdepth 1 -type d | sort)
+          test "${#roots[@]}" -eq 1
+          for file in apiforge.project.json .gitignore .gitattributes; do
+            test -s "${roots[0]}/$file"
+          done
+          test ! -e "$data/workspace.json"
+          test ! -e "$data/projects.json"
+          echo "created: ${roots[0]##*/}"
+
+          # 2. A legacy workspace: migrated once and left byte-identical. The
+          # store writes plain workspace JSON, so the fixture is one.
+          data="$migrated/apiforge"
+          cp fixtures/workspace.json "$data/workspace.json"
+          before="$(sha256sum <"$data/workspace.json" | cut -d' ' -f1)"
+          catalogue_written() { test -f "$data/projects.json"; }
+          managed migrated "$migrated" catalogue_written
+
+          # The project IDs of fixtures/workspace.json.
+          for project in shop tickets blocks-poc workflow-poc; do
+            test -s "$data/projects/$project/apiforge.project.json"
+            test -s "$data/projects/$project/.gitignore"
+            test -s "$data/projects/$project/.gitattributes"
+          done
+          after="$(sha256sum <"$data/workspace.json" | cut -d' ' -f1)"
+          test "$before" = "$after"
+          catalogue() {
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
+              "$data/projects.json" "$1"
+          }
+          migration="$(catalogue migrationId)"
+          test -n "$migration"
+          echo "migrated: $migration, workspace sha256 $after unchanged"
+
+          # 3. A restart reads that migration instead of repeating it. Opening a
+          # project rewrites the recent-project file, which is the signal that
+          # the restart got as far as a project rather than stalling.
+          roots="$(find "$data/projects" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+          stamp="$(stat -c %y "$data/recent-projects.json")"
+          reopened() {
+            test "$(stat -c %y "$data/recent-projects.json")" != "$stamp"
+          }
+          managed restarted "$migrated" reopened
+
+          test "$(catalogue migrationId)" = "$migration"
+          test "$(find "$data/projects" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq "$roots"
+          echo "restarted: migration $migration kept, $roots project(s)"
+
+          # 4. A migrated project renders. `tickets` was written by migration and
+          # never opened, so this opens migration output from cold. Opening a
+          # folder records it in the data directory's recent projects, so the
+          # run keeps the scratch one.
+          xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+            timeout --kill-after=5s 45s env XDG_DATA_HOME="$migrated" "$binary" \
+            --screenshot test-results/native-folder.png \
+            --folder "$data/projects/tickets"
+          test -s test-results/native-folder.png
+
+      # The same cover on Windows. `dirs::data_dir()` resolves
+      # FOLDERID_RoamingAppData through SHGetKnownFolderPath, which ignores
+      # %APPDATA%, so `--managed` cannot be pointed at a scratch directory here:
+      # the roaming directory of the runner account is reset between phases
+      # instead. Nothing else in the job writes folder projects into it.
+      - name: Exercise folder projects and managed startup (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 6
+        env:
+          WGPU_BACKEND: dx12
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force test-results | Out-Null
+          $binary = './${{ matrix.binary_path }}'
+          # The same known folder dirs::data_dir() asks for.
+          $roaming = [Environment]::GetFolderPath('ApplicationData')
+          if ([string]::IsNullOrWhiteSpace($roaming)) {
+            throw 'This system has no roaming application data directory.'
+          }
+          $data = Join-Path $roaming 'apiforge'
+          $projects = Join-Path $data 'projects'
+          $catalogue = Join-Path $data 'projects.json'
+          $workspace = Join-Path $data 'workspace.json'
+          $recent = Join-Path $data 'recent-projects.json'
+          $scratch = (New-Item -ItemType Directory -Path (
+            Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid())
+          )).FullName
+          $owned = $false
+
+          # The workspace tests open folder projects through
+          # RecentProjects::default(), so recent-projects.json is expected to be
+          # here already. A real workspace or real projects stop the step rather
+          # than being cleared, which only matters on a self-hosted runner.
+          function Reset-DataDirectory {
+            if (Test-Path $data) {
+              if (-not $script:owned) {
+                foreach ($name in @('workspace.json', 'projects.json', 'projects')) {
+                  if (Test-Path (Join-Path $data $name)) {
+                    throw "$data already holds $name; clear it by hand before this step."
+                  }
+                }
+              }
+              # A handle of the run just stopped can outlive the process for a
+              # moment, so removal is retried before it is called a failure.
+              foreach ($attempt in 1..3) {
+                try {
+                  Remove-Item -Recurse -Force $data
+                  break
+                } catch {
+                  if ($attempt -eq 3) {
+                    throw
+                  }
+                  Start-Sleep -Seconds 2
+                }
+              }
+            }
+            $script:owned = $true
+            New-Item -ItemType Directory -Force $data | Out-Null
+          }
+
+          # --managed opens a window and never exits by itself, so each run is
+          # stopped once what it owes is on disk. A run that writes nothing, or
+          # that exits early, fails on its own deadline instead of hanging the
+          # job.
+          function Invoke-Managed([string] $Label, [scriptblock] $Ready) {
+            $out = Join-Path $scratch "$Label.out.log"
+            $failures = Join-Path $scratch "$Label.err.log"
+            $process = Start-Process -FilePath $binary -ArgumentList @('--managed') `
+              -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $failures
+            # Keep the process handle so ExitCode remains available after exit.
+            $null = $process.Handle
+            $deadline = (Get-Date).AddSeconds(60)
+            $ready = $false
+            try {
+              while ((Get-Date) -lt $deadline) {
+                if (& $Ready) {
+                  $ready = $true
+                  break
+                }
+                if ($process.HasExited) {
+                  break
+                }
+                Start-Sleep -Seconds 1
+              }
+              if ($ready) {
+                # Let the storage worker finish the commit around those files
+                # before the window is taken away.
+                Start-Sleep -Seconds 3
+              }
+            } finally {
+              # Whatever happened above, the window does not outlive this run.
+              if (-not $process.HasExited) {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+              }
+              $null = $process.WaitForExit(15000)
+              foreach ($log in @($out, $failures)) {
+                if ((Test-Path $log -PathType Leaf) -and (Get-Item $log).Length -gt 0) {
+                  Get-Content $log | ForEach-Object { Write-Host "  $_" }
+                }
+              }
+            }
+            if (-not $ready) {
+              throw "Managed startup ($Label) did not write what it owes within 60 seconds."
+            }
+          }
+
+          function Assert-ProjectFiles([string] $Root) {
+            foreach ($name in @('apiforge.project.json', '.gitignore', '.gitattributes')) {
+              $file = Join-Path $Root $name
+              if (-not (Test-Path $file -PathType Leaf)) {
+                throw "$Root is missing $name."
+              }
+              if ((Get-Item $file).Length -eq 0) {
+                throw "$Root has an empty $name."
+              }
+            }
+          }
+
+          function Get-MigrationId {
+            $id = (Get-Content $catalogue -Raw | ConvertFrom-Json).migrationId
+            if ([string]::IsNullOrWhiteSpace($id)) {
+              throw 'The project catalogue carries no migration ID.'
+            }
+            return $id
+          }
+
+          # 1. An empty data directory: one project is created, nothing migrated.
+          Reset-DataDirectory
+          Invoke-Managed 'created' {
+            @(Get-ChildItem $projects -Directory -ErrorAction SilentlyContinue |
+              Where-Object {
+                Test-Path (Join-Path $_.FullName 'apiforge.project.json') -PathType Leaf
+              }).Count -ge 1
+          }
+          $roots = @(Get-ChildItem $projects -Directory)
+          if ($roots.Count -ne 1) {
+            throw "Managed startup created $($roots.Count) projects; expected one."
+          }
+          Assert-ProjectFiles $roots[0].FullName
+          foreach ($name in @('workspace.json', 'projects.json')) {
+            if (Test-Path (Join-Path $data $name)) {
+              throw "Managed startup wrote $name without migrating anything."
+            }
+          }
+          Write-Host "created: $($roots[0].Name)"
+
+          # 2. A legacy workspace: migrated once and left byte-identical. The
+          # store writes plain workspace JSON, so the fixture is one.
+          Reset-DataDirectory
+          Copy-Item 'fixtures/workspace.json' $workspace
+          $before = (Get-FileHash $workspace -Algorithm SHA256).Hash
+          Invoke-Managed 'migrated' { Test-Path $catalogue -PathType Leaf }
+
+          # The project IDs of fixtures/workspace.json.
+          foreach ($project in @('shop', 'tickets', 'blocks-poc', 'workflow-poc')) {
+            Assert-ProjectFiles (Join-Path $projects $project)
+          }
+          $after = (Get-FileHash $workspace -Algorithm SHA256).Hash
+          if ($before -ne $after) {
+            throw "Migration changed the original workspace: $before became $after."
+          }
+          $migration = Get-MigrationId
+          Write-Host "migrated: $migration, workspace SHA256 $after unchanged"
+
+          # 3. A restart reads that migration instead of repeating it. Opening a
+          # project rewrites the recent-project file, which is the signal that
+          # the restart got as far as a project rather than stalling.
+          $count = @(Get-ChildItem $projects -Directory).Count
+          $stamp = (Get-Item $recent).LastWriteTimeUtc.Ticks
+          Invoke-Managed 'restarted' {
+            (Test-Path $recent -PathType Leaf) -and
+              ((Get-Item $recent).LastWriteTimeUtc.Ticks -ne $stamp)
+          }
+          $again = Get-MigrationId
+          if ($again -ne $migration) {
+            throw "The restart replaced migration $migration with $again."
+          }
+          $restarted = @(Get-ChildItem $projects -Directory).Count
+          if ($restarted -ne $count) {
+            throw "The restart left $restarted projects; expected $count."
+          }
+          Write-Host "restarted: migration $migration kept, $count project(s)"
+
+          # 4. A migrated project renders. `tickets` was written by migration and
+          # never opened, so this opens migration output from cold.
+          $capture = 'test-results/native-folder.png'
+          $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -ArgumentList @(
+            '--screenshot', $capture,
+            '--folder', (Join-Path $projects 'tickets')
+          )
+          $null = $process.Handle
+          if (-not $process.WaitForExit(45000)) {
+            & taskkill.exe /PID $process.Id /T /F | Out-Null
+            throw 'The folder-window capture exceeded 45 seconds.'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "The folder-window capture failed with exit code $($process.ExitCode)."
+          }
+          if (-not (Test-Path $capture -PathType Leaf)) {
+            throw 'The folder-window capture was not created.'
+          }
+          if ((Get-Item $capture).Length -eq 0) {
+            throw 'The folder-window capture is empty.'
+          }
+
+      - name: Upload native window captures
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-window-${{ matrix.os }}
-          path: test-results/native-window.png
+          path: |
+            test-results/native-window.png
+            test-results/native-folder.png
           if-no-files-found: warn
 
       # These binaries are build artifacts, not signed production installers.

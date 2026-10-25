@@ -248,7 +248,10 @@ merging belongs to human review. Folder CLI commands become available behind
 `--folder` with P6c, and managed startup behind `--managed` with P7g. P7g passed
 its integration gates on Linux, so what remains before either becomes the default
 start is the Windows release QA and directory durability that no Linux evidence
-can close.
+can close. Continuous integration now runs folder projects and managed startup
+on `windows-2022` as well, asserting the layout that migration and creation
+write and that the original workspace stays byte-identical. Interactive native
+QA and durability are a different kind of evidence; neither is closed by it.
 
 | Package | Implementation | Required exit evidence |
 | --- | --- | --- |
@@ -368,7 +371,7 @@ the input findings from `docs/stage-ii-p8-findings` at `cedabc3`.
 | P7 tests | Implemented on `feat/stage-ii-p7-tests`, base unmerged GUI testing `ac906e6`: interaction tests through named widgets for P7a switching and failed recovery, P7b settings and session secrets, P7c conflict and transaction decisions, P7d responsiveness and queued storage work, and P7e initialisation attributes; design review views of the project dialogs. Project form fields, environment fields and the source editor are named; the start screen name field has the form height; a full recent-project list scrolls inside the window | 929 workspace tests, seventeen ignored (two helpers, fourteen review views, the inspection host); formatting, clippy with and without `inspection`, fixtures and UI gate 10/10 passed, built without debug information. Behaviour was explored with `egui_mcp` on the headless host. The native file portal and exports remain P7f |
 | P7f | Implemented on `feat/stage-ii-p7-performance`, base unmerged P7e `3c71e38`: shared session models and memoised dirty state, cached caret/completion work, a large-source mode, named controls and menus, keyboard tests and the [folder projects guide](folder-projects.md) | 916 workspace tests, three ignored (two helpers, the release frame test); UI gate 10/10, analysis 1.7/5 ms, release frame budgets at 1000 lines and 1 MiB and [native keyboard/portal/large-source review](qa/2026-10-25/p7-performance/verification.md). No screen-reader session; Windows remains open |
 | P7 integration | Implemented on `feat/stage-ii-p7-integration`, merging unmerged P7 tests `8eaa5bc` into unmerged P7f `8701928`, both based on P7e `3c71e38`: one naming scheme for the two parallel accessibility passes, one status table, and the demo card overlap the GUI-testing package measured | 940 workspace tests, eighteen ignored (two helpers, fourteen review views, the inspection host, the release frame test); formatting, clippy with and without `inspection`, fixtures and UI gate 10/10 passed, and the release frame budgets hold at 1000 lines and 1 MiB. A code or text editor carries one accessible name, `Contents of <path>`; the audit resolves names through `labelled_by`, as AccessKit computes them. The demo's overlapping card moves in both frozen version-one sources, with the fixtures regenerated and a board-wide disjointness test. Tests no longer read the developer's own preferences |
-| P7g | Implemented on `feat/stage-ii-p7-activation`, base unmerged P7 integration `09387b0`: `--managed` resolves the application data directory to one project, calling `migrate_workspace` from the application for the first time, creating one managed project when there is nothing to migrate, and leaving a locked or recovery-bound workspace to the workspace window. Preparation writes both Git rules, so a migrated project excludes its local session data | 949 workspace tests, eighteen ignored (two helpers, fourteen review views, the inspection host, the release frame test); UI gate 10/10, release frame budgets, and [native activation evidence](qa/2026-10-25/p7g-activation/verification.md) with byte-identical originals and a restart that does not migrate again. [Acceptance matrix](stage-ii-p7g-acceptance.md). The default start is unchanged; Windows QA and Windows durability remain the gates that decide when it changes |
+| P7g | Implemented on `feat/stage-ii-p7-activation`, base unmerged P7 integration `09387b0`: `--managed` resolves the application data directory to one project, calling `migrate_workspace` from the application for the first time, creating one managed project when there is nothing to migrate, and leaving a locked or recovery-bound workspace to the workspace window. Preparation writes both Git rules, so a migrated project excludes its local session data | 949 workspace tests, eighteen ignored (two helpers, fourteen review views, the inspection host, the release frame test); UI gate 10/10, release frame budgets, and [native activation evidence](qa/2026-10-25/p7g-activation/verification.md) with byte-identical originals and a restart that does not migrate again. [Acceptance matrix](stage-ii-p7g-acceptance.md). Creation, migration, the restart and a folder window now run per push on both CI runners. The default start is unchanged; interactive Windows QA and Windows durability remain the gates that decide when it changes |
 
 Every completed package runs formatting, all-target workspace clippy with warnings
 denied, serial all-target workspace tests with isolated config/data directories,
@@ -419,9 +422,12 @@ analysis budget and test the existing 1 MiB source limit. Polling and file saves
 must not block UI frames.
 
 Native QA includes Linux and Windows, keyboard use, file dialogs, restart/recovery,
-read-only locks and both 960 × 540 and larger windows. Windows directory durability
-remains a release gate; Linux sandbox results do not close it. Record accessibility
-evidence for new controls without claiming that this closes all of M7.
+read-only locks and both 960 × 540 and larger windows. None of that is automated:
+the Windows CI steps open a window and check what reaches disk, and no more.
+Windows directory durability remains a release gate; neither Linux sandbox
+results nor a CI run close it, because a runner that never loses power cannot
+tell a synced directory from an unsynced one. Record accessibility evidence for
+new controls without claiming that this closes all of M7.
 
 Baseline exploration at `d967a79` passed the script/storage tests and 180 desktop
 tests with isolated config/data directories and serial desktop execution. One

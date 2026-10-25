@@ -5,9 +5,9 @@
 - Base: unmerged P7 integration `09387b0`
 - Scope: managed startup, automatic migration through `migrate_workspace`, and
   creating a managed folder project. No change to the default start
-- Result: implemented and verified on Linux; Windows QA and Windows directory
-  durability remain release gates, and the default start still opens the legacy
-  workspace
+- Result: implemented and verified on Linux, and exercised on both platforms by
+  continuous integration; Windows QA and Windows directory durability remain
+  release gates, and the default start still opens the legacy workspace
 
 ## Implemented contracts
 
@@ -53,12 +53,41 @@ inspection host, the release frame test). UI gate 10/10. Release frame budgets
 held at 1000 lines and 1 MiB. Native evidence is in
 [the P7g verification](qa/2026-10-25/p7g-activation/verification.md).
 
+## Continuous integration
+
+`.github/workflows/rust.yml` exercises folder projects and managed startup on
+`ubuntu-24.04` and `windows-2022` on every push, against the release binary and
+a real filesystem. Both runners assert that:
+
+- an application data directory holding nothing yields exactly one project under
+  `projects/`, with its manifest, `.gitignore` and `.gitattributes`, and that
+  neither `workspace.json` nor `projects.json` was written;
+- a legacy `workspace.json` is migrated into `projects.json` and the four
+  projects of `fixtures/workspace.json`, with the original workspace
+  byte-identical by SHA-256 before and after;
+- a second `--managed` run keeps the same migration ID and adds no project
+  directory;
+- `--screenshot --folder` renders a migrated project that no run had opened, to
+  a non-empty PNG.
+
+`--managed` opens a window and never exits by itself, so each run is stopped
+once what it owes is on disk; a run that writes nothing fails on its own
+deadline. Linux gives each phase its own `XDG_DATA_HOME`. Windows cannot:
+`dirs::data_dir()` resolves `FOLDERID_RoamingAppData` through
+`SHGetKnownFolderPath`, which ignores `%APPDATA%`, so the job uses the roaming
+directory of the runner account and clears it between phases, refusing to start
+if it already holds a workspace or projects.
+
 ## Open gates
 
-- **Windows.** Native Windows QA and Windows directory durability are not closed
-  by any Linux evidence. Migration writes, renames and syncs directories, which
-  is where the two platforms differ most; this is the remaining gate before the
-  default start can change.
+- **Windows.** The directory writes above now run per push on `windows-2022`,
+  which is evidence that migration and project creation produce the expected
+  layout there and that the original workspace is left untouched. That is not
+  the Windows gate. Interactive native QA — keyboard use, file dialogs, restart
+  and recovery, read-only locks, both window sizes — has still never been run on
+  Windows. Nor does a CI job observe directory durability: the runner does not
+  lose power, so a missing directory sync would pass every run. Both remain
+  release gates before the default start can change.
 - **The default start.** `apiforge-desktop` with no arguments opens the legacy
   workspace, unchanged. Managed startup is reachable through `--managed` only.
   Flipping it is a change to the `Arguments::Window(None)` arm in
