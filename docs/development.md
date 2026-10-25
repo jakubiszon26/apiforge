@@ -35,10 +35,16 @@ Two commands exercise the real native window:
 ```bash
 cargo run -p apiforge-desktop --locked -- --smoke-test fixtures/workspace.json
 cargo run -p apiforge-desktop --locked -- --screenshot out.png --project fixtures/workspace.json [--select <step>]
+cargo run -p apiforge-desktop --locked -- --screenshot out.png --folder <path> [--mode code|diagram|split] [--size 960x540]
 ```
 
 The smoke test draws three frames and exits; the screenshot command saves the
 viewport as PNG. Both use a session workspace and send no requests.
+`--mode` shows a folder capture in Code, Diagram or Split instead of the mode
+the folder restores, without recording it as the folder's view; it is rejected
+without `--folder`, because the workspace window has no modes. `--size WxH`
+sets the window's logical size for either window (default 1600x1000, at least
+960x540); the PNG is that size times the display scale.
 
 ### Demo API
 
@@ -119,7 +125,10 @@ an ADR.
 The workflow runs on Linux and Windows: formatting, clippy, tests, the scenario
 examples and workspace check, a release build and `--check` with the release binary.
 It then opens the real application window twice per platform (`--smoke-test` and
-`--screenshot`) and uploads the capture and the binary as artifacts.
+`--screenshot`) and uploads the capture and the binary as artifacts. The folder
+project step captures the migrated demo shop in Code, Diagram and Split at
+960 × 540 and 1600 × 1000 and uploads them as `qa-captures-<os>` for QA reports
+([testing](process/testing.md#how-to-fetch-windows-captures-for-a-qa-report)).
 
 On Linux each probe gets a fresh 1920 × 1200 Xvfb display and Mesa's Lavapipe Vulkan
 driver; a missing driver fails the job instead of selecting another backend. On Windows
