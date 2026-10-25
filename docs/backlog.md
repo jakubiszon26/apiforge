@@ -1,13 +1,13 @@
 # Backlog
 
-The board for API Forge. One row per ticket; the columns follow the
-[development process](process/README.md). A ticket above `S` or with a risk
-flag has a file in `docs/tickets/`. Work in progress is limited to three
-tickets awaiting owner acceptance.
+Tickets are [GitHub issues](https://github.com/jakubiszon26/apiforge/issues),
+one per ticket, titled `<ID>: <goal>` and labelled as the
+[development process](process/README.md#labels) says. Their state — open,
+closed, `decision-needed`, `awaiting-acceptance` — lives there and nowhere
+else. This file names the current sprint, its exit criteria and the issues
+in it, and keeps the record of finished sprints.
 
-Estimate: size · owner review minutes · risk flags
-([estimation](process/estimation.md)). Actual values are added when a ticket is
-done.
+At most three pull requests await owner acceptance at a time.
 
 ## Sprint: KTLO (2026-10-26 to 2026-11-08)
 
@@ -15,59 +15,45 @@ Keep the lights on: stabilise what Stage II shipped and run the new process
 end to end once. No new features. Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
-      owner decision (KTLO-03).
+      owner decision (KTLO-03, #5).
 - [ ] No ignored test without a ticket; the identity checkpoint decision is
-      made (KTLO-04).
-- [ ] The block palette in the folder mode is accepted by the owner through
-      the full process: mock-up, acceptance tests, QA report (KTLO-05a/b).
+      made (KTLO-04, #6).
+- [ ] The block library in the folder mode is accepted by the owner through
+      the full process: mock-up, acceptance tests, QA report (KTLO-05a #7,
+      KTLO-05b #8).
 - [ ] The process documents were followed once end to end, and amended where
       the pilot required it.
-- [ ] The regression smoke list has run on Linux and on Windows (KTLO-07).
-- [ ] The KTLO retrospective is written and its actions are tickets (KTLO-10).
+- [ ] The regression smoke list has run on Linux and on Windows (KTLO-07, #10).
+- [ ] The two interface findings the owner raised on the mock-ups — one header
+      above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
+      #17) — are accepted through the same mock-up → test → report path.
+- [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
 work does not start.
 
-### Done
-
-| ID | Ticket | Estimate | Actual | PR |
-| --- | --- | --- | --- | --- |
-
-### Awaiting owner acceptance (≤ 3)
-
-| ID | Ticket | Estimate | PR |
-| --- | --- | --- | --- |
-| KTLO-01 | Process documents: lifecycle, planning, estimation, testing, retrospective, board, PR template | M (docs) · 30 min — estimated S, ~730 lines written | `docs/process` |
-| KTLO-02 | Stage II retrospective in the repository | S (docs) · 15 min | `docs/process` |
-| KTLO-05a | Block library in the folder mode: analysis and mock-up (pilot of the planning procedure); [ticket](tickets/KTLO-05a.md) | S · 20 min · `visible UI` | `docs/ktlo-05a-library-analysis` |
-
-### In progress
-
-| ID | Ticket | Estimate | Branch |
-| --- | --- | --- | --- |
-
-### Ready
-
-| ID | Ticket | Estimate | Owner decision |
-| --- | --- | --- | --- |
-| KTLO-03 | Migration refuses a real six-project workspace: isolate the cause with an anonymised fixture, add the acceptance test, fix | M · 30 min · `migration` | How a refused migration should behave |
-| KTLO-08 | CI: upload the Linux and Windows captures of every push as artifacts, named by branch, so QA reports can cite Windows evidence | S · 10 min | — |
-
-### Backlog
-
-| ID | Ticket | Estimate | Owner decision |
-| --- | --- | --- | --- |
-| KTLO-04 | Identity checkpoint at `initialise`/`register_existing`/`import`: recommendation, decision, un-ignore the acceptance test | S–M · 30 min · `format` | Seal at registration, at first analysis, or at first save |
-| KTLO-05b | Block library panel in the folder mode: acceptance tests, implementation reusing `library.rs`, the canvas drop handling and `Command::AddNode`, QA report (pilot of the full procedure) | M · 45 min · `visible UI` | Acceptance |
-| KTLO-06 | Legacy JSON mode sunset: parity list folder vs legacy, deprecation notice in README and roadmap | S (docs) · 20 min · `removal` | Approve the parity list |
-| KTLO-07 | Regression smoke list: first run on Linux (agent) and Windows (owner's build), results recorded | S · 45 min | Run the Windows pass |
-| KTLO-09 | Orphaned code audit: list every symbol reachable only from the legacy window; output is the list, not a removal | S · 10 min | — |
-| KTLO-10 | KTLO retrospective | S (docs) · 30 min | Participation |
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| — | KTLO-01 Process documents — merged in #1 | M (docs) · 30 min; estimated S, ~730 lines written |
+| — | KTLO-02 Stage II retrospective — merged in #1; facts corrected in #2 | S (docs) · 15 min |
+| [#5](https://github.com/jakubiszon26/apiforge/issues/5) | KTLO-03 Migration refuses a real six-project workspace | M · 30 min · `migration` |
+| [#6](https://github.com/jakubiszon26/apiforge/issues/6) | KTLO-04 Identity checkpoint at initialise, register_existing and import | S–M · 30 min · `format` |
+| [#7](https://github.com/jakubiszon26/apiforge/issues/7) | KTLO-05a Block library — analysis and mock-up; [ticket](tickets/KTLO-05a.md) | S · 20 min · `visible UI`; actual 120 lines, 1 round |
+| [#8](https://github.com/jakubiszon26/apiforge/issues/8) | KTLO-05b Block library — implementation (pilot of the full procedure) | M · 45 min · `visible UI` |
+| [#9](https://github.com/jakubiszon26/apiforge/issues/9) | KTLO-06 Legacy JSON mode sunset: parity list and deprecation notice | S (docs) · 20 min · `removal` |
+| [#10](https://github.com/jakubiszon26/apiforge/issues/10) | KTLO-07 Regression smoke list: first run on Linux and Windows | S · 45 min |
+| [#11](https://github.com/jakubiszon26/apiforge/issues/11) | KTLO-08 CI uploads QA captures per platform; [ticket](tickets/KTLO-08.md) | S · 10 min; actual 471 lines (M), 1 round |
+| [#12](https://github.com/jakubiszon26/apiforge/issues/12) | KTLO-09 Orphaned code audit | S · 10 min |
+| [#13](https://github.com/jakubiszon26/apiforge/issues/13) | KTLO-10 KTLO retrospective | S (docs) · 30 min |
+| [#16](https://github.com/jakubiszon26/apiforge/issues/16) | KTLO-12 One header above the board: title and Main/Cleanup beside Add step | S · 15 min · `visible UI` |
+| [#17](https://github.com/jakubiszon26/apiforge/issues/17) | KTLO-13 The code editor fills its panel without a bordered box | S · 15 min · `visible UI` |
 
 ## Later
 
 Feature work resumes after KTLO exits. Candidates, unestimated:
 
+- [#14](https://github.com/jakubiszon26/apiforge/issues/14) KTLO-11 Scenario
+  navigation in Diagram mode (from the KTLO-05a decision).
 - Removal of the legacy JSON mode once the KTLO-06 parity list is closed.
 - Roadmap M7 editor features ([roadmap](roadmap.md)).
 - Windows release gates: interactive native QA and directory durability

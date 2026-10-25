@@ -8,9 +8,12 @@ the stage had shipped.
 
 ## The ticket
 
-A ticket is a row in [`docs/backlog.md`](../backlog.md). When the row is not
-enough — anything above `S`, or anything with a risk flag — the ticket gets a
-file `docs/tickets/<ID>.md` with these sections, in this order:
+A ticket is a GitHub issue titled `<ID>: <goal>`, labelled as the
+[process](README.md#labels) says, created with `gh issue create` when the
+ticket is accepted into a sprint. When the issue is not enough — anything
+above `S`, or anything with a risk flag — the ticket also gets a file
+`docs/tickets/<ID>.md`, linked from the issue, with these sections, in this
+order:
 
 ```markdown
 # KTLO-05a: Block palette in the folder mode
@@ -72,6 +75,18 @@ Acceptable forms, in order of preference:
 A mock-up is approved as a whole or sent back; approval is noted in the
 ticket's state. The implementation is then measured against the mock-up in the
 QA report.
+
+The owner looks at mock-ups in the issue, not in the repository tree. Once
+the captures are committed on the ticket's branch, post them to the issue as
+images by their immutable raw URL, one per view with its caption:
+
+```markdown
+![Diagram at 960 × 540](https://raw.githubusercontent.com/jakubiszon26/apiforge/<commit>/docs/qa/<date>/<ID>/<view>.png)
+```
+
+`<commit>` is the commit that added them, so the link survives the branch
+being deleted after merge. The same applies to the captures of a QA report
+when the pull request asks for a decision.
 
 ## Stop conditions
 

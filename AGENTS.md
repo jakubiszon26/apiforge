@@ -5,7 +5,9 @@ Coding agents and people follow the same rules in this repository.
 - [Development process](docs/process/README.md): the lifecycle of a ticket,
   who decides what, the limits on size and work in progress, and which model
   does which kind of work. Read it first.
-- [Backlog](docs/backlog.md): the board. Work starts from a ticket in `Ready`.
+- [Backlog](docs/backlog.md): the sprint and its issues. Work starts from an
+  open issue in the sprint with no `decision-needed` label; `gh issue list
+  --label sprint:ktlo` lists them.
 - [Development guide](docs/development.md): toolchain, running, the verification
   every change passes before merge, and conventions.
 - [GUI testing](docs/gui-testing.md): required for every change to the desktop
@@ -34,4 +36,5 @@ Coding agents and people follow the same rules in this repository.
    mechanical edits to Sonnet. An implementing agent does not delegate
    analysis downwards.
 9. **The repository holds tickets, decisions and evidence**, never the content
-   of conversations.
+   of conversations, and never a link to one: a commit ends with
+   `Co-Authored-By: Claude <model> <noreply@anthropic.com>` and nothing else.

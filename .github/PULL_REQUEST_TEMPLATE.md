@@ -1,6 +1,8 @@
 ## Ticket
 
-<!-- ID and title from docs/backlog.md, e.g. KTLO-05b: Block palette in the folder mode -->
+Closes #<!-- issue number -->
+
+<!-- ID and title, e.g. KTLO-05b: Block library beside the board; link docs/tickets/<ID>.md if it exists -->
 
 - Estimate: <!-- S · 20 min · visible UI --> · Actual: <!-- lines · minutes · rounds -->
 - Analysis model: <!-- Fable --> · Implementation model: <!-- Opus 5.5 -->
@@ -26,4 +28,4 @@
 - [ ] Interface change: interaction tests and design review per `docs/gui-testing.md`
 - [ ] Regression smoke list run on the release binary; results in the report
 - [ ] No `#[ignore]` without a ticket ID
-- [ ] The backlog row is updated
+- [ ] The issue is labelled `awaiting-acceptance` and `docs/backlog.md` still lists it
