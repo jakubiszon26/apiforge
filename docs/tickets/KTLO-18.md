@@ -1,9 +1,9 @@
 # KTLO-18: The Problems section expands over the code with one click
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis (issue #43) — mock-up posted on the issue, waits for the owner's
-  decisions below
-- Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
+- State: Approved 2026-10-26 (issue #43) — mock-up approved as a whole;
+  decision 1 = A (the button), decision 2 = Code and Split
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Owner's wish of 2026-10-26.
 
@@ -44,7 +44,7 @@ the editor's margin), criterion 1 reads "96 px" as that rounded value. At
 Split with ten errors the board shows only its "code has errors" banner, as
 today.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-26: 1 = A, 2 = both, 3 = approved)
 
 1. **How to expand?**
    - **A (recommended):** the expand/restore button above. One click each

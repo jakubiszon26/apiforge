@@ -1,9 +1,9 @@
 # KTLO-19: Run results can fill the window
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`
-- State: Analysis (issue #44) — mock-up posted on the issue, waits for the owner's
-  decisions below
-- Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
+- State: Approved 2026-10-26 (issue #44) — mock-up approved as a whole;
+  decision 1 = A (all three modes)
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Owner's wish of 2026-10-26.
 
@@ -41,7 +41,7 @@ Rendering notes: a notice under the tab strip ("Running saved code.") is part
 of the tab strip's panel, so the maximised report starts under the notice
 while one is shown and closes up when it is dismissed.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-26: 1 = A, 2 = approved)
 
 1. **Diagram and Split only, or Code too?**
    - **A (recommended):** all three modes. The panel is the same widget and
