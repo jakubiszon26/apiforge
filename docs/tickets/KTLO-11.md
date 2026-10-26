@@ -1,10 +1,11 @@
 # KTLO-11: Project files in Diagram — the left panel switches between Library and Files
 
-- Size: M · Owner review: 30 min · Risk: `visible UI`, `format` (the chosen
-  tab remembered per project, decision 2)
-- State: Analysis (issue #14) — mock-up posted on the issue, waits for the owner's
-  decisions below. Depends on KTLO-17 (the rail).
-- Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
+- Size: M · Owner review: 30 min · Risk: `visible UI`, `format`
+- State: Approved 2026-10-26 (issue #14) — mock-up approved with one change:
+  *Library | Files* are underline tabs like *Main | Cleanup*, not a
+  segmented row; decision 1 = A (Diagram only), decision 2 = A (remembered).
+  Depends on KTLO-17 (the rail).
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Opened on 2026-10-25 as "scenario navigation in Diagram mode" (KTLO-05a
   decision 3, *Later*). Re-scoped on 2026-10-26 to the owner's wish: in
@@ -20,8 +21,8 @@ library* or the project's *Files*, and one click switches between them.
 ## What the owner will see
 
 - **New:** two tabs, *Library* and *Files*, in the caption row of the left
-  panel in Diagram, styled like the *Blocks · Variables · Operators* row
-  inside the library. *Files* shows the same explorer as Code mode: the
+  panel in Diagram, drawn as underline tabs like *Main | Cleanup* above the
+  board (owner's choice on the mock-up, which showed a segmented row). *Files* shows the same explorer as Code mode: the
   tree, *+*, delete and refresh, the same keys, the same selection that
   follows the active tab. Clicking a scenario or component opens its tab and
   the board shows it; the mode stays Diagram. Clicking a text file opens its
@@ -53,7 +54,7 @@ that confusing, the alternative is underline tabs like *Main | Cleanup*
 above the board; say so with the approval. At 960 × 540 long file names in
 the tree are truncated with a tooltip, as in Code today.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-26: 1 = A, 2 = A, 3 = approved with underline tabs)
 
 1. **Diagram only, or Split too?**
    - **A (recommended, as asked):** Diagram only. In Split the code is

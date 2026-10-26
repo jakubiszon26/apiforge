@@ -1,10 +1,9 @@
 # KTLO-17: The block library collapses to a rail in Diagram and Split
 
-- Size: S · Owner review: 20 min · Risk: `visible UI`, `format` (if the
-  state is remembered per project, decision 1)
-- State: Analysis (issue #42) — mock-up posted on the issue, waits for the owner's
-  decisions below
-- Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
+- Size: S · Owner review: 20 min · Risk: `visible UI`, `format`
+- State: Approved 2026-10-26 (issue #42) — mock-up approved as a whole;
+  decision 1 = A (remembered per project), decision 2 = Ctrl+B
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Owner's wish of 2026-10-26; the *Later* entry "hiding the block library
   panel in Split by choice" is this ticket.
@@ -47,7 +46,7 @@ Rendering notes: the icon set has no left-pointing chevron; the mock-up adds
 `ChevronLeft`, and the implementation keeps it. The rail's button uses the
 panel icon.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-26: 1 = A, 2 = yes, 3 = approved)
 
 1. **Remember the collapsed state per project?**
    - **A (recommended):** yes, with the panel sizes in the project's local
