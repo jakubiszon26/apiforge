@@ -71,6 +71,24 @@ Rules:
   binary) and from the owner's local build; a report without a Windows
   section says so, and the ticket is not accepted for Windows.
 
+### How to fetch Windows captures for a QA report
+
+A CI run whose folder-project step completes uploads, per platform, an
+artifact `qa-captures-<os>` (`qa-captures-windows-2022`,
+`qa-captures-ubuntu-24.04`): the demo shop folder project captured by that
+run's release binary in Code, Diagram and Split at 960 × 540 and
+1600 × 1000, named `<mode>-<W>x<H>.png`. The artifact is uploaded even when the
+step fails, so a failed run may hold fewer than six captures or none; confirm
+all six are there. On Linux a capture of another size fails the step; on
+Windows, whose display may be smaller than the window, it is only a warning on
+the run, so check the run's warnings before citing a capture as a standard
+size. Artifacts belong to one workflow run, so take them from the latest run of
+the branch under review (Actions → the run for the branch's head commit →
+Artifacts, or `gh run download <run-id> -n qa-captures-windows-2022`), cite the
+commit of that run in the report, and copy the captures used next to the
+report. Other views are captured the same way with
+`--screenshot OUT.png --folder PATH --mode … --size WxH`.
+
 ## 3. The regression smoke list
 
 Run on the release binary before every merge to `main`, on Linux by the agent

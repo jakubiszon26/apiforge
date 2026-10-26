@@ -60,6 +60,10 @@ enum Arguments {
         project: Option<PathBuf>,
         folder: Option<PathBuf>,
         select: Option<String>,
+        /// The folder window's mode; without it, the one the folder restores.
+        mode: Option<folder::Mode>,
+        /// The window's inner size in logical points, width and height.
+        size: Option<(u32, u32)>,
     },
     Help,
 }
@@ -80,6 +84,7 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
         Some(Some("--screenshot")) => {
             let output = path("Missing screenshot PNG path")?;
             let (mut project, mut folder, mut select) = (None, None, None);
+            let (mut mode, mut size) = (None, None);
             while let Some(flag) = values.next() {
                 let value = values
                     .next()
@@ -88,9 +93,11 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
                     Some("--project") => project = Some(PathBuf::from(value)),
                     Some("--folder") => folder = Some(PathBuf::from(value)),
                     Some("--select") => select = Some(value.to_string_lossy().into_owned()),
+                    Some("--mode") => mode = Some(view_mode(value.to_str())?),
+                    Some("--size") => size = Some(window_size(value.to_str())?),
                     _ => {
                         return Err(
-                            "Unknown screenshot option; use --project FILE, --folder PATH or --select NODE",
+                            "Unknown screenshot option; use --project FILE, --folder PATH, --select NODE, --mode MODE or --size WxH",
                         );
                     }
                 }
@@ -98,11 +105,18 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
             if project.is_some() && folder.is_some() {
                 return Err("Use either --project or --folder, not both");
             }
+            if mode.is_some() && folder.is_none() {
+                return Err(
+                    "--mode applies only to a --folder capture; the workspace window has no modes",
+                );
+            }
             Arguments::Screenshot {
                 output,
                 project,
                 folder,
                 select,
+                mode,
+                size,
             }
         }
         _ => return Err("Unknown argument; use --help"),
@@ -111,6 +125,35 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
         return Err("Unexpected extra argument");
     }
     Ok(result)
+}
+
+fn view_mode(value: Option<&str>) -> Result<folder::Mode, &'static str> {
+    match value {
+        Some("code") => Ok(folder::Mode::Code),
+        Some("diagram") => Ok(folder::Mode::Diagram),
+        Some("split") => Ok(folder::Mode::Split),
+        _ => Err("--mode takes code, diagram or split"),
+    }
+}
+
+/// `WIDTHxHEIGHT` in logical points, at least the minimum window.
+fn window_size(value: Option<&str>) -> Result<(u32, u32), &'static str> {
+    const MALFORMED: &str = "--size takes WIDTHxHEIGHT, for example 960x540";
+    let (width, height) = value
+        .and_then(|value| value.split_once('x'))
+        .ok_or(MALFORMED)?;
+    let number = |text: &str| {
+        // `parse` would also take a leading `+`.
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(MALFORMED);
+        }
+        text.parse::<u32>().map_err(|_| MALFORMED)
+    };
+    let size = (number(width)?, number(height)?);
+    if (size.0 as f32) < MIN_WINDOW_SIZE[0] || (size.1 as f32) < MIN_WINDOW_SIZE[1] {
+        return Err("--size is below the minimum window of 960x540");
+    }
+    Ok(size)
 }
 
 /// Where managed startup begins, and whether it can.
@@ -147,6 +190,10 @@ const HELP: &str = "API Forge
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
   apiforge-desktop --screenshot OUT.png [--project FILE | --folder PATH] [--select NODE]
+                   [--mode code|diagram|split] [--size WxH]
+                                        capture the window and exit; --mode needs --folder
+                                        (default: the folder's own mode), --size defaults
+                                        to 1600x1000 and is at least 960x540
 
 Opening a document never executes requests.";
 
@@ -185,7 +232,7 @@ fn main() -> ExitCode {
             }
         },
         Arguments::Window(path) => session(&path, Probe::None),
-        Arguments::Folder(path) => run_window(Opening::Folder(path), Probe::None),
+        Arguments::Folder(path) => run_window(Opening::Folder(path, None), Probe::None),
         Arguments::Managed => match managed_opening() {
             Ok(opening) => run_window(opening, Probe::None),
             Err(error) => {
@@ -198,12 +245,18 @@ fn main() -> ExitCode {
             output,
             folder: Some(folder),
             select,
+            mode,
+            size,
             ..
-        } => run_window(Opening::Folder(folder), Probe::Screenshot(output, select)),
+        } => run_window(
+            Opening::Folder(folder, mode),
+            Probe::Screenshot(output, select, size),
+        ),
         Arguments::Screenshot {
             output,
             project,
             select,
+            size,
             ..
         } => {
             let workspace = match project {
@@ -218,7 +271,7 @@ fn main() -> ExitCode {
             };
             run_window(
                 Opening::Workspace(app::Source::Session(workspace)),
-                Probe::Screenshot(output, select),
+                Probe::Screenshot(output, select, size),
             )
         }
     }
@@ -241,14 +294,16 @@ fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
 enum Probe {
     None,
     Smoke,
-    /// Capture the window, optionally with a node (by id or name) selected.
-    Screenshot(PathBuf, Option<String>),
+    /// Capture the window, optionally with a node (by id or name) selected,
+    /// at a window size other than the usual one.
+    Screenshot(PathBuf, Option<String>, Option<(u32, u32)>),
 }
 
 /// What the window opens: the workspace, or a folder project.
 enum Opening {
     Workspace(app::Source),
-    Folder(PathBuf),
+    /// A folder project, in the given mode instead of its own.
+    Folder(PathBuf, Option<folder::Mode>),
     /// The application data directory, resolved to a project after the window
     /// exists so that migrating one does not delay it.
     Managed(PathBuf),
@@ -368,18 +423,25 @@ impl eframe::App for Window {
     }
 }
 
+/// The window's logical size when it opens.
+const DEFAULT_WINDOW_SIZE: [f32; 2] = [1600.0, 1000.0];
+
 /// Minimum logical window size: 1920×1080 at 200 % scaling (G6).
 const MIN_WINDOW_SIZE: [f32; 2] = [960.0, 540.0];
 
 fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     let automated = !matches!(probe, Probe::None);
     let completed = Arc::new(AtomicBool::new(!automated));
+    let size = match probe {
+        Probe::Screenshot(_, _, Some((width, height))) => [width as f32, height as f32],
+        _ => DEFAULT_WINDOW_SIZE,
+    };
     let observed = Arc::clone(&completed);
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("API Forge")
             .with_app_id("apiforge")
-            .with_inner_size([1600.0, 1000.0])
+            .with_inner_size(size)
             .with_min_inner_size(MIN_WINDOW_SIZE),
         ..Default::default()
     };
@@ -390,7 +452,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
             let (capture, smoke, select) = match probe {
                 Probe::None => (None, false, None),
                 Probe::Smoke => (None, true, None),
-                Probe::Screenshot(path, select) => {
+                Probe::Screenshot(path, select, _) => {
                     (Some(capture::Capture::new(path)), false, select)
                 }
             };
@@ -398,8 +460,12 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                 Opening::Workspace(source) => {
                     Front::Workspace(Box::new(app::App::new(&context.egui_ctx, source)))
                 }
-                Opening::Folder(root) => {
-                    Front::Folder(Box::new(folder::FolderApp::open(&context.egui_ctx, root)))
+                Opening::Folder(root, mode) => {
+                    let mut folder = folder::FolderApp::open(&context.egui_ctx, root);
+                    if let Some(mode) = mode {
+                        folder.request_mode(mode);
+                    }
+                    Front::Folder(Box::new(folder))
                 }
                 Opening::Managed(data) => Front::Folder(Box::new(
                     folder::FolderApp::start_managed(&context.egui_ctx, data),
@@ -472,5 +538,142 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    fn screenshot(
+        folder: Option<&str>,
+        project: Option<&str>,
+        mode: Option<folder::Mode>,
+        size: Option<(u32, u32)>,
+    ) -> Arguments {
+        Arguments::Screenshot {
+            output: "a.png".into(),
+            project: project.map(PathBuf::from),
+            folder: folder.map(PathBuf::from),
+            select: None,
+            mode,
+            size,
+        }
+    }
+
+    /// KTLO-08: QA captures of the folder window in each mode at both
+    /// standard sizes.
+    #[test]
+    fn screenshot_takes_a_folder_mode_and_a_window_size() {
+        use folder::Mode;
+        for (word, mode) in [
+            ("code", Mode::Code),
+            ("diagram", Mode::Diagram),
+            ("split", Mode::Split),
+        ] {
+            for (text, size) in [("960x540", (960, 540)), ("1600x1000", (1600, 1000))] {
+                assert_eq!(
+                    parse(&[
+                        "--screenshot",
+                        "a.png",
+                        "--folder",
+                        "p",
+                        "--mode",
+                        word,
+                        "--size",
+                        text
+                    ]),
+                    Ok(screenshot(Some("p"), None, Some(mode), Some(size)))
+                );
+            }
+        }
+        // Options come in any order, and each one stays optional.
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--size",
+                "960x540",
+                "--mode",
+                "split",
+                "--folder",
+                "p"
+            ]),
+            Ok(screenshot(
+                Some("p"),
+                None,
+                Some(Mode::Split),
+                Some((960, 540))
+            ))
+        );
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--folder",
+                "p",
+                "--mode",
+                "diagram"
+            ]),
+            Ok(screenshot(Some("p"), None, Some(Mode::Diagram), None))
+        );
+        // Without either option nothing changes: the folder's own mode, the
+        // usual window.
+        assert_eq!(
+            parse(&["--screenshot", "a.png", "--folder", "p"]),
+            Ok(screenshot(Some("p"), None, None, None))
+        );
+        // The legacy window has a size but no modes.
+        assert_eq!(
+            parse(&[
+                "--screenshot",
+                "a.png",
+                "--project",
+                "x.json",
+                "--size",
+                "960x540"
+            ]),
+            Ok(screenshot(None, Some("x.json"), None, Some((960, 540))))
+        );
+    }
+
+    #[test]
+    fn screenshot_rejects_a_mode_without_a_folder_and_a_malformed_size() {
+        for legacy in [
+            &[
+                "--screenshot",
+                "a.png",
+                "--project",
+                "x.json",
+                "--mode",
+                "code",
+            ][..],
+            &["--screenshot", "a.png", "--mode", "split"][..],
+        ] {
+            let error = parse(legacy).expect_err("the legacy window has no modes");
+            assert!(
+                error.contains("--mode") && error.contains("--folder"),
+                "the error says --mode needs --folder: {error}"
+            );
+        }
+        for mode in ["Code", "board", ""] {
+            assert!(
+                parse(&["--screenshot", "a.png", "--folder", "p", "--mode", mode]).is_err(),
+                "{mode:?} is not a mode"
+            );
+        }
+        assert!(parse(&["--screenshot", "a.png", "--folder", "p", "--mode"]).is_err());
+        for size in [
+            "960",
+            "960x",
+            "x540",
+            "960x540x2",
+            "wxh",
+            "-960x540",
+            "960 x 540",
+            "0x0",
+            // Below the window's minimum the capture would not have that size.
+            "959x540",
+            "960x539",
+        ] {
+            let error =
+                parse(&["--screenshot", "a.png", "--folder", "p", "--size", size]).expect_err(size);
+            assert!(error.contains("--size"), "the error names --size: {error}");
+        }
     }
 }

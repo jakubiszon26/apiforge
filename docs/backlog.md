@@ -45,7 +45,7 @@ work does not start.
 | [#23](https://github.com/jakubiszon26/apiforge/issues/23) | KTLO-05d The Add step popup lists Variables and Operators below 1440 px | S · 15 min · `visible UI` |
 | [#9](https://github.com/jakubiszon26/apiforge/issues/9) | KTLO-06 Legacy JSON mode sunset: parity list and deprecation notice | S (docs) · 20 min · `removal` |
 | [#10](https://github.com/jakubiszon26/apiforge/issues/10) | KTLO-07 Regression smoke list: first run on Linux and Windows | S · 45 min |
-| [#11](https://github.com/jakubiszon26/apiforge/issues/11) | KTLO-08 CI uploads QA captures per platform; [ticket](tickets/KTLO-08.md) | S · 10 min; actual 471 lines (M), 1 round |
+| [#11](https://github.com/jakubiszon26/apiforge/issues/11) | KTLO-08 CI uploads QA captures per platform; [ticket](tickets/KTLO-08.md) — merged in #4 | S · 10 min; actual 483 lines (M), 2 rounds |
 | [#12](https://github.com/jakubiszon26/apiforge/issues/12) | KTLO-09 Orphaned code audit; [ticket](tickets/KTLO-09.md) — merged in #20 | S · 10 min; actual 118 lines, 2 rounds |
 | [#13](https://github.com/jakubiszon26/apiforge/issues/13) | KTLO-10 KTLO retrospective | S (docs) · 30 min |
 | [#16](https://github.com/jakubiszon26/apiforge/issues/16) | KTLO-12 One header above the board: title and Main/Cleanup beside Add step | S · 15 min · `visible UI` |
@@ -59,6 +59,9 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 - [#14](https://github.com/jakubiszon26/apiforge/issues/14) KTLO-11 Scenario
   navigation in Diagram mode (from the KTLO-05a decision).
 - Hiding the block library panel in Split by choice (owner's wish, 2026-10-26).
+- The windows-2022 runner's display is 1024 × 768, so the CI captures
+  requested at 1600 × 1000 come out at 1024 × 768 (KTLO-08 warning); set the
+  runner's resolution or accept the smaller Windows evidence.
 - The interaction-test `settle()` also waits for a debounced analysis whose
   pause has not passed (review finding on #19; not a cause of any failure).
 - `resolving_one_documents_conflict_leaves_another_documents_unsaved_work_and_history`

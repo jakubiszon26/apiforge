@@ -596,3 +596,35 @@ fn unsaved_configuration_stops_a_switch_that_otherwise_carries_source_and_text()
     );
     assert_eq!(saved_name(alpha.path()), "Carry Renamed");
 }
+
+/// KTLO-08: `--screenshot --folder … --mode` shows the folder window in the
+/// requested mode at startup, and that request is a capture setting, never the
+/// project's: the view written back keeps the mode the folder would restore.
+#[test]
+fn a_mode_requested_at_startup_is_shown_and_not_written_back() {
+    use crate::testing::{MINIMUM, folder_harness_in, shop_project};
+
+    let project = shop_project();
+    let harness = folder_harness(project.path(), WIDE);
+    assert_eq!(
+        folder(&harness).workbench.mode,
+        Mode::Code,
+        "without a request the folder's own mode is shown, as before"
+    );
+    drop(harness);
+
+    for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+        for size in [MINIMUM, WIDE] {
+            let project = shop_project();
+            let mut harness = folder_harness_in(project.path(), size, mode);
+            let app = harness.state_mut().as_mut().unwrap();
+            assert!(app.has_document(), "the demo shop opened");
+            assert_eq!(app.workbench.mode, mode, "{mode:?} at {size:?} is shown");
+            assert_eq!(
+                app.capture_view().map(|view| view.mode),
+                Some(Mode::Code),
+                "{mode:?} is not written back as the project's view"
+            );
+        }
+    }
+}
