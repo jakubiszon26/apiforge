@@ -11,6 +11,8 @@ mod activation_tests;
 mod interaction_tests;
 #[path = "library_tests.rs"]
 mod library_tests;
+#[path = "popup_tests.rs"]
+mod popup_tests;
 #[path = "project_interaction_tests.rs"]
 mod project_interaction_tests;
 #[path = "recovery_tests.rs"]

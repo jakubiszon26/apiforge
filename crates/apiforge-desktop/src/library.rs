@@ -53,7 +53,7 @@ impl Default for Library {
         Self {
             search: String::new(),
             section: Section::Blocks,
-            open_groups: vec![OperatorGroup::Comparison, OperatorGroup::Logic],
+            open_groups: default_open_groups(),
         }
     }
 }
@@ -271,61 +271,12 @@ impl Library {
                 }
                 if show_variables {
                     ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        widgets::subcaption(ui, "VARIABLES");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(widgets::icon_button(Icon::Plus, "Add variable").compact())
-                                .clicked()
-                            {
-                                actions.push(Action::AddNode {
-                                    block: Block::Variable,
-                                    component: None,
-                                });
-                            }
-                        });
-                    });
-                    self.variables(ui, context, &matches, &mut actions);
+                    variables_section(ui, context, &matches, &mut actions);
                 }
 
                 ui.add_space(6.0);
                 if show_operators {
-                    widgets::subcaption(ui, "OPERATORS");
-                    for group in OperatorGroup::ALL {
-                        let operators: Vec<Operator> = Operator::ALL
-                            .into_iter()
-                            .filter(|operator| {
-                                operator.spec().group == group && matches(operator.label())
-                            })
-                            .collect();
-                        if operators.is_empty() {
-                            continue;
-                        }
-                        let open = !query.is_empty() || self.open_groups.contains(&group);
-                        let header = ui.add(widgets::Disclosure::new(
-                            group.label(),
-                            open,
-                            operators.len(),
-                        ));
-                        if header.clicked() {
-                            if let Some(index) =
-                                self.open_groups.iter().position(|item| *item == group)
-                            {
-                                self.open_groups.remove(index);
-                            } else {
-                                self.open_groups.push(group);
-                            }
-                        }
-                        if open {
-                            ui.horizontal_wrapped(|ui| {
-                                for operator in operators {
-                                    if operator_chip(ui, operator).clicked() {
-                                        actions.push(Action::AddOperator(operator));
-                                    }
-                                }
-                            });
-                        }
-                    }
+                    operators_section(ui, &mut self.open_groups, &query, &mut actions);
                 }
                 if show_blocks {
                     ui.add_space(6.0);
@@ -381,7 +332,6 @@ impl Library {
     }
 
     fn variables(
-        &self,
         ui: &mut egui::Ui,
         context: &Context<'_>,
         matches: &dyn Fn(&str) -> bool,
@@ -467,6 +417,82 @@ impl Library {
                 }
             }
         });
+    }
+}
+
+/// The operator groups open before the person opens or closes any.
+pub fn default_open_groups() -> Vec<OperatorGroup> {
+    vec![OperatorGroup::Comparison, OperatorGroup::Logic]
+}
+
+/// The *Variables* section: its caption with *Add variable*, then a chip for
+/// each variable, parameter and environment value matching the search.
+/// Shared by the library and the board's *Add step* popup (KTLO-05d).
+pub fn variables_section(
+    ui: &mut egui::Ui,
+    context: &Context<'_>,
+    matches: &dyn Fn(&str) -> bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.horizontal(|ui| {
+        widgets::subcaption(ui, "VARIABLES");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(widgets::icon_button(Icon::Plus, "Add variable").compact())
+                .clicked()
+            {
+                actions.push(Action::AddNode {
+                    block: Block::Variable,
+                    component: None,
+                });
+            }
+        });
+    });
+    Library::variables(ui, context, matches, actions);
+}
+
+/// The *Operators* section: a disclosure per group with its chips; every group
+/// with a match is open while `query` (lower case) is not empty. Shared by the
+/// library and the board's *Add step* popup (KTLO-05d).
+pub fn operators_section(
+    ui: &mut egui::Ui,
+    open_groups: &mut Vec<OperatorGroup>,
+    query: &str,
+    actions: &mut Vec<Action>,
+) {
+    widgets::subcaption(ui, "OPERATORS");
+    for group in OperatorGroup::ALL {
+        let operators: Vec<Operator> = Operator::ALL
+            .into_iter()
+            .filter(|operator| {
+                operator.spec().group == group && operator.label().to_lowercase().contains(query)
+            })
+            .collect();
+        if operators.is_empty() {
+            continue;
+        }
+        let open = !query.is_empty() || open_groups.contains(&group);
+        let header = ui.add(widgets::Disclosure::new(
+            group.label(),
+            open,
+            operators.len(),
+        ));
+        if header.clicked() {
+            if let Some(index) = open_groups.iter().position(|item| *item == group) {
+                open_groups.remove(index);
+            } else {
+                open_groups.push(group);
+            }
+        }
+        if open {
+            ui.horizontal_wrapped(|ui| {
+                for operator in operators {
+                    if operator_chip(ui, operator).clicked() {
+                        actions.push(Action::AddOperator(operator));
+                    }
+                }
+            });
+        }
     }
 }
 

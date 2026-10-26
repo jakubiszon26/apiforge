@@ -3,12 +3,13 @@
 
 use super::Command;
 use crate::icons::Icon;
-use crate::theme;
+use crate::{library, theme};
 use apiforge_core::{
     block::Block,
     format::{Graph, Port, Position, Project},
     graph::{ORDER_PORT, TRUE_PORT, compatible, latest_components, output_ports},
     model::NodeKind,
+    operator::OperatorGroup,
 };
 use eframe::egui::{self, Key, Pos2, RichText, Stroke};
 
@@ -16,6 +17,8 @@ pub enum Outcome {
     Open,
     Close,
     Add(Command),
+    /// A Variables or Operators entry, added as the library panel adds it.
+    Library(library::Action),
 }
 
 pub struct ActionMenu {
@@ -25,6 +28,8 @@ pub struct ActionMenu {
     source: Option<(String, String)>,
     search: String,
     focus_search: bool,
+    /// Operator groups open in the popup's Operators section.
+    open_groups: Vec<OperatorGroup>,
 }
 
 /// The output a card's menu starts from: control flow for Start and IF, otherwise
@@ -56,6 +61,7 @@ impl ActionMenu {
             source,
             search: String::new(),
             focus_search: true,
+            open_groups: library::default_open_groups(),
         }
     }
 
@@ -130,7 +136,15 @@ impl ActionMenu {
         actions
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, graph: &Graph, project: &Project) -> Outcome {
+    /// Shows the popup. With `library`, the steps are followed by the block
+    /// library's Variables and Operators sections (KTLO-05d).
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        graph: &Graph,
+        project: &Project,
+        library: Option<&library::Context<'_>>,
+    ) -> Outcome {
         // The opening click belongs to the toolbar/card, outside the new popup.
         // Preserve this before requesting search focus clears the initial flag.
         let opening = self.focus_search;
@@ -208,10 +222,13 @@ impl ActionMenu {
                                     });
                             });
                         }
-                        let search = ui.add(
-                            crate::widgets::text_edit(&mut self.search)
-                                .hint_text("Find an action…")
-                                .desired_width(f32::INFINITY),
+                        let search = crate::widgets::named(
+                            ui.add(
+                                crate::widgets::text_edit(&mut self.search)
+                                    .hint_text("Find an action…")
+                                    .desired_width(f32::INFINITY),
+                            ),
+                            "Find an action",
                         );
                         if self.focus_search {
                             search.request_focus();
@@ -243,6 +260,22 @@ impl ActionMenu {
                                             position,
                                             source: self.source.clone(),
                                         });
+                                    }
+                                }
+                                if let Some(context) = library {
+                                    let matches = |text: &str| text.to_lowercase().contains(&query);
+                                    let mut actions = Vec::new();
+                                    ui.add_space(6.0);
+                                    library::variables_section(ui, context, &matches, &mut actions);
+                                    ui.add_space(6.0);
+                                    library::operators_section(
+                                        ui,
+                                        &mut self.open_groups,
+                                        &query,
+                                        &mut actions,
+                                    );
+                                    if let Some(action) = actions.pop() {
+                                        outcome = Outcome::Library(action);
                                     }
                                 }
                             });
@@ -289,7 +322,10 @@ fn action_row(ui: &mut egui::Ui, action: &Action) -> egui::Response {
         egui::FontId::proportional(10.5),
         theme::MUTED,
     );
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    crate::widgets::named(
+        response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        &action.name,
+    )
 }
 
 #[cfg(test)]
@@ -341,7 +377,7 @@ mod tests {
                         ));
                     }
                     if let Some(menu) = &mut popup
-                        && matches!(menu.show(&context, graph, &project), Outcome::Close)
+                        && matches!(menu.show(&context, graph, &project, None), Outcome::Close)
                     {
                         popup = None;
                     }
