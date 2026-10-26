@@ -50,6 +50,18 @@ both runners. Baseline evidence: run
    renormalised. This file is the repository's own; it is unrelated to the
    per-project `.gitattributes` the application writes (ADR 0010/0011, B8).
 
+3. **Both runners, intermittently**: desktop tests failed now and then
+   (`renaming_a_dirty_text_tab_…` on ubuntu, `a_created_project_registers_…`
+   on Windows). `ProjectStore::scan_tree` read the transaction head without
+   the writer lock and answered `RecoveryRequired` when the window's
+   once-a-second external-change check overlapped its own rename or save;
+   the window then showed the interrupted-transaction screen. Reproduced
+   locally under CPU load (3 of 450 runs, then 6 of 75 for the pair). Fix: the
+   scan answers `Busy` while this owner's worker holds the lock
+   (`a_scan_during_this_owners_own_commit_is_busy_not_an_interrupted_transaction`,
+   committed failing first), and the test-only `is_settled()` also waits for
+   analysis and the check. After the fix: 0 of 450 runs of the pair failed.
+
 ## Not in scope
 
 - Making the fixture comparison line-ending-neutral: the attribute is enough.
@@ -57,5 +69,9 @@ both runners. Baseline evidence: run
 
 ## Actual
 
-Changed lines: 71 (workflow 1, `.gitattributes` 4, `docs/development.md` 5,
-this ticket 61).
+Changed lines: 158 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
+storage fix 9 and its tests 46, desktop test settling 7, this ticket 77).
+Three rounds: the two causes above, the Windows probe fix (`bcdb106`), then
+cause 3. Green on both runners on `0d88f05`: runs
+[40277674373](https://github.com/jakubiszon26/apiforge/actions/runs/40277674373) (push) and
+[40277679824](https://github.com/jakubiszon26/apiforge/actions/runs/40277679824) (pull request).
