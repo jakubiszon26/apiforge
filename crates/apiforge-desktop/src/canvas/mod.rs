@@ -131,8 +131,8 @@ pub struct Input<'a> {
     /// hint can point at it (KTLO-05b, criterion 9).
     pub library_in_view: bool,
     /// The size of a header the caller draws at the left of the board's header
-    /// row (KTLO-12), for which the row keeps room; `None` keeps the row as it
-    /// is without one.
+    /// row (KTLO-12), which puts the steps summary beside the toolbar and drops
+    /// it when there is no room; `None` keeps the summary at the left.
     pub header_leading: Option<Vec2>,
     /// The library's Variables and Operators for the *Add step* popup, when no
     /// library panel is in view (KTLO-05d).
@@ -141,7 +141,6 @@ pub struct Input<'a> {
 
 /// The width a caller's header may take at the left of the board's header row.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code, reason = "KTLO-12 part 2 sizes the folder header with it")]
 pub struct HeaderRoom {
     /// With nothing else beside the toolbar.
     pub alone: f32,
@@ -341,18 +340,18 @@ impl Canvas {
             self.selected_wires.clear();
             self.error = None;
         }
-        let (viewport, background) = ui.allocate_exact_size(
-            ui.available_size().max(vec2(1.0, 1.0)),
-            Sense::click_and_drag(),
-        );
+        let viewport = Self::viewport(ui);
+        let measures = self.measure_overlays(ui, input);
+        let overlays = layout::board_overlays(viewport, &measures);
+        // The toolbar comes before the board in the keyboard order: it ends the
+        // header row, which reads before the board below it (KTLO-12).
+        self.toolbar(ui, viewport, &overlays, input, &mut commands);
+        let background = ui.allocate_rect(viewport, Sense::click_and_drag());
         background.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Diagram board")
         });
         let painter = ui.painter().with_clip_rect(viewport);
         painter.rect_filled(viewport, 0.0, theme::BG);
-
-        let measures = self.measure_overlays(ui, input);
-        let overlays = layout::board_overlays(viewport, &measures);
 
         let mut cards: Vec<Card> = input
             .graph
@@ -675,14 +674,17 @@ impl Canvas {
         );
         self.handle_keys(ui, input, &mut commands);
 
-        paint::overlay_chrome(&painter, &overlays, input.graph);
-        ui.interact(
-            overlays.banner,
-            ui.id().with("execution-mode-hint"),
-            Sense::hover(),
-        )
-        .on_hover_text(paint::mode_line_text(input.graph));
-        self.toolbar(ui, viewport, &overlays, input, &mut commands);
+        let summary = paint::steps_summary(input.graph);
+        if let Some(at) = paint::overlay_chrome(
+            &painter,
+            &overlays,
+            &summary,
+            input.header_leading.is_some(),
+        ) {
+            ui.interact(at, ui.id().with("execution-mode-hint"), Sense::hover())
+                .on_hover_text(paint::mode_line_text(input.graph))
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &summary));
+        }
         self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips));
         if let Some((mm_inner, bounds, scale)) = paint::minimap(
             &painter,
@@ -781,7 +783,6 @@ impl Canvas {
 
     /// How wide a header at the left of the board's header row may be, beside
     /// the toolbar as last drawn for `input` (KTLO-12).
-    #[allow(dead_code, reason = "KTLO-12 part 2 sizes the folder header with it")]
     pub fn header_room(&self, ui: &egui::Ui, input: &Input<'_>) -> HeaderRoom {
         // The header, a gap, the summary or nothing, a gap, the toolbar.
         let toolbar = self.measure_overlays(ui, input).toolbar_size.x;
@@ -807,7 +808,6 @@ impl Canvas {
 
     /// Where the caller's header goes on the board that `ui` is about to show
     /// for `input`: the left of the board's header row.
-    #[allow(dead_code, reason = "KTLO-12 part 2 places the folder header with it")]
     pub fn leading_rect(&self, ui: &egui::Ui, input: &Input<'_>) -> Rect {
         let measures = self.measure_overlays(ui, input);
         layout::board_overlays(Self::viewport(ui), &measures).leading
