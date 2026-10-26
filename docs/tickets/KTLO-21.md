@@ -105,15 +105,18 @@ which is unchanged in length.
 
 ## Actual
 
-Changed lines: 379 (`git diff --stat origin/main...HEAD`), over the 300 of the
-S class and inside the 800 of M, so the ticket is not split.
+Changed lines: **393** (370 added, 23 removed) at `0d900c0`, over the 300 of
+the S class and inside the 800 of M, so the ticket is not split. Measured at a
+named commit because the figure cannot count the paragraph that states it; the
+correction that put this number here is the only change after it.
 
 | Part | Changed lines |
 | --- | --- |
 | The fix (`src/project/transaction.rs`) | 70 (47 added, 23 removed) |
 | Acceptance tests (`tests/acceptance.rs`) | 97 |
-| This ticket | 108 |
+| This ticket | 121 |
 | QA report | 104 |
+| Backlog row | 1 |
 
 The estimate held for the work itself — the change to the code is 47 added
 lines against 23 removed, and the writing was what grew. The size rule counts
