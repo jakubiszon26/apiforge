@@ -13,10 +13,11 @@ At most three pull requests await owner acceptance at a time.
 
 Keep the lights on: stabilise what Stage II shipped and run the new process
 end to end once. No new features, with one exception the owner made on
-2026-10-26: four interface wishes for the folder window (KTLO-17, KTLO-11,
-KTLO-18, KTLO-19) join the sprint and go through the full path, mock-up →
-decision → acceptance tests → QA report. They add about 85 minutes of owner
-review. Exit criteria:
+2026-10-26: five interface wishes for the folder window (KTLO-17, KTLO-11,
+KTLO-18, KTLO-19, KTLO-20) join the sprint and go through the full path,
+mock-up → decision → acceptance tests → QA report. They add about 105 minutes
+of owner review. KTLO-20 is the last ticket added to this sprint; its scope
+is closed. Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -32,9 +33,10 @@ review. Exit criteria:
 - [ ] The two interface findings the owner raised on the mock-ups — one header
       above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
       #17) — are accepted through the same mock-up → test → report path.
-- [ ] The four interface wishes of 2026-10-26 are decided on their mock-ups
-      (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44); those approved are
-      accepted or carried into the next sprint with their state recorded.
+- [ ] The five interface wishes of 2026-10-26 are decided on their mock-ups
+      (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44, KTLO-20 #46); those
+      approved are accepted or carried into the next sprint with their state
+      recorded.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -64,6 +66,7 @@ work does not start.
 | [#14](https://github.com/jakubiszon26/apiforge/issues/14) | KTLO-11 Project files in Diagram: the left panel switches between Library and Files; [ticket](tickets/KTLO-11.md); after KTLO-17 | M · 30 min · `visible UI`, `format` |
 | [#43](https://github.com/jakubiszon26/apiforge/issues/43) | KTLO-18 The Problems section expands over the code with one click; [ticket](tickets/KTLO-18.md) | S · 15 min · `visible UI` |
 | [#44](https://github.com/jakubiszon26/apiforge/issues/44) | KTLO-19 Run results can fill the window; [ticket](tickets/KTLO-19.md) | S · 20 min · `visible UI` |
+| [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — the last ticket added to this sprint | S · 20 min · `visible UI` |
 
 ## Later
 
