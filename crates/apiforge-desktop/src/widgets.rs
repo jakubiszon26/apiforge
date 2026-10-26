@@ -229,6 +229,10 @@ impl Widget for Disclosure<'_> {
             FontId::proportional(10.0),
             theme::MUTED,
         );
+        let open = self.open;
+        response
+            .ctx
+            .accesskit_node_builder(response.id, |node| node.set_expanded(open));
         named(response, self.text)
     }
 }
@@ -269,7 +273,7 @@ pub fn variable_chip(ui: &mut Ui, label: &str, kind: &str, payload: Payload) -> 
                 "{label} · {kind} — drag onto an argument, into text, or onto the board to place it there"
             ))
             .on_hover_cursor(egui::CursorIcon::Grab),
-        label,
+        format!("{label} · {kind}"),
     )
 }
 

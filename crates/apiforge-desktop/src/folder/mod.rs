@@ -1010,9 +1010,12 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let project = self.context_project();
+        // Cleanup steps may use the main graph's results, as on the board.
+        let main = cleanup.then(|| graph_of(&model, false).nodes.iter());
         let variables = graph_of(&model, cleanup)
             .nodes
             .iter()
+            .chain(main.into_iter().flatten())
             .filter(|node| node.is_variable())
             .map(|node| (node.id.clone(), node.display_name().to_owned()))
             .collect();
