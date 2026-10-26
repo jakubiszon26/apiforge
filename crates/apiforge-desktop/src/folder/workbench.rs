@@ -2,7 +2,9 @@
 //! shows. Pure state, so the mode and tab rules are tested without a window.
 //! Switching a mode or a tab never saves, closes or resets a document.
 
-use apiforge_storage::project::{PanelSizes, TabState, TextSelection, WorkspaceState};
+use apiforge_storage::project::{
+    DEFAULT_LIBRARY_WIDTH, PanelSizes, TabState, TextSelection, WorkspaceState,
+};
 use std::collections::BTreeSet;
 
 pub use apiforge_storage::project::ViewMode as Mode;
@@ -11,6 +13,7 @@ pub const DEFAULT_PANELS: PanelSizes = PanelSizes {
     documents: 232.0,
     split_code: 520.0,
     diagnostics: 132.0,
+    library: DEFAULT_LIBRARY_WIDTH,
 };
 
 #[derive(Clone, Debug, PartialEq)]

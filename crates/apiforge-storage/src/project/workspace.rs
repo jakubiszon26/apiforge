@@ -44,8 +44,18 @@ pub struct TabState {
     pub camera: Option<CameraState>,
 }
 
+/// Width of the block library when a view state does not record one.
+pub const DEFAULT_LIBRARY_WIDTH: f32 = 240.0;
+
+fn default_library_width() -> f32 {
+    DEFAULT_LIBRARY_WIDTH
+}
+
+/// Panel sizes are the one part of the view state that ignores unknown fields
+/// (KTLO-05c): a size added by a newer build is dropped, not a reason to lose
+/// the whole view.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PanelSizes {
     /// Width of the document list beside the code.
     pub documents: f32,
@@ -53,6 +63,9 @@ pub struct PanelSizes {
     pub split_code: f32,
     /// Height of the diagnostics below the code.
     pub diagnostics: f32,
+    /// Width of the block library beside the board.
+    #[serde(default = "default_library_width")]
+    pub library: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -121,9 +134,14 @@ impl WorkspaceState {
             return Err(ProjectError::InvalidMetadata);
         }
         if let Some(panels) = &self.panels
-            && ![panels.documents, panels.split_code, panels.diagnostics]
-                .iter()
-                .all(|size| size.is_finite() && *size >= 0.0)
+            && ![
+                panels.documents,
+                panels.split_code,
+                panels.diagnostics,
+                panels.library,
+            ]
+            .iter()
+            .all(|size| size.is_finite() && *size >= 0.0)
         {
             return Err(ProjectError::InvalidMetadata);
         }
@@ -201,6 +219,7 @@ mod tests {
                 documents: 220.0,
                 split_code: 480.0,
                 diagnostics: 140.0,
+                library: 260.0,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")

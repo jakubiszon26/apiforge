@@ -1,7 +1,7 @@
 //! KTLO-05b: the block library panel beside the board in the folder window,
-//! driven through named widgets (ADR 0013). Persistence (criterion 6) and the
-//! Add-step popup sections (criterion 5, below 1440 px) are separate pull
-//! requests; see docs/tickets/KTLO-05b.md.
+//! driven through named widgets (ADR 0013). Persistence of its width
+//! (criterion 6) is KTLO-05c; the Add-step popup sections (criterion 5, below
+//! 1440 px) are a separate pull request; see docs/tickets/KTLO-05b.md.
 use super::project_interaction_tests::type_into;
 use super::*;
 use crate::testing::{
