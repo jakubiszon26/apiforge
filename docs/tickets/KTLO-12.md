@@ -1,0 +1,76 @@
+# KTLO-12: One header above the board
+
+- Size: M · Owner review: 20 min · Risk: visible UI
+- State: Approved 2026-10-26 — Diagram: variant A; Split: variant B
+- Analysis model: Fable · Implementation model: Opus 5.5
+
+## Goal
+
+Above the board there is one row, not two: the document's name and its
+Main / Cleanup tabs on the left, the board's tools on the right. The top app
+bar (Project · name · Code / Diagram / Split · Save · Save all · Run options ·
+Run) does not change.
+
+## What the owner will see
+
+- New: nothing.
+- Changed: the document header row (file name · "Scenario" · Main / Cleanup)
+  and the board toolbar row (steps summary · Add step · tools) become a single
+  row on the board's header band.
+  - In **Diagram** (variant A): file name, kind and Main / Cleanup on the
+    left; steps summary, Add step and the tools on the right. When the row is
+    too narrow, the kind ("Scenario") is dropped first, then the name is
+    shortened with its full text on hover, then the steps summary is dropped.
+    At 960 × 540 with the block library open everything but the kind fits.
+  - In **Split** (variant B): only Main / Cleanup on the left, because the
+    tab strip already shows the file name; the right side is the same as in
+    Diagram. At 960 × 540 the steps summary does not fit and is left out.
+- Removed or hidden: the separate white header row; in Split the file name
+  and kind above the board (still visible on the tab strip). Decided by the
+  owner on 2026-10-26.
+- Migrated or converted: nothing.
+- Default behaviour that changes: none.
+
+## Mock-up
+
+`docs/qa/2026-10-26/KTLO-12/`: `before-<view>-<size>.png` (current),
+`mock-a-diagram-<size>.png` (approved for Diagram),
+`mock-b-split-<size>.png` (approved for Split), sizes 960x540 and 1600x1000.
+Posted on issue #16.
+
+## Acceptance criteria
+
+1. In Diagram and in Split there is exactly one row between the tab strip and
+   the board; the top app bar is unchanged (interaction test through the
+   named widgets, at 960 × 540 and 1600 × 1000).
+2. Diagram shows, left to right: file name, kind, Main, Cleanup, steps
+   summary, Add step, the two tool buttons; Split shows Main, Cleanup, then
+   the same right-hand group.
+3. Main / Cleanup keep their accessible names and behaviour; Add step and the
+   tools keep theirs; keyboard tab order runs name → Main → Cleanup → Add
+   step → tools.
+4. At 960 × 540 nothing overlaps or is clipped (`assert_within_window`) in
+   Diagram with the block library open and in Split; the drop order from
+   "What the owner will see" is what happens.
+5. The accessibility audit passes in both modes.
+6. Design review captures match the approved mock-ups; the QA report shows
+   release-binary captures at both sizes in both modes.
+
+## Not in scope
+
+Hiding the block library in Split (backlog, *Later*); KTLO-13 (the editor).
+
+## Technical appendix
+
+The document header is a `Frame` row in `FolderApp::diagram_area`
+(`folder/diagram.rs`); the second row is the canvas overlay header whose
+geometry is `canvas/layout.rs::board_overlays`, painted by
+`paint::overlay_chrome` (summary at `overlays.banner`) with the toolbar drawn
+by `Canvas::toolbar` (`canvas/mod.rs`) as an `egui::Area`. The mock-up
+(branch `mock/ktlo-12-header`, commit `a2c1cf8`) deletes the Frame row, draws
+the header in an `Area` over the board's header at the left, adds
+`canvas::Input.header_leading` and moves the summary next to the toolbar; its
+widths are hard-coded guesses. The real version measures the widths, feeds the
+left width into `board_overlays` (which has a stacked fallback) and extends
+its unit test. The legacy `app.rs` `Input` needs the new field. Risks: focus
+order across two `Area`s; the header now sits on the board's grey band.
