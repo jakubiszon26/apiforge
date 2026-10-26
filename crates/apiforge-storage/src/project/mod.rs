@@ -37,7 +37,9 @@ pub use trash::{
     RestoreDestination, TrashCommit, TrashEntry, TrashFile, TrashIndex, TrashPreview,
     TrashRestorePreview,
 };
-pub use workspace::{CameraState, PanelSizes, TabState, ViewMode, WorkspaceState};
+pub use workspace::{
+    CameraState, DEFAULT_LIBRARY_WIDTH, PanelSizes, TabState, ViewMode, WorkspaceState,
+};
 
 use std::{
     io as std_io,

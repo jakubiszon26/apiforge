@@ -1057,8 +1057,8 @@ impl FolderApp {
             document_locked: !snapshot.editable,
             show_examples: false,
         };
-        let actions = egui::Panel::left("folder-library")
-            .default_size(240.0)
+        let panel = egui::Panel::left("folder-library")
+            .default_size(self.workbench.panels.library)
             .size_range(200.0..=320.0)
             .frame(
                 egui::Frame::new()
@@ -1070,8 +1070,10 @@ impl FolderApp {
                     ui.disable();
                 }
                 self.library.show_blocks(ui, &context)
-            })
-            .inner;
+            });
+        // The panel's outer width, kept in the project's view state (KTLO-05c).
+        self.workbench.panels.library = panel.response.rect.width();
+        let actions = panel.inner;
         widgets::name_resize_handle(
             ui.ctx(),
             egui::Id::new("folder-library"),
