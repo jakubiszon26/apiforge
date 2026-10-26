@@ -42,6 +42,7 @@ work does not start.
 | [#7](https://github.com/jakubiszon26/apiforge/issues/7) | KTLO-05a Block library — analysis and mock-up; [ticket](tickets/KTLO-05a.md) | S · 20 min · `visible UI`; actual 120 lines, 1 round |
 | [#8](https://github.com/jakubiszon26/apiforge/issues/8) | KTLO-05b Block library — implementation (pilot of the full procedure); [ticket](tickets/KTLO-05b.md) — merged in #21 | M · 45 min · `visible UI`; actual 788 lines, 2 rounds |
 | [#22](https://github.com/jakubiszon26/apiforge/issues/22) | KTLO-05c The library panel's width is remembered per project (owner decision: unknown panel sizes are ignored) | S · 10 min · `format` |
+| [#25](https://github.com/jakubiszon26/apiforge/issues/25) | KTLO-15 A foreign write to a scenario file is sometimes not seen as a conflict on Windows | S · 10 min |
 | [#23](https://github.com/jakubiszon26/apiforge/issues/23) | KTLO-05d The Add step popup lists Variables and Operators below 1440 px | S · 15 min · `visible UI` |
 | [#9](https://github.com/jakubiszon26/apiforge/issues/9) | KTLO-06 Legacy JSON mode sunset: parity list and deprecation notice | S (docs) · 20 min · `removal` |
 | [#10](https://github.com/jakubiszon26/apiforge/issues/10) | KTLO-07 Regression smoke list: first run on Linux and Windows | S · 45 min |
@@ -59,6 +60,12 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 - [#14](https://github.com/jakubiszon26/apiforge/issues/14) KTLO-11 Scenario
   navigation in Diagram mode (from the KTLO-05a decision).
 - Hiding the block library panel in Split by choice (owner's wish, 2026-10-26).
+- Panel widths carry over between projects opened in the same window: egui
+  caches panel sizes under fixed IDs, so a restored per-project width loses
+  to the cached one (project files, split code, diagnostics and, after
+  KTLO-05c, the block library). One ticket for all panels.
+- The block library's resize handle only grabs on the panel's side of its
+  edge; the board takes the pointer on the other side (seen in KTLO-05c).
 - The windows-2022 runner's display is 1024 × 768, so the CI captures
   requested at 1600 × 1000 come out at 1024 × 768 (KTLO-08 warning); set the
   runner's resolution or accept the smaller Windows evidence.
