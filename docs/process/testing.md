@@ -96,7 +96,7 @@ action.
 | --- | --- | --- |
 | 1 | Start with no arguments | The managed project opens; no error on stderr |
 | 2 | Open a folder project | Explorer shows the tree; a scenario opens in Code |
-| 3 | Add a block from the palette | A card appears on the board and in the source |
+| 3 | Add a block from the library panel | A card appears on the board and in the source |
 | 4 | Wire two blocks | The wire routes around cards; source updates |
 | 5 | Edit source, see the board | Board follows within 250 ms; invalid source holds the board |
 | 6 | Run a simulation | Report shows every step; no request is sent |
@@ -105,7 +105,8 @@ action.
 | 9 | Migrate a legacy workspace | The six-project fixture migrates; originals byte-identical |
 | 10 | Window at 960 × 540 | All controls visible and usable in Code, Diagram and Split |
 
-Item 3 fails on `main` at the time of writing; see KTLO-05.
+Item 3 fails on `main` at the time of writing: the folder mode has the
+board's `Add step` menu but no library panel; see KTLO-05.
 
 ## Verification commands
 

@@ -8,9 +8,12 @@ the stage had shipped.
 
 ## The ticket
 
-A ticket is a row in [`docs/backlog.md`](../backlog.md). When the row is not
-enough — anything above `S`, or anything with a risk flag — the ticket gets a
-file `docs/tickets/<ID>.md` with these sections, in this order:
+A ticket is a GitHub issue titled `<ID>: <goal>`, labelled as the
+[process](README.md#labels) says, created with `gh issue create` when the
+ticket is accepted into a sprint. When the issue is not enough — anything
+above `S`, or anything with a risk flag — the ticket also gets a file
+`docs/tickets/<ID>.md`, linked from the issue, with these sections, in this
+order:
 
 ```markdown
 # KTLO-05a: Block palette in the folder mode
@@ -60,8 +63,10 @@ Acceptable forms, in order of preference:
 1. **A design review capture** from a throwaway branch: a `review_*` test (see
    [GUI testing](../gui-testing.md#design-review)) that renders the intended
    layout with static or placeholder content, captured by
-   `tools/gui/review.sh <filter>`. The branch is deleted after approval; the
-   capture is attached to the ticket or pull request, not committed.
+   `tools/gui/review.sh <filter>`. The branch is deleted after the decision.
+   The captures the owner decided on are committed with the ticket under
+   `docs/qa/<date>/<ticket>/`, as the evidence of that decision; captures of
+   rejected rounds are not.
 2. **An annotated capture of the current view** when the change is small
    enough to describe by marking an existing screenshot.
 3. **A labelled wireframe** (text or drawing) only for a screen that does not
@@ -70,6 +75,18 @@ Acceptable forms, in order of preference:
 A mock-up is approved as a whole or sent back; approval is noted in the
 ticket's state. The implementation is then measured against the mock-up in the
 QA report.
+
+The owner looks at mock-ups in the issue, not in the repository tree. Once
+the captures are committed on the ticket's branch, post them to the issue as
+images by their immutable raw URL, one per view with its caption:
+
+```markdown
+![Diagram at 960 × 540](https://raw.githubusercontent.com/jakubiszon26/apiforge/<commit>/docs/qa/<date>/<ID>/<view>.png)
+```
+
+`<commit>` is the commit that added them, so the link survives the branch
+being deleted after merge. The same applies to the captures of a QA report
+when the pull request asks for a decision.
 
 ## Stop conditions
 

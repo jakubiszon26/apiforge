@@ -90,12 +90,15 @@ pub fn folder(harness: &FolderHarness) -> &FolderApp {
     harness.state().as_ref().unwrap()
 }
 
-/// Steps until no storage work is in flight and the interface stops requesting
-/// immediate repaints. Background work runs in real time, so this waits for it.
+/// Steps until no storage work or analysis is in flight and the interface stops
+/// requesting immediate repaints. Background work runs in real time, so this
+/// waits for it.
 pub fn settle(harness: &mut FolderHarness) {
     let deadline = Instant::now() + SETTLE_TIMEOUT;
     loop {
-        if folder(harness).is_settled() && harness.try_run().is_ok() && folder(harness).is_settled()
+        if folder(harness).is_analysed()
+            && harness.try_run().is_ok()
+            && folder(harness).is_analysed()
         {
             return;
         }

@@ -1,0 +1,4 @@
+# The repository's own attributes. Generated fixtures and scenario scripts are
+# compared byte for byte, so they stay at LF on every checkout, Windows included.
+*.json text eol=lf
+*.afs text eol=lf
