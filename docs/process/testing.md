@@ -103,15 +103,15 @@ action.
 | 2 | Open a folder project | Explorer shows the tree; a scenario opens in Code |
 | 3 | Add a block from the library panel | A card appears on the board and in the source |
 | 4 | Wire two blocks | The wire routes around cards; source updates |
-| 5 | Edit source, see the board | Board follows within 250 ms; invalid source holds the board |
+| 5 | Edit source, see the board | Board follows within 500 ms (the analysis pause is 250 ms, ADR 0007); invalid source holds the board |
 | 6 | Run a simulation | Report shows every step; no request is sent |
 | 7 | Save (Ctrl+S) and reopen | Exact bytes on disk; layout and identities restored |
-| 8 | Close with dirty tabs | Save / Discard / Cancel offered; recovery restores after a kill |
-| 9 | Migrate a legacy workspace | The six-project fixture migrates; originals byte-identical |
+| 8 | Close a dirty tab, then kill the process with unsaved work | Save / Discard / Cancel offered; recovery restores the work after a kill |
+| 9 | Migrate a legacy workspace | `fixtures/workspace.json` (four projects) migrates and every project passes `check`; the original is byte-identical |
 | 10 | Window at 960 × 540 | All controls visible and usable in Code, Diagram and Split |
 
-Item 3 fails on `main` at the time of writing: the folder mode has the
-board's `Add step` menu but no library panel; see KTLO-05.
+The first Linux run is `docs/qa/2026-10-26/KTLO-07/report.md`; the owner's
+Windows run is pending (KTLO-07, #10).
 
 ## Verification commands
 
