@@ -277,3 +277,40 @@ fn a_focus_line_shows_in_the_gutter_only_while_the_editor_has_focus() {
         "a focus line stays in the gutter without focus"
     );
 }
+
+/// The gutter covers the left of the panel, so a caret scrolled back to the
+/// start of a long line must bring the whole line start out from under it.
+#[test]
+fn home_on_a_scrolled_long_line_shows_its_start_beside_the_gutter() {
+    let project = long_line_project();
+    let mut harness = folder_harness(project.path(), MINIMUM);
+    show(&mut harness, "Code");
+    let source = active_source(&harness);
+    let index = source
+        .lines()
+        .enumerate()
+        .max_by_key(|(_, line)| line.len())
+        .unwrap()
+        .0;
+    let before = editor(&harness);
+    let row = harness
+        .ctx
+        .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)));
+    click_at(
+        &mut harness,
+        before.left_top() + egui::vec2(120.0, 2.0 + row * (index as f32 + 0.5)),
+    );
+    harness.key_press(egui::Key::End);
+    settle(&mut harness);
+    assert!(
+        editor(&harness).left() < before.left() - 100.0,
+        "the line scrolled"
+    );
+    harness.key_press(egui::Key::Home);
+    settle(&mut harness);
+    let after = editor(&harness);
+    assert!(
+        (after.left() - before.left()).abs() <= 1.0,
+        "the text area is at {after:?} after Home, not back at {before:?}"
+    );
+}
