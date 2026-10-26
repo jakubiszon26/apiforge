@@ -1,6 +1,6 @@
 # KTLO-12: One header above the board (part 2 of 2) — QA report
 
-- Branch: `feat/ktlo-12-one-header-b2` (the PR head commit), from `main` at `5ff7123`
+- Branch: `feat/ktlo-12-one-header-b2`; binary and captures built at `cda8a8d`, from `main` at `5ff7123`
 - Built with: `cargo build --release --locked -p apiforge-desktop`
 - Compared against the approved mock-ups in this directory: `mock-a-diagram-*`
   (Diagram, variant A) and `mock-b-split-*` (Split, variant B);
@@ -30,7 +30,7 @@ Expected: no white header row; on the board's grey header band, Diagram shows
 file name, "Scenario", Main, Cleanup, the steps summary, Add step and the two
 tools; Split shows Main, Cleanup, then the same right-hand group. The top app
 bar is unchanged.
-Observed: as expected and as in the mock-ups at both sizes. Tests:
+Observed: as in the mock-ups at both sizes; at 960 × 540 Diagram leaves out "Scenario" (scenario 2). Tests:
 `one_row_lies_between_the_tab_strip_and_the_board`,
 `the_row_shows_its_parts_left_to_right`.
 
