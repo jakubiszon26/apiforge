@@ -420,3 +420,56 @@ fn operator_group_headers_expose_their_expanded_state() {
         "the state follows a click"
     );
 }
+
+/// The right edge of the block library panel: where its named resize handle is.
+fn library_edge(harness: &FolderHarness) -> egui::Pos2 {
+    harness.get_by_label("Resize block library").rect().center()
+}
+
+/// KTLO-05c criterion 4: the library panel's width, changed through its resize
+/// handle, comes back when the project is closed and opened again.
+#[test]
+fn the_library_width_comes_back_after_reopening_the_project() {
+    let project = shop();
+    let mut harness = folder_harness(project.path(), WIDE);
+    harness.get_by_label("Diagram").click();
+    settle(&mut harness);
+    // Grab the handle on the panel's side of the edge: the board, drawn after
+    // the panel, takes the pointer on the other side.
+    let start = library_edge(&harness) - egui::vec2(2.0, 0.0);
+    let end = start + egui::vec2(60.0, 0.0);
+
+    harness.hover_at(start);
+    harness.step();
+    harness.drag_at(start);
+    harness.step();
+    for step in 1..=6 {
+        harness.hover_at(start + (end - start) * (step as f32 / 6.0));
+        harness.step();
+    }
+    harness.drop_at(end);
+    settle(&mut harness);
+    let resized = library_edge(&harness).x;
+    assert!(
+        (resized - end.x).abs() < 2.0,
+        "the handle resizes the panel: {} -> {resized}",
+        start.x
+    );
+
+    // Close the window the way the application closes it, then open again.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !harness.state_mut().as_mut().unwrap().prepare_close() {
+        assert!(std::time::Instant::now() < deadline, "close did not finish");
+        harness.step();
+    }
+    drop(harness);
+
+    let mut reopened = folder_harness(project.path(), WIDE);
+    reopened.get_by_label("Diagram").click();
+    settle(&mut reopened);
+    let restored = library_edge(&reopened).x;
+    assert!(
+        (restored - resized).abs() < 1.0,
+        "the library keeps its width: its edge was at {resized}, now {restored}"
+    );
+}

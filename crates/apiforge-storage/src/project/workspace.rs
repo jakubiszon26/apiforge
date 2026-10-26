@@ -260,6 +260,100 @@ mod tests {
         assert_eq!(store.load_workspace_state("project").unwrap(), None);
     }
 
+    /// Writes `panels` into an otherwise valid view state on disk, loads it, saves
+    /// it again and returns the panel sizes as written by this build.
+    fn panels_through_load_and_save(panels: serde_json::Value) -> serde_json::Value {
+        let (directory, store) = store();
+        let path = directory.path().join(WORKSPACE_PATH);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let state = serde_json::json!({
+            "formatVersion": 1,
+            "projectId": "project",
+            "mode": "diagram",
+            "tabs": [],
+            "active": null,
+            "panels": panels,
+        });
+        std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+        let loaded = store
+            .load_workspace_state("project")
+            .unwrap()
+            .expect("the view state loads");
+        assert_eq!(loaded.mode, ViewMode::Diagram);
+        store.save_workspace_state(&loaded).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        written["panels"].clone()
+    }
+
+    /// KTLO-05c criterion 1: the library panel's width round-trips.
+    #[test]
+    fn the_library_panel_width_round_trips() {
+        let panels = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 287.5,
+        });
+        assert_eq!(panels_through_load_and_save(panels.clone()), panels);
+    }
+
+    /// KTLO-05c criterion 2: a view state written before the library width was
+    /// remembered loads with the default width (240, the panel's former fixed
+    /// default).
+    #[test]
+    fn a_view_state_without_a_library_width_loads_with_the_default() {
+        let panels = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+        }));
+        assert_eq!(
+            panels,
+            serde_json::json!({
+                "documents": 220.0,
+                "splitCode": 480.0,
+                "diagnostics": 140.0,
+                "library": 240.0,
+            })
+        );
+    }
+
+    /// KTLO-05c criterion 3: a panel size from a newer build is ignored; the
+    /// known sizes keep their values. The rest of the view state still rejects
+    /// unknown fields (the manifest's own check is
+    /// `schema_rejects_unknown_versions_fields_and_collisions`).
+    #[test]
+    fn an_unknown_panel_size_is_dropped_and_the_known_ones_kept() {
+        let panels = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 300.0,
+            "inspectorFromTheFuture": 99.0,
+        }));
+        assert_eq!(
+            panels,
+            serde_json::json!({
+                "documents": 220.0,
+                "splitCode": 480.0,
+                "diagnostics": 140.0,
+                "library": 300.0,
+            })
+        );
+        for unknown in [
+            br#"{"formatVersion":1,"projectId":"project","mode":"code","tabs":[],"active":null,"future":1}"#
+                .to_vec(),
+            br#"{"formatVersion":1,"projectId":"project","mode":"code","tabs":[{"documentId":"doc","selection":{"anchor":0,"caret":0},"scroll":0.0,"future":1}],"active":null}"#
+                .to_vec(),
+        ] {
+            assert!(
+                WorkspaceState::from_bytes(&unknown).is_err(),
+                "unknown fields outside the panel sizes are still rejected"
+            );
+        }
+    }
+
     #[test]
     fn a_read_only_session_does_not_write_view_state() {
         let (directory, _writer) = store();
