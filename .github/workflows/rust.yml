@@ -179,42 +179,101 @@ jobs:
           migrated="$scratch/migrated"
           mkdir -p "$created" "$migrated/apiforge"
 
-          # Managed startup opens a window and never exits by itself, so each
-          # run is stopped once what it owes is on disk. A run that writes
-          # nothing, or that exits early, fails on its own deadline instead of
-          # hanging the job.
-          managed() {
-            # Prefixed names, because a `local` would otherwise shadow the
-            # variables the readiness predicate reads from this script.
-            local run_label="$1" run_home="$2" run_ready="$3"
-            local run_log="$scratch/$run_label.log" run_waited=0 run_pid run_group
-            setsid xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
-              env XDG_DATA_HOME="$run_home" "$binary" --managed >"$run_log" 2>&1 &
-            run_pid=$!
-            # The whole group, so the X server goes with the application.
-            run_group="$(ps -o pgid= -p "$run_pid" | tr -d ' ')"
-            test -n "$run_group"
-            until "$run_ready"; do
-              if ! kill -0 "$run_pid" 2>/dev/null; then
-                echo "Managed startup ($run_label) exited before writing what it owes:" >&2
-                sed 's/^/  /' "$run_log" >&2
-                return 1
-              fi
-              if test "$run_waited" -ge 60; then
-                echo "Managed startup ($run_label) wrote nothing within 60 s:" >&2
-                sed 's/^/  /' "$run_log" >&2
-                kill -TERM -- "-$run_group" 2>/dev/null || true
-                return 1
-              fi
-              sleep 1
-              run_waited=$((run_waited + 1))
+          # KTLO-16: each phase runs in a session of its own, so its process
+          # group ID is its PID. The group is never read back with `ps`: read
+          # before the child's setsid(), that returns this shell's own group,
+          # and the TERM meant for the phase stopped the step instead and left
+          # the phase running. Every phase has a deadline; an overrun prints
+          # the phase's log, sends TERM to its group, and KILL 10 s later.
+          step_group="$(ps -o pgid= -p $$ | tr -d ' ')"
+          echo "Step shell $$, process group $step_group (PID PPID PGID SID COMMAND):"
+          ps -e -o pid=,ppid=,pgid=,sid=,comm= | awk -v g="$step_group" '$3 == g'
+          phase_pid=""
+          # alive PID, or alive -GROUP: a process, or a member of the group,
+          # that has not exited.
+          alive() {
+            ps -e -o pid=,pgid=,stat= | awk -v p="$1" \
+              '(p > 0 ? $1 == p : $2 == -p) && $3 !~ /^Z/ { f = 1 } END { exit !f }'
+          }
+          exited() { ! alive "$phase_pid"; }
+          stop_phase() {
+            test -n "$phase_pid" || return 0
+            local stop_by=$((SECONDS + 10))
+            kill -TERM -- "-$phase_pid" 2>/dev/null || true
+            while alive "-$phase_pid" && test "$SECONDS" -lt "$stop_by"; do
+              sleep 0.1
             done
+            if alive "-$phase_pid"; then
+              echo "Process group $phase_pid outlived TERM by 10 s; sending KILL" >&2
+              kill -KILL -- "-$phase_pid" 2>/dev/null || true
+            fi
+            wait "$phase_pid" 2>/dev/null || true
+            phase_pid=""
+          }
+          trap 'stop_phase; rm -rf "$XDG_RUNTIME_DIR" "$scratch"' EXIT
+          trap 'exit 143' TERM INT
+
+          # phase LABEL HOME SECONDS READY ARGS...: the binary with ARGS under
+          # Xvfb until READY holds; fails after SECONDS, or if it exits first.
+          # Prefixed names, because a `local` would otherwise shadow the
+          # variables the readiness predicate reads from this script.
+          phase() {
+            local phase_label="$1" phase_home="$2" phase_seconds="$3" phase_ready="$4"
+            local phase_by=$((SECONDS + 5))
+            shift 4
+            phase_log="$scratch/$phase_label.log"
+            setsid -w xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
+              env XDG_DATA_HOME="$phase_home" "$binary" "$@" >"$phase_log" 2>&1 &
+            phase_pid=$!
+            until test "$(ps -o pgid= -p "$phase_pid" | tr -d ' ')" = "$phase_pid"; do
+              alive "$phase_pid" || break
+              if test "$SECONDS" -ge "$phase_by"; then
+                echo "Phase $phase_label: PID $phase_pid did not lead its group within 5 s" >&2
+                kill -KILL "$phase_pid" 2>/dev/null || true
+                phase_pid=""
+                return 1
+              fi
+              sleep 0.1
+            done
+            phase_by=$((SECONDS + phase_seconds))
+            until "$phase_ready"; do
+              if test "$phase_ready" != exited && exited; then
+                echo "Phase $phase_label exited before it was ready:" >&2
+              elif test "$SECONDS" -ge "$phase_by"; then
+                echo "Phase $phase_label was not ready within $phase_seconds s:" >&2
+              else
+                sleep 0.1
+                continue
+              fi
+              sed 's/^/  /' "$phase_log" >&2
+              stop_phase
+              return 1
+            done
+          }
+
+          # Managed startup opens a window and never exits by itself, so each
+          # run is stopped once what it owes is on disk, within 60 s.
+          managed() {
+            phase "$1" "$2" 60 "$3" --managed
             # Let the storage worker finish the commit around those files
             # before the window is taken away.
             sleep 3
-            kill -TERM -- "-$run_group" 2>/dev/null || true
-            wait "$run_pid" 2>/dev/null || true
-            sed 's/^/  /' "$run_log"
+            stop_phase
+            sed 's/^/  /' "$phase_log"
+          }
+
+          # capture LABEL ARGS...: a --screenshot run that must exit by itself,
+          # successfully, within 45 s.
+          capture() {
+            local capture_status=0
+            phase "$1" "$migrated" 45 exited "${@:2}"
+            wait "$phase_pid" || capture_status=$?
+            phase_pid=""
+            if test "$capture_status" -ne 0; then
+              echo "Capture $1 exited with status $capture_status:" >&2
+              sed 's/^/  /' "$phase_log" >&2
+              return 1
+            fi
           }
 
           # 1. An empty data directory: one project is created, nothing migrated.
@@ -275,9 +334,7 @@ jobs:
           # never opened, so this opens migration output from cold. Opening a
           # folder records it in the data directory's recent projects, so the
           # run keeps the scratch one.
-          xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
-            timeout --kill-after=5s 45s env XDG_DATA_HOME="$migrated" "$binary" \
-            --screenshot test-results/native-folder.png \
+          capture folder --screenshot test-results/native-folder.png \
             --folder "$data/projects/tickets"
           test -s test-results/native-folder.png
 
@@ -290,14 +347,12 @@ jobs:
           }
           for mode in code diagram split; do
             for size in 960x540 1600x1000; do
-              capture="test-results/qa/$mode-$size.png"
-              xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
-                timeout --kill-after=5s 45s env XDG_DATA_HOME="$migrated" "$binary" \
-                --screenshot "$capture" --folder "$data/projects/shop" \
-                --mode "$mode" --size "$size"
-              test -s "$capture"
-              test "$(png_size "$capture")" = "$size"
-              echo "captured: $capture"
+              shot="test-results/qa/$mode-$size.png"
+              capture "qa-$mode-$size" --screenshot "$shot" \
+                --folder "$data/projects/shop" --mode "$mode" --size "$size"
+              test -s "$shot"
+              test "$(png_size "$shot")" = "$size"
+              echo "captured: $shot"
             done
           done
 

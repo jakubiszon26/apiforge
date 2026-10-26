@@ -2331,6 +2331,7 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 header_leading: None,
+                library: None,
             };
             self.canvas.show(ui, &input)
         };

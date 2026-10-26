@@ -82,6 +82,9 @@ pub struct Outcome {
 #[derive(Clone, Default)]
 pub struct CodeEditor {
     completions: Completions,
+    /// The selection drawn last frame, so a moved caret is scrolled clear of
+    /// the gutter that covers the left of the panel.
+    caret: Option<egui::text::CCursorRange>,
 }
 
 /// The completion popup of one text edit, whatever widget drew it.
@@ -390,6 +393,9 @@ impl CodeEditor {
             0.0
         };
 
+        // What is left of the panel below here; the row below starts only as
+        // tall as a control, so it is measured before the row begins.
+        let to_bottom = (ui.max_rect().bottom() - ui.cursor().top()).max(0.0);
         let mut outcome = None;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -401,15 +407,25 @@ impl CodeEditor {
                 );
                 rect
             });
-            let output = egui::TextEdit::multiline(text)
+            let mut edit = egui::TextEdit::multiline(text)
                 .id(id)
                 .font(egui::TextStyle::Monospace)
                 .code_editor()
                 .desired_width(f32::INFINITY)
                 .lock_focus(true)
-                .layouter(&mut layouter)
-                .show(ui);
+                .layouter(&mut layouter);
+            if gutter.is_some() {
+                // An editor with line numbers is its panel's content, not a form
+                // field: no box of its own (a given frame replaces the default
+                // fill and strokes), and it reaches the bottom of the panel so a
+                // click below the last line still lands in it.
+                edit = edit
+                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 2)))
+                    .min_size(vec2(0.0, to_bottom));
+            }
+            let output = edit.show(ui);
             if let Some(gutter) = gutter {
+                self.keep_caret_clear_of_gutter(ui, &output, gutter_width);
                 self.paint_gutter(ui, gutter, text, &output, context);
             }
             outcome = Some(self.after_edit(ui, text, context, &output, Taken { keys, indent }, id));
@@ -434,6 +450,19 @@ impl CodeEditor {
         // what is visible.
         let visible = ui.clip_rect();
         let painter = ui.painter().with_clip_rect(visible);
+        // It stays at the panel's left edge while a long line scrolls beneath
+        // it, on the panel's own fill so the text passing under it is hidden.
+        let rect = rect.translate(vec2((visible.left() - rect.left()).max(0.0), 0.0));
+        let band = Rect::from_x_y_ranges(rect.x_range(), visible.y_range());
+        painter.rect_filled(band, 0.0, ui.visuals().panel_fill);
+        // The box's coloured stroke used to be the only sign of keyboard focus.
+        if output.response.response.has_focus() {
+            let x = band.right() - 1.0;
+            painter.line_segment(
+                [pos2(x, band.top()), pos2(x, band.bottom())],
+                Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            );
+        }
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         let marked = marked_lines(text, context.diagnostics);
@@ -469,6 +498,34 @@ impl CodeEditor {
             }
             begins_a_line = row.ends_with_newline;
             number += usize::from(row.ends_with_newline);
+        }
+    }
+
+    /// Scrolls a moved caret into view with the gutter's width to its left.
+    ///
+    /// The text edit scrolls its caret to the panel's edge, which the gutter
+    /// covers: Home on a scrolled line would leave the line's start under the
+    /// numbers. Asking again, wider, after it lets this request win.
+    fn keep_caret_clear_of_gutter(
+        &mut self,
+        ui: &Ui,
+        output: &egui::text_edit::TextEditOutput,
+        gutter_width: f32,
+    ) {
+        // The first frame after opening a document only restores its caret; its
+        // restored scroll offset stands.
+        let caret = output.cursor_range;
+        let moved =
+            std::mem::replace(&mut self.caret, caret).is_some_and(|last| Some(last) != caret);
+        if let Some(range) = caret
+            && output.response.response.has_focus()
+            && (moved || output.response.response.changed())
+        {
+            let at = output
+                .galley
+                .pos_from_cursor(range.primary)
+                .translate(output.galley_pos.to_vec2());
+            ui.scroll_to_rect(at.with_min_x(at.left() - gutter_width), None);
         }
     }
 

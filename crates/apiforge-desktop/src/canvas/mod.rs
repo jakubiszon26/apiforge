@@ -96,6 +96,24 @@ pub enum Command {
     SetBridges(bool),
 }
 
+/// The board command for a block library action: a block or operator added at
+/// `position`, unconnected, or a variable selected. Workspace navigation has no
+/// board command.
+pub fn library_command(action: crate::library::Action, position: Position) -> Option<Command> {
+    use crate::library::Action;
+    match action {
+        Action::AddNode { block, component } => Some(Command::AddNode {
+            block,
+            component,
+            position,
+            source: None,
+        }),
+        Action::AddOperator(operator) => Some(Command::AddOperator { operator, position }),
+        Action::SelectNode(id) => Some(Command::Select(vec![id])),
+        _ => None,
+    }
+}
+
 /// Everything the board needs to draw one frame.
 pub struct Input<'a> {
     pub graph: &'a Graph,
@@ -116,6 +134,9 @@ pub struct Input<'a> {
     /// row (KTLO-12), for which the row keeps room; `None` keeps the row as it
     /// is without one.
     pub header_leading: Option<Vec2>,
+    /// The library's Variables and Operators for the *Add step* popup, when no
+    /// library panel is in view (KTLO-05d).
+    pub library: Option<&'a crate::library::Context<'a>>,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -245,6 +266,20 @@ impl Canvas {
             x: f64::from(world.x).round(),
             y: f64::from(world.y).round(),
         }
+    }
+
+    /// Opens the *Add step* popup near the board's top-left corner, as the
+    /// toolbar's button does, for tests that audit the popup.
+    #[cfg(test)]
+    pub(crate) fn debug_open_menu(&mut self) {
+        let at = self.last_viewport.min + vec2(16.0, 48.0);
+        let camera = self.screen_camera(self.last_viewport);
+        self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_menu_open(&self) -> bool {
+        self.menu.is_some()
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -684,11 +719,16 @@ impl Canvas {
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
-            match menu.show(ui.ctx(), input.graph, input.project) {
+            match menu.show(ui.ctx(), input.graph, input.project, input.library) {
                 menu::Outcome::Open => {}
                 menu::Outcome::Close => self.menu = None,
                 menu::Outcome::Add(command) => {
                     commands.push(command);
+                    self.menu = None;
+                }
+                menu::Outcome::Library(action) => {
+                    // As a click in the library panel: at the visible centre.
+                    commands.extend(library_command(action, self.visible_center()));
                     self.menu = None;
                 }
             }
@@ -2220,6 +2260,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 header_leading: None,
+                                library: None,
                             },
                         );
                     });
@@ -2264,6 +2305,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 header_leading: None,
+                                library: None,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =

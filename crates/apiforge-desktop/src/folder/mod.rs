@@ -1037,26 +1037,7 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let project = self.context_project();
-        // Cleanup steps may use the main graph's results, as on the board.
-        let main = cleanup.then(|| graph_of(&model, false).nodes.iter());
-        let variables = graph_of(&model, cleanup)
-            .nodes
-            .iter()
-            .chain(main.into_iter().flatten())
-            .filter(|node| node.is_variable())
-            .map(|node| (node.id.clone(), node.display_name().to_owned()))
-            .collect();
-        let context = library::Context {
-            project: &project,
-            projects: Vec::new(),
-            scenario_id: document_id,
-            variables,
-            parameters: parameters_of(&model),
-            editing_component: matches!(*model, Document::Component(_)),
-            running: false,
-            document_locked: !snapshot.editable,
-            show_examples: false,
-        };
+        let context = library_context(&project, document_id, &model, cleanup, snapshot.editable);
         let panel = egui::Panel::left("folder-library")
             .default_size(self.workbench.panels.library)
             .size_range(200.0..=320.0)
@@ -1102,23 +1083,11 @@ impl FolderApp {
             .get(document_id)
             .map(Canvas::visible_center)
             .unwrap_or(Position { x: 100.0, y: 100.0 });
-        let command = match action {
-            library::Action::AddNode { block, component } => Command::AddNode {
-                block,
-                component,
-                position: centre,
-                source: None,
-            },
-            library::Action::AddOperator(operator) => Command::AddOperator {
-                operator,
-                position: centre,
-            },
-            library::Action::SelectNode(id) => Command::Select(vec![id]),
-            // The folder panel shows only block sections, never workspace
-            // navigation, so no other action reaches here.
-            _ => return,
-        };
-        self.board_command(document_id, model, cleanup, editable, command);
+        // The folder panel shows only block sections, never workspace
+        // navigation, so every action it sends has a board command.
+        if let Some(command) = canvas::library_command(action, centre) {
+            self.board_command(document_id, model, cleanup, editable, command);
+        }
     }
 
     fn step_model_history(&mut self, document_id: &str, undo: bool) {
@@ -1201,6 +1170,37 @@ fn text_tab(path: &str) -> String {
 
 fn context_key(document_id: &str, cleanup: bool) -> String {
     format!("{document_id}/{}", if cleanup { "cleanup" } else { "main" })
+}
+
+/// What the block library shows for one board: the library panel and, when
+/// the panel is not in view, the board's *Add step* popup (KTLO-05d).
+fn library_context<'a>(
+    project: &'a Project,
+    document_id: &'a str,
+    model: &Document,
+    cleanup: bool,
+    editable: bool,
+) -> library::Context<'a> {
+    // Cleanup steps may use the main graph's results, as on the board.
+    let main = cleanup.then(|| graph_of(model, false).nodes.iter());
+    let variables = graph_of(model, cleanup)
+        .nodes
+        .iter()
+        .chain(main.into_iter().flatten())
+        .filter(|node| node.is_variable())
+        .map(|node| (node.id.clone(), node.display_name().to_owned()))
+        .collect();
+    library::Context {
+        project,
+        projects: Vec::new(),
+        scenario_id: document_id,
+        variables,
+        parameters: parameters_of(model),
+        editing_component: matches!(*model, Document::Component(_)),
+        running: false,
+        document_locked: !editable,
+        show_examples: false,
+    }
 }
 
 fn graph_of(model: &Document, cleanup: bool) -> &Graph {

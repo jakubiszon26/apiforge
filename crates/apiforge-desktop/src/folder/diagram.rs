@@ -127,6 +127,9 @@ impl FolderApp {
         let library_in_view = self.workbench.mode == Mode::Diagram
             || (self.workbench.mode == Mode::Split
                 && ui.ctx().content_rect().width() >= SPLIT_INSPECTOR_WIDTH);
+        // Without the panel, the Add step popup carries its sections (KTLO-05d).
+        let library = (!library_in_view)
+            .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));
         if !self.canvases.contains_key(document_id) {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
@@ -152,6 +155,7 @@ impl FolderApp {
                         context: &context,
                         library_in_view,
                         header_leading: None,
+                        library: library.as_ref(),
                     },
                 )
             })

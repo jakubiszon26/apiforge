@@ -3,7 +3,12 @@ use eframe::egui;
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, TryRecvError},
+    time::{Duration, Instant},
 };
+
+/// How long a capture waits for the window to have a document, so that a
+/// folder that cannot be opened ends the probe instead of keeping it open.
+const READY_PATIENCE: Duration = Duration::from_secs(30);
 
 pub struct Capture {
     path: PathBuf,
@@ -11,15 +16,22 @@ pub struct Capture {
     frames: u8,
     finished: bool,
     saved: Option<Receiver<Result<(), String>>>,
+    started: Instant,
+    patience: Duration,
 }
 impl Capture {
     pub fn new(path: PathBuf) -> Self {
+        Self::with_patience(path, READY_PATIENCE)
+    }
+    fn with_patience(path: PathBuf, patience: Duration) -> Self {
         Self {
             path,
             requested: false,
             frames: 0,
             finished: false,
             saved: None,
+            started: Instant::now(),
+            patience,
         }
     }
     pub fn update(&mut self, context: &egui::Context, ready: bool) -> Option<Result<(), String>> {
@@ -66,6 +78,12 @@ impl Capture {
                     return Some(Err("Cannot start screenshot encoder".into()));
                 }
             }
+        } else if !ready && self.frames == 0 && self.started.elapsed() >= self.patience {
+            self.finished = true;
+            return Some(Err(format!(
+                "Capture failed: the window had no document after {} s",
+                self.patience.as_secs()
+            )));
         } else if ready {
             self.frames += 1;
             if self.frames >= 8 {
@@ -92,6 +110,20 @@ mod tests {
         drop(sender);
         let context = egui::Context::default();
         assert_eq!(capture.update(&context, false), Some(Ok(())));
+        assert_eq!(capture.update(&context, false), None);
+    }
+
+    #[test]
+    fn a_window_that_never_has_a_document_ends_the_capture_with_an_error() {
+        // KTLO-16: `--screenshot --folder` on a folder that cannot be opened
+        // kept the window open until something killed it.
+        let mut capture = Capture::with_patience("unused.png".into(), Duration::ZERO);
+        let context = egui::Context::default();
+        let result = capture.update(&context, false);
+        assert!(
+            matches!(&result, Some(Err(message)) if message.contains("no document")),
+            "{result:?}"
+        );
         assert_eq!(capture.update(&context, false), None);
     }
 }

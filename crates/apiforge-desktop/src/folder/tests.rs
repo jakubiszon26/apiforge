@@ -7,10 +7,14 @@ mod acceptance_tests;
 mod accessibility_tests;
 #[path = "activation_tests.rs"]
 mod activation_tests;
+#[path = "editor_tests.rs"]
+mod editor_tests;
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
 #[path = "library_tests.rs"]
 mod library_tests;
+#[path = "popup_tests.rs"]
+mod popup_tests;
 #[path = "project_interaction_tests.rs"]
 mod project_interaction_tests;
 #[path = "recovery_tests.rs"]
