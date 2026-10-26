@@ -84,8 +84,8 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
 code stacks in one column, no tidied wire is straight, wires are drawn on top
-of each other, and ordering wires cross data wires by construction. Not
-scheduled in KTLO; in the order to do them:
+of each other, and ordering wires cross data wires by construction. Owner
+decision of 2026-10-26: scheduled for the sprint after KTLO, in this order:
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
