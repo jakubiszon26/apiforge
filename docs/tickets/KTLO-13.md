@@ -1,7 +1,11 @@
 # KTLO-13: The code editor fills its panel without a bordered box
 
 - Size: S · Owner review: 15 min · Risk: visible UI
-- State: Approved 2026-10-26 — variant A (horizontal scroll), focus option 2
+- State: Awaiting acceptance — approved 2026-10-26, variant A (horizontal
+  scroll), focus option 2; QA report `docs/qa/2026-10-26/KTLO-13/report.md`
+- Actual: 620 changed lines without captures — size M, over the S estimate:
+  the code is 63 lines, the acceptance and regression tests 318, the review
+  view 50, the ticket and QA report the rest
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
