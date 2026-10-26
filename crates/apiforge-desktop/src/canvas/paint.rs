@@ -704,7 +704,12 @@ pub fn mode_line_text(graph: &Graph) -> &'static str {
     }
 }
 
-pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays, graph: &Graph) {
+pub fn overlay_chrome(
+    painter: &Painter,
+    overlays: &super::layout::BoardOverlays,
+    graph: &Graph,
+    header_leading: f32,
+) {
     painter.rect_filled(overlays.header, 0.0, theme::BG);
     painter.line_segment(
         [
@@ -725,14 +730,25 @@ pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays
         graph.nodes.len(),
         if starts { "From Start" } else { "All steps" }
     );
-    label(
-        painter,
-        overlays.banner,
-        &caption,
+    // KTLO-12 mock-up: the summary sits on the right, before the toolbar,
+    // and is left out when the document header leaves no room for it.
+    let galley = painter.layout_no_wrap(
+        caption,
         FontId::proportional(theme::FONT_META),
         theme::MUTED,
-        egui::Align::Min,
     );
+    let right = overlays.toolbar.left() - super::layout::OVERLAY_GAP;
+    let left = overlays.header.left()
+        + super::layout::OVERLAY_PADDING_LEFT
+        + header_leading
+        + super::layout::OVERLAY_GAP;
+    if right - galley.size().x >= left {
+        let at = egui::pos2(
+            right - galley.size().x,
+            overlays.toolbar.center().y - galley.size().y / 2.0,
+        );
+        painter.galley(at, galley, theme::MUTED);
+    }
 
     if let super::layout::HintPlacement::Inline(rect) = overlays.hint {
         painter.text(

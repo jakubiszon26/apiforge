@@ -2330,6 +2330,7 @@ impl App {
                     .is_some_and(|clipboard| clipboard.context == context),
                 context: &context,
                 library_in_view: true,
+                header_leading: 0.0,
             };
             self.canvas.show(ui, &input)
         };

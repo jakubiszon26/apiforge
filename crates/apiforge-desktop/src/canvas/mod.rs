@@ -112,6 +112,9 @@ pub struct Input<'a> {
     /// Whether a block library panel is beside the board, so the empty-board
     /// hint can point at it (KTLO-05b, criterion 9).
     pub library_in_view: bool,
+    /// KTLO-12 mock-up: width of the document header drawn at the left of
+    /// the board's header row; the steps summary keeps clear of it.
+    pub header_leading: f32,
 }
 
 /// Everything the board draws: the blocks' cards and the proxies' chips.
@@ -626,7 +629,7 @@ impl Canvas {
         );
         self.handle_keys(ui, input, &mut commands);
 
-        paint::overlay_chrome(&painter, &overlays, input.graph);
+        paint::overlay_chrome(&painter, &overlays, input.graph, input.header_leading);
         ui.interact(
             overlays.banner,
             ui.id().with("execution-mode-hint"),
@@ -2164,6 +2167,7 @@ mod tests {
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
+                                header_leading: 0.0,
                             },
                         );
                     });

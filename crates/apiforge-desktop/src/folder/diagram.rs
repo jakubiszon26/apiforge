@@ -45,25 +45,6 @@ impl FolderApp {
             return;
         };
         let mut cleanup = self.cleanup(document_id);
-        egui::Frame::new()
-            .fill(theme::WHITE)
-            .inner_margin(egui::Margin::symmetric(16, 4))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(file_name(&snapshot.path))
-                            .size(theme::FONT_BODY)
-                            .family(theme::bold_family()),
-                    );
-                    widgets::hint(ui, kind_label(snapshot.kind));
-                    if matches!(*model, Document::Scenario(_)) {
-                        ui.add_space(theme::SPACE_LG);
-                        widgets::tab_value(ui, &mut cleanup, false, "Main");
-                        widgets::tab_value(ui, &mut cleanup, true, "Cleanup");
-                    }
-                });
-            });
         if cleanup != self.cleanup(document_id) {
             if let Some(tab) = self.workbench.tab_mut(document_id) {
                 tab.cleanup = cleanup;
@@ -127,6 +108,59 @@ impl FolderApp {
         let library_in_view = self.workbench.mode == Mode::Diagram
             || (self.workbench.mode == Mode::Split
                 && ui.ctx().content_rect().width() >= SPLIT_INSPECTOR_WIDTH);
+        // KTLO-12 mock-up: the document header is drawn into the board's own
+        // header row instead of a row of its own; the board reserves its width.
+        let variant_b = std::env::var("APIFORGE_MOCK_HEADER").is_ok_and(|value| value == "b");
+        let header_origin = ui.available_rect_before_wrap().left_top();
+        let left_budget = ui.available_width() - 18.0 - 14.0 - 12.0 - 175.0 - 105.0;
+        let before = cleanup;
+        let header = egui::Area::new(ui.id().with("mock-document-header"))
+            .fixed_pos(header_origin + egui::vec2(18.0, 21.0))
+            .pivot(egui::Align2::LEFT_CENTER)
+            .fade_in(false)
+            .show(ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    if !variant_b {
+                        let tabs = 140.0;
+                        let kind = 70.0;
+                        let show_kind = left_budget - tabs - kind >= 200.0;
+                        let name_budget = (left_budget
+                            - tabs
+                            - theme::SPACE_LG
+                            - if show_kind { kind } else { 0.0 })
+                        .max(40.0);
+                        let name = file_name(&snapshot.path);
+                        ui.scope(|ui| {
+                            ui.set_max_width(name_budget);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(name)
+                                        .size(theme::FONT_BODY)
+                                        .family(theme::bold_family()),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(name);
+                        });
+                        if show_kind {
+                            widgets::hint(ui, kind_label(snapshot.kind));
+                        }
+                        ui.add_space(theme::SPACE_LG);
+                    }
+                    if matches!(*model, Document::Scenario(_)) {
+                        widgets::tab_value(ui, &mut cleanup, false, "Main");
+                        widgets::tab_value(ui, &mut cleanup, true, "Cleanup");
+                    }
+                });
+            });
+        let header_leading = header.response.rect.right() - header_origin.x - 18.0;
+        if cleanup != before {
+            if let Some(tab) = self.workbench.tab_mut(document_id) {
+                tab.cleanup = cleanup;
+            }
+            self.selections.remove(document_id);
+            self.touched();
+        }
         if !self.canvases.contains_key(document_id) {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
@@ -151,6 +185,7 @@ impl FolderApp {
                         can_paste,
                         context: &context,
                         library_in_view,
+                        header_leading,
                     },
                 )
             })

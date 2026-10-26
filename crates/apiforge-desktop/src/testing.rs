@@ -243,6 +243,24 @@ mod review {
         mode_views(&mut harness, "960x540@2x");
     }
 
+    /// KTLO-12 mock-up: the document header and the board toolbar as one row.
+    /// `APIFORGE_REVIEW_PREFIX` names the round (before, mock-a, mock-b).
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ktlo12_board_header() {
+        let prefix = std::env::var("APIFORGE_REVIEW_PREFIX").unwrap_or_else(|_| "mock".into());
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            for mode in ["Diagram", "Split"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                let name = format!("{prefix}-{}-{suffix}", mode.to_lowercase());
+                capture(&mut harness, &name, None);
+            }
+        }
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
