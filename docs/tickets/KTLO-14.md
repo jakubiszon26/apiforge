@@ -63,7 +63,10 @@ both runners. Baseline evidence: run
    until no analysis is running (the Windows Pending vs Valid failure). After
    the fix: 0 of 450 runs of the pair failed. A first version made the shared
    `is_settled()` wait for analysis and the check too; that broke two model
-   tests' timing on the runners and was narrowed (`e34d8b6`).
+   tests' timing on the runners and was narrowed (`e34d8b6`). That run also
+   showed a pre-existing race in `a_failed_discard_on_close_keeps_the_window_usable`
+   (2 of 111 runs under load on `bcdb106`); the test now waits for the
+   discard's answer (`c4cb022`).
 
 ## Not in scope
 
@@ -72,8 +75,8 @@ both runners. Baseline evidence: run
 
 ## Actual
 
-Changed lines: 170 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
-storage fix 9 and its tests 46, desktop test settling 17, this ticket 79).
+Changed lines: 180 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
+storage fix 9 and its tests 46, desktop tests 24, this ticket 82).
 Four rounds: the two causes above, the Windows probe fix (`bcdb106`),
-cause 3, then the narrowed settle change. The runs on the final commit are
-linked in the pull request (#19).
+cause 3, then the narrowed settle change and the discard test. The runs on
+the final commit are linked in the pull request (#19).
