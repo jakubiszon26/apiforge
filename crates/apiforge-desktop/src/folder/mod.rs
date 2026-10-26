@@ -1296,8 +1296,9 @@ fn centred_hint(ui: &mut egui::Ui, text: &str) {
 /// The hint under the sleeping dog, the pair centred in the board area
 /// (KTLO-20). The drawing is decoration, named so that a screen reader says
 /// what the empty board shows and a test can measure it. A board with no room
-/// for the pair keeps the hint alone, as the board's other hints are.
-fn hint_with_dog(ui: &mut egui::Ui, text: &str, motion: dog::Motion) {
+/// for the pair keeps the hint alone, as the board's other hints are, and says
+/// so: a board that draws no dog has no loop to keep going.
+fn hint_with_dog(ui: &mut egui::Ui, text: &str, motion: dog::Motion) -> bool {
     let area = ui.available_rect_before_wrap();
     let gap = theme::SPACE_MD;
     // The hint's own height, so that the pair is centred on the board's centre
@@ -1316,7 +1317,7 @@ fn hint_with_dog(ui: &mut egui::Ui, text: &str, motion: dog::Motion) {
     let fit = (room.x / size.x).min(room.y / size.y).min(1.0);
     if fit <= 0.0 {
         centred_hint(ui, text);
-        return;
+        return false;
     }
     // The board is named whether a document fills it or not.
     ui.allocate_rect(area, egui::Sense::hover())
@@ -1337,6 +1338,7 @@ fn hint_with_dog(ui: &mut egui::Ui, text: &str, motion: dog::Motion) {
             .layout(egui::Layout::top_down(egui::Align::Center)),
         |ui| widgets::hint(ui, text),
     );
+    true
 }
 
 fn quoted(name: &str) -> String {

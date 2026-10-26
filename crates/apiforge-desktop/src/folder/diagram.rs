@@ -4,15 +4,14 @@
 use super::*;
 
 impl FolderApp {
-    /// Where the sleeping dog is in its four-second loop. The loop runs only
-    /// while an empty board is on screen: the frame that draws it is the one
-    /// that asks to be drawn again.
+    /// Where the sleeping dog is in its four-second loop, or its rest frame in
+    /// a window that does not animate.
     fn dog_motion(&self, ui: &egui::Ui) -> dog::Motion {
-        if !self.animation {
-            return dog::Motion::REST;
+        if self.animation {
+            dog::Motion::at(ui.input(|input| input.time))
+        } else {
+            dog::Motion::REST
         }
-        ui.ctx().request_repaint();
-        dog::Motion::at(ui.input(|input| input.time))
     }
 
     pub(super) fn diagram_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
@@ -20,11 +19,16 @@ impl FolderApp {
             // The sleeping dog keeps the empty board company (KTLO-20); the
             // board's other hints announce a problem or a wait and stay plain.
             let motion = self.dog_motion(ui);
-            hint_with_dog(
+            let drawn = hint_with_dog(
                 ui,
                 "Open a scenario or component to see its diagram.",
                 motion,
             );
+            // The loop runs only while the drawing is on screen: the frame
+            // that draws it is the one that asks for the next.
+            if drawn && self.animation {
+                ui.ctx().request_repaint();
+            }
             return;
         };
         if let Some(path) = self.text_of(document_id) {
