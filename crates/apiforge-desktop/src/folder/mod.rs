@@ -459,10 +459,15 @@ impl FolderApp {
         self.session.is_some()
     }
 
-    /// No storage work, opening, departure, close or project switch is in flight.
+    /// No storage work, analysis, external-change check, opening, departure,
+    /// close or project switch is in flight. The analyser and the watcher run on
+    /// their own threads; a check that finishes queues the storage work that
+    /// applies it, so both must be idle before a test acts on the result.
     #[cfg(test)]
     pub(crate) fn is_settled(&self) -> bool {
         !(self.storage.is_busy()
+            || self.analyser.is_busy()
+            || self.watcher.is_busy()
             || self.opening
             || self.persistence.departure
             || (self.persistence.closing && !self.persistence.close_ready)
