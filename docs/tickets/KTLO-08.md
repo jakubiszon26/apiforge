@@ -64,5 +64,5 @@ Not applicable: no interface change.
 - The capture's pixel size is the logical size times the display scale; the
   CI displays use a scale of 1.
 
-Actual: 471 changed lines (M; estimated S) · owner review and rounds of
+Actual: 483 changed lines (M; estimated S) · owner review and rounds of
 changes recorded at acceptance.
