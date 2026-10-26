@@ -59,8 +59,11 @@ both runners. Baseline evidence: run
    locally under CPU load (3 of 450 runs, then 6 of 75 for the pair). Fix: the
    scan answers `Busy` while this owner's worker holds the lock
    (`a_scan_during_this_owners_own_commit_is_busy_not_an_interrupted_transaction`,
-   committed failing first), and the test-only `is_settled()` also waits for
-   analysis and the check. After the fix: 0 of 450 runs of the pair failed.
+   committed failing first), and the interaction-test `settle()` also waits
+   until no analysis is running (the Windows Pending vs Valid failure). After
+   the fix: 0 of 450 runs of the pair failed. A first version made the shared
+   `is_settled()` wait for analysis and the check too; that broke two model
+   tests' timing on the runners and was narrowed (`e34d8b6`).
 
 ## Not in scope
 
@@ -69,9 +72,8 @@ both runners. Baseline evidence: run
 
 ## Actual
 
-Changed lines: 158 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
-storage fix 9 and its tests 46, desktop test settling 7, this ticket 77).
-Three rounds: the two causes above, the Windows probe fix (`bcdb106`), then
-cause 3. Green on both runners on `0d88f05`: runs
-[40277674373](https://github.com/jakubiszon26/apiforge/actions/runs/40277674373) (push) and
-[40277679824](https://github.com/jakubiszon26/apiforge/actions/runs/40277679824) (pull request).
+Changed lines: 170 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
+storage fix 9 and its tests 46, desktop test settling 17, this ticket 79).
+Four rounds: the two causes above, the Windows probe fix (`bcdb106`),
+cause 3, then the narrowed settle change. The runs on the final commit are
+linked in the pull request (#19).
