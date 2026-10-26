@@ -124,6 +124,9 @@ impl FolderApp {
             .clipboard
             .as_ref()
             .is_some_and(|clipboard| clipboard.context == context);
+        let library_in_view = self.workbench.mode == Mode::Diagram
+            || (self.workbench.mode == Mode::Split
+                && ui.ctx().content_rect().width() >= SPLIT_INSPECTOR_WIDTH);
         if !self.canvases.contains_key(document_id) {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
@@ -147,6 +150,7 @@ impl FolderApp {
                         steps: steps.as_deref(),
                         can_paste,
                         context: &context,
+                        library_in_view,
                     },
                 )
             })

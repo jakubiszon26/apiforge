@@ -36,6 +36,7 @@ use crate::{
     canvas::{self, Canvas, Command},
     code, dialogs,
     inspector::{self, Inspector},
+    library::{self, Library},
     preferences::Preferences,
     theme, widgets,
 };
@@ -229,6 +230,8 @@ pub struct FolderApp {
     activation_generation: u64,
     operation_sequence: u64,
     picked_ready: Vec<Picked>,
+    /// The block library shown beside the board (KTLO-05b).
+    library: Library,
 }
 
 struct Clipboard {
@@ -362,6 +365,7 @@ impl FolderApp {
             activation_generation: 0,
             operation_sequence: 0,
             picked_ready: Vec::new(),
+            library: Library::default(),
         }
     }
 
@@ -629,6 +633,7 @@ impl FolderApp {
                     .show(ui, |ui| self.main_code_area(ui, active.as_deref()));
             }
             Mode::Diagram => {
+                self.library_panel(ui, active.as_deref());
                 self.inspector_panel(ui, active.as_deref());
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::BG))
@@ -650,6 +655,7 @@ impl FolderApp {
                     "Resize code",
                 );
                 if width >= SPLIT_INSPECTOR_WIDTH {
+                    self.library_panel(ui, active.as_deref());
                     self.inspector_panel(ui, active.as_deref());
                 }
                 egui::CentralPanel::default()
@@ -986,6 +992,101 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(&document_id);
         self.board_command(&document_id, &model, cleanup, snapshot.editable, command);
+    }
+
+    /// The block library beside the board (KTLO-05b): the shared block sections
+    /// in a left panel, disabled when the board is read-only. The caller places
+    /// it left of the board in Diagram, and in Split only when the window is
+    /// wide enough for a fourth panel.
+    fn library_panel(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
+        let Some(document_id) = active else {
+            return;
+        };
+        let Some(snapshot) = self.snapshot(document_id) else {
+            return;
+        };
+        let Some(model) = snapshot.model.clone() else {
+            return;
+        };
+        let cleanup = self.cleanup(document_id);
+        let project = self.context_project();
+        let variables = graph_of(&model, cleanup)
+            .nodes
+            .iter()
+            .filter(|node| node.is_variable())
+            .map(|node| (node.id.clone(), node.display_name().to_owned()))
+            .collect();
+        let context = library::Context {
+            project: &project,
+            projects: Vec::new(),
+            scenario_id: document_id,
+            variables,
+            parameters: parameters_of(&model),
+            editing_component: matches!(*model, Document::Component(_)),
+            running: false,
+            document_locked: !snapshot.editable,
+            show_examples: false,
+        };
+        let actions = egui::Panel::left("folder-library")
+            .default_size(240.0)
+            .size_range(200.0..=320.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(12, 10)),
+            )
+            .show(ui, |ui| {
+                if !snapshot.editable {
+                    ui.disable();
+                }
+                self.library.show_blocks(ui, &context)
+            })
+            .inner;
+        widgets::name_resize_handle(
+            ui.ctx(),
+            egui::Id::new("folder-library"),
+            "Resize block library",
+        );
+        for action in actions {
+            self.library_action(document_id, &model, cleanup, snapshot.editable, action);
+        }
+    }
+
+    /// Applies a block library action to the board: a clicked block or operator
+    /// appears at the board's visible centre, selected (KTLO-05b).
+    fn library_action(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        editable: bool,
+        action: library::Action,
+    ) {
+        if !editable {
+            return;
+        }
+        let centre = self
+            .canvases
+            .get(document_id)
+            .map(Canvas::visible_center)
+            .unwrap_or(Position { x: 100.0, y: 100.0 });
+        let command = match action {
+            library::Action::AddNode { block, component } => Command::AddNode {
+                block,
+                component,
+                position: centre,
+                source: None,
+            },
+            library::Action::AddOperator(operator) => Command::AddOperator {
+                operator,
+                position: centre,
+            },
+            library::Action::SelectNode(id) => Command::Select(vec![id]),
+            // The folder panel shows only block sections, never workspace
+            // navigation, so no other action reaches here.
+            _ => return,
+        };
+        self.board_command(document_id, model, cleanup, editable, command);
     }
 
     fn step_model_history(&mut self, document_id: &str, undo: bool) {

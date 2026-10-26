@@ -69,6 +69,9 @@ pub struct Context<'a> {
     pub editing_component: bool,
     pub running: bool,
     pub document_locked: bool,
+    /// The *Examples* entry opens demo scenarios into the workspace; the folder
+    /// window leaves it out (KTLO-05a decision 2), the legacy window keeps it.
+    pub show_examples: bool,
 }
 
 impl Library {
@@ -129,20 +132,42 @@ impl Library {
         }
         ui.add_space(12.0);
 
+        actions.extend(self.show_blocks(ui, context));
+        actions
+    }
+
+    /// The block library alone: search, the Blocks / Variables / Operators
+    /// sections and the project's components, without workspace navigation.
+    /// Shared by the legacy sidebar and the folder window's left panel.
+    pub fn show_blocks(&mut self, ui: &mut egui::Ui, context: &Context<'_>) -> Vec<Action> {
+        let mut actions = Vec::new();
         let components = latest_components(context.project);
         ui.horizontal(|ui| {
-            widgets::caption(ui, "BLOCK LIBRARY");
+            let heading = ui.label(
+                RichText::new("BLOCK LIBRARY")
+                    .size(theme::FONT_META)
+                    .family(theme::bold_family())
+                    .color(theme::MUTED),
+            );
+            // The screen-reader name of the panel is the title case "Block
+            // library", not the visually upper-cased caption.
+            heading.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Block library")
+            });
             ui.label(
                 RichText::new((BUILTIN.len() + components.len()).to_string())
                     .size(11.0)
                     .color(theme::MUTED),
             );
         });
-        ui.add_sized(
-            [ui.available_width(), theme::CONTROL_HEIGHT],
-            crate::widgets::text_edit(&mut self.search)
-                .hint_text("Search blocks…")
-                .desired_width(f32::INFINITY),
+        widgets::named(
+            ui.add_sized(
+                [ui.available_width(), theme::CONTROL_HEIGHT],
+                crate::widgets::text_edit(&mut self.search)
+                    .hint_text("Search blocks…")
+                    .desired_width(f32::INFINITY),
+            ),
+            "Search blocks",
         );
         ui.add_space(4.0);
         egui::Frame::new()
@@ -194,7 +219,7 @@ impl Library {
                 if context.document_locked {
                     ui.disable();
                 }
-                if show_blocks && !context.editing_component {
+                if show_blocks && !context.editing_component && context.show_examples {
                     widgets::action_menu(
                         ui,
                         widgets::action(Icon::Layers, "Examples").quiet(),
@@ -515,11 +540,14 @@ fn library_item(
         );
     }
     let _ = id;
-    response
-        .on_hover_text(format!(
-            "{description} — click to add, or drag onto the board"
-        ))
-        .on_hover_cursor(egui::CursorIcon::Grab)
+    widgets::named(
+        response
+            .on_hover_text(format!(
+                "{description} — click to add, or drag onto the board"
+            ))
+            .on_hover_cursor(egui::CursorIcon::Grab),
+        title,
+    )
 }
 
 fn operator_chip(ui: &mut egui::Ui, operator: Operator) -> egui::Response {
@@ -545,7 +573,10 @@ fn operator_chip(ui: &mut egui::Ui, operator: Operator) -> egui::Response {
     ui.painter().rect_filled(rect, 6.0, fill);
     ui.painter()
         .galley(rect.min + egui::vec2(8.0, 5.0), galley, theme::OPERATOR);
-    response
-        .on_hover_text("Click to add as a step, or drag into an argument")
-        .on_hover_cursor(egui::CursorIcon::Grab)
+    widgets::named(
+        response
+            .on_hover_text("Click to add as a step, or drag into an argument")
+            .on_hover_cursor(egui::CursorIcon::Grab),
+        operator.label(),
+    )
 }

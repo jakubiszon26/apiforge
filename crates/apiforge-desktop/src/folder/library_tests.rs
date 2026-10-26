@@ -46,24 +46,32 @@ fn diagram_shows_a_named_block_library_panel_with_its_sections() {
 }
 
 /// Criterion 2: clicking a block adds it at the board's visible centre,
-/// selected; the source gains the statement and the tab becomes dirty.
+/// selected; the source gains the statement and the tab becomes dirty. The
+/// empty Cleanup board keeps the centre free, so the placement is exact.
 #[test]
 fn clicking_a_block_adds_it_at_the_visible_centre_selected_and_dirty() {
-    let project = shop();
+    let project = empty_scenario();
     let mut harness = folder_harness(project.path(), WIDE);
     harness.get_by_label("Diagram").click();
     settle(&mut harness);
+    harness.get_by_label("Cleanup").click();
+    settle(&mut harness);
     let id = active_id(&harness);
-    let before = node_count(&harness, &id);
+    let before = graph_of(&model(folder(&harness), &id), true).nodes.len();
     let centre = folder(&harness).canvases.get(&id).unwrap().visible_center();
 
     harness.get_by_label("HTTP request").click();
     settle(&mut harness);
 
-    assert_eq!(node_count(&harness, &id), before + 1, "one node is added");
     let model = model(folder(&harness), &id);
-    let added = graph_of(&model, false).nodes.last().unwrap();
-    let selection = folder(&harness).selections.get(&id).cloned().unwrap_or_default();
+    let graph = graph_of(&model, true);
+    assert_eq!(graph.nodes.len(), before + 1, "one node is added");
+    let added = graph.nodes.last().unwrap();
+    let selection = folder(&harness)
+        .selections
+        .get(&id)
+        .cloned()
+        .unwrap_or_default();
     assert!(
         selection.contains(&added.id),
         "the new block is selected: {selection:?}"
@@ -100,7 +108,11 @@ fn an_operator_chip_adds_a_value_block() {
     harness.get_by_label("A = B").click();
     settle(&mut harness);
 
-    assert_eq!(node_count(&harness, &id), before + 1, "the operator is added");
+    assert_eq!(
+        node_count(&harness, &id),
+        before + 1,
+        "the operator is added"
+    );
 }
 
 /// Criterion 4: *Add variable* adds a variable to the document's graph.
