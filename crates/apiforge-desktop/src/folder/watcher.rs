@@ -131,7 +131,10 @@ impl Watcher {
         (outcome, POLL_INTERVAL)
     }
 
-    /// Waits for the running check and applies it, for tests.
+    /// Checks the folder now and applies the result, for tests. A check
+    /// already running may have read the folder before the caller's last
+    /// write, so its answer is awaited and set aside; a check that met a
+    /// transaction in progress is repeated, as the next tick would.
     #[cfg(test)]
     pub fn finish(
         &mut self,
@@ -139,16 +142,23 @@ impl Watcher {
     ) -> Option<apiforge_project::ExternalOutcome> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while self.running && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-            if let Ok(result) = self.results.recv_timeout(Duration::from_millis(5)) {
+            if self.results.recv_timeout(Duration::from_millis(5)).is_ok() {
                 self.running = false;
-                if let Ok(changes) = result {
+            }
+        }
+        while Instant::now() < deadline {
+            match session.external_check().run() {
+                Ok(changes) => {
                     self.scan = Some(changes.scan.clone());
                     return session
                         .apply_external(changes)
                         .ok()
                         .filter(|outcome| !outcome.is_empty());
                 }
+                Err(apiforge_project::Error::Storage(ProjectError::Busy)) => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => return None,
             }
         }
         None
