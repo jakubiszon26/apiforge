@@ -223,6 +223,16 @@ impl Canvas {
         self.last_viewport
     }
 
+    /// The board position a drop at `screen` lands on, as `handle_drop` maps it.
+    #[cfg(test)]
+    pub(crate) fn debug_board_position(&self, screen: Pos2) -> Position {
+        let world = ((screen - self.last_viewport.min) - self.camera.pan) / self.camera.zoom;
+        Position {
+            x: f64::from(world.x).round(),
+            y: f64::from(world.y).round(),
+        }
+    }
+
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);
