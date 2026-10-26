@@ -533,12 +533,16 @@ fn assert_collapsed(harness: &FolderHarness, context: &str) {
     }
 }
 
-/// Where the rail starts: the window's left edge in Diagram, the code panel's
-/// edge (its named resize handle) in Split.
+/// Where the rail starts: the folder window's left edge in Diagram (inset by
+/// the margin of the harness's own central panel), the code panel's edge (its
+/// named resize handle) in Split.
 fn rail_start(harness: &FolderHarness, mode: &str) -> f32 {
     match mode {
         "Split" => harness.get_by_label("Resize code").rect().center().x,
-        _ => 0.0,
+        _ => {
+            let margin = egui::Frame::central_panel(&harness.ctx.global_style()).inner_margin;
+            harness.ctx.content_rect().left() + margin.leftf()
+        }
     }
 }
 
@@ -580,8 +584,8 @@ fn drag_library_edge(harness: &mut FolderHarness, dx: f32) {
 /// *Show block library*, and the board takes the freed width.
 #[test]
 fn ktlo17_collapsing_the_library_leaves_a_rail_and_widens_the_board() {
-    let project = shop();
     for size in [MINIMUM, WIDE] {
+        let project = shop();
         let context = format!("Diagram at {size:?}");
         let mut harness = window(&project, size, "Diagram");
         assert_expanded(&harness, &context);
@@ -645,8 +649,8 @@ fn ktlo17_the_library_comes_back_at_its_width_by_button_and_by_ctrl_b() {
 /// below 1440 px there is neither panel nor rail, and the popup is the library.
 #[test]
 fn ktlo17_split_collapses_when_wide_and_is_unchanged_when_narrow() {
-    let project = shop();
     for size in [WIDE_SPLIT, WIDE] {
+        let project = shop();
         let context = format!("Split at {size:?}");
         let mut harness = window(&project, size, "Split");
         assert_expanded(&harness, &context);
@@ -666,6 +670,7 @@ fn ktlo17_split_collapses_when_wide_and_is_unchanged_when_narrow() {
         assert_expanded(&harness, &format!("{context}, Ctrl+B again"));
     }
     for size in [NARROW_SPLIT, MINIMUM] {
+        let project = shop();
         let context = format!("Split at {size:?}");
         let mut harness = window(&project, size, "Split");
         for pressed in [false, true] {
@@ -697,9 +702,9 @@ fn ktlo17_split_collapses_when_wide_and_is_unchanged_when_narrow() {
 /// its steps.
 #[test]
 fn ktlo17_the_popup_carries_the_library_while_it_is_collapsed() {
-    let project = shop();
     let sections = ["VARIABLES", "Add variable", "OPERATORS", "A = B"];
     for (size, mode) in [(MINIMUM, "Diagram"), (WIDE, "Diagram"), (WIDE, "Split")] {
+        let project = shop();
         let context = format!("{mode} at {size:?}");
         let mut harness = window(&project, size, mode);
         click(&mut harness, "Collapse block library");
@@ -733,8 +738,8 @@ fn ktlo17_the_popup_carries_the_library_while_it_is_collapsed() {
 fn ktlo17_the_empty_board_hint_follows_the_collapsed_library() {
     const DRAG: &str = "Drag a block from the library or add the first step.";
     const FIRST: &str = "Add the first step.";
-    let project = empty_scenario();
     for (size, mode) in [(WIDE, "Diagram"), (MINIMUM, "Diagram"), (WIDE, "Split")] {
+        let project = empty_scenario();
         let context = format!("{mode} at {size:?}");
         let mut harness = window(&project, size, mode);
         click(&mut harness, "Cleanup");
@@ -786,10 +791,10 @@ fn ktlo17_the_collapsed_library_comes_back_after_reopening_the_project() {
 /// the window at 960 × 540 in Diagram, and at 1600 × 1000 in Diagram and Split.
 #[test]
 fn ktlo17_the_rail_and_its_neighbours_fit_the_window() {
-    let project = shop();
     let toolbar = ["Main", "Cleanup", "Add step", "Zoom in", "Zoom out"];
     let inspector = ["Close Inspector", "Resize inspector"];
     for (size, mode) in [(MINIMUM, "Diagram"), (WIDE, "Diagram"), (WIDE, "Split")] {
+        let project = shop();
         let mut harness = window(&project, size, mode);
         // The inspector opens for one selected block.
         click(&mut harness, "Expected price (Value)");
