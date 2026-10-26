@@ -15,6 +15,15 @@ use std::{
 const HEAD: &str = ".apiforge/local/head.json";
 const TRANSACTIONS: &str = ".apiforge/local/transactions";
 
+/// A process spawned by another thread forks this one, and the child keeps a
+/// duplicate of every open descriptor — a writer's lock among them — until its
+/// exec. Until that exec a lock whose only `File` has been closed still looks
+/// held, so both probes of the writer lock wait the window out before they
+/// believe a would-block, and wait equally long: a probe can never report a
+/// writer that `open_exclusive` would then be able to take.
+const LOCK_CONFIRMATION_RETRIES: u32 = 20;
+const LOCK_CONFIRMATION_PAUSE: std::time::Duration = std::time::Duration::from_millis(10);
+
 /// Includes absence and directories so that creates and deletes detect races.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -153,22 +162,10 @@ impl ProjectStore {
             .truncate(false)
             .open(&lock_path)
             .map_err(|error| ProjectError::io(&lock_path, error))?;
-        // A process spawned by another thread holds inherited descriptors until
-        // its exec, which can briefly keep a just-released lock. Retry for a
-        // short time before reporting another writer.
-        let mut attempts = 0;
-        loop {
-            match lock.try_lock() {
-                Ok(()) => break,
-                Err(TryLockError::WouldBlock) if attempts < 20 => {
-                    attempts += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(TryLockError::WouldBlock) => return Err(ProjectError::Locked),
-                Err(TryLockError::Error(error)) => {
-                    return Err(ProjectError::io(&lock_path, error));
-                }
-            }
+        if !take_confirmed_lock(|| lock.try_lock())
+            .map_err(|error| ProjectError::io(&lock_path, error))?
+        {
+            return Err(ProjectError::Locked);
         }
         // An earlier opener may have failed while flushing newly-created local
         // infrastructure. Establish its durability even when it already exists.
@@ -887,22 +884,28 @@ impl ProjectStore {
         Ok(())
     }
 
-    /// Whether another process holds the writer lock. A read-only session that
+    /// Whether a writer session holds the writer lock. A read-only session that
     /// meets `RecoveryRequired` while a writer is alive is seeing a commit in
     /// progress or that writer's own recovery, and can retry later. The probe
-    /// never creates the lock, never blocks and is released immediately.
+    /// never creates the lock and gives up its own shared lock immediately.
+    ///
+    /// This session's own lock is answered from what it already holds, without
+    /// touching the folder. Otherwise a would-block is confirmed over the same
+    /// window `open_exclusive` waits, so a writer that is really there costs
+    /// that window to report, and the answer never contradicts opening one.
     pub fn has_live_writer(&self) -> Result<bool> {
+        if !self.is_read_only() {
+            return Ok(true);
+        }
         let path = path::resolve(&self.root, ".apiforge/local/project.lock")?;
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(ProjectError::io(&path, error)),
         };
-        match file.try_lock_shared() {
-            Ok(()) => Ok(false),
-            Err(TryLockError::WouldBlock) => Ok(true),
-            Err(TryLockError::Error(error)) => Err(ProjectError::io(&path, error)),
-        }
+        let taken = take_confirmed_lock(|| file.try_lock_shared())
+            .map_err(|error| ProjectError::io(&path, error))?;
+        Ok(!taken)
     }
 
     pub(super) fn writable(&self) -> Result<()> {
@@ -971,6 +974,27 @@ impl ProjectStore {
 }
 
 /// Creates a directory unless a concurrent opener already did.
+/// `Ok(true)` when `take` acquired the lock, `Ok(false)` when it was still held
+/// after the whole confirmation window. Returns as soon as `take` succeeds, so
+/// an inherited descriptor costs only the rest of its own lifetime; a lock a
+/// live owner keeps costs the full window.
+fn take_confirmed_lock(
+    mut take: impl FnMut() -> std::result::Result<(), TryLockError>,
+) -> std::result::Result<bool, io::Error> {
+    let mut retries = 0;
+    loop {
+        match take() {
+            Ok(()) => return Ok(true),
+            Err(TryLockError::WouldBlock) if retries < LOCK_CONFIRMATION_RETRIES => {
+                retries += 1;
+                std::thread::sleep(LOCK_CONFIRMATION_PAUSE);
+            }
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Error(error)) => return Err(error),
+        }
+    }
+}
+
 fn ensure_directory(path: &Path) -> Result<()> {
     if path.is_dir() {
         return Ok(());
