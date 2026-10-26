@@ -11,9 +11,11 @@ sizes (960 × 540 and 1600 × 1000), taken from the release binary built by CI
 for the branch under review.
 
 ## What the owner will see
-- New: nothing in the application. Every CI run uploads, per platform, an
-  artifact `qa-captures-<os>` with six captures of the folder window; QA
-  reports gain a Windows section built from them.
+- New: nothing in the application. Every CI run whose capture phase
+  completes uploads, per platform, an artifact `qa-captures-<os>` with six
+  captures of the folder window (a failed run may upload fewer; a Windows
+  capture of another size than asked is a warning on the run, not a failure);
+  QA reports gain a Windows section built from them.
 - Changed: nothing. `--screenshot` gains two optional developer flags,
   `--mode` and `--size`; without them it captures exactly what it did before.
 - Removed or hidden: nothing.
