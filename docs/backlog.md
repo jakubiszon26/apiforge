@@ -15,7 +15,7 @@ Keep the lights on: stabilise what Stage II shipped and run the new process
 end to end once. No new features, with one exception the owner made on
 2026-10-26: five interface wishes for the folder window (KTLO-17, KTLO-11,
 KTLO-18, KTLO-19, KTLO-20) join the sprint and go through the full path,
-mock-up → decision → acceptance tests → QA report. They add about 105 minutes
+mock-up → decision → acceptance tests → QA report. They add about 115 minutes
 of owner review. KTLO-20 is the last ticket added to this sprint; its scope
 is closed. Exit criteria:
 
@@ -66,7 +66,7 @@ work does not start.
 | [#14](https://github.com/jakubiszon26/apiforge/issues/14) | KTLO-11 Project files in Diagram: the left panel switches between Library and Files; [ticket](tickets/KTLO-11.md); after KTLO-17 | M · 30 min · `visible UI`, `format` |
 | [#43](https://github.com/jakubiszon26/apiforge/issues/43) | KTLO-18 The Problems section expands over the code with one click; [ticket](tickets/KTLO-18.md) | S · 15 min · `visible UI` |
 | [#44](https://github.com/jakubiszon26/apiforge/issues/44) | KTLO-19 Run results can fill the window; [ticket](tickets/KTLO-19.md) | S · 20 min · `visible UI` |
-| [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — the last ticket added to this sprint | S · 20 min · `visible UI` |
+| [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — the last ticket added to this sprint; animated (owner decision) | M · 30 min · `visible UI` |
 
 ## Later
 

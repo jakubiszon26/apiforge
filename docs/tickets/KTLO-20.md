@@ -1,9 +1,10 @@
 # KTLO-20: A sleeping dog keeps the empty board company in Diagram and Split
 
-- Size: S · Owner review: 20 min · Risk: `visible UI`
-- State: Analysis (issue #46) — mock-up posted on the issue, waits for the
-  owner's decisions below
-- Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
+- Size: M · Owner review: 30 min · Risk: `visible UI` (S · 20 min before
+  decision 1 chose the animation)
+- State: Approved 2026-10-26 (issue #46) — mock-up approved as a whole;
+  decision 1 = B (animated), decision 2 = A (only the no-file hint)
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-20-sleeping-dog`, commit 1506a9e (throwaway;
   deleted after the decision)
 - Owner's wish of 2026-10-26; the last ticket added to the KTLO sprint.
@@ -31,8 +32,10 @@ rather than a blank.
   top left.
 - **Removed or hidden:** nothing.
 - **Migrated or converted:** nothing.
-- **Default behaviour that changes:** none. Decision 1 decides whether the
-  dog moves; with the recommendation it does not.
+- **Default behaviour that changes:** none in what opens or what a key
+  does. The dog is animated (decision 1 = B), so while an empty board is on
+  screen the window redraws continuously instead of resting; a tab opened
+  stops it.
 
 The dog is decoration: it has no accessible name and screen readers announce
 only the hint, as today. The other hints of the board — a text file, a missing
@@ -50,7 +53,7 @@ paths of the supplied SVG, as the still frame the drawing itself shows when
 the system asks for reduced motion. Whatever decision 1 brings, this is the
 frame the owner approves; an animated dog breathes around it.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-26: 1 = B, 2 = A, 3 = approved)
 
 1. **Still or animated?**
    - **A (recommended): still.** The frame of the mock-up, always. Nothing
@@ -97,18 +100,19 @@ frame the owner approves; an animated dog breathes around it.
    document list hides it.
 5. The hint is the only new or changed node in the accessibility tree: the
    dog adds none, and the existing accessibility audit passes.
-6. With decision 1 = A: the empty board requests no repaint; `settle()` in
-   the harness returns at once. With decision 1 = B: the animation runs only
-   while the empty board is visible, stops when a tab opens, and is off in
-   the test harness so that `settle()` still returns.
+6. The animation runs only while the empty board is visible and stops when a
+   tab opens or the Code view is chosen (no repaint is requested then); it is
+   off in the test harness so that `settle()` still returns, and the
+   harness's still frame is the approved mock-up frame.
 7. At 960 × 540 with double scale the dog is sharp and keeps its proportions
    (design review capture; manual QA step, no pixel assertion).
 
 ## Not in scope
 
 The empty Code view and the start screen; the other hints of the board
-(decision 2); the drop shadow and the drawing's font; any animation if
-decision 1 = A; a setting to hide the dog.
+(decision 2); the drop shadow and the drawing's font; honouring the
+operating system's reduced-motion setting (egui does not expose it); a
+setting to hide or still the dog.
 
 ## Technical appendix
 
@@ -147,7 +151,7 @@ decision 1 = A; a setting to hide the dog.
   every frame while the empty board is drawn, and a switch the harness sets
   (`settle` fails after 15 s when repaints never stop, see
   `testing::settle`). egui does not read the OS reduced-motion setting.
-  Estimate under B: M, 30 min review.
+  Estimate under B: M, 30 min review — the decision taken.
 - Tests: `folder/acceptance_tests.rs`; a `pub(crate)` accessor for the dog's
   box of the last frame (`None` when not drawn) gives criteria 1–4 their
   measurements through `assert_within_window` and `assert_disjoint`-style
