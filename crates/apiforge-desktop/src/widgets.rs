@@ -57,6 +57,16 @@ pub fn caption(ui: &mut Ui, text: &str) {
     );
 }
 
+/// Mock-up: a caption whose response the caller names.
+pub fn caption_response(ui: &mut Ui, text: &str) -> egui::Response {
+    ui.label(
+        RichText::new(text)
+            .size(theme::FONT_META)
+            .family(theme::bold_family())
+            .color(theme::MUTED),
+    )
+}
+
 /// A smaller caption inside a section.
 pub fn subcaption(ui: &mut Ui, text: &str) {
     ui.label(

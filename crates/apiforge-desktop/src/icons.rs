@@ -14,6 +14,9 @@ pub enum Icon {
     Redo,
     ChevronDown,
     ChevronRight,
+    /// Mock-up only (KTLO-17/18): collapse left, expand up.
+    ChevronLeft,
+    ChevronUp,
     Panel,
     Close,
     ArrowLeft,
@@ -129,6 +132,8 @@ impl Icon {
             }
             Self::ChevronDown => path(&[(6.0, 9.0), (12.0, 15.0), (18.0, 9.0)]),
             Self::ChevronRight => path(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
+            Self::ChevronLeft => path(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)]),
+            Self::ChevronUp => path(&[(6.0, 15.0), (12.0, 9.0), (18.0, 15.0)]),
             Self::Panel => {
                 outline(3.0, 4.0, 21.0, 20.0);
                 line((15.0, 4.0), (15.0, 20.0));

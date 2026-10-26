@@ -14,17 +14,27 @@ impl FolderApp {
         let Some(snapshot) = self.snapshot(document_id) else {
             return;
         };
-        let diagnostics = egui::Id::new(("folder-diagnostics", self.workbench.mode as u8));
+        // KTLO-18 mock: expanded, the list leaves a 96 px strip of code.
+        let expanded = self.mock.problems_expanded;
+        let full = (ui.available_height() - 96.0).max(72.0);
+        let diagnostics =
+            egui::Id::new(("folder-diagnostics", self.workbench.mode as u8, expanded));
         egui::Panel::bottom(diagnostics)
-            .default_size(self.workbench.panels.diagnostics)
-            .size_range(72.0..=360.0)
+            .default_size(if expanded {
+                full
+            } else {
+                self.workbench.panels.diagnostics
+            })
+            .size_range(if expanded { 72.0..=full } else { 72.0..=360.0 })
             .frame(
                 egui::Frame::new()
                     .fill(theme::PANEL)
                     .inner_margin(egui::Margin::symmetric(12, 8)),
             )
             .show(ui, |ui| {
-                self.workbench.panels.diagnostics = ui.available_height() + 16.0;
+                if !expanded {
+                    self.workbench.panels.diagnostics = ui.available_height() + 16.0;
+                }
                 self.diagnostics_panel(ui, document_id, &snapshot);
             });
         widgets::name_resize_handle(ui.ctx(), diagnostics, "Resize problems");
@@ -335,9 +345,18 @@ impl FolderApp {
         if read_only {
             status.push("Read-only".into());
         }
+        let mut toggle = false;
         ui.horizontal(|ui| {
             widgets::caption(ui, "PROBLEMS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // KTLO-18 mock: the expand / restore chevron before the status.
+                let (icon, name) = if self.mock.problems_expanded {
+                    (Icon::ChevronDown, "Restore problems")
+                } else {
+                    (Icon::ChevronUp, "Expand problems")
+                };
+                toggle = ui.add(widgets::icon_button(icon, name).compact()).clicked();
+                ui.add_space(2.0);
                 ui.label(
                     RichText::new(status.join("  ·  "))
                         .size(theme::FONT_LABEL)
@@ -349,6 +368,9 @@ impl FolderApp {
                 );
             });
         });
+        if toggle {
+            self.mock.problems_expanded = !self.mock.problems_expanded;
+        }
         if snapshot.diagnostics.is_empty() {
             widgets::hint(
                 ui,

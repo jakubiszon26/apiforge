@@ -124,9 +124,10 @@ impl FolderApp {
             .clipboard
             .as_ref()
             .is_some_and(|clipboard| clipboard.context == context);
-        let library_in_view = self.workbench.mode == Mode::Diagram
-            || (self.workbench.mode == Mode::Split
-                && ui.ctx().content_rect().width() >= SPLIT_INSPECTOR_WIDTH);
+        let library_in_view = !self.mock.library_collapsed
+            && (self.workbench.mode == Mode::Diagram
+                || (self.workbench.mode == Mode::Split
+                    && ui.ctx().content_rect().width() >= SPLIT_INSPECTOR_WIDTH));
         // Without the panel, the Add step popup carries its sections (KTLO-05d).
         let library = (!library_in_view)
             .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));

@@ -238,6 +238,21 @@ pub struct FolderApp {
     picked_ready: Vec<Picked>,
     /// The block library shown beside the board (KTLO-05b).
     library: Library,
+    /// Throwaway design-review state for KTLO-17/11/18 (mock-up branch only).
+    pub(crate) mock: Mock,
+}
+
+/// Mock-up switches (KTLO-17, KTLO-11, KTLO-18). Throwaway.
+#[derive(Default)]
+pub struct Mock {
+    /// KTLO-17: the library panel is folded to a rail.
+    pub library_collapsed: bool,
+    /// KTLO-11: the Diagram left panel has the Library | Files tab row.
+    pub library_tabs: bool,
+    /// KTLO-11: the Files tab is shown.
+    pub files_tab: bool,
+    /// KTLO-18: the Problems section is expanded over the code.
+    pub problems_expanded: bool,
 }
 
 struct Clipboard {
@@ -374,6 +389,7 @@ impl FolderApp {
             operation_sequence: 0,
             picked_ready: Vec::new(),
             library: Library::default(),
+            mock: Mock::default(),
         }
     }
 
@@ -633,6 +649,12 @@ impl FolderApp {
             });
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
+        // KTLO-19 mock: a maximised report leaves no central area.
+        if self.report_maximised(active.as_deref()) {
+            self.prompts(ui.ctx());
+            self.protect(now);
+            return;
+        }
         match self.workbench.mode {
             Mode::Code => {
                 egui::Panel::left("folder-documents")
@@ -1038,19 +1060,94 @@ impl FolderApp {
         let cleanup = self.cleanup(document_id);
         let project = self.context_project();
         let context = library_context(&project, document_id, &model, cleanup, snapshot.editable);
+        // KTLO-11 mock: the tab row only in Diagram.
+        let tabs = self.mock.library_tabs && self.workbench.mode == Mode::Diagram;
+        if self.mock.library_collapsed {
+            // KTLO-17 mock: the rail.
+            egui::Panel::left("folder-library-rail")
+                .resizable(false)
+                .exact_size(36.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::PANEL)
+                        .inner_margin(egui::Margin::symmetric(5, 10)),
+                )
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if ui
+                        .add(widgets::icon_button(Icon::Panel, "Show block library").compact())
+                        .clicked()
+                    {
+                        self.mock.library_collapsed = false;
+                        self.mock.files_tab = false;
+                    }
+                    if tabs
+                        && ui
+                            .add(widgets::icon_button(Icon::Folder, "Show project files").compact())
+                            .clicked()
+                    {
+                        self.mock.library_collapsed = false;
+                        self.mock.files_tab = true;
+                    }
+                });
+            return;
+        }
+        let files = tabs && self.mock.files_tab;
+        let count = library::block_count(&context);
         let panel = egui::Panel::left("folder-library")
             .default_size(self.workbench.panels.library)
-            .size_range(200.0..=320.0)
+            .size_range(if tabs { 200.0..=420.0 } else { 200.0..=320.0 })
             .frame(
                 egui::Frame::new()
                     .fill(theme::PANEL)
                     .inner_margin(egui::Margin::symmetric(12, 10)),
             )
             .show(ui, |ui| {
+                let mut collapse = false;
+                ui.horizontal(|ui| {
+                    if tabs {
+                        let mut files_tab = self.mock.files_tab;
+                        mock_tab_row(ui, &mut files_tab);
+                        self.mock.files_tab = files_tab;
+                    } else {
+                        let heading = widgets::caption_response(ui, "BLOCK LIBRARY");
+                        heading.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Label,
+                                true,
+                                "Block library",
+                            )
+                        });
+                        ui.label(
+                            RichText::new(count.to_string())
+                                .size(11.0)
+                                .color(theme::MUTED),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        collapse = ui
+                            .add(
+                                widgets::icon_button(Icon::ChevronLeft, "Collapse block library")
+                                    .compact(),
+                            )
+                            .clicked();
+                    });
+                });
+                if collapse {
+                    self.mock.library_collapsed = true;
+                }
+                if files {
+                    ui.add_space(theme::SPACE_SM);
+                    self.explorer_panel(ui);
+                    return Vec::new();
+                }
                 if !snapshot.editable {
                     ui.disable();
                 }
-                self.library.show_blocks(ui, &context)
+                self.library.caption = false;
+                let actions = self.library.show_blocks(ui, &context);
+                self.library.caption = true;
+                actions
             });
         // The panel's outer width, kept in the project's view state (KTLO-05c).
         self.workbench.panels.library = panel.response.rect.width();
@@ -1338,3 +1435,67 @@ fn file_stem(name: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// KTLO-11 mock: the Library | Files tab row, styled like the library's
+/// Blocks · Variables · Operators row.
+fn mock_tab_row(ui: &mut egui::Ui, files: &mut bool) {
+    egui::Frame::new()
+        .fill(theme::FIELD)
+        .corner_radius(7)
+        .inner_margin(3)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding.x = 4.0;
+            for (is_files, title) in [(false, "Library"), (true, "Files")] {
+                let active = *files == is_files;
+                let mut button = egui::Button::new(
+                    RichText::new(title)
+                        .size(theme::FONT_LABEL)
+                        .color(if active { theme::TEXT } else { theme::MUTED }),
+                )
+                .selected(active)
+                .frame(active)
+                .corner_radius(5);
+                if active {
+                    button = button
+                        .fill(theme::WHITE)
+                        .stroke(egui::Stroke::new(1.0, theme::BORDER));
+                }
+                if ui.add_sized([64.0, 24.0], button).clicked() {
+                    *files = is_files;
+                }
+            }
+        });
+}
+
+#[cfg(test)]
+impl FolderApp {
+    /// KTLO mock-ups: the mock switches.
+    pub fn mock_mut(&mut self) -> &mut Mock {
+        &mut self.mock
+    }
+
+    /// KTLO-19 mock: a run is in flight.
+    pub fn mock_running(&self) -> bool {
+        self.runs.handle.is_some()
+    }
+
+    /// KTLO-11 mock: expands every folder whose path starts with `prefix`.
+    pub fn mock_expand(&mut self, prefix: &str) {
+        let folders: Vec<String> = self
+            .explorer_rows()
+            .into_iter()
+            .filter(|row| row.is_folder() && !row.is_root() && row.path.starts_with(prefix))
+            .map(|row| row.path)
+            .collect();
+        self.workbench.expanded.extend(folders);
+    }
+
+    /// KTLO-18 mock: the number of problems of the active document.
+    pub fn mock_problems(&self) -> usize {
+        self.workbench
+            .active()
+            .and_then(|id| self.snapshot(id))
+            .map_or(0, |snapshot| snapshot.diagnostics.len())
+    }
+}

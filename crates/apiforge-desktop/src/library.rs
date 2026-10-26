@@ -43,6 +43,8 @@ enum Section {
 }
 
 pub struct Library {
+    /// Mock-up (KTLO-17): the folder panel draws its own caption row.
+    pub caption: bool,
     section: Section,
     pub search: String,
     open_groups: Vec<OperatorGroup>,
@@ -51,6 +53,7 @@ pub struct Library {
 impl Default for Library {
     fn default() -> Self {
         Self {
+            caption: true,
             search: String::new(),
             section: Section::Blocks,
             open_groups: default_open_groups(),
@@ -142,28 +145,30 @@ impl Library {
     pub fn show_blocks(&mut self, ui: &mut egui::Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         let components = latest_components(context.project);
-        ui.horizontal(|ui| {
-            let heading = ui.label(
-                RichText::new("BLOCK LIBRARY")
-                    .size(theme::FONT_META)
-                    .family(theme::bold_family())
+        if self.caption {
+            ui.horizontal(|ui| {
+                let heading = ui.label(
+                    RichText::new("BLOCK LIBRARY")
+                        .size(theme::FONT_META)
+                        .family(theme::bold_family())
+                        .color(theme::MUTED),
+                );
+                // The screen-reader name of the panel is the title case "Block
+                // library", not the visually upper-cased caption.
+                heading.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Block library")
+                });
+                ui.label(
+                    // A component's graph also offers the Export block.
+                    RichText::new(
+                        (BUILTIN.len() + usize::from(context.editing_component) + components.len())
+                            .to_string(),
+                    )
+                    .size(11.0)
                     .color(theme::MUTED),
-            );
-            // The screen-reader name of the panel is the title case "Block
-            // library", not the visually upper-cased caption.
-            heading.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Block library")
+                );
             });
-            ui.label(
-                // A component's graph also offers the Export block.
-                RichText::new(
-                    (BUILTIN.len() + usize::from(context.editing_component) + components.len())
-                        .to_string(),
-                )
-                .size(11.0)
-                .color(theme::MUTED),
-            );
-        });
+        }
         widgets::named(
             ui.add_sized(
                 [ui.available_width(), theme::CONTROL_HEIGHT],
@@ -609,4 +614,11 @@ fn operator_chip(ui: &mut egui::Ui, operator: Operator) -> egui::Response {
             .on_hover_cursor(egui::CursorIcon::Grab),
         operator.label(),
     )
+}
+
+/// Mock-up (KTLO-17): the number shown in the BLOCK LIBRARY caption.
+pub fn block_count(context: &Context<'_>) -> usize {
+    BUILTIN.len()
+        + usize::from(context.editing_component)
+        + latest_components(context.project).len()
 }

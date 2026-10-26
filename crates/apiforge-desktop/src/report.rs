@@ -136,6 +136,8 @@ pub struct ReportPanel {
     height: f32,
     compact_height: f32,
     size_epoch: u64,
+    /// KTLO-19 mock: the panel fills the window below the tab strip.
+    pub maximised: bool,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
     last_run_id: Option<String>,
@@ -152,6 +154,7 @@ impl Default for ReportPanel {
             height: 320.0,
             compact_height: 180.0,
             size_epoch: 0,
+            maximised: false,
             #[cfg(test)]
             last_handle: None,
             last_run_id: None,
@@ -173,7 +176,11 @@ impl ReportPanel {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
 
+        if !self.open {
+            self.maximised = false;
+        }
         let was_open = self.open;
+        let maximised = self.maximised;
         let compact = ui.available_height() < 460.0;
         let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
         let maximum = (ui.available_height() - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
@@ -184,15 +191,26 @@ impl ReportPanel {
         }
         .clamp(min_height, maximum);
         let collapsed_height = if compact { 44.0 } else { 48.0 };
-        let panel_id = if was_open {
+        let full = ui.available_height();
+        let panel_id = if maximised {
+            egui::Id::new("report-maximised")
+        } else if was_open {
             egui::Id::new(("report-expanded", compact, self.size_epoch))
         } else {
             egui::Id::new("report-collapsed")
         };
         let response = egui::Panel::bottom(panel_id)
-            .resizable(self.open)
-            .default_size(if self.open { height } else { collapsed_height })
-            .size_range(if self.open {
+            .resizable(self.open && !maximised)
+            .default_size(if maximised {
+                full
+            } else if self.open {
+                height
+            } else {
+                collapsed_height
+            })
+            .size_range(if maximised {
+                full..=full
+            } else if self.open {
                 min_height..=maximum
             } else {
                 collapsed_height..=collapsed_height
@@ -216,7 +234,7 @@ impl ReportPanel {
                     }
                 }
             });
-        if was_open {
+        if was_open && !maximised {
             let actual_height = response.response.rect.height().clamp(min_height, maximum);
             if compact {
                 self.compact_height = actual_height;
@@ -384,6 +402,22 @@ impl ReportPanel {
                 });
                 if policy != context.error_policy {
                     actions.push(Action::SetErrorPolicy(policy));
+                }
+                // KTLO-19 mock: maximise / restore, left of the policy.
+                ui.add_space(4.0);
+                let name = if self.maximised {
+                    "Restore run results"
+                } else {
+                    "Maximise run results"
+                };
+                if ui
+                    .add(widgets::icon_button(Icon::Fit, name).compact())
+                    .clicked()
+                {
+                    self.maximised = !self.maximised;
+                    if self.maximised {
+                        self.open = true;
+                    }
                 }
                 ui.add_space(8.0);
                 if context.stale {

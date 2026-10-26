@@ -293,6 +293,157 @@ mod review {
         }
     }
 
+    // ---- Throwaway mock-ups for KTLO-17, KTLO-11, KTLO-18 and KTLO-19 ----
+
+    fn mock_app(harness: &mut FolderHarness) -> &mut FolderApp {
+        harness.state_mut().as_mut().unwrap()
+    }
+
+    fn mock_mode(harness: &mut FolderHarness, mode: &str) {
+        harness.get_by_label(mode).click();
+        settle(harness);
+    }
+
+    fn mock_click(harness: &mut FolderHarness, label: &str) {
+        harness.get_by_label(label).click();
+        settle(harness);
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_17_library_rail() {
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), WIDE);
+        mock_mode(&mut harness, "Diagram");
+        capture(&mut harness, "mock-17-diagram-expanded-1600x1000", None);
+        mock_click(&mut harness, "Collapse block library");
+        capture(&mut harness, "mock-17-diagram-collapsed-1600x1000", None);
+        mock_mode(&mut harness, "Split");
+        capture(&mut harness, "mock-17-split-collapsed-1600x1000", None);
+        drop(harness);
+
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        mock_mode(&mut harness, "Diagram");
+        mock_click(&mut harness, "Collapse block library");
+        capture(&mut harness, "mock-17-diagram-collapsed-960x540", None);
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_11_library_files() {
+        for (size, suffix) in [(WIDE, "1600x1000"), (MINIMUM, "960x540")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            mock_mode(&mut harness, "Diagram");
+            mock_app(&mut harness).mock_mut().library_tabs = true;
+            settle(&mut harness);
+            if size == WIDE {
+                capture(&mut harness, "mock-11-diagram-library-1600x1000", None);
+            }
+            mock_app(&mut harness).mock_mut().files_tab = true;
+            mock_app(&mut harness).mock_expand("components");
+            settle(&mut harness);
+            capture(
+                &mut harness,
+                &format!("mock-11-diagram-files-{suffix}"),
+                None,
+            );
+            if size == WIDE {
+                mock_click(&mut harness, "Collapse block library");
+                capture(&mut harness, "mock-11-diagram-rail-1600x1000", None);
+            }
+        }
+    }
+
+    /// The demo shop whose scenario has about ten problems.
+    fn problems_project() -> tempfile::TempDir {
+        let directory = shop_project();
+        let mut scenario = None;
+        let mut stack = vec![directory.path().to_owned()];
+        while let Some(folder) = stack.pop() {
+            for entry in std::fs::read_dir(&folder).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "afs")
+                    && std::fs::read_to_string(&path)
+                        .unwrap()
+                        .trim_start()
+                        .starts_with("scenario")
+                {
+                    scenario = Some(path);
+                }
+            }
+        }
+        let scenario = scenario.expect("the demo has a scenario");
+        let text = std::fs::read_to_string(&scenario).unwrap();
+        let end = text.rfind('}').unwrap();
+        let mut broken = text[..end].to_owned();
+        for index in 1..=10 {
+            broken.push_str(&format!("  check_{index} = missing_value_{index} + 1\n"));
+        }
+        broken.push_str(&text[end..]);
+        std::fs::write(&scenario, broken).unwrap();
+        directory
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_18_problems() {
+        let project = problems_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        mock_mode(&mut harness, "Code");
+        eprintln!("problems: {}", folder(&harness).mock_problems());
+        capture(&mut harness, "mock-18-code-before-960x540", None);
+        mock_click(&mut harness, "Expand problems");
+        capture(&mut harness, "mock-18-code-expanded-960x540", None);
+        drop(harness);
+
+        let project = problems_project();
+        let mut harness = folder_harness(project.path(), WIDE);
+        mock_mode(&mut harness, "Code");
+        mock_click(&mut harness, "Expand problems");
+        capture(&mut harness, "mock-18-code-expanded-1600x1000", None);
+        mock_mode(&mut harness, "Split");
+        capture(&mut harness, "mock-18-split-expanded-1600x1000", None);
+    }
+
+    fn mock_run(harness: &mut FolderHarness) {
+        harness.get_by_label("Run").scroll_to_me();
+        settle(harness);
+        mock_click(harness, "Run");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).mock_running() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_19_run_results() {
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), WIDE);
+        mock_mode(&mut harness, "Diagram");
+        mock_run(&mut harness);
+        capture(&mut harness, "mock-19-diagram-before-1600x1000", None);
+        mock_click(&mut harness, "Maximise run results");
+        capture(&mut harness, "mock-19-diagram-maximised-1600x1000", None);
+        mock_mode(&mut harness, "Split");
+        capture(&mut harness, "mock-19-split-maximised-1600x1000", None);
+        drop(harness);
+
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        mock_mode(&mut harness, "Diagram");
+        mock_run(&mut harness);
+        mock_click(&mut harness, "Maximise run results");
+        capture(&mut harness, "mock-19-diagram-maximised-960x540", None);
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {

@@ -28,6 +28,13 @@ pub(super) struct JournalReview {
 }
 
 impl FolderApp {
+    /// KTLO-19 mock: the active document's run report fills the window.
+    pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
+        self.runs.panel.maximised
+            && self.runs.panel.open
+            && active.is_some_and(|id| self.runs.reports.contains_key(id))
+    }
+
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
         let (prepared, report) = self.runs.reports.get(id)?;
         (!self.session.as_ref()?.run_is_stale(prepared)).then(|| report.clone())
