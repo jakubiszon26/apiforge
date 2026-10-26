@@ -95,7 +95,14 @@ impl ProjectStore {
     pub fn scan_tree(&self) -> Result<TreeScan> {
         let before = self.head()?;
         if before.active_transaction_id.is_some() {
-            return Err(ProjectError::RecoveryRequired);
+            // The scan does not wait for the writer lock. While this owner's
+            // worker holds it, the active transaction is a commit in progress;
+            // only one left behind with the lock free needs recovery.
+            return Err(match self.owner.worker.try_lock() {
+                Err(std::sync::TryLockError::WouldBlock) => ProjectError::Busy,
+                _ if self.head()?.active_transaction_id.is_none() => ProjectError::Busy,
+                _ => ProjectError::RecoveryRequired,
+            });
         }
         let mut entries = Vec::new();
         let mut truncated = false;
