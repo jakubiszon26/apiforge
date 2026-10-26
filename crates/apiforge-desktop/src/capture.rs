@@ -78,6 +78,12 @@ impl Capture {
                     return Some(Err("Cannot start screenshot encoder".into()));
                 }
             }
+        } else if !ready && self.frames == 0 && self.started.elapsed() >= self.patience {
+            self.finished = true;
+            return Some(Err(format!(
+                "Capture failed: the window had no document after {} s",
+                self.patience.as_secs()
+            )));
         } else if ready {
             self.frames += 1;
             if self.frames >= 8 {
