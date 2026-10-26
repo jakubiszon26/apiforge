@@ -191,4 +191,39 @@ mod tests {
         assert_eq!(outcome.reloaded, std::slice::from_ref(&id));
         assert!(session.document(&id).unwrap().text().contains('7'));
     }
+
+    /// KTLO-15: a check that read the folder before a write and answers only
+    /// after it must not stand in for a check of that write. On a loaded
+    /// runner the once-a-second check can be that slow.
+    #[test]
+    fn finishing_checks_writes_made_while_a_slow_check_was_running() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session = ProjectSession::create(directory.path(), "Folder").unwrap();
+        let id = session
+            .create_document(DocumentKind::Scenario, "main.afs", SCENARIO)
+            .unwrap();
+        let mut watcher = Watcher::new(None);
+
+        // The check reads the folder now; its answer arrives later.
+        let stale = session.external_check().run();
+        watcher.running = true;
+        let sender = watcher.sender.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = sender.send(stale);
+        });
+
+        std::fs::write(
+            directory.path().join("main.afs"),
+            SCENARIO.replace('2', "7"),
+        )
+        .unwrap();
+        let outcome = watcher.finish(&mut session);
+        assert_eq!(
+            outcome.map(|outcome| outcome.reloaded),
+            Some(vec![id.clone()]),
+            "the write made while the slow check ran is followed"
+        );
+        assert!(session.document(&id).unwrap().text().contains('7'));
+    }
 }
