@@ -155,9 +155,13 @@ impl Library {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Block library")
             });
             ui.label(
-                RichText::new((BUILTIN.len() + components.len()).to_string())
-                    .size(11.0)
-                    .color(theme::MUTED),
+                // A component's graph also offers the Export block.
+                RichText::new(
+                    (BUILTIN.len() + usize::from(context.editing_component) + components.len())
+                        .to_string(),
+                )
+                .size(11.0)
+                .color(theme::MUTED),
             );
         });
         widgets::named(
