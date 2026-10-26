@@ -1,6 +1,6 @@
 # KTLO-14: CI has failed on every push to main since Stage II began
 
-- Size: S · Owner review: 10 min · Risk: none
+- Size: S · Owner review: 15 min · Risk: none
 - State: Awaiting acceptance (issue #18)
 - Analysis model: Fable · Implementation model: Opus 5.5
 
@@ -12,7 +12,10 @@ again.
 ## What the owner will see
 
 - New: a green check on `main` for the CI workflow, on Linux and Windows.
-- Changed: nothing in the application.
+- Changed: the interrupted-transaction (recovery) screen no longer appears
+  by mistake when the once-a-second external-change check overlaps the
+  window's own save or rename. A real interrupted transaction still shows it.
+  Also, a failed discard from the close dialog always shows its error dialog.
 - Removed or hidden: nothing.
 - Migrated or converted: nothing.
 - Default behaviour that changes: none.
