@@ -60,6 +60,18 @@ fn redraws_at_once(harness: &mut FolderHarness) -> bool {
     harness.ctx.requested_repaint_last_pass()
 }
 
+/// Whether the drawing's own loop asked for the next frame. The diagram view
+/// asks for a repaint in one place only: the frame that draws the dog.
+fn the_loop_redraws(harness: &mut FolderHarness) -> bool {
+    harness.step();
+    harness.step();
+    harness
+        .ctx
+        .repaint_causes()
+        .iter()
+        .any(|cause| cause.file.ends_with("folder/diagram.rs"))
+}
+
 /// Criterion 1: closing the last tab shows the drawing in Diagram and on the
 /// board side of Split; opening a file hides it again.
 #[test]
@@ -170,12 +182,11 @@ fn the_code_side_of_split_keeps_its_own_hint() {
 }
 
 /// Criterion 5: the board's other hints are unchanged — a text file's hint
-/// keeps the board to itself, centred as it is today.
+/// keeps the board to itself, justified across it as it is today. Its board
+/// is a few points shorter than an empty one, whose tab strip holds no tab,
+/// so what is measured is the hint itself.
 #[test]
 fn the_text_file_hint_keeps_the_board_to_itself() {
-    let (_other, empty) = empty_board(WIDE, "Diagram");
-    let centre = rect(&empty, BOARD).center();
-
     let project = shop_project();
     std::fs::write(project.path().join("README.md"), "# Shop\n").unwrap();
     let mut harness = folder_harness(project.path(), WIDE);
@@ -191,32 +202,74 @@ fn the_text_file_hint_keeps_the_board_to_itself() {
         !shown(&harness, DOG),
         "a text file's hint keeps the board to itself"
     );
+    let window = harness.ctx.content_rect();
     assert!(
-        (hint.center() - centre).length() <= 1.0,
-        "the text-file hint at {hint:?} is no longer centred on {centre:?}"
+        hint.height() > 200.0,
+        "the text-file hint at {hint:?} is no longer justified across its board"
+    );
+    assert!(
+        (hint.center().x - window.center().x).abs() <= 1.0,
+        "the text-file hint at {hint:?} is no longer centred in the window {window:?}"
     );
 }
 
 /// Criterion 6: the four-second loop is off in the test harness, so a board
-/// that shows the drawing settles as every other board does; a board with a
-/// file open does not animate either.
+/// that shows the drawing settles as every other board does.
 #[test]
 fn an_empty_board_asks_for_no_redraw_in_the_test_harness() {
     for mode in ["Diagram", "Split"] {
         let (_project, mut harness) = empty_board(MINIMUM, mode);
         assert!(shown(&harness, DOG), "{mode} shows the drawing");
         assert!(
+            !the_loop_redraws(&mut harness),
+            "{mode} keeps the loop going in the test harness"
+        );
+        assert!(
             !redraws_at_once(&mut harness),
             "{mode} draws an empty board again every frame"
         );
+    }
+}
 
-        let project = shop_project();
-        let mut open = folder_harness(project.path(), MINIMUM);
-        open.get_by_label(mode).click();
-        settle(&mut open);
+/// Criterion 6, the other half: the loop runs while an empty board is on
+/// screen and nowhere else. It is off in the harness, so this test turns it on
+/// for the window it watches; it never settles such a window.
+#[test]
+fn the_loop_runs_only_while_an_empty_board_is_visible() {
+    for mode in ["Diagram", "Split"] {
+        let (_project, mut harness) = empty_board(MINIMUM, mode);
         assert!(
-            !redraws_at_once(&mut open),
-            "{mode} draws a board with a file open again every frame"
+            !folder(&harness).animation,
+            "the harness holds the drawing at its rest frame by default"
+        );
+        app(&mut harness).animation = true;
+        assert!(
+            the_loop_redraws(&mut harness),
+            "{mode} does not keep the drawing moving on an empty board"
+        );
+        assert!(
+            redraws_at_once(&mut harness),
+            "{mode} does not ask for the next frame of the loop"
+        );
+    }
+    // Code shows no board, so there is nothing to animate.
+    let (_project, mut harness) = empty_board(MINIMUM, "Code");
+    app(&mut harness).animation = true;
+    assert!(
+        !the_loop_redraws(&mut harness),
+        "Code keeps the loop going with no board on screen"
+    );
+    // Neither does a board with a file open, which shows no drawing. Such a
+    // board asks for frames of its own, so this watches the loop's own ask.
+    for mode in ["Diagram", "Split"] {
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        harness.get_by_label(mode).click();
+        settle(&mut harness);
+        app(&mut harness).animation = true;
+        assert!(
+            !the_loop_redraws(&mut harness),
+            "{mode} keeps the loop going with a file open"
         );
     }
 }

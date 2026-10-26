@@ -176,6 +176,21 @@ fn stage_ii_screens_and_dialogs_name_every_control() {
 /// KTLO-05d criterion 3: the *Add step* popup names every control, with its
 /// Variables and Operators sections (Split at 960 × 540) and without them
 /// (Split at 1600 × 1000, beside the library panel).
+/// KTLO-20: an empty board shows the sleeping dog above its hint. The drawing
+/// is decoration with a name, and the board keeps every control it leaves on
+/// screen named.
+#[test]
+fn the_empty_board_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    app.close_tab_with(&id, false);
+    for mode in [Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?} with no file open"), &mut app, &context);
+    }
+}
+
 #[test]
 fn the_add_step_popup_names_every_control() {
     let directory = shop();

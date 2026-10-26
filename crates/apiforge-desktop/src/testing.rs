@@ -293,6 +293,32 @@ mod review {
         }
     }
 
+    /// The sleeping dog on an empty board (KTLO-20): Diagram and the board
+    /// side of Split with the last tab closed, at both window sizes. The loop
+    /// is off in the harness, so these show its rest frame.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_empty_board() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            // The demo project opens its scenario by itself the first time.
+            harness
+                .get_by_label("Close promotion-and-cart-price.afs")
+                .click();
+            settle(&mut harness);
+            for mode in ["Diagram", "Split"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("empty-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+        }
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
