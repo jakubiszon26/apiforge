@@ -340,11 +340,20 @@ impl FolderApp {
                     app.persistence.close_ready = true;
                 }
                 Err(error) => {
+                    // A departure from the window's own close dialog reports
+                    // here: advance_departure stops looking once departure is
+                    // cleared, so it would miss an error this completion
+                    // leaves when the frame polls storage before it.
+                    let leaving = app.persistence.departure && !app.switching();
                     app.persistence.closing = false;
                     app.persistence.discard = false;
                     app.persistence.departure = false;
                     app.watcher.resume();
-                    app.close_error = Some(error.to_string());
+                    if leaving {
+                        app.prompt = Some(Prompt::CloseFailed(error.to_string()));
+                    } else {
+                        app.close_error = Some(error.to_string());
+                    }
                 }
             },
         );
