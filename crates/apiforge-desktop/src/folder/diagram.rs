@@ -44,33 +44,14 @@ impl FolderApp {
             );
             return;
         };
-        let mut cleanup = self.cleanup(document_id);
-        egui::Frame::new()
-            .fill(theme::WHITE)
-            .inner_margin(egui::Margin::symmetric(16, 4))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(file_name(&snapshot.path))
-                            .size(theme::FONT_BODY)
-                            .family(theme::bold_family()),
-                    );
-                    widgets::hint(ui, kind_label(snapshot.kind));
-                    if matches!(*model, Document::Scenario(_)) {
-                        ui.add_space(theme::SPACE_LG);
-                        widgets::tab_value(ui, &mut cleanup, false, "Main");
-                        widgets::tab_value(ui, &mut cleanup, true, "Cleanup");
-                    }
-                });
-            });
-        if cleanup != self.cleanup(document_id) {
-            if let Some(tab) = self.workbench.tab_mut(document_id) {
-                tab.cleanup = cleanup;
-            }
-            self.selections.remove(document_id);
-            self.touched();
-        }
+        let cleanup = self.cleanup(document_id);
+        // The document's header shares the board's header row (KTLO-12): Split
+        // leaves the file name and kind to the tab strip beside the code.
+        let header = Header {
+            name: (self.workbench.mode == Mode::Diagram)
+                .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
+            tabs: matches!(*model, Document::Scenario(_)),
+        };
         if !snapshot.editable {
             let text = if snapshot.held {
                 "Unsaved work from an earlier session needs a decision in the code first."
@@ -135,6 +116,7 @@ impl FolderApp {
             self.canvases.insert(document_id.to_owned(), canvas);
         }
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
+        let mut chosen = cleanup;
         let commands = ui
             .scope(|ui| {
                 if !snapshot.editable {
@@ -142,24 +124,35 @@ impl FolderApp {
                     ui.visuals_mut().disabled_alpha = 1.0;
                     ui.disable();
                 }
-                canvas.show(
-                    ui,
-                    &canvas::Input {
-                        graph,
-                        reference_graph: reference,
-                        project: &project,
-                        parameters: &parameters,
-                        selection: &selection,
-                        steps: steps.as_deref(),
-                        can_paste,
-                        context: &context,
-                        library_in_view,
-                        header_leading: None,
-                        library: library.as_ref(),
-                    },
-                )
+                let mut input = canvas::Input {
+                    graph,
+                    reference_graph: reference,
+                    project: &project,
+                    parameters: &parameters,
+                    selection: &selection,
+                    steps: steps.as_deref(),
+                    can_paste,
+                    context: &context,
+                    library_in_view,
+                    header_leading: None,
+                    library: library.as_ref(),
+                };
+                let fit = header.fit(ui, canvas.header_room(ui, &input));
+                input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
+                let row = canvas.leading_rect(ui, &input);
+                // Drawn before the board, so the keyboard reaches the header
+                // first and then the board's toolbar on the same row.
+                header.show(ui.ctx(), ui.id(), row, &fit, &mut chosen);
+                canvas.show(ui, &input)
             })
             .inner;
+        if chosen != cleanup {
+            if let Some(tab) = self.workbench.tab_mut(document_id) {
+                tab.cleanup = chosen;
+            }
+            self.selections.remove(document_id);
+            self.touched();
+        }
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
@@ -598,5 +591,123 @@ impl FolderApp {
             self.ui_context
                 .memory_mut(|memory| memory.request_focus(editor_id(document_id)));
         }
+    }
+}
+
+/// The narrowest the file name is shortened to before the steps summary goes.
+const NAME_MIN_WIDTH: f32 = 80.0;
+
+/// The document's part of the board's header row (KTLO-12): in Diagram the
+/// file name and kind, then Main / Cleanup for a scenario; in Split only
+/// Main / Cleanup, since the tab strip beside the code names the file.
+struct Header<'a> {
+    name: Option<(&'a str, &'static str)>,
+    tabs: bool,
+}
+
+/// What of the header fits, and its width.
+struct HeaderFit {
+    name_width: f32,
+    kind: bool,
+    width: f32,
+}
+
+impl Header<'_> {
+    fn text_width(ui: &egui::Ui, text: &str, font: egui::FontId) -> f32 {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, theme::TEXT)
+            .size()
+            .x
+    }
+
+    /// Gives up, as the row narrows, first the kind, then the name's full
+    /// width (its full text stays on hover), then the steps summary, which the
+    /// board leaves out once the header takes its room.
+    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom) -> HeaderFit {
+        let gap = ui.spacing().item_spacing.x;
+        let tabs = if self.tabs {
+            widgets::tab_value_width(ui, "Main") + gap + widgets::tab_value_width(ui, "Cleanup")
+        } else {
+            0.0
+        };
+        let Some((name, kind)) = self.name else {
+            return HeaderFit {
+                name_width: 0.0,
+                kind: false,
+                width: tabs,
+            };
+        };
+        let full = Self::text_width(
+            ui,
+            name,
+            egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
+        );
+        let kind_width =
+            gap + Self::text_width(ui, kind, egui::FontId::proportional(theme::FONT_LABEL));
+        let fixed = if self.tabs {
+            gap + theme::SPACE_LG + tabs
+        } else {
+            0.0
+        };
+        // A point to spare keeps rounding from pushing the summary out.
+        let (name_width, kind) = if full + kind_width + fixed <= room.with_summary {
+            (full, true)
+        } else if full + fixed <= room.with_summary {
+            (full, false)
+        } else if room.with_summary - fixed - 1.0 >= NAME_MIN_WIDTH {
+            (room.with_summary - fixed - 1.0, false)
+        } else {
+            (
+                (room.alone - fixed - 1.0).clamp(NAME_MIN_WIDTH.min(full), full),
+                false,
+            )
+        };
+        HeaderFit {
+            name_width,
+            kind,
+            width: name_width + if kind { kind_width } else { 0.0 } + fixed,
+        }
+    }
+
+    /// Draws the header into `row`, the left of the board's header row.
+    fn show(
+        &self,
+        ctx: &egui::Context,
+        id: egui::Id,
+        row: egui::Rect,
+        fit: &HeaderFit,
+        cleanup: &mut bool,
+    ) {
+        egui::Area::new(id.with("board-document-header"))
+            .fixed_pos(row.left_center())
+            .pivot(egui::Align2::LEFT_CENTER)
+            .fade_in(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some((name, kind)) = self.name {
+                        ui.scope(|ui| {
+                            ui.set_max_width(fit.name_width);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(name)
+                                        .size(theme::FONT_BODY)
+                                        .family(theme::bold_family()),
+                                )
+                                .truncate(),
+                            );
+                        });
+                        if fit.kind {
+                            widgets::hint(ui, kind);
+                        }
+                        if self.tabs {
+                            ui.add_space(theme::SPACE_LG);
+                        }
+                    }
+                    if self.tabs {
+                        widgets::tab_value(ui, cleanup, false, "Main");
+                        widgets::tab_value(ui, cleanup, true, "Cleanup");
+                    }
+                });
+            });
     }
 }

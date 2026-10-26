@@ -719,7 +719,16 @@ pub fn summary_font() -> FontId {
     FontId::proportional(theme::FONT_META)
 }
 
-pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays, graph: &Graph) {
+/// Paints the header and footer bands and the steps summary, and returns where
+/// the summary went. Beside the toolbar (`trailing`, KTLO-12) the summary is
+/// right-aligned in the banner and left out when the banner is too narrow;
+/// otherwise it starts the row.
+pub fn overlay_chrome(
+    painter: &Painter,
+    overlays: &super::layout::BoardOverlays,
+    summary: &str,
+    trailing: bool,
+) -> Option<Rect> {
     painter.rect_filled(overlays.header, 0.0, theme::BG);
     painter.line_segment(
         [
@@ -734,14 +743,31 @@ pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays
         Stroke::new(1.0, theme::BORDER),
     );
 
-    label(
-        painter,
-        overlays.banner,
-        &steps_summary(graph),
-        summary_font(),
-        theme::MUTED,
-        egui::Align::Min,
-    );
+    let summary_at = if trailing {
+        let galley = painter.layout_no_wrap(summary.to_owned(), summary_font(), theme::MUTED);
+        let banner = overlays.banner;
+        (galley.size().x <= banner.width() + 0.5).then(|| {
+            let at = Rect::from_min_size(
+                pos2(
+                    banner.right() - galley.size().x,
+                    banner.center().y - galley.size().y / 2.0,
+                ),
+                galley.size(),
+            );
+            painter.galley(at.min, galley, theme::MUTED);
+            at
+        })
+    } else {
+        label(
+            painter,
+            overlays.banner,
+            summary,
+            summary_font(),
+            theme::MUTED,
+            egui::Align::Min,
+        );
+        Some(overlays.banner)
+    };
 
     if let super::layout::HintPlacement::Inline(rect) = overlays.hint {
         painter.text(
@@ -752,6 +778,7 @@ pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays
             theme::MUTED,
         );
     }
+    summary_at
 }
 
 pub fn minimap(
