@@ -326,14 +326,19 @@ mod review {
     }
 
     /// The sleeping dog on an empty board (KTLO-20): Diagram and the board
-    /// side of Split with the last tab closed, at both window sizes. The loop
-    /// is off in the harness, so these show its rest frame.
+    /// side of Split with the last tab closed, at both window sizes and at
+    /// double scale, which criterion 7 reviews by eye. The loop is off in the
+    /// harness, so these show its rest frame.
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_empty_board() {
-        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+        for (size, scale, suffix) in [
+            (MINIMUM, 1.0, "960x540"),
+            (WIDE, 1.0, "1600x1000"),
+            (MINIMUM, 2.0, "960x540@2x"),
+        ] {
             let project = shop_project();
-            let mut harness = folder_harness(project.path(), size);
+            let mut harness = folder_harness_scaled(project.path(), size, scale);
             // The demo project opens its scenario by itself the first time.
             harness
                 .get_by_label("Close promotion-and-cart-price.afs")

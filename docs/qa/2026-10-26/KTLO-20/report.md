@@ -5,7 +5,9 @@
 - Built with: `cargo build -p apiforge-desktop --release --locked`
 - Compared against the mock-up the owner approved in
   [#46](https://github.com/jakubiszon26/apiforge/issues/46), copied into this
-  directory as `mock-*`. The ticket file arrives on `main` with #45.
+  directory as `mock-*`; criteria from [the ticket](../../../tickets/KTLO-20.md),
+  which reached `main` with #45 while this branch was being verified and was
+  merged into it.
 - Owner decisions carried out: animated on a four-second loop, only while an
   empty board is visible, off in the test harness; only the "no file open"
   hint; the mock-up approved as a whole.
@@ -53,9 +55,11 @@ Expected: the code side of Split keeps "Open a scenario or component from the
 document list."; a text file's hint stays alone, justified across its board.
 Observed: as expected; `after-split-*.png` show the code hint unchanged to the
 left of the board. Tests: `the_code_side_of_split_keeps_its_own_hint`,
-`the_text_file_hint_keeps_the_board_to_itself`. The missing-file, invalid-code
-and "Checking the code…" hints share the one code path this ticket did not
-touch, `centred_hint`, and were not captured.
+`the_text_file_hint_keeps_the_board_to_itself`. A file whose code has errors
+and one missing from the folder keep their own hints too
+(`a_file_with_errors_or_a_missing_one_keeps_its_own_hint`); they and
+"Checking the code…" share the one path this ticket did not touch,
+`centred_hint`, and were not captured.
 
 ### Scenario 4: the four-second loop
 Expected: the drawing breathes, its shadow and bubble swell, the ears and tail
@@ -70,14 +74,23 @@ proved automatically is its period and rest frame
 empty board (`the_loop_runs_only_while_an_empty_board_is_visible`) and that it
 is off in the harness (`an_empty_board_asks_for_no_redraw_in_the_test_harness`).
 
-### Scenario 5: accessibility and design review
+### Scenario 5: accessibility and design review (criteria 5, 7)
 Observed: `the_empty_board_names_every_control` audits Diagram and Split with
-no file open at both sizes and finds no unnamed control. The drawing is named
-decoration ("Sleeping dog", role Image) and the empty board area carries the
-same name the canvas gives it when a document fills it ("Diagram board"), so
-both are measurable and a screen reader says what the board shows. Design
-review of the new view `review_empty_board` at 960 × 540 and 1600 × 1000:
-nothing overlaps, nothing is cut off, and the pair is centred.
+no file open at both sizes and finds no unnamed control. Criterion 5 asks that
+the drawing add nothing a screen reader announces. It is painted decoration,
+so it is marked hidden in the accessibility tree — what `aria-hidden` is to a
+decorative picture — and only the hint is announced, as today. It does carry a
+name behind that flag ("Sleeping dog"), as does the empty board area ("Diagram
+board", the name the canvas already uses when a document fills it), because
+`docs/gui-testing.md` asks that a widget a test must measure be nameable; the
+assertions on the drawing's box and place rest on those two names. **This is a
+deviation from the letter of criterion 5 ("the dog adds none") and the owner
+may want it undone** — see the pull request.
+
+Design review of `review_empty_board` at 960 × 540, 1600 × 1000 and 960 × 540
+at double scale: nothing overlaps, nothing is cut off, the pair is centred,
+and at double scale the drawing and its letters are sharp and keep their
+proportions (criterion 7, reviewed by eye as the ticket asks).
 
 ## Windows
 
@@ -100,10 +113,6 @@ for Windows on this report alone.
 - A board too small for the drawing (a very short window, or one whose run
   report leaves no room) falls back to the hint alone. No capture, and no
   test: the minimum window is 960 × 540 and fits the pair.
-- Double scale: the standard review set renders the folder modes at 960 x 540
-  with a scale of two, and the new empty-board view does not. The drawing is
-  painted, not an image, and its box is measured in points, so it scales with
-  everything else; it was not captured.
 - Windows, other than the CI suite.
 
 ## Regression smoke list

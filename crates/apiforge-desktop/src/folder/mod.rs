@@ -1350,6 +1350,17 @@ fn centred_hint(ui: &mut egui::Ui, text: &str) {
     ui.centered_and_justified(|ui| widgets::hint(ui, text));
 }
 
+/// Names a painted decoration so that a test can measure where it is, and
+/// hides it from assistive technology: a sleeping dog says nothing a screen
+/// reader needs, and KTLO-20 asks that only the hint be announced. AccessKit's
+/// `hidden` is what `aria-hidden` is to a decorative picture.
+fn name_decoration(ui: &mut egui::Ui, rect: egui::Rect, name: &'static str) {
+    let response = ui.allocate_rect(rect, egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, name));
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_hidden());
+}
+
 /// The hint under the sleeping dog, the pair centred in the board area
 /// (KTLO-20). The drawing is decoration, named so that a screen reader says
 /// what the empty board shows and a test can measure it. A board with no room
@@ -1377,15 +1388,13 @@ fn hint_with_dog(ui: &mut egui::Ui, text: &str, motion: dog::Motion) -> bool {
         return false;
     }
     // The board is named whether a document fills it or not.
-    ui.allocate_rect(area, egui::Sense::hover())
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Diagram board"));
+    name_decoration(ui, area, "Diagram board");
     let size = size * fit;
     let top = area.center().y - (size.y + gap + line) / 2.0;
     let drawing =
         egui::Rect::from_center_size(egui::pos2(area.center().x, top + size.y / 2.0), size);
     dog::paint(ui.painter(), drawing, motion);
-    ui.allocate_rect(drawing, egui::Sense::hover())
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, "Sleeping dog"));
+    name_decoration(ui, drawing, "Sleeping dog");
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_size(

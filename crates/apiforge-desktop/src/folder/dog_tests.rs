@@ -150,6 +150,11 @@ fn the_hint_sits_under_the_drawing_and_the_pair_is_centred_in_the_board() {
                 "{mode} at {size:?}: the hint is {} points below the drawing",
                 hint.top() - dog.bottom()
             );
+            assert!(
+                (dog.center().x - hint.center().x).abs() <= 1.0,
+                "{mode} at {size:?}: the drawing at {dog:?} and the hint at {hint:?} \
+                 do not share a horizontal centre"
+            );
             let pair = dog.union(hint);
             assert!(
                 (pair.center().x - board.center().x).abs() <= 1.0,
@@ -211,6 +216,39 @@ fn the_text_file_hint_keeps_the_board_to_itself() {
         (hint.center().x - window.center().x).abs() <= 1.0,
         "the text-file hint at {hint:?} is no longer centred in the window {window:?}"
     );
+}
+
+/// Criterion 3 of the ticket: a tab open on a file whose code has errors, or
+/// on one missing from the folder, shows the hint it shows today and no
+/// drawing.
+#[test]
+fn a_file_with_errors_or_a_missing_one_keeps_its_own_hint() {
+    for (break_it, expected) in [
+        (true, "The code has errors"),
+        (false, "missing from the project folder"),
+    ] {
+        let project = shop_project();
+        let source = project
+            .path()
+            .join("scenarios")
+            .join("promotion-and-cart-price.afs");
+        if break_it {
+            std::fs::write(&source, "scenario \"Broken\" {\n").unwrap();
+        } else {
+            std::fs::remove_file(&source).unwrap();
+        }
+        let mut harness = folder_harness(project.path(), WIDE);
+        harness.get_by_label("Diagram").click();
+        settle(&mut harness);
+        assert!(
+            harness.query_by_label_contains(expected).is_some(),
+            "the board shows {expected:?}"
+        );
+        assert!(
+            !shown(&harness, DOG),
+            "{expected:?} keeps the board to itself"
+        );
+    }
 }
 
 /// Criterion 6: the four-second loop is off in the test harness, so a board
