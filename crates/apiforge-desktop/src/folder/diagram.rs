@@ -154,6 +154,7 @@ impl FolderApp {
                         can_paste,
                         context: &context,
                         library_in_view,
+                        header_leading: None,
                         library: library.as_ref(),
                     },
                 )

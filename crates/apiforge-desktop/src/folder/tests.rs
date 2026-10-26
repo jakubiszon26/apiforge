@@ -2513,14 +2513,34 @@ fn a_large_source_follows_the_caret_once_its_edit_is_analysed() {
     let edited = text.replacen("price: 12.5", "price: 12.75", 1);
     let session = app.session.as_mut().unwrap();
     session.edit_source(&id, &edited, Origin(1)).unwrap();
+    // Typing has not paused yet, so the edit stays pending for however long the
+    // frames below take; a wall-clock race with the analysis worker lost this
+    // under load.
+    app.analyser
+        .typed(&id, Instant::now() + Duration::from_secs(3600));
     caret_at(&mut app, &context, &id, inside("ok_5") + 1);
+    let analysis = |app: &FolderApp| {
+        let session = app.session.as_ref().unwrap();
+        session.document(&id).unwrap().analysis()
+    };
+    assert_eq!(
+        analysis(&app),
+        AnalysisState::Pending,
+        "the edit is pending"
+    );
     assert_eq!(
         app.selections[&id],
         vec![node_id(&app, &id, "ok_3")],
         "not searched while the edit is pending"
     );
 
-    settle(&mut app, &context);
+    // Typing pauses: the analysis starts on the next frame and is waited for.
+    app.analyser.typed(&id, Instant::now() - APPLY_DELAY);
+    frame(&mut app, &context, vec![]);
+    let session = app.session.as_mut().unwrap();
+    app.analyser.finish(session);
+    assert_eq!(analysis(&app), AnalysisState::Valid, "the edit is analysed");
+    frame(&mut app, &context, vec![]);
     frame(&mut app, &context, vec![]);
     assert_eq!(app.selections[&id], vec![node_id(&app, &id, "ok_5")]);
 }

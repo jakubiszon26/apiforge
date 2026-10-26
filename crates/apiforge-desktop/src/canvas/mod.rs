@@ -130,9 +130,23 @@ pub struct Input<'a> {
     /// Whether a block library panel is beside the board, so the empty-board
     /// hint can point at it (KTLO-05b, criterion 9).
     pub library_in_view: bool,
+    /// The size of a header the caller draws at the left of the board's header
+    /// row (KTLO-12), for which the row keeps room; `None` keeps the row as it
+    /// is without one.
+    pub header_leading: Option<Vec2>,
     /// The library's Variables and Operators for the *Add step* popup, when no
     /// library panel is in view (KTLO-05d).
     pub library: Option<&'a crate::library::Context<'a>>,
+}
+
+/// The width a caller's header may take at the left of the board's header row.
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code, reason = "KTLO-12 part 2 sizes the folder header with it")]
+pub struct HeaderRoom {
+    /// With nothing else beside the toolbar.
+    pub alone: f32,
+    /// With the steps summary still shown between the header and the toolbar.
+    pub with_summary: f32,
 }
 
 /// Everything the board draws: the blocks' cards and the proxies' chips.
@@ -755,7 +769,48 @@ impl Canvas {
             hint_width: hint_galley.size().x,
             shortcuts_badge_width: 78.0,
             error_size,
+            leading_size: input.header_leading.unwrap_or(Vec2::ZERO),
         }
+    }
+
+    /// The rect the board fills: what is left of `ui`.
+    fn viewport(ui: &egui::Ui) -> Rect {
+        let rect = ui.available_rect_before_wrap();
+        Rect::from_min_size(rect.min, rect.size().max(vec2(1.0, 1.0)))
+    }
+
+    /// How wide a header at the left of the board's header row may be, beside
+    /// the toolbar as last drawn for `input` (KTLO-12).
+    #[allow(dead_code, reason = "KTLO-12 part 2 sizes the folder header with it")]
+    pub fn header_room(&self, ui: &egui::Ui, input: &Input<'_>) -> HeaderRoom {
+        // The header, a gap, the summary or nothing, a gap, the toolbar.
+        let toolbar = self.measure_overlays(ui, input).toolbar_size.x;
+        let alone = Self::viewport(ui).width()
+            - layout::OVERLAY_PADDING_LEFT
+            - layout::OVERLAY_PADDING_RIGHT
+            - toolbar
+            - 2.0 * layout::OVERLAY_GAP;
+        let summary = ui
+            .painter()
+            .layout_no_wrap(
+                paint::steps_summary(input.graph),
+                paint::summary_font(),
+                theme::MUTED,
+            )
+            .size()
+            .x;
+        HeaderRoom {
+            alone,
+            with_summary: alone - summary,
+        }
+    }
+
+    /// Where the caller's header goes on the board that `ui` is about to show
+    /// for `input`: the left of the board's header row.
+    #[allow(dead_code, reason = "KTLO-12 part 2 places the folder header with it")]
+    pub fn leading_rect(&self, ui: &egui::Ui, input: &Input<'_>) -> Rect {
+        let measures = self.measure_overlays(ui, input);
+        layout::board_overlays(Self::viewport(ui), &measures).leading
     }
 
     fn fit(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
@@ -2204,6 +2259,7 @@ mod tests {
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
+                                header_leading: None,
                                 library: None,
                             },
                         );
@@ -2220,5 +2276,72 @@ mod tests {
             "{actual:?} outside center {focus:?}"
         );
         assert!(focus.expand(0.1).contains_rect(actual));
+    }
+
+    #[test]
+    fn a_header_as_wide_as_its_room_shares_the_row_with_the_summary_and_toolbar() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let project = apiforge_core::demos::shop_project();
+        let graph = &project.scenarios[0].graph;
+        for width in [960.0, 1600.0] {
+            let mut canvas = Canvas::default();
+            for frame in 0..3 {
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 600.0))),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::CentralPanel::default().show(ui, |ui| {
+                            let mut input = Input {
+                                graph,
+                                reference_graph: graph,
+                                project: &project,
+                                parameters: &[],
+                                selection: &[],
+                                steps: None,
+                                can_paste: false,
+                                context: "test",
+                                library_in_view: true,
+                                header_leading: None,
+                                library: None,
+                            };
+                            let room = canvas.header_room(ui, &input);
+                            input.header_leading =
+                                Some(vec2(room.with_summary, theme::CONTROL_HEIGHT));
+                            let leading = canvas.leading_rect(ui, &input);
+                            // The toolbar's size is measured by the frames before.
+                            if frame == 2 {
+                                let overlays = layout::board_overlays(
+                                    Canvas::viewport(ui),
+                                    &canvas.measure_overlays(ui, &input),
+                                );
+                                let summary = ui
+                                    .painter()
+                                    .layout_no_wrap(
+                                        paint::steps_summary(graph),
+                                        paint::summary_font(),
+                                        theme::MUTED,
+                                    )
+                                    .size()
+                                    .x;
+                                assert_eq!(leading, overlays.leading);
+                                assert!((leading.width() - room.with_summary).abs() < 0.01);
+                                assert!((room.alone - room.with_summary - summary).abs() < 0.01);
+                                assert!(
+                                    (leading.center().y - overlays.toolbar.center().y).abs() <= 3.0,
+                                    "one row at {width} px"
+                                );
+                                assert!(overlays.banner.width() >= summary - 0.01);
+                                assert!(overlays.banner.right() < overlays.toolbar.left());
+                            }
+                            canvas.show(ui, &input);
+                        });
+                    },
+                );
+                output.textures_delta.clear();
+            }
+        }
     }
 }

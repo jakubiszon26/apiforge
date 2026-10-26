@@ -552,12 +552,7 @@ pub fn tab_value<T: PartialEq>(
     let text = label.as_ref();
     let selected = *value == candidate;
     let font = FontId::proportional(theme::FONT_BODY);
-    let width = ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT)
-        .size()
-        .x
-        + 24.0;
+    let width = tab_value_width(ui, text);
     let (rect, mut response) =
         ui.allocate_at_least(vec2(width, theme::CONTROL_HEIGHT), Sense::click());
     if response.clicked() && !selected {
@@ -598,6 +593,19 @@ pub fn tab_value<T: PartialEq>(
         egui::Align::Center,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The width [`tab_value`] takes for `label`.
+pub fn tab_value_width(ui: &Ui, label: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            FontId::proportional(theme::FONT_BODY),
+            theme::TEXT,
+        )
+        .size()
+        .x
+        + 24.0
 }
 
 #[cfg(test)]
