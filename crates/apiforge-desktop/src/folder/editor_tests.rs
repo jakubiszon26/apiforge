@@ -33,10 +33,21 @@ fn editor(harness: &FolderHarness) -> egui::Rect {
     harness.get_by_label_contains("Contents of").rect()
 }
 
-/// The top of the Problems bar's caption, just below the code panel: the bar's
-/// inner margin (8) and the code panel's (6) lie between them.
+/// The top of the Problems bar below the code: the panel-coloured fill under
+/// its caption. Only the code panel's own margin (6) lies between the bar and
+/// the bottom of the code.
 fn problems_top(harness: &FolderHarness) -> f32 {
-    harness.get_by_label("PROBLEMS").rect().top()
+    let caption = harness.get_by_label("PROBLEMS").rect();
+    shapes(harness)
+        .into_iter()
+        .filter_map(|(_, shape)| match shape {
+            Shape::Rect(rect) if rect.fill == theme::PANEL && rect.rect.contains_rect(caption) => {
+                Some(rect.rect.top())
+            }
+            _ => None,
+        })
+        .reduce(f32::max)
+        .expect("the Problems bar has a fill of its own")
 }
 
 fn shapes(harness: &FolderHarness) -> Vec<(egui::Rect, Shape)> {
@@ -160,7 +171,7 @@ fn the_editor_paints_no_box_and_reaches_the_bottom_of_its_panel() {
             );
             let bottom = problems_top(&harness);
             assert!(
-                editor.bottom() >= bottom - 16.0,
+                editor.bottom() >= bottom - 7.0,
                 "{mode} at {size:?}: the text area ends at {} but the panel at {bottom}",
                 editor.bottom()
             );
