@@ -233,6 +233,20 @@ impl Canvas {
         }
     }
 
+    /// Opens the *Add step* popup near the board's top-left corner, as the
+    /// toolbar's button does, for tests that audit the popup.
+    #[cfg(test)]
+    pub(crate) fn debug_open_menu(&mut self) {
+        let at = self.last_viewport.min + vec2(16.0, 48.0);
+        let camera = self.screen_camera(self.last_viewport);
+        self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
+
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);

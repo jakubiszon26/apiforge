@@ -173,6 +173,25 @@ fn stage_ii_screens_and_dialogs_name_every_control() {
     assert_named("initialise", &mut app, &context);
 }
 
+/// KTLO-05d criterion 3: the *Add step* popup names every control, with its
+/// Variables and Operators sections (Split at 960 × 540) and without them
+/// (Split at 1600 × 1000, beside the library panel).
+#[test]
+fn the_add_step_popup_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    app.workbench.mode = Mode::Split;
+    wait_storage(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    app.canvases.get_mut(&id).unwrap().debug_open_menu();
+    assert_named("Add step popup", &mut app, &context);
+    assert!(
+        app.canvases.get(&id).unwrap().debug_menu_open(),
+        "the popup stayed open during the audit"
+    );
+}
+
 /// The names of the controls Tab visits from the current focus, in order.
 fn tab_order(app: &mut FolderApp, context: &egui::Context, presses: usize) -> Vec<String> {
     context.enable_accesskit();
