@@ -16,8 +16,8 @@ end to end once. No new features, with one exception the owner made on
 2026-10-26: five interface wishes for the folder window (KTLO-17, KTLO-11,
 KTLO-18, KTLO-19, KTLO-20) join the sprint and go through the full path,
 mock-up → decision → acceptance tests → QA report. They add about 115 minutes
-of owner review. KTLO-20 is the last ticket added to this sprint; its scope
-is closed. Exit criteria:
+of owner review. The owner reopened the sprint's scope on 2026-10-26 to admit
+a further wish, KTLO-24 (#57, S · 15 min). Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -37,6 +37,9 @@ is closed. Exit criteria:
       (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44, KTLO-20 #46); those
       approved are accepted or carried into the next sprint with their state
       recorded.
+- [ ] The open-files bar hides itself when no file is open (KTLO-24, #57),
+      decided on its mock-up and accepted, or carried into the next sprint
+      with its state recorded.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -68,6 +71,7 @@ work does not start.
 | [#44](https://github.com/jakubiszon26/apiforge/issues/44) | KTLO-19 Run results can fill the window; [ticket](tickets/KTLO-19.md) | S · 20 min · `visible UI` |
 | [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — the last ticket added to this sprint; animated (owner decision) | M · 30 min · `visible UI` |
 | [#49](https://github.com/jakubiszon26/apiforge/issues/49) | KTLO-21 A reader still sees a live writer right after the writer is dropped (flaky on Linux CI); [ticket](tickets/KTLO-21.md) | S · 20 min; actual 393 lines (M), 1 round |
+| [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
 
 ## Later
 
