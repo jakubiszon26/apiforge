@@ -140,6 +140,19 @@ impl Library {
     /// sections and the project's components, without workspace navigation.
     /// Shared by the legacy sidebar and the folder window's left panel.
     pub fn show_blocks(&mut self, ui: &mut egui::Ui, context: &Context<'_>) -> Vec<Action> {
+        self.show_blocks_with(ui, context, |_| {}, true)
+    }
+
+    /// [`Self::show_blocks`] with `trailing` drawn at the right of the caption
+    /// row, where the folder window puts its collapse chevron (KTLO-17), and
+    /// everything below the caption row disabled unless `enabled`.
+    pub fn show_blocks_with(
+        &mut self,
+        ui: &mut egui::Ui,
+        context: &Context<'_>,
+        trailing: impl FnOnce(&mut egui::Ui),
+        enabled: bool,
+    ) -> Vec<Action> {
         let mut actions = Vec::new();
         let components = latest_components(context.project);
         ui.horizontal(|ui| {
@@ -163,7 +176,11 @@ impl Library {
                 .size(11.0)
                 .color(theme::MUTED),
             );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
         });
+        if !enabled {
+            ui.disable();
+        }
         widgets::named(
             ui.add_sized(
                 [ui.available_width(), theme::CONTROL_HEIGHT],

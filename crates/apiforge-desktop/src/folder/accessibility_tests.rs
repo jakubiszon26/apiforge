@@ -383,3 +383,48 @@ fn menus_opened_from_the_keyboard_are_named_and_reachable() {
         frame(&mut app, &context, vec![]);
     }
 }
+
+/// Whether one frame of `app` at the default window exposes a node named `name`.
+fn exposes(app: &mut FolderApp, context: &egui::Context, name: &str) -> bool {
+    context.enable_accesskit();
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 1000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    output.textures_delta.clear();
+    let tree = output.platform_output.accesskit_update.unwrap();
+    tree.nodes
+        .iter()
+        .any(|(_, node)| accessible_name(&tree, node).as_deref() == Some(name))
+}
+
+/// KTLO-17 criterion 7: the audit passes with the library expanded and
+/// collapsed (Ctrl+B), in Diagram and in Split.
+#[test]
+fn the_block_library_names_every_control_expanded_and_collapsed() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    for mode in [Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        wait_storage(&mut app, &context);
+        frame(&mut app, &context, vec![]);
+        assert!(
+            exposes(&mut app, &context, "Collapse block library"),
+            "{mode:?}: the expanded panel has its chevron"
+        );
+        assert_named(&format!("{mode:?}, library expanded"), &mut app, &context);
+        frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
+        assert!(
+            exposes(&mut app, &context, "Show block library"),
+            "{mode:?}: Ctrl+B folds the library to its rail"
+        );
+        assert_named(&format!("{mode:?}, library collapsed"), &mut app, &context);
+        frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
+    }
+}

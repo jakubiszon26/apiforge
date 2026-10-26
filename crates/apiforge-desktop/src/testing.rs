@@ -293,6 +293,38 @@ mod review {
         }
     }
 
+    /// The block library folded to its rail (KTLO-17) in Diagram and Split, and
+    /// the expanded panel's caption row with its chevron, at both windows.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_library_rail() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            harness.get_by_label("Diagram").click();
+            settle(&mut harness);
+            let caption = harness.get_by_label("Block library").rect();
+            let chevron = harness.get_by_label("Collapse block library").rect();
+            let region = caption.union(chevron).expand2(egui::vec2(16.0, 12.0));
+            capture(
+                &mut harness,
+                &format!("library-caption-{suffix}"),
+                Some(region),
+            );
+            harness.get_by_label("Collapse block library").click();
+            settle(&mut harness);
+            for mode in ["Diagram", "Split"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("library-rail-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+        }
+    }
+
     /// The sleeping dog on an empty board (KTLO-20): Diagram and the board
     /// side of Split with the last tab closed, at both window sizes. The loop
     /// is off in the harness, so these show its rest frame.
