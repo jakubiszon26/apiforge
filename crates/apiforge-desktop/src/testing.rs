@@ -299,6 +299,33 @@ mod review {
         let mut harness = workspace_harness(WIDE);
         capture(&mut harness, "workspace-1600x1000", None);
     }
+
+    /// KTLO-20 throwaway mock-up: Diagram and Split with no file open, the
+    /// sleeping dog above the hint.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_20_sleeping_dog() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            harness.get_by_label("Diagram").click();
+            settle(&mut harness);
+            // Ctrl+W until no tab is left; a press with no tab is a no-op.
+            for _ in 0..8 {
+                harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::W);
+                settle(&mut harness);
+            }
+            for mode in ["Diagram", "Split"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("mock-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+        }
+    }
 }
 
 /// Serves egui_inspection from a harness until killed or until

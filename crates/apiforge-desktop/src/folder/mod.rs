@@ -15,6 +15,7 @@ mod chrome;
 mod code_view;
 mod conflict_view;
 mod diagram;
+mod dog;
 mod explorer;
 mod file_prompts;
 mod navigation;
@@ -1285,6 +1286,31 @@ fn clamp_selection(text: &str, selection: &TextSelection) -> TextSelection {
 
 fn centred_hint(ui: &mut egui::Ui, text: &str) {
     ui.centered_and_justified(|ui| widgets::hint(ui, text));
+}
+
+/// KTLO-20 mock-up: the hint under the sleeping dog, the pair centred in the
+/// area. The dog is decoration and has no accessibility node; the hint keeps
+/// its label.
+fn hint_with_dog(ui: &mut egui::Ui, text: &str) {
+    let area = ui.available_rect_before_wrap();
+    let size = dog::size_for(area.height());
+    let gap = theme::SPACE_MD;
+    let line = ui.text_style_height(&egui::TextStyle::Body);
+    let total = size.y + gap + line;
+    let top = area.center().y - total / 2.0;
+    let dog_rect =
+        egui::Rect::from_center_size(egui::pos2(area.center().x, top + size.y / 2.0), size);
+    dog::paint(ui.painter(), dog_rect);
+    let text_rect = egui::Rect::from_min_size(
+        egui::pos2(area.left(), top + size.y + gap),
+        egui::vec2(area.width(), line),
+    );
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(text_rect)
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+        |ui| widgets::hint(ui, text),
+    );
 }
 
 fn quoted(name: &str) -> String {

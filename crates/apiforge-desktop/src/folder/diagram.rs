@@ -6,7 +6,7 @@ use super::*;
 impl FolderApp {
     pub(super) fn diagram_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
         let Some(document_id) = active else {
-            centred_hint(ui, "Open a scenario or component to see its diagram.");
+            hint_with_dog(ui, "Open a scenario or component to see its diagram.");
             return;
         };
         if let Some(path) = self.text_of(document_id) {
