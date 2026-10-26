@@ -85,6 +85,23 @@ bounds at 50 ms. Answering `false` is unchanged: one `open`, one
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`: exit
   status 0, no diagnostics.
 
+### 7. CI, and the branch after `main` moved
+
+At `904bfe3`, before `main` moved: every check green, both platforms in both
+the `push` and the `pull_request` run —
+[40402828810](https://github.com/jakubiszon26/apiforge/actions/runs/40402828810)
+and
+[40402835539](https://github.com/jakubiszon26/apiforge/actions/runs/40402835539).
+All four `Build & Test` jobs passed, which is what the ticket is for: the flake
+no longer turns one of a pair of identical runs red.
+
+`main` then took #38, #45 and #48, so the branch was brought up to date by
+merging `main` (`93d78f4`, the conflict being one row of `docs/backlog.md`
+where both sides append to the sprint table). #48 changes the desktop crate, so
+the storage suite was run again on the merged tree: **175 passed, 0 failed, 2
+ignored**, and `tests/acceptance.rs` 2 passed. The whole workspace on the merge
+commit is covered by that commit's own CI run, cited on the pull request.
+
 ## Not verified
 
 - Windows: the mechanism is a `fork` artefact and cannot occur there, because
