@@ -1,7 +1,9 @@
 # KTLO-12: One header above the board
 
-- Size: M · Owner review: 20 min · Risk: visible UI
-- State: Approved 2026-10-26 — Diagram: variant A; Split: variant B
+- Size: M, measured L, split into two pull requests (see *Delivery*) · Owner
+  review: 20 min · Risk: visible UI
+- State: In progress — PR A of 2. Approved 2026-10-26 — Diagram: variant A;
+  Split: variant B
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
@@ -74,3 +76,34 @@ widths are hard-coded guesses. The real version measures the widths, feeds the
 left width into `board_overlays` (which has a stacked fallback) and extends
 its unit test. The legacy `app.rs` `Input` needs the new field. Risks: focus
 order across two `Area`s; the header now sits on the board's grey band.
+
+## Delivery
+
+The finished change measured about 1,040 changed lines with its QA report:
+size L, which is not scheduled ([estimation](../process/estimation.md#size)).
+It was split before the QA report into two pull requests, along a seam that
+leaves the first with nothing to see:
+
+- **PR A (part 1 of 2)** — groundwork in the board, no visible change.
+  `canvas::Input.header_leading` (`None` at every caller),
+  `OverlayMeasures.leading_size` and `BoardOverlays.leading`,
+  `Canvas::header_room` and `leading_rect`, `widgets::tab_value_width`, the
+  steps summary's text and font as functions, and the `board_overlays` unit
+  test with three header widths. It also fixes a pre-existing test race (below).
+- **PR B (part 2 of 2)**, branched from `main` after PR A is merged — the
+  header drawn on the board's row in `folder/diagram.rs`, the steps summary
+  beside the toolbar, the keyboard order, the six acceptance tests, the
+  captures and the QA report. It closes #16.
+
+### A pre-existing test race
+
+`folder::tests::a_large_source_follows_the_caret_once_its_edit_is_analysed`
+edited the source through the session, which skips the typing pause, so its
+analysis worker raced three frames of an 8,400-line editor. On `main` it
+passed 4 of 4 suite runs on a 3-core machine; with the heavier acceptance
+tests of part 2 in the same suite it failed in 4 of 5: twice "not searched
+while the edit is pending", and twice "storage did not become idle" when
+opening, the latter at a load average around 15. PR A holds the edit
+pending by the typing pause, asserts it is still pending, and waits on the
+analyser instead of the clock; the selection assertions are unchanged. The
+15-second opening wait it shares with other folder tests is not changed.
