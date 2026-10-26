@@ -2,7 +2,7 @@
 
 - Size: M · Owner review: 20 min · Risk: none (positions after *Tidy up*
   change; the cards and wires do not)
-- State: Backlog
+- State: Backlog (issue #35)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

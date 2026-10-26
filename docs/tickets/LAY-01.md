@@ -1,7 +1,7 @@
 # LAY-01: A quality measurement for layout and routing
 
 - Size: S · Owner review: 10 min · Risk: none
-- State: Backlog
+- State: Backlog (issue #32)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

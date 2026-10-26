@@ -79,3 +79,19 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 - Roadmap M7 editor features ([roadmap](roadmap.md)).
 - Windows release gates: interactive native QA and directory durability
   ([Stage II plan](stage-ii-code-workspace.md#delivery-and-acceptance)).
+
+### Layout and wire routing readability
+
+Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
+code stacks in one column, no tidied wire is straight, wires are drawn on top
+of each other, and ordering wires cross data wires by construction. Not
+scheduled in KTLO; in the order to do them:
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#32](https://github.com/jakubiszon26/apiforge/issues/32) | LAY-01 A quality measurement for layout and routing; [ticket](tickets/LAY-01.md) | S · 10 min |
+| [#33](https://github.com/jakubiszon26/apiforge/issues/33) | LAY-02 A scenario opened from code is placed in layers; [ticket](tickets/LAY-02.md) | S · 15 min |
+| [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Wires are never drawn on top of each other; [ticket](tickets/LAY-03.md) | S · 15 min |
+| [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows: wires between neighbours run straight; [ticket](tickets/LAY-04.md) | M · 20 min |
+| [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape of a tidied scenario — owner decision with mock-ups; [ticket](tickets/LAY-06.md) | S · 30 min · `visible UI` · `decision-needed` |
+| [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes between columns: a short wire does not cross a long one; [ticket](tickets/LAY-05.md) | M · 15 min · measured again after LAY-04 |

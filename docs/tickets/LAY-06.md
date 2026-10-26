@@ -2,7 +2,7 @@
 
 - Size: S (analysis and mock-ups only) · Owner review: 30 min plus the
   discussion · Risk: visible UI
-- State: Backlog · decision needed
+- State: Backlog (issue #37) · decision needed
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

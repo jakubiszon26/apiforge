@@ -1,7 +1,7 @@
 # LAY-03: Wires are never drawn on top of each other
 
 - Size: S · Owner review: 15 min · Risk: none
-- State: Backlog
+- State: Backlog (issue #34)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

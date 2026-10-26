@@ -2,7 +2,7 @@
 
 - Size: S · Owner review: 15 min · Risk: none (no visible design changes;
   the first placement of a new scenario improves)
-- State: Backlog
+- State: Backlog (issue #33)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal
