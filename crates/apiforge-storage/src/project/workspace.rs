@@ -66,6 +66,10 @@ pub struct PanelSizes {
     /// Width of the block library beside the board.
     #[serde(default = "default_library_width")]
     pub library: f32,
+    /// Whether the block library is folded to its rail (KTLO-17). Written only
+    /// when set, so an expanded library leaves the file as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub library_collapsed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -220,6 +224,7 @@ mod tests {
                 split_code: 480.0,
                 diagnostics: 140.0,
                 library: 260.0,
+                library_collapsed: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")
@@ -371,6 +376,80 @@ mod tests {
                 "unknown fields outside the panel sizes are still rejected"
             );
         }
+    }
+
+    /// KTLO-17 criterion 6: a collapsed block library round-trips with the
+    /// panel sizes.
+    #[test]
+    fn the_library_collapsed_flag_round_trips() {
+        let panels = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 287.5,
+            "libraryCollapsed": true,
+        });
+        assert_eq!(panels_through_load_and_save(panels.clone()), panels);
+    }
+
+    /// KTLO-17 criterion 6: a view state written before the flag existed opens
+    /// the library expanded; an expanded library adds nothing to the file.
+    #[test]
+    fn a_view_state_without_the_collapsed_flag_opens_expanded() {
+        let panels = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 240.0,
+        });
+        assert_eq!(panels_through_load_and_save(panels.clone()), panels);
+        let expanded = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 240.0,
+            "libraryCollapsed": false,
+        }));
+        assert_eq!(expanded, panels);
+    }
+
+    /// KTLO-17 criterion 6 (KTLO-05c criterion 3 extended): the panel sizes this
+    /// build writes with the flag load in a build without it, whose panel sizes
+    /// are KTLO-05c's: tolerant of unknown fields, with no `libraryCollapsed`.
+    #[test]
+    fn a_view_state_with_the_collapsed_flag_loads_in_a_build_without_it() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename_all = "camelCase")]
+        struct PanelSizesOfKtlo05c {
+            documents: f32,
+            split_code: f32,
+            diagnostics: f32,
+            #[serde(default = "default_library_width")]
+            library: f32,
+        }
+        let written = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 300.0,
+            "libraryCollapsed": true,
+        }));
+        assert_eq!(
+            written["libraryCollapsed"],
+            serde_json::json!(true),
+            "this build writes the flag"
+        );
+        let older: PanelSizesOfKtlo05c = serde_json::from_value(written).unwrap();
+        assert_eq!(
+            older,
+            PanelSizesOfKtlo05c {
+                documents: 220.0,
+                split_code: 480.0,
+                diagnostics: 140.0,
+                library: 300.0,
+            },
+            "the older build keeps every size it knows"
+        );
     }
 
     #[test]
