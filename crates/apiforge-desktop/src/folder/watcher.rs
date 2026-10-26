@@ -131,7 +131,10 @@ impl Watcher {
         (outcome, POLL_INTERVAL)
     }
 
-    /// Waits for the running check and applies it, for tests.
+    /// Checks the folder now and applies the result, for tests. A check
+    /// already running may have read the folder before the caller's last
+    /// write, so its answer is awaited and set aside; a check that met a
+    /// transaction in progress is repeated, as the next tick would.
     #[cfg(test)]
     pub fn finish(
         &mut self,
@@ -139,16 +142,23 @@ impl Watcher {
     ) -> Option<apiforge_project::ExternalOutcome> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while self.running && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-            if let Ok(result) = self.results.recv_timeout(Duration::from_millis(5)) {
+            if self.results.recv_timeout(Duration::from_millis(5)).is_ok() {
                 self.running = false;
-                if let Ok(changes) = result {
+            }
+        }
+        while Instant::now() < deadline {
+            match session.external_check().run() {
+                Ok(changes) => {
                     self.scan = Some(changes.scan.clone());
                     return session
                         .apply_external(changes)
                         .ok()
                         .filter(|outcome| !outcome.is_empty());
                 }
+                Err(apiforge_project::Error::Storage(ProjectError::Busy)) => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => return None,
             }
         }
         None
@@ -189,6 +199,41 @@ mod tests {
         assert!(watcher.is_busy(), "regaining focus checks at once");
         let outcome = watcher.finish(&mut session).unwrap();
         assert_eq!(outcome.reloaded, std::slice::from_ref(&id));
+        assert!(session.document(&id).unwrap().text().contains('7'));
+    }
+
+    /// KTLO-15: a check that read the folder before a write and answers only
+    /// after it must not stand in for a check of that write. On a loaded
+    /// runner the once-a-second check can be that slow.
+    #[test]
+    fn finishing_checks_writes_made_while_a_slow_check_was_running() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session = ProjectSession::create(directory.path(), "Folder").unwrap();
+        let id = session
+            .create_document(DocumentKind::Scenario, "main.afs", SCENARIO)
+            .unwrap();
+        let mut watcher = Watcher::new(None);
+
+        // The check reads the folder now; its answer arrives later.
+        let stale = session.external_check().run();
+        watcher.running = true;
+        let sender = watcher.sender.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = sender.send(stale);
+        });
+
+        std::fs::write(
+            directory.path().join("main.afs"),
+            SCENARIO.replace('2', "7"),
+        )
+        .unwrap();
+        let outcome = watcher.finish(&mut session);
+        assert_eq!(
+            outcome.map(|outcome| outcome.reloaded),
+            Some(vec![id.clone()]),
+            "the write made while the slow check ran is followed"
+        );
         assert!(session.document(&id).unwrap().text().contains('7'));
     }
 }

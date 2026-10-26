@@ -910,7 +910,7 @@ fn discarding_a_tab_clears_unfinished_text_held_by_the_body_field() {
     );
 }
 
-/// Waits for the folder check the watcher started and applies it.
+/// Checks the folder now, as the watcher would, and applies the result.
 fn watch(app: &mut FolderApp, context: &egui::Context) {
     app.watcher.rescan();
     frame(app, context, vec![]);
