@@ -1,7 +1,7 @@
 # KTLO-05d: The Add step popup lists Variables and Operators below 1440 px
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Approved (issue #23; second half of KTLO-05a criterion 5, option A)
+- State: Awaiting acceptance (issue #23; second half of KTLO-05a criterion 5, option A)
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
@@ -54,3 +54,9 @@ place and hands it to the board (`canvas::Input`) when the panel is not in
 view; `canvas/menu.rs::ActionMenu` shows the sections when it has one, and the
 board turns their actions into the same `Command`s the panel's click sends,
 at its visible centre.
+
+## Actual
+
+Changed lines: 669 (code 292, tests and their two test-only board helpers
+241, ticket and QA report 136). Size M: the code alone fits S; the tests and
+the report push it over. One round.
