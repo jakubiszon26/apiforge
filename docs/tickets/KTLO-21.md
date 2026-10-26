@@ -1,6 +1,6 @@
 # KTLO-21: A reader still sees a live writer right after the writer is dropped
 
-- Size: S · Owner review: 20 min · Risk: none
+- Size: S estimated, **M measured** · Owner review: 20 min · Risk: none
 - State: Awaiting acceptance (issue #49)
 - Analysis model: Fable (ticket), Opus 5 (cause) · Implementation model: Opus 5
 
@@ -105,4 +105,17 @@ which is unchanged in length.
 
 ## Actual
 
-Changed lines: filled in before review (`git diff --stat origin/main...HEAD`).
+Changed lines: 379 (`git diff --stat origin/main...HEAD`), over the 300 of the
+S class and inside the 800 of M, so the ticket is not split.
+
+| Part | Changed lines |
+| --- | --- |
+| The fix (`src/project/transaction.rs`) | 70 (47 added, 23 removed) |
+| Acceptance tests (`tests/acceptance.rs`) | 97 |
+| This ticket | 108 |
+| QA report | 104 |
+
+The estimate held for the work itself — the change to the code is 47 added
+lines against 23 removed, and the writing was what grew. The size rule counts
+tests and docs, so the measurement is recorded as M rather than argued down:
+what the owner reviews really is longer than an S ticket.
