@@ -66,6 +66,10 @@ pub struct PanelSizes {
     /// Width of the block library beside the board.
     #[serde(default = "default_library_width")]
     pub library: f32,
+    /// Whether the block library is folded to its rail (KTLO-17). Written only
+    /// when set, so an expanded library leaves the file as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub library_collapsed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -220,6 +224,7 @@ mod tests {
                 split_code: 480.0,
                 diagnostics: 140.0,
                 library: 260.0,
+                library_collapsed: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")
