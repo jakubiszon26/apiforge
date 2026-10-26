@@ -39,7 +39,10 @@ cargo run -p apiforge-desktop --locked -- --screenshot out.png --folder <path> [
 ```
 
 The smoke test draws three frames and exits; the screenshot command saves the
-viewport as PNG. Both use a session workspace and send no requests.
+viewport as PNG. None of them sends requests. The smoke test and the
+`--project` capture use a session workspace; the `--folder` capture opens the
+project itself, as `--folder` does, so it is added to the recent projects and
+the project's view may be written (never with the requested mode).
 `--mode` shows a folder capture in Code, Diagram or Split instead of the mode
 the folder restores, without recording it as the folder's view; it is rejected
 without `--folder`, because the workspace window has no modes. `--size WxH`
