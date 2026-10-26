@@ -12,7 +12,11 @@ At most three pull requests await owner acceptance at a time.
 ## Sprint: KTLO (2026-10-26 to 2026-11-08)
 
 Keep the lights on: stabilise what Stage II shipped and run the new process
-end to end once. No new features. Exit criteria:
+end to end once. No new features, with one exception the owner made on
+2026-10-26: four interface wishes for the folder window (KTLO-17, KTLO-11,
+KTLO-18, KTLO-19) join the sprint and go through the full path, mock-up →
+decision → acceptance tests → QA report. They add about 85 minutes of owner
+review. Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -28,6 +32,9 @@ end to end once. No new features. Exit criteria:
 - [ ] The two interface findings the owner raised on the mock-ups — one header
       above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
       #17) — are accepted through the same mock-up → test → report path.
+- [ ] The four interface wishes of 2026-10-26 are decided on their mock-ups
+      (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44); those approved are
+      accepted or carried into the next sprint with their state recorded.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -52,14 +59,16 @@ work does not start.
 | [#16](https://github.com/jakubiszon26/apiforge/issues/16) | KTLO-12 One header above the board: title and Main/Cleanup beside Add step | S · 15 min · `visible UI` |
 | [#17](https://github.com/jakubiszon26/apiforge/issues/17) | KTLO-13 The code editor fills its panel without a bordered box | S · 15 min · `visible UI` |
 | [#18](https://github.com/jakubiszon26/apiforge/issues/18) | KTLO-14 CI has failed on every push to main since Stage II began; [ticket](tickets/KTLO-14.md) — merged in #19 | S · 10 min; actual 195 lines, 4 rounds |
+| [#31](https://github.com/jakubiszon26/apiforge/issues/31) | KTLO-16 The Linux folder-projects CI step sometimes hangs; [ticket](tickets/KTLO-16.md) — merged in #40 | S · 10 min |
+| [#42](https://github.com/jakubiszon26/apiforge/issues/42) | KTLO-17 The block library collapses to a rail in Diagram and Split; [ticket](tickets/KTLO-17.md) | S · 20 min · `visible UI`, `format` |
+| [#14](https://github.com/jakubiszon26/apiforge/issues/14) | KTLO-11 Project files in Diagram: the left panel switches between Library and Files; [ticket](tickets/KTLO-11.md); after KTLO-17 | M · 30 min · `visible UI`, `format` |
+| [#43](https://github.com/jakubiszon26/apiforge/issues/43) | KTLO-18 The Problems section expands over the code with one click; [ticket](tickets/KTLO-18.md) | S · 15 min · `visible UI` |
+| [#44](https://github.com/jakubiszon26/apiforge/issues/44) | KTLO-19 Run results can fill the window; [ticket](tickets/KTLO-19.md) | S · 20 min · `visible UI` |
 
 ## Later
 
 Feature work resumes after KTLO exits. Candidates, unestimated:
 
-- [#14](https://github.com/jakubiszon26/apiforge/issues/14) KTLO-11 Scenario
-  navigation in Diagram mode (from the KTLO-05a decision).
-- Hiding the block library panel in Split by choice (owner's wish, 2026-10-26).
 - Panel widths carry over between projects opened in the same window: egui
   caches panel sizes under fixed IDs, so a restored per-project width loses
   to the cached one (project files, split code, diagnostics and, after

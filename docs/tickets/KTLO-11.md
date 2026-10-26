@@ -2,7 +2,7 @@
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `format` (the chosen
   tab remembered per project, decision 2)
-- State: Analysis — mock-up posted on the issue, waits for the owner's
+- State: Analysis (issue #14) — mock-up posted on the issue, waits for the owner's
   decisions below. Depends on KTLO-17 (the rail).
 - Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)

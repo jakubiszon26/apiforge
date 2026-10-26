@@ -1,7 +1,7 @@
 # KTLO-18: The Problems section expands over the code with one click
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis — mock-up posted on the issue, waits for the owner's
+- State: Analysis (issue #43) — mock-up posted on the issue, waits for the owner's
   decisions below
 - Analysis model: Fable · Implementation model: — (Opus 5.5 when approved)
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
