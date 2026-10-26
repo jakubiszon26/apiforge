@@ -91,15 +91,17 @@ fn clicking_a_block_adds_it_at_the_visible_centre_selected_and_dirty() {
         "the block is at the visible centre {centre:?}, not {:?}",
         added.position
     );
+    let document = folder(&harness)
+        .session
+        .as_ref()
+        .unwrap()
+        .document(&id)
+        .unwrap();
+    assert!(document.needs_recovery(), "the tab is dirty after an edit");
     assert!(
-        folder(&harness)
-            .session
-            .as_ref()
-            .unwrap()
-            .document(&id)
-            .unwrap()
-            .needs_recovery(),
-        "the tab is dirty after an edit"
+        document.text().contains(&format!("{} =", added.handle)),
+        "the source gains the block's statement:\n{}",
+        document.text()
     );
 }
 
