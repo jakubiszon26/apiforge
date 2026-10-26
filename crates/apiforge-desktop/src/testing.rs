@@ -243,6 +243,56 @@ mod review {
         mode_views(&mut harness, "960x540@2x");
     }
 
+    /// The code editor without a box (KTLO-13), with a line wider than the
+    /// panel: Code and Split, then Code with the caret at the end of that
+    /// line, so the line is scrolled and the gutter's focus line shows.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_code_editor() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut demo = apiforge_core::demos::shop_project();
+            demo.scenarios[0].description = "Check the promotion, the final price and an \
+                extra field. The demo data can be run against the local demo API, which \
+                answers on the address configured in the project environment."
+                .into();
+            apiforge_project::prepare_project(directory.path(), &demo).unwrap();
+            let mut harness = folder_harness(directory.path(), size);
+            for mode in ["Split", "Code"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("editor-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+            // Line 2 holds the description; the caret goes to its end.
+            let at = harness
+                .get_by_label_contains("Contents of")
+                .rect()
+                .left_top()
+                + egui::vec2(120.0, 24.0);
+            harness.hover_at(at);
+            for pressed in [true, false] {
+                harness.event(egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
+            harness.key_press(egui::Key::End);
+            settle(&mut harness);
+            capture(
+                &mut harness,
+                &format!("editor-code-scrolled-{suffix}"),
+                None,
+            );
+        }
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
