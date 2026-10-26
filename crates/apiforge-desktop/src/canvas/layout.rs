@@ -77,12 +77,18 @@ pub struct OverlayMeasures {
     pub hint_width: f32,
     pub shortcuts_badge_width: f32,
     pub error_size: Option<Vec2>,
+    /// A header the caller draws at the left of the header row (KTLO-12):
+    /// its size, or zero when the row has none.
+    pub leading_size: Vec2,
 }
 
 /// Disjoint regions of the canvas viewport.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoardOverlays {
     pub header: Rect,
+    /// Where the caller's own header sits, at the left of the header row.
+    pub leading: Rect,
+    /// The steps summary's room: after the leading header, before the toolbar.
     pub banner: Rect,
     pub banner_wrap_width: f32,
     pub toolbar: Rect,
@@ -95,34 +101,46 @@ pub struct BoardOverlays {
     pub focus: Rect,
 }
 
-/// Computes the wrap width available for the top-left mode banner.
-pub fn banner_wrap_width(viewport_width: f32, toolbar_width: f32) -> f32 {
-    let side_by_side =
-        viewport_width - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT - toolbar_width - OVERLAY_GAP;
-    if side_by_side >= MIN_BANNER_SIDE_BY_SIDE {
-        side_by_side
-    } else {
-        (viewport_width - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT).max(80.0)
-    }
-}
-
 /// Pure layout function placing header, footer, board, minimap and camera focus rects.
+///
+/// The header row holds, left to right, the caller's leading header, the
+/// banner and the toolbar. When they do not fit side by side, with at least
+/// [`MIN_BANNER_SIDE_BY_SIDE`] for the leading header and the banner together,
+/// the toolbar moves below them.
 pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverlays {
-    let side_by_side = viewport.width()
-        - OVERLAY_PADDING_LEFT
-        - OVERLAY_PADDING_RIGHT
-        - measures.toolbar_size.x
-        - OVERLAY_GAP;
-    let wrap_width = banner_wrap_width(viewport.width(), measures.toolbar_size.x);
-    let banner_h = measures.banner_height.max(26.0);
+    let leading_width = measures.leading_size.x.max(0.0);
+    let after_leading = if leading_width > 0.0 {
+        leading_width + OVERLAY_GAP
+    } else {
+        0.0
+    };
+    let row = viewport.width() - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT - after_leading;
+    let room = row - measures.toolbar_size.x - OVERLAY_GAP;
+    let side_by_side = room >= (MIN_BANNER_SIDE_BY_SIDE - after_leading).max(0.0);
+    let wrap_width = if side_by_side {
+        room
+    } else if leading_width > 0.0 {
+        row.max(0.0)
+    } else {
+        row.max(80.0)
+    };
+    let banner_h = measures
+        .banner_height
+        .max(measures.leading_size.y)
+        .max(26.0);
+    let row_top = viewport.top() + OVERLAY_PADDING_Y;
+    let leading = Rect::from_min_size(
+        pos2(viewport.left() + OVERLAY_PADDING_LEFT, row_top),
+        vec2(leading_width, banner_h),
+    );
     let banner = Rect::from_min_size(
         pos2(
-            viewport.left() + OVERLAY_PADDING_LEFT,
-            viewport.top() + OVERLAY_PADDING_Y,
+            viewport.left() + OVERLAY_PADDING_LEFT + after_leading,
+            row_top,
         ),
         vec2(wrap_width, banner_h),
     );
-    let toolbar = if side_by_side >= MIN_BANNER_SIDE_BY_SIDE {
+    let toolbar = if side_by_side {
         Rect::from_min_size(
             pos2(
                 viewport.right() - OVERLAY_PADDING_RIGHT - measures.toolbar_size.x,
@@ -192,6 +210,7 @@ pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverla
 
     BoardOverlays {
         header,
+        leading,
         banner,
         banner_wrap_width: wrap_width,
         toolbar,
@@ -754,7 +773,13 @@ mod tests {
             vec2(865.0, 420.0),
             vec2(1345.0, 600.0),
         ];
-        for size in sizes {
+        // No leading header (the legacy window), Split's Main / Cleanup, and
+        // Diagram's file name, kind and Main / Cleanup (KTLO-12).
+        let leading_sizes = [Vec2::ZERO, vec2(140.0, 32.0), vec2(400.0, 32.0)];
+        for (size, leading_size) in sizes
+            .into_iter()
+            .flat_map(|size| leading_sizes.map(|leading| (size, leading)))
+        {
             let viewport = Rect::from_min_size(pos2(235.0, 160.0), size);
             let measures = OverlayMeasures {
                 banner_height: 36.0,
@@ -763,12 +788,28 @@ mod tests {
                 hint_width: 440.0,
                 shortcuts_badge_width: 78.0,
                 error_size: Some(vec2(300.0, 30.0)),
+                leading_size,
             };
             let out = board_overlays(viewport, &measures);
             assert!(viewport.contains_rect(out.header));
             assert!(viewport.contains_rect(out.footer));
             assert!(viewport.contains_rect(out.board));
             assert!(!out.banner.intersects(out.toolbar));
+            assert_eq!(out.leading.size().x, leading_size.x);
+            assert!(out.header.contains_rect(out.leading));
+            assert!(out.leading.right() <= out.banner.left());
+            assert!(!out.leading.intersects(out.toolbar));
+            let room = size.x - OVERLAY_PADDING_LEFT - OVERLAY_PADDING_RIGHT;
+            if leading_size.x + OVERLAY_GAP * 2.0 + measures.toolbar_size.x <= room
+                && leading_size.x > 0.0
+            {
+                // Side by side: one row, the leading header left of the toolbar.
+                assert!(out.leading.right() < out.toolbar.left());
+                assert!((out.leading.center().y - out.toolbar.center().y).abs() <= 3.0);
+            } else if leading_size.x > 0.0 {
+                // Stacked: the toolbar moves below the leading header.
+                assert!(out.toolbar.top() >= out.leading.bottom());
+            }
             assert!(!out.header.intersects(out.board.shrink(0.5)));
             assert!(!out.footer.intersects(out.board.shrink(0.5)));
             let hint_rect = match out.hint {

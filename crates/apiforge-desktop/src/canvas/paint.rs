@@ -704,6 +704,21 @@ pub fn mode_line_text(graph: &Graph) -> &'static str {
     }
 }
 
+/// The steps summary of the board's header row, e.g. "6 steps  ·  All steps".
+pub fn steps_summary(graph: &Graph) -> String {
+    let starts = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
+    format!(
+        "{} steps  ·  {}",
+        graph.nodes.len(),
+        if starts { "From Start" } else { "All steps" }
+    )
+}
+
+/// The font of the steps summary.
+pub fn summary_font() -> FontId {
+    FontId::proportional(theme::FONT_META)
+}
+
 pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays, graph: &Graph) {
     painter.rect_filled(overlays.header, 0.0, theme::BG);
     painter.line_segment(
@@ -719,17 +734,11 @@ pub fn overlay_chrome(painter: &Painter, overlays: &super::layout::BoardOverlays
         Stroke::new(1.0, theme::BORDER),
     );
 
-    let starts = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
-    let caption = format!(
-        "{} steps  ·  {}",
-        graph.nodes.len(),
-        if starts { "From Start" } else { "All steps" }
-    );
     label(
         painter,
         overlays.banner,
-        &caption,
-        FontId::proportional(theme::FONT_META),
+        &steps_summary(graph),
+        summary_font(),
         theme::MUTED,
         egui::Align::Min,
     );
