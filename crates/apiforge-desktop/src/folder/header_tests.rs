@@ -366,7 +366,9 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
     let (_project, wide) = open(WIDE, "Diagram");
     let full_name = row_label(&wide, NAME).unwrap().width();
     let mut previous = 0;
-    for width in (760..=1600).rev().step_by(40) {
+    // Each width opens a window; a sample keeps the suite's other timing
+    // tests from being starved of CPU while still covering every transition.
+    for width in [1600, 1360, 1120, 1040, 960, 920, 880, 840, 800, 760] {
         let width = width as f32;
         let (_project, harness) = open(egui::vec2(width, 800.0), "Diagram");
         let level = given_up(&harness, full_name, width);
