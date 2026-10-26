@@ -41,6 +41,17 @@ fn a_reader_never_sees_a_writer_that_was_already_dropped() {
 
     let directory = tempfile::tempdir().expect("temporary folder");
     let reader = ProjectStore::open_read_only(directory.path()).expect("read-only store");
+
+    // A live writer is seen once, outside the loop: confirming a would-block
+    // costs the confirmation window, and the released lock is what this test is
+    // about.
+    let writer = ProjectStore::open_exclusive(directory.path()).expect("writer");
+    assert!(
+        reader.has_live_writer().expect("probe"),
+        "a live writer was not seen"
+    );
+    drop(writer);
+
     let mut rounds = 0;
     let mut stale = 0;
     // Stops at the first stale answer: one is already a defect, and the run
@@ -48,10 +59,6 @@ fn a_reader_never_sees_a_writer_that_was_already_dropped() {
     while rounds < ROUNDS && stale == 0 {
         rounds += 1;
         let writer = ProjectStore::open_exclusive(directory.path()).expect("writer");
-        assert!(
-            reader.has_live_writer().expect("probe"),
-            "round {rounds}: the live writer was not seen"
-        );
         drop(writer);
         if reader.has_live_writer().expect("probe") {
             stale += 1;
