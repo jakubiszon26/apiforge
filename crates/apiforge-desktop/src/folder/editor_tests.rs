@@ -2,8 +2,14 @@
 //! line scrolls under line numbers that stay put, and keyboard focus shows as
 //! a line in the gutter. Driven through named widgets (ADR 0013); what the
 //! editor paints is read from the frame's shapes. See docs/tickets/KTLO-13.md.
+//! The KTLO-18 tests at the end expand the Problems section over the code
+//! (docs/tickets/KTLO-18.md); they share this file's `editor` and
+//! `problems_top`.
+use super::project_interaction_tests::replace_text;
 use super::*;
-use crate::testing::{FolderHarness, MINIMUM, WIDE, folder, folder_harness, settle};
+use crate::testing::{
+    FolderHarness, MINIMUM, WIDE, assert_within_window, folder, folder_harness, settle,
+};
 use egui::epaint::{ClippedShape, Shape};
 use egui_kittest::kittest::Queryable;
 
@@ -312,5 +318,236 @@ fn home_on_a_scrolled_long_line_shows_its_start_beside_the_gutter() {
     assert!(
         (after.left() - before.left()).abs() <= 1.0,
         "the text area is at {after:?} after Home, not back at {before:?}"
+    );
+}
+
+// ---- KTLO-18: the Problems section expands over the code ----
+
+/// The accessible name of the active document's editor, which is its
+/// registry path, as the cross-package acceptance tests derive it.
+fn editor_label(harness: &FolderHarness) -> String {
+    let app = folder(harness);
+    let id = app.workbench.active().expect("an open document");
+    format!(
+        "Contents of {}",
+        app.session
+            .as_ref()
+            .unwrap()
+            .document(id)
+            .unwrap()
+            .entry()
+            .path
+            .as_str()
+    )
+}
+
+/// The strip of code left visible above the Problems bar.
+fn code_strip(harness: &FolderHarness) -> f32 {
+    problems_top(harness) - editor(harness).top()
+}
+
+/// The height the view state holds for the Problems section.
+fn remembered(harness: &FolderHarness) -> f32 {
+    folder(harness).workbench.panels.diagnostics
+}
+
+fn row_height(harness: &mut FolderHarness) -> f32 {
+    harness
+        .ctx
+        .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)))
+}
+
+fn click(harness: &mut FolderHarness, label: &str) {
+    harness.get_by_label(label).click();
+    settle(harness);
+}
+
+/// Drags the Problems resize handle by `dy`, as KTLO-05c's test drags the
+/// library's edge.
+fn drag_problems_edge(harness: &mut FolderHarness, dy: f32) {
+    let start = harness.get_by_label("Resize problems").rect().center();
+    let end = start + egui::vec2(0.0, dy);
+    harness.hover_at(start);
+    harness.step();
+    harness.drag_at(start);
+    harness.step();
+    for step in 1..=6 {
+        harness.hover_at(start + (end - start) * (step as f32 / 6.0));
+        harness.step();
+    }
+    harness.drop_at(end);
+    settle(harness);
+}
+
+/// KTLO-18 criterion 1: the caption row holds *Expand problems*; clicking it
+/// gives the section the panel's height less a strip of code, and the editor
+/// stays visible above it. The strip is the rounded value the ticket names:
+/// four whole lines plus the code panel's margin, never more than 96 px.
+#[test]
+fn expanding_the_problems_section_keeps_a_strip_of_code_above_it() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let mut harness = folder_harness(project.path(), size);
+        let row = row_height(&mut harness);
+        let before = code_strip(&harness);
+
+        click(&mut harness, "Expand problems");
+        let after = code_strip(&harness);
+        assert!(
+            after < before,
+            "at {size:?}: the Problems section did not grow: the code strip went from {before} to {after}"
+        );
+        assert!(
+            after >= row * 4.0 && after <= 96.0 + 1.0,
+            "at {size:?}: the code strip is {after} px, not four whole lines within 96 px (one line is {row} px)"
+        );
+        let editor = editor(&harness);
+        assert!(
+            editor.height() > 0.0,
+            "at {size:?}: the editor is gone while the problems are expanded"
+        );
+        let label = editor_label(&harness);
+        assert_within_window(&harness, &[&label, "PROBLEMS", "Restore problems"]);
+    }
+}
+
+/// KTLO-18 criterion 2: the button is then named *Restore problems*, and
+/// clicking it returns the height the section had, which is also the height
+/// the view state keeps.
+#[test]
+fn restoring_the_problems_section_returns_the_height_it_had() {
+    let project = shop();
+    let mut harness = folder_harness(project.path(), WIDE);
+    let strip = code_strip(&harness);
+    let height = remembered(&harness);
+
+    click(&mut harness, "Expand problems");
+    assert!(
+        harness.query_by_label("Expand problems").is_none(),
+        "the button is still named *Expand problems* while expanded"
+    );
+    click(&mut harness, "Restore problems");
+    assert!(
+        harness.query_by_label("Restore problems").is_none(),
+        "the button is still named *Restore problems* after restoring"
+    );
+    assert!(
+        (code_strip(&harness) - strip).abs() <= 1.0,
+        "the code strip is {} px, not back at {strip} px",
+        code_strip(&harness)
+    );
+    assert!(
+        (remembered(&harness) - height).abs() <= 1.0,
+        "the view state holds {} px, not the {height} px the section had",
+        remembered(&harness)
+    );
+}
+
+/// KTLO-18 criterion 2, second half: an expanded section is never written to
+/// the view state, so a window closed while expanded reopens as it was.
+#[test]
+fn the_expanded_height_is_never_written_to_the_view_state() {
+    let project = shop();
+    let mut harness = folder_harness(project.path(), WIDE);
+    let height = remembered(&harness);
+    click(&mut harness, "Expand problems");
+    assert!(
+        (remembered(&harness) - height).abs() <= 1.0,
+        "the expanded height {} replaced the remembered {height}",
+        remembered(&harness)
+    );
+}
+
+/// KTLO-18 criterion 4: the resize handle still works while expanded, and the
+/// next *Restore problems* returns the height from before the expansion, not
+/// the dragged one.
+#[test]
+fn dragging_while_expanded_works_and_restore_returns_the_earlier_height() {
+    let project = shop();
+    let mut harness = folder_harness(project.path(), WIDE);
+    let strip = code_strip(&harness);
+
+    click(&mut harness, "Expand problems");
+    let expanded = code_strip(&harness);
+    drag_problems_edge(&mut harness, 40.0);
+    let dragged = code_strip(&harness);
+    assert!(
+        (dragged - expanded).abs() > 4.0,
+        "the handle did not move the expanded section: {expanded} then {dragged}"
+    );
+    click(&mut harness, "Restore problems");
+    assert!(
+        (code_strip(&harness) - strip).abs() <= 1.0,
+        "after a drag while expanded, restoring gave {} px instead of {strip} px",
+        code_strip(&harness)
+    );
+}
+
+/// KTLO-18 criterion 5: decision 2 is "Code and Split", and the code panel is
+/// one widget, so the button behaves the same on the split's code side.
+#[test]
+fn the_problems_section_expands_in_split_too() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let mut harness = folder_harness(project.path(), size);
+        show(&mut harness, "Split");
+        let row = row_height(&mut harness);
+        let before = code_strip(&harness);
+
+        click(&mut harness, "Expand problems");
+        let after = code_strip(&harness);
+        assert!(
+            after < before && after >= row * 4.0 && after <= 96.0 + 1.0,
+            "Split at {size:?}: the code strip is {after} px, not four whole lines within 96 px (from {before})"
+        );
+        click(&mut harness, "Restore problems");
+        assert!(
+            (code_strip(&harness) - before).abs() <= 1.0,
+            "Split at {size:?}: restoring gave {} px instead of {before} px",
+            code_strip(&harness)
+        );
+    }
+}
+
+/// KTLO-18 criterion 3: a problem row still reveals its line in the editor
+/// while the section is expanded.
+#[test]
+fn clicking_a_problem_while_expanded_still_reveals_its_line() {
+    let project = shop();
+    let mut harness = folder_harness(project.path(), WIDE);
+    // Three lines that do not parse, so the list has rows to click.
+    let label = editor_label(&harness);
+    replace_text(&mut harness, &label, "scenario \"Main\" {\n  ???\n}\n");
+    let id = folder(&harness).workbench.active().unwrap().to_owned();
+    let diagnostics = folder(&harness).snapshot(&id).unwrap().diagnostics.len();
+    assert!(diagnostics > 0, "the broken source produced no problems");
+
+    let range = folder(&harness).snapshot(&id).unwrap().diagnostics[0]
+        .range
+        .clone();
+
+    click(&mut harness, "Expand problems");
+    let row = harness
+        .get_by_label_contains("Line 2, column")
+        .rect()
+        .center();
+    click_at(&mut harness, row);
+    settle(&mut harness);
+    let selection = folder(&harness)
+        .workbench
+        .active_tab()
+        .unwrap()
+        .selection
+        .clone();
+    assert_eq!(
+        (selection.anchor, selection.caret),
+        (range.start, range.end),
+        "clicking the problem did not select its range"
+    );
+    assert!(
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(editor_id(&id))),
+        "clicking the problem did not focus the editor"
     );
 }
