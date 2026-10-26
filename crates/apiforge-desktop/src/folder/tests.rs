@@ -764,6 +764,13 @@ fn a_failed_discard_on_close_keeps_the_window_usable() {
             ],
         );
     }
+    // Discarding runs on the storage worker, after any external-change check
+    // in flight; its answer can take more than the click's two frames.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !matches!(app.prompt, Some(Prompt::CloseFailed(_))) && Instant::now() < deadline {
+        frame(&mut app, &context, vec![]);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(
         matches!(app.prompt, Some(Prompt::CloseFailed(_))),
         "The failing discard should report an error"

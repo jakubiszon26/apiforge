@@ -469,6 +469,14 @@ impl FolderApp {
             || (self.switching() && !self.navigation.failed && self.prompt.is_none()))
     }
 
+    /// Settled, and no analysis is running on its own thread. An analysis
+    /// thread does not request a repaint until it finishes, so an interface
+    /// that stops repainting can still have a Pending result on the way.
+    #[cfg(test)]
+    pub(crate) fn is_analysed(&self) -> bool {
+        self.is_settled() && !self.analyser.is_busy()
+    }
+
     fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
