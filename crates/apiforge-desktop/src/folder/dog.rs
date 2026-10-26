@@ -65,6 +65,54 @@ const BLUSH: Color32 = Color32::from_rgb(0xFD, 0xA4, 0xAF);
 const BUBBLE: Color32 = Color32::from_rgba_premultiplied(168, 181, 190, 191);
 const SHADOW: Color32 = Color32::from_rgba_premultiplied(52, 57, 64, 89);
 
+/// One cubic segment of the drawing: its start, two controls and its end, in
+/// the view box's whole-number coordinates. A path's segments run on from one
+/// another, as the drawing's do.
+type Curve = [i16; 8];
+
+const TAIL: [Curve; 2] = [
+    [365, 225, 405, 205, 415, 255, 375, 262],
+    [375, 262, 355, 265, 355, 240, 372, 238],
+];
+const LOAF: [Curve; 4] = [
+    [105, 240, 95, 135, 175, 110, 255, 115],
+    [255, 115, 335, 120, 385, 160, 375, 245],
+    [375, 245, 370, 278, 330, 278, 240, 278],
+    [240, 278, 150, 278, 110, 278, 105, 240],
+];
+const PATCHES: [Curve; 2] = [
+    [245, 116, 245, 148, 285, 152, 295, 120],
+    [310, 126, 308, 148, 335, 152, 342, 138],
+];
+const BACK: [Curve; 1] = [[230, 115, 275, 115, 325, 125, 355, 148]];
+const EARS: [[Curve; 2]; 2] = [
+    [
+        [135, 145, 100, 140, 80, 180, 100, 205],
+        [100, 205, 115, 220, 138, 195, 140, 165],
+    ],
+    [
+        [225, 135, 255, 130, 275, 165, 255, 195],
+        [255, 195, 240, 210, 220, 185, 218, 155],
+    ],
+];
+const EYES: [Curve; 2] = [
+    [135, 192, 140, 204, 155, 204, 160, 192],
+    [196, 192, 201, 204, 216, 204, 221, 192],
+];
+const MOUTH: [Curve; 2] = [
+    [164, 220, 170, 227, 178, 223, 178, 214],
+    [178, 214, 178, 223, 186, 227, 192, 220],
+];
+/// The paws under the belly, which stay on the ground.
+const PAWS: [(f32, f32); 3] = [(140.0, 276.0), (215.0, 276.0), (325.0, 274.0)];
+/// z z Z: where each letter sits, how large, how thick its outline, and how
+/// far it floats up over the loop.
+const LETTERS: [(f32, f32, f32, f32, f32, &str); 3] = [
+    (280.0, 100.0, 26.0, 8.0, 6.0, "z"),
+    (320.0, 78.0, 38.0, 10.0, 9.0, "z"),
+    (368.0, 58.0, 52.0, 12.0, 12.0, "Z"),
+];
+
 struct Canvas<'a> {
     painter: &'a egui::Painter,
     scale: f32,
@@ -83,32 +131,26 @@ impl Canvas<'_> {
         Stroke::new(width * self.scale, OUTLINE)
     }
 
-    /// Points along a cubic Bézier, the first included and the last included.
-    fn cubic(
-        &self,
-        points: &mut Vec<Pos2>,
-        p0: (f32, f32),
-        c1: (f32, f32),
-        c2: (f32, f32),
-        p1: (f32, f32),
-    ) {
+    /// The points along a path, 24 to a segment, both ends included.
+    fn path(&self, curves: &[Curve]) -> Vec<Pos2> {
         const STEPS: usize = 24;
-        if points.is_empty() {
-            points.push(self.at(p0.0, p0.1));
+        let mut points = Vec::with_capacity(curves.len() * STEPS + 1);
+        for curve in curves {
+            let [x0, y0, x1, y1, x2, y2, x3, y3] = curve.map(f32::from);
+            if points.is_empty() {
+                points.push(self.at(x0, y0));
+            }
+            for step in 1..=STEPS {
+                let t = step as f32 / STEPS as f32;
+                let u = 1.0 - t;
+                let x =
+                    u * u * u * x0 + 3.0 * u * u * t * x1 + 3.0 * u * t * t * x2 + t * t * t * x3;
+                let y =
+                    u * u * u * y0 + 3.0 * u * u * t * y1 + 3.0 * u * t * t * y2 + t * t * t * y3;
+                points.push(self.at(x, y));
+            }
         }
-        for step in 1..=STEPS {
-            let t = step as f32 / STEPS as f32;
-            let u = 1.0 - t;
-            let x = u * u * u * p0.0
-                + 3.0 * u * u * t * c1.0
-                + 3.0 * u * t * t * c2.0
-                + t * t * t * p1.0;
-            let y = u * u * u * p0.1
-                + 3.0 * u * u * t * c1.1
-                + 3.0 * u * t * t * c2.1
-                + t * t * t * p1.1;
-            points.push(self.at(x, y));
-        }
+        points
     }
 
     fn ellipse(&self, cx: f32, cy: f32, rx: f32, ry: f32) -> Vec<Pos2> {
@@ -197,176 +239,52 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, motion: Motion) {
     );
 
     // Curled tail, swaying: the fill as three convex pieces, then the outline
-    // along the path.
+    // along the whole path.
     c.shift = vec2(2.0 * motion.sway, -1.5 * motion.sway);
-    let mut tail_a = Vec::new();
-    c.cubic(
-        &mut tail_a,
-        (365.0, 225.0),
-        (405.0, 205.0),
-        (415.0, 255.0),
-        (375.0, 262.0),
-    );
-    let mut tail_b = Vec::new();
-    c.cubic(
-        &mut tail_b,
-        (375.0, 262.0),
-        (355.0, 265.0),
-        (355.0, 240.0),
-        (372.0, 238.0),
-    );
-    c.fill(tail_a.clone(), GREY);
-    c.fill(tail_b.clone(), GREY);
+    let curl = c.path(&TAIL[..1]);
+    let tip = c.path(&TAIL[1..]);
+    c.fill(curl.clone(), GREY);
+    c.fill(tip.clone(), GREY);
     c.fill(
         vec![c.at(365.0, 225.0), c.at(375.0, 262.0), c.at(372.0, 238.0)],
         GREY,
     );
-    let mut tail = tail_a;
-    tail.extend(tail_b.into_iter().skip(1));
+    let mut tail = curl;
+    tail.extend(tip.into_iter().skip(1));
     c.line(tail, 6.0);
 
     // The loaf-shaped body and everything it carries breathe together; the
     // paws and the shadow below stay on the ground.
     c.shift = vec2(0.0, -2.0 * motion.breath);
-    let mut body = Vec::new();
-    c.cubic(
-        &mut body,
-        (105.0, 240.0),
-        (95.0, 135.0),
-        (175.0, 110.0),
-        (255.0, 115.0),
-    );
-    c.cubic(
-        &mut body,
-        (255.0, 115.0),
-        (335.0, 120.0),
-        (385.0, 160.0),
-        (375.0, 245.0),
-    );
-    c.cubic(
-        &mut body,
-        (375.0, 245.0),
-        (370.0, 278.0),
-        (330.0, 278.0),
-        (240.0, 278.0),
-    );
-    c.cubic(
-        &mut body,
-        (240.0, 278.0),
-        (150.0, 278.0),
-        (110.0, 278.0),
-        (105.0, 240.0),
-    );
+    let mut body = c.path(&LOAF);
     body.pop();
     c.painter
         .add(Shape::convex_polygon(body, BODY, c.stroke(6.0)));
 
     // Grey patches on the back, and the back's outline over them.
-    let mut patch = Vec::new();
-    c.cubic(
-        &mut patch,
-        (245.0, 116.0),
-        (245.0, 148.0),
-        (285.0, 152.0),
-        (295.0, 120.0),
-    );
-    c.fill(patch, GREY);
-    let mut patch = Vec::new();
-    c.cubic(
-        &mut patch,
-        (310.0, 126.0),
-        (308.0, 148.0),
-        (335.0, 152.0),
-        (342.0, 138.0),
-    );
-    c.fill(patch, GREY);
-    let mut back = Vec::new();
-    c.cubic(
-        &mut back,
-        (230.0, 115.0),
-        (275.0, 115.0),
-        (325.0, 125.0),
-        (355.0, 148.0),
-    );
-    c.line(back, 6.0);
+    for patch in &PATCHES {
+        c.fill(c.path(&[*patch]), GREY);
+    }
+    c.line(c.path(&BACK), 6.0);
 
     // Floppy ears, which sway a little behind the breath.
     c.shift += vec2(1.5 * motion.sway, 0.0);
-    let mut ear = Vec::new();
-    c.cubic(
-        &mut ear,
-        (135.0, 145.0),
-        (100.0, 140.0),
-        (80.0, 180.0),
-        (100.0, 205.0),
-    );
-    c.cubic(
-        &mut ear,
-        (100.0, 205.0),
-        (115.0, 220.0),
-        (138.0, 195.0),
-        (140.0, 165.0),
-    );
-    c.fill(ear.clone(), GREY);
-    c.line(ear, 6.0);
-    let mut ear = Vec::new();
-    c.cubic(
-        &mut ear,
-        (225.0, 135.0),
-        (255.0, 130.0),
-        (275.0, 165.0),
-        (255.0, 195.0),
-    );
-    c.cubic(
-        &mut ear,
-        (255.0, 195.0),
-        (240.0, 210.0),
-        (220.0, 185.0),
-        (218.0, 155.0),
-    );
-    c.fill(ear.clone(), GREY);
-    c.line(ear, 6.0);
+    for ear in &EARS {
+        let points = c.path(ear);
+        c.fill(points.clone(), GREY);
+        c.line(points, 6.0);
+    }
 
     // Muzzle, blushes, closed eyes, nose and mouth.
     c.shift = vec2(0.0, -2.0 * motion.breath);
     c.fill_ellipse(178.0, 218.0, 34.0, 24.0, LIGHT, None);
     c.fill_ellipse(132.0, 215.0, 11.0, 6.0, BLUSH, None);
     c.fill_ellipse(224.0, 215.0, 11.0, 6.0, BLUSH, None);
-    let mut eye = Vec::new();
-    c.cubic(
-        &mut eye,
-        (135.0, 192.0),
-        (140.0, 204.0),
-        (155.0, 204.0),
-        (160.0, 192.0),
-    );
-    c.line(eye, 6.0);
-    let mut eye = Vec::new();
-    c.cubic(
-        &mut eye,
-        (196.0, 192.0),
-        (201.0, 204.0),
-        (216.0, 204.0),
-        (221.0, 192.0),
-    );
-    c.line(eye, 6.0);
+    for eye in &EYES {
+        c.line(c.path(&[*eye]), 6.0);
+    }
     c.fill_ellipse(178.0, 208.0, 8.0, 5.5, OUTLINE, None);
-    let mut mouth = Vec::new();
-    c.cubic(
-        &mut mouth,
-        (164.0, 220.0),
-        (170.0, 227.0),
-        (178.0, 223.0),
-        (178.0, 214.0),
-    );
-    c.cubic(
-        &mut mouth,
-        (178.0, 214.0),
-        (178.0, 223.0),
-        (186.0, 227.0),
-        (192.0, 220.0),
-    );
-    c.line(mouth, 5.0);
+    c.line(c.path(&MOUTH), 5.0);
 
     // The sleep bubble at the nose, which swells on the way out.
     let swell = 1.0 - 0.09 * motion.breath;
@@ -382,17 +300,13 @@ pub(super) fn paint(painter: &egui::Painter, rect: Rect, motion: Motion) {
 
     // Paws under the belly, on the ground.
     c.shift = egui::Vec2::ZERO;
-    for (x, y) in [(140.0, 276.0), (215.0, 276.0), (325.0, 274.0)] {
+    for (x, y) in PAWS {
         c.fill_ellipse(x, y, 18.0, 10.0, LIGHT, Some(6.0));
     }
 
     // z z Z, floating up and fading as they go, the largest the furthest.
     let fade = 1.0 - 0.4 * motion.drift;
-    for (x, y, size, outline, rise, text) in [
-        (280.0, 100.0, 26.0, 8.0, 6.0, "z"),
-        (320.0, 78.0, 38.0, 10.0, 9.0, "z"),
-        (368.0, 58.0, 52.0, 12.0, 12.0, "Z"),
-    ] {
+    for (x, y, size, outline, rise, text) in LETTERS {
         c.shift = vec2(0.0, -rise * motion.drift);
         c.letter(x, y, size, outline, fade, text);
     }
