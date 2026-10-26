@@ -37,6 +37,10 @@ with the new button at the normal height), `mock-diagram-maximised-960x540.png`,
 `mock-diagram-maximised-1600x1000.png` and `mock-split-maximised-1600x1000.png`.
 Posted on the issue.
 
+Rendering notes: a notice under the tab strip ("Running saved code.") is part
+of the tab strip's panel, so the maximised report starts under the notice
+while one is shown and closes up when it is dismissed.
+
 ## Decisions for the owner
 
 1. **Diagram and Split only, or Code too?**

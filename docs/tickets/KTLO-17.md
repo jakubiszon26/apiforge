@@ -43,6 +43,10 @@ library (KTLO-05a decision 1).
 (the rail) and `mock-diagram-expanded-1600x1000.png` (the caption row with
 the new chevron). Posted on the issue.
 
+Rendering notes: the icon set has no left-pointing chevron; the mock-up adds
+`ChevronLeft`, and the implementation keeps it. The rail's button uses the
+panel icon.
+
 ## Decisions for the owner
 
 1. **Remember the collapsed state per project?**

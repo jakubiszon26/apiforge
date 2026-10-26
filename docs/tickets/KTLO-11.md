@@ -46,6 +46,13 @@ library* or the project's *Files*, and one click switches between them.
 `mock-diagram-rail-1600x1000.png` (the collapsed rail with both icons).
 Posted on the issue.
 
+Rendering notes: with *Library | Files* drawn as a segmented row, the panel
+shows two segmented rows one above the other on the *Library* tab
+(`mock-diagram-library-1600x1000.png`), which look alike. If the owner finds
+that confusing, the alternative is underline tabs like *Main | Cleanup*
+above the board; say so with the approval. At 960 × 540 long file names in
+the tree are truncated with a tooltip, as in Code today.
+
 ## Decisions for the owner
 
 1. **Diagram only, or Split too?**

@@ -37,6 +37,13 @@ both unless the owner says otherwise (decision 2).
 problems), `mock-code-expanded-960x540.png`, `mock-code-expanded-1600x1000.png`
 and `mock-split-expanded-1600x1000.png`. Posted on the issue.
 
+Rendering notes: a 96 px strip shows four and a half lines, the fifth cut
+through; the implementation rounds the strip to whole lines (four lines plus
+the editor's margin), criterion 1 reads "96 px" as that rounded value. At
+960 × 540 the expanded list shows seven of ten problems with a scrollbar. In
+Split with ten errors the board shows only its "code has errors" banner, as
+today.
+
 ## Decisions for the owner
 
 1. **How to expand?**
