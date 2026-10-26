@@ -1607,6 +1607,7 @@ impl App {
             editing_component: self.editor.draft().is_some(),
             running,
             document_locked: self.document_locked(),
+            show_examples: true,
         };
         let actions = self.library.show(ui, &context);
         drop(graph);
@@ -2328,6 +2329,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|clipboard| clipboard.context == context),
                 context: &context,
+                library_in_view: true,
             };
             self.canvas.show(ui, &input)
         };

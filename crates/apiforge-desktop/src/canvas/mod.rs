@@ -109,6 +109,9 @@ pub struct Input<'a> {
     pub can_paste: bool,
     /// Changing context resets the camera and transient state.
     pub context: &'a str,
+    /// Whether a block library panel is beside the board, so the empty-board
+    /// hint can point at it (KTLO-05b, criterion 9).
+    pub library_in_view: bool,
 }
 
 /// Everything the board draws: the blocks' cards and the proxies' chips.
@@ -218,6 +221,16 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_viewport(&self) -> Rect {
         self.last_viewport
+    }
+
+    /// The board position a drop at `screen` lands on, as `handle_drop` maps it.
+    #[cfg(test)]
+    pub(crate) fn debug_board_position(&self, screen: Pos2) -> Position {
+        let world = ((screen - self.last_viewport.min) - self.camera.pan) / self.camera.zoom;
+        Position {
+            x: f64::from(world.x).round(),
+            y: f64::from(world.y).round(),
+        }
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -653,7 +666,7 @@ impl Canvas {
             }
         }
         if input.graph.nodes.is_empty() && input.graph.proxies.is_empty() {
-            self.empty_state(ui, overlays.board, &mut commands);
+            self.empty_state(ui, overlays.board, input.library_in_view, &mut commands);
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
@@ -1550,7 +1563,13 @@ impl Canvas {
         }
     }
 
-    fn empty_state(&mut self, ui: &mut egui::Ui, viewport: Rect, commands: &mut Vec<Command>) {
+    fn empty_state(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        library_in_view: bool,
+        commands: &mut Vec<Command>,
+    ) {
         let rect = Rect::from_center_size(viewport.center() - vec2(0.0, 40.0), vec2(360.0, 150.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.vertical_centered(|ui| {
@@ -1559,10 +1578,12 @@ impl Canvas {
                         .size(17.0)
                         .family(theme::bold_family()),
                 );
-                ui.label(
-                    egui::RichText::new("Drag a block from the library or add the first step.")
-                        .color(theme::MUTED),
-                );
+                let hint = if library_in_view {
+                    "Drag a block from the library or add the first step."
+                } else {
+                    "Add the first step."
+                };
+                ui.label(egui::RichText::new(hint).color(theme::MUTED));
                 ui.add_space(8.0);
                 if ui
                     .add(widgets::action(Icon::Plus, "Add an HTTP request"))
@@ -2142,6 +2163,7 @@ mod tests {
                                 steps: None,
                                 can_paste: false,
                                 context: "test",
+                                library_in_view: true,
                             },
                         );
                     });

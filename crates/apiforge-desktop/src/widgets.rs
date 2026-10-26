@@ -229,7 +229,11 @@ impl Widget for Disclosure<'_> {
             FontId::proportional(10.0),
             theme::MUTED,
         );
+        let open = self.open;
         response
+            .ctx
+            .accesskit_node_builder(response.id, |node| node.set_expanded(open));
+        named(response, self.text)
     }
 }
 
@@ -263,11 +267,14 @@ pub fn variable_chip(ui: &mut Ui, label: &str, kind: &str, payload: Payload) -> 
     );
     ui.painter()
         .galley(rect.min + vec2(9.0, 5.0), galley, theme::VARIABLE);
-    response
-        .on_hover_text(format!(
-            "{label} · {kind} — drag onto an argument, into text, or onto the board to place it there"
-        ))
-        .on_hover_cursor(egui::CursorIcon::Grab)
+    named(
+        response
+            .on_hover_text(format!(
+                "{label} · {kind} — drag onto an argument, into text, or onto the board to place it there"
+            ))
+            .on_hover_cursor(egui::CursorIcon::Grab),
+        format!("{label} · {kind}"),
+    )
 }
 
 /// A rounded status label.

@@ -9,6 +9,8 @@ mod accessibility_tests;
 mod activation_tests;
 #[path = "interaction_tests.rs"]
 mod interaction_tests;
+#[path = "library_tests.rs"]
+mod library_tests;
 #[path = "project_interaction_tests.rs"]
 mod project_interaction_tests;
 #[path = "recovery_tests.rs"]
