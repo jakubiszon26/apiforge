@@ -446,3 +446,49 @@ fn a_newline_only_foreign_replacement_requires_preservation_before_transaction_r
         b"scenario \"Saved\" {}\n"
     );
 }
+
+#[test]
+fn a_scan_during_this_owners_own_commit_is_busy_not_an_interrupted_transaction() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    // The window's external-change check scans through a clone of the store
+    // while the storage worker commits a file operation.
+    let watcher = writer.clone();
+    let mut scans = Vec::new();
+    writer
+        .commit_with_hook(save_plan(), |boundary| {
+            if boundary == "operation" {
+                scans.push(watcher.scan_tree().map(|_| ()));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(!scans.is_empty(), "the commit replayed its operations");
+    for scan in scans {
+        assert!(
+            matches!(scan, Err(ProjectError::Busy)),
+            "a commit in progress is not a recovery: {scan:?}"
+        );
+    }
+    assert!(watcher.scan_tree().is_ok(), "the next check scans again");
+}
+
+#[test]
+fn a_scan_after_an_interrupted_commit_still_requires_recovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    let result = writer.commit_with_hook(save_plan(), |boundary| {
+        if boundary == "operation" {
+            Err(interrupted())
+        } else {
+            Ok(())
+        }
+    });
+    assert!(result.is_err());
+    assert!(matches!(
+        writer.scan_tree(),
+        Err(ProjectError::RecoveryRequired)
+    ));
+}
