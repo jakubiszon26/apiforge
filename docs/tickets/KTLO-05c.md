@@ -3,6 +3,7 @@
 - Size: S · Owner review: 10 min · Risk: format
 - State: Awaiting acceptance (issue #22)
 - Analysis model: Fable · Implementation model: Opus 5.5
+- Owner decision: option A on #8 (2026-10-26)
 
 ## Goal
 
@@ -13,14 +14,12 @@ other panels, so reopening a project restores it.
 
 - New: the library panel's width survives closing and reopening the project.
 - Changed: a workspace state written by this build gains a `library` panel
-  size. A build *older* than this one no longer rejects such a file: unknown
-  panel sizes are ignored instead.
+  size. From this build on, unknown panel sizes are ignored; an older build
+  still rejects such a file and opens the project with the default view.
 - Removed or hidden: nothing.
 - Migrated or converted: nothing (the field has a default; files without it
   load as before).
 - Default behaviour that changes: none.
-
-Owner decision: option A on #8 (2026-10-26), as above.
 
 ## Mock-up
 
@@ -52,4 +51,4 @@ workbench persists it with the other sizes.
 
 ## Actual
 
-Changed lines: see the pull request. One round.
+Changed lines: 300 (code 45, tests 154, ticket and QA report 101). One round.
