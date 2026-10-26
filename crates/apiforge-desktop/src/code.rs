@@ -406,6 +406,16 @@ impl CodeEditor {
                 .font(egui::TextStyle::Monospace)
                 .code_editor()
                 .desired_width(f32::INFINITY)
+                // KTLO-13 mock-up: no field box; the text fills the panel.
+                .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(4, 2)))
+                .min_size(vec2(
+                    0.0,
+                    if context.line_numbers {
+                        (ui.clip_rect().bottom() - ui.cursor().top()).max(0.0)
+                    } else {
+                        0.0
+                    },
+                ))
                 .lock_focus(true)
                 .layouter(&mut layouter)
                 .show(ui);
@@ -434,6 +444,14 @@ impl CodeEditor {
         // what is visible.
         let visible = ui.clip_rect();
         let painter = ui.painter().with_clip_rect(visible);
+        // KTLO-13 mock-up: the gutter stays at the left edge while a long line
+        // scrolls horizontally beneath it.
+        let rect = rect.translate(vec2((visible.left() - rect.left()).max(0.0), 0.0));
+        painter.rect_filled(
+            Rect::from_x_y_ranges(rect.x_range(), visible.y_range()),
+            0.0,
+            theme::WHITE,
+        );
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         let marked = marked_lines(text, context.diagnostics);

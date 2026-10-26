@@ -111,7 +111,7 @@ impl FolderApp {
                                 scope: completion.names.scope(&shapes),
                                 diagnostics: &snapshot.diagnostics,
                                 line_numbers: true,
-                                wrap: false,
+                                wrap: std::env::var("APIFORGE_MOCK_EDITOR").is_ok_and(|value| value == "b"),
                                 font_size: 13.0,
                                 plain: false,
                             },
