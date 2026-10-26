@@ -1,7 +1,7 @@
 # KTLO-05c: The block library panel's width is remembered per project
 
 - Size: S · Owner review: 10 min · Risk: format
-- State: In progress (issue #22)
+- State: Awaiting acceptance (issue #22)
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
@@ -20,13 +20,7 @@ other panels, so reopening a project restores it.
   load as before).
 - Default behaviour that changes: none.
 
-## Owner decision
-
-Option A on #8 (2026-10-26): relax `deny_unknown_fields` on the panel sizes
-of the local view state only, add a `library` size with a default, and
-persist the library panel's width per project. The view state
-(`.apiforge/local/workspace.json`) is local to the machine; the documents and
-the manifest keep rejecting unknown fields.
+Owner decision: option A on #8 (2026-10-26), as above.
 
 ## Mock-up
 
@@ -50,11 +44,12 @@ Not applicable: no visible layout change; only persistence.
 
 ## Technical appendix
 
-`apiforge_storage::project::PanelSizes` (`project/workspace.rs`): remove
-`#[serde(deny_unknown_fields)]` from this struct only, add `library: f32`
-with `#[serde(default = ...)]`, and validate it like the other sizes. Folder
-window: `workbench.panels` already persists the other sizes through
-`Workbench::state` and `Workbench::restore`; the panel is
-`egui::Panel::left("folder-library")` in `folder/mod.rs`, which takes its
-default size from `workbench.panels.library` and records its width each
-frame, as `folder-documents` does.
+`PanelSizes` (`apiforge-storage`, `project/workspace.rs`) drops
+`deny_unknown_fields` and gains `library: f32` defaulting to 240, validated
+like the other sizes. `folder-library` (`folder/mod.rs`) opens at
+`workbench.panels.library` and records its outer width each frame; the
+workbench persists it with the other sizes.
+
+## Actual
+
+Changed lines: see the pull request. One round.

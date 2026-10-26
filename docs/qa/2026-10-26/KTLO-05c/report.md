@@ -1,8 +1,7 @@
 # KTLO-05c: The block library panel's width is remembered per project — QA report
 
 - Branch: `feat/ktlo-05c-library-width` (the PR head commit)
-- Built with: `cargo build -p apiforge-desktop --locked` (debug, through the
-  test suites); the release binary was not built for this report.
+- Built with: the debug test builds; the release binary was not built.
 - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
   --all-targets --locked -- -D warnings`, the storage and desktop suites and
   `apiforge-convert-v1 --fixtures --check`; output in the pull request.
@@ -25,10 +24,6 @@ committed failing before the implementation.
 | 2 | No `panels.library` | Loads; the library gets the default width 240 (the panel's former fixed default) | As expected; the other sizes keep their values | `a_view_state_without_a_library_width_loads_with_the_default` |
 | 3 | Unknown panel size | Loads; the unknown size is dropped on the next save, the known sizes keep their values; unknown fields elsewhere in the view state are still rejected | As expected. The manifest's own rejection of unknown fields is covered by the existing `schema_rejects_unknown_versions_fields_and_collisions` | `an_unknown_panel_size_is_dropped_and_the_known_ones_kept` |
 | 4 | Resize, close, reopen | Dragging *Resize block library* 60 px right widens the panel; after closing the window and opening the project again, the panel's edge is where it was left | As expected (handle at 248 px at the default width, 306 px after the drag and again after reopening) | `the_library_width_comes_back_after_reopening_the_project` |
-
-Before this change, on `main`: a view state with a `library` size, or any
-unknown panel size, was refused as a whole, so the project opened with the
-default mode, tabs and panel sizes; the library always opened at 240 px.
 
 ## Windows
 
