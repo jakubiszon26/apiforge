@@ -459,19 +459,22 @@ impl FolderApp {
         self.session.is_some()
     }
 
-    /// No storage work, analysis, external-change check, opening, departure,
-    /// close or project switch is in flight. The analyser and the watcher run on
-    /// their own threads; a check that finishes queues the storage work that
-    /// applies it, so both must be idle before a test acts on the result.
+    /// No storage work, opening, departure, close or project switch is in flight.
     #[cfg(test)]
     pub(crate) fn is_settled(&self) -> bool {
         !(self.storage.is_busy()
-            || self.analyser.is_busy()
-            || self.watcher.is_busy()
             || self.opening
             || self.persistence.departure
             || (self.persistence.closing && !self.persistence.close_ready)
             || (self.switching() && !self.navigation.failed && self.prompt.is_none()))
+    }
+
+    /// Settled, and no analysis is running on its own thread. An analysis
+    /// thread does not request a repaint until it finishes, so an interface
+    /// that stops repainting can still have a Pending result on the way.
+    #[cfg(test)]
+    pub(crate) fn is_analysed(&self) -> bool {
+        self.is_settled() && !self.analyser.is_busy()
     }
 
     fn new_canvas(&self) -> Canvas {
