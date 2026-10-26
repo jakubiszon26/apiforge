@@ -216,7 +216,14 @@ impl FolderApp {
                 tab.camera = camera;
             }
         }
-        Some(self.workbench.state(&session.manifest().id))
+        let mut state = self.workbench.state(&session.manifest().id);
+        // A mode requested for a capture is not the project's to remember.
+        if let Some((shown, own)) = self.shown_instead
+            && state.mode == shown
+        {
+            state.mode = own;
+        }
+        Some(state)
     }
 
     pub(super) fn protect(&mut self, now: Instant) {
