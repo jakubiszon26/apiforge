@@ -65,8 +65,11 @@ both runners. Baseline evidence: run
    `is_settled()` wait for analysis and the check too; that broke two model
    tests' timing on the runners and was narrowed (`e34d8b6`). That run also
    showed a pre-existing race in `a_failed_discard_on_close_keeps_the_window_usable`
-   (2 of 111 runs under load on `bcdb106`); the test now waits for the
-   discard's answer (`c4cb022`).
+   (2 of 111 runs under load on `bcdb106`). Waiting for the discard's answer
+   (`c4cb022`) was not enough: a failed discard from the close dialog could
+   end without any dialog when the frame polled its completion first. The
+   completion now raises the dialog itself (`6d69a6f`);
+   0 of 111 runs failed after it.
 
 ## Not in scope
 
@@ -75,8 +78,9 @@ both runners. Baseline evidence: run
 
 ## Actual
 
-Changed lines: 180 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
-storage fix 9 and its tests 46, desktop tests 24, this ticket 82).
+Changed lines: 195 (workflow 10, `.gitattributes` 4, `docs/development.md` 5,
+storage fix 9 and its tests 46, close-dialog fix 11, desktop tests 24, this
+ticket 86).
 Four rounds: the two causes above, the Windows probe fix (`bcdb106`),
-cause 3, then the narrowed settle change and the discard test. The runs on
+cause 3, then the narrowed settle change and the close-dialog fix. The runs on
 the final commit are linked in the pull request (#19).
