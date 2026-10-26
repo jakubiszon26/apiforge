@@ -1,8 +1,11 @@
 # KTLO-17: The block library collapses to a rail in Diagram and Split
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`, `format`
-- State: Approved 2026-10-26 (issue #42) — mock-up approved as a whole;
-  decision 1 = A (remembered per project), decision 2 = Ctrl+B
+- State: Awaiting acceptance (issue #42; PR #48)
+- Actual: 853 changed lines without captures, 728 without this ticket's copy
+  (which also arrives through the docs pull request) — size M, over the S
+  estimate: the code is 98 lines, the acceptance and storage tests 458, the
+  review view 32, the QA report 140, this ticket 125; one round
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Owner's wish of 2026-10-26; the *Later* entry "hiding the block library
