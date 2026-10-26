@@ -4,7 +4,7 @@
   review: 20 min · Risk: visible UI
 - State: Awaiting acceptance — PR B of 2 (PR A merged). Approved 2026-10-26 —
   Diagram: variant A; Split: variant B
-- Actual: part 1 385 changed lines; part 2 795 changed lines (without captures)
+- Actual: part 1 385 changed lines; part 2 797 changed lines (without captures)
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
