@@ -25,14 +25,21 @@ library only when it is in view (`canvas::Input::library_in_view`). The
 custom-painted library item, operator and variable chips and the disclosure
 headers get accessible names so the folder accessibility audit passes.
 
-Criteria covered: 1, 2, 3, 4, 5 (panel half), 7, 8, 9.
+Criteria covered: 1, 2, 3, 4, 5 (panel half), 7, 8, 9, each by an
+interaction test in `folder/library_tests.rs`. Tests for criteria 3 and 7,
+the 1440 px boundary and the toolbar and inspector at 960 × 540 came in the
+review round, after the implementation; so did three fixes from review
+(Cleanup lists the main graph's variables, variable chips are named with
+their kind, operator group headers expose their expanded state).
 
 ### PR B — the popup sections (follow-up)
 
 Criterion 5's second half: in Split below 1440 px there is no room for the
 panel, so the *Add step* popup (`canvas/menu.rs::ActionMenu`) gains the
-Variables and Operators sections. Kept separate to hold PR A within its size
-class and because it is a distinct surface.
+Variables and Operators sections. With the review round PR A is at the top of
+the `M` class (about 800 changed lines with its tests and QA report),
+so the popup is a second pull request; it starts when the
+work-in-progress limit allows.
 
 ## Open decision — criterion 6 (panel-width persistence)
 
