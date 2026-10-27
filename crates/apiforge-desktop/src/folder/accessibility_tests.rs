@@ -485,6 +485,27 @@ fn the_library_and_files_tabs_name_every_control() {
     assert_named("Diagram, panel on its rail", &mut app, &context);
 }
 
+/// KTLO-24 criterion 6: the audit passes in Code, Diagram and Split with no
+/// file open, where the band of tabs is gone.
+#[test]
+fn the_window_with_no_file_open_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    app.close_tab(&id);
+    for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        wait_storage(&mut app, &context);
+        frame(&mut app, &context, vec![]);
+        assert!(app.workbench.tabs().is_empty(), "{mode:?}: no tab is open");
+        assert!(
+            !exposes(&mut app, &context, "Close promotion-and-cart-price.afs"),
+            "{mode:?}: no tab's cross is exposed"
+        );
+        assert_named(&format!("{mode:?} with no file open"), &mut app, &context);
+    }
+}
+
 /// Where the control named `name` is, for a pointer click at 1600 × 1000.
 fn centre_of(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos2 {
     context.enable_accesskit();

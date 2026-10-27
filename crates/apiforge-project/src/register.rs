@@ -230,7 +230,8 @@ impl ProjectSession {
     }
 
     /// Registers copies in one transaction, each with a new document and
-    /// entity ID. Nothing is overwritten and nothing is published.
+    /// entity ID. Nothing is overwritten and nothing is published. The
+    /// checkpoint of each copy that analyses cleanly is written afterwards.
     pub fn import(&mut self, items: &[ImportItem], origin: Origin) -> Result<Vec<String>> {
         if self.store.is_read_only() {
             return Err(Error::Storage(ProjectError::ReadOnly));
@@ -332,7 +333,8 @@ impl ProjectSession {
     }
 
     /// Registers unregistered sources already in the project folder, exactly as
-    /// they are, with new identity. Only the registry is written.
+    /// they are, with new identity. The sources are not written; the registry
+    /// is, and the checkpoint of each source that analyses cleanly.
     pub fn register_existing(
         &mut self,
         registrations: &[Registration],

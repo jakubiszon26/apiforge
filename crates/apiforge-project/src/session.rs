@@ -430,9 +430,8 @@ impl ProjectSession {
             Some(&entry.document_id),
             EventKind::DocumentRegistered,
         );
-        let index = self.documents.len() - 1;
-        self.analyse_now(index)?;
-        self.seal_new_checkpoint(index);
+        // A valid source seals its checkpoint as its analysis is applied.
+        self.analyse_now(self.documents.len() - 1)?;
         Ok(entry.document_id)
     }
 
@@ -636,6 +635,9 @@ impl ProjectSession {
             None => document.analysis = AnalysisState::Invalid,
         }
         self.seal_valid(index);
+        if valid {
+            self.seal_first_checkpoint(index);
+        }
         self.emit(
             Origin::SESSION,
             Some(&analysis.ticket.document_id),
@@ -982,12 +984,35 @@ impl ProjectSession {
         Ok(Some(file))
     }
 
-    /// Seals the checkpoint of a document whose source was just written. Its
-    /// text already matches the file exactly, so nothing marks it dirty and no
-    /// save is owed; without a record every later load would allocate fresh
-    /// identities for its blocks. ADR 0010 forbids failing valid source over a
-    /// missing checkpoint, so a write that cannot be made is left to the next
-    /// save rather than failing the registration that already succeeded.
+    /// Seals the identities and layout of a document at its first successful
+    /// analysis of saved source (owner decision of 2026-10-26, KTLO-04): a
+    /// created, initialised, registered or imported document as soon as it is
+    /// registered, an invalid one when its saved source first analyses
+    /// cleanly. Without a record every later load would allocate fresh
+    /// identities for its blocks. An existing record is never replaced here;
+    /// saves keep their own route. Unsaved text is not sealed, because shared
+    /// checkpoints describe saved valid source (ADR 0010), and a session that
+    /// only reads the project writes nothing.
+    fn seal_first_checkpoint(&mut self, index: usize) {
+        let document = &self.documents[index];
+        if self.store.is_read_only() || document.is_dirty() || document.conflict.is_some() {
+            return;
+        }
+        let key = DocumentKey::Working {
+            document_id: document.id().into(),
+        };
+        let Some(file) = &self.diagram else { return };
+        if file.records.iter().any(|record| record.key == key) {
+            return;
+        }
+        self.seal_new_checkpoint(index);
+    }
+
+    /// Writes the checkpoint of a document whose text matches its saved file
+    /// exactly, so nothing marks it dirty and no save is owed. ADR 0010 forbids
+    /// failing valid source over a missing checkpoint, so a write that cannot
+    /// be made is left to the next save rather than failing the registration,
+    /// import or analysis that already succeeded.
     fn seal_new_checkpoint(&mut self, index: usize) {
         let Ok(Some(file)) = self.checkpoint(index) else {
             return;

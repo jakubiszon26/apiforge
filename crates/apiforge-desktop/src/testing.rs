@@ -358,6 +358,50 @@ mod review {
         }
     }
 
+    /// The band under the app header with no file open (KTLO-24): gone in the
+    /// three modes at both windows, back with one notice, and the strip as
+    /// before with one tab. The views of the approved mock-up.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_tab_band() {
+        fn mode(harness: &mut FolderHarness, mode: &str) {
+            harness.get_by_label(mode).click();
+            settle(harness);
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            mode(&mut harness, "Diagram");
+            if size == MINIMUM {
+                capture(&mut harness, "tab-band-diagram-one-tab-960x540", None);
+            }
+            harness
+                .get_by_label("Close promotion-and-cart-price.afs")
+                .click();
+            settle(&mut harness);
+            for name in ["Code", "Diagram", "Split"] {
+                mode(&mut harness, name);
+                capture(
+                    &mut harness,
+                    &format!("tab-band-{}-empty-{suffix}", name.to_lowercase()),
+                    None,
+                );
+            }
+            mode(&mut harness, "Diagram");
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .debug_notify("Moved to the trash.");
+            settle(&mut harness);
+            capture(
+                &mut harness,
+                &format!("tab-band-diagram-notice-{suffix}"),
+                None,
+            );
+        }
+    }
+
     /// The sleeping dog on an empty board (KTLO-20): Diagram and the board
     /// side of Split with the last tab closed, at both window sizes and at
     /// double scale, which criterion 7 reviews by eye. The loop is off in the
