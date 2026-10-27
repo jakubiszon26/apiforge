@@ -3,7 +3,9 @@
 //! written catalogue lists every migrated project and is also the completion
 //! marker. Original files are never modified. Not used by normal startup yet.
 use crate::{Document, Error, ProjectSession, Result, context::base_project, prepare_project};
-use apiforge_core::format::{Component, Project, Workspace};
+use apiforge_core::format::{
+    Binding, Bindings, Component, Graph, Project, TemplatePart, Workspace,
+};
 use apiforge_storage::{
     CodeDraft, DraftTarget, WorkspaceStore,
     project::{
@@ -458,6 +460,7 @@ fn active_project(workspace: &Workspace) -> Option<String> {
 /// Writes the folder and transfers drafts into local recovery. Returns the
 /// drafts that name a definition the project no longer has.
 fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec<CodeDraft>> {
+    let project = &in_source_order(project);
     let mut manifest = prepare_project(folder, project)?;
     let store = ProjectStore::open_exclusive(folder)?;
     let mut context = base_project(&manifest);
@@ -584,6 +587,102 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
         )?;
     }
     Ok(unmigrated)
+}
+
+/// The legacy model may hold a block's inputs, or an expression's operands, in
+/// an order its printed source does not read back: a check whose request was
+/// replaced on the board stores `expected, actual`, and its source reads back
+/// `actual, expected`. The maps compare equal either way, but a checkpoint's
+/// semantic digest hashes their order, so a checkpoint sealed from the legacy
+/// order would not describe its own source (KTLO-03). Migration therefore seals
+/// every checkpoint with these maps in the order the source reads back; nothing
+/// else changes. A definition that does not print and lower back is left as it
+/// is, for preparation and `verify` to judge.
+fn in_source_order(project: &Project) -> Project {
+    let mut context = project.clone();
+    context.scenarios.clear();
+    let mut sealed = project.clone();
+    for scenario in &mut sealed.scenarios {
+        let document = Document::Scenario(scenario.clone());
+        if let Some(Document::Scenario(read)) = read_back(&context, &document, None) {
+            graph_in_order(&mut scenario.graph, &read.graph);
+            graph_in_order(&mut scenario.cleanup, &read.cleanup);
+        }
+    }
+    for component in &mut sealed.components {
+        let document = Document::Component(component.clone());
+        if let Some(Document::Component(read)) = read_back(&context, &document, Some(component)) {
+            graph_in_order(&mut component.graph, &read.graph);
+        }
+    }
+    sealed
+}
+
+fn read_back(
+    context: &Project,
+    document: &Document,
+    pinned: Option<&Component>,
+) -> Option<Document> {
+    let text = apiforge_script::print_folder_document(context, document).ok()?;
+    let lower = apiforge_script::LowerContext::folder(context);
+    let lower = match pinned {
+        Some(component) => lower.with_component(component),
+        None => lower,
+    };
+    let lowered = apiforge_script::lower(&apiforge_script::parse(&text), &lower);
+    (!lowered.has_errors())
+        .then_some(lowered.document)
+        .flatten()
+}
+
+/// Blocks are matched by handle, which is unique within a graph.
+fn graph_in_order(graph: &mut Graph, read: &Graph) {
+    for node in &mut graph.nodes {
+        if let Some(read) = read.nodes.iter().find(|read| read.handle == node.handle) {
+            bindings_in_order(&mut node.inputs, &read.inputs);
+        }
+    }
+}
+
+fn bindings_in_order(bindings: &mut Bindings, read: &Bindings) {
+    let position = |name: &String| read.get_index_of(name).unwrap_or(usize::MAX);
+    bindings.sort_by(|left, _, right, _| position(left).cmp(&position(right)));
+    for (name, binding) in bindings.iter_mut() {
+        if let Some(read) = read.get(name) {
+            binding_in_order(binding, read);
+        }
+    }
+}
+
+/// An expression's operands, wherever an expression appears in a binding.
+fn binding_in_order(binding: &mut Binding, read: &Binding) {
+    match (binding, read) {
+        (Binding::Expression { inputs, .. }, Binding::Expression { inputs: read, .. }) => {
+            bindings_in_order(inputs, read);
+        }
+        (Binding::Object { fields }, Binding::Object { fields: read }) => {
+            for (name, binding) in fields.iter_mut() {
+                if let Some(read) = read.get(name) {
+                    binding_in_order(binding, read);
+                }
+            }
+        }
+        (Binding::Array { items }, Binding::Array { items: read }) => {
+            for (binding, read) in items.iter_mut().zip(read) {
+                binding_in_order(binding, read);
+            }
+        }
+        (Binding::Template { parts }, Binding::Template { parts: read }) => {
+            for (part, read) in parts.iter_mut().zip(read) {
+                if let (TemplatePart::Value { binding }, TemplatePart::Value { binding: read }) =
+                    (part, read)
+                {
+                    binding_in_order(binding, read);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The registered document a legacy draft belongs to. A draft of an older
