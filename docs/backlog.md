@@ -108,8 +108,8 @@ the window stays open and observes the agent's committed changes live, one
 writer per agent session, validation before the first write, versions on
 every read and write, four defined ends of a run, one rule for secrets, a
 written contract, and a per-project toggle for live requests. Decision 5
-(the lock per write) is superseded; decisions 10–17 were taken 2026-10-27
-(all A); 18 is open. [ADR
+(the lock per write) is superseded; decisions 10–18 were taken 2026-10-27
+(all A: MCP first, the UX line after MCP-11). [ADR
 0014](decisions/0014-agent-sessions.md) records the ownership rules.
 
 **Key acceptance criterion:** the agent works through MCP and the owner
@@ -118,7 +118,7 @@ watches its committed changes live in the already open application
 
 Capacity: the owner review minutes of the MCP tickets below sum to **310**;
 the interface findings carried from KTLO have their own line of **115**
-(UX-00 to UX-05) and start after MCP-11 unless decision 18 says otherwise;
+(UX-00 to UX-05) and start after MCP-11 (decision 18 = A);
 KTLO-31 adds 5. An addition made during the sprint is charged against the UX
 line, and when it is spent an addition displaces a ticket, named at the
 time. Carried from KTLO: the Windows run of the regression smoke list
@@ -153,7 +153,7 @@ criteria:
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–17 taken 2026-10-27; 18 open |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–18 taken 2026-10-27 |
 | [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print, with versions; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
 | [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference for models, tested — the document; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
 | [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The lock names its holder; the window says who and takes the project back when it is free; [ticket](tickets/MCP-07.md); decision 6, mock-up M1 | S · 20 min · `visible UI`, `default` |
@@ -187,7 +187,7 @@ Raised by the owner on 2026-10-27 after using the accepted KTLO changes
 ([retrospective](retrospectives/2026-10-27-ktlo.md#interface-findings-carried-into-the-mcp-sprint)),
 ticketed at MCP planning ([UX-00](tickets/UX-00.md)): one shared mock-up,
 five decisions, five tickets, 115 minutes in all, in the owner's priority.
-They start after MCP-11 unless MCP-00 decision 18 says otherwise.
+They start after MCP-11 (MCP-00 decision 18 = A, 2026-10-27).
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |

@@ -2,7 +2,8 @@
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #66) · MCP-00 decision 6 = A taken 2026-10-27 ·
-  waits for mock-up M1 approved on the issue · revised 2026-10-27 (MCP-00
+  mock-up M1 approved 2026-10-27 (the *Take back*
+  button of MCP-08b gets a second round) · revised 2026-10-27 (MCP-00
   revision 2: the lock description gains the endpoint field; the take-back
   happens only when the lock is free, never from a living process; the
   observer behaviour moved to MCP-08a)

@@ -3,7 +3,8 @@
 - Size: M · Owner review: 25 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #93) · owner's requirement of 2026-10-27 (updates
   MCP-00 decision 4 and MCP-06) · MCP-00 decisions 14, 15, 16 = A taken
-  2026-10-27 · waits for mock-up M3 · after MCP-08b and MCP-06
+  2026-10-27 · mock-up M3 approved 2026-10-27 (the footer and
+  *Apply settings* hidden while observing) · after MCP-08b and MCP-06
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md#live-consent-the-toggle)
 
@@ -47,7 +48,9 @@ header with the *Live allowed* badge, at 960 × 540 and 1600 × 1000.
    id and not in any file under the project folder (a test asserts the folder
    is byte-identical).
 2. *Project settings* opens while observing; only the toggle and *Close* are
-   enabled.
+   enabled; the footer *Apply changes, then use Save all…* and *Apply
+   settings* are hidden (owner decision of 2026-10-27 on M3). A ticked box
+   applies at once and needs no save.
 3. With the agent connected and the box off, `run(live: true)` is
    `live_disabled` with the settings message; ticking the box — no restart
    of the window or the server — makes the next `run(live: true)` send; the

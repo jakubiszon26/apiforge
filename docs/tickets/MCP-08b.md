@@ -2,7 +2,8 @@
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #91) · MCP-00 decisions 10 and 11 = A taken
-  2026-10-27 · waits for mock-up M1 · after MCP-08a and MCP-04
+  2026-10-27 · M1 approved 2026-10-27 except *Take back*, whose
+  second round is pending · after MCP-08a and MCP-04
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 
