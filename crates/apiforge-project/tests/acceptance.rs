@@ -599,3 +599,79 @@ fn a_publication_settings_change_and_trash_restore_survive_one_restart_together(
     assert_eq!(restored.text(), SOURCE);
     assert_eq!(restored.analysis(), AnalysisState::Valid);
 }
+
+/// KTLO-22 criterion 1: the folder window checks for external changes once a
+/// second with an exclusive storage job that starts from a snapshot of the
+/// session. A comment-loss decision taken on the live session while such a job
+/// runs is about a source the job left alone, so it survives the job's
+/// completion and the publication behind it goes ahead.
+#[test]
+fn a_comment_decision_survives_an_exclusive_job_that_left_its_document_alone() {
+    let directory = prepared_demo();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let component = only(&session, DocumentKind::Component);
+    let text = session.document(&component).unwrap().text().to_owned();
+    session
+        .edit_source(
+            &component,
+            &format!("// a loose note\n\n{text}"),
+            Origin::SESSION,
+        )
+        .unwrap();
+    session.settle(&component).unwrap();
+    assert!(matches!(
+        session.publish(&component, Origin::SESSION),
+        Err(Error::CommentsWouldBeLost { comments: 1 })
+    ));
+
+    let revisions = session.manifest().revisions.len();
+
+    let snapshot = session.storage_snapshot();
+    session.accept_comment_loss(&component).unwrap();
+    let completion = snapshot.run(StorageMode::Exclusive, |_| ());
+    session.complete_storage(completion).unwrap();
+
+    session
+        .publish(&component, Origin::SESSION)
+        .expect("the decision taken during the job still holds");
+    assert_eq!(session.manifest().revisions.len(), revisions + 1);
+}
+
+/// KTLO-22 criterion 1, for the other per-document decision an exclusive job
+/// used to overwrite: where the caret and the selection are, in a document and
+/// in a plain text file.
+#[test]
+fn a_selection_survives_an_exclusive_job_that_left_its_file_alone() {
+    let directory = prepared_demo();
+    std::fs::write(directory.path().join("README.md"), "# Shop\n\nNotes.\n").unwrap();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let component = only(&session, DocumentKind::Component);
+    session.open_text_file("README.md").unwrap();
+
+    let snapshot = session.storage_snapshot();
+    let in_document = apiforge_storage::project::TextSelection {
+        anchor: 4,
+        caret: 1,
+    };
+    let in_text = apiforge_storage::project::TextSelection {
+        anchor: 8,
+        caret: 14,
+    };
+    session
+        .set_selection(&component, in_document.clone())
+        .unwrap();
+    session
+        .set_text_selection("README.md", in_text.clone())
+        .unwrap();
+    let completion = snapshot.run(StorageMode::Exclusive, |_| ());
+    session.complete_storage(completion).unwrap();
+
+    assert_eq!(
+        session.document(&component).unwrap().selection(),
+        &in_document
+    );
+    assert_eq!(
+        session.text_file("README.md").unwrap().selection(),
+        &in_text
+    );
+}

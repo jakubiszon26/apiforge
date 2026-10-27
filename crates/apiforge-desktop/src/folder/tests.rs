@@ -1732,6 +1732,86 @@ fn publishing_from_the_header_requires_a_comment_decision_and_cancel_keeps_sourc
     );
 }
 
+/// KTLO-22 criterion 2: once a second the watcher queues an exclusive storage
+/// job that changes nothing. A *Continue* pressed while that job is still on
+/// the worker publishes once the job completes, instead of being forgotten and
+/// asking again.
+#[test]
+fn continue_in_the_comment_prompt_publishes_while_an_exclusive_check_is_in_flight() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    app.workbench.open(&id);
+    let original = format!("// loose comment\n\n{}", text(&app, &id));
+    app.session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &original, CODE)
+        .unwrap();
+    app.session.as_mut().unwrap().settle(&id).unwrap();
+    let revisions = app.session.as_ref().unwrap().manifest().revisions.len();
+    let at = label_position(&mut app, &context, "Publish");
+    click(&mut app, &context, at);
+    assert!(matches!(app.prompt, Some(Prompt::CommentLoss { .. })));
+
+    // The watcher's job, held on the worker until the decision is taken.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    app.storage_project(
+        "Checking external changes…",
+        apiforge_project::StorageMode::Exclusive,
+        false,
+        move |_| {
+            let _ = held.recv();
+            Ok(())
+        },
+        |_, _: apiforge_project::Result<()>| {},
+    );
+    frame(&mut app, &context, vec![]);
+    assert!(app.storage.owns_session(), "the check is on the worker");
+
+    // `click` waits for storage, which is held, so the press is sent directly.
+    let at = label_position(&mut app, &context, "Continue");
+    frame(&mut app, &context, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        frame(
+            &mut app,
+            &context,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    assert!(
+        app.storage.owns_session(),
+        "the decision was taken while the check was in flight"
+    );
+    release.send(()).unwrap();
+    wait_storage(&mut app, &context);
+
+    assert!(
+        !matches!(app.prompt, Some(Prompt::CommentLoss { .. })),
+        "the prompt does not come back"
+    );
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().revisions.len(),
+        revisions + 1
+    );
+    assert!(
+        app.notice
+            .as_ref()
+            .is_some_and(|notice| !notice.error && notice.text.starts_with("Published revision")),
+        "notice: {:?}",
+        app.notice.as_ref().map(|notice| &notice.text)
+    );
+    assert_eq!(text(&app, &id), original);
+}
+
 #[test]
 fn a_stale_comment_dialog_cannot_authorise_an_edit_of_newer_source() {
     let directory = shop();
