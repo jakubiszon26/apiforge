@@ -62,6 +62,8 @@ pub struct DocumentSession {
     pub(crate) saved: FileState,
     pub(crate) unavailable: Option<Unavailable>,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    /// Diagnostics the analysis found beyond the ones it keeps.
+    pub(crate) omitted_diagnostics: usize,
     pub(crate) analysis: AnalysisState,
     pub(crate) model: Option<Arc<Document>>,
     /// The source text `model` describes, when known. Differs from `text` while
@@ -97,6 +99,19 @@ impl DocumentSession {
     }
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+    /// How many diagnostics the analysis found beyond the
+    /// `MAX_DIAGNOSTICS` that `diagnostics` keeps.
+    pub fn omitted_diagnostics(&self) -> usize {
+        self.omitted_diagnostics
+    }
+    /// SHA-256 of the saved bytes this session last read or wrote; `None`
+    /// when the file is missing.
+    pub fn saved_sha256(&self) -> Option<&str> {
+        match &self.saved {
+            FileState::File { sha256, .. } => Some(sha256),
+            _ => None,
+        }
     }
     pub fn analysis(&self) -> AnalysisState {
         self.analysis
@@ -177,6 +192,7 @@ impl DocumentSession {
             saved,
             unavailable: None,
             diagnostics: Vec::new(),
+            omitted_diagnostics: 0,
             analysis: AnalysisState::Pending,
             model: None,
             model_source: None,

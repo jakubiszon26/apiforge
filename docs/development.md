@@ -203,6 +203,85 @@ attributes, and ordinary Save preserves exact LF/CRLF editor text. Review nested
 overrides before checkout: a converted immutable revision fails its exact-byte
 integrity check. See the [Git portability evidence](qa/2026-10-25/p7-portability/verification.md).
 
+## MCP server
+
+`apiforge mcp` serves a folder project to a model over the Model Context
+Protocol on stdio, protocol revisions `2026-07-28` (`server/discover`) and
+`2025-11-25` (`initialize`):
+
+```bash
+cargo run -p apiforge-cli --locked -- mcp [--folder /path/to/project]
+```
+
+Without `--folder` it serves the directory it was started in. Stdout carries
+protocol messages only; the server's own lines go to stderr and name the tool
+and the error code, never an argument. EOF on stdin ends the process with exit
+code 0.
+
+To use it from Claude Code, register the release binary in the project folder:
+
+```bash
+claude mcp add apiforge -- /path/to/apiforge mcp
+```
+
+or check in a `.mcp.json` at the project root:
+
+```json
+{
+  "mcpServers": {
+    "apiforge": { "command": "/path/to/apiforge", "args": ["mcp"] }
+  }
+}
+```
+
+Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
+
+### Tools
+
+Each tool names a document by its registered path. It opens the saved project
+read-only for each call and writes nothing, not even `.apiforge/local`.
+
+| Tool | Input | Result |
+| --- | --- | --- |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests`, server and reference version |
+| `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
+| `check` | `path`? | per document: path, `source_sha256`, `valid`, diagnostics, `omitted`; a project with errors is reported, not refused |
+| `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
+
+`source_sha256` is the SHA-256 of the saved bytes. `generation` is the
+project's head generation, which advances on every commit; it is 0 in a fresh
+clone, before the first commit on that machine.
+
+### The contract
+
+- Every tool has an input and an output schema and `readOnlyHint: true`;
+  `tools/list` returns them in the order above. A result carries
+  `structuredContent` and the same JSON as readable text in `content`.
+- A call that could not do what was asked is `isError: true` with
+  `structuredContent` `{ code, message, wrote, details }`. The codes form a
+  fixed list: `not_a_project`, `project_unreadable`, `unknown_document`,
+  `invalid_text`, `invalid_inputs`, `not_a_component`,
+  `invalid_checkpoint`, `stale_source`, `stale_project`, `held_by_window`,
+  `handover_pending`, `handover_refused`, `held_by_other`, `live_disabled`,
+  `comments_would_be_lost`, `secret_in_text`, `secret_in_source`,
+  `path_rejected`, `path_exists`, `handle_exists`, `recovery_required`,
+  `too_large`, `result_too_large`, `run_in_progress`, `cancelled`,
+  `timed_out`, `unknown_outcome`. The read tools use `not_a_project`,
+  `project_unreadable` (any other storage failure, with its message),
+  `recovery_required` (an interrupted transaction), `unknown_document`
+  (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
+  `path_rejected` and `result_too_large`; `wrote` is always `false` for them.
+- A path argument must pass `ProjectPath::working_source`: relative, portable,
+  outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
+  `.apiforge/diagram.json` or a Windows reserved name is `path_rejected`.
+- Positions: `line` and `column` are 1-based and counted in Unicode scalar
+  values; `end_line` and `end_column` are exclusive; a line break is `\n`, and
+  a `\r` before it belongs to the break. A fix carries its replacement and its
+  own range.
+- Limits: the analysis keeps 1 000 diagnostics per document and `omitted`
+  counts the rest; a result over 2 MiB is `result_too_large`, never cut; a
+  `text` argument over 1 MiB will be `too_large` (from MCP-03).
+
 ## The legacy JSON code panel
 
 A scenario or an open component can be edited as text beside its board (Ctrl+E).

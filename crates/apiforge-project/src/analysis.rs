@@ -57,6 +57,8 @@ pub enum Restored {
 pub struct Analysis {
     pub ticket: AnalysisTicket,
     pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics dropped beyond `MAX_DIAGNOSTICS`.
+    pub omitted_diagnostics: usize,
     pub(crate) model: Option<(Document, Restored)>,
 }
 
@@ -73,7 +75,7 @@ impl AnalysisInput {
     /// Pure and potentially slow: parse, lower with the folder policy, then
     /// reconcile identities. Never touches storage or session state.
     pub fn run(&self) -> Analysis {
-        let (diagnostics, model) = derive(
+        let (diagnostics, omitted_diagnostics, model) = derive_counted(
             &self.target,
             &self.text,
             &self.context,
@@ -84,6 +86,7 @@ impl AnalysisInput {
         Analysis {
             ticket: self.ticket.clone(),
             diagnostics,
+            omitted_diagnostics,
             model,
         }
     }
@@ -97,12 +100,27 @@ pub(crate) fn derive(
     checkpoint: Option<&DiagramRecord>,
     placer: &dyn Placer,
 ) -> (Vec<Diagnostic>, Option<(Document, Restored)>) {
+    let (diagnostics, _, model) = derive_counted(target, text, context, base, checkpoint, placer);
+    (diagnostics, model)
+}
+
+/// As `derive`, with the number of diagnostics the analysis dropped beyond
+/// `MAX_DIAGNOSTICS` (MCP-01: nothing is cut silently).
+pub(crate) fn derive_counted(
+    target: &Target,
+    text: &str,
+    context: &Project,
+    base: Option<&Document>,
+    checkpoint: Option<&DiagramRecord>,
+    placer: &dyn Placer,
+) -> (Vec<Diagnostic>, usize, Option<(Document, Restored)>) {
     if text.len() > MAX_SOURCE_BYTES {
         return (
             vec![Diagnostic::error(
                 0..0,
                 "The source exceeds the 1 MiB limit",
             )],
+            0,
             None,
         );
     }
@@ -119,18 +137,19 @@ pub(crate) fn derive(
     };
     let lowered = apiforge_script::lower(&tree, &lower_context);
     let mut diagnostics = lowered.diagnostics.clone();
+    let omitted = lowered.omitted_diagnostics;
     if lowered.has_errors() {
-        return (diagnostics, None);
+        return (diagnostics, omitted, None);
     }
     let Some(mut document) = lowered.document.clone() else {
-        return (diagnostics, None);
+        return (diagnostics, omitted, None);
     };
     if kind(&document) != target.kind {
         diagnostics.push(Diagnostic::error(
             0..text.len(),
             "This code describes a different kind of document",
         ));
-        return (diagnostics, None);
+        return (diagnostics, omitted, None);
     }
     normalise(&mut document, target);
     let checkpoint = checkpoint.filter(|record| {
@@ -144,7 +163,7 @@ pub(crate) fn derive(
         (None, Some(record)) if record.describes(text, &lowered_base, context) => {
             let mut exact = document_of(&record.identity_base);
             normalise(&mut exact, target);
-            return (diagnostics, Some((exact, Restored::Checkpoint)));
+            return (diagnostics, omitted, Some((exact, Restored::Checkpoint)));
         }
         (None, Some(record)) => (document_of(&record.identity_base), Restored::Reconciled),
         (None, None) => (empty, Restored::Fresh),
@@ -154,7 +173,7 @@ pub(crate) fn derive(
             0..text.len(),
             "This code describes a different document",
         ));
-        return (diagnostics, None);
+        return (diagnostics, omitted, None);
     };
     let mut document = reconciled.document;
     normalise(&mut document, target);
@@ -165,9 +184,9 @@ pub(crate) fn derive(
             0..text.len(),
             "The definition is not valid in this project",
         ));
-        return (diagnostics, None);
+        return (diagnostics, omitted, None);
     }
-    (diagnostics, Some((document, restored)))
+    (diagnostics, omitted, Some((document, restored)))
 }
 
 /// Registry identity is authoritative: lowering and reconciliation may suggest

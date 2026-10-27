@@ -1,7 +1,7 @@
 //! Folder commands share the desktop's stable loader and folder analysis policy.
 //! Only committed source is loaded: recovery and last-valid cache are excluded.
-use apiforge_project::{AnalysisState, Origin, ProjectSession};
-use apiforge_storage::project::ProjectPath;
+use apiforge_mcp::folder::{check_document as check_saved, select as select_path};
+use apiforge_project::{Origin, ProjectSession};
 use std::{ffi::OsString, path::PathBuf};
 
 pub const USAGE: &str = "apiforge check --folder <directory> [--file <relative.afs>]\napiforge print --folder <directory> --file <relative.afs>\napiforge apply --folder <directory> --file <relative.afs> <source.afs>";
@@ -108,23 +108,18 @@ fn execute(args: Args) -> Result<(), String> {
     }
 }
 
+/// Prints the document's diagnostics in the CLI's stderr format.
 fn check_document(session: &ProjectSession, id: &str) -> Result<(), String> {
-    let document = session.document(id).ok_or("Unknown document")?;
+    let (document, valid) = check_saved(session, id).map_err(|error| error.message)?;
     super::diagnostics(document.diagnostics());
-    if document.analysis() != AnalysisState::Valid || document.unavailable().is_some() {
+    if !valid {
         return Err("Saved source has no valid definition".into());
     }
     Ok(())
 }
 
 pub(super) fn select(session: &ProjectSession, path: &str) -> Result<String, String> {
-    let path = ProjectPath::working_source(path).map_err(|error| error.to_string())?;
-    session
-        .documents()
-        .iter()
-        .find(|document| document.entry().path == path)
-        .map(|document| document.id().to_owned())
-        .ok_or_else(|| "No registered document has this path".into())
+    select_path(session, path).map_err(|error| error.message)
 }
 
 pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::RunStatus, String> {

@@ -48,6 +48,8 @@ pub struct SyntaxTree {
     pub tokens: Vec<Token>,
     pub file: Option<File>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics found beyond `MAX_DIAGNOSTICS` and not kept.
+    pub omitted_diagnostics: usize,
 }
 
 impl SyntaxTree {
