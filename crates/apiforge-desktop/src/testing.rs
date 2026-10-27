@@ -409,6 +409,51 @@ mod review {
         }
     }
 
+    /// The *Migration stopped* window (KTLO-03) centred on a screen of
+    /// `size`, as the window system centres it, on a flat background since it
+    /// is the first window of the start. Returns the window's rectangle.
+    fn stop_on_screen(size: egui::Vec2, name: &str, region: Option<egui::Rect>) -> egui::Rect {
+        use crate::stop::{StopWindow, WINDOW_SIZE};
+        let window = egui::Rect::from_center_size((size / 2.0).to_pos2(), WINDOW_SIZE);
+        let mut themed = false;
+        let mut harness = Harness::builder().with_size(size).build_ui_state(
+            move |ui, stop: &mut StopWindow| {
+                if !themed {
+                    crate::theme::apply(ui.ctx());
+                    themed = true;
+                    return;
+                }
+                ui.painter()
+                    .rect_filled(ui.ctx().content_rect(), 0.0, crate::theme::GRID);
+                ui.painter().rect_stroke(
+                    window.expand(1.0),
+                    0.0,
+                    egui::Stroke::new(1.0, crate::theme::BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(window), |ui| stop.ui(ui));
+            },
+            StopWindow::new(crate::folder::Refusal {
+                project: Some(legacy_workspace::REFUSED_PROJECT_NAME.into()),
+                scenario: Some(legacy_workspace::REFUSED_SCENARIO_NAME.into()),
+                reason: "a scenario differs after reloading".into(),
+            }),
+        );
+        harness.run();
+        assert_within_window(&harness, &["Quit", "Open the previous workspace"]);
+        assert_disjoint(&harness, &["Quit", "Open the previous workspace"]);
+        capture(&mut harness, name, region);
+        window
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_migration_stop() {
+        stop_on_screen(MINIMUM, "migration-stop-960x540", None);
+        let window = stop_on_screen(WIDE, "migration-stop-1600x1000", None);
+        stop_on_screen(WIDE, "migration-stop-window", Some(window.expand(1.0)));
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {

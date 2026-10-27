@@ -160,11 +160,11 @@ fn window_size(value: Option<&str>) -> Result<(u32, u32), &'static str> {
 /// Where managed startup begins, and whether it can.
 ///
 /// Opening a folder project is the window's own asynchronous work, so almost
-/// nothing happens here. The exception is a legacy workspace that cannot be
-/// migrated yet: another window owns it, or it needs an explicit backup
-/// decision. Only the workspace window can resolve either, and which window to
-/// build has to be decided before one exists, so that case starts exactly as it
-/// does today.
+/// nothing happens here. The exceptions are a legacy workspace that cannot be
+/// migrated yet — another window owns it, or it needs an explicit backup
+/// decision, which only the workspace window can resolve — and one that
+/// migration refused, which ends in the stop window. Which window to build has
+/// to be decided before one exists.
 fn managed_opening() -> Result<Opening, String> {
     let data = dirs::data_dir()
         .ok_or("This system has no application data directory.")?
@@ -184,10 +184,11 @@ fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
+        // Nothing opens by itself after a refusal (KTLO-03, decision 1): the
+        // stop window offers the previous workspace and quitting.
         folder::Start::Refused(refusal) => {
-            eprintln!("Opening the workspace instead: {}", refusal.reason);
-            let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
-            Ok(Opening::Workspace(app::Source::Storage(store)))
+            eprintln!("Migration stopped: {refusal}.");
+            Ok(Opening::Stopped(refusal))
         }
     }
 }
@@ -470,12 +471,25 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
         _ => DEFAULT_WINDOW_SIZE,
     };
     let observed = Arc::clone(&completed);
+    let viewport = eframe::egui::ViewportBuilder::default()
+        .with_title("API Forge")
+        .with_app_id("apiforge");
+    // The stop window has one size and is centred, like a dialog; it grows
+    // into the workspace window if the person opens the previous workspace.
+    let stopped = matches!(opening, Opening::Stopped(_));
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("API Forge")
-            .with_app_id("apiforge")
-            .with_inner_size(size)
-            .with_min_inner_size(MIN_WINDOW_SIZE),
+        viewport: if stopped {
+            let size = stop::WINDOW_SIZE;
+            viewport
+                .with_inner_size(size)
+                .with_min_inner_size(size)
+                .with_resizable(false)
+        } else {
+            viewport
+                .with_inner_size(size)
+                .with_min_inner_size(MIN_WINDOW_SIZE)
+        },
+        centered: stopped,
         ..Default::default()
     };
     let started = eframe::run_native(
@@ -504,6 +518,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                     folder::FolderApp::start_managed(&context.egui_ctx, data),
                 )),
                 Opening::Stopped(refusal) => {
+                    theme::apply(&context.egui_ctx);
                     Front::Stopped(Box::new(stop::Stopped::new(refusal, previous_workspace)))
                 }
             };
