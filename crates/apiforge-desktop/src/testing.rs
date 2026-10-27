@@ -15,6 +15,10 @@ pub const WIDE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// The synthetic legacy workspaces of the migration tests (KTLO-03).
+#[path = "../../apiforge-project/tests/support/legacy_workspace.rs"]
+pub mod legacy_workspace;
+
 pub type FolderHarness = Harness<'static, Option<FolderApp>>;
 pub type WorkspaceHarness = Harness<'static, Option<App>>;
 

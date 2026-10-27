@@ -3,7 +3,13 @@
 - Size: M · Owner review: 30 min · Risk: `migration`, `visible UI` (the stop
   message)
 - State: Approved 2026-10-27 (issue #5) — decisions 1 and 2 taken 2026-10-26,
-  3 and 4 taken and the mock-up (5) approved 2026-10-27; after KTLO-04 (#6)
+  3 and 4 taken and the mock-up (5) approved 2026-10-27; after KTLO-04 (#6).
+  Implemented 2026-10-27 in two parts (see *What the implementation found*):
+  part 1 — the fixture, the named refusal and `Start::Refused` (criteria 1, 3,
+  the first half of 4, 6) — awaits acceptance in PR #78, 747 changed
+  lines (M); part 2 — the *Migration stopped* window (the rest of 4, and 5) —
+  follows from `main` once part 1 is merged. Criterion 2 is not met: the
+  refusal's cause is not KTLO-04, and fixing it is a decision for the owner
 - Mock-up branch: `mock/ktlo-03-migration-stop` (throwaway; captures in
   `docs/qa/2026-10-27/KTLO-03/`, posted on #5)
 - Analysis model: Fable · Implementation model: Opus 5.5
@@ -91,6 +97,52 @@ person sees, before any project window exists, in the application's theme.
    (interaction tests at both screen sizes; the accessibility audit passes).
 6. The verification commands of the development guide pass; the migration
    tests of `apiforge-project` pass unchanged.
+
+## What the implementation found (2026-10-27)
+
+- **The refusal is not KTLO-04's.** Migration never relied on the session to
+  seal checkpoints: `prepare_project` writes a record for every scenario,
+  revision and working component itself, so the appendix's recipe (a project
+  written by the legacy writer "so no `diagram.json` record exists") cannot
+  produce an unsealed migrated document. KTLO-04's report already noted that
+  its criterion 5 held before its change.
+- **What does reproduce it.** A check whose request was replaced on the board:
+  deleting the request removes the check's `actual` input, and wiring the new
+  request's response back appends `actual` after `expected`. The legacy model
+  stores the inputs as `expected, actual`; the printed source reads them back
+  as `actual, expected`. Compared as values the semantics are equal, so the
+  printer accepts the source, but the checkpoint's semantic digest hashes the
+  serialised projection, in stored order. The checkpoint sealed from the
+  legacy model therefore does not describe its own source; the reload only
+  reconciles against it, and the reconciled scenario lists its blocks in
+  source order, which `verify` rejects as "a scenario differs after
+  reloading". The synthetic six-project workspace (the four demo projects,
+  *Order desk* with that check, *Support desk*) is refused on its fifth
+  project with four projects left in staging — what the owner saw — at
+  `280d6bd` (before KTLO-04) and on `main` with KTLO-04 alike.
+- **Criterion 2 is not met** and its test is `#[ignore = "KTLO-03: …"]`.
+  Fixing the cause changes how checkpoints are sealed, which is the owner's
+  decision (migration, and possibly existing checkpoints). Two ways, for the
+  planner to put to the owner:
+  - A. Migration only: `prepare_project` (and migration's recovered
+    components) seal each checkpoint with its input and operand maps in the
+    order the printed source reads back. No format change, nothing else
+    changes; existing folder projects are untouched. About 60 lines and a
+    test; criterion 2 then passes and criterion 3 needs another broken
+    fixture.
+  - B. Make the semantic digest independent of map order. Also covers a
+    folder-session board edit that removes and re-wires an input before a
+    save (suspected, not verified), but every existing checkpoint with an
+    unsorted map would stop matching its source once, so that document's
+    identities and layout are reconciled again at its next open.
+- **Criterion 3's "staged folders byte-identical before and after"** cannot
+  hold across two attempts: every attempt prepares unpublished folders afresh
+  with new document IDs. The test checks the originals byte-for-byte, that
+  staging is kept and that nothing is published or activated, then that a
+  second attempt is refused the same way.
+- **Size.** Over M with the window, so split at the appendix's seam: part 1
+  (criteria 1–3 and `Start::Refused`) is one pull request; part 2 (the window,
+  the rest of criterion 4, and 5) follows from `main` once part 1 is merged.
 
 ## Not in scope
 
