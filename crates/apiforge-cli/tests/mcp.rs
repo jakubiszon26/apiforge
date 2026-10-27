@@ -2,6 +2,13 @@
 //! binary driven with both protocol revisions, a malformed line, an unknown
 //! method, a tool error and EOF. Criterion 6's "byte for byte what
 //! `apiforge print` prints" is checked against the command here as well.
+//!
+//! MCP-03 (#62) over real stdio: `check_text`, `run`, `language_reference` and
+//! the resources; a run cancelled with `notifications/cancelled` while reads
+//! are answered and a second run is refused; the deadline; EOF during a run.
+//! A slow simulation comes from the server's test seam
+//! `APIFORGE_MCP_TEST_STEP_DELAY_MS`, a short deadline from
+//! `APIFORGE_MCP_TEST_DEADLINE_MS`.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -14,7 +21,16 @@ use std::{
 };
 
 const PRODUCT: &str = "components/product.afs";
-const TOOLS: [&str; 4] = ["project_overview", "read_source", "check", "print"];
+const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+const TOOLS: [&str; 7] = [
+    "project_overview",
+    "language_reference",
+    "read_source",
+    "check",
+    "check_text",
+    "print",
+    "run",
+];
 
 fn demo() -> tempfile::TempDir {
     let directory = tempfile::tempdir().unwrap();
@@ -34,8 +50,12 @@ struct Server {
 
 impl Server {
     fn spawn(folder: Option<&Path>, current_dir: &Path) -> Self {
+        Self::spawn_with(folder, current_dir, &[])
+    }
+
+    fn spawn_with(folder: Option<&Path>, current_dir: &Path, envs: &[(&str, &str)]) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_apiforge"));
-        command.arg("mcp");
+        command.arg("mcp").envs(envs.iter().copied());
         if let Some(folder) = folder {
             command.arg("--folder").arg(folder);
         }
@@ -202,6 +222,7 @@ fn criteria_1_and_2_a_discover_session_over_stdio() {
     assert!(versions.contains(&json!("2026-07-28")), "{discover}");
     assert!(versions.contains(&json!("2025-11-25")), "{discover}");
     assert!(result["capabilities"]["tools"].is_object(), "{discover}");
+    assert!(result["capabilities"]["resources"].is_object(), "MCP-03");
     assert_eq!(server_info(result)["name"], "apiforge", "{discover}");
     assert_eq!(server_info(result)["version"], env!("CARGO_PKG_VERSION"));
 
@@ -219,8 +240,8 @@ fn criteria_1_and_2_a_discover_session_over_stdio() {
 
     server.send("{ this is not JSON");
     server.send(&json!({ "jsonrpc": "2.0", "id": 4, "method": "no/such/method", "params": { "_meta": meta() } }).to_string());
-    let unknown =
-        server.response(|m| m["id"] == json!(4) || (m["id"].is_null() && m["error"].is_object()));
+    // MCP-03 carry-over 2: the error answers the request's id, never null.
+    let unknown = server.response(|m| m["id"] == json!(4));
     assert!(unknown["error"].is_object(), "{unknown}");
 
     let rejected = server.request(
@@ -261,6 +282,7 @@ fn criteria_1_and_2_an_initialize_session_over_stdio() {
     assert_eq!(result["serverInfo"]["name"], "apiforge");
     assert_eq!(result["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
     assert!(result["capabilities"]["tools"].is_object());
+    assert!(result["capabilities"]["resources"].is_object(), "MCP-03");
     server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
 
     assert_tools(&server.request(2, "tools/list", json!({})));
@@ -273,8 +295,8 @@ fn criteria_1_and_2_an_initialize_session_over_stdio() {
 
     server.send("not json at all");
     server.send(r#"{"jsonrpc":"2.0","id":4,"method":"no/such/method"}"#);
-    let unknown =
-        server.response(|m| m["id"] == json!(4) || (m["id"].is_null() && m["error"].is_object()));
+    // MCP-03 carry-over 2: the error answers the request's id, never null.
+    let unknown = server.response(|m| m["id"] == json!(4));
     assert!(unknown["error"].is_object(), "{unknown}");
 
     let missing = server.request(
@@ -359,4 +381,210 @@ fn criterion_6_print_matches_the_print_command_byte_for_byte() {
         let printed = apiforge_mcp::tools::print(root, path).unwrap();
         assert_eq!(printed.text.as_bytes(), output.stdout.as_slice(), "{path}");
     }
+}
+
+// MCP-03 (#62) ---------------------------------------------------------------
+
+fn initialize(server: &mut Server) {
+    server.request(
+        1,
+        "initialize",
+        json!({ "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "acceptance", "version": "1.0.0" } }),
+    );
+    server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+}
+
+fn call(server: &mut Server, id: u64, name: &str, arguments: Value) -> Value {
+    server.request(
+        id,
+        "tools/call",
+        json!({ "name": name, "arguments": arguments }),
+    )
+}
+
+fn send_call(server: &mut Server, id: u64, name: &str, arguments: Value) {
+    server.send(
+        &json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": arguments } })
+            .to_string(),
+    );
+}
+
+fn answered(server: &Server, id: u64) -> bool {
+    server.stdout.iter().any(|line| {
+        serde_json::from_str::<Value>(line).is_ok_and(|message| message["id"] == json!(id))
+    })
+}
+
+#[test]
+fn mcp03_check_text_run_the_reference_and_resources_over_stdio() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    assert_tools(&server.request(2, "tools/list", json!({})));
+
+    let product = std::fs::read_to_string(root.join(PRODUCT)).unwrap();
+    let checked = call(
+        &mut server,
+        3,
+        "check_text",
+        json!({ "path": PRODUCT, "text": product.replacen("export product", "export ???", 1) }),
+    );
+    let checked = structured(&checked);
+    assert_eq!(checked["registered"], true);
+    assert_eq!(checked["valid"], false);
+    assert_eq!(checked["diagnostics"][0]["severity"], "error");
+
+    let report = call(&mut server, 4, "run", json!({ "path": SCENARIO }));
+    let report = structured(&report);
+    assert_eq!(report["status"], "passed");
+    assert_eq!(report["ended_by"], "completed");
+    assert_eq!(report["step_count"], 18);
+    assert_eq!(report["redacted"], true);
+
+    let live = call(
+        &mut server,
+        5,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    tool_error(&live, "live_disabled");
+
+    let reference = call(&mut server, 6, "language_reference", json!({}));
+    let reference = structured(&reference);
+    assert_eq!(reference["version"], "1");
+    let text = reference["text"].as_str().unwrap().to_owned();
+
+    let listed = server.request(7, "resources/list", json!({}));
+    let uris: Vec<_> = listed["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|resource| resource["uri"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(uris.len(), 5, "{listed}");
+    assert_eq!(uris[0], "apiforge://reference");
+    assert!(uris.contains(&format!("apiforge://source/{PRODUCT}")));
+
+    let read = server.request(
+        8,
+        "resources/read",
+        json!({ "uri": "apiforge://reference" }),
+    );
+    let contents = &read["result"]["contents"][0];
+    assert_eq!(contents["mimeType"], "text/plain", "{read}");
+    assert_eq!(contents["text"], text);
+    let read = server.request(
+        9,
+        "resources/read",
+        json!({ "uri": format!("apiforge://source/{PRODUCT}") }),
+    );
+    assert_eq!(read["result"]["contents"][0]["text"], product);
+    assert_eq!(read["result"]["contents"][0]["mimeType"], "text/plain");
+
+    let refused = server.request(
+        10,
+        "resources/read",
+        json!({ "uri": "apiforge://source/%2e%2e/x.afs" }),
+    );
+    assert!(refused["error"].is_object(), "{refused}");
+    assert_eq!(
+        refused["error"]["data"]["code"], "path_rejected",
+        "{refused}"
+    );
+    assert_clean_end(server);
+    assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_criterion_10_a_cancelled_run_over_stdio() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn_with(
+        Some(root),
+        root,
+        &[("APIFORGE_MCP_TEST_STEP_DELAY_MS", "300")],
+    );
+    initialize(&mut server);
+
+    send_call(&mut server, 2, "run", json!({ "path": SCENARIO }));
+    thread::sleep(Duration::from_millis(400));
+    // Answered while the run is in progress.
+    let overview = call(&mut server, 3, "project_overview", json!({}));
+    assert_eq!(structured(&overview)["name"], "Demo shop");
+    let second = call(&mut server, 4, "run", json!({ "path": PRODUCT }));
+    tool_error(&second, "run_in_progress");
+    assert!(!answered(&server, 2), "the first run is still going");
+
+    server.send(
+        &json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 2, "reason": "acceptance" } })
+            .to_string(),
+    );
+    // The slot frees once the cancelled run has run its cleanup.
+    let started = Instant::now();
+    let mut id = 5;
+    let report = loop {
+        let response = call(&mut server, id, "run", json!({ "path": PRODUCT }));
+        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+            break response;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the cancelled run did not end"
+        );
+        thread::sleep(Duration::from_millis(100));
+        id += 1;
+    };
+    assert_eq!(structured(&report)["status"], "passed");
+
+    let (status, _, stdout, stderr) = server.close();
+    assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    assert!(
+        !stdout
+            .iter()
+            .any(|line| { serde_json::from_str::<Value>(line).unwrap()["id"] == json!(2) }),
+        "a cancelled request gets no response"
+    );
+    assert!(stderr.contains("apiforge mcp: run: cancelled"), "{stderr}");
+}
+
+#[test]
+fn mcp03_criterion_11_a_run_past_the_deadline_over_stdio() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn_with(
+        Some(root),
+        root,
+        &[
+            ("APIFORGE_MCP_TEST_STEP_DELAY_MS", "200"),
+            ("APIFORGE_MCP_TEST_DEADLINE_MS", "300"),
+        ],
+    );
+    initialize(&mut server);
+    let report = call(&mut server, 2, "run", json!({ "path": SCENARIO }));
+    let report = structured(&report);
+    assert_eq!(report["status"], "cancelled");
+    assert_eq!(report["ended_by"], "timed_out");
+    // The server stays up.
+    let overview = call(&mut server, 3, "project_overview", json!({}));
+    assert_eq!(structured(&overview)["name"], "Demo shop");
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp03_eof_during_a_run_cancels_it_and_ends_the_process() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn_with(
+        Some(root),
+        root,
+        &[("APIFORGE_MCP_TEST_STEP_DELAY_MS", "300")],
+    );
+    initialize(&mut server);
+    send_call(&mut server, 2, "run", json!({ "path": SCENARIO }));
+    thread::sleep(Duration::from_millis(400));
+    let (status, elapsed, _, stderr) = server.close();
+    assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    assert!(elapsed < Duration::from_secs(5), "EOF took {elapsed:?}");
+    assert!(!root.join(".apiforge/local").exists());
 }

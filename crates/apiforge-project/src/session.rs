@@ -28,6 +28,9 @@ mod external;
 pub use execution::PreparedRun;
 #[path = "files.rs"]
 mod files;
+#[path = "new_document.rs"]
+mod new_document;
+pub use new_document::{NewDocumentCheck, RegistrationProblem};
 #[path = "publish.rs"]
 mod publish;
 #[path = "recovery.rs"]
@@ -215,6 +218,14 @@ impl ProjectSession {
             Arc::new(FixedPlacer),
             1,
         )
+    }
+
+    /// As `open_saved_read_only`, but a registered source over the 1 MiB
+    /// limit does not fail the load: that document is `Unavailable::TooLarge`
+    /// and the others are served (MCP-03).
+    pub fn open_saved_tolerant(root: impl AsRef<Path>) -> Result<Self> {
+        let _ = root;
+        unimplemented!("MCP-03")
     }
 
     /// Stable saved definitions under the writer lock. Never falls back to a

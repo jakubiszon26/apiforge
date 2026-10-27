@@ -161,6 +161,12 @@ async fn call<T: Serialize + Send + 'static>(
 
 /// Serves until stdin ends, then returns. The runtime exists only here.
 pub fn serve_stdio(folder: PathBuf) -> io::Result<()> {
+    serve_stdio_with(folder, crate::tools::RunSettings::default())
+}
+
+/// As `serve_stdio`, with the run limits of `settings`.
+pub fn serve_stdio_with(folder: PathBuf, settings: crate::tools::RunSettings) -> io::Result<()> {
+    let _ = settings;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

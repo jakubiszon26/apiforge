@@ -258,14 +258,17 @@ version = "0.1.0"
 dependencies = [
  "apiforge-core",
  "apiforge-project",
+ "apiforge-runner",
  "apiforge-script",
  "apiforge-storage",
+ "indexmap",
  "rmcp",
  "schemars",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

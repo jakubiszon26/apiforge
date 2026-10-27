@@ -1,0 +1,19 @@
+       ok  Product
+       ok    Fetch product
+       ok    Product
+       ok  Active promotion
+       ok    Promotion status
+       ok    Promotion must be active
+       ok    product
+       ok  Expected price
+       ok  Add to cart
+       ok    Product ID
+       ok    Cart item
+       ok    Create cart
+       ok    Fetch cart
+       ok    Cart
+       ok  Promotional price
+       ok  Field inna_nazwa
+       ok  Delete cart
+       ok  Cart was deleted
+Passed
