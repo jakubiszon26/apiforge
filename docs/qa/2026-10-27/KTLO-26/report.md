@@ -63,12 +63,17 @@ No file under `crates/apiforge-storage` changes. At `4885f5c`:
 
 ### 6. CI
 
-CI_LINE
+The branch's CI run on `7d80824` (the fix plus this report's first version):
+[40529343975](https://github.com/jakubiszon26/apiforge/actions/runs/40529343975),
+**success** — `Build & Test` passed on `ubuntu-24.04` and on `windows-2022`,
+and the Windows log shows both KTLO-26 tests `ok`. The later commit changes
+only this section; its run is on the pull request.
 
 ## Windows
 
 Not run locally. The change is platform-independent session code with no
-interface; the only Windows evidence is the branch's CI run above.
+interface; the only Windows evidence is the branch's CI run above, where the
+whole suite passed on `windows-2022`, the two KTLO-26 tests among it.
 
 ## Not verified
 
