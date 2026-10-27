@@ -297,7 +297,14 @@ ignored until this is decided.
 ## A real workspace that migration refuses
 
 - Recorded: 2026-10-25
-- Status: open; startup falls back rather than stranding the session
+- Status: open (KTLO-03, #5). A synthetic workspace reproduces
+  the refusal with and without KTLO-04: a check whose inputs are stored as
+  `expected, actual` (its request was replaced on the board) prints and reads
+  back as `actual, expected`; the checkpoint's semantic digest hashes that
+  order, so the sealed checkpoint does not describe its own source
+  (`crates/apiforge-project/tests/migration_refusal.rs`). The fix awaits a
+  decision; the *Migration stopped* window (KTLO-03's second part) replaces
+  the fallback described below.
 
 Migration verifies every prepared project by reloading it through the new
 loader and comparing it with the workspace it came from. On a real six-project

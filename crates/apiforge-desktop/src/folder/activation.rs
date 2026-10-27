@@ -46,11 +46,11 @@ pub(super) struct Activated {
 /// Whether managed startup can proceed, and the migration it needs first.
 ///
 /// Opening a project is the window's own asynchronous work. Migrating a legacy
-/// workspace is not: it happens once in the life of an installation, and if it
-/// fails the answer is that the workspace window should open instead. A window
-/// cannot change which application it is running once it exists, so that has to
-/// be known before one is built, and a migration that leaves the user with an
-/// error screen and no way back is worse than one that makes them wait.
+/// workspace is not: it happens once in the life of an installation. A window
+/// cannot change which application it is running once it exists, so whether it
+/// can has to be known before one is built. A migration that refuses is its own
+/// start, naming what it refused (KTLO-03); the causes only the workspace
+/// window can resolve are `Legacy`.
 pub enum Start {
     /// Managed startup; the slow work runs in the folder window.
     Managed,
@@ -67,6 +67,41 @@ pub struct Refusal {
     pub project: Option<String>,
     pub scenario: Option<String>,
     pub reason: String,
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(project) = &self.project {
+            write!(formatter, "project \u{201c}{project}\u{201d}: ")?;
+        }
+        write!(formatter, "{}", self.reason)?;
+        if let Some(scenario) = &self.scenario {
+            write!(formatter, " (scenario \u{201c}{scenario}\u{201d})")?;
+        }
+        Ok(())
+    }
+}
+
+impl Refusal {
+    fn of(error: &apiforge_project::Error) -> Self {
+        match error {
+            apiforge_project::Error::Migration(MigrationError::Verification {
+                project_name,
+                scenario,
+                reason,
+                ..
+            }) => Self {
+                project: Some(project_name.clone()),
+                scenario: scenario.clone(),
+                reason: (*reason).to_owned(),
+            },
+            other => Self {
+                project: None,
+                scenario: None,
+                reason: other.to_string(),
+            },
+        }
+    }
 }
 
 pub fn decide(data: &Path) -> Start {
@@ -99,7 +134,7 @@ pub fn decide(data: &Path) -> Start {
     let decision = match ready {
         Err(reason) => Start::Legacy(Some(reason)),
         // Migrating here rather than on the worker, so that a workspace which
-        // cannot be migrated still opens the window that can work with it.
+        // cannot be migrated is known before any window exists.
         // A migration that succeeded leaves a catalogue, so every later start
         // takes the fast path and reads it instead.
         Ok(()) => match migrate_workspace(&store) {
@@ -107,10 +142,10 @@ pub fn decide(data: &Path) -> Start {
             Err(apiforge_project::Error::Migration(MigrationError::InputsChanged)) => {
                 match migrate_workspace(&store) {
                     Ok(_) => Start::Managed,
-                    Err(error) => Start::Legacy(Some(error.to_string())),
+                    Err(error) => Start::Refused(Refusal::of(&error)),
                 }
             }
-            Err(error) => Start::Legacy(Some(error.to_string())),
+            Err(error) => Start::Refused(Refusal::of(&error)),
         },
     };
     // The worker takes the lock again for the work itself; holding it here

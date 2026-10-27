@@ -177,8 +177,10 @@ fn managed_opening() -> Result<Opening, String> {
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
+        // The stop window of decision 3 comes with KTLO-03's second part; until
+        // then a refusal is reported and opens the workspace window, as before.
         folder::Start::Refused(refusal) => {
-            eprintln!("Opening the workspace instead: {}", refusal.reason);
+            eprintln!("Migration refused {refusal}. Opening the workspace instead.");
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
