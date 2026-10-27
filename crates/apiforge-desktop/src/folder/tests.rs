@@ -21,6 +21,8 @@ mod popup_tests;
 mod project_interaction_tests;
 #[path = "recovery_tests.rs"]
 mod recovery_tests;
+#[path = "report_tests.rs"]
+mod report_tests;
 #[path = "storage_tests.rs"]
 mod storage_tests;
 
