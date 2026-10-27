@@ -277,3 +277,49 @@ fn a_migration_that_cannot_finish_activates_nothing_and_reports_it() {
     assert!(crate::testing::folder(&harness).open_error.is_none());
     assert!(data.path().join(CATALOGUE_FILE).exists());
 }
+
+/// KTLO-03 criterion 4: a migration that refuses is its own start, naming
+/// the project, the scenario and the reason. Nothing is activated.
+#[test]
+fn ktlo03_a_refused_migration_starts_the_stop_window_not_the_workspace_window() {
+    use crate::testing::legacy_workspace::*;
+    let data = tempfile::tempdir().unwrap();
+    drop(write(data.path(), &with_a_broken_project()));
+
+    let Start::Refused(refusal) = decide(data.path()) else {
+        panic!("a refused migration is reported as its own start");
+    };
+    assert_eq!(refusal.project.as_deref(), Some(REFUSED_PROJECT_NAME));
+    assert_eq!(refusal.scenario.as_deref(), Some(REFUSED_SCENARIO_NAME));
+    assert!(
+        refusal
+            .reason
+            .contains("a scenario differs after reloading"),
+        "{}",
+        refusal.reason
+    );
+    assert!(!data.path().join(CATALOGUE_FILE).exists());
+}
+
+/// KTLO-03 decision 4: the causes that are not a refused migration keep
+/// opening the workspace window. The lock and the backup decision are the
+/// tests above; these are the unreadable drafts and a workspace that cannot be
+/// loaded at all.
+#[test]
+fn ktlo03_the_other_causes_still_open_the_workspace_window() {
+    let data = tempfile::tempdir().unwrap();
+    legacy(data.path());
+    fs::write(data.path().join("drafts.json"), b"{ not drafts").unwrap();
+    let Start::Legacy(Some(reason)) = decide(data.path()) else {
+        panic!("unreadable drafts are left to the workspace window");
+    };
+    assert!(reason.contains("drafts"), "{reason}");
+
+    let data = tempfile::tempdir().unwrap();
+    fs::write(data.path().join("workspace.json"), b"{ not a workspace").unwrap();
+    assert!(
+        matches!(decide(data.path()), Start::Legacy(Some(_))),
+        "a workspace that cannot be loaded is left to the workspace window"
+    );
+    assert!(!data.path().join(CATALOGUE_FILE).exists());
+}

@@ -56,6 +56,17 @@ pub enum Start {
     Managed,
     /// Open the legacy workspace window instead, for the stated reason.
     Legacy(Option<String>),
+    /// Migration refused the workspace: report it and stop (KTLO-03).
+    Refused(Refusal),
+}
+
+/// Why migration refused the legacy workspace, for the *Migration stopped*
+/// window: the project and scenario it names, when it names them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refusal {
+    pub project: Option<String>,
+    pub scenario: Option<String>,
+    pub reason: String,
 }
 
 pub fn decide(data: &Path) -> Start {

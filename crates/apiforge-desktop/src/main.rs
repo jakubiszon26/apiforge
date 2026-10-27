@@ -177,6 +177,11 @@ fn managed_opening() -> Result<Opening, String> {
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
+        folder::Start::Refused(refusal) => {
+            eprintln!("Opening the workspace instead: {}", refusal.reason);
+            let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
+            Ok(Opening::Workspace(app::Source::Storage(store)))
+        }
     }
 }
 
