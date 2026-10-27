@@ -296,7 +296,7 @@ with screenshots.
 | M5 | `feat/code-editor` | Completion engine, `CodeEditor` widget, body views and modes, completion in small fields | M4 |
 | M6 | `feat/live-sync` | Code panel, buffers, drafts and both histories (ADR 0007), both sync directions, selection sync; `apiforge run` | S1, M2, M5 |
 | M3 | `feat/variable-proxies` | Variable mark in the inspector, Variables panel, proxies, nearest-proxy wiring, navigation | M2 |
-| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, go to definition and rename from the code panel, language reference for users and MCP, screenshot QA | M6, M3 |
+| M7 | `feat/code-canvas-hardening` | Performance budgets checked, accessibility labels for the editor, go to definition and rename from the code panel, screenshot QA | M6, M3 |
 
 S1 lands before anything extends what is stored, because M1 already changes the
 file format and ADR 0007 adds a second file. M4 and M2 are independent and can run
