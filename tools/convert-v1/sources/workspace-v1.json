@@ -83,6 +83,7 @@
                   "headers": {},
                   "query": {},
                   "timeoutMs": 10000,
+                  "contractId": "Product",
                   "inputPorts": [
                     {
                       "name": "id",
@@ -323,6 +324,7 @@
                   "headers": {},
                   "query": {},
                   "timeoutMs": 10000,
+                  "contractId": "Cart",
                   "inputPorts": [
                     {
                       "name": "id",
