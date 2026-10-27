@@ -6,11 +6,12 @@
   3 and 4 taken and the mock-up (5) approved 2026-10-27; after KTLO-04 (#6).
   Implemented 2026-10-27 in two parts (see *What the implementation found*):
   part 1 — the fixture, the named refusal and `Start::Refused` (criteria 1, 3,
-  the first half of 4, 6) — awaits acceptance in PR #78, 747 changed
-  lines (M); part 2 — the *Migration stopped* window (the rest of 4, and 5) —
-  follows from `main` once part 1 is merged; its QA report is
-  `docs/qa/2026-10-27/KTLO-03/report-part2.md`. Criterion 2 is not met: the
-  refusal's cause is not KTLO-04, and fixing it is a decision for the owner
+  the first half of 4, 6) — merged in PR #78 (747 changed lines). Decisions 6
+  and 7 taken 2026-10-27 after part 1. Part 2 — the *Migration stopped*
+  window (the rest of 4, and 5) and the fix of decision 6 (criterion 2), with
+  criterion 3's new broken fixture — awaits acceptance in the part 2 pull
+  request, 1 164 changed lines — over M (see *Size*). QA report for both parts:
+  `docs/qa/2026-10-27/KTLO-03/report.md`
 - Mock-up branch: `mock/ktlo-03-migration-stop` (throwaway; captures in
   `docs/qa/2026-10-27/KTLO-03/`, posted on #5)
 - Analysis model: Fable · Implementation model: Opus 5.5
@@ -39,10 +40,10 @@ migration refuses*; `main.rs:168-181`).
   decision, unreadable drafts, a load error — and only the refused migration
   changes route.
 - Removed or hidden: the silent fallback.
-- Migrated or converted: the owner's workspace, once the cause is fixed —
-  expected to be KTLO-04's missing checkpoint: a scenario whose identities
-  were never sealed gets fresh ones on reload, which `verify`
-  (`migration.rs:689-714`) rightly rejects.
+- Migrated or converted: the owner's workspace, once the cause is fixed. It
+  was expected to be KTLO-04's missing checkpoint; it was not (see *What the
+  implementation found*): it is the order in which a checkpoint records a
+  block's inputs, fixed for migration by decision 6.
 - Default behaviour that changes: a refused migration ends at the stop
   window, not in the legacy window.
 
@@ -76,6 +77,24 @@ person sees, before any project window exists, in the application's theme.
    (declined): for all six, which would need the lock and the backup decision
    handled in a new window.
 5. **(taken 2026-10-27) The mock-up** as a whole.
+6. **(taken 2026-10-27, after part 1: A) How the refusal's cause is fixed.**
+   The cause: after a request is deleted and a new one wired back into a
+   comparison, the legacy model stores the comparison's inputs as
+   `expected, actual` while its printed source reads them back as
+   `actual, expected`. The two compare equal as values, so the printer
+   accepts the source, but a checkpoint's semantic digest hashes the stored
+   order; the checkpoint migration sealed therefore did not describe its own
+   source, the reload only reconciled against it, the scenario came back with
+   its blocks in source order, and `verify` refused the project. A: only
+   migration seals its checkpoints with the input and operand maps in the
+   order the source reads back — no format change, existing projects
+   untouched. B (declined): an order-independent digest, which would make
+   every existing checkpoint with an unsorted map stop matching once.
+7. **(taken 2026-10-27) Part 2 is one pull request from `main`** holding the
+   window and the fix of decision 6, so criterion 2 is met; criterion 3 gets
+   a different deliberately broken fixture. The suspected twin in a folder
+   session (a board edit that removes and re-wires an input, then saves) gets
+   its own ticket.
 
 ## Acceptance criteria
 
@@ -121,21 +140,26 @@ person sees, before any project window exists, in the application's theme.
   *Order desk* with that check, *Support desk*) is refused on its fifth
   project with four projects left in staging — what the owner saw — at
   `280d6bd` (before KTLO-04) and on `main` with KTLO-04 alike.
-- **Criterion 2 is not met** and its test is `#[ignore = "KTLO-03: …"]`.
-  Fixing the cause changes how checkpoints are sealed, which is the owner's
-  decision (migration, and possibly existing checkpoints). Two ways, for the
-  planner to put to the owner:
-  - A. Migration only: `prepare_project` (and migration's recovered
-    components) seal each checkpoint with its input and operand maps in the
-    order the printed source reads back. No format change, nothing else
-    changes; existing folder projects are untouched. About 60 lines and a
-    test; criterion 2 then passes and criterion 3 needs another broken
-    fixture.
-  - B. Make the semantic digest independent of map order. Also covers a
-    folder-session board edit that removes and re-wires an input before a
-    save (suspected, not verified), but every existing checkpoint with an
-    unsorted map would stop matching its source once, so that document's
-    identities and layout are reconciled again at its next open.
+- **Criterion 2** was not met by part 1 (its test was
+  `#[ignore = "KTLO-03: …"]`); the owner chose A of the two fixes the analysis
+  offered (decision 6) and part 2 implements it in `migration.rs` alone:
+  before preparing a project, migration prints and reads back each scenario
+  and component and orders every block's inputs, and every expression's
+  operands, as the source reads them back. The six projects then migrate
+  and criterion 2's test passes without its ignore.
+- **Criterion 3 needed a new broken project** (part 2). With decision 6 in
+  place, no map order the legacy writer can save was found that still
+  refuses (also tried: object fields, literal objects, parameters, sample
+  responses, `-0.0`), and verification restores every scenario from its
+  checkpoint. What migration still refuses is a scenario that cannot be
+  written as a folder source at all: *Partner feed*'s request reads an
+  environment value the project never sets, which a legacy document may keep
+  and a folder source may not. That surfaced as the anonymous
+  `Error::Unprintable`, naming neither project nor scenario, so part 2 checks
+  each scenario prints before preparing the project and refuses with
+  `Verification { reason: "a scenario cannot be written as code without
+  loss" }` naming both. A component that cannot be printed still gives the
+  anonymous error.
 - **Criterion 3's "staged folders byte-identical before and after"** cannot
   hold across two attempts: every attempt prepares unpublished folders afresh
   with new document IDs. The test checks the originals byte-for-byte, that
@@ -143,7 +167,13 @@ person sees, before any project window exists, in the application's theme.
   second attempt is refused the same way.
 - **Size.** Over M with the window, so split at the appendix's seam: part 1
   (criteria 1–3 and `Start::Refused`) is one pull request; part 2 (the window,
-  the rest of criterion 4, and 5) follows from `main` once part 1 is merged.
+  the rest of criterion 4, and 5) follows from `main` once part 1 is merged. Part 2, measured with `git diff --stat
+  origin/main...HEAD` (captures not counted), is **1 164 changed lines, over
+  M's 800**: the window 524 (code 250, tests 274), the fix of decision 6 and
+  the named refusal 123 (`migration.rs`), the fixture and project tests 184,
+  docs 333 (QA report 226, ticket 79, review notes 23, development
+  guide 5). Decision 7 put the window and the fix in one pull request; the
+  tests are not trimmed.
 
 ## Not in scope
 
