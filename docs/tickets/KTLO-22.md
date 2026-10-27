@@ -1,8 +1,9 @@
 # KTLO-22: Publishing from the header is sometimes not recorded yet when the test asserts it
 
 - Size: S · Owner review: 15 min · Risk: none
-- State: Approved 2026-10-27 (issue #51); cause re-analysed the same day after
-  the first fix was measured not to work — see Cause
+- State: Awaiting acceptance (issue #51); approved 2026-10-27, cause
+  re-analysed the same day after the first fix was measured not to work — see
+  Cause
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
