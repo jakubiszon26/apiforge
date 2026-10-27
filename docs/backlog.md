@@ -32,10 +32,12 @@ the open-files bar hides itself). Exit criteria:
       KTLO-05d #23.
 - [ ] The process documents were followed once end to end, and amended where
       the pilot required it.
-- [ ] The regression smoke list has run on Linux and on Windows (KTLO-07, #10).
-- [ ] The two interface findings the owner raised on the mock-ups — one header
+- [x] The regression smoke list has run on Linux and on Windows (KTLO-07, #10;
+      closed 2026-10-26).
+- [x] The two interface findings the owner raised on the mock-ups — one header
       above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
-      #17) — are accepted through the same mock-up → test → report path.
+      #17) — are accepted through the same mock-up → test → report path
+      (KTLO-13 merged in #39, KTLO-12 in #41 and #47).
 - [ ] The five interface wishes of 2026-10-26 are decided on their mock-ups
       (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44, KTLO-20 #46); those
       approved are accepted or carried into the next sprint with their state
@@ -55,8 +57,8 @@ work does not start.
 | --- | --- | --- |
 | — | KTLO-01 Process documents — merged in #1 | M (docs) · 30 min; estimated S, ~730 lines written |
 | — | KTLO-02 Stage II retrospective — merged in #1; facts corrected in #2 | S (docs) · 15 min |
-| [#5](https://github.com/jakubiszon26/apiforge/issues/5) | KTLO-03 Migration refuses a real six-project workspace | M · 30 min · `migration` |
-| [#6](https://github.com/jakubiszon26/apiforge/issues/6) | KTLO-04 Identity checkpoint at initialise, register_existing and import | S–M · 30 min · `format` |
+| [#5](https://github.com/jakubiszon26/apiforge/issues/5) | KTLO-03 Migration refuses a real six-project workspace; [ticket](tickets/KTLO-03.md); after KTLO-04 | M · 30 min · `migration`, `visible UI` |
+| [#6](https://github.com/jakubiszon26/apiforge/issues/6) | KTLO-04 Identity checkpoint at initialise, register_existing and import; [ticket](tickets/KTLO-04.md) | S–M · 30 min · `format` |
 | [#7](https://github.com/jakubiszon26/apiforge/issues/7) | KTLO-05a Block library — analysis and mock-up; [ticket](tickets/KTLO-05a.md) | S · 20 min · `visible UI`; actual 120 lines, 1 round |
 | [#8](https://github.com/jakubiszon26/apiforge/issues/8) | KTLO-05b Block library — implementation (pilot of the full procedure); [ticket](tickets/KTLO-05b.md) — merged in #21 | M · 45 min · `visible UI`; actual 788 lines, 2 rounds |
 | [#22](https://github.com/jakubiszon26/apiforge/issues/22) | KTLO-05c The library panel's width is remembered per project (owner decision: unknown panel sizes are ignored) | S · 10 min · `format` |
