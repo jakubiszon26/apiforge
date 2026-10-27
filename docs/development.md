@@ -243,14 +243,57 @@ read-only for each call and writes nothing, not even `.apiforge/local`.
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests`, server and reference version |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests`, server version, `reference_version` |
+| `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
-| `check` | `path`? | per document: path, `source_sha256`, `valid`, diagnostics, `omitted`; a project with errors is reported, not refused |
+| `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
+| `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `path_rejected`, `invalid_text`) |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
+| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document: `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`; with `full: true` the runner's JSON report instead of the steps |
+
+`check_text` checks a proposed text without saving it, while `run` executes
+the saved source, so a model that wants to run its draft writes it first.
 
 `source_sha256` is the SHA-256 of the saved bytes. `generation` is the
 project's head generation, which advances on every commit; it is 0 in a fresh
-clone, before the first commit on that machine.
+clone, before the first commit on that machine. A registered source over
+1 MiB does not stop the server: that document is `unavailable: "too_large"`
+and the others are served.
+
+`run` sends nothing: `live: true` is `live_disabled` (*live requests are not
+enabled on this server*) until live requests land (MCP-06). A failed verdict
+is a result, not an error. A component runs alone with `inputs`, a JSON
+object of values by input name read by the rules of the Run inputs dialog
+(a value of the input's type, or text the dialog would read as one, such as
+`"7"` for a number); the defaults written in code fill the rest. A missing
+input without a default, an unknown name or a value of another type is
+`invalid_inputs` with `details.missing`, `details.unknown` and
+`details.invalid`; a scenario takes no inputs.
+
+One run at a time per server: a second `run` meanwhile is
+`run_in_progress`, while the other tools stay answered. The client cancels a
+run with `notifications/cancelled`; the main phase stops at the next step,
+the cleanup still runs, the run's slot frees, and the request gets no
+response, as the protocol says, while stderr says `apiforge mcp: run:
+cancelled`. A run still going after ten minutes is cancelled the same way
+and answered with `status: cancelled`, `ended_by: timed_out`; a step whose
+request was on its way is marked `may_have_reached_api`. At the end of stdin
+a run in progress is cancelled and its cleanup waited for up to ten seconds.
+Two environment variables are test seams for this and are not set in use:
+`APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline and
+`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run.
+
+### Resources
+
+`resources/list` returns `apiforge://reference`, the language reference, and
+`apiforge://source/<path>` for every registered document; `resources/read`
+returns the reference or the saved text as `text/plain`. In Claude Code,
+`@apiforge:apiforge://reference` in a prompt attaches the reference. A source
+URI's path is percent-decoded and must then pass the path rule below, so
+`apiforge://source/%2e%2e/x.afs` or `apiforge://source/.apiforge/…` is
+refused with a JSON-RPC error whose `data.code` is `path_rejected`; an
+unregistered path is `resource_not_found` with `data.code`
+`unknown_document`.
 
 ### The contract
 
@@ -270,6 +313,7 @@ clone, before the first commit on that machine.
   `project_unreadable` (any other storage failure, with its message),
   `recovery_required` (an interrupted transaction), `unknown_document`
   (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
+  `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,
   `path_rejected` and `result_too_large`; `wrote` is always `false` for them.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
@@ -279,8 +323,11 @@ clone, before the first commit on that machine.
   a `\r` before it belongs to the break. A fix carries its replacement and its
   own range.
 - Limits: the analysis keeps 1 000 diagnostics per document and `omitted`
-  counts the rest; a result over 2 MiB is `result_too_large`, never cut; a
-  `text` argument over 1 MiB will be `too_large` (from MCP-03).
+  counts the rest, an error taking a warning's place at the limit so a
+  project-level error is never the one dropped; a result or an error over
+  2 MiB is `result_too_large` with how to narrow the request (`full: false`,
+  one path), never cut; a `text` argument over 1 MiB is `too_large` before
+  anything else.
 
 ## The legacy JSON code panel
 
