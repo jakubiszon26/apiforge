@@ -91,6 +91,15 @@ fn ktlo03_the_stop_window_says_what_was_refused_and_offers_two_ways_out() {
             quit.rect().left() >= open.rect().right(),
             "{size:?}: Quit is the last button"
         );
+        // On the last row: 24 points above the window's bottom edge, as in the
+        // mock-up (found in the release-binary capture, KTLO-03 QA).
+        for button in [open.rect(), quit.rect()] {
+            assert!(
+                (button.bottom() - inner.bottom()).abs() <= 1.0,
+                "{size:?}: {button:?} ends on the margin {}",
+                inner.bottom()
+            );
+        }
     }
 }
 

@@ -64,19 +64,18 @@ impl StopWindow {
             )
             .wrap(),
         );
-        // The buttons sit on the window's last row, whatever the text's length.
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(widgets::action(Icon::Close, "Quit")).clicked() {
-                    self.choice = Some(Choice::Quit);
-                }
-                if ui
-                    .add(widgets::action(Icon::Folder, "Open the previous workspace"))
-                    .clicked()
-                {
-                    self.choice = Some(Choice::OpenPrevious);
-                }
-            });
+        // The buttons sit on the window's last row, whatever the text's length:
+        // right to left, aligned to the bottom of the space that remains.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+            if ui.add(widgets::action(Icon::Close, "Quit")).clicked() {
+                self.choice = Some(Choice::Quit);
+            }
+            if ui
+                .add(widgets::action(Icon::Folder, "Open the previous workspace"))
+                .clicked()
+            {
+                self.choice = Some(Choice::OpenPrevious);
+            }
         });
     }
 
