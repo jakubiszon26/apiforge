@@ -16,8 +16,10 @@ end to end once. No new features, with one exception the owner made on
 2026-10-26: five interface wishes for the folder window (KTLO-17, KTLO-11,
 KTLO-18, KTLO-19, KTLO-20) join the sprint and go through the full path,
 mock-up → decision → acceptance tests → QA report. They add about 115 minutes
-of owner review. KTLO-20 is the last ticket added to this sprint; its scope
-is closed. Exit criteria:
+of owner review. A sixth wish was added later the same day, after KTLO-20 had
+been called the last: running a component from its own tab (KTLO-23, two parts,
+65 further owner minutes), an owner decision that reopened the sprint's scope
+for that one ticket. Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -37,6 +39,9 @@ is closed. Exit criteria:
       (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44, KTLO-20 #46); those
       approved are accepted or carried into the next sprint with their state
       recorded.
+- [ ] A component runs from its tab the way a scenario does: the mock-up is
+      decided and the two parts are accepted, or carried into the next sprint
+      with their state recorded (KTLO-23a #53, KTLO-23b #54).
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -66,8 +71,11 @@ work does not start.
 | [#14](https://github.com/jakubiszon26/apiforge/issues/14) | KTLO-11 Project files in Diagram: the left panel switches between Library and Files; [ticket](tickets/KTLO-11.md); after KTLO-17 | M · 30 min · `visible UI`, `format` |
 | [#43](https://github.com/jakubiszon26/apiforge/issues/43) | KTLO-18 The Problems section expands over the code with one click; [ticket](tickets/KTLO-18.md) | S · 15 min · `visible UI` |
 | [#44](https://github.com/jakubiszon26/apiforge/issues/44) | KTLO-19 Run results can fill the window; [ticket](tickets/KTLO-19.md) | S · 20 min · `visible UI` |
-| [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — the last ticket added to this sprint; animated (owner decision) | M · 30 min · `visible UI` |
+| [#46](https://github.com/jakubiszon26/apiforge/issues/46) | KTLO-20 A sleeping dog keeps the empty board company in Diagram and Split; [ticket](tickets/KTLO-20.md) — last of the five wishes; animated (owner decision) | M · 30 min · `visible UI` |
 | [#49](https://github.com/jakubiszon26/apiforge/issues/49) | KTLO-21 A reader still sees a live writer right after the writer is dropped (flaky on Linux CI); [ticket](tickets/KTLO-21.md) | S · 20 min; actual 393 lines (M), 1 round |
+| [#51](https://github.com/jakubiszon26/apiforge/issues/51) | KTLO-22 Publishing from the header is sometimes not recorded yet when the test asserts it (flaky on Windows CI) | S · 10 min |
+| [#53](https://github.com/jakubiszon26/apiforge/issues/53) | KTLO-23a A component runs from its tab — runner, session and the Run button; [ticket](tickets/KTLO-23.md) | M · 45 min · `visible UI` |
+| [#54](https://github.com/jakubiszon26/apiforge/issues/54) | KTLO-23b A component runs from its tab — the Run inputs dialog; [ticket](tickets/KTLO-23b.md); after KTLO-23a | S · 20 min · `visible UI` |
 
 ## Later
 
@@ -88,6 +96,9 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
   failed once on windows-2022 after #19 (run 40304041875) and passed on the
   same commit: a foreign write was not seen as a conflict. Timing-sensitive;
   needs a ticket if it repeats.
+- `apiforge run --folder --component <name>`: the command line runs a saved
+  component the way the window will after KTLO-23 (owner decision of
+  2026-10-26 kept it out of that ticket).
 - Removal of the legacy JSON mode once the KTLO-06 parity list is closed.
 - Roadmap M7 editor features ([roadmap](roadmap.md)).
 - Windows release gates: interactive native QA and directory durability
