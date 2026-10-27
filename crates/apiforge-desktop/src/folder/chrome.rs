@@ -255,11 +255,20 @@ impl FolderApp {
         }
     }
 
+    /// The storage indicator, shown only while a tab is open: with no file
+    /// open nothing is at stake, and the indicator alone would bring the band
+    /// back for a moment and move the central area (KTLO-24, round 2).
+    fn storage_indicator(&self) -> Option<&'static str> {
+        self.storage
+            .label()
+            .filter(|_| !self.workbench.tabs().is_empty())
+    }
+
     /// Whether [`Self::notices`] draws anything, by the same conditions, so
     /// the band under the app header is left out when it would carry neither
     /// a tab nor a notice (KTLO-24).
     pub(super) fn has_notices(&self) -> bool {
-        if self.storage.label().is_some() {
+        if self.storage_indicator().is_some() {
             return true;
         }
         let Some(session) = self.session.as_ref() else {
@@ -278,7 +287,7 @@ impl FolderApp {
     /// The notices under the tabs; [`Self::has_notices`] says whether any is
     /// due and must change with them.
     pub(super) fn notices(&mut self, ui: &mut egui::Ui) {
-        if let Some(label) = self.storage.label() {
+        if let Some(label) = self.storage_indicator() {
             ui.horizontal(|ui| {
                 ui.spinner();
                 widgets::hint(ui, label);
