@@ -93,6 +93,16 @@ fn stage_ii_screens_and_dialogs_name_every_control() {
         app.workbench.mode = mode;
         assert_named(&format!("{mode:?}"), &mut app, &context);
     }
+    // KTLO-18 criterion 6: the Problems section expanded over the code, in
+    // both modes that show it, as the button leaves it.
+    app.problems_expanded = true;
+    app.problems_epoch += 1;
+    for mode in [Mode::Code, Mode::Split] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?}, problems expanded"), &mut app, &context);
+    }
+    app.problems_expanded = false;
+    app.problems_epoch += 1;
     app.workbench.mode = Mode::Code;
     let path = SCENARIO.to_owned();
     let prompts = [

@@ -406,8 +406,23 @@ fn expanding_the_problems_section_keeps_a_strip_of_code_above_it() {
             editor.height() > 0.0,
             "at {size:?}: the editor is gone while the problems are expanded"
         );
-        let label = editor_label(&harness);
-        assert_within_window(&harness, &[&label, "PROBLEMS", "Restore problems"]);
+        // The editor's own rect is all of its text laid out, which the demo's
+        // long lines take past the right of a 960-wide window, expanded or not.
+        // What the strip shows is what the code panel paints: the first lines,
+        // numbered, whole, and inside the window.
+        let window = harness.ctx.content_rect();
+        let shown: Vec<String> = line_numbers(&harness)
+            .into_iter()
+            .filter(|(_, rect, clip)| rect.bottom() <= clip.bottom() && window.contains_rect(*rect))
+            .map(|(number, ..)| number)
+            .collect();
+        assert!(
+            ["1", "2", "3", "4"]
+                .iter()
+                .all(|line| shown.iter().any(|number| number == line)),
+            "at {size:?}: the strip shows lines {shown:?}, not the first four"
+        );
+        assert_within_window(&harness, &["PROBLEMS", "Restore problems"]);
     }
 }
 
