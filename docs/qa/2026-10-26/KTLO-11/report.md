@@ -1,7 +1,8 @@
 # KTLO-11: Project files in Diagram — the left panel switches between Library and Files — QA report
 
 - Branch: `feat/ktlo-11-library-files-tabs`; captures from the release binary
-  of `08f9dc6` (the implementation commit)
+  of `08f9dc6` (the implementation commit), before `main` (KTLO-24, KTLO-04)
+  was merged in
 - Built with: `cargo build --release -p apiforge-desktop --locked`
 - Compared against mock-up: [docs/tickets/KTLO-11.md](../../../tickets/KTLO-11.md)
   (`mock-*.png` in this directory), approved 2026-10-26 on #14 with one
@@ -11,8 +12,11 @@
 - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
   --all-targets --locked -- -D warnings`, `cargo test --workspace
   --all-targets --locked` (isolated `XDG_CONFIG_HOME` and `XDG_DATA_HOME`) and
-  `apiforge-convert-v1 --fixtures --check`: all pass. The fifteen KTLO-11
-  tests passed ten runs in a row.
+  `apiforge-convert-v1 --fixtures --check`: all pass, on the implementation
+  and again after merging `main`. The fifteen KTLO-11 tests passed ten runs
+  in a row each time. After the merge the *Refresh* check failed once under
+  load, because the scan it starts runs on a worker the harness does not wait
+  for; it now steps the window until the row appears.
 
 ## Captures
 
