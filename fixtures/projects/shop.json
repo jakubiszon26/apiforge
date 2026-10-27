@@ -286,7 +286,8 @@
                   "price": 80,
                   "inna_nazwa": "Oferta jesienna"
                 }
-              }
+              },
+              "contractId": "Product"
             }
           },
           {
@@ -546,7 +547,8 @@
                 "productId": 123,
                 "quantity": 1,
                 "total": 80
-              }
+              },
+              "contractId": "Cart"
             }
           },
           {
