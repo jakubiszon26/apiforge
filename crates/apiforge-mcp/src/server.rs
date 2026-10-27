@@ -1,22 +1,50 @@
-//! The tools over MCP stdio with `rmcp`. Stdout carries protocol messages
-//! only; the server's own lines go to stderr and never quote an argument.
-use crate::{error::ToolError, tools};
+//! The tools and resources over MCP stdio with `rmcp`. Stdout carries
+//! protocol messages only; the server's own lines go to stderr and never
+//! quote an argument.
+use crate::{
+    error::{ErrorCode, ToolError},
+    executor::{CancellationToken, EndedBy},
+    resources,
+    tools::{self, RunArguments, RunSettings, Runs},
+};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::schema_for_output, wrapper::Parameters},
     model::{
-        CacheScope, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
-        ProtocolVersion, ResultType,
+        CacheScope, CallToolResult, ContentBlock, Implementation, ListResourcesResult,
+        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ResultType,
+        ServerCapabilities, ServerConfig,
     },
     service::{RequestContext, ServerInitializeError},
     tool, tool_handler, tool_router,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{io, path::PathBuf, sync::Arc, time::Duration};
+use serde_json::json;
+use std::{
+    io,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-/// The order `tools/list` returns, from the overview to the canonical text.
-const TOOL_ORDER: [&str; 4] = ["project_overview", "read_source", "check", "print"];
+/// The order `tools/list` returns: the overview and the reference first,
+/// then reading, checking, printing and running.
+const TOOL_ORDER: [&str; 7] = [
+    "project_overview",
+    "language_reference",
+    "read_source",
+    "check",
+    "check_text",
+    "print",
+    "run",
+];
+
+/// How long the end of stdin waits for a run's cleanup.
+const CLEANUP_WAIT: Duration = Duration::from_secs(10);
+
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing. These tools read the saved project and write nothing.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -32,29 +60,59 @@ pub struct CheckArguments {
     pub path: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CheckTextArguments {
+    /// A registered path, or the path a new document would have, for example
+    /// `components/new-product.afs`.
+    pub path: String,
+    /// The proposed `.afs` text, at most 1 MiB.
+    pub text: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct ApiforgeServer {
     folder: Arc<PathBuf>,
+    runs: Runs,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router(router = tool_router)]
 impl ApiforgeServer {
     pub fn new(folder: PathBuf) -> Self {
+        Self::with_run_settings(folder, RunSettings::default())
+    }
+
+    /// A server whose runs follow `settings`.
+    pub fn with_run_settings(folder: PathBuf, settings: RunSettings) -> Self {
         Self {
             folder: Arc::new(folder),
+            runs: Runs::new(settings),
             tool_router: Self::tool_router(),
         }
     }
 
+    /// The server's run slot, shared by every clone.
+    pub fn runs(&self) -> &Runs {
+        &self.runs
+    }
+
     #[tool(
-        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project and whether live requests are allowed. Reads the saved project; writes nothing.",
+        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project, whether live requests are allowed, and the version of the language reference. Reads the saved project; writes nothing.",
         output_schema = schema_for_output::<tools::ProjectOverview>(),
         annotations(title = "Project overview", read_only_hint = true)
     )]
     async fn project_overview(&self) -> Result<CallToolResult, ErrorData> {
         let folder = self.folder.clone();
         call("project_overview", move || tools::project_overview(&folder)).await
+    }
+
+    #[tool(
+        description = "The .afs language reference for models, with its version: file shape, statements, requests, expressions, assertions, cleanup, component calls, and what each diagnostic asks you to do. Read it before writing or changing a document. Also the resource apiforge://reference.",
+        output_schema = schema_for_output::<tools::Reference>(),
+        annotations(title = "Language reference", read_only_hint = true)
+    )]
+    async fn language_reference(&self) -> Result<CallToolResult, ErrorData> {
+        call("language_reference", tools::language_reference).await
     }
 
     #[tool(
@@ -90,6 +148,22 @@ impl ApiforgeServer {
     }
 
     #[tool(
+        description = "Checks a proposed text without saving it: the diagnostics the text would have as the document at `path`, with positions as read_source gives them, `valid`, the project generation and the source_sha256 of what was used. For a path that is not registered, the text is checked as a new document: kind and handle from its header, and the problems a registration would meet (path_exists, handle_exists, path_rejected, invalid_text). check_text checks a proposal; run executes the saved source, so a model that wants to run its draft writes it first. Writes nothing.",
+        output_schema = schema_for_output::<tools::TextCheck>(),
+        annotations(title = "Check text", read_only_hint = true)
+    )]
+    async fn check_text(
+        &self,
+        Parameters(arguments): Parameters<CheckTextArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let folder = self.folder.clone();
+        call("check_text", move || {
+            tools::check_text(&folder, &arguments.path, &arguments.text)
+        })
+        .await
+    }
+
+    #[tool(
         description = "The canonical text of one saved document, exactly as `apiforge print` and the window write it. A document without a valid definition is the error `invalid_text` with its diagnostics. Writes nothing.",
         output_schema = schema_for_output::<tools::Printed>(),
         annotations(title = "Print", read_only_hint = true)
@@ -101,22 +175,51 @@ impl ApiforgeServer {
         let folder = self.folder.clone();
         call("print", move || tools::print(&folder, &arguments.path)).await
     }
+
+    #[tool(
+        description = "Simulates the saved scenario or component at `path` with the sample responses written in it: nothing is sent and nothing is written. Returns `status` (passed, failed or cancelled; a failed verdict is a result, not an error), every step with handle, label, status, message and, for a failed comparison, expected and actual, a component's steps nested beneath it, the generation and source_sha256. A component runs alone with `inputs` by name, its defaults filling the rest. `full: true` returns the runner's complete JSON report instead of the steps. run executes the saved source; check_text checks a proposal. One run at a time; a cancelled request or the ten-minute deadline stops the run and its cleanup still runs.",
+        output_schema = schema_for_output::<tools::RunReport>(),
+        annotations(title = "Run (simulation)", read_only_hint = true)
+    )]
+    async fn run(
+        &self,
+        Parameters(arguments): Parameters<RunArguments>,
+        cancel: CancellationToken,
+    ) -> Result<CallToolResult, ErrorData> {
+        let folder = self.folder.clone();
+        let runs = self.runs.clone();
+        call("run", move || {
+            let report = tools::run(&folder, &arguments, &runs, cancel)?;
+            match report.ended_by {
+                EndedBy::Completed => {}
+                EndedBy::Cancelled => eprintln!("apiforge mcp: run: cancelled"),
+                EndedBy::TimedOut => eprintln!("apiforge mcp: run: timed_out"),
+            }
+            Ok(report)
+        })
+        .await
+    }
 }
 
-#[tool_handler(
-    router = self.tool_router,
-    name = "apiforge",
-    instructions = "API Forge project tools. Every document is named by its registered path; call project_overview first. These tools read the saved project and write nothing."
-)]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for ApiforgeServer {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_server_info(Implementation::new("apiforge", env!("CARGO_PKG_VERSION")))
+        .with_instructions(INSTRUCTIONS.to_owned())
+    }
+
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let supports_cache_hints = context
-            .protocol_version()
-            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let supports_cache_hints = supports_cache_hints(&context);
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools: TOOL_ORDER
@@ -129,10 +232,79 @@ impl ServerHandler for ApiforgeServer {
             cache_scope: supports_cache_hints.then_some(CacheScope::Public),
         })
     }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let folder = self.folder.clone();
+        let listed = blocking("resources/list", move || resources::list(&folder)).await?;
+        let supports_cache_hints = supports_cache_hints(&context);
+        Ok(ListResourcesResult {
+            result_type: Some(ResultType::COMPLETE),
+            resources: listed
+                .into_iter()
+                .map(|resource| {
+                    Resource::new(resource.uri, resource.name)
+                        .with_description(resource.description)
+                        .with_mime_type(resources::MIME_TYPE)
+                })
+                .collect(),
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Private),
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let folder = self.folder.clone();
+        let uri = request.uri;
+        let read = {
+            let uri = uri.clone();
+            blocking("resources/read", move || resources::read(&folder, &uri)).await?
+        };
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(read, uri).with_mime_type(resources::MIME_TYPE),
+        ])
+        .into())
+    }
 }
 
-/// Runs a tool on the blocking pool: storage reads must not stall the
-/// transport. The result is `structuredContent` and its pretty JSON text.
+fn supports_cache_hints(context: &RequestContext<RoleServer>) -> bool {
+    context
+        .protocol_version()
+        .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+}
+
+/// Runs a resource request on the blocking pool. A refusal is a JSON-RPC
+/// error whose `data` carries the tools' `{ code, message }`.
+async fn blocking<T: Send + 'static>(
+    name: &'static str,
+    work: impl FnOnce() -> Result<T, ToolError> + Send + 'static,
+) -> Result<T, ErrorData> {
+    let result = tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| ErrorData::internal_error("The request stopped unexpectedly", None))?;
+    result.map_err(|error| {
+        eprintln!("apiforge mcp: {name}: {}", error.code.as_str());
+        let data = Some(json!({ "code": error.code, "message": error.message }));
+        match error.code {
+            ErrorCode::PathRejected => ErrorData::invalid_params(error.message, data),
+            ErrorCode::UnknownDocument => ErrorData::resource_not_found(error.message, data),
+            _ => ErrorData::internal_error(error.message, data),
+        }
+    })
+}
+
+/// Runs a tool on the blocking pool: storage reads and runs must not stall
+/// the transport. The result is `structuredContent` and its pretty JSON
+/// text; a result or an error over 2 MiB becomes `result_too_large`.
 async fn call<T: Serialize + Send + 'static>(
     name: &'static str,
     work: impl FnOnce() -> Result<T, ToolError> + Send + 'static,
@@ -140,7 +312,7 @@ async fn call<T: Serialize + Send + 'static>(
     let result = tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| ErrorData::internal_error("The tool stopped unexpectedly", None))?;
-    let (value, is_error) = match result {
+    let (value, is_error) = match tools::bound(result) {
         Ok(value) => (serde_json::to_value(value), false),
         Err(error) => {
             eprintln!("apiforge mcp: {name}: {}", error.code.as_str());
@@ -161,27 +333,32 @@ async fn call<T: Serialize + Send + 'static>(
 
 /// Serves until stdin ends, then returns. The runtime exists only here.
 pub fn serve_stdio(folder: PathBuf) -> io::Result<()> {
-    serve_stdio_with(folder, crate::tools::RunSettings::default())
+    serve_stdio_with(folder, RunSettings::default())
 }
 
-/// As `serve_stdio`, with the run limits of `settings`.
-pub fn serve_stdio_with(folder: PathBuf, settings: crate::tools::RunSettings) -> io::Result<()> {
-    let _ = settings;
+/// As `serve_stdio`, with the run limits of `settings`. At the end of stdin a
+/// run in progress is cancelled, and its cleanup is waited for up to ten
+/// seconds.
+pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()?;
+    let server = ApiforgeServer::with_run_settings(folder, settings);
+    let runs = server.runs().clone();
     let result = runtime.block_on(async move {
-        let service = match ApiforgeServer::new(folder)
-            .serve(rmcp::transport::stdio())
-            .await
-        {
+        let service = match server.serve(rmcp::transport::stdio()).await {
             Ok(service) => service,
             // The client went away before choosing a lifecycle: a normal end.
             Err(ServerInitializeError::ConnectionClosed(_)) => return Ok(()),
             Err(error) => return Err(io::Error::other(error.to_string())),
         };
         service.waiting().await.map_err(io::Error::other)?;
+        // Ending the service cancelled every request, a run among them.
+        let started = Instant::now();
+        while runs.is_busy() && started.elapsed() < CLEANUP_WAIT {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         Ok(())
     });
     runtime.shutdown_timeout(Duration::from_millis(500));
