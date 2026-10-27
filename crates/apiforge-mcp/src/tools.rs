@@ -1,10 +1,21 @@
 //! One plain function per tool. Each call opens a fresh read-only session on
 //! the saved project: the stable read guards against a transaction in
 //! progress, and nothing is written, not even `.apiforge/local`.
-use crate::error::ToolError;
+use crate::{
+    error::{ErrorCode, ToolError},
+    folder,
+    positions::Lines,
+};
+use apiforge_project::{DocumentKind, DocumentSession, ProjectSession, Unavailable};
+use apiforge_script::MAX_DIAGNOSTICS;
+use apiforge_storage::project::ProjectError;
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::json;
 use std::path::Path;
+
+/// A result larger than this is refused with `result_too_large`, never cut.
+pub const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -146,18 +157,224 @@ pub struct Printed {
     pub generation: u64,
 }
 
-pub fn project_overview(_folder: &Path) -> Result<ProjectOverview, ToolError> {
-    unimplemented!("MCP-01")
+pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
+    let session = open(folder)?;
+    let manifest = session.manifest();
+    let holder = match session.store().has_live_writer() {
+        Ok(false) => Holder::None,
+        Ok(true) => Holder::AnotherProcess,
+        Err(error) => return Err(storage_error(apiforge_project::Error::Storage(error))),
+    };
+    bounded(ProjectOverview {
+        name: manifest.name.clone(),
+        base_url: manifest.environment.base_url.clone(),
+        variables: manifest.environment.variables.keys().cloned().collect(),
+        secret_names: manifest.environment.secret_names.clone(),
+        contracts: manifest
+            .contracts
+            .iter()
+            .map(|contract| ContractSummary {
+                id: contract.id.clone(),
+                name: contract.name.clone(),
+            })
+            .collect(),
+        documents: session
+            .documents()
+            .iter()
+            .map(|document| DocumentSummary {
+                kind: match document.entry().kind {
+                    DocumentKind::Scenario => Kind::Scenario,
+                    DocumentKind::Component => Kind::Component,
+                },
+                path: document.entry().path.as_str().to_owned(),
+                handle: match document.entry().kind {
+                    DocumentKind::Scenario => None,
+                    DocumentKind::Component => apiforge_project::declaration(document.text())
+                        .and_then(|declaration| declaration.handle),
+                },
+                base_revision: document.entry().base_revision,
+                source_sha256: document.saved_sha256().map(str::to_owned),
+            })
+            .collect(),
+        revisions: manifest
+            .revisions
+            .iter()
+            .map(|revision| RevisionSummary {
+                handle: revision.handle.clone(),
+                revision: revision.revision,
+                path: revision.path.as_str().to_owned(),
+                source_sha256: revision.source_hash.clone(),
+            })
+            .collect(),
+        generation: session.loaded_generation(),
+        holder,
+        live_requests: LiveRequests {
+            allowed: false,
+            source: "no --allow-live".into(),
+        },
+        server_version: env!("CARGO_PKG_VERSION").into(),
+        reference_version: String::new(),
+    })
 }
 
-pub fn read_source(_folder: &Path, _path: &str) -> Result<SourceText, ToolError> {
-    unimplemented!("MCP-01")
+pub fn read_source(folder: &Path, path: &str) -> Result<SourceText, ToolError> {
+    let (session, id) = open_document(folder, path)?;
+    let (document, valid) = folder::check_document(&session, &id)?;
+    let (diagnostics, omitted) = diagnostics(document);
+    bounded(SourceText {
+        path: document.entry().path.as_str().to_owned(),
+        text: match document.unavailable() {
+            None => document.text().to_owned(),
+            Some(_) => String::new(),
+        },
+        source_sha256: document.saved_sha256().map(str::to_owned),
+        generation: session.loaded_generation(),
+        valid,
+        unavailable: document.unavailable().map(|unavailable| {
+            match unavailable {
+                Unavailable::Missing => "missing",
+                Unavailable::NotUtf8 => "not_utf8",
+                Unavailable::TooLarge => "too_large",
+            }
+            .to_owned()
+        }),
+        diagnostics,
+        omitted,
+    })
 }
 
-pub fn check(_folder: &Path, _path: Option<&str>) -> Result<CheckResult, ToolError> {
-    unimplemented!("MCP-01")
+pub fn check(folder: &Path, path: Option<&str>) -> Result<CheckResult, ToolError> {
+    let (session, selected) = match path {
+        Some(path) => {
+            let (session, id) = open_document(folder, path)?;
+            (session, Some(id))
+        }
+        None => (open(folder)?, None),
+    };
+    let mut documents = Vec::new();
+    for document in session
+        .documents()
+        .iter()
+        .filter(|document| selected.as_deref().is_none_or(|id| document.id() == id))
+    {
+        let (document, valid) = folder::check_document(&session, document.id())?;
+        let (diagnostics, omitted) = diagnostics(document);
+        documents.push(DocumentCheck {
+            path: document.entry().path.as_str().to_owned(),
+            source_sha256: document.saved_sha256().map(str::to_owned),
+            valid,
+            diagnostics,
+            omitted,
+        });
+    }
+    bounded(CheckResult {
+        generation: session.loaded_generation(),
+        valid: documents.iter().all(|document| document.valid),
+        documents,
+    })
 }
 
-pub fn print(_folder: &Path, _path: &str) -> Result<Printed, ToolError> {
-    unimplemented!("MCP-01")
+pub fn print(folder: &Path, path: &str) -> Result<Printed, ToolError> {
+    let (session, id) = open_document(folder, path)?;
+    let (document, valid) = folder::check_document(&session, &id)?;
+    let invalid = |message: &str, diagnostics: Vec<Diagnostic>, omitted: usize| {
+        ToolError::new(ErrorCode::InvalidText, message)
+            .with_details(json!({ "diagnostics": diagnostics, "omitted": omitted }))
+    };
+    let model = match document.model() {
+        Some(model) if valid => model,
+        _ => {
+            let (diagnostics, omitted) = diagnostics(document);
+            return Err(invalid(
+                "The saved source has no valid definition",
+                diagnostics,
+                omitted,
+            ));
+        }
+    };
+    let text =
+        apiforge_script::print_folder_document(session.context(), model).map_err(|found| {
+            let lines = Lines::new(document.text());
+            let diagnostics = found.iter().map(|d| diagnostic(&lines, d)).collect();
+            invalid("Cannot print the definition", diagnostics, 0)
+        })?;
+    bounded(Printed {
+        path: document.entry().path.as_str().to_owned(),
+        text,
+        source_sha256: document.saved_sha256().map(str::to_owned),
+        generation: session.loaded_generation(),
+    })
+}
+
+/// A fresh read-only session on the saved project. Creates nothing.
+fn open(folder: &Path) -> Result<ProjectSession, ToolError> {
+    ProjectSession::open_saved_read_only(folder).map_err(storage_error)
+}
+
+/// The path is checked before the folder is touched.
+fn open_document(folder: &Path, path: &str) -> Result<(ProjectSession, String), ToolError> {
+    folder::validate(path)?;
+    let session = open(folder)?;
+    let id = folder::select(&session, path)?;
+    Ok((session, id))
+}
+
+fn storage_error(error: apiforge_project::Error) -> ToolError {
+    let code = match &error {
+        apiforge_project::Error::NotAProject => ErrorCode::NotAProject,
+        apiforge_project::Error::Storage(ProjectError::RecoveryRequired) => {
+            ErrorCode::RecoveryRequired
+        }
+        _ => ErrorCode::ProjectUnreadable,
+    };
+    ToolError::new(code, error.to_string())
+}
+
+/// The kept diagnostics with positions, and how many the analysis omitted.
+fn diagnostics(document: &DocumentSession) -> (Vec<Diagnostic>, usize) {
+    let lines = Lines::new(document.text());
+    let found = document.diagnostics();
+    let kept = &found[..found.len().min(MAX_DIAGNOSTICS)];
+    (
+        kept.iter().map(|d| diagnostic(&lines, d)).collect(),
+        document.omitted_diagnostics() + (found.len() - kept.len()),
+    )
+}
+
+fn diagnostic(lines: &Lines<'_>, found: &apiforge_script::Diagnostic) -> Diagnostic {
+    let (line, column, end_line, end_column) = lines.range(found.range.clone());
+    Diagnostic {
+        line,
+        column,
+        end_line,
+        end_column,
+        severity: match found.severity {
+            apiforge_script::Severity::Error => Severity::Error,
+            apiforge_script::Severity::Warning => Severity::Warning,
+        },
+        message: found.message.clone(),
+        fix: found.fix.as_ref().map(|fix| {
+            let (line, column, end_line, end_column) = lines.range(fix.range.clone());
+            Fix {
+                replacement: fix.replacement.clone(),
+                line,
+                column,
+                end_line,
+                end_column,
+            }
+        }),
+    }
+}
+
+/// Refuses a result over `MAX_RESULT_BYTES` as the model will read it.
+fn bounded<T: Serialize>(result: T) -> Result<T, ToolError> {
+    let size = serde_json::to_vec_pretty(&result).map_or(usize::MAX, |bytes| bytes.len());
+    if size > MAX_RESULT_BYTES {
+        return Err(ToolError::new(
+            ErrorCode::ResultTooLarge,
+            "The result exceeds 2 MiB; ask for one document at a time",
+        )
+        .with_details(json!({ "bytes": size, "limit": MAX_RESULT_BYTES })));
+    }
+    Ok(result)
 }
