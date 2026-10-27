@@ -1,15 +1,16 @@
 # MCP-08a: Observer mode — editing paused, the window follows every commit — QA report
 
 - Branch: `feat/mcp-08a-observer`. Captures are from the release binary of
-  `cf6ee98`.
+  `cf6ee98`; the commit under review is `609b868`: review round 1's fixes (`28c7329`) and test messages CodeQL flagged
+  (see *Review round 1* below).
 - Built with: `cargo build --release --locked` (Rust 1.99.0)
 - Compared against mock-up: `docs/qa/2026-10-27/MCP-00/m1-observer-*.png`
   (M1, round 4, approved 2026-10-27). The *Take back* button in M1's bar
   belongs to MCP-08b and is not in this ticket.
-- Verification on `cf6ee98`, all exit 0:
+- Verification on `28c7329` (`609b868` changes only test messages), all exit 0:
   - `cargo fmt --all -- --check`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-  - `cargo test --workspace --all-targets --locked`: 1178 passed, 0 failed,
+  - `cargo test --workspace --all-targets --locked`: 1179 passed, 0 failed,
     31 ignored
   - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 - Acceptance tests first: commit `c3b8508`. Before the implementation 7
@@ -20,6 +21,28 @@
   keeps: the save after the take-back (criterion 8), the deleted document
   at session level, and the storage mixed-read test (criterion 5), because
   the stable read already never mixes a source with another checkpoint.
+
+## Review round 1
+
+The automated review of #110 raised fifteen points; all were valid and are
+fixed in `28c7329`. Those that change behaviour:
+- A check that meets the holder's commit in progress leaves the window as it
+  was until the next check; before, it fell back to following files one by
+  one from a possibly partial commit.
+- No live run starts from an observing window by any path, including a
+  confirmation shown before observing began.
+- Opening a called component from the board works while observing.
+- The environment and settings dialogs follow the observing state while
+  open; observing, *Apply environment* applies the session's secret values
+  only.
+- The bar's last change takes at most half the bar and is cut with the full
+  text on hover; a long file name no longer pushes the holder out.
+- The deletion notice names only documents whose tab closed; a commit of a
+  source and the settings names both.
+- A failed probe at opening counts as a living holder (saved state only).
+
+The release-binary captures were not retaken: what changed is drawn the
+same for the short names they show.
 
 ## How the release binary was driven
 
@@ -195,8 +218,20 @@ kept.
 
 ## Windows
 
-Not run on Windows yet: the CI run of this branch's head has not finished when
-this report was written. Its captures are added here once it has.
+### CI captures
+
+From CI run 40598448691 (push, commit `cf6ee98`, Build & Test
+(windows-2022): success), artifact `qa-captures-windows-2022`:
+[code 960](windows/code-960x540.png), [diagram 960](windows/diagram-960x540.png),
+[split 960](windows/split-960x540.png), [code](windows/code-1600x1000.png),
+[diagram](windows/diagram-1600x1000.png), [split](windows/split-1600x1000.png).
+
+- They show the writer state (no other holder), not the observer: no CI
+  step holds the project, so none shows the bar or the paused editor.
+- The three captures named `1600x1000` are 1024 × 768, the runner's display.
+
+On Windows the observer is covered by the desktop, project and storage tests
+of this ticket, which passed in that run; the runs of later heads are on the pull request.
 
 ## Not verified
 
