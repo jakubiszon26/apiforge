@@ -1,7 +1,7 @@
 # MCP-02: A language reference the model reads from the server
 
 - Size: M (mostly documentation) · Owner review: 30 min · Risk: none
-- State: Backlog (issue #61) · waits for the MCP-00 decision 7
+- State: Backlog (issue #61) · MCP-00 decision 7 = A taken 2026-10-27
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

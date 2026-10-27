@@ -1,7 +1,8 @@
 # MCP-01: `apiforge mcp` answers Claude Code — overview, read, check, print
 
 - Size: M · Owner review: 20 min · Risk: none
-- State: Backlog (issue #60) · waits for the MCP-00 decisions 8 and 9
+- State: Backlog (issue #60) · MCP-00 decisions 8 = A and 9 = B taken
+  2026-10-27
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

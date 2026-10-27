@@ -2,8 +2,8 @@
 
 - Size: S · Owner review: 15 min · Risk: none on screen; a new Git-tracked
   file per revision (decision 3)
-- State: Backlog (issue #64) · waits for the MCP-00 decision 3 · after
-  MCP-04
+- State: Backlog (issue #64) · MCP-00 decision 3 = A taken 2026-10-27 ·
+  after MCP-04
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

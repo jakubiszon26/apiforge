@@ -1,8 +1,8 @@
 # MCP-07: The window names who holds the project and becomes writable when they leave
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`, `default`
-- State: Backlog (issue #66) · waits for the MCP-00 decision 6 and a
-  mock-up (annotated capture) approved on the issue
+- State: Backlog (issue #66) · MCP-00 decision 6 = A taken 2026-10-27 ·
+  waits for a mock-up (annotated capture) approved on the issue
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 
@@ -37,9 +37,10 @@ and notice at 960 × 540 and 1600 × 1000 with the new wording for the MCP
 server case, from a throwaway `review_*` test on a `mock/mcp-07-*` branch,
 posted on the issue.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-27: 1 = A; 2 waits for the mock-up)
 
-1. MCP-00 decision 6 (the wording and the automatic take-back).
+1. MCP-00 decision 6 (the wording and the automatic take-back): A
+   **(taken)** on #59.
 2. The mock-up as a whole.
 
 ## Acceptance criteria

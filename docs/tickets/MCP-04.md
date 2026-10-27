@@ -2,8 +2,8 @@
 
 - Size: M · Owner review: 30 min · Risk: none on screen; the project's
   Git-tracked files are written by a new caller (decisions 1, 2, 5)
-- State: Backlog (issue #63) · waits for the MCP-00 decisions 1, 2 and 5
-  · after MCP-01
+- State: Backlog (issue #63) · MCP-00 decisions 1, 2 and 5 = A taken
+  2026-10-27 · after MCP-01
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

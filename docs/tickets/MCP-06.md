@@ -2,8 +2,8 @@
 
 - Size: S · Owner review: 20 min · Risk: none on screen; real requests leave
   the machine when the person enables it (decision 4)
-- State: Backlog (issue #65) · waits for the MCP-00 decision 4 · after
-  MCP-03
+- State: Backlog (issue #65) · MCP-00 decision 4 = A taken 2026-10-27 ·
+  after MCP-03
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

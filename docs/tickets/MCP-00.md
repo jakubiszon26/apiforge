@@ -6,7 +6,7 @@
   without the desktop window
 - Goal in the owner's words (2026-10-26): analyse an MCP server for the
   project; a task for a whole new sprint.
-- State: analysis · owner decisions pending (issue #59)
+- State: Approved 2026-10-27 (issue #59)
 
 ## Goal
 
@@ -144,65 +144,68 @@ reference and the round-trip corpus together — gains the reference as a third
 member. `project_overview` and `language_reference` return the server's crate
 version and the reference's version, so a report of a wrong answer names both.
 
-## Decisions for the owner
+## Decisions for the owner (taken 2026-10-27: 1 = A, 2 = A, 3 = A, 4 = A, 5 = A, 6 = A, 7 = A, 8 = A, 9 = B)
 
-1. **May the model save project files through the server?** **A
-   (recommended):** yes — `write_source` and `create_document`, validated and
-   saved under the writer lock exactly as `apply` does, refused while the
-   window holds the project. Consequence: a model finishes a scenario on its
-   own and Git shows the owner the diff. **B:** read-only server; the model
+1. **May the model save project files through the server?** **A (recommended,
+   taken):** yes — `write_source` and `create_document`, validated and saved
+   under the writer lock exactly as `apply` does, refused while the window
+   holds the project. Consequence: a model finishes a scenario on its own and
+   Git shows the owner the diff. **B (declined):** read-only server; the model
    edits `.afs` files with its own tools and uses the server to check, print
    and run. Consequence: no registration and no checkpoint from the model —
    new files wait for the owner to register them in the window.
-2. **Does the server save a text with errors?** **A (recommended):** no — it
-   returns the diagnostics and saves nothing, like `apply`. Consequence: the
-   project on disk is never red because of the model; the model fixes and
-   retries. **B:** yes, like Ctrl+S in the window. Consequence: an unfinished
-   scenario can be committed with errors.
-3. **May the model publish a component revision?** **A (recommended):** yes,
-   `publish`; a revision is a Git-tracked file the owner reviews like any
+2. **Does the server save a text with errors?** **A (recommended, taken):** no
+   — it returns the diagnostics and saves nothing, like `apply`. Consequence:
+   the project on disk is never red because of the model; the model fixes and
+   retries. **B (declined):** yes, like Ctrl+S in the window. Consequence: an
+   unfinished scenario can be committed with errors.
+3. **May the model publish a component revision?** **A (recommended, taken):**
+   yes, `publish`; a revision is a Git-tracked file the owner reviews like any
    other, and without it a scenario cannot call a component the model wrote
    (folder calls name `Handle@revision`). Consequence: revisions can
-   accumulate; none is ever overwritten. **B:** no; the model asks the person
-   to publish in the window. Consequence: one round trip per new component.
-4. **Live requests through the server?** **A (recommended):** only when the
-   person starts it with `--allow-live` (a flag in `.mcp.json`), journalled,
-   secrets from the server's environment or a `--secrets` file. Consequence:
-   off unless the person turns it on per project; a model cannot turn it on
-   from inside a session. **B:** never in this sprint. Consequence: the model
-   simulates; the person runs live from the window or `apiforge run --live`.
-5. **The lock while the window is open.** **A (recommended):** the server
-   takes the writer lock per write and releases it; a write is refused while
-   the window holds the project. Consequence: the owner keeps the window open
-   and loses nothing; the model's saves fail with a clear message until the
-   window closes the project. **B:** the server holds the lock for its
-   lifetime. Consequence: simpler, but every window opened while Claude Code
-   runs is read-only.
-6. **The window names who holds the project and takes the lock back when it
-   is free (MCP-07, mock-up required).** **A (recommended):** yes: the notice
-   reads "The API Forge MCP server (started 10:42) is editing this project…"
-   and the *Read-only* badge disappears within a second of the holder
-   leaving. Consequence: a `default` change (a read-only window becomes
+   accumulate; none is ever overwritten. **B (declined):** no; the model asks
+   the person to publish in the window. Consequence: one round trip per new
+   component.
+4. **Live requests through the server?** **A (recommended, taken):** only when
+   the person starts it with `--allow-live` (a flag in `.mcp.json`),
+   journalled, secrets from the server's environment or a `--secrets` file.
+   Consequence: off unless the person turns it on per project; a model cannot
+   turn it on from inside a session. **B (declined):** never in this sprint.
+   Consequence: the model simulates; the person runs live from the window or
+   `apiforge run --live`.
+5. **The lock while the window is open.** **A (recommended, taken):** the
+   server takes the writer lock per write and releases it; a write is refused
+   while the window holds the project. Consequence: the owner keeps the window
+   open and loses nothing; the model's saves fail with a clear message until
+   the window closes the project. **B (declined):** the server holds the lock
+   for its lifetime. Consequence: simpler, but every window opened while
+   Claude Code runs is read-only.
+6. **The window names who holds the project and takes the lock back when it is
+   free (MCP-07, mock-up required).** **A (recommended, taken):** yes: the
+   notice reads "The API Forge MCP server (started 10:42) is editing this
+   project…" and the *Read-only* badge disappears within a second of the
+   holder leaving. Consequence: a `default` change (a read-only window becomes
    writable by itself) and a text change; the KTLO-21 probe gets its first
-   caller. **B:** leave the text and the behaviour. Consequence: "Another
-   window" is wrong whenever the holder is a model or `apply`, and the person
-   reopens the project to write again.
-7. **A language reference as its own document.** **A (recommended):**
+   caller. **B (declined):** leave the text and the behaviour. Consequence:
+   "Another window" is wrong whenever the holder is a model or `apply`, and
+   the person reopens the project to write again.
+7. **A language reference as its own document.** **A (recommended, taken):**
    `docs/language/reference.md`, written for a model, tested, served by the
    tool and the resource. Consequence: one document to review (about 30
-   minutes), maintained with the grammar. **B:** the model gets ADR 0005 as
-   is. Consequence: nothing to write; the model reads reconciliation and
-   storage rules it does not need and no complete example of a folder call.
+   minutes), maintained with the grammar. **B (declined):** the model gets ADR
+   0005 as is. Consequence: nothing to write; the model reads reconciliation
+   and storage rules it does not need and no complete example of a folder
+   call.
 8. **`apiforge mcp` without `--folder` uses the current directory** (so
-   `claude mcp add apiforge -- apiforge mcp` works in any project folder).
-   **A (recommended):** yes (a `default` flag: the other commands require
+   `claude mcp add apiforge -- apiforge mcp` works in any project folder). **A
+   (recommended, taken):** yes (a `default` flag: the other commands require
    `--folder`). Consequence: a server started outside a project answers "the
-   folder has no API Forge project". **B:** `--folder` required, as for
-   `check`. Consequence: every registration names the folder.
-9. **Which sprint follows KTLO.** **A (recommended):** the layout sprint
-   (LAY-01..06), as decided on 2026-10-26, then MCP; MCP-01 and MCP-02 depend
-   on nothing in LAY and can be prepared meanwhile. **B:** MCP first.
-   Consequence: the layout decision waits one sprint.
+   folder has no API Forge project". **B (declined):** `--folder` required, as
+   for `check`. Consequence: every registration names the folder.
+9. **Which sprint follows KTLO.** **A (recommended, declined):** the layout
+   sprint (LAY-01..06), as decided on 2026-10-26, then MCP; MCP-01 and MCP-02
+   depend on nothing in LAY and can be prepared meanwhile. **B (taken):** MCP
+   first. Consequence: the layout decision waits one sprint.
 
 ## Sizing
 
@@ -211,6 +214,10 @@ the decisions above (30 minutes). Nothing in MCP-01 to MCP-06 changes the
 window; MCP-07 is the only interface ticket and needs a mock-up.
 
 ## Tickets, in the order to do them
+
+The MCP sprint follows KTLO, and LAY follows MCP (decision 9 = B, taken
+2026-10-27; it revises the order of 2026-10-26 on #32, where LAY followed
+KTLO).
 
 | Ticket | Goal | Size |
 | --- | --- | --- |
