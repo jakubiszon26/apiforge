@@ -782,6 +782,51 @@ fn with_inputs_in_source_order(model: &Document, source_order: &Document) -> Doc
     Document::Scenario(model)
 }
 
+/// Every block's (identity, position) by handle, and every order edge's
+/// (identity, source, target): what a selection and the board's layout refer
+/// to, whatever the stored order.
+type Layout = (
+    std::collections::BTreeMap<String, (String, f64, f64)>,
+    std::collections::BTreeSet<(String, String, String)>,
+);
+
+fn layout_of(model: &Document) -> Layout {
+    let Document::Scenario(scenario) = model else {
+        panic!("a scenario model")
+    };
+    let graphs = [&scenario.graph, &scenario.cleanup];
+    let blocks = graphs
+        .iter()
+        .flat_map(|graph| &graph.nodes)
+        .map(|node| {
+            (
+                node.handle.clone(),
+                (node.id.clone(), node.position.x, node.position.y),
+            )
+        })
+        .collect();
+    let edges = graphs
+        .iter()
+        .flat_map(|graph| &graph.edges)
+        .map(|edge| (edge.id.clone(), edge.source.clone(), edge.target.clone()))
+        .collect();
+    (blocks, edges)
+}
+
+/// Every block's handle and input names, in stored order.
+fn order_of(model: &Document) -> Vec<(String, Vec<String>)> {
+    let Document::Scenario(scenario) = model else {
+        panic!("a scenario model")
+    };
+    scenario
+        .graph
+        .nodes
+        .iter()
+        .chain(&scenario.cleanup.nodes)
+        .map(|node| (node.handle.clone(), node.inputs.keys().cloned().collect()))
+        .collect()
+}
+
 /// The input names of the cleanup check, in stored order.
 fn check_inputs(model: &Document) -> Vec<String> {
     let Document::Scenario(scenario) = model else {
@@ -868,18 +913,14 @@ fn rewired(model: &Document, context: &apiforge_core::format::Project) -> Docume
 /// describes the saved source, so that the next load restores the saved model
 /// exactly rather than reconciling against it.
 ///
-/// It does not today. The edit leaves the check's inputs stored as
-/// `expected, actual`; `apply_model_edit` prints the source (which reads them
-/// back as `actual, expected`) but keeps the edited model as it is, and `save`
-/// seals the checkpoint from that model. The semantic digest serialises the
-/// inputs in stored order, so the record's digest is not the digest of the
-/// saved source lowered, `describes` is false, and the reload reconciles: the
-/// blocks keep their identities (reconciled by handle) and positions, but the
-/// reloaded model lists the cleanup's blocks and the check's inputs in source
-/// order, unlike the model that was saved. The record stays stale until the
-/// document is saved again.
+/// The edit leaves the check's inputs stored as `expected, actual`; the
+/// printed source reads them back as `actual, expected`, and the semantic
+/// digest serialises the inputs in stored order. The owner's decision A
+/// (2026-10-27): `apply_model_edit` keeps the model the printed source reads
+/// back, with the edited model's identities and positions, so the model after
+/// the edit is in the order a reload gives and the checkpoint sealed from it
+/// describes the saved source.
 #[test]
-#[ignore = "KTLO-26: reproduction; the decision is the owner's"]
 fn ktlo_26_a_board_edit_that_rewires_a_check_seals_a_checkpoint_that_describes_its_source() {
     let directory = prepared_demo();
     let root = directory.path();
@@ -908,7 +949,16 @@ fn ktlo_26_a_board_edit_that_rewires_a_check_seals_a_checkpoint_that_describes_i
     let outcome = session.save(&id).unwrap();
     assert!(outcome.checkpoint, "the save writes a checkpoint");
     let saved = session.document(&id).unwrap().model().unwrap().clone();
-    assert_eq!(saved, edited, "the session keeps the edited model as it is");
+    assert_eq!(
+        layout_of(&saved),
+        layout_of(&edited),
+        "the session keeps every identity and position of the edited model"
+    );
+    assert_eq!(
+        check_inputs(&saved),
+        ["actual", "expected"],
+        "the session keeps the check's inputs in the order the source reads back"
+    );
     let record = record_of(root, &id);
     drop(session);
 
@@ -949,6 +999,16 @@ fn ktlo_26_a_board_edit_that_rewires_a_check_seals_a_checkpoint_that_describes_i
         ids_of(&after),
         ids_of(&saved),
         "the reload restores the saved blocks"
+    );
+    assert_eq!(
+        order_of(&after),
+        order_of(&saved),
+        "the blocks and inputs after the edit are in the order a reload gives"
+    );
+    assert_eq!(
+        layout_of(&after),
+        layout_of(&edited),
+        "the reload restores every identity and position of the edited model"
     );
     assert_eq!(after, saved, "the reload restores the saved model exactly");
 }
