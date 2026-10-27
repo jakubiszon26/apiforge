@@ -19,7 +19,11 @@ implementation commits then make them pass without editing the assertions.
 - A criterion that cannot be turned into a test is recorded in the ticket as a
   manual QA step with the reason; "hard to test" is not a reason.
 - A test that must wait for a decision is `#[ignore = "<ticket>: <reason>"]`.
-  An ignore with no ticket is a defect.
+  An ignore with no ticket is a defect, with two named exceptions that are not
+  waiting for anything: a design-review view
+  (`#[ignore = "design review capture; run with tools/gui/review.sh"]`) and a
+  helper a test spawns as a child process
+  (`#[ignore = "launched by …"]`). Any other reason names a ticket.
 
 The whole suite still passes with the commands of the
 [development guide](../development.md#verification).

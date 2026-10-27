@@ -282,19 +282,25 @@ order; these are the mechanics.
   `docs/…`. A branch is never based on an unmerged branch, and no integration
   branch collects several tickets before review. Stage II's chain of fifteen
   branches is the counter-example that produced this rule.
-- One ticket, one branch, one pull request, within the ticket's
-  [size class](process/estimation.md#size). A pull request that outgrows its
-  class is split, not explained.
+- One ticket, one branch, one pull request, from the analysis to the QA
+  report ([one result, one pull request](process/planning.md#one-acceptable-result-one-pull-request)).
+  The pull request states its changed lines; a ticket whose
+  [size](process/estimation.md#size) proves wrong by a class is re-approved
+  or split at that point, not explained at the end.
 - Small [Conventional Commits](https://www.conventionalcommits.org/).
   Acceptance tests are committed before the implementation
   ([testing](process/testing.md#1-acceptance-tests-first)).
 - The pull request follows `.github/PULL_REQUEST_TEMPLATE.md` and links its
-  QA report. At most three pull requests await owner acceptance at a time.
+  QA report. At most four pull requests await owner acceptance at a time, and
+  at most 60 estimated review minutes among them
+  ([limits](process/README.md#limits-that-keep-review-possible)).
 - Only the owner merges to `main`. Passing the verification commands above is
   necessary and never sufficient.
-- `#[ignore = "<ticket>: <reason>"]` is the only accepted form of an ignored
-  test. A change to a default, a format or a migration path cites the ticket in
-  which the owner decided it.
+- `#[ignore = "<ticket>: <reason>"]` is the accepted form of an ignored test;
+  the two exceptions are a design-review view and a spawned helper, named in
+  [testing](process/testing.md#1-acceptance-tests-first). A change to a
+  default, a format or a migration path cites the ticket in which the owner
+  decided it.
 
 ## Conventions
 

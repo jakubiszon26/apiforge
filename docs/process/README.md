@@ -11,6 +11,7 @@ whose findings every rule below answers.
 | [Estimation](estimation.md) | Size classes, review time, risk flags, splitting |
 | [Testing](testing.md) | Acceptance tests first, the QA report, the regression smoke list |
 | [Retrospective](retrospective.md) | The sprint review and its three actions |
+| [Autonomy](autonomy.md) | Which tickets another model may take unattended, how it picks one, what it escalates, who merges |
 | [Backlog](../backlog.md) | The sprint: its goal, exit criteria and the issues in it |
 | [Issues](https://github.com/jakubiszon26/apiforge/issues) | The tickets: one issue each, with state, estimate and discussion |
 | [Development guide](../development.md) | Toolchain, verification commands, branch rules |
@@ -32,16 +33,23 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
 2. **Analysis.** Written for the owner, one page at most: what changes on
    screen, what disappears, what migrates, what the acceptance criteria are.
    A change that touches the interface includes a mock-up. Technical detail
-   goes to an appendix or an ADR. See [planning](planning.md).
-3. **Estimate.** Size, owner review minutes and risk flags, recorded in the
-   ticket. An `L` ticket is split before it is scheduled.
+   goes to an appendix or an ADR. The analysis is the first commit of the
+   ticket's draft pull request, which then carries everything below
+   ([one result, one pull request](planning.md#one-acceptable-result-one-pull-request)).
+   See [planning](planning.md).
+3. **Estimate.** Size by complexity, uncertainty, regression potential and
+   verification cost; owner review minutes; risk flags, recorded in the
+   ticket. An `L` ticket is split before it is scheduled; changed lines are
+   recorded, never a limit ([estimation](estimation.md)).
 4. **Owner approval.** The owner approves the analysis, or sends it back. No
    code before approval, except a throwaway branch that exists only to produce
    the mock-up.
 5. **Acceptance test.** The acceptance criteria become failing tests, committed
    on their own before the implementation.
-6. **Implementation.** One branch from `main`, one pull request, within the
-   size class. The verification commands of the development guide pass.
+6. **Implementation.** On the same branch from `main`, in the same pull
+   request. The verification commands of the development guide pass. A ticket
+   labelled `ready:sol` or `ready:sonnet` may be taken from here by that model
+   under [autonomy](autonomy.md).
 7. **QA report.** A functional report with screenshots per platform and an
    explicit list of what was not verified. See [testing](testing.md).
 8. **Owner acceptance.** The owner reads the report and, when they choose,
@@ -72,10 +80,15 @@ the ticket before implementation.
 
 ## Limits that keep review possible
 
-- **Work in progress:** at most three pull requests awaiting owner acceptance.
-  A fourth is not started; the agent picks up review feedback instead.
-- **Size:** `S` ≤ 300 changed lines, `M` ≤ 800, `L` is split. Generated
-  fixtures and lock files are not counted; tests and docs are.
+- **Work in progress:** at most **four** pull requests awaiting owner
+  acceptance, and the sum of their estimated review minutes at most **60**.
+  Whichever limit is reached first stops the next start; the agent picks up
+  review feedback instead. The numbers are the MCP sprint's experiment
+  (KTLO-30, from three and no minute cap in KTLO) and are measured again at
+  its retrospective: wait time, rounds after acceptance, findings after
+  acceptance.
+- **Size:** `S`, `M` or `L` by [complexity and risk](estimation.md#size);
+  `L` is split. Changed lines are recorded in the pull request, not limited.
 - **Branches:** every branch starts at `main`. A branch is never based on an
   unmerged branch, and there is no integration branch that collects several
   tickets before review.
@@ -91,6 +104,7 @@ the ticket before implementation.
 | `risk:format`, `risk:migration`, `risk:default`, `risk:visible-ui`, `risk:removal` | The [risk flags](estimation.md#risk-flags) |
 | `decision-needed` | Waits for an owner decision named in the issue |
 | `awaiting-acceptance` | A pull request is open and waits for the owner |
+| `ready:sol`, `ready:sonnet` | Approved, decided and bounded: that model may take the ticket unattended ([autonomy](autonomy.md)) |
 | `process` | Changes the process itself |
 
 A pull request says `Closes #<issue>` so that the merge closes the ticket.
@@ -103,11 +117,14 @@ links to it; the issue body is the summary, not a copy.
 | Stage | Model | Note |
 | --- | --- | --- |
 | Analysis that sets the bar: ticket analysis, mock-ups, estimates, decisions put to the owner, retrospectives, process changes | Fable | If Fable is unavailable, Opus may analyse and the ticket records it |
-| Everything else by default: programming, tests, refactoring, QA reports, coordination, status, ordinary conversation | Opus 5.5 or newer | The working default; never a smaller model for code |
-| Mechanical edits: a typo, a one-line change, formatting | Sonnet | Changes that contain no decision |
+| Everything else by default: programming, tests, refactoring, QA reports, coordination, status, ordinary conversation | Opus 5.5 or newer | The working default |
+| A ticket labelled `ready:sol`: acceptance tests, implementation, QA report, pull request | GPT 6.1 SOL (Codex) | Unattended, under [autonomy](autonomy.md); escalates instead of deciding |
+| A ticket labelled `ready:sonnet`, and mechanical edits: a typo, a one-line change, formatting | Sonnet | Changes that contain no decision and no regression potential |
 
 Fable is reserved for the work where the quality of the thinking decides the
 outcome; a session that only coordinates, answers or implements runs on Opus.
+The `ready:*` labels are given by the planning model when it closes the
+analysis, never by the model that would take the ticket.
 
 Subagents follow the same split: a planning agent delegates implementation to an
 Opus subagent and trivia to a Sonnet subagent; an implementing agent never

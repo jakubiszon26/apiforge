@@ -22,10 +22,11 @@ Closes #<!-- issue number -->
 
 ## Checklist
 
-- [ ] Branch starts at `main`; one ticket, within its size class
+- [ ] Branch starts at `main`; one ticket, one pull request from analysis to QA report; changed lines stated above and the size re-approved if it proved wrong by a class
 - [ ] Acceptance tests were committed before the implementation
 - [ ] `cargo fmt`, clippy with `-D warnings`, the workspace tests and the fixture check pass
 - [ ] Interface change: interaction tests and design review per `docs/gui-testing.md`
 - [ ] Regression smoke list run on the release binary; results in the report
-- [ ] No `#[ignore]` without a ticket ID
+- [ ] No `#[ignore]` without a ticket ID, other than a design-review view or a spawned helper
+- [ ] WIP after this pull request: at most four awaiting acceptance, within 60 estimated review minutes
 - [ ] The issue is labelled `awaiting-acceptance` and `docs/backlog.md` still lists it
