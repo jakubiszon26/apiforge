@@ -16,8 +16,12 @@ This roadmap retains the JSON-backed milestones; folder amendments are in ADRs
 Current work is tracked on the [backlog](backlog.md) under the
 [development process](process/README.md). The sprint after Stage II is
 keep-the-lights-on: no roadmap feature starts before its exit criteria are met.
-The legacy JSON mode is sunset and will be removed once the folder mode reaches
-parity with it (KTLO-06); M7 then continues on the folder mode only.
+The legacy JSON mode is sunset. It is removed, in a `removal` ticket the owner
+approves, when the [removal condition of KTLO-06](tickets/KTLO-06.md#removal-condition)
+holds: every row of its parity list present in the folder mode or struck by an
+owner decision, KTLO-03 closed so that a refused migration reports and stops,
+and folder equivalents for the CI probes that open the legacy window. M7 then
+continues on the folder mode only.
 
 ## Goals
 
