@@ -635,6 +635,12 @@ impl FolderApp {
             });
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
+        // Maximised run results leave no room for anything else (KTLO-19).
+        if self.report_maximised(active.as_deref()) {
+            self.prompts(ui.ctx());
+            self.protect(now);
+            return;
+        }
         match self.workbench.mode {
             Mode::Code => {
                 egui::Panel::left("folder-documents")
@@ -949,6 +955,7 @@ impl FolderApp {
         } else if shortcut(Modifiers::COMMAND, Key::S) {
             self.save_active();
         }
+        self.restore_report_on_escape(context);
         if shortcut(Modifiers::COMMAND, Key::E) {
             self.workbench.toggle();
             self.touched();
