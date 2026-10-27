@@ -479,3 +479,163 @@ fn an_unwritable_untouched_folder_opens_read_only_without_local_data() {
     fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
 }
+
+// ----- MCP-07: the lock names its holder ----------------------------------------
+
+const LOCK: &str = ".apiforge/local/project.lock";
+const HOLDER: &str = ".apiforge/local/holder.json";
+
+/// Criterion 1: the writer describes itself in one JSON line beside the lock,
+/// and a reader returns that description while the writer lives. The lock
+/// file itself stays empty: on Windows it cannot be read while it is held.
+#[test]
+fn mcp07_a_writer_describes_itself_and_a_reader_returns_the_description() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive_as(
+        directory.path(),
+        &Holder::new(HolderRole::Agent, Some("Claude Code".into())),
+    )
+    .unwrap();
+    let bytes = fs::read(directory.path().join(HOLDER)).unwrap();
+    assert_eq!(bytes.iter().filter(|byte| **byte == b'\n').count(), 1);
+    assert!(bytes.ends_with(b"\n"), "one JSON line");
+    let line: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let object = line.as_object().unwrap();
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["version", "program", "role", "client", "since", "endpoint"]
+    );
+    assert_eq!(line["version"], 1);
+    assert_eq!(line["program"], "apiforge");
+    assert_eq!(line["role"], "agent");
+    assert_eq!(line["client"], "Claude Code");
+    assert_eq!(line["endpoint"], serde_json::Value::Null);
+    let since = line["since"].as_str().unwrap();
+    assert_eq!(since.len(), "2026-10-27T10:42:11Z".len(), "{since}");
+    assert!(
+        since.ends_with('Z') && since.as_bytes()[10] == b'T',
+        "{since}"
+    );
+    assert_eq!(fs::read(directory.path().join(LOCK)).unwrap(), b"");
+
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    let holder = reader
+        .holder()
+        .unwrap()
+        .expect("a live writer is described");
+    assert_eq!(holder.role(), Some(HolderRole::Agent));
+    assert_eq!(holder.client(), Some("Claude Code"));
+    assert_eq!(holder.since(), Some(since));
+    assert_eq!(holder.endpoint(), None);
+    assert!(!holder.is_unknown());
+    drop(writer);
+}
+
+/// The window and the command line name themselves; `open_exclusive` keeps
+/// describing a window for the callers that do not say who they are.
+#[test]
+fn mcp07_windows_and_commands_name_themselves() {
+    let directory = tempfile::tempdir().unwrap();
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    let writer =
+        ProjectStore::open_exclusive_as(directory.path(), &Holder::command("apply")).unwrap();
+    let holder = reader.holder().unwrap().unwrap();
+    assert_eq!(holder.role(), Some(HolderRole::Command));
+    assert_eq!(holder.client(), Some("apply"));
+    drop(writer);
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let holder = reader.holder().unwrap().unwrap();
+    assert_eq!(holder.role(), Some(HolderRole::Window));
+    assert_eq!(holder.client(), None);
+    drop(writer);
+    let writer = ProjectStore::open(directory.path()).unwrap();
+    assert!(!writer.is_read_only());
+    assert_eq!(
+        reader.holder().unwrap().unwrap().role(),
+        Some(HolderRole::Window)
+    );
+}
+
+/// A description left behind by a holder that is gone describes nobody.
+#[test]
+fn mcp07_a_holder_file_without_a_live_writer_is_ignored() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive_as(
+        directory.path(),
+        &Holder::new(HolderRole::Agent, Some("Claude Code".into())),
+    )
+    .unwrap();
+    drop(writer);
+    assert!(directory.path().join(HOLDER).exists(), "left behind");
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    assert_eq!(reader.holder().unwrap(), None);
+    // The probe never prevents a new writer, which describes itself anew.
+    let next = ProjectStore::open_exclusive_as(directory.path(), &Holder::command("run")).unwrap();
+    assert_eq!(
+        reader.holder().unwrap().unwrap().role(),
+        Some(HolderRole::Command)
+    );
+    drop(next);
+}
+
+/// Criterion 2's storage half: a live writer from an older build wrote no
+/// description, or one that cannot be read; the reader says only that some
+/// process holds the project.
+#[test]
+fn mcp07_a_live_writer_without_a_readable_description_is_an_unknown_holder() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    fs::remove_file(directory.path().join(HOLDER)).unwrap();
+    let holder = reader.holder().unwrap().unwrap();
+    assert!(holder.is_unknown());
+    assert_eq!(holder, Holder::unknown());
+    assert_eq!(holder.role(), None);
+    assert_eq!(holder.since(), None);
+    for unreadable in [
+        &b""[..],
+        b"not json\n",
+        b"{\"version\":2,\"program\":\"apiforge\",\"role\":\"agent\",\"client\":null,\"since\":\"2026-10-27T10:42:11Z\",\"endpoint\":null}\n",
+        b"{\"version\":1,\"program\":\"other\",\"role\":\"agent\",\"client\":null,\"since\":\"2026-10-27T10:42:11Z\",\"endpoint\":null}\n",
+        b"{\"version\":1,\"program\":\"apiforge\",\"role\":\"robot\",\"client\":null,\"since\":\"2026-10-27T10:42:11Z\",\"endpoint\":null}\n",
+    ] {
+        fs::write(directory.path().join(HOLDER), unreadable).unwrap();
+        assert_eq!(
+            reader.holder().unwrap(),
+            Some(Holder::unknown()),
+            "{}",
+            String::from_utf8_lossy(unreadable)
+        );
+    }
+    drop(writer);
+    assert_eq!(reader.holder().unwrap(), None);
+}
+
+/// Asking who holds a project writes nothing, as the probe writes nothing.
+#[test]
+fn mcp07_reading_the_holder_creates_no_local_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    assert_eq!(reader.holder().unwrap(), None);
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+/// The lock file is never replaced or written: a new holder replaces only
+/// the description, and the lock keeps its identity across holders.
+#[cfg(unix)]
+#[test]
+fn mcp07_describing_the_holder_never_replaces_the_lock_file() {
+    use std::os::unix::fs::MetadataExt;
+    let directory = tempfile::tempdir().unwrap();
+    let lock = directory.path().join(LOCK);
+    let first =
+        ProjectStore::open_exclusive_as(directory.path(), &Holder::command("apply")).unwrap();
+    let identity = fs::metadata(&lock).unwrap().ino();
+    drop(first);
+    let second =
+        ProjectStore::open_exclusive_as(directory.path(), &Holder::new(HolderRole::Agent, None))
+            .unwrap();
+    assert_eq!(fs::metadata(&lock).unwrap().ino(), identity);
+    assert_eq!(fs::read(&lock).unwrap(), b"");
+    drop(second);
+}

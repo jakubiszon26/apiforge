@@ -28,6 +28,7 @@ inspection = ["eframe/inspection"]
 workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 tempfile.workspace = true
 egui_kittest.workspace = true
 egui_inspection.workspace = true

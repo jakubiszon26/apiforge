@@ -34,6 +34,8 @@ libm = "=0.2.16"
 uuid = { version = "=1.28.0", features = ["v4"] }
 dirs = "=6.0.0"
 tempfile = "=3.27.0"
+# Local wall-clock time for the holder of a project (MCP-07); no other feature.
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 # Local demo API: HTTP/1 only, a current-thread runtime and no tracing or macros.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 # HTTP/1.1 only with rustls; no implicit proxy, cookie or decompression behaviour.
