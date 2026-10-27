@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{self, Read},
+    io::Read,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -134,20 +134,19 @@ impl Holder {
         }
     }
 
-    /// The description at `path`; a missing, oversized or unreadable one is
-    /// an unknown holder. Only called while a writer is live.
-    pub(super) fn read(path: &Path) -> io::Result<Self> {
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::unknown()),
-            Err(error) => return Err(error),
+    /// The description at `path`. Anything that is not a readable
+    /// description, whether it is missing, unreadable (permissions, another
+    /// user's file), oversized or malformed, is an unknown holder: the writer
+    /// is live, only its name is lost. Only called while a writer is live.
+    pub(super) fn read(path: &Path) -> Self {
+        let Ok(file) = File::open(path) else {
+            return Self::unknown();
         };
         let mut bytes = Vec::new();
-        file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Ok(Self::unknown());
+        match file.take(MAX_BYTES + 1).read_to_end(&mut bytes) {
+            Ok(_) if bytes.len() as u64 <= MAX_BYTES => Self::parse(&bytes),
+            _ => Self::unknown(),
         }
-        Ok(Self::parse(&bytes))
     }
 }
 

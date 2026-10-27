@@ -938,9 +938,7 @@ impl ProjectStore {
             return Ok(None);
         }
         let path = path::resolve(&self.root, HOLDER_PATH)?;
-        Holder::read(&path)
-            .map(Some)
-            .map_err(|error| ProjectError::io(&path, error))
+        Ok(Some(Holder::read(&path)))
     }
 
     pub(super) fn writable(&self) -> Result<()> {

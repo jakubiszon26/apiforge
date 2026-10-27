@@ -130,7 +130,7 @@ impl FolderApp {
         self.open_error = None;
         if let Some(session) = destination.session {
             self.install(session, destination.state);
-            self.holder = destination.holder;
+            self.holder = destination.holder.map(holder::Observed::new);
         } else {
             self.uninitialised = true;
             self.survey = destination.survey;

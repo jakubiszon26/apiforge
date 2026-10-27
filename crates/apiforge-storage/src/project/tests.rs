@@ -516,7 +516,8 @@ fn mcp07_a_writer_describes_itself_and_a_reader_returns_the_description() {
         since.ends_with('Z') && since.as_bytes()[10] == b'T',
         "{since}"
     );
-    assert_eq!(fs::read(directory.path().join(LOCK)).unwrap(), b"");
+    // Held, so only its length: Windows refuses to read a locked file.
+    assert_eq!(fs::metadata(directory.path().join(LOCK)).unwrap().len(), 0);
 
     let reader = ProjectStore::open_read_only(directory.path()).unwrap();
     let holder = reader
@@ -636,6 +637,29 @@ fn mcp07_describing_the_holder_never_replaces_the_lock_file() {
         ProjectStore::open_exclusive_as(directory.path(), &Holder::new(HolderRole::Agent, None))
             .unwrap();
     assert_eq!(fs::metadata(&lock).unwrap().ino(), identity);
-    assert_eq!(fs::read(&lock).unwrap(), b"");
+    assert_eq!(fs::metadata(&lock).unwrap().len(), 0);
     drop(second);
+}
+
+/// Review round 1 of #106: a description this user cannot read (no
+/// permission, or another user's private file) is still a live writer whose
+/// name is lost, never an error that would hide the bar. Unix only: Windows
+/// permissions cannot be modelled with a mode here.
+#[cfg(unix)]
+#[test]
+fn mcp07_an_unreadable_description_with_a_live_writer_is_an_unknown_holder() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let writer =
+        ProjectStore::open_exclusive_as(directory.path(), &Holder::command("apply")).unwrap();
+    let description = directory.path().join(HOLDER);
+    fs::set_permissions(&description, fs::Permissions::from_mode(0o000)).unwrap();
+    // Privileged users read it regardless; then there is nothing to verify.
+    if fs::read(&description).is_ok() {
+        return;
+    }
+    let reader = ProjectStore::open_read_only(directory.path()).unwrap();
+    assert_eq!(reader.holder().unwrap(), Some(Holder::unknown()));
+    drop(writer);
+    assert_eq!(reader.holder().unwrap(), None);
 }

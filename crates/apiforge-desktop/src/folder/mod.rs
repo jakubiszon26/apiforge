@@ -264,7 +264,7 @@ pub struct FolderApp {
     animation: bool,
     /// Who holds the project while this window observes it (MCP-07); `None`
     /// while this window is the writer, or read-only with no live holder.
-    holder: Option<apiforge_storage::project::Holder>,
+    holder: Option<holder::Observed>,
     take_back: holder::TakeBack,
 }
 

@@ -16,6 +16,20 @@ const PAUSED: &str = "editing is paused here; this window follows every change";
 /// A client names itself; a longer name is cut so the bar keeps its line.
 const MAX_CLIENT_CHARS: usize = 40;
 
+/// The holder and the bar's text, formatted once per description rather
+/// than on every frame.
+pub(super) struct Observed {
+    holder: Holder,
+    text: String,
+}
+
+impl Observed {
+    pub(super) fn new(holder: Holder) -> Self {
+        let text = holder_text(&holder);
+        Self { holder, text }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct TakeBack {
     /// A take-back is queued or running on the storage worker.
@@ -51,7 +65,15 @@ impl FolderApp {
             self.take_back.recovering = false;
         }
         match probe {
-            Some(holder) => self.holder = Some(holder),
+            Some(holder) => {
+                if self
+                    .holder
+                    .as_ref()
+                    .is_none_or(|observed| observed.holder != holder)
+                {
+                    self.holder = Some(Observed::new(holder));
+                }
+            }
             None => self.take_back(),
         }
     }
@@ -118,10 +140,10 @@ impl FolderApp {
         if !self.observing() {
             return;
         }
-        let Some(holder) = self.holder.as_ref() else {
+        let Some(observed) = self.holder.as_ref() else {
             return;
         };
-        let text = holder_text(holder);
+        let text = observed.text.clone();
         let response = egui::Panel::bottom("folder-holder")
             .exact_size(BAR_HEIGHT)
             .resizable(false)

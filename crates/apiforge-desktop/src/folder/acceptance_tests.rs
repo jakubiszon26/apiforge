@@ -747,6 +747,28 @@ mod mcp07 {
         }
     }
 
+    /// Review round 1 of #106: a description this user cannot read is the
+    /// generic wording too, not a plain read-only window. Unix only: Windows
+    /// permissions cannot be modelled with a mode here.
+    #[cfg(unix)]
+    #[test]
+    fn a_holder_whose_description_cannot_be_read_is_another_process() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let file = directory.path().join(".apiforge/local/holder.json");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        // Privileged users read it regardless; then there is nothing to verify.
+        if fs::read(&file).is_ok() {
+            return;
+        }
+        let harness = folder_harness(directory.path(), WIDE);
+        assert!(has_label(&harness, &format!("Another process · {PAUSED}")));
+        assert!(has_label(&harness, "Observing"));
+        drop(harness);
+        drop(owner);
+    }
+
     /// Criterion 3: the holder lets go; within two seconds the window is the
     /// writer, the badge and the bar are gone, Save is enabled and saves. The
     /// text typed while observing is the text saved.
@@ -838,7 +860,12 @@ mod mcp07 {
         assert!(has_label(&harness, &text));
         assert!(has_label(&harness, "Observing"));
         assert!(!owner.is_read_only(), "the holder still holds the project");
-        assert_eq!(fs::read(&lock).unwrap(), b"", "the lock file is untouched");
+        // Held, so only its length: Windows refuses to read a locked file.
+        assert_eq!(
+            fs::metadata(&lock).unwrap().len(),
+            0,
+            "the lock file is untouched"
+        );
         assert_eq!(fs::read(&description).unwrap(), described);
         #[cfg(unix)]
         {
