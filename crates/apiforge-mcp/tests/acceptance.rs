@@ -1514,8 +1514,9 @@ fn mcp03_review_a_variable_that_is_not_unicode_is_skipped_not_a_panic() {
         ("PATH".into(), not_unicode()),
     ];
     let found = executor::secrets_from(None, environment).unwrap();
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found["TOKEN"], "t");
+    // Names only: a failing assertion must not print a secret's value.
+    assert_eq!(found.keys().collect::<Vec<_>>(), ["TOKEN"]);
+    assert!(found["TOKEN"] == "t");
 }
 
 #[test]
@@ -1524,7 +1525,7 @@ fn mcp03_review_a_secrets_file_over_the_limit_is_refused_by_its_size() {
     let file = directory.path().join("secrets.json");
     fs::write(&file, r#"{"TOKEN": "t"}"#).unwrap();
     let found = executor::secrets_from(Some(&file), Vec::new()).unwrap();
-    assert_eq!(found["TOKEN"], "t");
+    assert!(found["TOKEN"] == "t");
 
     fs::write(&file, vec![b' '; executor::MAX_SECRETS_BYTES as usize + 1]).unwrap();
     assert_eq!(
