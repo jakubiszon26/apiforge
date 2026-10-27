@@ -198,6 +198,7 @@ async fn simulation_runs_match_the_reference() {
         let run_request = RunRequest {
             project: request.project,
             scenario_id: request.scenario_id,
+            target: apiforge_runner::RunTarget::Scenario,
             mode: request.mode,
             target_node_id: request.target_node_id,
             single_node_id: request.single_node_id,

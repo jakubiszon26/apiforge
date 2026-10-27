@@ -1,4 +1,5 @@
-//! The bottom panel: live progress and step-by-step results of a scenario run.
+//! The bottom panel: live progress and step-by-step results of a scenario run,
+//! or of a component run on its own.
 //!
 //! Draws the toggle bar, run summary, hierarchical step list (including component
 //! inner steps and the cleanup phase) and the selected step's comparison, outputs,
@@ -9,7 +10,7 @@ use crate::{dnd::Payload, labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, OptionalJson},
     js::{json_stringify, type_name},
-    model::ErrorPolicy,
+    model::{ErrorPolicy, NodeKind},
     path::JsonPath,
     run::{Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
@@ -46,6 +47,9 @@ pub struct Context<'a> {
     pub running: bool,
     pub stale: bool,
     pub files_busy: bool,
+    /// The run is a component's on its own (KTLO-23): it has no error policy,
+    /// and the empty report does not speak of a scenario.
+    pub component: bool,
     pub document_locked: bool,
 }
 
@@ -241,6 +245,9 @@ impl ReportPanel {
                     }
                 }
             });
+        // The panel's own edge, found unnamed by the audit of a component's run
+        // results (KTLO-23).
+        widgets::name_resize_handle(ui.ctx(), panel_id, "Resize run results");
         // Maximised, the normal height is kept and there is nothing to resize.
         if was_open && !maximised {
             let actual_height = response.response.rect.height().clamp(min_height, maximum);
@@ -393,6 +400,9 @@ impl ReportPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut policy = context.error_policy;
                 ui.add_enabled_ui(!context.running && !context.document_locked, |ui| {
+                    if context.component {
+                        return;
+                    }
                     let combo = egui::ComboBox::from_id_salt("report-error-policy")
                         .selected_text(error_policy_label(policy))
                         .width(190.0)
@@ -509,6 +519,7 @@ impl ReportPanel {
                                 &run.id,
                                 selected.as_ref(),
                                 !context.document_locked,
+                                context.component,
                                 actions,
                             );
                         });
@@ -556,13 +567,25 @@ impl ReportPanel {
         run_id: &str,
         selected: Option<&StepRow<'_>>,
         editable: bool,
+        component: bool,
         actions: &mut Vec<Action>,
     ) {
         let Some(selected) = selected else {
-            widgets::hint(ui, "Results will appear while the scenario runs.");
+            widgets::hint(
+                ui,
+                if component {
+                    "Results will appear while the component runs."
+                } else {
+                    "Results will appear while the scenario runs."
+                },
+            );
             return;
         };
         let step = selected.step;
+        // A check or variable on a component's export would edit the
+        // component's own graph (KTLO-23 criterion 11); exports appear at the
+        // top level only when a component runs on its own.
+        let checkable = selected.depth == 0 && step.kind != NodeKind::Export;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
@@ -612,7 +635,7 @@ impl ReportPanel {
             if step.request.is_some() {
                 widgets::tab_value(ui, &mut self.tab, DetailTab::Request, "HTTP request");
             }
-            if selected.depth == 0 && self.tab == DetailTab::Outputs {
+            if checkable && self.tab == DetailTab::Outputs {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     widgets::hint(ui, "Choose a field → add a check");
                 });
@@ -662,8 +685,7 @@ impl ReportPanel {
                         );
                         return;
                     }
-                    let interactive =
-                        self.tab == DetailTab::Outputs && selected.depth == 0 && editable;
+                    let interactive = self.tab == DetailTab::Outputs && checkable && editable;
                     for (port, value) in map {
                         let branch = format!("{run_id}:{}:{}:{port}", selected.key, self.tab as u8);
                         let target = interactive.then_some((step.node_id.as_str(), port.as_str()));
@@ -1305,6 +1327,7 @@ mod tests {
             running: false,
             stale: false,
             files_busy: false,
+            component: false,
             document_locked: false,
         };
         let draw = |panel: &mut ReportPanel| {
@@ -1414,6 +1437,7 @@ mod tests {
                     running: false,
                     stale: false,
                     files_busy: false,
+                    component: false,
                     document_locked: false,
                 };
                 assert!(panel.show(ui, &empty).is_empty());
@@ -1429,6 +1453,7 @@ mod tests {
                     running: false,
                     stale: true,
                     files_busy: false,
+                    component: false,
                     document_locked: false,
                 };
                 let _ = panel.show(ui, &populated);
@@ -1452,6 +1477,7 @@ mod tests {
                 running: false,
                 stale: false,
                 files_busy: false,
+                component: false,
                 document_locked: false,
             };
             let draw = |panel: &mut ReportPanel, events| {

@@ -19,7 +19,13 @@ impl FolderApp {
         let active = self.workbench.active();
         let run_document = active
             .and_then(|id| session.document(id))
-            .filter(|document| document.entry().kind == DocumentKind::Scenario)
+            // A component runs on its own from its tab (KTLO-23).
+            .filter(|document| {
+                matches!(
+                    document.entry().kind,
+                    DocumentKind::Scenario | DocumentKind::Component
+                )
+            })
             .map(|document| document.id().to_owned());
         let publish = active
             .and_then(|id| session.document(id))
@@ -39,9 +45,11 @@ impl FolderApp {
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
-            // Keep room for the full scenario toolbar and the read-only badge.
-            // A long project name must not paint into the Code tab at 960 px.
-            let reserved = 620.0 + if read_only { 80.0 } else { 0.0 };
+            // Keep room for the widest toolbar, a component's with Publish
+            // (635 px), and the read-only badge, on every tab so that the
+            // title keeps its width (KTLO-23 decision 6). A long project name
+            // must not paint into the Code tab at 960 px.
+            let reserved = 650.0 + if read_only { 80.0 } else { 0.0 };
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
@@ -77,7 +85,7 @@ impl FolderApp {
                     if ui
                         .add(widgets::action(Icon::Play, "Run").primary())
                         .on_hover_text(
-                            "Simulate the selected scenario, including unsaved valid code",
+                            "Simulate the selected scenario or component, including unsaved valid code",
                         )
                         .clicked()
                     {

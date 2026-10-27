@@ -238,8 +238,11 @@ impl ProjectSession {
         self.require_current_registry()?;
         self.settle(document_id)?;
         let document = &self.documents[self.index(document_id)?];
-        if document.entry.kind != DocumentKind::Scenario
-            || document.analysis != AnalysisState::Valid
+        // A scenario or, run on its own, a component (KTLO-23).
+        if !matches!(
+            document.entry.kind,
+            DocumentKind::Scenario | DocumentKind::Component
+        ) || document.analysis != AnalysisState::Valid
             || document.conflict.is_some()
             || !document.fields.is_empty()
         {

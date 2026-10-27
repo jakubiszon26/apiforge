@@ -165,6 +165,7 @@ pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::
     let request = apiforge_runner::RunRequest {
         project,
         scenario_id: scenario.id.clone(),
+        target: apiforge_runner::RunTarget::Scenario,
         mode: if args.live {
             apiforge_core::run::RunMode::Live
         } else {

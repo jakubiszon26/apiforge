@@ -471,15 +471,15 @@ impl FolderApp {
                     let response = ui
                         .horizontal(|ui| {
                             ui.label(RichText::new("●").color(colour));
-                            let response = ui.add(
-                                egui::Label::new(
-                                    RichText::new(format!(
-                                        "Line {line}, column {column}   {}",
-                                        diagnostic.message
-                                    ))
-                                    .size(theme::FONT_LABEL),
-                                )
-                                .sense(egui::Sense::click()),
+                            let text =
+                                format!("Line {line}, column {column}   {}", diagnostic.message);
+                            // Found unnamed by the audit of a component's tab (KTLO-23).
+                            let response = widgets::named(
+                                ui.add(
+                                    egui::Label::new(RichText::new(&text).size(theme::FONT_LABEL))
+                                        .sense(egui::Sense::click()),
+                                ),
+                                &text,
                             );
                             if diagnostic.fix.is_some()
                                 && ui

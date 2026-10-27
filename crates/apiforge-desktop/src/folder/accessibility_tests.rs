@@ -519,3 +519,24 @@ fn the_maximised_run_results_name_every_control() {
         );
     }
 }
+
+/// KTLO-23a: a component's tab names its header and its run results in every
+/// mode.
+#[test]
+fn a_component_tab_with_run_results_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, "components/product.afs");
+    app.workbench.open(&id);
+    app.request_run(&id, false);
+    finish_folder_run(&mut app);
+    assert!(app.run_result(&id).is_some(), "the component ran");
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        assert_named(
+            &format!("{mode:?}, a component's run results"),
+            &mut app,
+            &context,
+        );
+    }
+}

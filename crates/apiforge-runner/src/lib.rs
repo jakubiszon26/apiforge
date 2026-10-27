@@ -1,4 +1,5 @@
-//! Execution engine: runs a scenario of a validated project and reports each step.
+//! Execution engine: runs a scenario, or a component on its own, of a validated
+//! project and reports each step.
 //!
 //! Semantics: serial execution in dependency order, Start reachability, IF branches, components, an independent cleanup phase,
 //! diagnostics (up to a node, a single step) and redaction of everything published.
@@ -17,6 +18,6 @@ mod support;
 
 pub use engine::run_scenario;
 pub use http::{HttpTransport, TransportError};
-pub use request::{RunError, RunLimits, RunOptions, RunRequest, validate};
+pub use request::{RunError, RunLimits, RunOptions, RunRequest, RunTarget, validate};
 pub use service::{MAX_ACTIVE_RUNS, Notify, RunHandle, RunnerService};
 pub use support::{SeededRandom, rfc3339_millis};

@@ -119,6 +119,7 @@ fn execute(args: Args) -> Result<RunStatus, String> {
     let request = RunRequest {
         project: project.clone(),
         scenario_id: scenario.id.clone(),
+        target: apiforge_runner::RunTarget::Scenario,
         mode: if args.live {
             RunMode::Live
         } else {

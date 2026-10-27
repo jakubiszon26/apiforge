@@ -14,14 +14,32 @@ use apiforge_core::{
     validate_project,
 };
 use indexmap::IndexMap;
+use serde_json::Value;
 use std::{collections::HashSet, fmt, sync::Arc, time::Duration};
 use thiserror::Error;
 
-/// A request to run one scenario of a frozen project.
+/// What a run executes (KTLO-23).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum RunTarget {
+    /// The scenario that `RunRequest::scenario_id` names.
+    #[default]
+    Scenario,
+    /// The component that `RunRequest::scenario_id` names, at `revision`, on
+    /// its own: `inputs` are its arguments, the defaults written in code fill
+    /// the rest, and there is no cleanup phase.
+    Component {
+        revision: u32,
+        inputs: IndexMap<String, Value>,
+    },
+}
+
+/// A request to run one scenario, or one component, of a frozen project.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunRequest {
     pub project: Project,
+    /// The scenario, or with a component target the component, to run.
     pub scenario_id: String,
+    pub target: RunTarget,
     pub mode: RunMode,
     /// Run only this node and every node it depends on.
     pub target_node_id: Option<String>,
@@ -39,11 +57,30 @@ impl RunRequest {
         Self {
             project,
             scenario_id: scenario_id.into(),
+            target: RunTarget::Scenario,
             mode,
             target_node_id: None,
             single_node_id: None,
             previous_run: None,
             secrets: IndexMap::new(),
+        }
+    }
+}
+
+impl RunRequest {
+    /// A full run of a component's revision with its input defaults.
+    pub fn component(
+        project: Project,
+        component_id: impl Into<String>,
+        revision: u32,
+        mode: RunMode,
+    ) -> Self {
+        Self {
+            target: RunTarget::Component {
+                revision,
+                inputs: IndexMap::new(),
+            },
+            ..Self::new(project, component_id, mode)
         }
     }
 }
@@ -130,6 +167,10 @@ pub enum RunError {
     InvalidProject(#[from] ImportError),
     #[error("Scenario `{0}` does not exist")]
     ScenarioNotFound(String),
+    #[error("Component `{0}` does not exist")]
+    ComponentNotFound(String),
+    #[error("Component input `{0}` does not exist")]
+    InputNotFound(String),
     #[error("Node `{0}` does not exist in the scenario")]
     NodeNotFound(String),
     #[error("Choose either a target node or a single node, not both")]
@@ -151,18 +192,43 @@ const MAX_PREVIOUS_STEPS: usize = 400;
 
 /// Checks the request with the import rules plus the run-specific rules.
 pub fn validate(request: &RunRequest) -> Result<(), RunError> {
-    validate_project(&request.project)?;
+    match request.target {
+        // A component's run holds no scenario; the project rules ask for one.
+        RunTarget::Component { .. } if request.project.scenarios.is_empty() => {
+            let mut project = request.project.clone();
+            project
+                .scenarios
+                .push(apiforge_core::demos::empty_scenario("Component run"));
+            validate_project(&project)?;
+        }
+        _ => validate_project(&request.project)?,
+    }
     for (name, value) in &request.secrets {
         if utf16_len(value) > 100_000 {
             return Err(RunError::SecretTooLong(name.clone()));
         }
     }
-    let scenario = request
-        .project
-        .scenarios
-        .iter()
-        .find(|scenario| scenario.id == request.scenario_id)
-        .ok_or_else(|| RunError::ScenarioNotFound(request.scenario_id.clone()))?;
+    let graph = match &request.target {
+        RunTarget::Scenario => {
+            &request
+                .project
+                .scenarios
+                .iter()
+                .find(|scenario| scenario.id == request.scenario_id)
+                .ok_or_else(|| RunError::ScenarioNotFound(request.scenario_id.clone()))?
+                .graph
+        }
+        RunTarget::Component { revision, inputs } => {
+            let component = target_component(request, *revision)?;
+            if let Some(name) = inputs
+                .keys()
+                .find(|name| !component.inputs.iter().any(|port| &&port.name == name))
+            {
+                return Err(RunError::InputNotFound(name.clone()));
+            }
+            &component.graph
+        }
+    };
     if request.target_node_id.is_some() && request.single_node_id.is_some() {
         return Err(RunError::ConflictingModes);
     }
@@ -170,7 +236,7 @@ pub fn validate(request: &RunRequest) -> Result<(), RunError> {
         .into_iter()
         .flatten()
     {
-        if !scenario.graph.nodes.iter().any(|node| &node.id == id) {
+        if !graph.nodes.iter().any(|node| &node.id == id) {
             return Err(RunError::NodeNotFound(id.clone()));
         }
     }
@@ -181,6 +247,19 @@ pub fn validate(request: &RunRequest) -> Result<(), RunError> {
         validate_previous(request, previous)?;
     }
     Ok(())
+}
+
+/// The component revision a component target runs.
+pub(crate) fn target_component(
+    request: &RunRequest,
+    revision: u32,
+) -> Result<&apiforge_core::format::Component, RunError> {
+    request
+        .project
+        .components
+        .iter()
+        .find(|component| component.id == request.scenario_id && component.revision == revision)
+        .ok_or_else(|| RunError::ComponentNotFound(format!("{}@{revision}", request.scenario_id)))
 }
 
 fn validate_previous(request: &RunRequest, previous: &RunResult) -> Result<(), RunError> {
