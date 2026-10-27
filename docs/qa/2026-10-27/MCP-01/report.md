@@ -214,6 +214,12 @@ guide):
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`: exit
   status 0.
 
+The four commands were run again, with the same results (1 134 passed, 0
+failed, 29 ignored), at `729332d`. That commit is after the merge of
+`origin/main` (MCP-00 revision 2, docs only), the ticket amendments, and the
+alignment of the error-code list with MCP-00 as merged (`invalid_inputs`,
+`not_a_component` and `invalid_checkpoint` added, unused by the read tools).
+
 The analysis and the scenario language changed (the count of dropped
 diagnostics), so the guide's extra checks for those were also run, in
 release:
