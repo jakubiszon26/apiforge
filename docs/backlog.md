@@ -19,7 +19,8 @@ mock-up → decision → acceptance tests → QA report. They add about 115 minu
 of owner review. A sixth wish was added later the same day, after KTLO-20 had
 been called the last: running a component from its own tab (KTLO-23, two parts,
 65 further owner minutes), an owner decision that reopened the sprint's scope
-for that one ticket. Exit criteria:
+for that one ticket, and once more for a seventh, KTLO-24 (#57, S · 15 min,
+the open-files bar hides itself). Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -42,6 +43,9 @@ for that one ticket. Exit criteria:
 - [ ] A component runs from its tab the way a scenario does: the mock-up is
       decided and the two parts are accepted, or carried into the next sprint
       with their state recorded (KTLO-23a #53, KTLO-23b #54).
+- [ ] The open-files bar hides itself when no file is open (KTLO-24, #57),
+      decided on its mock-up and accepted, or carried into the next sprint
+      with its state recorded.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -117,6 +121,7 @@ criteria:
 | [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish a component from the server; [ticket](tickets/MCP-05.md); decision 3, after MCP-04 | S · 15 min |
 | [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests from the server behind `--allow-live`; [ticket](tickets/MCP-06.md); decision 4, after MCP-03 | S · 20 min |
 | [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The window names who holds the project and becomes writable when they leave; [ticket](tickets/MCP-07.md); decision 6, mock-up required | S · 20 min · `visible UI`, `default` |
+| [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
 
 ## Later
 
