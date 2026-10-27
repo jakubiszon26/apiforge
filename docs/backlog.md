@@ -7,51 +7,60 @@ closed, `decision-needed`, `awaiting-acceptance` — lives there and nowhere
 else. This file names the current sprint, its exit criteria and the issues
 in it, and keeps the record of finished sprints.
 
-At most three pull requests await owner acceptance at a time.
+At most four pull requests await owner acceptance at a time, within 60
+estimated review minutes ([limits](process/README.md#limits-that-keep-review-possible)).
+A ticked exit criterion names the evidence that ticked it: the report, the
+run or the issue.
 
-## Sprint: KTLO (2026-10-26 to 2026-11-08)
+## Sprint: KTLO (2026-10-25 to 2026-10-27, closed)
 
 Keep the lights on: stabilise what Stage II shipped and run the new process
-end to end once. No new features, with one exception the owner made on
-2026-10-26: five interface wishes for the folder window (KTLO-17, KTLO-11,
-KTLO-18, KTLO-19, KTLO-20) join the sprint and go through the full path,
-mock-up → decision → acceptance tests → QA report. They add about 115 minutes
-of owner review. A sixth wish was added later the same day, after KTLO-20 had
-been called the last: running a component from its own tab (KTLO-23, two parts,
-65 further owner minutes), an owner decision that reopened the sprint's scope
-for that one ticket, and once more for a seventh, KTLO-24 (#57, S · 15 min,
-the open-files bar hides itself). Exit criteria:
+end to end once. Planned for 2026-10-26 to 2026-11-08 and closed by the owner
+on 2026-10-27 with every ticket accepted; the
+[retrospective](retrospectives/2026-10-27-ktlo.md) has the facts and the three
+actions. No new features, with one exception the owner made on 2026-10-26:
+five interface wishes for the folder window (KTLO-17, KTLO-11, KTLO-18,
+KTLO-19, KTLO-20) joined the sprint and went through the full path, mock-up →
+decision → acceptance tests → QA report, about 115 minutes of owner review. A
+sixth wish was added later the same day: running a component from its own tab
+(KTLO-23, two parts, 65 further owner minutes), and a seventh, KTLO-24 (#57,
+S · 15 min, the open-files bar hides itself). The sprint had no capacity line
+for additions; the MCP sprint has one. Exit criteria:
 
-- [ ] Migration of the owner's real workspace works, or is switched off by an
-      owner decision (KTLO-03, #5).
-- [ ] No ignored test without a ticket; the identity checkpoint decision is
-      made (KTLO-04, #6).
+- [x] Migration of the owner's real workspace works (KTLO-03, #5; the
+      six-project workspace migrates, `docs/qa/2026-10-27/KTLO-03/report.md`,
+      merged in #78 and #83).
+- [x] No ignored test without a ticket; the identity checkpoint decision is
+      made (KTLO-04, #6, merged in #74). One Stage II ignore remains without
+      a ticket (`timing; run in release`, `folder/tests.rs`) and 24 review
+      views are a named exception since KTLO-28; the former gets its ticket at
+      MCP planning.
 - [x] The block library in the folder mode is accepted by the owner through
       the full process: mock-up, acceptance tests, QA report (KTLO-05a #7,
       KTLO-05b #8; accepted 2026-10-26). Follow-ups: KTLO-05c #22,
-      KTLO-05d #23.
-- [ ] The process documents were followed once end to end, and amended where
-      the pilot required it.
-- [x] The regression smoke list has run on Linux and on Windows (KTLO-07, #10;
-      closed 2026-10-26).
+      KTLO-05d #23, both merged.
+- [x] The process documents were followed once end to end, and amended where
+      the pilot required it (#15 tickets as issues; KTLO-28, 29, 30 from the
+      retrospective).
+- [ ] The regression smoke list has run on Linux and on Windows (KTLO-07,
+      #10). **Linux only**: `docs/qa/2026-10-26/KTLO-07/report.md` records
+      every Windows item as pending, and no later report ran it. Carried into
+      MCP: the owner's local build or the Windows CI captures of the first MCP
+      ticket that touches the window.
 - [x] The two interface findings the owner raised on the mock-ups — one header
       above the board (KTLO-12, #16) and an editor without a box (KTLO-13,
       #17) — are accepted through the same mock-up → test → report path
       (KTLO-13 merged in #39, KTLO-12 in #41 and #47).
-- [ ] The five interface wishes of 2026-10-26 are decided on their mock-ups
-      (KTLO-17 #42, KTLO-11 #14, KTLO-18 #43, KTLO-19 #44, KTLO-20 #46); those
-      approved are accepted or carried into the next sprint with their state
-      recorded.
-- [ ] A component runs from its tab the way a scenario does: the mock-up is
-      decided and the two parts are accepted, or carried into the next sprint
-      with their state recorded (KTLO-23a #53, KTLO-23b #54).
-- [ ] The open-files bar hides itself when no file is open (KTLO-24, #57),
-      decided on its mock-up and accepted, or carried into the next sprint
-      with its state recorded.
-- [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
-
-If the criteria are not met by 2026-11-08, the sprint is extended; feature
-work does not start.
+- [x] The five interface wishes of 2026-10-26 are decided on their mock-ups
+      and accepted (KTLO-17 #48, KTLO-11 #77, KTLO-18 #71, KTLO-19 #69,
+      KTLO-20 #52).
+- [x] A component runs from its tab the way a scenario does (KTLO-23a #75,
+      KTLO-23b #80; the optional-input scenario the criteria missed, KTLO-27
+      #85).
+- [x] The open-files bar hides itself when no file is open (KTLO-24, #70).
+- [x] The KTLO retrospective is written and its actions are issues (KTLO-10
+      #13; actions KTLO-28 #86, KTLO-29 #87, KTLO-30 #88, delivered in the
+      retrospective's pull request).
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
@@ -95,8 +104,15 @@ the nine decisions of MCP-00 on 2026-10-27
 ([#59](https://github.com/jakubiszon26/apiforge/issues/59)): 1–8 the
 recommended option (writes, invalid text, publishing, live requests, the lock
 beside an open window, the window's wording, the reference, the default
-folder), and 9 = B: this sprint follows KTLO and LAY follows it. Exit
-criteria:
+folder), and 9 = B: this sprint follows KTLO and LAY follows it.
+
+Capacity: the sum of the owner review minutes of the tickets below, plus a
+reserved line for the interface findings carried from KTLO and for additions
+made during the sprint; an addition is charged against that line, and when it
+is spent an addition displaces a ticket, named at the time. The numbers are
+set at MCP planning. Carried from KTLO without a ticket yet: the Windows run
+of the regression smoke list (KTLO-07) and a ticket for the Stage II ignore
+`timing; run in release`. Exit criteria:
 
 - [ ] In the demo shop folder, `claude mcp add apiforge -- apiforge mcp`
       lets a model list the project, read and check every source with line
@@ -127,6 +143,27 @@ criteria:
 | [#79](https://github.com/jakubiszon26/apiforge/issues/79) | KTLO-26 A board edit keeps the model the printed source reads back, so the checkpoint it seals describes its source; [ticket](tickets/KTLO-26.md); decision A 2026-10-27 | S · 10 min · `format` |
 | [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning | S · 5 min |
 | [#84](https://github.com/jakubiszon26/apiforge/issues/84) | KTLO-27 An empty optional input in the Run inputs dialog means "absent"; [ticket](tickets/KTLO-27.md); after KTLO-23b, owner decision of 2026-10-27 on #54 | S · 10 min · `visible UI` |
+| [#86](https://github.com/jakubiszon26/apiforge/issues/86) | KTLO-28 Estimate by complexity and risk, not lines; one acceptable result is one pull request (retrospective action 1) | S (docs) · 15 min · `process` |
+| [#87](https://github.com/jakubiszon26/apiforge/issues/87) | KTLO-29 A hand-off path for GPT 6.1 SOL and Sonnet: `ready:*` labels, escalation, merge authority; [autonomy](process/autonomy.md) (action 2) | S (docs) · 15 min · `process` |
+| [#88](https://github.com/jakubiszon26/apiforge/issues/88) | KTLO-30 WIP experiment for MCP: four pull requests within 60 review minutes; actual minutes recorded (action 3) | S (docs) · 10 min · `process` |
+
+### Interface findings carried from KTLO into MCP planning
+
+Raised by the owner on 2026-10-27 after using the accepted KTLO changes
+([retrospective](retrospectives/2026-10-27-ktlo.md#interface-findings-carried-into-the-mcp-sprint)).
+Unestimated until MCP planning, where they get IDs, one shared mock-up that
+shows how they work together, and their own capacity line in the sprint. In
+the owner's priority:
+
+1. Several checks from one run: Run results lets a check be added for more
+   than one field without a run per check.
+2. Run mode is a persistent setting chosen in Run options; the Run button
+   runs it and reads *Run simulation* (purple, as the badge) or *Run live*.
+3. The red status line of the code editor shown while editing goes; errors
+   will mark their lines later.
+4. The "Running unsaved code" notice moves to the window header.
+5. Run results and Problems drag to the whole workspace, not only maximise
+   by button (KTLO-19, KTLO-18).
 
 ## Later
 
