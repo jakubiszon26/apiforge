@@ -168,9 +168,12 @@ On the branch head before this report (`6a849a7`):
 ### Windows
 
 Not run on Windows by hand. CI runs the suites on the Windows runner; see the
-pull request's checks. The `qa-captures-windows-2022` artifact does not show
-managed startup, so it shows neither the stop window nor a migration. Not
-accepted for Windows on this report alone.
+pull request's checks. Its first run (40532418829) failed criterion 3's test
+on Windows only: the test looked for the staged project by a path with `/`,
+and Windows lists it with `\`. The test now asks the file system for the
+folder. The `qa-captures-windows-2022` artifact does not show managed startup,
+so it shows neither the stop window nor a migration. Not accepted for Windows
+on this report alone.
 
 ### Not verified
 
