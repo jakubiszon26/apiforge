@@ -105,6 +105,7 @@ fn execute(project: apiforge_core::format::Project, scenario_id: &str) -> RunRes
         .start(RunRequest {
             project,
             scenario_id: scenario_id.to_owned(),
+            target: apiforge_runner::RunTarget::Scenario,
             mode: RunMode::Simulation,
             target_node_id: None,
             single_node_id: None,

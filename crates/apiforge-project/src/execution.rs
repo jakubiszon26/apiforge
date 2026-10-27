@@ -17,13 +17,16 @@ impl PreparedRun {
     pub fn document_id(&self) -> &str {
         &self.ticket.document_id
     }
+    /// The frozen project the run executes: the snapshot's public context
+    /// with the scenario, or the component at its working revision (KTLO-23).
     pub fn project(&self) -> Result<apiforge_core::format::Project> {
-        let apiforge_storage::project::IdentityBase::Scenario(scenario) = self.snapshot.document()
-        else {
-            return Err(Error::InvalidModel);
-        };
+        use apiforge_storage::project::IdentityBase;
         let mut project = self.snapshot.context().clone();
-        project.scenarios.push(scenario.clone());
+        match self.snapshot.document() {
+            IdentityBase::Scenario(scenario) => project.scenarios.push(scenario.clone()),
+            // Its next revision, which no published revision uses.
+            IdentityBase::Component(component) => project.components.push(component.clone()),
+        }
         Ok(project)
     }
 }
@@ -68,7 +71,11 @@ impl ProjectSession {
         self.settle(document_id)?;
         let index = self.index(document_id)?;
         let document = &self.documents[index];
-        if document.entry.kind != DocumentKind::Scenario || document.conflict.is_some() {
+        if !matches!(
+            document.entry.kind,
+            DocumentKind::Scenario | DocumentKind::Component
+        ) || document.conflict.is_some()
+        {
             return Err(Error::ModelLocked);
         }
         let last_valid = document.analysis != AnalysisState::Valid || !document.fields.is_empty();

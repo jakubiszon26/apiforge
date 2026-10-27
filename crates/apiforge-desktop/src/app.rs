@@ -1269,6 +1269,7 @@ impl App {
         let request = RunRequest {
             project: self.editor.project().clone(),
             scenario_id: self.editor.scenario().id.clone(),
+            target: apiforge_runner::RunTarget::Scenario,
             mode: self.mode,
             target_node_id,
             single_node_id,
@@ -2092,6 +2093,7 @@ impl App {
                 running: self.is_running(),
                 stale: self.is_run_stale(),
                 files_busy: self.files.busy(),
+                component: false,
                 document_locked: self.document_locked(),
             };
             self.report.show(ui, &context)

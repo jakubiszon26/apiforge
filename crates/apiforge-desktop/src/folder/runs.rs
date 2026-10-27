@@ -5,8 +5,9 @@ use apiforge_core::{
     run::{Phase, RunMode, RunResult},
 };
 use apiforge_project::PreparedRun;
-use apiforge_runner::{RunHandle, RunRequest, RunnerService};
+use apiforge_runner::{RunHandle, RunRequest, RunTarget, RunnerService};
 use apiforge_storage::JournalStore;
+use apiforge_storage::project::IdentityBase;
 
 #[derive(Default)]
 pub(super) struct Runs {
@@ -120,7 +121,13 @@ impl FolderApp {
                 });
             }
             Ok(prepared) => self.start_prepared_run(prepared, live),
-            Err(error) => self.notify(format!("Cannot run this scenario: {error}"), true),
+            Err(error) => {
+                let kind = match session.document(id).map(|document| document.entry().kind) {
+                    Some(DocumentKind::Component) => "component",
+                    _ => "scenario",
+                };
+                self.notify(format!("Cannot run this {kind}: {error}"), true)
+            }
         }
     }
 
@@ -149,10 +156,18 @@ impl FolderApp {
                 return;
             }
         };
-        let Some(scenario) = project.scenarios.first() else {
-            return;
+        // A component runs its working revision on its own (KTLO-23); its
+        // inputs are the defaults written in code until KTLO-23b asks for them.
+        let (scenario_id, target) = match prepared.snapshot.document() {
+            IdentityBase::Scenario(scenario) => (scenario.id.clone(), RunTarget::Scenario),
+            IdentityBase::Component(component) => (
+                component.id.clone(),
+                RunTarget::Component {
+                    revision: component.revision,
+                    inputs: indexmap::IndexMap::new(),
+                },
+            ),
         };
-        let scenario_id = scenario.id.clone();
         if self.runs.runner.is_none() {
             let context = self.ui_context.clone();
             match RunnerService::new(Arc::new(move || context.request_repaint())) {
@@ -174,6 +189,7 @@ impl FolderApp {
         let request = RunRequest {
             project,
             scenario_id,
+            target,
             mode: if live {
                 RunMode::Live
             } else {
@@ -245,9 +261,10 @@ impl FolderApp {
             ui.heading(if prepared.last_valid { "Run the last valid version?" } else { "Run without a journal?" });
             if prepared.last_valid {
                 ui.label("The current code or inspector fields contain errors. Run the earlier code with its recorded public configuration and pinned component revisions.");
-                if let apiforge_storage::project::IdentityBase::Scenario(scenario) = prepared.snapshot.document() {
-                    ui.label(format!("Scenario: {}", scenario.name));
-                }
+                ui.label(match prepared.snapshot.document() {
+                    IdentityBase::Scenario(scenario) => format!("Scenario: {}", scenario.name),
+                    IdentityBase::Component(component) => format!("Component: {}", component.name),
+                });
             }
             if live && self.runs.journal.is_none() {
                 ui.label("This session cannot record live requests. An interrupted run will leave no journal of its effects on the API.");
@@ -307,6 +324,11 @@ impl FolderApp {
                 running: self.runs.handle.is_some(),
                 stale,
                 files_busy: false,
+                component: self
+                    .session
+                    .as_ref()
+                    .and_then(|session| session.document(id))
+                    .is_some_and(|document| document.entry().kind == DocumentKind::Component),
                 document_locked: stale
                     || snapshot.as_ref().is_none_or(|snapshot| !snapshot.editable),
             },

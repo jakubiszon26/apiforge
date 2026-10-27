@@ -1,4 +1,5 @@
-//! Serial execution of a scenario: scheduling, node operations, components, cleanup.
+//! Serial execution of a scenario, or of a component on its own: scheduling,
+//! node operations, components, cleanup.
 //!
 //! Operations run one at a time and each is awaited. A node becomes ready when all
 //! its data and ordering dependencies inside the graph have finished; among ready
@@ -13,12 +14,12 @@ use crate::{
     http::{self, HttpError, Reached},
     plan::ExecutionPlan,
     redact::Redactor,
-    request::{RunError, RunLimits, RunOptions, RunRequest, validate},
+    request::{RunError, RunLimits, RunOptions, RunRequest, RunTarget, target_component, validate},
     support::{byte_size, duration_label, rfc3339_millis, sentence},
 };
 use apiforge_core::{
     binding::Reference,
-    format::{Binding, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
+    format::{Binding, Component, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
     graph::{
         BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, ancestors_and_self,
         component_definition, condition_inputs, condition_predicates, input_ports, predicate,
@@ -69,14 +70,57 @@ pub(crate) async fn run_validated(
     cancel: CancellationToken,
     on_update: impl FnMut(&RunResult) + Send,
 ) -> Result<RunResult, RunError> {
-    let scenario = request
-        .project
-        .scenarios
-        .iter()
-        .find(|scenario| scenario.id == request.scenario_id)
-        .ok_or_else(|| RunError::ScenarioNotFound(request.scenario_id.clone()))?;
+    let standalone;
+    let (scenario, missing) = match &request.target {
+        RunTarget::Scenario => (
+            request
+                .project
+                .scenarios
+                .iter()
+                .find(|scenario| scenario.id == request.scenario_id)
+                .ok_or_else(|| RunError::ScenarioNotFound(request.scenario_id.clone()))?,
+            None,
+        ),
+        RunTarget::Component { revision, inputs } => {
+            let (scenario, missing) = component_run(target_component(&request, *revision)?, inputs);
+            standalone = scenario;
+            (&standalone, Some(missing))
+        }
+    };
     let mut engine = Engine::new(&request, scenario, options, on_update);
+    engine.component_inputs = missing;
     Ok(engine.run(cancel).await)
+}
+
+/// A component run on its own executes its graph as a scenario without a
+/// cleanup phase, its parameters the given inputs over the defaults written in
+/// code. Also returns the required inputs that have neither (KTLO-23).
+fn component_run(
+    component: &Component,
+    inputs: &IndexMap<String, Value>,
+) -> (Scenario, Vec<String>) {
+    let mut parameters = IndexMap::new();
+    let mut missing = Vec::new();
+    for port in &component.inputs {
+        match inputs.get(&port.name).or(port.default()) {
+            Some(value) => {
+                parameters.insert(port.name.clone(), value.clone());
+            }
+            None if port.is_required() => missing.push(port.name.clone()),
+            None => {}
+        }
+    }
+    let scenario = Scenario {
+        id: component.id.clone(),
+        name: component.name.clone(),
+        description: component.description.clone(),
+        graph: component.graph.clone(),
+        cleanup: Graph::default(),
+        parameters,
+        // A component has no policy of its own; the first failure stops it.
+        error_policy: apiforge_core::model::ErrorPolicy::Stop,
+    };
+    (scenario, missing)
 }
 
 /// Resolved inputs of a node; `None` is a missing value, distinct from JSON null.
@@ -203,6 +247,10 @@ struct Engine<'a, F> {
     /// it, because the entry on disk then overstates what is unknown.
     journal_error: Option<String>,
     run: RunResult,
+    /// A component run on its own: its required inputs without a value. A step
+    /// of its graph that reads one fails as a missing input. `None` for a
+    /// scenario, which also has a cleanup phase.
+    component_inputs: Option<Vec<String>>,
     executed_steps: usize,
     report_bytes: usize,
     on_update: F,
@@ -275,6 +323,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             journal_sequence: 0,
             journal_error: None,
             run,
+            component_inputs: None,
             executed_steps: 0,
             report_bytes: 0,
             on_update,
@@ -351,21 +400,24 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         // independent deadline and must not turn a successful main phase into a timeout.
         let main_budget_exceeded = Instant::now() >= main_deadline;
         // Cleanup gets its own budget, unaffected by cancellation of the main phase.
-        self.journal_cleanup_started();
-        context.phase = Phase::Cleanup;
-        context.signal = Signal {
-            token: CancellationToken::new(),
-            deadline: Instant::now() + self.limits.cleanup_budget,
-        };
-        if let Err(error) = self
-            .execute_graph(&scenario.cleanup, &mut context, true, None)
-            .await
-        {
-            let cleanup = format!("Cleanup error: {error}");
-            self.run.error = Some(match self.run.error.take() {
-                Some(previous) => format!("{previous} {cleanup}"),
-                None => cleanup,
-            });
+        // A component run on its own has no cleanup phase.
+        if self.component_inputs.is_none() {
+            self.journal_cleanup_started();
+            context.phase = Phase::Cleanup;
+            context.signal = Signal {
+                token: CancellationToken::new(),
+                deadline: Instant::now() + self.limits.cleanup_budget,
+            };
+            if let Err(error) = self
+                .execute_graph(&scenario.cleanup, &mut context, true, None)
+                .await
+            {
+                let cleanup = format!("Cleanup error: {error}");
+                self.run.error = Some(match self.run.error.take() {
+                    Some(previous) => format!("{previous} {cleanup}"),
+                    None => cleanup,
+                });
+            }
         }
         if main_budget_exceeded {
             self.run.error = Some(format!(
@@ -685,6 +737,20 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         self.executed_steps += 1;
         if self.executed_steps > self.limits.max_steps {
             return Err(StepError::StepLimit(self.limits.max_steps));
+        }
+        // Only the component's own graph reads its inputs; a call binds them.
+        if context.stack.is_empty()
+            && let Some(missing) = &self.component_inputs
+            && let Some(name) =
+                node.inputs
+                    .values()
+                    .flat_map(Binding::leaves)
+                    .find_map(|(_, leaf)| match leaf {
+                        Binding::Parameter { name, .. } if missing.contains(name) => Some(name),
+                        _ => None,
+                    })
+        {
+            return Err(StepError::MissingInput(name.clone()));
         }
         context.arguments.clear();
         let mut values = Values::with_capacity(node.inputs.len());
