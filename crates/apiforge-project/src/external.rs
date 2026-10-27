@@ -68,6 +68,8 @@ pub struct ExternalChanges {
     manifest: Option<ObservedFile>,
     documents: Vec<(String, FileState, ObservedFile)>,
     texts: Vec<(String, FileState, Option<Vec<u8>>)>,
+    /// The check ran beside a living holder: this session observes it.
+    observer: bool,
     /// An observer's checkpoint or a revision file differs from the loaded one.
     committed_outside_sources: bool,
 }
@@ -206,7 +208,13 @@ impl ExternalCheck {
             texts.push((path.as_str().to_owned(), saved.clone(), bytes));
         }
         let mut committed_outside_sources = false;
-        if let Some((diagram, revisions)) = &self.observed {
+        // A read-only session without a living holder (a folder this user
+        // cannot write, a holder that is gone) keeps following file by file.
+        let observed = match &self.observed {
+            Some(observed) if self.store.has_live_writer()? => Some(observed),
+            _ => None,
+        };
+        if let Some((diagram, revisions)) = observed {
             let diagram_path = ProjectPath::new(super::DIAGRAM_PATH)?;
             for (path, saved) in std::iter::once((&diagram_path, diagram))
                 .chain(revisions.iter().map(|(path, saved)| (path, saved)))
@@ -228,6 +236,7 @@ impl ExternalCheck {
             manifest,
             documents,
             texts,
+            observer: observed.is_some(),
             committed_outside_sources,
         })
     }
@@ -270,7 +279,8 @@ impl ProjectSession {
         if changes.epoch != self.epoch || changes.manifest_base != self.manifest_saved {
             return Ok(outcome);
         }
-        if self.store.is_read_only()
+        if changes.observer
+            && self.store.is_read_only()
             && !self.has_unsaved_work()
             && let Some(followed) = self.follow_commit(&changes)?
         {
