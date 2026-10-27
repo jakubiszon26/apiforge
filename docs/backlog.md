@@ -94,76 +94,109 @@ for additions; the MCP sprint has one. Exit criteria:
 
 ## Sprint: MCP (planned, after KTLO)
 
-An MCP server: a model works on a project without the window. Analysed
-2026-10-27 ([MCP-00](tickets/MCP-00.md)) at the owner's request of
-2026-10-26: a `mcp` subcommand of the `apiforge` binary over stdio, so that
-Claude Code or another MCP client reads, checks, edits and runs the scenarios
-of a folder project through API Forge's own session — the same files and
-bytes the window writes. The owner called it a sprint of its own and took
-the nine decisions of MCP-00 on 2026-10-27
-([#59](https://github.com/jakubiszon26/apiforge/issues/59)): 1–8 the
-recommended option (writes, invalid text, publishing, live requests, the lock
-beside an open window, the window's wording, the reference, the default
-folder), and 9 = B: this sprint follows KTLO and LAY follows it.
+An MCP server: a model works on a project while the owner watches in the
+window that is already open. Analysed 2026-10-27 ([MCP-00](tickets/MCP-00.md))
+at the owner's request of 2026-10-26: a `mcp` subcommand of the `apiforge`
+binary over stdio, so that Claude Code or another MCP client reads, checks,
+edits, publishes and runs the scenarios of a folder project through API
+Forge's own session — the same files and bytes the window writes. The owner
+called it a sprint of its own and took the nine decisions of MCP-00 on
+2026-10-27 ([#59](https://github.com/jakubiszon26/apiforge/issues/59)): 1–8
+the recommended option and 9 = B (this sprint follows KTLO, LAY follows it).
+The owner's audit of 2026-10-27 revised the analysis (MCP-00 revision 2):
+the window stays open and observes the agent's committed changes live, one
+writer per agent session, validation before the first write, versions on
+every read and write, four defined ends of a run, one rule for secrets, a
+written contract, and a per-project toggle for live requests. Decision 5
+(the lock per write) is superseded; decisions 10–18 are open on #59. [ADR
+0014](decisions/0014-agent-sessions.md) records the ownership rules.
 
-Capacity: the sum of the owner review minutes of the tickets below, plus a
-reserved line for the interface findings carried from KTLO and for additions
-made during the sprint; an addition is charged against that line, and when it
-is spent an addition displaces a ticket, named at the time. The numbers are
-set at MCP planning. Carried from KTLO without a ticket yet: the Windows run
-of the regression smoke list (KTLO-07) and a ticket for the Stage II ignore
-`timing; run in release`. Exit criteria:
+**Key acceptance criterion:** the agent works through MCP and the owner
+watches its committed changes live in the already open application
+(MCP-11).
+
+Capacity: the owner review minutes of the MCP tickets below sum to **310**;
+the interface findings carried from KTLO have their own line of **115**
+(UX-00 to UX-05) and start after MCP-11 unless decision 18 says otherwise;
+KTLO-31 adds 5. An addition made during the sprint is charged against the UX
+line, and when it is spent an addition displaces a ticket, named at the
+time. Carried from KTLO: the Windows run of the regression smoke list
+(KTLO-07, #10), owed by the first MCP ticket that touches the window
+(MCP-07), and the Stage II ignore `timing; run in release` (KTLO-31). Exit
+criteria:
 
 - [ ] In the demo shop folder, `claude mcp add apiforge -- apiforge mcp`
-      lets a model list the project, read and check every source with line
-      and column, print, run a simulation and check a proposed text, with
-      nothing written to the project (MCP-01, MCP-03).
+      lets a model list the project, read and check every source with line,
+      column and version, print, simulate a scenario or a component and
+      check a proposed text, with nothing written to the project (MCP-01,
+      MCP-03).
 - [ ] The language reference a model receives is a tested document whose
-      examples parse, format unchanged and lower (MCP-02).
-- [ ] With the owner's decisions 1–3 taken, the model saves, registers and
-      publishes through the server under the writer lock, never while the
-      window holds the project, and the window follows what it wrote
-      (MCP-04, MCP-05).
-- [ ] Live requests are off unless the person starts the server with
-      `--allow-live`; secrets never pass through a tool (MCP-06).
-- [ ] The window names who holds the project and becomes writable when they
-      leave, through mock-up, acceptance tests and QA report (MCP-07).
+      examples parse, format unchanged and lower, served by the server
+      (MCP-02, MCP-03).
+- [ ] The model saves, registers and publishes through the server under one
+      agent session: validated before the first byte, refused when stale,
+      secrets never written (MCP-04, MCP-05).
+- [ ] Live requests are off unless the person allows them — the window's
+      toggle while a window is connected, `--allow-live` otherwise — and
+      every end of a run has a defined result; no secret value leaves the
+      server by any tool, resource, report, diagnostic, error or log
+      (MCP-06, MCP-09).
+- [ ] The window names who holds the project, hands it over on request from
+      a consistent state, observes every commit within two seconds keeping
+      the person's place, and takes the project back when the holder is
+      gone — never from a living process — through mock-ups, acceptance
+      tests and QA reports (MCP-07, MCP-08a, MCP-08b, MCP-08c, MCP-10).
+- [ ] The whole workflow runs end to end with a real client while the owner
+      watches, with the client's version and the steps recorded, and the
+      Windows evidence or its absence stated item by item (MCP-11).
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md) | S (docs) · 30 min plus the discussion · decisions taken 2026-10-27 |
-| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
-| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference the model reads from the server; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
-| [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation and check a proposed text from the server; [ticket](tickets/MCP-03.md); after MCP-01 | S · 15 min |
-| [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save a scenario or component from the server; [ticket](tickets/MCP-04.md); decisions 1, 2, 5 | M · 30 min |
-| [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish a component from the server; [ticket](tickets/MCP-05.md); decision 3, after MCP-04 | S · 15 min |
-| [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests from the server behind `--allow-live`; [ticket](tickets/MCP-06.md); decision 4, after MCP-03 | S · 20 min |
-| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The window names who holds the project and becomes writable when they leave; [ticket](tickets/MCP-07.md); decision 6, mock-up required | S · 20 min · `visible UI`, `default` |
-| [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–9 taken 2026-10-27; 10–18 open |
+| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print, with versions; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
+| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference for models, tested — the document; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
+| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The lock names its holder; the window says who and takes the project back when it is free; [ticket](tickets/MCP-07.md); decision 6, mock-up M1 | S · 20 min · `visible UI`, `default` |
+| [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation (scenario or component), check a proposal, serve the reference and resources; the executor returns data; cancellation and timeout; [ticket](tickets/MCP-03.md); after MCP-01, MCP-02 | M · 20 min |
+| [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save and create from the server — the agent session, validation before the first write, versions, secrets, paths; [ticket](tickets/MCP-04.md); decisions 1, 2, 10; after MCP-03 | M · 30 min |
+| — | MCP-08a Observer mode: editing paused while another holds the project; the window follows every commit by reload within two seconds, keeping its navigation; [ticket](tickets/MCP-08a.md); decisions 10, 12, mock-up M1; after MCP-07 | M · 30 min · `visible UI`, `default`, `removal` |
+| [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish from the server: comment-loss consent, expected hash, request ids; [ticket](tickets/MCP-05.md); decision 3; after MCP-04 | S · 15 min |
+| [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests: the four ends of a run, the journal, `--allow-live` and the permission slot; [ticket](tickets/MCP-06.md); decision 4; after MCP-04 | M · 25 min |
+| — | MCP-08b Hand-over on request: the control channel, a clean window hands over and observes, refusal with unsaved work, `saved` rescans, *Take back*, release; [ticket](tickets/MCP-08b.md); decisions 10, 11, mock-up M1; after MCP-08a, MCP-04 | M · 30 min · `visible UI`, `default` |
+| — | MCP-08c The hand-over prompt when the window has unsaved work; [ticket](tickets/MCP-08c.md); decision 13, mock-up M2; after MCP-08b | S · 15 min · `visible UI` |
+| — | MCP-09 The live toggle in the project settings; the server obeys it while a window is connected; [ticket](tickets/MCP-09.md); decisions 14–16, mock-up M3; after MCP-08b, MCP-06 | M · 25 min · `visible UI`, `default` |
+| — | MCP-10 The agent's run status in the header; [ticket](tickets/MCP-10.md); decision 17, mock-up M4; after MCP-08b | S · 15 min · `visible UI` |
+| — | MCP-11 The whole workflow end to end with a real client — the sprint's acceptance; [ticket](tickets/MCP-11.md); after every MCP ticket | S · 30 min |
+| — | KTLO-31 The `timing; run in release` ignore (`folder/tests.rs` frame budgets) names its ticket, or the test moves to the release-only verification step | S · 5 min |
+| [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) — merged in #70 | S · 15 min · `visible UI`, `default` |
 | [#79](https://github.com/jakubiszon26/apiforge/issues/79) | KTLO-26 A board edit keeps the model the printed source reads back, so the checkpoint it seals describes its source; [ticket](tickets/KTLO-26.md); decision A 2026-10-27 | S · 10 min · `format` |
-| [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning | S · 5 min |
-| [#84](https://github.com/jakubiszon26/apiforge/issues/84) | KTLO-27 An empty optional input in the Run inputs dialog means "absent"; [ticket](tickets/KTLO-27.md); after KTLO-23b, owner decision of 2026-10-27 on #54 | S · 10 min · `visible UI` |
-| [#86](https://github.com/jakubiszon26/apiforge/issues/86) | KTLO-28 Estimate by complexity and risk, not lines; one acceptable result is one pull request (retrospective action 1) | S (docs) · 15 min · `process` |
-| [#87](https://github.com/jakubiszon26/apiforge/issues/87) | KTLO-29 A hand-off path for GPT 6.1 SOL and Sonnet: `ready:*` labels, escalation, merge authority; [autonomy](process/autonomy.md) (action 2) | S (docs) · 15 min · `process` |
-| [#88](https://github.com/jakubiszon26/apiforge/issues/88) | KTLO-30 WIP experiment for MCP: four pull requests within 60 review minutes; actual minutes recorded (action 3) | S (docs) · 10 min · `process` |
+| [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning — merged in #82 | S · 5 min |
+| [#84](https://github.com/jakubiszon26/apiforge/issues/84) | KTLO-27 An empty optional input in the Run inputs dialog means "absent"; [ticket](tickets/KTLO-27.md) — merged in #85 | S · 10 min · `visible UI` |
+| [#86](https://github.com/jakubiszon26/apiforge/issues/86) | KTLO-28 Estimate by complexity and risk, not lines; one acceptable result is one pull request (retrospective action 1) — merged in #89 | S (docs) · 15 min · `process` |
+| [#87](https://github.com/jakubiszon26/apiforge/issues/87) | KTLO-29 A hand-off path for GPT 6.1 SOL and Sonnet: `ready:*` labels, escalation, merge authority; [autonomy](process/autonomy.md) (action 2) — merged in #89 | S (docs) · 15 min · `process` |
+| [#88](https://github.com/jakubiszon26/apiforge/issues/88) | KTLO-30 WIP experiment for MCP: four pull requests within 60 review minutes; actual minutes recorded (action 3) — merged in #89 | S (docs) · 10 min · `process` |
 
-### Interface findings carried from KTLO into MCP planning
+Order and parallelism: MCP-01, MCP-02 and MCP-07 depend on nothing and may
+start together within the WIP cap; MCP-03 follows 01 and 02; MCP-04 follows
+03; MCP-08a follows 07; MCP-05 and MCP-06 follow 04; MCP-08b follows 08a and
+04; MCP-08c and MCP-10 follow 08b; MCP-09 follows 08b and 06; MCP-11 closes.
+
+### Interface findings carried from KTLO — the UX line
 
 Raised by the owner on 2026-10-27 after using the accepted KTLO changes
-([retrospective](retrospectives/2026-10-27-ktlo.md#interface-findings-carried-into-the-mcp-sprint)).
-Unestimated until MCP planning, where they get IDs, one shared mock-up that
-shows how they work together, and their own capacity line in the sprint. In
-the owner's priority:
+([retrospective](retrospectives/2026-10-27-ktlo.md#interface-findings-carried-into-the-mcp-sprint)),
+ticketed at MCP planning ([UX-00](tickets/UX-00.md)): one shared mock-up,
+five decisions, five tickets, 115 minutes in all, in the owner's priority.
+They start after MCP-11 unless MCP-00 decision 18 says otherwise.
 
-1. Several checks from one run: Run results lets a check be added for more
-   than one field without a run per check.
-2. Run mode is a persistent setting chosen in Run options; the Run button
-   runs it and reads *Run simulation* (purple, as the badge) or *Run live*.
-3. The red status line of the code editor shown while editing goes; errors
-   will mark their lines later.
-4. The "Running unsaved code" notice moves to the window header.
-5. Run results and Problems drag to the whole workspace, not only maximise
-   by button (KTLO-19, KTLO-18).
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| — | UX-00 One mock-up and the owner's decisions for the five findings; [ticket](tickets/UX-00.md) | S · 20 min plus the discussion · `visible UI` · `decision-needed` |
+| — | UX-01 Several checks from one run | M · 30 min · `visible UI` |
+| — | UX-02 Run mode is a persistent setting in *Run options*; the Run button reads *Run simulation* (purple) or *Run live* | S · 20 min · `visible UI`, `default` |
+| — | UX-03 The red status line of the code editor goes | S · 10 min · `visible UI`, `removal` |
+| — | UX-04 *Running unsaved code* moves to the window header | S · 15 min · `visible UI` |
+| — | UX-05 Run results and Problems drag to the whole workspace | S · 20 min · `visible UI` |
+
 
 ## Later
 
