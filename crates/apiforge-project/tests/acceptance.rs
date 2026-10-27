@@ -675,3 +675,43 @@ fn a_selection_survives_an_exclusive_job_that_left_its_file_alone() {
         &in_text
     );
 }
+
+/// KTLO-25 (#76). A fresh demo shop is the first project many people open, so
+/// its Problems list starts empty: every document analyses valid with no
+/// warning and no error. `components/product.afs` used to carry "The value's
+/// type does not match this input".
+#[test]
+fn the_prepared_demo_shop_analyses_without_a_problem_in_any_document() {
+    let directory = prepared_demo();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    session.settle_all().unwrap();
+
+    assert!(!session.documents().is_empty());
+    let problems: Vec<String> = session
+        .documents()
+        .iter()
+        .flat_map(|document| {
+            let text = document.text();
+            document.diagnostics().iter().map(move |diagnostic| {
+                let before = &text[..diagnostic.range.start];
+                let line = before.matches('\n').count() + 1;
+                let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+                format!(
+                    "{}:{line}:{column}: {:?} {}",
+                    document.entry().path.as_str(),
+                    diagnostic.severity,
+                    diagnostic.message
+                )
+            })
+        })
+        .collect();
+    assert!(problems.is_empty(), "{problems:#?}");
+    for document in session.documents() {
+        assert_eq!(
+            document.analysis(),
+            AnalysisState::Valid,
+            "{}",
+            document.entry().path.as_str()
+        );
+    }
+}
