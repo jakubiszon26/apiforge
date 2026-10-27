@@ -361,6 +361,109 @@ mod review {
         }
     }
 
+    // ---- Throwaway mock-up for KTLO-03: the Migration stopped window ----
+
+    /// Content width of the stop window, in points; the window adds its margins.
+    const MOCK_STOP_WIDTH: f32 = 432.0;
+    const MOCK_STOP_MARGIN: i8 = 24;
+
+    /// What the stop window says. The project and scenario names are placeholders.
+    fn mock_stop_contents(ui: &mut egui::Ui) {
+        use crate::icons::Icon;
+        use crate::{theme, widgets};
+        use egui::RichText;
+        ui.set_width(MOCK_STOP_WIDTH);
+        ui.label(
+            RichText::new("Migration stopped")
+                .size(theme::FONT_TITLE)
+                .family(theme::bold_family()),
+        );
+        ui.add_space(theme::SPACE_SM);
+        ui.add(
+            egui::Label::new(
+                "API Forge could not move the project \u{201c}Customer integration\u{201d} \
+                 from the previous workspace into its own folder: a scenario differs after \
+                 reloading. The scenario \u{201c}Refund a partially shipped order paid with \
+                 a gift card and a credit card, then reissue the corrected invoice\u{201d} \
+                 did not read back the same from the migrated folder.",
+            )
+            .wrap(),
+        );
+        ui.add_space(theme::SPACE_MD);
+        ui.add(
+            egui::Label::new(
+                RichText::new(
+                    "The previous workspace and the staged folders were left untouched, \
+                     and nothing was activated.",
+                )
+                .size(theme::FONT_LABEL)
+                .color(theme::MUTED),
+            )
+            .wrap(),
+        );
+        ui.add_space(theme::SPACE_XL);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(widgets::action(Icon::Close, "Quit"));
+            ui.add(widgets::action(Icon::Folder, "Open the previous workspace"));
+        });
+    }
+
+    /// The stop window centred on a screen of `size`, the screen drawn as a flat
+    /// grey with no other window, since it is the first window the person sees.
+    /// Returns the window's outer rectangle.
+    fn mock_stop_on_screen(size: egui::Vec2, name: &str, region: Option<egui::Rect>) -> egui::Rect {
+        let mut harness = Harness::builder().with_size(size).build_ui_state(
+            |ui, (themed, outer): &mut (bool, egui::Rect)| {
+                // The theme's fonts take effect from the next frame.
+                if !*themed {
+                    crate::theme::apply(ui.ctx());
+                    *themed = true;
+                    return;
+                }
+                let ctx = ui.ctx().clone();
+                ui.painter()
+                    .rect_filled(ctx.content_rect(), 0.0, crate::theme::GRID);
+                let ctx = &ctx;
+                let shown = egui::Area::new(egui::Id::new("mock-stop"))
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .show(ctx, |ui| {
+                        egui::Frame::new()
+                            .fill(crate::theme::BG)
+                            .stroke(egui::Stroke::new(1.0, crate::theme::BORDER))
+                            .shadow(ui.style().visuals.window_shadow)
+                            .inner_margin(MOCK_STOP_MARGIN)
+                            .show(ui, mock_stop_contents)
+                    });
+                *outer = shown.inner.response.rect;
+            },
+            (false, egui::Rect::NOTHING),
+        );
+        harness.run();
+        assert_within_window(&harness, &["Quit", "Open the previous workspace"]);
+        assert_disjoint(&harness, &["Quit", "Open the previous workspace"]);
+        capture(&mut harness, name, region);
+        harness.state().1
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_03_migration_stop() {
+        let small = mock_stop_on_screen(MINIMUM, "mock-migration-stop-960x540", None);
+        let wide = mock_stop_on_screen(WIDE, "mock-migration-stop-1600x1000", None);
+        assert_eq!(small.size(), wide.size(), "the window has one natural size");
+        // The window alone, outline included, cut from the 1600 x 1000 screen.
+        mock_stop_on_screen(WIDE, "mock-migration-stop-window", Some(wide));
+        let report = format!(
+            "window {} x {} points inside a 1 point outline; on 960x540 at {:?}; on 1600x1000 at {:?}\n",
+            small.width() - 2.0,
+            small.height() - 2.0,
+            small.min,
+            wide.min
+        );
+        std::fs::write(capture_dir().join("mock-migration-stop-size.txt"), &report).unwrap();
+        eprintln!("{report}");
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
