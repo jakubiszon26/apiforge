@@ -202,13 +202,28 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
         "no project is published"
     );
 
-    // The staged folders stay for inspection, and the next start, which
-    // migrates again before it decides what to show, is refused the same way.
+    // The staged folders stay for inspection: the project prepared before the
+    // refused one, and the refused one's folder, which is refused before
+    // anything is written into it. The next start, which migrates again
+    // before it decides what to show, is refused the same way.
     let staged = tree(&directory.path().join("migration"));
     assert!(
-        staged.keys().any(|path| path.contains(REFUSED_PROJECT_ID)),
-        "the refused project's staged folder is kept: {:?}",
+        staged
+            .keys()
+            .any(|path| path.ends_with("support-desk/apiforge.project.json")),
+        "the project before it stays staged: {:?}",
         staged.keys().collect::<Vec<_>>()
+    );
+    let index: serde_json::Value = serde_json::from_slice(&staged["index.json"]).unwrap();
+    let migration_id = index["migrationId"].as_str().unwrap();
+    assert!(
+        directory
+            .path()
+            .join("migration")
+            .join(migration_id)
+            .join(REFUSED_PROJECT_ID)
+            .is_dir(),
+        "the refused project's staged folder is kept"
     );
     drop(store);
     let store =

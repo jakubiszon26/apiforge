@@ -460,6 +460,7 @@ fn active_project(workspace: &Workspace) -> Option<String> {
 /// Writes the folder and transfers drafts into local recovery. Returns the
 /// drafts that name a definition the project no longer has.
 fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec<CodeDraft>> {
+    printable(project)?;
     let project = &in_source_order(project);
     let mut manifest = prepare_project(folder, project)?;
     let store = ProjectStore::open_exclusive(folder)?;
@@ -587,6 +588,27 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
         )?;
     }
     Ok(unmigrated)
+}
+
+/// A scenario that cannot be written as a folder source, such as one that
+/// reads an environment value the project never sets, refuses the project by
+/// its name and the scenario's, rather than as an anonymous printing error.
+fn printable(project: &Project) -> Result<()> {
+    let mut context = project.clone();
+    context.scenarios.clear();
+    for scenario in &project.scenarios {
+        let document = Document::Scenario(scenario.clone());
+        if apiforge_script::print_folder_document(&context, &document).is_err() {
+            return Err(MigrationError::Verification {
+                project_id: project.id.clone(),
+                project_name: project.name.clone(),
+                scenario: Some(scenario.name.clone()),
+                reason: "a scenario cannot be written as code without loss",
+            }
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// The legacy model may hold a block's inputs, or an expression's operands, in
