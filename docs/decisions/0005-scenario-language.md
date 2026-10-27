@@ -353,6 +353,8 @@ Diagnostics never quote secret values.
   preserved; comments survive only as notes.
 - Everything the board can express is expressible in text and vice versa,
   including ordering, branches and Start. Layout is the only exception.
-- The language reference for users and MCP is generated from this ADR in M7. Any
-  grammar change updates this ADR, the reference and the round-trip corpus
-  together.
+- The language reference for users and MCP,
+  [`docs/language/reference.md`](../language/reference.md), is written and
+  maintained by hand (amended 2026-10-27, MCP-02; it was to be generated from
+  this ADR in M7). A test parses, formats and lowers its examples. Any grammar
+  change updates this ADR, the reference and the round-trip corpus together.
