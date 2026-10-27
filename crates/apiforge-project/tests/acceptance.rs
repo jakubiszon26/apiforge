@@ -215,7 +215,7 @@ fn an_invalid_source_seals_its_identities_at_its_first_successful_analysis() {
     std::fs::write(root.join("found.afs"), SOURCE).unwrap();
     let changes = session.external_check().run().unwrap();
     let outcome = session.apply_external(changes).unwrap();
-    assert_eq!(outcome.reloaded, [found.clone()]);
+    assert_eq!(outcome.reloaded, std::slice::from_ref(&found));
     let fixed = blocks(session.document(&found).unwrap());
     assert!(
         has_record(root, &found),
