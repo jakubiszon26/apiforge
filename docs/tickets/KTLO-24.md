@@ -1,8 +1,13 @@
 # KTLO-24: The bar with the open files hides itself when no file is open
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Approved 2026-10-27 (issue #57) — decisions 1 and 2 = A taken
-  2026-10-26; decision 3, the mock-up as a whole, approved 2026-10-27
+- State: Awaiting acceptance in PR #70, round 2 (issue #57) — decisions 1
+  and 2 = A taken 2026-10-26; decision 3, the mock-up as a whole, approved
+  2026-10-27; decisions 4 and 5 on PR #70 taken 2026-10-27
+- Actual size: 1,067 changed lines without the PNGs over two rounds (869
+  in round 1, 198 in round 2): code 71, tests 687, the review view 44, the
+  QA report 210, this ticket's amendment 55 — over S and over the M cap of
+  800, accepted unsplit (decision 5)
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-24-hide-tab-strip` (throwaway; deleted after the
   decision)
@@ -24,12 +29,16 @@ right under the app header; the band comes back the moment a file is opened.
   or Ctrl+W) takes it away again.
 - **Changed:** when a notice belongs in that band while no file is open —
   "Unsaved work from an earlier session is in the recovery backup", an
-  orphan draft, unreadable recovery data, the storage label with its
-  spinner, the project-file notices (changed, invalid, missing) or the
-  dismissable notice with its cross — the band comes back carrying only the
-  notice, and closes up again when the notice goes. With one or more files
-  open, nothing changes: the strip, its tabs, crosses and notices are as
-  today.
+  orphan draft, unreadable recovery data, the project-file notices
+  (changed, invalid, missing) or the dismissable notice with its cross — the
+  band comes back carrying only the notice, and closes up again when the
+  notice goes. With one or more files open, nothing changes: the strip, its
+  tabs, crosses and notices are as today.
+- **Changed (round 2, decision 4):** the storage indicator — the spinner
+  with "Saving file…", "Protecting unsaved work…" and the like, shown for an
+  operation longer than 150 ms — is not shown while no file is open and does
+  not bring the band back, so the board does not jump. With a file open it
+  shows under the tabs as today.
 - **Removed or hidden:** the empty band, decision 2. It carries no control
   while it is empty, so nothing reachable is lost.
 - **Migrated or converted:** nothing.
@@ -77,6 +86,36 @@ describes; the notice view sets a dismissable notice before the capture.
      effectively today's behaviour.
 3. **The mock-up** as a whole: the three modes without the band at both
    sizes, the band back with a notice, and the strip unchanged with one tab.
+
+## Owner decisions on PR #70 (2026-10-27)
+
+4. **One more round before the merge: no flicker.** The storage indicator
+   (an operation longer than 150 ms, e.g. the view-state write a second
+   after a mode change) must not bring the band back while no file is open;
+   nothing is at stake in that state and the board must not jump. Then the
+   PR is merged.
+5. **Size accepted unsplit:** 869 changed lines in round 1 against the M cap
+   of 800, 60 of them code and 582 tests; the breach is recorded here and
+   counts in the retrospective.
+
+## Technical decision of the implementation (round 2)
+
+Where the storage indicator goes while no file is open: **nowhere — it is
+not shown.** `FolderApp::storage_indicator()` (`folder/chrome.rs`) gives the
+storage label only while a tab is open, and both `has_notices()` and
+`notices()` use it, so the indicator alone never brings the band back. A
+real notice due with no file open (recovery backup, orphan draft,
+unreadable recovery data, the project-file notices, the dismissable notice)
+still brings the band back, and then carries no spinner either. Other
+places were considered and declined: the app header (a new element there
+needs a mock-up) and keeping the band at the indicator's height (decision 2
+took the whole band away). A blocking operation still disables the app
+header's controls, and an operation the person starts with no file open
+(e.g. *Restore backup*) shows its own working dialog, so nothing waits
+without a sign. Tests:
+`with_no_tab_open_a_long_storage_operation_does_not_bring_the_band_back`
+and `with_a_tab_open_a_long_storage_operation_shows_its_indicator_under_the_tabs`
+in `folder/tab_band_tests.rs`.
 
 ## Acceptance criteria
 

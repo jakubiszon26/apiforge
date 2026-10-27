@@ -29,6 +29,8 @@ mod recovery_tests;
 mod report_tests;
 #[path = "storage_tests.rs"]
 mod storage_tests;
+#[path = "tab_band_tests.rs"]
+mod tab_band_tests;
 
 fn frame(app: &mut FolderApp, context: &egui::Context, events: Vec<egui::Event>) {
     let mut output = context.run_ui(
