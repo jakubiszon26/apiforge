@@ -98,8 +98,9 @@ client's name and the time, nothing about conversations).
   `format` change. The window writes `role: "window"`, the CLI `command` with
   the subcommand's name, the server `agent` with the client's name from
   `initialize`/`server/discover` when it has one.
-- Desktop: `folder/mod.rs:455` sets the notice once; the text becomes a
-  function of the holder. The take-back: on each watcher result in a
+- Desktop: `folder/mod.rs:455` sets the notice once; it goes, and a
+  `TopBottomPanel::bottom` of 36 px in `chrome.rs` renders the holder from
+  the description. The take-back: on each watcher result in a
   read-only session, `has_live_writer()`; when `false`, reopen the saved
   session as the writer (`ProjectSession::open` with the unsaved text carried
   over as the recovery path does), clear the bar and `read_only` in

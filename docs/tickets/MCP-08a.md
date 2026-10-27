@@ -15,10 +15,10 @@ in the project, and does not let them type into a file they cannot save.
 
 ## What the owner will see
 
-- New: the badge reads *Observing* instead of *Read-only*; the notice names
-  the holder (MCP-07) and says *editing is paused here; this window follows
-  every change*; a line under it says what changed last (*10:43 ·
-  scenarios/promotion.afs saved*). A new document appears in the explorer, a
+- New: the badge reads *Observing* instead of *Read-only*; the bottom bar
+  names the holder (MCP-07) and says *editing is paused here; this window
+  follows every change*; its middle says what changed last (*10:43 ·
+  promotion.afs saved*). A new document appears in the explorer, a
   changed one in its tab, a new revision in the component's tab — without a
   reload notice each time.
 - Changed: the active document, its tab, its camera and the selected block
