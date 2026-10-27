@@ -8,8 +8,9 @@ use crate::{
 use apiforge_core::format::Project;
 use apiforge_script::Document;
 use apiforge_storage::project::{
-    DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, MANIFEST_PATH,
-    ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot, ProjectStore,
+    DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, Holder,
+    MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot,
+    ProjectStore,
 };
 use std::{collections::HashSet, path::Path, sync::Arc};
 
@@ -200,11 +201,20 @@ impl ProjectSession {
     }
 
     pub fn open_with(root: impl AsRef<Path>, placer: Arc<dyn Placer>) -> Result<Self> {
+        Self::open_with_as(root, placer, &Holder::window())
+    }
+
+    /// [`Self::open_with`] for a writer that describes itself as `holder`.
+    pub fn open_with_as(
+        root: impl AsRef<Path>,
+        placer: Arc<dyn Placer>,
+        holder: &Holder,
+    ) -> Result<Self> {
         let root = root.as_ref();
         if !has_manifest(root)? {
             return Err(Error::NotAProject);
         }
-        Self::load(ProjectStore::open(root)?, placer, 1)
+        Self::load(ProjectStore::open_as(root, holder)?, placer, 1)
     }
 
     /// Stable committed definitions only, without local recovery or cache and
@@ -246,11 +256,17 @@ impl ProjectSession {
     /// Stable saved definitions under the writer lock. Never falls back to a
     /// read-only session when another writer owns the project.
     pub fn open_saved_exclusive(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_saved_exclusive_as(root, &Holder::window())
+    }
+
+    /// [`Self::open_saved_exclusive`] for a writer that describes itself as
+    /// `holder`, such as a command-line subcommand.
+    pub fn open_saved_exclusive_as(root: impl AsRef<Path>, holder: &Holder) -> Result<Self> {
         if !has_manifest(root.as_ref())? {
             return Err(Error::NotAProject);
         }
         Self::load_saved(
-            ProjectStore::open_exclusive(root)?,
+            ProjectStore::open_exclusive_as(root, holder)?,
             Arc::new(FixedPlacer),
             1,
         )

@@ -7,6 +7,7 @@ mod conflict;
 mod diagram;
 mod evidence;
 mod explorer;
+mod holder;
 mod io;
 mod journal;
 mod metadata;
@@ -26,6 +27,7 @@ pub use diagram::{DiagramFile, DiagramRecord, DocumentKey, IdentityBase};
 pub use explorer::{
     MAX_TREE_DEPTH, MAX_TREE_ENTRIES, TreeEntry, TreeEntryKind, TreeScan, tree_order,
 };
+pub use holder::{Holder, HolderRole};
 pub use metadata::{DiagramRecoveryPreview, MetadataReplacement};
 pub use path::ProjectPath;
 pub use recovery::{

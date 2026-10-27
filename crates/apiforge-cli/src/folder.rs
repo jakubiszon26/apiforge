@@ -1,7 +1,7 @@
 //! Folder commands share the desktop's stable loader and folder analysis policy.
 //! Only committed source is loaded: recovery and last-valid cache are excluded.
 use apiforge_mcp::folder::{check_document as check_saved, select as select_path};
-use apiforge_project::{Origin, ProjectSession};
+use apiforge_project::{Holder, Origin, ProjectSession};
 use std::{ffi::OsString, path::PathBuf};
 
 pub const USAGE: &str = "apiforge check --folder <directory> [--file <relative.afs>]\napiforge print --folder <directory> --file <relative.afs>\napiforge apply --folder <directory> --file <relative.afs> <source.afs>";
@@ -56,7 +56,7 @@ pub fn run(args: &[OsString]) -> u8 {
 
 fn execute(args: Args) -> Result<(), String> {
     let mut session = if args.command == "apply" {
-        ProjectSession::open_saved_exclusive(&args.folder)
+        ProjectSession::open_saved_exclusive_as(&args.folder, &Holder::command("apply"))
     } else {
         ProjectSession::open_saved_read_only(&args.folder)
     }
@@ -124,7 +124,7 @@ pub(super) fn select(session: &ProjectSession, path: &str) -> Result<String, Str
 
 pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::RunStatus, String> {
     let mut session = if args.live {
-        ProjectSession::open_saved_exclusive(&args.path)
+        ProjectSession::open_saved_exclusive_as(&args.path, &Holder::command("run"))
     } else {
         ProjectSession::open_saved_read_only(&args.path)
     }

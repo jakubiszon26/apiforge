@@ -4,9 +4,13 @@
 //! finishes, a worker scans the folder and reads changed files. The session
 //! applies the result: clean documents follow the disk, unsaved work gets a
 //! conflict. The latest scan also feeds the explorer.
+//!
+//! A read-only window also asks, with each check, who holds the project
+//! (MCP-07): the holder's description while a writer lives, or that the lock
+//! is free, which is when the window takes the project back.
 
 use apiforge_project::{ExternalChanges, ProjectError, ProjectSession};
-use apiforge_storage::project::TreeScan;
+use apiforge_storage::project::{Holder, TreeScan};
 use eframe::egui;
 use std::{
     sync::mpsc::{Receiver, Sender, channel},
@@ -16,10 +20,18 @@ use std::{
 pub const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 type Result = std::result::Result<ExternalChanges, apiforge_project::Error>;
+/// What a worker reports: the folder's changes, then, for a read-only
+/// session, who holds the project (`None` when the lock is free). The probe
+/// follows the check rather than delaying it: confirming a live writer takes
+/// a moment the explorer need not wait for.
+enum Message {
+    Check(Result),
+    Probe(std::result::Result<Option<Holder>, ProjectError>),
+}
 
 pub struct Watcher {
-    sender: Sender<Result>,
-    results: Receiver<Result>,
+    sender: Sender<Message>,
+    results: Receiver<Message>,
     running: bool,
     /// When the next check may start; `None` starts one on the next poll.
     due: Option<Instant>,
@@ -30,6 +42,8 @@ pub struct Watcher {
     /// Why the folder could not be checked, until a check succeeds.
     pub problem: Option<String>,
     pub recovery_required: bool,
+    /// The latest answer to who holds the project, until the window takes it.
+    probe: Option<Option<Holder>>,
 }
 
 impl Watcher {
@@ -45,6 +59,7 @@ impl Watcher {
             scan: None,
             problem: None,
             recovery_required: false,
+            probe: None,
         }
     }
 
@@ -82,6 +97,12 @@ impl Watcher {
         }
     }
 
+    /// The latest answer to who holds the project, once: `Some(None)` when
+    /// the lock was free, `Some(Some(holder))` while a writer holds it.
+    pub fn take_probe(&mut self) -> Option<Option<Holder>> {
+        self.probe.take()
+    }
+
     /// Applies a finished check, then starts the next one when it is due.
     /// Returns what changed and how long until the next check.
     pub fn poll(
@@ -90,7 +111,17 @@ impl Watcher {
         now: Instant,
     ) -> (Option<ExternalChanges>, Duration) {
         let mut outcome = None;
-        for result in self.results.try_iter() {
+        for message in self.results.try_iter() {
+            let result = match message {
+                Message::Check(result) => result,
+                // An error leaves the last answer standing.
+                Message::Probe(probe) => {
+                    if let Ok(probe) = probe {
+                        self.probe = Some(probe);
+                    }
+                    continue;
+                }
+            };
             self.running = false;
             match result {
                 Ok(changes) => {
@@ -119,13 +150,20 @@ impl Watcher {
         self.running = true;
         self.due = Some(now + POLL_INTERVAL);
         let check = session.external_check();
+        let observed = session.is_read_only().then(|| session.store().clone());
         let sender = self.sender.clone();
         let repaint = self.repaint.clone();
         std::thread::spawn(move || {
             // The window may have closed; then nobody wants the result.
-            let _ = sender.send(check.run());
-            if let Some(context) = repaint {
+            let _ = sender.send(Message::Check(check.run()));
+            if let Some(context) = &repaint {
                 context.request_repaint();
+            }
+            if let Some(store) = observed {
+                let _ = sender.send(Message::Probe(store.holder()));
+                if let Some(context) = &repaint {
+                    context.request_repaint();
+                }
             }
         });
         (outcome, POLL_INTERVAL)
@@ -142,7 +180,7 @@ impl Watcher {
     ) -> Option<apiforge_project::ExternalOutcome> {
         let deadline = Instant::now() + Duration::from_secs(10);
         while self.running && Instant::now() < deadline {
-            if self.results.recv_timeout(Duration::from_millis(5)).is_ok() {
+            if let Ok(Message::Check(_)) = self.results.recv_timeout(Duration::from_millis(5)) {
                 self.running = false;
             }
         }
@@ -220,7 +258,7 @@ mod tests {
         let sender = watcher.sender.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            let _ = sender.send(stale);
+            let _ = sender.send(Message::Check(stale));
         });
 
         std::fs::write(

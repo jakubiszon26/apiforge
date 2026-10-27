@@ -266,3 +266,30 @@ fn a_source_beyond_the_scan_limit_is_not_taken_for_deleted() {
     fs::remove_file(directory.path().join(&path)).unwrap();
     assert_eq!(poll(&mut session).missing, std::slice::from_ref(&id));
 }
+
+/// MCP-07: an observing session becomes the writer only once the holder is
+/// gone, keeps the text typed while it observed, and then names itself.
+#[test]
+fn an_observer_takes_the_writer_lock_only_when_it_is_free_and_keeps_its_text() {
+    let (directory, owner, id) = project();
+    let mut observer = ProjectSession::open(directory.path()).unwrap();
+    assert!(observer.is_read_only());
+    observer.edit_source(&id, CHANGED, Origin::SESSION).unwrap();
+    assert!(!observer.take_writer(&Holder::window()).unwrap(), "held");
+    assert!(observer.is_read_only());
+    drop(owner);
+    assert!(observer.take_writer(&Holder::window()).unwrap());
+    assert!(!observer.is_read_only());
+    assert_eq!(observer.document(&id).unwrap().text(), CHANGED);
+    assert!(observer.document(&id).unwrap().is_dirty());
+    observer.save(&id).unwrap();
+    assert_eq!(
+        fs::read_to_string(directory.path().join("scenarios/main.afs")).unwrap(),
+        CHANGED
+    );
+    let reader = ProjectSession::open_saved_read_only(directory.path()).unwrap();
+    assert_eq!(
+        reader.store().holder().unwrap().unwrap().role(),
+        Some(HolderRole::Window)
+    );
+}

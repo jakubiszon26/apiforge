@@ -30,7 +30,7 @@ pub use session::{
 
 pub use apiforge_script::Document;
 pub use apiforge_storage::project::{
-    DocumentEntry, DocumentKind, ProjectError, ProjectManifest, RecoveryText,
+    DocumentEntry, DocumentKind, Holder, HolderRole, ProjectError, ProjectManifest, RecoveryText,
 };
 
 use thiserror::Error;

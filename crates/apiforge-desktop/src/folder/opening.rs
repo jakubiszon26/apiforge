@@ -6,6 +6,8 @@ pub(super) struct Destination {
     pub session: Option<ProjectSession>,
     pub state: Option<WorkspaceState>,
     pub survey: Vec<SurveyRow>,
+    /// Who holds the project when it opened read-only (MCP-07).
+    pub holder: Option<apiforge_storage::project::Holder>,
 }
 
 pub(super) fn load(root: PathBuf) -> apiforge_project::Result<Destination> {
@@ -13,8 +15,16 @@ pub(super) fn load(root: PathBuf) -> apiforge_project::Result<Destination> {
         path: PathBuf::from("."),
         source: error,
     })?;
-    match ProjectSession::open_with(&root, Arc::new(CardPlacer)) {
+    let holder = apiforge_storage::project::Holder::window();
+    match ProjectSession::open_with_as(&root, Arc::new(CardPlacer), &holder) {
         Ok(mut session) => {
+            // A read-only window says who holds the project from its first
+            // frame; the watcher keeps the answer current.
+            let holder = if session.is_read_only() {
+                session.store().holder().ok().flatten()
+            } else {
+                None
+            };
             let state = session
                 .store()
                 .load_workspace_state(&session.manifest().id)
@@ -42,6 +52,7 @@ pub(super) fn load(root: PathBuf) -> apiforge_project::Result<Destination> {
                 session: Some(session),
                 state,
                 survey: Vec::new(),
+                holder,
             })
         }
         Err(apiforge_project::Error::NotAProject) => {
@@ -58,6 +69,7 @@ pub(super) fn load(root: PathBuf) -> apiforge_project::Result<Destination> {
                 session: None,
                 state: None,
                 survey,
+                holder: None,
             })
         }
         Err(error) => Err(error),
@@ -118,6 +130,7 @@ impl FolderApp {
         self.open_error = None;
         if let Some(session) = destination.session {
             self.install(session, destination.state);
+            self.holder = destination.holder.map(holder::Observed::new);
         } else {
             self.uninitialised = true;
             self.survey = destination.survey;

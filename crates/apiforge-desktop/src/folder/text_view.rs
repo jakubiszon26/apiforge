@@ -143,7 +143,8 @@ impl FolderApp {
         if snapshot.missing {
             status.push("Not in the folder".into());
         }
-        if read_only {
+        // While observing, the bar at the bottom says so (MCP-07, M1).
+        if read_only && !self.observing() {
             status.push("Read-only".into());
         }
         ui.horizontal(|ui| {

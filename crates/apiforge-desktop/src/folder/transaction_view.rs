@@ -38,6 +38,9 @@ impl FolderApp {
             .session
             .as_ref()
             .filter(|session| session.store().root() == root)
+            // An observing window whose holder is gone may finish what the
+            // holder left: it tries for the lock as at start (MCP-07).
+            .filter(|session| !session.is_read_only())
             .map(|session| session.store().clone());
         self.working_io(
             "Reading transaction recovery…",

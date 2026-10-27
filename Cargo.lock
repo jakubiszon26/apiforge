@@ -235,6 +235,7 @@ dependencies = [
  "apiforge-runner",
  "apiforge-script",
  "apiforge-storage",
+ "chrono",
  "dirs",
  "eframe",
  "egui_inspection",
