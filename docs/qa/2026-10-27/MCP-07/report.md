@@ -250,21 +250,41 @@ bar ([diagram 960](mcp07-agent-diagram-960x540.png),
 
 ## Windows
 
-Not run on Windows. No CI run of this branch existed when this report was
-written. The Windows captures are to be fetched from this branch's CI
-artifacts (`qa-captures-windows-2022`, as described in testing.md).
+### CI captures
+
+The captures come from CI run 40582097175 (push, commit `b722e66`, Build &
+Test (windows-2022): success), artifact `qa-captures-windows-2022`:
+
+- [code 960](windows/code-960x540.png)
+- [diagram 960](windows/diagram-960x540.png)
+- [split 960](windows/split-960x540.png)
+- [code 1600](windows/code-1600x1000.png)
+- [diagram 1600](windows/diagram-1600x1000.png)
+- [split 1600](windows/split-1600x1000.png)
+
+What these captures show:
+
+- **The writer state, not the observer state.** They show the demo shop in
+  Code, Diagram and Split, held by nothing else. The runner's locale made it
+  *Sklep demonstracyjny*. No CI capture exercises a held project, so none
+  shows the holder bar or the *Observing* badge.
+- **Two sizes, not three.** The runner's display is 1024 × 768, so the three
+  captures named `1600x1000` are 1024 × 768. The run warns about each one.
+
+On Windows the bar and the take-back are covered by the MCP-07 desktop
+tests, which passed in that run. Those tests include reading `holder.json`
+while the lock is held, which is what option A on #66 relies on.
+
+### Still owed
 
 This is the first MCP ticket that touches the window, so **the Windows run
-of the regression smoke list owed since KTLO-07 is owed here.** It is not
-done.
-
-On Windows the description file is written with `write_atomic` and read
-while the lock is held. Choosing `holder.json` (option A on #66) is what
-makes that possible on Windows. It is not yet verified on Windows.
+of the regression smoke list owed since KTLO-07 is owed here.** The CI
+captures do not replace it. It remains owed, from the owner's local build.
 
 ## Not verified
 
-- Windows, as above. The ticket is not accepted for Windows until that run.
+- Windows, as above: the observer state and the KTLO-07 smoke list were not
+  run on Windows; only the CI captures and the desktop tests were.
 - Simulated holders. The release-binary captures for the agent and `apply`
   use a stand-in process that takes the same OS lock and writes the same
   line. No shipped program describes itself as an agent yet.
