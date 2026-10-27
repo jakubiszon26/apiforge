@@ -3,8 +3,8 @@
 - Size: S · Owner review: 20 min · Risk: `visible UI`
 - State: Awaiting acceptance (issue #44; branch `feat/ktlo-19-max-run-results`)
   — approved 2026-10-26, mock-up as a whole; decision 1 = A (all three modes)
-- Actual: 576 changed lines without captures — size M, over the S estimate:
-  code 95, tests 355 (acceptance 339, design review view 16), QA report 119,
+- Actual: 577 changed lines without captures — size M, over the S estimate:
+  code 95, tests 355 (acceptance 339, design review view 16), QA report 120,
   this ticket 7; one round
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)

@@ -1,6 +1,7 @@
 # KTLO-19: Run results can fill the window — QA report
 
-- Branch: `feat/ktlo-19-max-run-results` (the PR head commit)
+- Branch: `feat/ktlo-19-max-run-results`; captures from the release binary of
+  `8ae3cd0`, before `main` (KTLO-20, an empty board only) was merged in
 - Built with: `cargo build --release -p apiforge-desktop --locked`
 - Compared against mock-up: [docs/tickets/KTLO-19.md](../../../tickets/KTLO-19.md)
   (`mock-*.png` in this directory), approved as a whole; decision 1 = A
