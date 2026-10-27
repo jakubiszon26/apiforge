@@ -80,6 +80,10 @@ pub struct EnvironmentDialog {
     new_secret: String,
     focused: bool,
     folder: bool,
+    /// The project's public part (base URL, variables, secret names) is shown
+    /// for reading; secret values stay editable (an observing folder window,
+    /// MCP-08a).
+    public_read_only: bool,
     error: Option<String>,
 }
 
@@ -110,6 +114,7 @@ impl EnvironmentDialog {
             new_secret: String::new(),
             focused: false,
             folder: false,
+            public_read_only: false,
             error: None,
         }
     }
@@ -118,6 +123,12 @@ impl EnvironmentDialog {
         let mut dialog = Self::new(environment, secrets);
         dialog.folder = true;
         dialog
+    }
+
+    /// The public part disabled; session secret values can still be entered.
+    pub fn public_read_only(mut self) -> Self {
+        self.public_read_only = true;
+        self
     }
 
     pub fn set_error(&mut self, error: String) {
@@ -209,14 +220,21 @@ impl EnvironmentDialog {
         if let Some(error) = &self.error {
             widgets::field_error(ui, error);
         }
-        let field = super::labelled_field(
-            ui,
-            "Base URL",
-            &mut self.base_url,
-            "http://localhost:3000",
-            problems.base_url,
-        );
-        autofocus(&field, &mut self.focused);
+        let public = !self.public_read_only;
+        let field = ui
+            .add_enabled_ui(public, |ui| {
+                super::labelled_field(
+                    ui,
+                    "Base URL",
+                    &mut self.base_url,
+                    "http://localhost:3000",
+                    problems.base_url,
+                )
+            })
+            .inner;
+        if public {
+            autofocus(&field, &mut self.focused);
+        }
         let submit = submitted(ui, &field);
         widgets::hint(
             ui,
@@ -230,8 +248,10 @@ impl EnvironmentDialog {
             "Plain values that blocks can read by name, e.g. an API version or a tenant.",
         );
         ui.add_space(2.0);
-        self.variable_rows(ui, &problems.variables);
-        self.add_row(ui, Entry::Variable);
+        ui.add_enabled_ui(public, |ui| {
+            self.variable_rows(ui, &problems.variables);
+            self.add_row(ui, Entry::Variable);
+        });
 
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -248,7 +268,7 @@ impl EnvironmentDialog {
         );
         ui.add_space(2.0);
         self.secret_rows(ui, &problems.secrets);
-        self.add_row(ui, Entry::Secret);
+        ui.add_enabled_ui(public, |ui| self.add_row(ui, Entry::Secret));
         ui.add_space(4.0);
         widgets::hint(
             ui,
@@ -301,6 +321,7 @@ impl EnvironmentDialog {
     }
 
     fn secret_rows(&mut self, ui: &mut Ui, errors: &[Option<NameError>]) {
+        let public = !self.public_read_only;
         if self.secrets.is_empty() {
             widgets::hint(ui, "No secrets yet.");
         }
@@ -309,13 +330,17 @@ impl EnvironmentDialog {
             let error = errors.get(index).copied().flatten();
             ui.push_id(("secret", index), |ui| {
                 ui.horizontal(|ui| {
-                    let field = super::text_field(
-                        ui,
-                        &mut secret.name,
-                        "name",
-                        NAME_WIDTH,
-                        error.is_some(),
-                    );
+                    let field = ui
+                        .add_enabled_ui(public, |ui| {
+                            super::text_field(
+                                ui,
+                                &mut secret.name,
+                                "name",
+                                NAME_WIDTH,
+                                error.is_some(),
+                            )
+                        })
+                        .inner;
                     widgets::name(ui, field.id, "Secret name");
                     field.on_hover_text("Secret name");
                     let width = ui.available_width() - 90.0;
@@ -335,7 +360,8 @@ impl EnvironmentDialog {
                         secret.revealed = !secret.revealed;
                     }
                     if ui
-                        .add(
+                        .add_enabled(
+                            public,
                             widgets::icon_button(Icon::Trash, "Remove secret")
                                 .compact()
                                 .danger(),

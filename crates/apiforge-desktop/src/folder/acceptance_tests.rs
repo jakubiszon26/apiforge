@@ -1148,7 +1148,10 @@ mod mcp08a {
     fn last_change(harness: &FolderHarness) -> Option<String> {
         harness
             .query_all_by_label_contains(" · ")
-            .filter_map(|node| node.accesskit_node().label())
+            .filter_map(|node| {
+                let node = node.accesskit_node();
+                node.label().or_else(|| node.value())
+            })
             .find(|label| {
                 !label.contains(PAUSED)
                     && [" saved", " added", " deleted", " published"]
@@ -1232,7 +1235,10 @@ mod mcp08a {
             "a block can still be selected"
         );
         assert!(
-            disabled(&harness, "Block name"),
+            harness
+                .get_by_role_and_label(egui::accesskit::Role::TextInput, "Block name")
+                .accesskit_node()
+                .is_disabled(),
             "the inspector is disabled"
         );
         let document = folder(&harness)

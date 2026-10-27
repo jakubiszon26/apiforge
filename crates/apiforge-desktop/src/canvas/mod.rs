@@ -137,6 +137,10 @@ pub struct Input<'a> {
     /// The library's Variables and Operators for the *Add step* popup, when no
     /// library panel is in view (KTLO-05d).
     pub library: Option<&'a crate::library::Context<'a>>,
+    /// The board is shown for reading: blocks can be selected, the camera
+    /// moves, nothing is added, moved, wired or changed. An observing folder
+    /// window shows it so (MCP-08a); a disabled board needs nothing more.
+    pub read_only: bool,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -516,7 +520,7 @@ impl Canvas {
             if response.double_clicked() && card.kind == NodeKind::Component {
                 commands.push(Command::EditComponent(card.id.clone()));
             }
-            if response.secondary_clicked() {
+            if response.secondary_clicked() && !input.read_only {
                 let source = menu::default_source(input.graph, input.project, &card.id);
                 self.menu = Some(ActionMenu::new(
                     pointer.unwrap_or(rect.center()),
@@ -524,7 +528,7 @@ impl Canvas {
                     source,
                 ));
             }
-            if response.drag_started_by(PointerButton::Primary) {
+            if response.drag_started_by(PointerButton::Primary) && !input.read_only {
                 let ids = if selection.contains(card.id.as_str()) {
                     input.selection.to_vec()
                 } else {
@@ -559,7 +563,9 @@ impl Canvas {
                 related_blocks.contains(&card.id),
                 step,
             );
-            self.card_controls(&mut board_ui, card, camera, input, &mut commands);
+            // A scope, so that a read-only card's disabled fields leave the
+            // next card's interactions alone.
+            board_ui.scope(|ui| self.card_controls(ui, card, camera, input, &mut commands));
         }
 
         for chip in &chips {
@@ -600,7 +606,7 @@ impl Canvas {
                 self.reveal(node.to_owned());
                 commands.push(Command::Select(vec![node.to_owned()]));
             }
-            if response.drag_started_by(PointerButton::Primary) {
+            if response.drag_started_by(PointerButton::Primary) && !input.read_only {
                 let ids = if selection.contains(chip.id()) {
                     input.selection.to_vec()
                 } else {
@@ -624,7 +630,7 @@ impl Canvas {
                 commands.push(Command::Move(moved_positions(input.graph, &ids, offset)));
             }
             paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
-            self.chip_controls(&mut board_ui, chip, camera, &mut commands);
+            self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
@@ -659,20 +665,23 @@ impl Canvas {
             }
         }
         if background.secondary_clicked()
+            && !input.read_only
             && let Some(pointer) = pointer
         {
             self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
         }
 
-        self.handle_drop(
-            &board_ui,
-            overlays.board,
-            &cards,
-            camera,
-            input,
-            &mut commands,
-        );
-        self.handle_keys(ui, input, &mut commands);
+        if !input.read_only {
+            self.handle_drop(
+                &board_ui,
+                overlays.board,
+                &cards,
+                camera,
+                input,
+                &mut commands,
+            );
+            self.handle_keys(ui, input, &mut commands);
+        }
 
         let summary = paint::steps_summary(input.graph);
         if let Some(at) = paint::overlay_chrome(
@@ -717,7 +726,7 @@ impl Canvas {
             }
         }
         if input.graph.nodes.is_empty() && input.graph.proxies.is_empty() {
-            self.empty_state(ui, overlays.board, input.library_in_view, &mut commands);
+            self.empty_state(ui, overlays.board, input, &mut commands);
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
@@ -889,6 +898,7 @@ impl Canvas {
             card.output_anchor(port)
                 .map(|anchor| (port.to_string(), anchor))
         }));
+        let editable = !input.read_only;
         for (port, anchor) in outputs {
             let center = camera.to_screen(anchor);
             let rect =
@@ -897,13 +907,22 @@ impl Canvas {
                 .interact(
                     rect,
                     ui.id().with(("socket", &card.id, &port)),
-                    Sense::drag(),
+                    if editable {
+                        Sense::drag()
+                    } else {
+                        Sense::hover()
+                    },
                 )
-                .on_hover_cursor(egui::CursorIcon::Crosshair);
+                .on_hover_cursor(if editable {
+                    egui::CursorIcon::Crosshair
+                } else {
+                    egui::CursorIcon::Default
+                });
             let name = format!("Output {port} of {}", card.name);
-            response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name));
-            if response.drag_started() {
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, editable, &name)
+            });
+            if editable && response.drag_started() {
                 self.drag = Some(Drag::Wire {
                     start: WireStart::Output {
                         node: card.id.clone(),
@@ -924,8 +943,9 @@ impl Canvas {
             .interact(action, ui.id().with(("action", &card.id)), Sense::click())
             .on_hover_text("Add a connected step");
         let name = format!("Add a step connected to {}", card.name);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-        if response.clicked() {
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, editable, &name));
+        if editable && response.clicked() {
             let source = menu::default_source(input.graph, input.project, &card.id);
             self.menu = Some(ActionMenu::new(
                 action.left_bottom(),
@@ -947,9 +967,10 @@ impl Canvas {
                 )
                 .on_hover_text(&next);
             let name = format!("{next} after {}", card.name);
-            response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-            if response.clicked() {
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, editable, &name)
+            });
+            if editable && response.clicked() {
                 self.menu = Some(ActionMenu::new(
                     rect.center_bottom(),
                     camera.to_world(rect.center_bottom()),
@@ -973,6 +994,9 @@ impl Canvas {
         // Inline literal fields.
         if zoom < INLINE_EDIT_ZOOM {
             return;
+        }
+        if !editable {
+            ui.disable();
         }
         for (index, row) in card.inputs.iter().enumerate() {
             let field = camera.rect(card.input_field(index));
@@ -1083,6 +1107,7 @@ impl Canvas {
         ui: &mut egui::Ui,
         chip: &Chip,
         camera: Camera,
+        editable: bool,
         commands: &mut Vec<Command>,
     ) {
         if chip.source_node().is_some()
@@ -1111,12 +1136,21 @@ impl Canvas {
             .interact(
                 rect,
                 ui.id().with(("chip-socket", chip.id())),
-                Sense::drag(),
+                if editable {
+                    Sense::drag()
+                } else {
+                    Sense::hover()
+                },
             )
-            .on_hover_cursor(egui::CursorIcon::Crosshair);
+            .on_hover_cursor(if editable {
+                egui::CursorIcon::Crosshair
+            } else {
+                egui::CursorIcon::Default
+            });
         let name = format!("Output of {}", chip.label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name));
-        if response.drag_started() {
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, editable, &name));
+        if editable && response.drag_started() {
             self.drag = Some(Drag::Wire {
                 start: WireStart::Proxy {
                     binding: proxy_binding(&chip.proxy.source),
@@ -1433,8 +1467,12 @@ impl Canvas {
                     .inner_margin(egui::Margin::symmetric(6, 3))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            let editable = !input.read_only;
                             if ui
-                                .add(widgets::action(Icon::Plus, "Add step").compact().quiet())
+                                .add_enabled(
+                                    editable,
+                                    widgets::action(Icon::Plus, "Add step").compact().quiet(),
+                                )
                                 .on_hover_text("Add a step to the board")
                                 .clicked()
                             {
@@ -1443,6 +1481,7 @@ impl Canvas {
                                 self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
                             }
                             if input.can_paste
+                                && editable
                                 && ui
                                     .add(
                                         widgets::icon_button(
@@ -1456,7 +1495,10 @@ impl Canvas {
                                 commands.push(Command::Paste);
                             }
                             if ui
-                                .add(widgets::icon_button(Icon::Layout, "Tidy up").compact())
+                                .add_enabled(
+                                    editable,
+                                    widgets::icon_button(Icon::Layout, "Tidy up").compact(),
+                                )
                                 .on_hover_text(if has_selection {
                                     "Lay out the selected steps (Ctrl+Shift+L)"
                                 } else {
@@ -1531,9 +1573,11 @@ impl Canvas {
                                             ),
                                         ];
                                         for (icon, label, shortcut, command) in items {
+                                            let allowed = has_selection
+                                                && (editable || matches!(command, Command::Copy));
                                             if ui
                                                 .add_enabled(
-                                                    has_selection,
+                                                    allowed,
                                                     widgets::action(icon, label).quiet(),
                                                 )
                                                 .on_hover_text(shortcut)
@@ -1545,7 +1589,8 @@ impl Canvas {
                                         }
                                         ui.separator();
                                         if ui
-                                            .add(
+                                            .add_enabled(
+                                                editable,
                                                 widgets::action(Icon::Trash, "Delete selection")
                                                     .danger(),
                                             )
@@ -1662,9 +1707,10 @@ impl Canvas {
         &mut self,
         ui: &mut egui::Ui,
         viewport: Rect,
-        library_in_view: bool,
+        input: &Input<'_>,
         commands: &mut Vec<Command>,
     ) {
+        let library_in_view = input.library_in_view;
         let rect = Rect::from_center_size(viewport.center() - vec2(0.0, 40.0), vec2(360.0, 150.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             ui.vertical_centered(|ui| {
@@ -1681,7 +1727,10 @@ impl Canvas {
                 ui.label(egui::RichText::new(hint).color(theme::MUTED));
                 ui.add_space(8.0);
                 if ui
-                    .add(widgets::action(Icon::Plus, "Add an HTTP request"))
+                    .add_enabled(
+                        !input.read_only,
+                        widgets::action(Icon::Plus, "Add an HTTP request"),
+                    )
                     .clicked()
                 {
                     commands.push(Command::AddNode {
@@ -2259,6 +2308,7 @@ mod tests {
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
+                                read_only: false,
                                 header_leading: None,
                                 library: None,
                             },
@@ -2304,6 +2354,7 @@ mod tests {
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
+                                read_only: false,
                                 header_leading: None,
                                 library: None,
                             };

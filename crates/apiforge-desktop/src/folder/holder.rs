@@ -124,6 +124,7 @@ impl FolderApp {
     /// The writer's start, for a session that has just become one.
     fn taken_back(&mut self) {
         self.holder = None;
+        self.last_change = None;
         self.take_back = TakeBack::default();
         self.watcher.recovery_required = false;
         self.follow_external(ExternalOutcome {
@@ -135,7 +136,8 @@ impl FolderApp {
     }
 
     /// The status bar at the bottom while another process holds the project:
-    /// the holder at the left, in the warning colour (mock-up M1).
+    /// the holder at the left, in the warning colour, and what its last
+    /// followed commit changed at the right (mock-up M1, MCP-08a).
     pub(super) fn holder_bar(&mut self, ui: &mut egui::Ui) {
         if !self.observing() {
             return;
@@ -144,6 +146,7 @@ impl FolderApp {
             return;
         };
         let text = observed.text.clone();
+        let last_change = self.last_change.clone();
         let response = egui::Panel::bottom("folder-holder")
             .exact_size(BAR_HEIGHT)
             .resizable(false)
@@ -154,15 +157,30 @@ impl FolderApp {
                     .inner_margin(egui::Margin::symmetric(theme::SPACE_LG as i8, 0)),
             )
             .show(ui, |ui| {
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(text)
-                                .size(theme::FONT_META)
-                                .color(theme::WARNING),
-                        )
-                        .truncate(),
-                    );
+                // The last change first, from the right, so the holder's
+                // words give way to it on a narrow window.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(change) = last_change {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(change)
+                                    .size(theme::FONT_META)
+                                    .color(theme::MUTED),
+                            )
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                        ui.add_space(theme::SPACE_LG);
+                    }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .size(theme::FONT_META)
+                                    .color(theme::WARNING),
+                            )
+                            .truncate(),
+                        );
+                    });
                 });
             })
             .response;

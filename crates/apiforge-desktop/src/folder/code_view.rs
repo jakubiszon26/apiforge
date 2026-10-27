@@ -189,6 +189,7 @@ impl FolderApp {
                                 wrap: false,
                                 font_size: CODE_FONT,
                                 plain: false,
+                                interactive: !snapshot.paused,
                             },
                         )
                     })

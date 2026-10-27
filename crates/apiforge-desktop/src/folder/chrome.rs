@@ -96,7 +96,16 @@ impl FolderApp {
                     }
                     ui.menu_button("Run options", |ui| {
                         widgets::name_menu(ui, "Run options menu");
-                        if ui.button("Run live requests").clicked() {
+                        // Live requests are the holder's to send while this
+                        // window observes (MCP-08a; MCP-09 asks the person).
+                        if ui
+                            .add_enabled(!observing, egui::Button::new("Run live requests"))
+                            .on_disabled_hover_text(
+                                "Live requests are not sent from this window while another \
+                                 process holds the project",
+                            )
+                            .clicked()
+                        {
                             ui.close();
                             self.request_run(id, true);
                         }

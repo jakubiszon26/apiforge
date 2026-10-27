@@ -164,6 +164,9 @@ pub struct SettingsDialog {
     contracts: Vec<ContractRow>,
     focused: bool,
     project_only: bool,
+    /// Shown for reading only: every control is disabled and nothing applies
+    /// (an observing folder window, MCP-08a).
+    read_only: bool,
     error: Option<String>,
 }
 
@@ -189,8 +192,15 @@ impl SettingsDialog {
                 .collect(),
             focused: false,
             project_only: true,
+            read_only: false,
             error: None,
         }
+    }
+
+    /// Every control disabled; Cancel closes it.
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
     }
 
     pub fn new(project: &Project, scenario_id: &str) -> Self {
@@ -294,11 +304,15 @@ impl SettingsDialog {
         let action = chrome.show(
             ctx,
             self,
-            |ui, dialog| dialog.body(ui),
-            |dialog| dialog.problems().is_empty(),
+            |ui, dialog| {
+                let enabled = !dialog.read_only;
+                ui.add_enabled_ui(enabled, |ui| dialog.body(ui));
+            },
+            |dialog| !dialog.read_only && dialog.problems().is_empty(),
         );
         match action {
             super::Action::Cancel => Outcome::Cancelled,
+            super::Action::Apply if self.read_only => Outcome::Open,
             super::Action::Apply => self.result().map_or(Outcome::Open, Outcome::Applied),
             super::Action::None => Outcome::Open,
         }

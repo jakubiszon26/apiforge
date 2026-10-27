@@ -74,7 +74,8 @@ impl FolderApp {
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
         };
-        if !snapshot.editable {
+        // While observing, the bar at the bottom says why (MCP-08a, M1).
+        if !snapshot.editable && !snapshot.paused {
             let text = if snapshot.held {
                 "Unsaved work from an earlier session needs a decision in the code first."
             } else if snapshot.analysis == AnalysisState::Pending {
@@ -140,7 +141,7 @@ impl FolderApp {
         let mut chosen = cleanup;
         let commands = ui
             .scope(|ui| {
-                if !snapshot.editable {
+                if !snapshot.editable && !snapshot.paused {
                     // Keep the last valid graph legible as a reference.
                     ui.visuals_mut().disabled_alpha = 1.0;
                     ui.disable();
@@ -157,6 +158,7 @@ impl FolderApp {
                     library_in_view,
                     header_leading: None,
                     library: library.as_ref(),
+                    read_only: !snapshot.editable,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
