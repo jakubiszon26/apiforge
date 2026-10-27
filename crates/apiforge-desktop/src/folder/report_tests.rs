@@ -288,7 +288,7 @@ fn ktlo19_the_maximised_bar_and_step_list_fit_the_minimum_window() {
 /// Design review: the bar at its normal height, then maximised, in each mode at
 /// both windows (KTLO-19).
 #[test]
-#[ignore = "design review capture; run with tools/gui/review.sh"]
+#[ignore = "KTLO-19: design review capture; run with tools/gui/review.sh"]
 fn review_run_results_maximised() {
     for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
         for mode in ["Diagram", "Split", "Code"] {
