@@ -433,3 +433,54 @@ fn the_block_library_names_every_control_expanded_and_collapsed() {
         frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
     }
 }
+
+/// Where the control named `name` is, for a pointer click at 1600 × 1000.
+fn centre_of(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos2 {
+    context.enable_accesskit();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        },
+        |ui| app.ui(ui),
+    );
+    output.textures_delta.clear();
+    let tree = output.platform_output.accesskit_update.unwrap();
+    let bounds = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| accessible_name(&tree, node).as_deref() == Some(name))
+        .and_then(|(_, node)| node.bounds())
+        .unwrap_or_else(|| panic!("no control named {name}"));
+    egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    )
+}
+
+/// KTLO-19 criterion 7: the audit passes with the run results maximised, in
+/// every mode.
+#[test]
+fn the_maximised_run_results_name_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    app.request_run(&id, false);
+    finish_folder_run(&mut app);
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        frame(&mut app, &context, vec![]);
+        let at = centre_of(&mut app, &context, "Maximise run results");
+        click(&mut app, &context, at);
+        assert!(
+            exposes(&mut app, &context, "Restore run results"),
+            "{mode:?}: the run results are maximised"
+        );
+        assert_named(
+            &format!("{mode:?}, run results maximised"),
+            &mut app,
+            &context,
+        );
+    }
+}
