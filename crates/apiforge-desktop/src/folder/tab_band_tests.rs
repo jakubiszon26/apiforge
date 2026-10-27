@@ -557,3 +557,107 @@ fn with_tabs_open_the_strip_and_its_notices_are_as_before() {
         }
     }
 }
+
+/// The label of the view-state write a second after a change of mode or tab,
+/// the storage operation that brought the band back for a moment in round 1.
+const PROTECTING: &str = "Protecting unsaved work…";
+/// How long frames are drawn while the operation is held: well past the
+/// 150 ms after which the storage indicator is due.
+const HELD: Duration = Duration::from_millis(400);
+
+/// Puts a storage operation labelled like the view-state write on the worker
+/// and holds it there until the returned sender is used or dropped.
+fn hold_storage(harness: &mut FolderHarness) -> std::sync::mpsc::Sender<()> {
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    harness.state_mut().as_mut().unwrap().storage_project(
+        PROTECTING,
+        apiforge_project::StorageMode::PreserveEdits,
+        false,
+        move |_| {
+            let _ = held.recv();
+            Ok(())
+        },
+        |_, _: apiforge_project::Result<()>| {},
+    );
+    release
+}
+
+/// Draws frames for [`HELD`] while the operation is held, with `check` after
+/// every one, and asserts that the storage indicator was due by the end.
+/// `settle` would wait for the held operation, so frames are stepped directly.
+fn while_held(harness: &mut FolderHarness, context: &str, mut check: impl FnMut(&FolderHarness)) {
+    let start = Instant::now();
+    while start.elapsed() < HELD {
+        harness.step();
+        assert!(
+            folder(harness).storage.owns_session(),
+            "{context}: the operation is held on the worker"
+        );
+        check(harness);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        folder(harness).storage.label(),
+        Some(PROTECTING),
+        "{context}: the storage indicator is due"
+    );
+}
+
+/// Round 2 (owner decision 4 of 2026-10-27): with no tab open, a storage
+/// operation longer than 150 ms does not bring the band back. The indicator is
+/// not shown in that state, and the central area stays at the app header's
+/// bottom edge in every frame, so the board does not jump.
+#[test]
+fn with_no_tab_open_a_long_storage_operation_does_not_bring_the_band_back() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let mut harness = open(&project, size, "Code");
+        close_every_tab(&mut harness);
+        for mode in MODES {
+            click(&mut harness, mode);
+            view_written(&mut harness);
+            let context = format!("{mode} at {size:?}, storage held");
+            assert_no_band(&harness, mode, &context);
+            let release = hold_storage(&mut harness);
+            while_held(&mut harness, &context, |harness| {
+                assert_no_band(harness, mode, &context);
+                assert!(
+                    harness.query_by_label(PROTECTING).is_none(),
+                    "{context}: the storage indicator is not shown with no tab open"
+                );
+            });
+            release.send(()).unwrap();
+            settle(&mut harness);
+            assert_no_band(&harness, mode, &format!("{mode} at {size:?}, released"));
+        }
+    }
+}
+
+/// Round 2: with a tab open the storage indicator shows as before this
+/// ticket, on the band under the tabs.
+#[test]
+fn with_a_tab_open_a_long_storage_operation_shows_its_indicator_under_the_tabs() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let mut harness = open(&project, size, "Code");
+        for mode in MODES {
+            click(&mut harness, mode);
+            view_written(&mut harness);
+            let context = format!("{mode} at {size:?}, one tab, storage held");
+            assert_band_with_tab(&harness, mode, &context);
+            let release = hold_storage(&mut harness);
+            while_held(&mut harness, &context, |_| {});
+            let band = assert_band(&harness, mode, &context);
+            let cross = harness.get_by_label(&format!("Close {NAME}")).rect();
+            let shown = harness.get_by_label(PROTECTING).rect();
+            assert!(
+                band.contains_rect(shown) && shown.top() >= cross.bottom(),
+                "{context}: the indicator {shown:?} is under the tab's cross {cross:?} on \
+                 the band {band:?}"
+            );
+            release.send(()).unwrap();
+            settle(&mut harness);
+            assert_band_with_tab(&harness, mode, &format!("{mode} at {size:?}, released"));
+        }
+    }
+}
