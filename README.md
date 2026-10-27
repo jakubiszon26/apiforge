@@ -104,8 +104,13 @@ specified in [ADR 0005](docs/decisions/0005-scenario-language.md).
 Folder projects, with their file explorer and code workspace, are the default
 start and are described in the [folder projects guide](docs/folder-projects.md).
 An existing JSON workspace is migrated once, and `--legacy` opens it instead.
-The legacy JSON mode is being retired: it stays until the folder mode matches
-it feature for feature, then it is removed ([backlog](docs/backlog.md), KTLO-06).
+**Deprecation notice.** The legacy JSON mode is retired. It is removed, in a
+ticket the owner approves, once every row of the
+[parity list](docs/tickets/KTLO-06.md#the-parity-list) is present in the
+folder mode or struck by an owner decision, a refused migration reports and
+stops instead of opening it (KTLO-03), and the CI probes that open it have
+folder equivalents ([removal condition](docs/tickets/KTLO-06.md#removal-condition)).
+Until then `--legacy` works as described above.
 Windows has not been reviewed: it builds and its tests run in continuous
 integration, but no one has used the application there.
 
