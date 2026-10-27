@@ -714,3 +714,162 @@ fn review_run_inputs() {
         crate::testing::capture(&mut harness, &format!("run-inputs-filled-{suffix}"), None);
     }
 }
+
+// ----- KTLO-27: an empty optional input means "absent" ------------------------
+
+/// A component with one required and one optional input, neither with a
+/// default. `given` takes its `else` path when `note` is absent; `size`
+/// reads `note` and fails without it, as when a caller omits it.
+pub(super) const NOTES: &str = "components/notes.afs";
+const NOTES_SOURCE: &str = "component Notes \"Notes\" {
+  @required(true)
+  input item: object
+  @optional
+  input note: string
+  id = param.item.id
+  given = if exists param.note {
+    echoed = param.note
+  } else {
+    fallback = \"no note\"
+  }
+  size = length(param.note)
+}
+";
+const ITEM_FIELD: &str = "item · Object";
+/// The optional marker is part of the field's name (criterion 4).
+pub(super) const NOTE_FIELD: &str = "note · Text · optional";
+
+/// The demo shop with the `Notes` component beside its own.
+pub(super) fn shop_with_notes() -> tempfile::TempDir {
+    let project = shop();
+    let mut session = ProjectSession::open(project.path()).unwrap();
+    session
+        .create_document(DocumentKind::Component, NOTES, NOTES_SOURCE)
+        .unwrap();
+    drop(session);
+    project
+}
+
+fn step<'a>(report: &'a RunResult, name: &str) -> Option<&'a apiforge_core::run::StepResult> {
+    report.steps.iter().find(|step| step.display_name() == name)
+}
+
+fn passed(report: &RunResult, name: &str) -> bool {
+    step(report, name).is_some_and(|step| step.status == StepStatus::Passed)
+}
+
+/// Runs the open dialog with what it holds.
+fn run_dialog(harness: &mut FolderHarness) -> RunResult {
+    assert!(run_enabled(harness), "the dialog's Run is enabled");
+    dialog_run(harness).click();
+    settle(harness);
+    assert!(!asks_for_inputs(harness), "the dialog closes");
+    finish(harness)
+}
+
+/// Criterion 1: with one required and one optional input without defaults,
+/// the dialog's *Run* is enabled once the required field has a value; the
+/// optional field is marked and its empty value reads "absent". Both windows
+/// hold the dialog.
+#[test]
+fn ktlo27_an_empty_optional_input_does_not_block_run() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop_with_notes();
+        let (mut harness, _) = on(&project, NOTES, size, "Diagram");
+        choose(&mut harness, "Run");
+        assert!(asks_for_inputs(&harness), "{size:?}: the dialog opens");
+        assert_eq!(field(&harness, ITEM_FIELD), "");
+        assert_eq!(field(&harness, NOTE_FIELD), "");
+        assert!(has(&harness, "optional · empty means absent"), "{size:?}");
+        assert!(!run_enabled(&harness), "{size:?}: item is required");
+        let labels = ["Run inputs", ITEM_FIELD, NOTE_FIELD, "Cancel"];
+        assert_within_window(&harness, &labels);
+        assert_disjoint(&harness, &labels);
+        let run = dialog_run(&harness).rect();
+        assert!(
+            run.left() >= 0.0 && run.right() <= size.x && run.bottom() <= size.y,
+            "{size:?}: the dialog's Run {run:?} is in the window"
+        );
+
+        enter(&mut harness, NOTE_FIELD, "hello");
+        assert!(!run_enabled(&harness), "{size:?}: item still has no value");
+        enter(&mut harness, NOTE_FIELD, "");
+        enter(&mut harness, ITEM_FIELD, r#"{"id": 7}"#);
+        assert!(
+            run_enabled(&harness),
+            "{size:?}: every required input has a value, note is empty"
+        );
+        assert!(folder(&harness).runs.handle.is_none(), "nothing runs yet");
+    }
+}
+
+/// Criterion 2: run with the optional field empty, no value is passed: the
+/// step reading it fails on its missing value, not as a missing required
+/// input, and the check on whether it exists takes its `else` path.
+#[test]
+fn ktlo27_an_empty_optional_input_passes_no_value() {
+    let project = shop_with_notes();
+    let (mut harness, _) = on(&project, NOTES, WIDE, "Diagram");
+    choose(&mut harness, "Run");
+    enter(&mut harness, ITEM_FIELD, r#"{"id": 7}"#);
+    let report = run_dialog(&mut harness);
+    assert!(passed(&report, "id"), "{:?}", report.steps);
+    assert_eq!(step(&report, "id").unwrap().outputs["value"], 7);
+    assert!(passed(&report, "fallback"), "the else path runs");
+    assert!(!passed(&report, "echoed"), "the then path does not");
+    let size = step(&report, "size").expect("the step reading note ran");
+    assert_eq!(size.status, StepStatus::Error, "{size:?}");
+    assert!(
+        size.inputs.is_empty(),
+        "no value reached it: {:?}",
+        size.inputs
+    );
+    let message = size.message.as_deref().unwrap_or_default();
+    assert!(
+        !message.contains("Missing required input"),
+        "an optional input is not a missing required one: {message}"
+    );
+}
+
+/// Criterion 3: a typed optional value is passed and kept for the session;
+/// emptied again, the next run passes none and the field stays empty.
+#[test]
+fn ktlo27_a_typed_optional_value_is_passed_and_kept() {
+    let project = shop_with_notes();
+    let (mut harness, _) = on(&project, NOTES, WIDE, "Diagram");
+    choose(&mut harness, "Run");
+    enter(&mut harness, ITEM_FIELD, r#"{"id": 7}"#);
+    enter(&mut harness, NOTE_FIELD, "hello");
+    let report = run_dialog(&mut harness);
+    assert!(passed(&report, "echoed"), "{:?}", report.steps);
+    assert_eq!(step(&report, "echoed").unwrap().outputs["value"], "hello");
+    assert_eq!(step(&report, "size").unwrap().outputs["value"], 5);
+    assert!(!passed(&report, "fallback"));
+
+    choose(&mut harness, "Run");
+    assert!(asks_for_inputs(&harness), "asked again, pre-filled");
+    assert_eq!(field(&harness, NOTE_FIELD), "hello", "kept");
+    assert!(has(&harness, "optional · kept from the last run"));
+    enter(&mut harness, NOTE_FIELD, "");
+    let report = run_dialog(&mut harness);
+    assert!(passed(&report, "fallback"), "emptied, it is absent");
+
+    choose(&mut harness, "Run");
+    assert_eq!(field(&harness, NOTE_FIELD), "", "kept as absent");
+    let item: serde_json::Value = serde_json::from_str(&field(&harness, ITEM_FIELD)).unwrap();
+    assert_eq!(item, serde_json::json!({ "id": 7 }));
+    assert!(run_enabled(&harness));
+}
+
+/// Design review: the Run inputs dialog with an optional field (KTLO-27).
+#[test]
+#[ignore = "KTLO-27: design review capture; run with tools/gui/review.sh"]
+fn review_run_inputs_optional() {
+    for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+        let project = shop_with_notes();
+        let (mut harness, _) = on(&project, NOTES, size, "Diagram");
+        choose(&mut harness, "Run");
+        enter(&mut harness, ITEM_FIELD, r#"{ "id": 7 }"#);
+        crate::testing::capture(&mut harness, &format!("run-inputs-optional-{suffix}"), None);
+    }
+}
