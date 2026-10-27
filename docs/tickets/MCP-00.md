@@ -183,8 +183,8 @@ version and the reference's version, so a report of a wrong answer names both.
 6. **The window names who holds the project and takes the lock back when it is
    free (MCP-07, mock-up required).** **A (recommended, taken):** yes: the
    notice reads "The API Forge MCP server (started 10:42) is editing this
-   project…" and the *Read-only* badge disappears within a second of the
-   holder leaving. Consequence: a `default` change (a read-only window becomes
+   project…" and the *Read-only* badge disappears within two seconds of the
+   holder leaving (the window checks once a second, MCP-07 criterion 3). Consequence: a `default` change (a read-only window becomes
    writable by itself) and a text change; the KTLO-21 probe gets its first
    caller. **B (declined):** leave the text and the behaviour. Consequence:
    "Another window" is wrong whenever the holder is a model or `apply`, and

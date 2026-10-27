@@ -16,7 +16,7 @@ request and without writing a file.
 
 - New: two tools in `/mcp`: `check_text` and `run`. Nothing on screen.
 - Changed, removed, migrated, defaults: nothing. `run` is a simulation only;
-  `live` is refused until MCP-06 and its decision.
+  `live` is refused until MCP-06 lands (decision 4 = A, taken 2026-10-27).
 
 ## Mock-up
 
