@@ -206,23 +206,17 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
     // refused one, and the refused one's folder, which is refused before
     // anything is written into it. The next start, which migrates again
     // before it decides what to show, is refused the same way.
-    let staged = tree(&directory.path().join("migration"));
+    let staging = directory.path().join("migration");
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(staging.join("index.json")).unwrap()).unwrap();
+    let staged = staging.join(index["migrationId"].as_str().unwrap());
     assert!(
-        staged
-            .keys()
-            .any(|path| path.ends_with("support-desk/apiforge.project.json")),
+        staged.join("support-desk/apiforge.project.json").is_file(),
         "the project before it stays staged: {:?}",
-        staged.keys().collect::<Vec<_>>()
+        tree(&staging).keys().collect::<Vec<_>>()
     );
-    let index: serde_json::Value = serde_json::from_slice(&staged["index.json"]).unwrap();
-    let migration_id = index["migrationId"].as_str().unwrap();
     assert!(
-        directory
-            .path()
-            .join("migration")
-            .join(migration_id)
-            .join(REFUSED_PROJECT_ID)
-            .is_dir(),
+        staged.join(REFUSED_PROJECT_ID).is_dir(),
         "the refused project's staged folder is kept"
     );
     drop(store);
