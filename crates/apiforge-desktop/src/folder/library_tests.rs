@@ -32,8 +32,9 @@ fn node_count(harness: &crate::testing::FolderHarness, id: &str) -> usize {
     graph_of(&model(folder(harness), id), false).nodes.len()
 }
 
-/// Criterion 1: Diagram shows a panel named "Block library" with search, the
-/// Blocks / Variables / Operators sections and the project's components.
+/// Criterion 1: Diagram shows the block library, on the panel's *Library* tab
+/// since KTLO-11, with search, the Blocks / Variables / Operators sections and
+/// the project's components.
 #[test]
 fn diagram_shows_a_named_block_library_panel_with_its_sections() {
     let project = shop();
@@ -41,7 +42,7 @@ fn diagram_shows_a_named_block_library_panel_with_its_sections() {
     harness.get_by_label("Diagram").click();
     settle(&mut harness);
     for label in [
-        "Block library",
+        "Library",
         "Blocks",
         "Variables",
         "Operators",
@@ -219,7 +220,7 @@ fn the_library_fits_the_minimum_window_in_diagram() {
         assert_within_window(
             &harness,
             &[
-                "Block library",
+                "Library",
                 "Search blocks",
                 "Blocks",
                 "Variables",
@@ -507,7 +508,7 @@ fn ctrl_b(harness: &mut FolderHarness) {
 /// The library panel is shown: its caption, search and chevron are there and
 /// the rail is not.
 fn assert_expanded(harness: &FolderHarness, context: &str) {
-    for label in ["Block library", "Search blocks", "Collapse block library"] {
+    for label in ["Search blocks", "Collapse block library"] {
         assert!(
             harness.query_by_label(label).is_some(),
             "{context}: the expanded panel has {label:?}"
@@ -525,7 +526,7 @@ fn assert_collapsed(harness: &FolderHarness, context: &str) {
         harness.query_by_label("Show block library").is_some(),
         "{context}: the rail holds *Show block library*"
     );
-    for label in ["Block library", "Search blocks", "Collapse block library"] {
+    for label in ["Search blocks", "Collapse block library"] {
         assert!(
             harness.query_by_label(label).is_none(),
             "{context}: the collapsed library has no {label:?}"
@@ -589,7 +590,8 @@ fn ktlo17_collapsing_the_library_leaves_a_rail_and_widens_the_board() {
         let context = format!("Diagram at {size:?}");
         let mut harness = window(&project, size, "Diagram");
         assert_expanded(&harness, &context);
-        let caption = harness.get_by_label("Block library").rect();
+        // The caption row holds the *Library | Files* tabs since KTLO-11.
+        let caption = harness.get_by_label("Files").rect();
         let chevron = harness.get_by_label("Collapse block library").rect();
         let edge = library_edge(&harness).x;
         assert!(
@@ -798,7 +800,7 @@ fn ktlo17_the_rail_and_its_neighbours_fit_the_window() {
         let mut harness = window(&project, size, mode);
         // The inspector opens for one selected block.
         click(&mut harness, "Expected price (Value)");
-        let mut labels = vec!["Collapse block library", "Block library"];
+        let mut labels = vec!["Collapse block library", "Search blocks"];
         labels.extend(toolbar);
         labels.extend(inspector);
         assert_within_window(&harness, &labels);
@@ -808,4 +810,559 @@ fn ktlo17_the_rail_and_its_neighbours_fit_the_window() {
         labels.extend(inspector);
         assert_within_window(&harness, &labels);
     }
+}
+
+// ----- KTLO-11: the left panel switches between Library and Files ----------------
+//
+// docs/tickets/KTLO-11.md; owner decisions of 2026-10-26 on #14: Diagram only
+// (1 = A), the chosen tab remembered per project (2 = A), underline tabs like
+// *Main | Cleanup*.
+
+/// Whether the control named `label` shows itself as the selected one.
+fn is_selected(harness: &FolderHarness, label: &str) -> bool {
+    harness.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+/// The panel shows the block library: *Library* is the selected tab and the
+/// block sections are there, the explorer is not.
+fn assert_on_library(harness: &FolderHarness, context: &str) {
+    assert!(
+        is_selected(harness, "Library") && !is_selected(harness, "Files"),
+        "{context}: *Library* is the selected tab"
+    );
+    for label in [
+        "Search blocks",
+        "Blocks",
+        "HTTP request",
+        "Collapse block library",
+    ] {
+        assert!(
+            harness.query_by_label(label).is_some(),
+            "{context}: *Library* shows {label:?}"
+        );
+    }
+    assert!(
+        harness.query_by_label("Project files").is_none(),
+        "{context}: no explorer on *Library*"
+    );
+}
+
+/// The panel shows the project's files: *Files* is the selected tab and the
+/// explorer with its toolbar is there, the block sections are not.
+fn assert_on_files(harness: &FolderHarness, context: &str) {
+    assert!(
+        is_selected(harness, "Files") && !is_selected(harness, "Library"),
+        "{context}: *Files* is the selected tab"
+    );
+    for label in [
+        "Project files",
+        "New",
+        "Trash",
+        "Refresh",
+        "Collapse project files",
+    ] {
+        assert!(
+            harness.query_by_label(label).is_some(),
+            "{context}: *Files* shows {label:?}"
+        );
+    }
+    assert!(
+        harness.query_by_label("Search blocks").is_none(),
+        "{context}: no block library on *Files*"
+    );
+}
+
+/// The folder window on `project` at `size` in Diagram with *Files* chosen.
+fn files_window(project: &tempfile::TempDir, size: egui::Vec2) -> FolderHarness {
+    let mut harness = window(project, size, "Diagram");
+    click(&mut harness, "Files");
+    harness
+}
+
+/// The names of the explorer's rows, top to bottom, as the tree shows them.
+fn explorer_labels(harness: &FolderHarness) -> Vec<String> {
+    let tree = harness.get_by_label("Project files").rect();
+    harness
+        .query_all_by(|node| {
+            node.role() != egui::accesskit::Role::Tree
+                && node.label().is_some()
+                && node.bounding_box().is_some()
+        })
+        .filter(|node| tree.contains(node.rect().center()))
+        .filter_map(|node| node.accesskit_node().label())
+        .collect()
+}
+
+/// Clicks the explorer row named `name` (a tab or the board header may carry
+/// the same name).
+fn click_row(harness: &mut FolderHarness, name: &str) {
+    let tree = harness.get_by_label("Project files").rect();
+    harness
+        .query_all_by_label(name)
+        .find(|node| tree.contains(node.rect().center()))
+        .unwrap_or_else(|| panic!("no explorer row {name:?}"))
+        .click();
+    settle(harness);
+}
+
+/// The project path of the active tab's file, document or text.
+fn active_path(harness: &FolderHarness) -> String {
+    let app = folder(harness);
+    let tab = app.workbench.active().expect("an active tab");
+    match app.text_of(tab) {
+        Some(path) => path.to_owned(),
+        None => app
+            .session
+            .as_ref()
+            .unwrap()
+            .document(tab)
+            .unwrap()
+            .entry()
+            .path
+            .as_str()
+            .to_owned(),
+    }
+}
+
+/// KTLO-11 criterion 1: in Diagram the panel's caption row holds *Library* and
+/// *Files*; *Library* shows the block sections, *Files* the explorer with the
+/// same rows as Code for the same project. Split keeps its library (1 = A).
+#[test]
+fn ktlo11_the_panel_has_library_and_files_tabs_with_the_rows_of_code() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let context = format!("Diagram at {size:?}");
+        let mut harness = window(&project, size, "Code");
+        let code_rows = explorer_labels(&harness);
+        assert!(
+            code_rows.iter().any(|row| row == "Demo shop"),
+            "Code lists the project: {code_rows:?}"
+        );
+
+        click(&mut harness, "Diagram");
+        assert_on_library(&harness, &context);
+        let library = harness.get_by_label("Library").rect();
+        let files = harness.get_by_label("Files").rect();
+        let chevron = harness.get_by_label("Collapse block library").rect();
+        assert!(
+            (library.center().y - chevron.center().y).abs() < 8.0
+                && (files.center().y - chevron.center().y).abs() < 8.0
+                && library.right() <= files.left()
+                && files.right() < chevron.left(),
+            "{context}: *Library* {library:?} and *Files* {files:?} are on the caption row, \
+             left of the chevron {chevron:?}"
+        );
+        let search = harness.get_by_label("Search blocks").rect();
+        assert!(
+            files.bottom() <= search.top(),
+            "{context}: the tabs are above the library's search {search:?}"
+        );
+
+        click(&mut harness, "Files");
+        assert_on_files(&harness, &context);
+        assert_eq!(folder(&harness).workbench.mode, Mode::Diagram);
+        assert_eq!(
+            explorer_labels(&harness),
+            code_rows,
+            "{context}: *Files* lists the rows of Code"
+        );
+        let tree = harness.get_by_label("Project files").rect();
+        let board = harness.get_by_label("Diagram board").rect();
+        assert!(
+            tree.right() <= board.left() + 1.0,
+            "{context}: the explorer {tree:?} is left of the board {board:?}"
+        );
+
+        click(&mut harness, "Library");
+        assert_on_library(&harness, &context);
+    }
+    // Decision 1 = A: Split's library panel has no tabs.
+    let project = shop();
+    let harness = window(&project, WIDE, "Split");
+    assert!(harness.query_by_label("Block library").is_some());
+    for label in ["Library", "Files"] {
+        assert!(
+            harness.query_by_label(label).is_none(),
+            "Split has no {label:?} tab"
+        );
+    }
+}
+
+/// KTLO-11 criterion 2: on *Files*, a component and a scenario open in their
+/// tab, the board shows them and the mode stays Diagram; a text file opens its
+/// text tab, which has no diagram.
+#[test]
+fn ktlo11_files_opens_documents_and_text_without_leaving_diagram() {
+    const NO_DIAGRAM: &str =
+        "README.md is a text file, not a scenario or component, so it has no diagram.";
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        std::fs::write(project.path().join("README.md"), "# Shop\n").unwrap();
+        let context = format!("Diagram at {size:?}");
+        let mut harness = files_window(&project, size);
+        let scenario = active_id(&harness);
+
+        click_row(&mut harness, "components");
+        click_row(&mut harness, "product.afs");
+        assert_eq!(folder(&harness).workbench.mode, Mode::Diagram, "{context}");
+        assert_eq!(active_path(&harness), "components/product.afs", "{context}");
+        let component = active_id(&harness);
+        assert_ne!(component, scenario);
+        assert!(
+            folder(&harness).canvases.contains_key(&component),
+            "{context}: the board shows the component"
+        );
+        assert!(harness.query_by_label("Diagram board").is_some());
+        assert_on_files(&harness, &format!("{context}, after a component"));
+
+        click_row(&mut harness, "promotion-and-cart-price.afs");
+        assert_eq!(folder(&harness).workbench.mode, Mode::Diagram, "{context}");
+        assert_eq!(
+            active_id(&harness),
+            scenario,
+            "{context}: the scenario's tab"
+        );
+        assert_eq!(
+            folder(&harness).workbench.tabs().len(),
+            2,
+            "{context}: the scenario keeps its one tab"
+        );
+
+        click_row(&mut harness, "README.md");
+        assert_eq!(folder(&harness).workbench.mode, Mode::Diagram, "{context}");
+        assert_eq!(
+            active_path(&harness),
+            "README.md",
+            "{context}: the text tab"
+        );
+        assert!(
+            harness.query_by_label(NO_DIAGRAM).is_some(),
+            "{context}: the Diagram area says the text file has no diagram"
+        );
+        assert_on_files(&harness, &format!("{context}, after a text file"));
+    }
+}
+
+/// KTLO-11 criterion 3 (toolbar and Delete key; the click and keyboard tests of
+/// the explorer in `tests.rs` run in both modes): *New*, *Trash*, *Refresh*
+/// and Delete do on *Files* what they do in Code, and the explorer's keys do
+/// not reach the board's selected block.
+#[test]
+fn ktlo11_the_explorer_on_files_does_what_it_does_in_code() {
+    for size in [MINIMUM, WIDE] {
+        for mode in ["Code", "Diagram"] {
+            let project = shop();
+            let context = format!("{mode} at {size:?}");
+            let mut harness = window(&project, size, mode);
+            let id = active_id(&harness);
+            let blocks = node_count(&harness, &id);
+            if mode == "Diagram" {
+                // A selected block, which the board's own Delete would remove.
+                click(&mut harness, "Expected price (Value)");
+                assert!(
+                    !folder(&harness)
+                        .selections
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_default()
+                        .is_empty(),
+                    "{context}: a block is selected"
+                );
+                click(&mut harness, "Files");
+            }
+
+            // + offers new items in the selected folder.
+            click_row(&mut harness, "components");
+            click(&mut harness, "New");
+            click(&mut harness, "New scenario");
+            assert!(
+                matches!(
+                    &folder(&harness).prompt,
+                    Some(Prompt::NewDocument { kind: DocumentKind::Scenario, folder: Some(into), .. })
+                        if into == "components"
+                ),
+                "{context}: *New scenario* asks for a name in components"
+            );
+            harness.key_press(Key::Escape);
+            settle(&mut harness);
+            assert!(
+                folder(&harness).prompt.is_none(),
+                "{context}: Escape cancels"
+            );
+
+            // The trash.
+            click(&mut harness, "Trash");
+            assert!(
+                matches!(&folder(&harness).prompt, Some(Prompt::Trash { .. })),
+                "{context}: *Trash* opens the trash"
+            );
+            harness.key_press(Key::Escape);
+            settle(&mut harness);
+
+            // Refresh lists a file written outside the window.
+            std::fs::write(project.path().join("notes.txt"), "notes\n").unwrap();
+            click(&mut harness, "Refresh");
+            // The scan it starts runs on a worker, which settling does not
+            // wait for.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while !explorer_labels(&harness)
+                .iter()
+                .any(|row| row == "notes.txt")
+                && std::time::Instant::now() < deadline
+            {
+                harness.step();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(
+                explorer_labels(&harness)
+                    .iter()
+                    .any(|row| row == "notes.txt"),
+                "{context}: *Refresh* lists the new file"
+            );
+
+            // Delete on the project row does nothing; Backspace does nothing;
+            // Delete on a file asks to delete that file.
+            click_row(&mut harness, "Demo shop");
+            harness.key_press(Key::Delete);
+            harness.key_press(Key::Backspace);
+            settle(&mut harness);
+            assert!(
+                folder(&harness).prompt.is_none(),
+                "{context}: the project row is not deleted"
+            );
+            click_row(&mut harness, "product.afs");
+            harness.key_press(Key::Delete);
+            settle(&mut harness);
+            assert!(
+                matches!(
+                    &folder(&harness).prompt,
+                    Some(Prompt::Delete { paths, .. }) if paths == &["components/product.afs".to_owned()]
+                ),
+                "{context}: Delete asks to delete the selected file"
+            );
+            harness.key_press(Key::Escape);
+            settle(&mut harness);
+            assert_eq!(
+                node_count(&harness, &id),
+                blocks,
+                "{context}: no block left the board"
+            );
+            assert!(project.path().join("components/product.afs").exists());
+        }
+    }
+}
+
+/// KTLO-11 criterion 4: the rail holds *Show block library* and *Show project
+/// files*; each expands the panel on its tab, and the chosen tab is kept
+/// through the chevron and Ctrl+B. Split's rail keeps its one button.
+#[test]
+fn ktlo11_the_rail_brings_the_panel_back_on_either_tab() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let context = format!("Diagram at {size:?}");
+        let mut harness = files_window(&project, size);
+
+        click(&mut harness, "Collapse project files");
+        for label in ["Show block library", "Show project files"] {
+            assert!(
+                harness.query_by_label(label).is_some(),
+                "{context}: the rail holds {label:?}"
+            );
+        }
+        for label in ["Library", "Files", "Project files", "Search blocks"] {
+            assert!(
+                harness.query_by_label(label).is_none(),
+                "{context}: the collapsed panel has no {label:?}"
+            );
+        }
+        assert_rail_beside_the_board(&harness, "Diagram", &context);
+        let files = harness.get_by_label("Show project files").rect();
+        let board = harness.get_by_label("Diagram board").rect();
+        assert!(
+            files.right() <= board.left() + 1.0,
+            "{context}: *Show project files* {files:?} is on the rail"
+        );
+        assert_within_window(&harness, &["Show block library", "Show project files"]);
+
+        click(&mut harness, "Show block library");
+        assert_on_library(&harness, &format!("{context}, from the rail"));
+        click(&mut harness, "Collapse block library");
+        click(&mut harness, "Show project files");
+        assert_on_files(&harness, &format!("{context}, from the rail"));
+
+        ctrl_b(&mut harness);
+        assert!(
+            harness.query_by_label("Show project files").is_some(),
+            "{context}: Ctrl+B folds the panel"
+        );
+        ctrl_b(&mut harness);
+        assert_on_files(&harness, &format!("{context}, Ctrl+B keeps the tab"));
+    }
+    let project = shop();
+    let mut harness = window(&project, WIDE, "Split");
+    click(&mut harness, "Collapse block library");
+    assert!(harness.query_by_label("Show block library").is_some());
+    assert!(
+        harness.query_by_label("Show project files").is_none(),
+        "Split's rail is unchanged (decision 1 = A)"
+    );
+}
+
+/// KTLO-11 criterion 5: while *Files* is shown, the explorer's selection
+/// follows the tab chosen in the tab strip.
+#[test]
+fn ktlo11_the_selection_follows_the_tab_strip_on_files() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let context = format!("Diagram at {size:?}");
+        let mut harness = files_window(&project, size);
+        click_row(&mut harness, "components");
+        click_row(&mut harness, "product.afs");
+        let scenario = "promotion-and-cart-price.afs";
+        // The scenario's tab in the strip: the one beside its close button.
+        let close = harness.get_by_label(&format!("Close {scenario}")).rect();
+        harness
+            .query_all_by_label(scenario)
+            .find(|node| (node.rect().center().y - close.center().y).abs() < 4.0)
+            .expect("the scenario's tab in the strip")
+            .click();
+        settle(&mut harness);
+
+        assert_eq!(active_path(&harness), SCENARIO, "{context}");
+        assert_eq!(
+            folder(&harness).explorer.selected.as_deref(),
+            Some(SCENARIO),
+            "{context}: the explorer selects the active file"
+        );
+        let tree = harness.get_by_label("Project files").rect();
+        let row = harness
+            .query_all_by_label(scenario)
+            .find(|node| tree.contains(node.rect().center()))
+            .expect("the scenario's row");
+        assert_eq!(
+            row.accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::True),
+            "{context}: the scenario's row shows as selected"
+        );
+    }
+}
+
+/// KTLO-11 criterion 6 (window half; the file half is in `apiforge-storage`):
+/// a project closed on *Files* reopens on *Files*, also behind the rail; one
+/// that never chose it opens on *Library*.
+#[test]
+fn ktlo11_the_chosen_tab_comes_back_after_reopening_the_project() {
+    let close = |mut harness: FolderHarness| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !harness.state_mut().as_mut().unwrap().prepare_close() {
+            assert!(std::time::Instant::now() < deadline, "close did not finish");
+            harness.step();
+        }
+    };
+    let project = shop();
+    let mut harness = window(&project, WIDE, "Diagram");
+    assert_on_library(&harness, "a view state without the field");
+    click(&mut harness, "Files");
+    close(harness);
+
+    let mut reopened = folder_harness(project.path(), WIDE);
+    settle(&mut reopened);
+    assert_eq!(folder(&reopened).workbench.mode, Mode::Diagram);
+    assert_on_files(&reopened, "reopened after *Files*");
+
+    click(&mut reopened, "Collapse project files");
+    close(reopened);
+    let mut reopened = folder_harness(project.path(), WIDE);
+    settle(&mut reopened);
+    assert!(
+        reopened.query_by_label("Show project files").is_some(),
+        "reopened behind the rail"
+    );
+    click(&mut reopened, "Show project files");
+    assert_on_files(&reopened, "the rail's *Files* after reopening");
+    click(&mut reopened, "Library");
+    close(reopened);
+
+    let reopened = folder_harness(project.path(), WIDE);
+    assert_on_library(&reopened, "reopened after *Library*");
+}
+
+/// KTLO-11 criterion 7 (layout half; the audit is in `accessibility_tests`):
+/// at 960 × 540 every control of the panel on *Files*, the board toolbar and
+/// the inspector are inside the window.
+#[test]
+fn ktlo11_the_files_tab_and_its_neighbours_fit_the_window() {
+    let toolbar = ["Main", "Cleanup", "Add step", "Zoom in", "Zoom out"];
+    let inspector = ["Close Inspector", "Resize inspector"];
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let mut harness = window(&project, size, "Diagram");
+        // The inspector opens for one selected block.
+        click(&mut harness, "Expected price (Value)");
+        click(&mut harness, "Files");
+        let mut labels = vec![
+            "Library",
+            "Files",
+            "Collapse project files",
+            "New",
+            "Trash",
+            "Refresh",
+            "Resize project files",
+        ];
+        labels.extend(toolbar);
+        labels.extend(inspector);
+        assert_within_window(&harness, &labels);
+        let tree = harness.get_by_label("Project files").rect();
+        let window = harness.ctx.content_rect();
+        assert!(
+            tree.top() + 48.0 < window.bottom() && tree.left() >= window.left(),
+            "{size:?}: the rows start inside the window: {tree:?}"
+        );
+        click(&mut harness, "Collapse project files");
+        let mut labels = vec!["Show block library", "Show project files"];
+        labels.extend(toolbar);
+        labels.extend(inspector);
+        assert_within_window(&harness, &labels);
+    }
+}
+
+/// KTLO-11 *Changed*: in Diagram the panel widens to 420 px, one width for
+/// both tabs; Split keeps the library's 320 px and does not shrink the
+/// Diagram width it shows.
+#[test]
+fn ktlo11_the_panel_widens_to_420_in_diagram_only() {
+    let project = shop();
+    let mut harness = window(&project, WIDE, "Diagram");
+    let start = rail_start(&harness, "Diagram");
+    drag_library_edge(&mut harness, 300.0);
+    let width = library_edge(&harness).x - start;
+    assert!(
+        (width - 420.0).abs() < 2.0,
+        "Diagram's panel reaches 420 px, not more: {width}"
+    );
+    click(&mut harness, "Files");
+    let files = harness
+        .get_by_label("Resize project files")
+        .rect()
+        .center()
+        .x
+        - start;
+    assert!(
+        (files - width).abs() < 1.0,
+        "one width for both tabs: {width} and {files}"
+    );
+    click(&mut harness, "Library");
+
+    click(&mut harness, "Split");
+    let split = library_edge(&harness).x - rail_start(&harness, "Split");
+    assert!(
+        split <= 321.0,
+        "Split keeps the library's 320 px range: {split}"
+    );
+    click(&mut harness, "Diagram");
+    let back = library_edge(&harness).x - start;
+    assert!(
+        (back - width).abs() < 1.0,
+        "Diagram keeps its width after Split: {width} -> {back}"
+    );
 }

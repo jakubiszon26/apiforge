@@ -305,7 +305,7 @@ fn at_the_minimum_window_the_row_fits_without_overlap() {
 
     let (_project, diagram) = open(MINIMUM, "Diagram");
     assert!(
-        diagram.query_by_label("Block library").is_some(),
+        diagram.query_by_label("Search blocks").is_some(),
         "the block library is open"
     );
     let name = row_label(&diagram, NAME).expect("the file name stays on the row");
@@ -325,7 +325,7 @@ fn at_the_minimum_window_the_row_fits_without_overlap() {
     row.extend(common);
     assert_inside(&diagram, &row, "Diagram at 960 × 540");
     assert_left_to_right(&row, "Diagram at 960 × 540");
-    assert_within_window(&diagram, &["Block library", "Main", "Cleanup", "Add step"]);
+    assert_within_window(&diagram, &["Library", "Main", "Cleanup", "Add step"]);
     assert_within_window(&diagram, &TOOLS);
 
     let (_project, split) = open(MINIMUM, "Split");
