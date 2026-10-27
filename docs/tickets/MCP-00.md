@@ -11,9 +11,9 @@
   and the owner watches its committed changes live in the already open
   application.**
 - State: revision 1 approved 2026-10-27 (issue #59, decisions 1–9);
-  revision 2 decisions 10–18 taken 2026-10-27 (all A); mock-ups M2, M3,
-  M4 approved 2026-10-27, M1 approved except the *Take back* button, which
-  gets a second round
+  revision 2 decisions 10–18 taken 2026-10-27 (all A); mock-ups M2 and M3
+  approved 2026-10-27, M1 and M4 approved the same day in round 4 (the
+  bottom status bar)
 
 ## What changed in revision 2
 
@@ -189,7 +189,7 @@ Every situation the owner asked for:
 | Situation | What happens |
 | --- | --- |
 | Window first, then the agent writes | The server finds the lock held by a window, asks over the channel. **Clean window:** it saves nothing, releases the lock, becomes an observer, says who has the project; the server takes the lock, the write proceeds. **Unsaved work:** MCP-08b refuses with *The window has unsaved work; save it there first* on both sides; MCP-08c asks the person instead: *Save all and hand over* or *Not now* (decision 13). The answer reaches the server within the request; a prompt the person has not answered in 30 s returns `handover_pending`, nothing written, and the prompt stays until answered; the next request is answered at once |
-| Server first, then the window opens | The window opens read-only, reads the holder's description from the lock (*Claude Code via apiforge mcp, since 10:42*), connects to the server's endpoint, and is an observer from the start: editing paused, live consent pushed, following every commit. When the agent finishes, the window takes the project back within two seconds |
+| Server first, then the window opens | The window opens read-only, reads the holder's description from the holder file (*Claude Code via apiforge mcp, since 10:42*), connects to the server's endpoint, and is an observer from the start: editing paused, live consent pushed, following every commit. When the agent finishes, the window takes the project back within two seconds |
 | Two clients on one project | The second server's write is refused with the first's description; reads and simulations work for both; no hand-over between servers |
 | The client disconnects (EOF) | The server cancels a run in progress, waits up to ten seconds for its cleanup, releases the lock, exits; the window takes the project back within two seconds |
 | The server process dies | The OS releases the lock; the window takes the project back; an activated transaction is finished by the window's existing recovery view, an interrupted live run is reported from the journal at that moment, as at start |
@@ -232,7 +232,7 @@ today beside `apply`: the per-file follow leaves the window's checkpoint
 baseline stale, and its next save would meet a conflict on `diagram.json`.
 
 **Agent runs in the window.** The owner asked whether the agent's runs are
-visible. Recommended for this sprint: a status line in the header — *Agent:
+visible. Recommended for this sprint: a status line in the bottom bar — *Agent:
 running main.afs (simulation)…*, then *main.afs passed, 18 steps, 12:58* —
 fed by the server's `run` messages (MCP-10). The full report stays in the
 agent's result, which the model shows the person; showing it in *Run results*

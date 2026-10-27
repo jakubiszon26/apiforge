@@ -2,8 +2,8 @@
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #66) · MCP-00 decision 6 = A taken 2026-10-27 ·
-  mock-up M1 approved 2026-10-27 (the *Take back*
-  button of MCP-08b gets a second round) · revised 2026-10-27 (MCP-00
+  mock-up M1 approved 2026-10-27 in round 4 (the bottom status bar with
+  the *Take back* button of MCP-08b) · revised 2026-10-27 (MCP-00
   revision 2: the holder description gains the endpoint field; the take-back
   happens only when the lock is free, never from a living process; the
   observer behaviour moved to MCP-08a)
@@ -27,7 +27,7 @@ holder that is still there.
   window · since 10:40 · …*; for the command line: *apiforge apply · since
   10:41 · …*. The header badge reads *Observing*. The notice under the tabs
   that says *Another window is editing this project* goes. An older build
-  that wrote nothing into the lock gets a generic *Another process* wording
+  that wrote no holder file gets a generic *Another process* wording
   in the bar. Mock-up M1, round 4, approved 2026-10-27.
 - Changed: a read-only window checks once a second (with the existing
   external check) whether the holder is gone and, when it is, takes the lock,
