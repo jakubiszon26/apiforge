@@ -122,7 +122,7 @@ impl Stopped {
 
     /// Draws the window. *Quit* closes it; *Open the previous workspace*
     /// returns the workspace window, as `--legacy` opens it, and grows the
-    /// native window to that window's size.
+    /// native window to that window's size, centred on the screen.
     pub fn ui(&mut self, ui: &mut egui::Ui) -> Option<app::App> {
         self.window.ui(ui);
         match self.window.take_choice()? {
@@ -139,6 +139,15 @@ impl Stopped {
                         egui::ViewportCommand::InnerSize(crate::DEFAULT_WINDOW_SIZE.into()),
                     ] {
                         context.send_viewport_cmd(command);
+                    }
+                    // Centred again at its new size, as the stop window was, so
+                    // it does not grow off the screen from the dialog's corner.
+                    let size = egui::Vec2::from(crate::DEFAULT_WINDOW_SIZE);
+                    if let Some(monitor) = context.input(|input| input.viewport().monitor_size) {
+                        let corner = ((monitor - size) / 2.0).max(egui::Vec2::ZERO);
+                        context.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                            corner.to_pos2(),
+                        ));
                     }
                     Some(app::App::new(context, source))
                 }
