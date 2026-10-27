@@ -507,8 +507,15 @@ a throwaway branch, at 960 × 540 and 1600 × 1000, posted to the issue.
 | M3 | *Project settings* in observer mode with the *Agent* section and the live toggle; the *Live allowed* badge in the header | MCP-09 |
 | M4 | The agent run status line: running, then passed | MCP-10 |
 
-The owner's consent to pausing edits does not replace approval of these
-captures.
+The captures are under `docs/qa/2026-10-27/MCP-00/` (`m1-*`, `m2-*`, `m3-*`,
+`m4-*`, rendered 2026-10-27 from the throwaway branch `mock/mcp-00-m1-m4`)
+and posted on #66 and #90–#94. Two points the captures raise for the
+owner: the settings dialog's footer *Apply changes, then use Save all…* reads
+oddly while observing and needs its wording; at 960 × 540 on a component tab
+(which has *Publish*) the two badges *Observing · Live allowed* may collide
+with the mode tabs — MCP-09 solves it (a shorter badge or a tooltip-only
+state) and its QA proves it. The owner's consent to pausing edits does not
+replace approval of these captures.
 
 ## Tickets
 
