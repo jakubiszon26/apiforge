@@ -13,7 +13,14 @@
   --all-targets --locked --no-fail-fast` (isolated `XDG_CONFIG_HOME` and
   `XDG_DATA_HOME`; 1078 passed, 0 failed) and `apiforge-convert-v1 --fixtures
   --check`: all pass. The 7 KTLO-23b tests (4 acceptance, the audit, 2 unit
-  tests of the dialog) passed ten runs in a row.
+  tests of the dialog) passed ten runs in a row. After merging `main`
+  (`1b689bb`, KTLO-11 and KTLO-03 included) fmt, clippy and the fixture
+  check pass again, and the 16 KTLO-23 tests (23a and 23b) passed ten runs
+  in a row; the workspace suite had 1096 passed and 1 failed: the older
+  `a_large_source_follows_the_caret_once_its_edit_is_analysed` timed out
+  waiting 15 s for storage under a load average of 15 on 3 cores, and fails
+  the same way on `main` itself (`0586860`) on this machine; CI runs it on
+  its own runners. The captures were not retaken after the merge.
 
 ## Captures
 
