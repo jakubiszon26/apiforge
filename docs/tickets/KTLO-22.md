@@ -1,6 +1,6 @@
 # KTLO-22: Publishing from the header is sometimes not recorded yet when the test asserts it
 
-- Size: S · Owner review: 15 min · Risk: none
+- Size: S estimated, **M measured** · Owner review: 15 min · Risk: none
 - State: Awaiting acceptance (issue #51); approved 2026-10-27, cause
   re-analysed the same day after the first fix was measured not to work — see
   Cause
@@ -95,6 +95,28 @@ recorded here because it changes what the person sees.
 The watcher's once-a-second exclusive check itself (its cost and whether a
 read-mode probe would do — a question for the backlog's *Later*); the
 `settle()` finding there; the Windows runner's speed.
+
+## Actual
+
+Changed lines: **421** (420 added, 1 removed) against `main` at `b08df58`,
+over the 300 of the S class and inside the 800 of M, so the ticket is not
+split. Measured at a named commit because the figure cannot count the
+paragraph that states it; this section and the size line above are the only
+change after it.
+
+| Part | Changed lines |
+| --- | --- |
+| The fix (`crates/apiforge-project/src/storage_work.rs`) | 28 |
+| Acceptance, criterion 1 (`crates/apiforge-project/tests/acceptance.rs`) | 76 |
+| Acceptance, criterion 2 (`crates/apiforge-desktop/src/folder/tests.rs`) | 80 |
+| This ticket, analysis and both causes | 109 |
+| QA report | 126 |
+| Backlog row | 2 |
+
+The estimate held for the code: 28 added lines and nothing removed. What grew
+is the evidence — two acceptance suites, the record of the refuted first cause
+and a report with five measured loops — and the size rule counts it, so the
+measurement is recorded as M rather than argued down. One round.
 
 ## Technical appendix
 
