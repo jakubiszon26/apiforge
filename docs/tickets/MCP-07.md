@@ -4,7 +4,7 @@
 - State: Backlog (issue #66) · MCP-00 decision 6 = A taken 2026-10-27 ·
   mock-up M1 approved 2026-10-27 (the *Take back*
   button of MCP-08b gets a second round) · revised 2026-10-27 (MCP-00
-  revision 2: the lock description gains the endpoint field; the take-back
+  revision 2: the holder description gains the endpoint field; the take-back
   happens only when the lock is free, never from a living process; the
   observer behaviour moved to MCP-08a)
 - Analysis model: Fable · Implementation model: —
@@ -54,14 +54,19 @@ at 960 × 540 and 1600 × 1000 for the agent, another window and `apply`.
 ## Acceptance criteria
 
 1. `ProjectStore::open_exclusive` writes the holder's description into
-   `.apiforge/local/project.lock` — program, role (`window`, `agent`,
-   `command`), start time, optional client name, optional `endpoint`; never a
-   path or a secret — and `ProjectStore::holder()` reads it from a read-only
-   store; the file is still never unlinked or replaced (KTLO-21's tests pass
+   `.apiforge/local/holder.json`, replaced atomically after the lock is
+   confirmed — program, role (`window`, `agent`, `command`), start time,
+   optional client name, optional `endpoint`; never a path or a secret — and
+   `ProjectStore::holder()` returns it from a read-only store **only while
+   the probe says a writer is live**; a holder file with no live writer is
+   ignored. The lock file itself stays empty (on Windows the lock is
+   mandatory and the file cannot be read while held) and is still never
+   unlinked or replaced (KTLO-21's tests pass
    unchanged).
 2. A window opened while a process holds the lock shows the bar with that
-   process's description; while a lock file from an older build (empty) is
-   held, it shows the generic wording.
+   process's description; while the lock is held by an older build that
+   wrote no holder file, or the holder file is unreadable, it shows the
+   generic wording.
 3. When the holder releases the lock, the read-only window becomes the writer
    within two seconds: the badge and the bar disappear, *Save* is enabled,
    and a save succeeds (headless interaction test: take the lock in the test,
@@ -84,15 +89,19 @@ at 960 × 540 and 1600 × 1000 for the agent, another window and `apply`.
 Pausing edits while read-only and the reload that follows commits (MCP-08a);
 the hand-over on request and the control channel (MCP-08b) — this ticket
 only reserves the `endpoint` field; a status line for what the agent does
-(MCP-10); naming the conversation (the lock holds the program's name, the
-client's name and the time, nothing about conversations).
+(MCP-10); naming the conversation (the holder file holds the program's
+name, the client's name and the time, nothing about conversations).
 
 ## Technical appendix
 
 - `transaction.rs::open_exclusive` (`:152`): after `take_confirmed_lock`,
-  truncate and write one JSON line
-  `{"version":1,"program":"apiforge","role":"agent","client":"Claude Code","since":"2026-10-27T10:42:11Z","endpoint":null}`;
-  the file is already opened read-write. `has_live_writer` (`:896`) gains
+  write one JSON line
+  `{"version":1,"program":"apiforge","role":"agent","client":"Claude Code","since":"2026-10-27T10:42:11Z","endpoint":null}`
+  to `.apiforge/local/holder.json` with `write_atomic`. Why not the lock
+  file: `std::fs::File::try_lock` is `LockFileEx` on Windows, a mandatory
+  whole-file lock, so a reader gets `ERROR_LOCK_VIOLATION` exactly while a
+  writer is live (planning decision of 2026-10-27 on #66, option A).
+  `has_live_writer` (`:896`) gains
   `holder() -> Result<Option<Holder>>` that returns the description when a
   writer is live. `.apiforge/local` is not tracked by Git, so this is not a
   `format` change. The window writes `role: "window"`, the CLI `command` with

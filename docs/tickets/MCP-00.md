@@ -67,7 +67,7 @@ When the model is done the window is theirs again, with nothing lost.
 - **One writer, many readers** (ADR 0011). `.apiforge/local/project.lock` is
   an OS lock on an open file, never unlinked, never taken over; a reader
   probes it without creating it (`has_live_writer`, KTLO-21). A read-only
-  store writes nothing under `.apiforge/local`. The lock carries no
+  store writes nothing under `.apiforge/local`. The holder has no
   description yet; MCP-07 gives it one.
 - **The window follows the disk** once a second and on focus (`watcher.rs`):
   a clean document follows (`follow_disk`: text and saved hash, new source
@@ -173,7 +173,7 @@ Streamable HTTP.
 A small **control channel** between the two processes replaces "close the
 project in the window": the lock holder listens on a local endpoint (a Unix
 socket under the user's runtime directory; a named pipe on Windows) and
-writes the endpoint's name into the lock file beside its description
+writes the endpoint's name into the holder file beside its description
 (MCP-07); the other side connects. The messages are few:
 
 | From | To | Message | Effect |
@@ -558,7 +558,7 @@ minutes) is in the backlog with its own capacity.
 
 **A — observer (recommended).** Reuses: the watcher, `reload`, the stable
 read, `has_live_writer`, the read-only chrome, the recovery view, the
-journal's interrupted report. Adds: the lock description with an endpoint
+journal's interrupted report. Adds: the holder description with an endpoint
 (MCP-07), the channel with seven message kinds, observer mode (edits
 blocked, reload keeping navigation), the agent session in the server (one
 `ProjectStore` held for the session, a fresh `ProjectSession` per call from
@@ -618,8 +618,9 @@ absence explicitly.
 ### Lock and storage facts
 
 `open_exclusive` (`transaction.rs:152`) opens the lock read-write and never
-truncates it; MCP-07 writes `{"program","role","since","endpoint"}` after the
-confirmed lock. `has_live_writer` (`:896`) probes with a shared try-lock over
+truncates it; MCP-07 writes `{"program","role","since","endpoint"}` to
+`.apiforge/local/holder.json` after the confirmed lock — not into the lock
+file, which Windows' mandatory lock makes unreadable while held. `has_live_writer` (`:896`) probes with a shared try-lock over
 the KTLO-21 window. Head generation (`head.json`) advances on every commit
 and is what `generation` reports. `set_known_secrets` (`:238`) feeds the
 staging check. `ProjectPath::working_source` (`path.rs:50`) rejects `..`,

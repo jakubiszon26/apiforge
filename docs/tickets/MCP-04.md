@@ -69,7 +69,7 @@ Not applicable: no interface change.
    keeps it across calls — after `write_source` returns,
    `ProjectStore::open_exclusive` on the folder **fails** with `Locked`, and
    succeeds within a second of `finish_editing` or of EOF on the server's
-   stdin. The lock file's description names `apiforge mcp`, the role
+   stdin. The holder file names `apiforge mcp`, the role
    `agent`, the start time and the client when known (MCP-07's format).
 8. A write while another process holds the lock is a tool error quoting the
    holder's description (`held_by_window` when it is a window, `held_by_other`

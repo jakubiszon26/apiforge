@@ -37,7 +37,7 @@ approved 2026-10-27: `docs/qa/2026-10-27/MCP-00/m1-observer-*.png`.
 ## Acceptance criteria
 
 1. The holder listens: a window that holds the project writes an `endpoint`
-   into its lock description and accepts connections there; so does the
+   into its holder file and accepts connections there; so does the
    server during an agent session; a reader finds the endpoint through
    `ProjectStore::holder()`.
 2. Window first: with the window open and clean, the server's first

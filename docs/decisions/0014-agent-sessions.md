@@ -3,7 +3,7 @@
 - Status: accepted 2026-10-27 (MCP-00 revision 2, decisions 10–16 = A);
   implementation pending (MCP-04, MCP-07, MCP-08a–c, MCP-09)
 - Date: 2026-10-27
-- Scope: `apiforge-storage` (lock description), `apiforge-project`,
+- Scope: `apiforge-storage` (holder description), `apiforge-project`,
   `apiforge-mcp`, desktop
 - Related: [transactions](0011-project-transactions.md),
   [sessions](0012-project-sessions.md), [run journal](0009-run-journal.md)
@@ -32,12 +32,15 @@ requests.
    only when the lock is free: released by its holder, or the holder is
    dead and the operating system released it. ADR 0011's rule — never
    unlink, replace or force-take-over a held lock — stands unchanged.
-3. **The lock names its holder.** The holder writes one JSON line into the
-   lock file after taking it: program, role (`window`, `agent`, `command`),
-   start time, the client's name when known, and the endpoint of its control
-   channel when it has one. Never a path, never a secret. The file is still
-   never unlinked. A reader shows the description; an older build's empty
-   lock gets the generic wording.
+3. **The holder names itself.** After taking the lock the holder writes one
+   JSON line to `.apiforge/local/holder.json`, replaced atomically: program,
+   role (`window`, `agent`, `command`), start time, the client's name when
+   known, and the endpoint of its control channel when it has one. Never a
+   path, never a secret. The lock file itself stays empty and is never
+   unlinked: on Windows the OS lock is mandatory and a held lock file cannot
+   be read. A reader trusts the holder file only while the probe says a
+   writer is live; a holder file without a live writer is stale and ignored.
+   An older build that wrote none gets the generic wording.
 4. **Hand-over is a request over a control channel**, not a file protocol:
    the lock holder listens on a same-user local endpoint (Unix socket under
    the runtime directory, named pipe on Windows); the other side connects.
@@ -82,8 +85,8 @@ requests.
   is never a dependency of the model's work, only of the person's view.
 - Both processes implement a small listener; Windows named pipes are a
   verification cost the first shipping ticket records.
-- `.apiforge/local/project.lock` gains content; it is untracked, so the
-  project file format is unchanged.
+- `.apiforge/local/holder.json` is new; it is untracked, so the project
+  file format is unchanged.
 - Exactly-once execution of external requests is not promised; a lost
   response has a way to learn the outcome (`request_id`, revision hashes,
   the journal) and nothing is retried on the server's own initiative.
