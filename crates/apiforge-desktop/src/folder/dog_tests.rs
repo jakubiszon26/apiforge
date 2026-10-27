@@ -195,7 +195,8 @@ fn the_code_side_of_split_keeps_its_own_hint() {
 /// Criterion 5: the board's other hints are unchanged — a text file's hint
 /// keeps the board to itself, justified across it as it is today. Its board
 /// is a few points shorter than an empty one, whose tab strip holds no tab,
-/// so what is measured is the hint itself.
+/// so what is measured is the hint itself. Since KTLO-11 the panel with the
+/// project's files stays beside it, so the board starts at the panel's edge.
 #[test]
 fn the_text_file_hint_keeps_the_board_to_itself() {
     let project = shop_project();
@@ -218,9 +219,18 @@ fn the_text_file_hint_keeps_the_board_to_itself() {
         hint.height() > 200.0,
         "the text-file hint at {hint:?} is no longer justified across its board"
     );
+    let board_left = harness
+        .get_by_label("Resize block library")
+        .rect()
+        .center()
+        .x;
+    // The harness's own central panel insets the window by its margin.
+    let margin = egui::Frame::central_panel(&harness.ctx.global_style()).inner_margin;
+    let board_right = window.right() - margin.rightf();
     assert!(
-        (hint.center().x - window.center().x).abs() <= 1.0,
-        "the text-file hint at {hint:?} is no longer centred in the window {window:?}"
+        (hint.left() - board_left).abs() <= 1.0 && (hint.right() - board_right).abs() <= 1.0,
+        "the text-file hint at {hint:?} no longer spans the board from the panel's edge \
+         {board_left} to {board_right}"
     );
 }
 

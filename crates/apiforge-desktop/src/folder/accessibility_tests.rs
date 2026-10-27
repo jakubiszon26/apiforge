@@ -448,6 +448,43 @@ fn the_block_library_names_every_control_expanded_and_collapsed() {
     }
 }
 
+/// KTLO-11 criterion 7: the audit passes in Diagram with *Library* shown, with
+/// *Files* shown and with the panel folded to its rail.
+#[test]
+fn the_library_and_files_tabs_name_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    app.workbench.mode = Mode::Diagram;
+    wait_storage(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    for name in ["Library", "Files", "Collapse block library"] {
+        assert!(exposes(&mut app, &context, name), "*Library* has {name:?}");
+    }
+    assert_named("Diagram, Library tab", &mut app, &context);
+
+    let at = centre_of(&mut app, &context, "Files");
+    click(&mut app, &context, at);
+    for name in [
+        "Project files",
+        "New",
+        "Trash",
+        "Refresh",
+        "Collapse project files",
+    ] {
+        assert!(exposes(&mut app, &context, name), "*Files* has {name:?}");
+    }
+    assert_named("Diagram, Files tab", &mut app, &context);
+
+    frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
+    for name in ["Show block library", "Show project files"] {
+        assert!(
+            exposes(&mut app, &context, name),
+            "Ctrl+B folds the panel to a rail with {name:?}"
+        );
+    }
+    assert_named("Diagram, panel on its rail", &mut app, &context);
+}
+
 /// KTLO-24 criterion 6: the audit passes in Code, Diagram and Split with no
 /// file open, where the band of tabs is gone.
 #[test]

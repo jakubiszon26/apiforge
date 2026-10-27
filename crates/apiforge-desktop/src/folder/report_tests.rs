@@ -54,7 +54,7 @@ fn hidden_in(mode: &str) -> &'static [&'static str] {
         "Code" => &["Resize project files", "Contents of"],
         "Split" => &["Resize code", "Contents of", "Diagram board", "Add step"],
         _ => &[
-            "Block library",
+            "Library",
             "Diagram board",
             "Add step",
             "Zoom in",

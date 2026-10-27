@@ -53,9 +53,16 @@ pub enum MigrationError {
     InputsChanged,
     #[error("A project folder already exists and belongs to something else: {path}")]
     Occupied { path: PathBuf },
-    #[error("Migrated project {project_id} does not match the workspace: {reason}.")]
+    #[error(
+        "Migrated project \u{201c}{project_name}\u{201d} ({project_id}) does not match the workspace: {reason}{}.",
+        in_scenario(.scenario)
+    )]
     Verification {
         project_id: String,
+        /// The project's name, as the person knows it.
+        project_name: String,
+        /// The scenario that did not read back the same, when one did not.
+        scenario: Option<String>,
         reason: &'static str,
     },
     #[error("A project ID cannot be used as a folder name: {project_id}")]
@@ -70,6 +77,13 @@ pub enum MigrationError {
     },
     #[error(transparent)]
     Workspace(#[from] apiforge_storage::StorageError),
+}
+
+fn in_scenario(scenario: &Option<String>) -> String {
+    scenario
+        .as_ref()
+        .map(|name| format!(" (scenario \u{201c}{name}\u{201d})"))
+        .unwrap_or_default()
 }
 
 fn io(path: &Path) -> impl FnOnce(io::Error) -> Error + '_ {
@@ -387,8 +401,16 @@ pub fn migrate_workspace(legacy: &WorkspaceStore) -> Result<MigrationOutcome> {
         let folder = staging.join(&project_id);
         let destination = projects.join(&project_id);
         if tree_digest(&folder)? != index.projects[position].digest {
+            let project_name = workspace
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .map(|project| project.name.clone())
+                .unwrap_or_default();
             return Err(MigrationError::Verification {
                 project_id,
+                project_name,
+                scenario: None,
                 reason: "the prepared folder changed before publication",
             }
             .into());
@@ -687,12 +709,15 @@ fn print(context: &Project, component: &Component) -> Result<String> {
 /// the legacy project: every scenario, every published revision and every
 /// working component must keep semantics, identities, layout and proxies.
 fn verify(folder: &Path, project: &Project) -> Result<()> {
-    let failure = |reason| {
+    let failure_in = |scenario: Option<&str>, reason| {
         Error::Migration(MigrationError::Verification {
             project_id: project.id.clone(),
+            project_name: project.name.clone(),
+            scenario: scenario.map(str::to_owned),
             reason,
         })
     };
+    let failure = |reason| failure_in(None, reason);
     let session = ProjectSession::open_without_recovery(folder)?;
     let mut published = session.context().components.clone();
     let mut expected = project.components.clone();
@@ -711,7 +736,10 @@ fn verify(folder: &Path, project: &Project) -> Result<()> {
             })
             .and_then(|document| document.model());
         if model != Some(&Document::Scenario(scenario.clone())) {
-            return Err(failure("a scenario differs after reloading"));
+            return Err(failure_in(
+                Some(&scenario.name),
+                "a scenario differs after reloading",
+            ));
         }
     }
     for document in session.documents() {

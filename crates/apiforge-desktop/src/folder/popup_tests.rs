@@ -158,7 +158,7 @@ fn the_popup_is_unchanged_when_the_library_panel_is_in_view() {
     ] {
         let mut harness = window(&project, size, mode);
         assert!(
-            harness.query_by_label("Block library").is_some(),
+            harness.query_by_label("Search blocks").is_some(),
             "{mode} at {size:?} shows the panel"
         );
         open_popup(&mut harness);
