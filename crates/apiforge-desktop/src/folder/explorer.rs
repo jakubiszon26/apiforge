@@ -382,6 +382,13 @@ impl FolderApp {
                 )
             });
             self.explorer_keys(ui.ctx(), &rows, &mut actions);
+            // Delete and Backspace belong to the explorer while it has the
+            // keyboard, even where they do nothing, so that in Diagram they never
+            // reach the board beside it and its selected blocks (KTLO-11).
+            ui.input_mut(|input| {
+                input.consume_key(Modifiers::NONE, Key::Delete);
+                input.consume_key(Modifiers::NONE, Key::Backspace);
+            });
         }
         let selected = self.explorer.selected.clone();
         let status = self.row_status();

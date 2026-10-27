@@ -15,6 +15,7 @@ pub const DEFAULT_PANELS: PanelSizes = PanelSizes {
     diagnostics: 132.0,
     library: DEFAULT_LIBRARY_WIDTH,
     library_collapsed: false,
+    library_files: false,
 };
 
 #[derive(Clone, Debug, PartialEq)]

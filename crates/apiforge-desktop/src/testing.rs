@@ -312,7 +312,7 @@ mod review {
             let mut harness = folder_harness(project.path(), size);
             harness.get_by_label("Diagram").click();
             settle(&mut harness);
-            let caption = harness.get_by_label("Block library").rect();
+            let caption = harness.get_by_label("Library").rect();
             let chevron = harness.get_by_label("Collapse block library").rect();
             let region = caption.union(chevron).expand2(egui::vec2(16.0, 12.0));
             capture(
@@ -331,6 +331,34 @@ mod review {
                     None,
                 );
             }
+        }
+    }
+
+    /// The panel beside the board in Diagram on *Files* (KTLO-11), whole and
+    /// as its caption row, and folded to the rail with both buttons, at both
+    /// windows.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_library_files() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            harness.get_by_label("Diagram").click();
+            settle(&mut harness);
+            harness.get_by_label("Files").click();
+            settle(&mut harness);
+            capture(&mut harness, &format!("library-files-{suffix}"), None);
+            let tabs = harness.get_by_label("Library").rect();
+            let chevron = harness.get_by_label("Collapse project files").rect();
+            let region = tabs.union(chevron).expand2(egui::vec2(16.0, 12.0));
+            capture(
+                &mut harness,
+                &format!("library-files-caption-{suffix}"),
+                Some(region),
+            );
+            harness.get_by_label("Collapse project files").click();
+            settle(&mut harness);
+            capture(&mut harness, &format!("library-files-rail-{suffix}"), None);
         }
     }
 

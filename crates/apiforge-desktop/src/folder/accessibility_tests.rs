@@ -457,6 +457,43 @@ fn the_block_library_names_every_control_expanded_and_collapsed() {
     }
 }
 
+/// KTLO-11 criterion 7: the audit passes in Diagram with *Library* shown, with
+/// *Files* shown and with the panel folded to its rail.
+#[test]
+fn the_library_and_files_tabs_name_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    app.workbench.mode = Mode::Diagram;
+    wait_storage(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    for name in ["Library", "Files", "Collapse block library"] {
+        assert!(exposes(&mut app, &context, name), "*Library* has {name:?}");
+    }
+    assert_named("Diagram, Library tab", &mut app, &context);
+
+    let at = centre_of(&mut app, &context, "Files");
+    click(&mut app, &context, at);
+    for name in [
+        "Project files",
+        "New",
+        "Trash",
+        "Refresh",
+        "Collapse project files",
+    ] {
+        assert!(exposes(&mut app, &context, name), "*Files* has {name:?}");
+    }
+    assert_named("Diagram, Files tab", &mut app, &context);
+
+    frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
+    for name in ["Show block library", "Show project files"] {
+        assert!(
+            exposes(&mut app, &context, name),
+            "Ctrl+B folds the panel to a rail with {name:?}"
+        );
+    }
+    assert_named("Diagram, panel on its rail", &mut app, &context);
+}
+
 /// KTLO-24 criterion 6: the audit passes in Code, Diagram and Split with no
 /// file open, where the band of tabs is gone.
 #[test]
@@ -600,4 +637,23 @@ fn the_migration_stop_window_names_every_control() {
         }
         assert_eq!(buttons, 2, "both buttons are named at {size:?}");
     }
+}
+
+/// KTLO-23b: the Run inputs dialog names each field and its buttons.
+#[test]
+fn the_run_inputs_dialog_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    app.workbench.open(&id);
+    app.request_run(&id, false);
+    assert!(
+        exposes(&mut app, &context, "product · Object"),
+        "the dialog is open"
+    );
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?}, Run inputs"), &mut app, &context);
+    }
+    assert!(app.runs.handle.is_none(), "nothing runs");
 }

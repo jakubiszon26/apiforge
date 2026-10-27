@@ -459,6 +459,11 @@ impl FolderApp {
             Prompt::Settings(dialog) => self.project_settings_prompt(context, *dialog),
             Prompt::Environment(dialog) => self.environment_prompt(context, *dialog),
             Prompt::Run { prepared, live } => self.run_prompt(context, *prepared, live),
+            Prompt::RunInputs {
+                prepared,
+                live,
+                dialog,
+            } => self.run_inputs_prompt(context, *prepared, live, *dialog),
             Prompt::Journal(review) => self.journal_prompt(context, *review),
             Prompt::AssignResult {
                 document_id,
