@@ -49,8 +49,9 @@ pub(super) struct Activated {
 /// workspace is not: it happens once in the life of an installation. A window
 /// cannot change which application it is running once it exists, so whether it
 /// can has to be known before one is built. A migration that refuses is its own
-/// start, naming what it refused (KTLO-03); the causes only the workspace
-/// window can resolve are `Legacy`.
+/// start, naming what it refused, and ends in a window that says so and offers
+/// the previous workspace (KTLO-03); the causes only the workspace window can
+/// resolve still open it.
 pub enum Start {
     /// Managed startup; the slow work runs in the folder window.
     Managed,

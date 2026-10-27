@@ -8,7 +8,8 @@
   part 1 — the fixture, the named refusal and `Start::Refused` (criteria 1, 3,
   the first half of 4, 6) — awaits acceptance in PR #78, 747 changed
   lines (M); part 2 — the *Migration stopped* window (the rest of 4, and 5) —
-  follows from `main` once part 1 is merged. Criterion 2 is not met: the
+  follows from `main` once part 1 is merged; its QA report is
+  `docs/qa/2026-10-27/KTLO-03/report-part2.md`. Criterion 2 is not met: the
   refusal's cause is not KTLO-04, and fixing it is a decision for the owner
 - Mock-up branch: `mock/ktlo-03-migration-stop` (throwaway; captures in
   `docs/qa/2026-10-27/KTLO-03/`, posted on #5)
