@@ -98,6 +98,12 @@ enum Prompt {
         prepared: Box<apiforge_project::PreparedRun>,
         live: bool,
     },
+    /// A component's input values, asked for before its run (KTLO-23b).
+    RunInputs {
+        prepared: Box<apiforge_project::PreparedRun>,
+        live: bool,
+        dialog: Box<dialogs::RunInputsDialog>,
+    },
     Journal(Box<runs::JournalReview>),
     AssignResult {
         document_id: String,

@@ -577,3 +577,22 @@ fn a_component_tab_with_run_results_names_every_control() {
         );
     }
 }
+
+/// KTLO-23b: the Run inputs dialog names each field and its buttons.
+#[test]
+fn the_run_inputs_dialog_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    app.workbench.open(&id);
+    app.request_run(&id, false);
+    assert!(
+        exposes(&mut app, &context, "product · Object"),
+        "the dialog is open"
+    );
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?}, Run inputs"), &mut app, &context);
+    }
+    assert!(app.runs.handle.is_none(), "nothing runs");
+}
