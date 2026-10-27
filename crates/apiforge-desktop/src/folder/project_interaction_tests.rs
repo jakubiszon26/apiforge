@@ -482,6 +482,21 @@ fn a_read_only_window_offers_only_session_secret_values() {
             .accesskit_node()
             .is_disabled()
     );
+    choose(&mut harness, "Cancel");
+    open_project_menu(&mut harness, "Test environment…");
+    assert!(
+        harness
+            .get_by_label("Base URL")
+            .accesskit_node()
+            .is_disabled(),
+        "the public part is disabled"
+    );
+    assert!(
+        harness
+            .get_by_label("New secret name")
+            .accesskit_node()
+            .is_disabled()
+    );
 }
 
 // ----- P7c: preview-bound conflict and recovery decisions --------------------------

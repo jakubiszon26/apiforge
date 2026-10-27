@@ -217,8 +217,9 @@ impl ProjectSession {
         let store = ProjectStore::open_as(root, holder)?;
         // Beside a living holder this session observes: it shows what the
         // holder committed, never the holder's unsaved drafts or its cache
-        // (MCP-08a, planning decision 1).
-        if store.is_read_only() && store.has_live_writer().unwrap_or(false) {
+        // (MCP-08a, planning decision 1). A probe that fails counts as a
+        // living holder: never the holder's drafts by mistake.
+        if store.is_read_only() && store.has_live_writer().unwrap_or(true) {
             return Self::load_saved(store, placer, 1);
         }
         Self::load(store, placer, 1)

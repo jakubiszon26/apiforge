@@ -564,8 +564,12 @@ impl Canvas {
                 step,
             );
             // A scope, so that a read-only card's disabled fields leave the
-            // next card's interactions alone.
-            board_ui.scope(|ui| self.card_controls(ui, card, camera, input, &mut commands));
+            // next card's interactions alone; its id is the card's, so the
+            // controls keep their ids whichever cards are off screen.
+            board_ui.scope_builder(
+                egui::UiBuilder::new().id_salt(("card-controls", &card.id)),
+                |ui| self.card_controls(ui, card, camera, input, &mut commands),
+            );
         }
 
         for chip in &chips {

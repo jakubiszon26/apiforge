@@ -161,14 +161,20 @@ impl FolderApp {
                 // words give way to it on a narrow window.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(change) = last_change {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(change)
-                                    .size(theme::FONT_META)
-                                    .color(theme::MUTED),
-                            )
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                        );
+                        // At most half the bar: a long file name is cut,
+                        // whole on hover, and the holder keeps its half.
+                        let room = ui.available_width() / 2.0;
+                        ui.scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&change)
+                                        .size(theme::FONT_META)
+                                        .color(theme::MUTED),
+                                )
+                                .truncate(),
+                            );
+                        });
                         ui.add_space(theme::SPACE_LG);
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {

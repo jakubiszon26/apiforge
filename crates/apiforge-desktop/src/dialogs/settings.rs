@@ -203,6 +203,11 @@ impl SettingsDialog {
         self
     }
 
+    /// Follows the window's state while open, as it starts or stops observing.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+    }
+
     pub fn new(project: &Project, scenario_id: &str) -> Self {
         let scenario = project
             .scenarios
@@ -297,8 +302,7 @@ impl SettingsDialog {
             } else {
                 "Save settings"
             },
-            note: self
-                .project_only
+            note: (self.project_only && !self.read_only)
                 .then_some("Apply changes, then use Save all to save the project settings."),
         };
         let action = chrome.show(

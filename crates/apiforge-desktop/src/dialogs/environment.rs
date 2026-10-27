@@ -131,6 +131,11 @@ impl EnvironmentDialog {
         self
     }
 
+    /// Follows the window's state while open, as it starts or stops observing.
+    pub fn set_public_read_only(&mut self, read_only: bool) {
+        self.public_read_only = read_only;
+    }
+
     pub fn set_error(&mut self, error: String) {
         self.error = Some(error);
     }

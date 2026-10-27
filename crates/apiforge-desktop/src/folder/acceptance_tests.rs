@@ -1082,9 +1082,10 @@ mod mcp08a {
             harness.step();
             std::thread::sleep(Duration::from_millis(5));
         }
-        let taken = committed.elapsed();
+        // Settled first: the bound covers the state the person sees,
+        // analysis included (review of #110).
         settle(harness);
-        taken
+        committed.elapsed()
     }
 
     fn await_writer(harness: &mut FolderHarness) {
@@ -1554,6 +1555,31 @@ mod mcp08a {
             choose(&mut harness, mode);
             assert_within_window(&harness, &[BAR, change.as_str(), "Observing"]);
             assert_disjoint(&harness, &[holder_text.as_str(), change.as_str()]);
+        }
+
+        // Review of #110: a long file name is cut, and both texts keep
+        // their place in the bar.
+        owner
+            .create_document(
+                DocumentKind::Scenario,
+                "scenarios/a-scenario-whose-name-is-far-too-long-to-fit-beside-the-holder.afs",
+                "scenario \"Long\" {\n  total = 2\n}\n",
+            )
+            .unwrap();
+        await_shown(&mut harness, Instant::now(), "the long name", |harness| {
+            last_change(harness).is_some_and(|text| text.contains("far-too-long"))
+        });
+        let change = last_change(&harness).unwrap();
+        choose(&mut harness, "Code");
+        assert_within_window(&harness, &[BAR, change.as_str(), holder_text.as_str()]);
+        assert_disjoint(&harness, &[holder_text.as_str(), change.as_str()]);
+        let bar = harness.get_by_label(BAR).rect();
+        for label in [change.as_str(), holder_text.as_str()] {
+            let rect = harness.get_by_label(label).rect();
+            assert!(
+                rect.left() >= bar.left() && rect.right() <= bar.right(),
+                "{label} stays in the bar"
+            );
         }
     }
 

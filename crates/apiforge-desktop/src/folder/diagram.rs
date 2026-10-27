@@ -193,6 +193,9 @@ impl FolderApp {
             && !matches!(
                 command,
                 Command::Select(_)
+                    // Opening a called component is navigation, which stays
+                    // free while observing (MCP-08a).
+                    | Command::EditComponent(_)
                     | Command::Copy
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)

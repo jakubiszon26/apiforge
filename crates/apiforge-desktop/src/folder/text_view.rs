@@ -222,7 +222,7 @@ impl FolderApp {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if output.inner.changed {
+        if output.inner.changed && interactive {
             match session.edit_text(&snapshot.path, &text, CODE) {
                 Ok(_) => self.changed_at = Some(Instant::now()),
                 Err(error) => self.notify(error.to_string(), true),

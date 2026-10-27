@@ -445,5 +445,32 @@ mod observer {
         assert!(outcome.project_reloaded, "{outcome:?}");
         assert_eq!(observer.documents().len(), 1);
         assert!(observer.document(&id).is_some());
+        assert_eq!(outcome.followed.len(), 1, "{outcome:?}");
+        assert_eq!(outcome.followed[0].kind, CommitChangeKind::Deleted);
+        assert_eq!(outcome.followed[0].path, "scenarios/other.afs");
+    }
+
+    /// Review of #110: a commit that saves a source and the project's
+    /// settings together names both, the source first.
+    #[test]
+    fn a_commit_of_a_source_and_settings_names_both() {
+        let (_directory, mut holder, mut observer, id) = held();
+        holder
+            .edit_configuration(|manifest| manifest.name = "Renamed".into(), HOLDER)
+            .unwrap();
+        holder.edit_source(&id, CHANGED, HOLDER).unwrap();
+        holder.save(&id).unwrap();
+        let outcome = poll(&mut observer);
+        let kinds: Vec<_> = outcome.followed.iter().map(|change| change.kind).collect();
+        assert_eq!(
+            kinds,
+            [CommitChangeKind::Saved, CommitChangeKind::Settings],
+            "{outcome:?}"
+        );
+        assert_eq!(
+            outcome.followed[0].document_id.as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(observer.manifest().name, "Renamed");
     }
 }

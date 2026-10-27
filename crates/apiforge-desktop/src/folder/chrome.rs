@@ -100,10 +100,7 @@ impl FolderApp {
                         // window observes (MCP-08a; MCP-09 asks the person).
                         if ui
                             .add_enabled(!observing, egui::Button::new("Run live requests"))
-                            .on_disabled_hover_text(
-                                "Live requests are not sent from this window while another \
-                                 process holds the project",
-                            )
+                            .on_disabled_hover_text(runs::LIVE_PAUSED)
                             .clicked()
                         {
                             ui.close();

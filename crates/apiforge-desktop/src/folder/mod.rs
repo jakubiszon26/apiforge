@@ -1014,7 +1014,12 @@ impl FolderApp {
                 .followed
                 .iter()
                 .filter(|change| change.kind == CommitChangeKind::Deleted)
-                .filter(|_| gone.iter().any(|id| !id.starts_with(TEXT_TAB)))
+                .filter(|change| {
+                    change
+                        .document_id
+                        .as_ref()
+                        .is_some_and(|id| gone.contains(id))
+                })
                 .map(|change| file_name(&change.path).to_owned())
                 .collect();
             for document_id in gone {

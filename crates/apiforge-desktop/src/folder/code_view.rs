@@ -206,7 +206,9 @@ impl FolderApp {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if outcome.changed {
+        // A completion or an indent can still reach a text that kept the
+        // keyboard into observing; editing is paused all the same (MCP-08a).
+        if outcome.changed && !snapshot.paused {
             match session.edit_source(document_id, &text, CODE) {
                 Ok(_) => {
                     self.analyser.typed(document_id, Instant::now());
