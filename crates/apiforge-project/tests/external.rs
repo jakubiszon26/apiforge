@@ -397,8 +397,8 @@ mod observer {
         holder
             .edit_source(&other, &OTHER.replace('1', "4"), HOLDER)
             .unwrap();
+        // Saving rewrites the holder's recovery file, still with the draft.
         holder.save(&other).unwrap();
-        assert!(holder.save_recovery().unwrap());
         let outcome = poll(&mut observer);
         assert!(outcome.project_reloaded, "{outcome:?}");
         assert_eq!(observer.document(&id).unwrap().text(), SCENARIO);

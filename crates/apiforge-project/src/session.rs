@@ -37,7 +37,8 @@ mod register;
 #[path = "text.rs"]
 mod text;
 pub use external::{
-    ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome, ObservedFile, RegistryState,
+    CommitChange, CommitChangeKind, ExternalChanges, ExternalCheck, ExternalConflict,
+    ExternalOutcome, ObservedFile, RegistryState,
 };
 pub use files::DeletePreview;
 pub use publish::Published;
@@ -161,6 +162,9 @@ pub struct ProjectSession {
     registry: RegistryState,
     /// The head generation of the stable read this session was loaded from.
     loaded_generation: u64,
+    /// Every registered revision file as loaded, which an observer
+    /// fingerprints to follow a publication (MCP-08a).
+    revisions_saved: Vec<(ProjectPath, FileState)>,
 }
 
 impl std::fmt::Debug for ProjectSession {
@@ -210,7 +214,14 @@ impl ProjectSession {
         if !has_manifest(root)? {
             return Err(Error::NotAProject);
         }
-        Self::load(ProjectStore::open_as(root, holder)?, placer, 1)
+        let store = ProjectStore::open_as(root, holder)?;
+        // Beside a living holder this session observes: it shows what the
+        // holder committed, never the holder's unsaved drafts or its cache
+        // (MCP-08a, planning decision 1).
+        if store.is_read_only() && store.has_live_writer().unwrap_or(false) {
+            return Self::load_saved(store, placer, 1);
+        }
+        Self::load(store, placer, 1)
     }
 
     /// Stable committed definitions only, without local recovery or cache and
@@ -352,6 +363,16 @@ impl ProjectSession {
             cache: None,
             registry: RegistryState::Current,
             loaded_generation: snapshot.generation,
+            revisions_saved: manifest
+                .revisions
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.path.clone(),
+                        snapshot.state(&entry.path).unwrap_or(FileState::Missing),
+                    )
+                })
+                .collect(),
         };
         for entry in manifest.documents {
             session.documents.push(document_from(&snapshot, entry));

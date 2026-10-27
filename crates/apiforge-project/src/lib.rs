@@ -20,11 +20,12 @@ pub use migration::{
 };
 pub use prepare::prepare_project;
 pub use session::{
-    ConflictDecision, ConflictPreview, ConflictTarget, Declaration, DeletePreview, DraftStatus,
-    Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome,
-    ImportCandidate, ImportItem, ObservedFile, Origin, PreparedRun, ProjectSession, Published,
-    Registration, RegistryState, SaveOutcome, SessionIdentity, SourceSurvey, StorageCompletion,
-    StorageMode, StorageSnapshot, TextFileSession, declaration, rename_handle,
+    CommitChange, CommitChangeKind, ConflictDecision, ConflictPreview, ConflictTarget, Declaration,
+    DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict,
+    ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin, PreparedRun,
+    ProjectSession, Published, Registration, RegistryState, SaveOutcome, SessionIdentity,
+    SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot, TextFileSession, declaration,
+    rename_handle,
 };
 
 pub use apiforge_script::Document;
