@@ -94,18 +94,23 @@ pub fn folder(harness: &FolderHarness) -> &FolderApp {
 /// requesting immediate repaints. Background work runs in real time, so this
 /// waits for it.
 pub fn settle(harness: &mut FolderHarness) {
+    assert!(settles(harness), "the folder window did not settle");
+}
+
+/// Whether the folder window settles as [`settle`] waits for it to, within the
+/// same time. A window that asks to be drawn again every frame never does.
+pub fn settles(harness: &mut FolderHarness) -> bool {
     let deadline = Instant::now() + SETTLE_TIMEOUT;
     loop {
         if folder(harness).is_analysed()
             && harness.try_run().is_ok()
             && folder(harness).is_analysed()
         {
-            return;
+            return true;
         }
-        assert!(
-            Instant::now() < deadline,
-            "the folder window did not settle"
-        );
+        if Instant::now() >= deadline {
+            return false;
+        }
         harness.step();
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -366,6 +371,37 @@ mod review {
                 &format!("tab-band-diagram-notice-{suffix}"),
                 None,
             );
+        }
+    }
+
+    /// The sleeping dog on an empty board (KTLO-20): Diagram and the board
+    /// side of Split with the last tab closed, at both window sizes and at
+    /// double scale, which criterion 7 reviews by eye. The loop is off in the
+    /// harness, so these show its rest frame.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_empty_board() {
+        for (size, scale, suffix) in [
+            (MINIMUM, 1.0, "960x540"),
+            (WIDE, 1.0, "1600x1000"),
+            (MINIMUM, 2.0, "960x540@2x"),
+        ] {
+            let project = shop_project();
+            let mut harness = folder_harness_scaled(project.path(), size, scale);
+            // The demo project opens its scenario by itself the first time.
+            harness
+                .get_by_label("Close promotion-and-cart-price.afs")
+                .click();
+            settle(&mut harness);
+            for mode in ["Diagram", "Split"] {
+                harness.get_by_label(mode).click();
+                settle(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("empty-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
         }
     }
 

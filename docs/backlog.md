@@ -19,7 +19,8 @@ mock-up → decision → acceptance tests → QA report. They add about 115 minu
 of owner review. A sixth wish was added later the same day, after KTLO-20 had
 been called the last: running a component from its own tab (KTLO-23, two parts,
 65 further owner minutes), an owner decision that reopened the sprint's scope
-for that one ticket. Exit criteria:
+for that one ticket, and once more for a seventh, KTLO-24 (#57, S · 15 min,
+the open-files bar hides itself). Exit criteria:
 
 - [ ] Migration of the owner's real workspace works, or is switched off by an
       owner decision (KTLO-03, #5).
@@ -42,6 +43,9 @@ for that one ticket. Exit criteria:
 - [ ] A component runs from its tab the way a scenario does: the mock-up is
       decided and the two parts are accepted, or carried into the next sprint
       with their state recorded (KTLO-23a #53, KTLO-23b #54).
+- [ ] The open-files bar hides itself when no file is open (KTLO-24, #57),
+      decided on its mock-up and accepted, or carried into the next sprint
+      with its state recorded.
 - [ ] The KTLO retrospective is written and its actions are issues (KTLO-10, #13).
 
 If the criteria are not met by 2026-11-08, the sprint is extended; feature
@@ -77,6 +81,48 @@ work does not start.
 | [#53](https://github.com/jakubiszon26/apiforge/issues/53) | KTLO-23a A component runs from its tab — runner, session and the Run button; [ticket](tickets/KTLO-23.md) | M · 45 min · `visible UI` |
 | [#54](https://github.com/jakubiszon26/apiforge/issues/54) | KTLO-23b A component runs from its tab — the Run inputs dialog; [ticket](tickets/KTLO-23b.md); after KTLO-23a | S · 20 min · `visible UI` |
 
+## Sprint: MCP (planned, after KTLO)
+
+An MCP server: a model works on a project without the window. Analysed
+2026-10-27 ([MCP-00](tickets/MCP-00.md)) at the owner's request of
+2026-10-26: a `mcp` subcommand of the `apiforge` binary over stdio, so that
+Claude Code or another MCP client reads, checks, edits and runs the scenarios
+of a folder project through API Forge's own session — the same files and
+bytes the window writes. The owner called it a sprint of its own and took
+the nine decisions of MCP-00 on 2026-10-27
+([#59](https://github.com/jakubiszon26/apiforge/issues/59)): 1–8 the
+recommended option (writes, invalid text, publishing, live requests, the lock
+beside an open window, the window's wording, the reference, the default
+folder), and 9 = B: this sprint follows KTLO and LAY follows it. Exit
+criteria:
+
+- [ ] In the demo shop folder, `claude mcp add apiforge -- apiforge mcp`
+      lets a model list the project, read and check every source with line
+      and column, print, run a simulation and check a proposed text, with
+      nothing written to the project (MCP-01, MCP-03).
+- [ ] The language reference a model receives is a tested document whose
+      examples parse, format unchanged and lower (MCP-02).
+- [ ] With the owner's decisions 1–3 taken, the model saves, registers and
+      publishes through the server under the writer lock, never while the
+      window holds the project, and the window follows what it wrote
+      (MCP-04, MCP-05).
+- [ ] Live requests are off unless the person starts the server with
+      `--allow-live`; secrets never pass through a tool (MCP-06).
+- [ ] The window names who holds the project and becomes writable when they
+      leave, through mock-up, acceptance tests and QA report (MCP-07).
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md) | S (docs) · 30 min plus the discussion · decisions taken 2026-10-27 |
+| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
+| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference the model reads from the server; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
+| [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation and check a proposed text from the server; [ticket](tickets/MCP-03.md); after MCP-01 | S · 15 min |
+| [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save a scenario or component from the server; [ticket](tickets/MCP-04.md); decisions 1, 2, 5 | M · 30 min |
+| [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish a component from the server; [ticket](tickets/MCP-05.md); decision 3, after MCP-04 | S · 15 min |
+| [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests from the server behind `--allow-live`; [ticket](tickets/MCP-06.md); decision 4, after MCP-03 | S · 20 min |
+| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The window names who holds the project and becomes writable when they leave; [ticket](tickets/MCP-07.md); decision 6, mock-up required | S · 20 min · `visible UI`, `default` |
+| [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
+
 ## Later
 
 Feature work resumes after KTLO exits. Candidates, unestimated:
@@ -99,6 +145,9 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 - `apiforge run --folder --component <name>`: the command line runs a saved
   component the way the window will after KTLO-23 (owner decision of
   2026-10-26 kept it out of that ticket).
+- The *Run results* panel does not scroll to the selected step and cuts the
+  fifth step off at its default height of 320 px (seen in the KTLO-23
+  mock-up).
 - Removal of the legacy JSON mode once the KTLO-06 parity list is closed.
 - Roadmap M7 editor features ([roadmap](roadmap.md)).
 - Windows release gates: interactive native QA and directory durability
@@ -109,7 +158,10 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
 code stacks in one column, no tidied wire is straight, wires are drawn on top
 of each other, and ordering wires cross data wires by construction. Owner
-decision of 2026-10-26: scheduled for the sprint after KTLO, in this order:
+decision of 2026-10-26: scheduled for the sprint after KTLO, in the order
+below. LAY follows MCP instead, by the owner's decision of 2026-10-27
+([#59](https://github.com/jakubiszon26/apiforge/issues/59),
+[#32](https://github.com/jakubiszon26/apiforge/issues/32)):
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
