@@ -1,8 +1,9 @@
-//! KTLO-23a: a component runs from its tab the way a scenario does, driven
-//! through named widgets (ADR 0013); see docs/tickets/KTLO-23.md. The runner's
-//! half is `apiforge-runner/tests/component_target.rs`, the header width
-//! (decision 6) is in `long_project_names_do_not_overlap_header_actions_…`
-//! and the audit is in `accessibility_tests`.
+//! KTLO-23a and KTLO-23b: a component runs from its tab the way a scenario
+//! does, and asks first for the inputs it has no default for; driven through
+//! named widgets (ADR 0013); see docs/tickets/KTLO-23.md. The runner's half is
+//! `apiforge-runner/tests/component_target.rs`, the header width (decision 6)
+//! is in `long_project_names_do_not_overlap_header_actions_…` and the audits
+//! are in `accessibility_tests`.
 use super::project_interaction_tests::{app, choose};
 use super::*;
 use crate::testing::{
@@ -10,7 +11,7 @@ use crate::testing::{
     settle,
 };
 use apiforge_core::run::{RunMode, RunResult, RunStatus, StepStatus};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use std::{
     io::{Read, Write},
     sync::{Arc, Mutex},
@@ -335,28 +336,6 @@ fn ktlo23_choosing_a_step_selects_its_block_on_the_components_board() {
     }
 }
 
-/// Criterion 7: until KTLO-23b, an input without a default fails the step that
-/// reads it, and the report says which.
-#[test]
-fn ktlo23_an_input_without_a_default_fails_its_step_as_missing() {
-    let project = shop();
-    let (mut harness, _) = on(&project, COMPONENT, WIDE, "Diagram");
-    let report = run(&mut harness);
-    assert_eq!(report.status, RunStatus::Failed);
-    let failed = report
-        .steps
-        .iter()
-        .find(|step| step.status == StepStatus::Error)
-        .expect("a failed step");
-    assert_eq!(
-        failed.message.as_deref(),
-        Some("Missing required input: product.")
-    );
-    harness.get_by_label_contains(&row(failed)).click();
-    settle(&mut harness);
-    assert!(has(&harness, "Missing required input: product."));
-}
-
 /// Criterion 11: the export's value offers no *Check* or *To variable*, which
 /// would edit the component's own graph; another step still does.
 #[test]
@@ -511,5 +490,227 @@ fn review_component_run() {
             .click();
         settle(&mut harness);
         crate::testing::capture(&mut harness, &format!("component-run-{suffix}"), None);
+    }
+}
+
+// ----- KTLO-23b: the Run inputs dialog (criterion 9, decision 1) ----------------
+
+/// The field of the demo's `product` input, which has no default.
+const PRODUCT_FIELD: &str = "product · Object";
+/// The field of the demo's `quantity` input, whose default is 1.
+const QUANTITY_FIELD: &str = "Quantity · quantity · Number";
+
+fn asks_for_inputs(harness: &FolderHarness) -> bool {
+    harness.query_by_label("Run inputs").is_some()
+}
+
+/// The dialog's own *Run*, on *Cancel*'s row: the header has a *Run* too.
+fn dialog_run(harness: &FolderHarness) -> egui_kittest::Node<'_> {
+    let cancel = harness.get_by_label("Cancel").rect();
+    harness
+        .query_all_by_label("Run")
+        .find(|node| (node.rect().center().y - cancel.center().y).abs() < 4.0)
+        .expect("the dialog's Run beside Cancel")
+}
+
+fn run_enabled(harness: &FolderHarness) -> bool {
+    !dialog_run(harness).accesskit_node().is_disabled()
+}
+
+fn field(harness: &FolderHarness, label: &str) -> String {
+    harness.get_by_label(label).value().unwrap_or_default()
+}
+
+/// Replaces the text of the field named `label`.
+fn enter(harness: &mut FolderHarness, label: &str, text: &str) {
+    harness.get_by_label(label).focus();
+    harness.step();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.key_press(Key::Backspace);
+    if !text.is_empty() {
+        harness.get_by_label(label).type_text(text);
+    }
+    settle(harness);
+}
+
+/// The value the run gave the `Cart item` block, whose inputs are the
+/// component's `product.id` and `quantity`.
+fn cart_item(report: &RunResult) -> serde_json::Value {
+    report
+        .steps
+        .iter()
+        .find(|step| step.display_name() == "Cart item")
+        .and_then(|step| step.outputs.get("value"))
+        .cloned()
+        .expect("the Cart item step ran")
+}
+
+/// Criterion 9: *Run* on a component with an input without a default asks for
+/// the inputs first, one field per input named with its type and pre-filled
+/// from its default; *Run* in the dialog stays disabled until every input has
+/// a value, and nothing runs meanwhile. Both windows hold the whole dialog.
+#[test]
+fn ktlo23b_an_input_without_a_default_asks_for_the_run_inputs() {
+    for size in [MINIMUM, WIDE] {
+        let project = shop();
+        let (mut harness, id) = on(&project, COMPONENT, size, "Diagram");
+        choose(&mut harness, "Run");
+        assert!(asks_for_inputs(&harness), "{size:?}: the dialog opens");
+        assert!(folder(&harness).runs.handle.is_none(), "nothing runs yet");
+        assert!(folder(&harness).run_result(&id).is_none());
+        assert_eq!(field(&harness, PRODUCT_FIELD), "", "no default");
+        assert_eq!(field(&harness, QUANTITY_FIELD), "1", "its default");
+        assert!(has(&harness, "no default, enter a value to run"));
+        assert!(has(&harness, "pre-filled from its default"));
+        assert!(!run_enabled(&harness), "{size:?}: product has no value");
+        let labels = ["Run inputs", PRODUCT_FIELD, QUANTITY_FIELD, "Cancel"];
+        assert_within_window(&harness, &labels);
+        assert_disjoint(&harness, &labels);
+        let window = harness.get_by_label("Run inputs").rect();
+        let run = dialog_run(&harness).rect();
+        assert!(
+            run.left() >= 0.0 && run.right() <= size.x && run.bottom() <= size.y,
+            "{size:?}: the dialog's Run {run:?} below {window:?} is in the window"
+        );
+
+        enter(&mut harness, PRODUCT_FIELD, "not json");
+        assert!(!run_enabled(&harness), "{size:?}: an object is JSON");
+        enter(&mut harness, PRODUCT_FIELD, r#"{"id": 124}"#);
+        assert!(run_enabled(&harness), "{size:?}: every input has a value");
+        enter(&mut harness, QUANTITY_FIELD, "");
+        assert!(!run_enabled(&harness), "{size:?}: quantity is emptied");
+        enter(&mut harness, QUANTITY_FIELD, "two");
+        assert!(!run_enabled(&harness), "{size:?}: quantity is a number");
+        enter(&mut harness, QUANTITY_FIELD, "2");
+        assert!(run_enabled(&harness));
+        assert!(folder(&harness).runs.handle.is_none(), "still nothing runs");
+    }
+}
+
+/// Criterion 9: the dialog's *Run* runs with the entered values, and the next
+/// run of the same component pre-fills them; another component does not see
+/// them.
+#[test]
+fn ktlo23b_the_entered_values_run_and_are_kept_for_the_component() {
+    let project = shop();
+    let mut session = ProjectSession::open(project.path()).unwrap();
+    let cart = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == COMPONENT)
+        .unwrap()
+        .id()
+        .to_owned();
+    let source = session.document(&cart).unwrap().text().to_owned();
+    let handle = source.split_whitespace().nth(1).unwrap().to_owned();
+    let other = source.replacen(
+        &format!("component {handle} \"Add to cart\""),
+        "component OtherCart \"Other cart\"",
+        1,
+    );
+    assert_ne!(other, source, "the copy is renamed");
+    session
+        .create_document(DocumentKind::Component, "components/other-cart.afs", &other)
+        .unwrap();
+    drop(session);
+
+    let (mut harness, id) = on(&project, COMPONENT, WIDE, "Diagram");
+    choose(&mut harness, "Run");
+    enter(&mut harness, PRODUCT_FIELD, r#"{"id": 124}"#);
+    enter(&mut harness, QUANTITY_FIELD, "2");
+    dialog_run(&harness).click();
+    settle(&mut harness);
+    assert!(!asks_for_inputs(&harness), "the dialog closes");
+    let report = finish(&mut harness);
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+    assert_eq!(
+        cart_item(&report),
+        serde_json::json!({ "productId": 124, "quantity": 2 }),
+        "the entered values"
+    );
+    assert!(
+        !report
+            .steps
+            .iter()
+            .any(|step| step.status == StepStatus::Error),
+        "no input is missing"
+    );
+
+    choose(&mut harness, "Run");
+    assert!(asks_for_inputs(&harness), "asked again, pre-filled");
+    let product: serde_json::Value = serde_json::from_str(&field(&harness, PRODUCT_FIELD)).unwrap();
+    assert_eq!(product, serde_json::json!({ "id": 124 }));
+    assert_eq!(field(&harness, QUANTITY_FIELD), "2", "not the default 1");
+    assert!(run_enabled(&harness));
+    dialog_run(&harness).click();
+    settle(&mut harness);
+    let again = finish(&mut harness);
+    assert_eq!(
+        cart_item(&again),
+        serde_json::json!({ "productId": 124, "quantity": 2 })
+    );
+    assert_eq!(folder(&harness).workbench.active(), Some(id.as_str()));
+
+    let other = document(folder(&harness), "components/other-cart.afs");
+    app(&mut harness).activate_tab(&other);
+    settle(&mut harness);
+    choose(&mut harness, "Run");
+    assert!(asks_for_inputs(&harness));
+    assert_eq!(
+        field(&harness, PRODUCT_FIELD),
+        "",
+        "another component's values"
+    );
+    assert_eq!(field(&harness, QUANTITY_FIELD), "1", "its own default");
+}
+
+/// Criterion 9: *Cancel* runs nothing and keeps nothing.
+#[test]
+fn ktlo23b_cancel_runs_nothing() {
+    let project = shop();
+    let (mut harness, id) = on(&project, COMPONENT, WIDE, "Diagram");
+    choose(&mut harness, "Run");
+    enter(&mut harness, PRODUCT_FIELD, r#"{"id": 124}"#);
+    click(&mut harness, "Cancel");
+    assert!(!asks_for_inputs(&harness), "the dialog closes");
+    harness.run_steps(5);
+    assert!(folder(&harness).runs.handle.is_none(), "nothing runs");
+    assert!(folder(&harness).run_result(&id).is_none(), "no report");
+    choose(&mut harness, "Run");
+    assert_eq!(
+        field(&harness, PRODUCT_FIELD),
+        "",
+        "cancelled values are not kept"
+    );
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    assert!(!asks_for_inputs(&harness), "Escape cancels too");
+    assert!(folder(&harness).run_result(&id).is_none());
+}
+
+/// Decision 1: a component whose inputs all have defaults runs at once.
+#[test]
+fn ktlo23b_a_component_whose_inputs_all_have_defaults_runs_with_no_dialog() {
+    let project = shop();
+    let (mut harness, _) = on(&project, PRODUCT, WIDE, "Diagram");
+    choose(&mut harness, "Run");
+    assert!(!asks_for_inputs(&harness), "no dialog");
+    let report = finish(&mut harness);
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+}
+
+/// Design review: the Run inputs dialog as it opens and filled (KTLO-23b), at
+/// both windows; compare with `docs/qa/2026-10-27/KTLO-23/mock-run-inputs-*`.
+#[test]
+#[ignore = "KTLO-23b: design review capture; run with tools/gui/review.sh"]
+fn review_run_inputs() {
+    for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+        let project = shop();
+        let (mut harness, _) = on(&project, COMPONENT, size, "Diagram");
+        choose(&mut harness, "Run");
+        crate::testing::capture(&mut harness, &format!("run-inputs-{suffix}"), None);
+        enter(&mut harness, PRODUCT_FIELD, r#"{ "id": 123 }"#);
+        enter(&mut harness, QUANTITY_FIELD, "2");
+        crate::testing::capture(&mut harness, &format!("run-inputs-filled-{suffix}"), None);
     }
 }
