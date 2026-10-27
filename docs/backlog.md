@@ -124,6 +124,7 @@ criteria:
 | [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests from the server behind `--allow-live`; [ticket](tickets/MCP-06.md); decision 4, after MCP-03 | S · 20 min |
 | [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The window names who holds the project and becomes writable when they leave; [ticket](tickets/MCP-07.md); decision 6, mock-up required | S · 20 min · `visible UI`, `default` |
 | [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
+| [#84](https://github.com/jakubiszon26/apiforge/issues/84) | KTLO-27 An empty optional input in the Run inputs dialog means "absent"; [ticket](tickets/KTLO-27.md); after KTLO-23b, owner decision of 2026-10-27 on #54 | S · 10 min · `visible UI` |
 
 ## Later
 
