@@ -22,6 +22,7 @@ mod persistence;
 mod preferences;
 mod report;
 mod shapes;
+mod stop;
 #[cfg(test)]
 mod testing;
 mod theme;
@@ -168,7 +169,13 @@ fn managed_opening() -> Result<Opening, String> {
     let data = dirs::data_dir()
         .ok_or("This system has no application data directory.")?
         .join("apiforge");
-    match folder::managed_start(&data) {
+    let start = folder::managed_start(&data);
+    opening_for(data, start)
+}
+
+/// The window a managed start opens, once it is known how it can start.
+fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
+    match start {
         folder::Start::Managed => Ok(Opening::Managed(data)),
         folder::Start::Legacy(reason) => {
             if let Some(reason) = reason {
@@ -177,10 +184,8 @@ fn managed_opening() -> Result<Opening, String> {
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
-        // The stop window of decision 3 comes with KTLO-03's second part; until
-        // then a refusal is reported and opens the workspace window, as before.
         folder::Start::Refused(refusal) => {
-            eprintln!("Migration refused {refusal}. Opening the workspace instead.");
+            eprintln!("Opening the workspace instead: {}", refusal.reason);
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
         }
@@ -284,6 +289,13 @@ fn main() -> ExitCode {
     }
 }
 
+/// What `--legacy` opens: the saved JSON workspace.
+fn previous_workspace() -> Result<app::Source, String> {
+    WorkspaceStore::default_location()
+        .map(app::Source::Storage)
+        .map_err(|error| error.to_string())
+}
+
 fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
     match files::read_document(path) {
         Ok(document) => run_window(
@@ -314,12 +326,16 @@ enum Opening {
     /// The application data directory, resolved to a project after the window
     /// exists so that migrating one does not delay it.
     Managed(PathBuf),
+    /// Migration refused the legacy workspace: the *Migration stopped* window.
+    Stopped(folder::Refusal),
 }
 
-/// The workspace window, or the folder project window.
+/// The workspace window, the folder project window, or the window that says
+/// migration stopped.
 enum Front {
     Workspace(Box<app::App>),
     Folder(Box<folder::FolderApp>),
+    Stopped(Box<stop::Stopped>),
 }
 
 impl Front {
@@ -327,6 +343,11 @@ impl Front {
         match self {
             Self::Workspace(app) => app.ui(ui),
             Self::Folder(app) => app.ui(ui),
+            Self::Stopped(stopped) => {
+                if let Some(app) = stopped.ui(ui) {
+                    *self = Self::Workspace(Box::new(app));
+                }
+            }
         }
     }
 
@@ -334,6 +355,7 @@ impl Front {
         match self {
             Self::Workspace(app) => app.has_document(),
             Self::Folder(app) => app.has_document(),
+            Self::Stopped(_) => false,
         }
     }
 
@@ -341,6 +363,7 @@ impl Front {
         match self {
             Self::Workspace(app) => app.prepare_close(),
             Self::Folder(app) => app.prepare_close(),
+            Self::Stopped(_) => true,
         }
     }
 
@@ -348,6 +371,7 @@ impl Front {
         match self {
             Self::Workspace(app) => app.close_save_error(),
             Self::Folder(app) => app.close_error(),
+            Self::Stopped(_) => None,
         }
     }
 
@@ -355,6 +379,7 @@ impl Front {
         match self {
             Self::Workspace(app) => app.abort_close_after_save_error(error),
             Self::Folder(app) => app.abort_close(error),
+            Self::Stopped(_) => {}
         }
     }
 
@@ -363,6 +388,7 @@ impl Front {
         match self {
             Self::Workspace(app) => app.save_pending(),
             Self::Folder(app) => app.save_pending(),
+            Self::Stopped(_) => false,
         }
     }
 
@@ -477,6 +503,9 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                 Opening::Managed(data) => Front::Folder(Box::new(
                     folder::FolderApp::start_managed(&context.egui_ctx, data),
                 )),
+                Opening::Stopped(refusal) => {
+                    Front::Stopped(Box::new(stop::Stopped::new(refusal, previous_workspace)))
+                }
             };
             if let Some(node) = select {
                 app.select_node(&node);
