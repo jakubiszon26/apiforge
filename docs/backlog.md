@@ -116,7 +116,7 @@ written contract, and a per-project toggle for live requests. Decision 5
 watches its committed changes live in the already open application
 (MCP-11).
 
-Capacity: the owner review minutes of the MCP tickets below sum to **310**;
+Capacity: the owner review minutes of the MCP tickets below sum to **305**;
 the interface findings carried from KTLO have their own line of **115**
 (UX-00 to UX-05) and start after MCP-11 (decision 18 = A);
 KTLO-31 adds 5. An addition made during the sprint is charged against the UX

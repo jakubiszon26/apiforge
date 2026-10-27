@@ -34,7 +34,7 @@ then added a twelfth: a per-project toggle for live requests. In short:
 | 8 | "No tool returns a secret" | One rule for every tool, resource, report, diagnostic, error and log; a source that contains a secret is withheld, never rewritten ([secrets](#secrets-and-the-project-boundary)) |
 | 9 | Tool shapes in prose | Output schemas, stable error codes, `wrote` on every write result, columns in Unicode scalar values, explicit limits, a real stdio test ([contract](#the-contract)) |
 | 10 | Two demo warnings; components cannot run | KTLO-25 removed the warnings and KTLO-23 made components run; the plan follows ([refresh](#what-exists)) |
-| 11 | Seven tickets, 130 minutes | Fourteen tickets, dependencies corrected, 150 → 310 minutes, the window scope split into acceptable results ([tickets](#tickets)) |
+| 11 | Seven tickets, 130 minutes | Thirteen tickets, dependencies corrected, 150 → 305 minutes, the window scope split into acceptable results ([tickets](#tickets)) |
 | 12 | Live consent = `--allow-live` at start | A toggle in the project settings the person can flip while the agent is connected; the flag serves the headless case ([live consent](#live-consent-the-toggle)) |
 
 ## Goal
@@ -490,7 +490,7 @@ write) is **superseded by decision 10**. New decisions, A recommended;
     still runs; the agent's result says `cancelled`.
 17. **Agent run status in the header** (MCP-10). **A:** yes, a status line;
     the report stays in the agent's answer. **B:** not in this sprint.
-18. **Capacity.** The fourteen tickets below sum to 310 minutes of owner
+18. **Capacity.** The thirteen MCP tickets below sum to 305 minutes of owner
     review, plus 115 for the five interface findings (UX-00 to UX-05) and 5
     for KTLO-31. **A:** MCP tickets first, UX after MCP-11, in the owner's
     priority order, each UX ticket starting only when the WIP limit allows.
@@ -547,7 +547,7 @@ Sized by [complexity and risk](../process/estimation.md). Dependencies
 | [MCP-11](MCP-11.md) | The whole workflow, end to end, with a real client; the sprint's acceptance | S · 30 min | all above |
 | KTLO-31 | The `timing; run in release` ignore names its ticket | S · 5 min | — |
 
-Sum: 310 minutes of owner review for MCP, 5 for KTLO-31. Three tickets can
+Sum: 305 minutes of owner review for MCP, 5 for KTLO-31. Three tickets can
 start at once (MCP-01, MCP-02, MCP-07: 70 minutes, which the WIP cap of 60
 limits to two until one is accepted). The UX line (UX-00 to UX-05, 115
 minutes) is in the backlog with its own capacity.
