@@ -177,7 +177,6 @@ impl FolderApp {
             })
             .collect();
         if tabs.is_empty() {
-            ui.add_space(theme::CONTROL_HEIGHT - 4.0);
             self.followed_tab = None;
             return;
         }
@@ -254,6 +253,24 @@ impl FolderApp {
         if let Some(document_id) = close {
             self.request_close_tab(&document_id);
         }
+    }
+
+    /// Whether [`Self::notices`] draws anything: the same conditions, so the
+    /// band can be left out when there are neither tabs nor notices.
+    pub(super) fn has_notices(&self) -> bool {
+        if self.storage.label().is_some() || self.notice.is_some() {
+            return true;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return false;
+        };
+        session.recovery_decision_required()
+            || (session.recovery_unavailable() && !session.is_read_only())
+            || session
+                .recovered_drafts()
+                .iter()
+                .any(|(status, _)| *status == apiforge_project::DraftStatus::Orphan)
+            || session.registry_state() != RegistryState::Current
     }
 
     pub(super) fn notices(&mut self, ui: &mut egui::Ui) {

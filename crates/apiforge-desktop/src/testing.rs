@@ -325,6 +325,67 @@ mod review {
         }
     }
 
+    // ---- Throwaway mock-up for KTLO-24: the band hides with no file open ----
+
+    /// Ctrl+W until no tab is left; a press with no tab is a no-op.
+    fn mock_close_every_tab(harness: &mut FolderHarness) {
+        for _ in 0..8 {
+            harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::W);
+            settle(harness);
+        }
+        assert!(
+            harness.query_by_label_contains("Close ").is_none(),
+            "a tab is still open"
+        );
+    }
+
+    fn mock_mode(harness: &mut FolderHarness, mode: &str) {
+        harness.get_by_label(mode).click();
+        settle(harness);
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_24_hide_tab_strip() {
+        // The three modes with every file closed, at the minimum window.
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        mock_mode(&mut harness, "Diagram");
+        mock_close_every_tab(&mut harness);
+        for mode in ["Code", "Diagram", "Split"] {
+            mock_mode(&mut harness, mode);
+            capture(
+                &mut harness,
+                &format!("mock-{}-empty-960x540", mode.to_lowercase()),
+                None,
+            );
+        }
+        // No file open, the band back with one dismissable notice.
+        mock_mode(&mut harness, "Diagram");
+        harness
+            .state_mut()
+            .as_mut()
+            .unwrap()
+            .notify("Moved to the trash.", false);
+        settle(&mut harness);
+        capture(&mut harness, "mock-diagram-notice-960x540", None);
+        drop(harness);
+
+        // Diagram with every file closed at the default window.
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), WIDE);
+        mock_mode(&mut harness, "Diagram");
+        mock_close_every_tab(&mut harness);
+        capture(&mut harness, "mock-diagram-empty-1600x1000", None);
+        drop(harness);
+
+        // One file open: the strip as today.
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        mock_mode(&mut harness, "Diagram");
+        capture(&mut harness, "mock-diagram-one-tab-960x540", None);
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
