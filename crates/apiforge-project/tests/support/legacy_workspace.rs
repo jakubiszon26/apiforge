@@ -12,23 +12,34 @@ use apiforge_core::{
     block::Block,
     demos,
     edit::{OutputRef, add_node, connect},
-    format::{Graph, Position, Project, Workspace},
+    format::{Binding, Graph, Position, Project, Workspace},
     graph::delete_nodes,
 };
 use apiforge_storage::WorkspaceStore;
 use std::{collections::HashSet, path::Path};
 
-/// The project the six-project workspace cannot migrate today.
-pub const REFUSED_PROJECT_ID: &str = "order-desk";
-pub const REFUSED_PROJECT_NAME: &str = "Order desk";
-/// Its scenario that does not read back the same from the migrated folder.
-pub const REFUSED_SCENARIO_ID: &str = "order-total";
-pub const REFUSED_SCENARIO_NAME: &str = "Order total is checked";
+/// The project the six-project workspace was refused on before migration
+/// sealed its checkpoints in source order (KTLO-03, decision 6 of 2026-10-27).
+pub const ORDER_DESK_ID: &str = "order-desk";
+pub const ORDER_DESK_NAME: &str = "Order desk";
+/// Its scenario, whose check stores its inputs out of source order.
+pub const ORDER_TOTAL_ID: &str = "order-total";
+pub const ORDER_TOTAL_NAME: &str = "Order total is checked";
+
+/// The project migration still refuses: its scenario cannot be written as a
+/// folder source.
+pub const REFUSED_PROJECT_ID: &str = "partner-feed";
+pub const REFUSED_PROJECT_NAME: &str = "Partner feed";
+pub const REFUSED_SCENARIO_ID: &str = "feed-is-fetched";
+pub const REFUSED_SCENARIO_NAME: &str = "Feed is fetched from an unset address";
+/// The environment value its request reads, which the project never sets.
+pub const UNSET_ENVIRONMENT_NAME: &str = "PARTNER_URL";
 
 /// Six projects in the order the owner's workspace held them: the four demo
 /// projects the workspace window offers, then two of the person's own. The
-/// fifth is refused, so four prepared projects stay in staging, as the owner
-/// saw on a real workspace (`docs/stage-ii-review-notes.md`).
+/// fifth, *Order desk*, holds the check that made migration refuse the owner's
+/// workspace with four projects left in staging
+/// (`docs/stage-ii-review-notes.md`); all six migrate now.
 pub fn six_projects() -> Workspace {
     let mut projects = demos::demo_projects();
     projects.push(order_desk());
@@ -42,7 +53,7 @@ pub fn six_projects() -> Workspace {
 
 /// Two projects, the second deliberately one that migration refuses.
 pub fn with_a_broken_project() -> Workspace {
-    let projects = vec![support_desk(), order_desk()];
+    let projects = vec![support_desk(), partner_feed()];
     Workspace {
         version: apiforge_core::format::FORMAT_VERSION,
         active_id: projects[0].id.clone(),
@@ -66,12 +77,12 @@ pub fn write(directory: &Path, workspace: &Workspace) -> WorkspaceStore {
 /// gives them.
 pub fn order_desk() -> Project {
     let mut project = demos::empty_project();
-    project.id = REFUSED_PROJECT_ID.into();
-    project.name = REFUSED_PROJECT_NAME.into();
+    project.id = ORDER_DESK_ID.into();
+    project.name = ORDER_DESK_NAME.into();
     project.environment.base_url = "http://127.0.0.1:4318/demo/shop".into();
     let scenario = &mut project.scenarios[0];
-    scenario.id = REFUSED_SCENARIO_ID.into();
-    scenario.name = REFUSED_SCENARIO_NAME.into();
+    scenario.id = ORDER_TOTAL_ID.into();
+    scenario.name = ORDER_TOTAL_NAME.into();
     let context = demos::empty_project();
     let mut graph = scenario.graph.clone();
     let start = graph.nodes[0].id.clone();
@@ -115,6 +126,35 @@ pub fn support_desk() -> Project {
     scenario.name = "Ticket lookup".into();
     let start = scenario.graph.nodes[0].id.clone();
     request(&mut scenario.graph, &start, "load_ticket", 140.0);
+    project
+}
+
+/// A request whose address is an environment value the project never sets.
+/// A legacy document may keep such a name and the legacy writer saves it; a
+/// folder source must name only values its environment holds, so the scenario
+/// cannot be written as one and migration refuses the project.
+pub fn partner_feed() -> Project {
+    let mut project = demos::empty_project();
+    project.id = REFUSED_PROJECT_ID.into();
+    project.name = REFUSED_PROJECT_NAME.into();
+    let scenario = &mut project.scenarios[0];
+    scenario.id = REFUSED_SCENARIO_ID.into();
+    scenario.name = REFUSED_SCENARIO_NAME.into();
+    let start = scenario.graph.nodes[0].id.clone();
+    let feed = request(&mut scenario.graph, &start, "load_feed", 140.0);
+    scenario
+        .graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == feed)
+        .unwrap()
+        .inputs
+        .insert(
+            "url".into(),
+            Binding::Environment {
+                name: UNSET_ENVIRONMENT_NAME.into(),
+            },
+        );
     project
 }
 
