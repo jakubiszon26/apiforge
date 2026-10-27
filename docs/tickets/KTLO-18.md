@@ -1,8 +1,17 @@
 # KTLO-18: The Problems section expands over the code with one click
 
-- Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Approved 2026-10-26 (issue #43) — mock-up approved as a whole;
-  decision 1 = A (the button), decision 2 = Code and Split
+- Size: S estimated, **M measured** · Owner review: 15 min · Risk: `visible UI`
+- State: Awaiting acceptance in the pull request (issue #43) — approved
+  2026-10-26, mock-up approved as a whole; decision 1 = A (the button),
+  decision 2 = Code and Split; allowed as a fourth pull request awaiting
+  acceptance by the owner's decision of 2026-10-27 on #43 (#52, #55 and #56
+  were merged before it opened)
+- Actual: 633 changed lines without captures — size M, over the S
+  estimate: the code is 138 lines, the tests 270 (the acceptance tests 239 of
+  them), the QA report 210, this ticket 15; one round. The code also
+  fixes two defects of `main` the criteria depend on: the section had no
+  resize handle, and clicking a problem lost its selection and focus (see the
+  QA report)
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Owner's wish of 2026-10-26.
