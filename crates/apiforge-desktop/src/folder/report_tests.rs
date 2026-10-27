@@ -15,15 +15,14 @@ const MAXIMISED: &str = "report-maximised";
 /// A block whose selection opens the inspector.
 const BLOCK: &str = "Expected price (Value)";
 
-/// The demo shop at `size` in `mode`, after a finished run of its scenario; in
-/// Diagram the inspector is open for [`BLOCK`].
+/// The demo shop at `size` in `mode`, after a finished run of its scenario.
+/// [`BLOCK`] is selected first, so Diagram shows its inspector in every test.
 fn ran(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarness) {
     let project = shop();
     let mut harness = folder_harness(project.path(), size);
+    click(&mut harness, "Diagram");
+    click(&mut harness, BLOCK);
     click(&mut harness, mode);
-    if mode == "Diagram" {
-        click(&mut harness, BLOCK);
-    }
     choose(&mut harness, "Run");
     let deadline = Instant::now() + Duration::from_secs(30);
     while folder(&harness).runs.handle.is_some() {
@@ -282,6 +281,22 @@ fn ktlo19_the_maximised_bar_and_step_list_fit_the_minimum_window() {
                 window.contains_rect(rect),
                 "{mode}: the row {name:?} at {rect:?}"
             );
+        }
+    }
+}
+
+/// Design review: the bar at its normal height, then maximised, in each mode at
+/// both windows (KTLO-19).
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_run_results_maximised() {
+    for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+        for mode in ["Diagram", "Split", "Code"] {
+            let (_project, mut harness) = ran(size, mode);
+            let name = format!("run-results-{}", mode.to_lowercase());
+            crate::testing::capture(&mut harness, &format!("{name}-normal-{suffix}"), None);
+            click(&mut harness, MAXIMISE);
+            crate::testing::capture(&mut harness, &format!("{name}-maximised-{suffix}"), None);
         }
     }
 }
