@@ -63,6 +63,9 @@ pub struct Lowered {
     /// are present: it is useful only for editor diagnostics and completion.
     pub document: Option<Document>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics found beyond `MAX_DIAGNOSTICS` and not kept, including a
+    /// warning an error replaced at the limit.
+    pub omitted_diagnostics: usize,
 }
 impl Lowered {
     pub fn has_errors(&self) -> bool {
@@ -113,6 +116,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
     Lowered {
         document,
         diagnostics: lower.diagnostics,
+        omitted_diagnostics: 0,
     }
 }
 

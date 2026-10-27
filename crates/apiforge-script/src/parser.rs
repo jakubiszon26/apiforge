@@ -30,6 +30,7 @@ pub fn parse(source: &str) -> SyntaxTree {
         tokens,
         file,
         diagnostics,
+        omitted_diagnostics: 0,
     }
 }
 
