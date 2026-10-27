@@ -23,7 +23,8 @@ without leaving the window: a status line, not the report.
 
 ## Mock-up
 
-M4: the line in the running and the passed state at 960 × 540.
+M4, round 4, approved 2026-10-27: `docs/qa/2026-10-27/MCP-00/m4-*.png` —
+the bar in the running and the passed state at 960 × 540.
 
 ## Acceptance criteria
 
@@ -31,10 +32,10 @@ M4: the line in the running and the passed state at 960 × 540.
    end, `state: passed | failed { step, label } | cancelled`; the window shows
    the line within a second of each message.
 2. The line shows the mode (*simulation* / *live*).
-3. The line is inside the window at 960 × 540 in Code, Diagram and Split and
-   does not move the explorer or the tabs.
-4. When the channel drops or the agent finishes, the line is gone.
-5. The QA report compares the line against M4; the verification commands of
+3. The status is never cut at 960 × 540 in Code, Diagram and Split: the
+   holder text gives way; the bar does not move the explorer or the tabs.
+4. When the channel drops or the agent finishes, the status is gone.
+5. The QA report compares the bar against M4; the verification commands of
    the development guide pass.
 
 ## Not in scope
@@ -46,5 +47,5 @@ the window; a history of the agent's runs.
 
 - The `run` message of MCP-08b's channel, sent by the server's run adapter
   from the executor's start and end; the window keeps `agent_run:
-  Option<AgentRun>` in the folder app and renders it under the notice in
+  Option<AgentRun>` in the folder app and renders it in the bottom bar in
   `chrome.rs`.

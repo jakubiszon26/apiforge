@@ -102,7 +102,7 @@ client's name and the time, nothing about conversations).
   function of the holder. The take-back: on each watcher result in a
   read-only session, `has_live_writer()`; when `false`, reopen the saved
   session as the writer (`ProjectSession::open` with the unsaved text carried
-  over as the recovery path does), clear the notice and `read_only` in
+  over as the recovery path does), clear the bar and `read_only` in
   `chrome.rs`, then run the start-time checks (recovery required, journal).
 - Tests: `folder/acceptance_tests.rs` with the lock taken by the test process
   (`ProjectStore::open_exclusive` on the same folder, dropped mid-test);

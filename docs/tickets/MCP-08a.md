@@ -34,13 +34,14 @@ in the project, and does not let them type into a file they cannot save.
 
 ## Mock-up
 
-M1 (shared with MCP-07, MCP-08b): header, badge, notice and the paused code
-view at 960 × 540 and 1600 × 1000, Code and Diagram.
+M1 (shared with MCP-07, MCP-08b), round 4, approved 2026-10-27:
+`docs/qa/2026-10-27/MCP-00/m1-observer-*.png` — badge, bottom bar and the
+paused code view at 960 × 540 and 1600 × 1000, Code, Diagram and Split.
 
 ## Acceptance criteria
 
 1. With the lock held by another process, the window shows *Observing* and
-   the holder's notice; the code view does not accept keystrokes, the board
+   the holder's bar; the code view does not accept keystrokes, the board
    does not accept a drop from the library or a wire, the inspector fields
    are disabled, the explorer's create, rename and delete are disabled, *Run*
    (simulation) works, *Run live requests* is disabled with a hover text.
@@ -67,8 +68,8 @@ view at 960 × 540 and 1600 × 1000, Code and Diagram.
 8. The window's own checkpoint baseline is the one on disk after each reload:
    after take-back (MCP-07) a save in the window succeeds with no conflict on
    `diagram.json` — the gap that exists today beside `apply`.
-9. At 960 × 540 the badge, notice and last-change line stay inside the window
-   in Code, Diagram and Split.
+9. At 960 × 540 the badge and the bar with its last-change text stay inside
+   the window in Code, Diagram and Split.
 10. The QA report compares the implementation against M1; the verification
     commands of the development guide pass.
 
@@ -95,7 +96,7 @@ the prompt with unsaved work (MCP-08c); the live toggle (MCP-09); run status
   `session.document(shown)` exists after the reload, keeps `self.canvases`
   by document id (the camera), and re-selects the block by its identity when
   it survived.
-- Last-change line: from the external check's diff (paths whose fingerprint
+- Last-change text in the bar: from the external check's diff (paths whose fingerprint
   changed) and the time of the scan.
 - Tests: `folder/acceptance_tests.rs` with the lock taken by the test process
   and writes through a second `ProjectSession` (exclusive) in the test;
