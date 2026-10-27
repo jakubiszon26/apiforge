@@ -489,7 +489,7 @@ write) is **superseded by decision 10**. New decisions, A recommended;
 16. **A live run in progress when live is turned off.** **A:** it finishes,
     cleanup included; no new one starts. **B:** it is cancelled; cleanup
     still runs; the agent's result says `cancelled`.
-17. **Agent run status in the header** (MCP-10). **A:** yes, a status line;
+17. **Agent run status in the bottom bar** (MCP-10). **A:** yes, a status line;
     the report stays in the agent's answer. **B:** not in this sprint.
 18. **Capacity.** The thirteen MCP tickets below sum to 305 minutes of owner
     review, plus 115 for the five interface findings (UX-00 to UX-05) and 5
@@ -545,7 +545,7 @@ Sized by [complexity and risk](../process/estimation.md). Dependencies
 | [MCP-08b](MCP-08b.md) | Hand-over on request: the control channel, a clean window hands over and observes, refusal with unsaved work, `saved` rescans, *Take back*, release | M · 30 min · `visible UI`, `default` | MCP-08a, MCP-04 |
 | [MCP-08c](MCP-08c.md) | The hand-over prompt when the window has unsaved work | S · 15 min · `visible UI` | MCP-08b |
 | [MCP-09](MCP-09.md) | The live toggle in the project settings; the server obeys it while a window is connected | M · 25 min · `visible UI`, `default` | MCP-08b, MCP-06 |
-| [MCP-10](MCP-10.md) | The agent's run status in the header | S · 15 min · `visible UI` | MCP-08b |
+| [MCP-10](MCP-10.md) | The agent's run status in the bottom bar | S · 15 min · `visible UI` | MCP-08b |
 | [MCP-11](MCP-11.md) | The whole workflow, end to end, with a real client; the sprint's acceptance | S · 30 min | all above |
 | KTLO-31 | The `timing; run in release` ignore names its ticket | S · 5 min | — |
 
