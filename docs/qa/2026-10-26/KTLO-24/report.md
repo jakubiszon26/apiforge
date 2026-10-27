@@ -1,6 +1,8 @@
 # KTLO-24: The bar with the open files hides itself when no file is open — QA report
 
-- Branch: `feat/ktlo-24-hide-tab-strip` (the PR head commit)
+- Branch and commit: `feat/ktlo-24-hide-tab-strip`; round 1 at `58be8c4`
+  (captures and scenarios 1–6), round 2 at `e7eca7c` (the fix of decision 4,
+  scenario 7) on top of `main` at `280d6bd`
 - Built with: `cargo build --release -p apiforge-desktop --locked`
 - Compared against mock-up: `docs/tickets/KTLO-24.md` (on the docs branch
   `docs/ktlo-24-hide-tab-strip`, PR #58) and the `mock-*.png` in this
@@ -15,6 +17,14 @@
   ten-run loop had found the Tab walk of criterion 6 failing twice, which a
   test-helper fix (waiting for the view-state write) removed, then fifteen
   runs of that test and the ten-run loop passed.
+- Round 2 (owner decision 4 of 2026-10-27, the flicker): the same four
+  checks pass on the round 2 head (396 desktop tests pass, 22 are ignored,
+  2 of the passing ones are new); the eleven KTLO-24 tests (the ten in
+  `tab_band_tests.rs` and the audit) passed ten runs in a row, the Tab walk
+  of criterion 6 among them. `main` brought KTLO-20's sleeping dog, which
+  names the empty board "Diagram board" and centres the hint under the
+  drawing; a test-only commit (`825cfbc`) takes the board's top from that
+  name instead of from the hint, with no assertion changed.
 
 ## Captures
 
@@ -140,6 +150,29 @@ Design review of `review_tab_band` (harness captures of the six mock-up views
 and the three at 1600 × 1000): the 960 × 540 views are identical to the
 mock-up's; nothing is cut off or overlapping.
 
+### Scenario 7: a long storage operation with no file open (round 2, decision 4)
+1. With no tab open, in Code, Diagram and Split at 960 × 540 and
+   1600 × 1000, wait for the view-state write of the mode change, then hold
+   an operation labelled "Protecting unsaved work…" (the view-state write's
+   own label) on the storage worker and draw frames for 400 ms, well past
+   the 150 ms after which the storage indicator is due.
+2. Release it.
+3. Repeat with one tab open.
+
+Expected: with no tab open, the band stays away in every frame — no strip
+node, the central area at the app header's bottom edge (±1 px) — and the
+indicator is not shown; with a tab open, the indicator shows on the band
+under the tab, as on `main`.
+Observed: as expected at both sizes in the three modes. On the round 1 code
+the first frame after 150 ms put the project files panel at y = 104 instead
+of 57: the band came back 47 px high with the spinner alone, and went again
+when the operation ended — the jump the owner saw. Tests:
+`with_no_tab_open_a_long_storage_operation_does_not_bring_the_band_back`
+(fails on round 1, passes on round 2),
+`with_a_tab_open_a_long_storage_operation_shows_its_indicator_under_the_tabs`.
+The view-state write is not held in the release binary, so this scenario is
+covered by the interaction tests only.
+
 ## Windows
 
 Not run on Windows by hand. CI runs the desktop suite, including the KTLO-24
@@ -157,16 +190,10 @@ request's checks. Not accepted for Windows on this report alone.
 - The release capture's recovery backup was written by hand and holds no
   draft; the backup in the test holds real drafts written by the session.
 - The other notices that bring the band back (an orphan draft, unreadable
-  recovery data, the storage label with its spinner, the project file changed,
-  invalid or missing) were not raised one by one; `has_notices()` repeats the
-  conditions under which `notices()` draws them, and only the dismissable and
-  the recovery-backup notices are tested.
-- How often the band shows briefly on its own: a storage operation that runs
-  longer than 150 ms (saving, or writing the view state a second after a
-  change) shows its spinner in the band, so with no file open the band
-  appears for that time and the central area moves down and back. This is the
-  approved behaviour for "the storage label with its spinner"; how often it
-  happens on an ordinary machine was not measured.
+  recovery data, the project file changed, invalid or missing) were not
+  raised one by one; `has_notices()` repeats the conditions under which
+  `notices()` draws them, and only the dismissable and the recovery-backup
+  notices are tested.
 - Double scale (960 × 540 at 2×) design review.
 - Windows, other than the CI suite and its captures.
 
