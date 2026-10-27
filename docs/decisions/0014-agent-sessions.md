@@ -1,7 +1,7 @@
 # ADR 0014: Agent sessions — hand-over of the writer role and live consent
 
-- Status: proposed 2026-10-27 with MCP-00 revision 2; accepted when the
-  owner takes decisions 10–16 of [MCP-00](../tickets/MCP-00.md)
+- Status: accepted 2026-10-27 (MCP-00 revision 2, decisions 10–16 = A);
+  implementation pending (MCP-04, MCP-07, MCP-08a–c, MCP-09)
 - Date: 2026-10-27
 - Scope: `apiforge-storage` (lock description), `apiforge-project`,
   `apiforge-mcp`, desktop

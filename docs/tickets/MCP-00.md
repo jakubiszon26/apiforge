@@ -10,8 +10,9 @@
   server for the project, a sprint of its own; **the agent works through MCP
   and the owner watches its committed changes live in the already open
   application.**
-- State: revision 1 approved 2026-10-27 (issue #59, decisions 1–9); revision
-  2 awaits decisions 10–18 and the mock-ups M1–M4
+- State: revision 1 approved 2026-10-27 (issue #59, decisions 1–9);
+  revision 2 decisions 10–17 taken 2026-10-27 (all A); decision 18 and the
+  mock-ups M1–M4 open
 
 ## What changed in revision 2
 
@@ -450,7 +451,8 @@ change in the open window, and `--allow-live` remains for the headless case.
 
 Decisions 1–4 and 6–9 of revision 1 stand (taken 2026-10-27 on #59: 1 = A,
 2 = A, 3 = A, 4 = A, 6 = A, 7 = A, 8 = A, 9 = B). Decision 5 (the lock per
-write) is **superseded by decision 10**. New decisions, A recommended:
+write) is **superseded by decision 10**. New decisions, A recommended;
+**10–17 taken 2026-10-27: all A**; 18 open:
 
 10. **Who holds the project while the agent works.** **A:** the server holds
     the lock for the whole agent session, the window observes and never takes

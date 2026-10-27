@@ -1,9 +1,9 @@
 # MCP-09: The live toggle — the person allows or forbids the agent's live requests in the open window
 
 - Size: M · Owner review: 25 min · Risk: `visible UI`, `default`
-- State: Backlog · owner's requirement of 2026-10-27 (updates MCP-00
-  decision 4 and MCP-06) · MCP-00 decisions 14, 15, 16 pending · waits for
-  mock-up M3 · after MCP-08b and MCP-06
+- State: Backlog (issue #93) · owner's requirement of 2026-10-27 (updates
+  MCP-00 decision 4 and MCP-06) · MCP-00 decisions 14, 15, 16 = A taken
+  2026-10-27 · waits for mock-up M3 · after MCP-08b and MCP-06
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md#live-consent-the-toggle)
 

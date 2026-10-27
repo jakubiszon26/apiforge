@@ -108,7 +108,8 @@ the window stays open and observes the agent's committed changes live, one
 writer per agent session, validation before the first write, versions on
 every read and write, four defined ends of a run, one rule for secrets, a
 written contract, and a per-project toggle for live requests. Decision 5
-(the lock per write) is superseded; decisions 10–18 are open on #59. [ADR
+(the lock per write) is superseded; decisions 10–17 were taken 2026-10-27
+(all A); 18 is open. [ADR
 0014](decisions/0014-agent-sessions.md) records the ownership rules.
 
 **Key acceptance criterion:** the agent works through MCP and the owner
@@ -152,21 +153,21 @@ criteria:
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–9 taken 2026-10-27; 10–18 open |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–17 taken 2026-10-27; 18 open |
 | [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print, with versions; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
 | [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference for models, tested — the document; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
 | [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The lock names its holder; the window says who and takes the project back when it is free; [ticket](tickets/MCP-07.md); decision 6, mock-up M1 | S · 20 min · `visible UI`, `default` |
 | [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation (scenario or component), check a proposal, serve the reference and resources; the executor returns data; cancellation and timeout; [ticket](tickets/MCP-03.md); after MCP-01, MCP-02 | M · 20 min |
 | [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save and create from the server — the agent session, validation before the first write, versions, secrets, paths; [ticket](tickets/MCP-04.md); decisions 1, 2, 10; after MCP-03 | M · 30 min |
-| — | MCP-08a Observer mode: editing paused while another holds the project; the window follows every commit by reload within two seconds, keeping its navigation; [ticket](tickets/MCP-08a.md); decisions 10, 12, mock-up M1; after MCP-07 | M · 30 min · `visible UI`, `default`, `removal` |
+| [#90](https://github.com/jakubiszon26/apiforge/issues/90) | MCP-08a Observer mode: editing paused while another holds the project; the window follows every commit by reload within two seconds, keeping its navigation; [ticket](tickets/MCP-08a.md); decisions 10, 12, mock-up M1; after MCP-07 | M · 30 min · `visible UI`, `default`, `removal` |
 | [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish from the server: comment-loss consent, expected hash, request ids; [ticket](tickets/MCP-05.md); decision 3; after MCP-04 | S · 15 min |
 | [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests: the four ends of a run, the journal, `--allow-live` and the permission slot; [ticket](tickets/MCP-06.md); decision 4; after MCP-04 | M · 25 min |
-| — | MCP-08b Hand-over on request: the control channel, a clean window hands over and observes, refusal with unsaved work, `saved` rescans, *Take back*, release; [ticket](tickets/MCP-08b.md); decisions 10, 11, mock-up M1; after MCP-08a, MCP-04 | M · 30 min · `visible UI`, `default` |
-| — | MCP-08c The hand-over prompt when the window has unsaved work; [ticket](tickets/MCP-08c.md); decision 13, mock-up M2; after MCP-08b | S · 15 min · `visible UI` |
-| — | MCP-09 The live toggle in the project settings; the server obeys it while a window is connected; [ticket](tickets/MCP-09.md); decisions 14–16, mock-up M3; after MCP-08b, MCP-06 | M · 25 min · `visible UI`, `default` |
-| — | MCP-10 The agent's run status in the header; [ticket](tickets/MCP-10.md); decision 17, mock-up M4; after MCP-08b | S · 15 min · `visible UI` |
-| — | MCP-11 The whole workflow end to end with a real client — the sprint's acceptance; [ticket](tickets/MCP-11.md); after every MCP ticket | S · 30 min |
-| — | KTLO-31 The `timing; run in release` ignore (`folder/tests.rs` frame budgets) names its ticket, or the test moves to the release-only verification step | S · 5 min |
+| [#91](https://github.com/jakubiszon26/apiforge/issues/91) | MCP-08b Hand-over on request: the control channel, a clean window hands over and observes, refusal with unsaved work, `saved` rescans, *Take back*, release; [ticket](tickets/MCP-08b.md); decisions 10, 11, mock-up M1; after MCP-08a, MCP-04 | M · 30 min · `visible UI`, `default` |
+| [#92](https://github.com/jakubiszon26/apiforge/issues/92) | MCP-08c The hand-over prompt when the window has unsaved work; [ticket](tickets/MCP-08c.md); decision 13, mock-up M2; after MCP-08b | S · 15 min · `visible UI` |
+| [#93](https://github.com/jakubiszon26/apiforge/issues/93) | MCP-09 The live toggle in the project settings; the server obeys it while a window is connected; [ticket](tickets/MCP-09.md); decisions 14–16, mock-up M3; after MCP-08b, MCP-06 | M · 25 min · `visible UI`, `default` |
+| [#94](https://github.com/jakubiszon26/apiforge/issues/94) | MCP-10 The agent's run status in the header; [ticket](tickets/MCP-10.md); decision 17, mock-up M4; after MCP-08b | S · 15 min · `visible UI` |
+| [#95](https://github.com/jakubiszon26/apiforge/issues/95) | MCP-11 The whole workflow end to end with a real client — the sprint's acceptance; [ticket](tickets/MCP-11.md); after every MCP ticket | S · 30 min |
+| [#96](https://github.com/jakubiszon26/apiforge/issues/96) | KTLO-31 The `timing; run in release` ignore (`folder/tests.rs` frame budgets) names its ticket, or the test moves to the release-only verification step | S · 5 min |
 | [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) — merged in #70 | S · 15 min · `visible UI`, `default` |
 | [#79](https://github.com/jakubiszon26/apiforge/issues/79) | KTLO-26 A board edit keeps the model the printed source reads back, so the checkpoint it seals describes its source; [ticket](tickets/KTLO-26.md); decision A 2026-10-27 | S · 10 min · `format` |
 | [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning — merged in #82 | S · 5 min |
@@ -190,12 +191,12 @@ They start after MCP-11 unless MCP-00 decision 18 says otherwise.
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| — | UX-00 One mock-up and the owner's decisions for the five findings; [ticket](tickets/UX-00.md) | S · 20 min plus the discussion · `visible UI` · `decision-needed` |
-| — | UX-01 Several checks from one run | M · 30 min · `visible UI` |
-| — | UX-02 Run mode is a persistent setting in *Run options*; the Run button reads *Run simulation* (purple) or *Run live* | S · 20 min · `visible UI`, `default` |
-| — | UX-03 The red status line of the code editor goes | S · 10 min · `visible UI`, `removal` |
-| — | UX-04 *Running unsaved code* moves to the window header | S · 15 min · `visible UI` |
-| — | UX-05 Run results and Problems drag to the whole workspace | S · 20 min · `visible UI` |
+| [#97](https://github.com/jakubiszon26/apiforge/issues/97) | UX-00 One mock-up and the owner's decisions for the five findings; [ticket](tickets/UX-00.md) | S · 20 min plus the discussion · `visible UI` · `decision-needed` |
+| [#98](https://github.com/jakubiszon26/apiforge/issues/98) | UX-01 Several checks from one run | M · 30 min · `visible UI` |
+| [#99](https://github.com/jakubiszon26/apiforge/issues/99) | UX-02 Run mode is a persistent setting in *Run options*; the Run button reads *Run simulation* (purple) or *Run live* | S · 20 min · `visible UI`, `default` |
+| [#100](https://github.com/jakubiszon26/apiforge/issues/100) | UX-03 The red status line of the code editor goes | S · 10 min · `visible UI`, `removal` |
+| [#101](https://github.com/jakubiszon26/apiforge/issues/101) | UX-04 *Running unsaved code* moves to the window header | S · 15 min · `visible UI` |
+| [#102](https://github.com/jakubiszon26/apiforge/issues/102) | UX-05 Run results and Problems drag to the whole workspace | S · 20 min · `visible UI` |
 
 
 ## Later

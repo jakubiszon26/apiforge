@@ -1,8 +1,8 @@
 # MCP-10: The agent's run status in the header
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Backlog · MCP-00 decision 17 pending · waits for mock-up M4 · after
-  MCP-08b
+- State: Backlog (issue #94) · MCP-00 decision 17 = A taken 2026-10-27 ·
+  waits for mock-up M4 · after MCP-08b
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md#live-preview-in-the-open-window)
 

@@ -1,8 +1,8 @@
 # MCP-08c: The hand-over prompt when the window has unsaved work
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Backlog · MCP-00 decision 13 pending · waits for mock-up M2 · after
-  MCP-08b
+- State: Backlog (issue #92) · MCP-00 decision 13 = A taken 2026-10-27 ·
+  waits for mock-up M2 · after MCP-08b
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

@@ -1,8 +1,8 @@
 # MCP-08a: Observer mode — editing paused while another holds the project; the window follows every commit
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`, `removal`
-- State: Backlog · MCP-00 decisions 10 and 12 pending · waits for mock-up M1
-  · after MCP-07
+- State: Backlog (issue #90) · MCP-00 decisions 10 and 12 = A taken
+  2026-10-27 · waits for mock-up M1 · after MCP-07
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 
