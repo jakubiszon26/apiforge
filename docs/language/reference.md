@@ -273,9 +273,10 @@ the value `first`. A statement with several outputs names the output first:
 `products.body.items[0]`, `ok.passed`.
 
 **Literals.** JSON numbers (`3`, `-1.5`), strings `"…"` with JSON escapes,
-`true`, `false`, `null`, arrays `[a, b]` and objects `{ key: value }`. Object keys are identifiers or strings. A string containing
-`{{expression}}` is a template; `\{{` writes literal braces. A triple-quoted
-string `"""…"""` spans lines and loses its common indentation; the formatter
+`true`, `false`, `null`, arrays `[a, b]` and objects `{ key: value }`.
+Object keys are identifiers or strings. A string containing `{{expression}}`
+is a template; `\{{` writes literal braces. A triple-quoted string
+`"""…"""` spans lines and loses its common indentation; the formatter
 rewrites it as an ordinary string with `\n`.
 
 **Operators**, from the loosest to the tightest binding; all are
@@ -630,10 +631,12 @@ scenario "Buy coffee" {
 
 A diagnostic has a range in the file, a severity and a message; some carry a
 fix. While a file has an error, the board keeps its last valid state and the
-server's write tools do not save the text; a warning stops nothing. The messages you will meet most:
+server's write tools do not save the text; a warning stops nothing. The
+messages you will meet most:
 
 - **``Expected `}` ``**, or the same with `)`, `]`, `:` or `=`: a brace or
-  separator is missing; the fix inserts it. Count the braces of the block above the range.
+  separator is missing; the fix inserts it. Count the braces of the block
+  above the range.
 - **`Unknown block handle`**: a name that is no statement of the file. Check
   the spelling, and that a main-flow statement does not use a cleanup handle
   (`Main flow cannot reference cleanup`).
