@@ -3,11 +3,12 @@
 - Size: S estimated, **M measured** · Owner review: 15 min · Risk: `visible UI`
 - State: Awaiting acceptance in the pull request (issue #43) — approved
   2026-10-26, mock-up approved as a whole; decision 1 = A (the button),
-  decision 2 = Code and Split; opened as a fourth pull request awaiting
-  acceptance by the owner's decision of 2026-10-27 on #43
-- Actual: 629 changed lines without captures — size M, over the S
+  decision 2 = Code and Split; allowed as a fourth pull request awaiting
+  acceptance by the owner's decision of 2026-10-27 on #43 (#52, #55 and #56
+  were merged before it opened)
+- Actual: 633 changed lines without captures — size M, over the S
   estimate: the code is 138 lines, the tests 270 (the acceptance tests 239 of
-  them), the QA report 207, this ticket 14; one round. The code also
+  them), the QA report 210, this ticket 15; one round. The code also
   fixes two defects of `main` the criteria depend on: the section had no
   resize handle, and clicking a problem lost its selection and focus (see the
   QA report)
