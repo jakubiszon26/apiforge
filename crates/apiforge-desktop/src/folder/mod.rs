@@ -9,7 +9,7 @@
 //! path still opens the workspace.
 
 mod activation;
-pub use activation::{Start, decide as managed_start};
+pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;
@@ -97,6 +97,12 @@ enum Prompt {
     Run {
         prepared: Box<apiforge_project::PreparedRun>,
         live: bool,
+    },
+    /// A component's input values, asked for before its run (KTLO-23b).
+    RunInputs {
+        prepared: Box<apiforge_project::PreparedRun>,
+        live: bool,
+        dialog: Box<dialogs::RunInputsDialog>,
     },
     Journal(Box<runs::JournalReview>),
     AssignResult {

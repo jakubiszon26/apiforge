@@ -24,13 +24,22 @@ fn accessible_name(tree: &eframe::egui::accesskit::TreeUpdate, node: &Node) -> O
 /// Every interactive accessibility node of one frame without a name, as
 /// `role (value)`, at `size`.
 fn unnamed(app: &mut FolderApp, context: &egui::Context, size: egui::Vec2) -> Vec<String> {
+    unnamed_in(context, size, |ui| app.ui(ui))
+}
+
+/// The same audit of whatever `draw` draws.
+fn unnamed_in(
+    context: &egui::Context,
+    size: egui::Vec2,
+    mut draw: impl FnMut(&mut egui::Ui),
+) -> Vec<String> {
     context.enable_accesskit();
     let mut output = context.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
             ..Default::default()
         },
-        |ui| app.ui(ui),
+        |ui| draw(ui),
     );
     output.textures_delta.clear();
     let tree = output
@@ -576,4 +585,75 @@ fn a_component_tab_with_run_results_names_every_control() {
             &context,
         );
     }
+}
+
+/// KTLO-03 criterion 5: the *Migration stopped* window names its buttons, at
+/// its own size and centred on both standard screens.
+#[test]
+fn the_migration_stop_window_names_every_control() {
+    use crate::stop::{StopWindow, WINDOW_SIZE};
+    let context = egui::Context::default();
+    crate::theme::apply(&context);
+    let mut window = StopWindow::new(Refusal {
+        project: Some("Order desk".into()),
+        scenario: Some("Order total is checked".into()),
+        reason: "a scenario differs after reloading".into(),
+    });
+    for size in [
+        WINDOW_SIZE,
+        egui::vec2(960.0, 540.0),
+        egui::vec2(1600.0, 1000.0),
+    ] {
+        let rect = egui::Rect::from_center_size((size / 2.0).to_pos2(), WINDOW_SIZE);
+        let mut draw = |ui: &mut egui::Ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| window.ui(ui));
+        };
+        for _ in 0..3 {
+            unnamed_in(&context, size, &mut draw);
+        }
+        let found = unnamed_in(&context, size, &mut draw);
+        assert!(
+            found.is_empty(),
+            "stop window at {size:?}: unnamed {found:?}"
+        );
+        let mut buttons = 0;
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            &mut draw,
+        );
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        for (_, node) in &tree.nodes {
+            if node.role() == Role::Button
+                && matches!(
+                    accessible_name(&tree, node).as_deref(),
+                    Some("Open the previous workspace" | "Quit")
+                )
+            {
+                buttons += 1;
+            }
+        }
+        assert_eq!(buttons, 2, "both buttons are named at {size:?}");
+    }
+}
+
+/// KTLO-23b: the Run inputs dialog names each field and its buttons.
+#[test]
+fn the_run_inputs_dialog_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, COMPONENT);
+    app.workbench.open(&id);
+    app.request_run(&id, false);
+    assert!(
+        exposes(&mut app, &context, "product · Object"),
+        "the dialog is open"
+    );
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?}, Run inputs"), &mut app, &context);
+    }
+    assert!(app.runs.handle.is_none(), "nothing runs");
 }

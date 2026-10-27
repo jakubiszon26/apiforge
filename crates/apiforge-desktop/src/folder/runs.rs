@@ -19,6 +19,9 @@ pub(super) struct Runs {
     journal: Option<Arc<JournalStore>>,
     pending_review: Option<JournalReview>,
     pub secrets: dialogs::SessionSecrets,
+    /// The input values last run per component document, for the session
+    /// (KTLO-23b).
+    inputs: HashMap<String, dialogs::RunInputs>,
     pub exporting: bool,
     /// The active tab and mode the report was last drawn for (KTLO-19).
     view: Option<(Option<String>, Mode)>,
@@ -132,6 +135,17 @@ impl FolderApp {
     }
 
     pub(super) fn start_prepared_run(&mut self, prepared: PreparedRun, live: bool) {
+        self.start_run_with(prepared, live, None);
+    }
+
+    /// Starts `prepared`; a component given no `inputs` runs with its
+    /// defaults, or first asks for them when some input has none (KTLO-23b).
+    fn start_run_with(
+        &mut self,
+        prepared: PreparedRun,
+        live: bool,
+        inputs: Option<dialogs::RunInputs>,
+    ) {
         if self.watcher.recovery_required {
             self.notify("Resolve project recovery and reload before running.", true);
             return;
@@ -156,17 +170,37 @@ impl FolderApp {
                 return;
             }
         };
-        // A component runs its working revision on its own (KTLO-23); its
-        // inputs are the defaults written in code until KTLO-23b asks for them.
+        // A component runs its working revision on its own (KTLO-23), with
+        // the values entered for its inputs over the defaults written in code.
         let (scenario_id, target) = match prepared.snapshot.document() {
             IdentityBase::Scenario(scenario) => (scenario.id.clone(), RunTarget::Scenario),
-            IdentityBase::Component(component) => (
-                component.id.clone(),
-                RunTarget::Component {
-                    revision: component.revision,
-                    inputs: indexmap::IndexMap::new(),
-                },
-            ),
+            IdentityBase::Component(component) => {
+                let inputs = match inputs {
+                    Some(inputs) => inputs,
+                    None if dialogs::RunInputsDialog::needed(&component.inputs) => {
+                        let dialog = dialogs::RunInputsDialog::new(
+                            &component.name,
+                            &component.inputs,
+                            &project.contracts,
+                            self.runs.inputs.get(prepared.document_id()),
+                        );
+                        self.prompt = Some(Prompt::RunInputs {
+                            prepared: Box::new(prepared),
+                            live,
+                            dialog: Box::new(dialog),
+                        });
+                        return;
+                    }
+                    None => dialogs::RunInputs::new(),
+                };
+                (
+                    component.id.clone(),
+                    RunTarget::Component {
+                        revision: component.revision,
+                        inputs,
+                    },
+                )
+            }
         };
         if self.runs.runner.is_none() {
             let context = self.ui_context.clone();
@@ -279,12 +313,37 @@ impl FolderApp {
         }
         if run {
             self.start_prepared_run(prepared, live);
-            return None;
+            // A component may ask for its inputs next.
+            return self.prompt.take();
         }
         Some(Prompt::Run {
             prepared: Box::new(prepared),
             live,
         })
+    }
+
+    pub(super) fn run_inputs_prompt(
+        &mut self,
+        context: &egui::Context,
+        prepared: PreparedRun,
+        live: bool,
+        mut dialog: dialogs::RunInputsDialog,
+    ) -> Option<Prompt> {
+        match dialog.show(context) {
+            dialogs::Outcome::Open => Some(Prompt::RunInputs {
+                prepared: Box::new(prepared),
+                live,
+                dialog: Box::new(dialog),
+            }),
+            dialogs::Outcome::Cancelled => None,
+            dialogs::Outcome::Applied(inputs) => {
+                self.runs
+                    .inputs
+                    .insert(prepared.document_id().to_owned(), inputs.clone());
+                self.start_run_with(prepared, live, Some(inputs));
+                self.prompt.take()
+            }
+        }
     }
 
     pub(super) fn run_report(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
