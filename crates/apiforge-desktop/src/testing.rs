@@ -436,7 +436,7 @@ mod review {
             StopWindow::new(crate::folder::Refusal {
                 project: Some(legacy_workspace::REFUSED_PROJECT_NAME.into()),
                 scenario: Some(legacy_workspace::REFUSED_SCENARIO_NAME.into()),
-                reason: "a scenario differs after reloading".into(),
+                reason: "a scenario cannot be written as code without loss".into(),
             }),
         );
         harness.run();

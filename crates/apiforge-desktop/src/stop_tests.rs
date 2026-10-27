@@ -15,7 +15,7 @@ fn refusal() -> Refusal {
     Refusal {
         project: Some(REFUSED_PROJECT_NAME.into()),
         scenario: Some(REFUSED_SCENARIO_NAME.into()),
-        reason: "a scenario differs after reloading".into(),
+        reason: "a scenario cannot be written as code without loss".into(),
     }
 }
 
@@ -69,7 +69,7 @@ fn ktlo03_the_stop_window_says_what_was_refused_and_offers_two_ways_out() {
         for text in [
             REFUSED_PROJECT_NAME,
             REFUSED_SCENARIO_NAME,
-            "a scenario differs after reloading",
+            "a scenario cannot be written as code without loss",
             "left untouched",
             "nothing was activated",
         ] {

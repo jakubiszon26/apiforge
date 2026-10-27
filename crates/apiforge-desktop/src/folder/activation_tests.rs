@@ -296,7 +296,7 @@ fn ktlo03_a_refused_migration_starts_the_stop_window_not_the_workspace_window() 
     assert!(
         refusal
             .reason
-            .contains("a scenario differs after reloading"),
+            .contains("a scenario cannot be written as code without loss"),
         "{}",
         refusal.reason
     );
