@@ -95,6 +95,34 @@ impl ProjectSession {
             if !self.same_storage_inputs(&base) {
                 return Err(Error::StaleStorage);
             }
+            // Decisions taken while the job ran (a comment-loss decision, a
+            // selection) survive for every file the job left alone, as they
+            // do in the arm below; a file the job changed is replaced whole.
+            for current in &self.documents {
+                if let Some(after) = candidate
+                    .documents
+                    .iter_mut()
+                    .find(|doc| doc.id() == current.id())
+                    && base
+                        .document(current.id())
+                        .is_some_and(|before| !changed_document(after, before))
+                {
+                    after.selection = current.selection.clone();
+                    after.comments_accepted = current.comments_accepted;
+                }
+            }
+            for current in &self.texts {
+                if let Some(after) = candidate
+                    .texts
+                    .iter_mut()
+                    .find(|file| file.path == current.path)
+                    && base.text_file(current.path()).is_some_and(|before| {
+                        after.version == before.version && after.held == before.held
+                    })
+                {
+                    after.selection = current.selection.clone();
+                }
+            }
         } else {
             // A save or text open does not replace document membership/context.
             if candidate.storage_identity() != base.storage_identity()

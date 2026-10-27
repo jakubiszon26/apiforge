@@ -13,6 +13,7 @@ pub enum Icon {
     Undo,
     Redo,
     ChevronDown,
+    ChevronUp,
     ChevronRight,
     ChevronLeft,
     Panel,
@@ -129,6 +130,7 @@ impl Icon {
                 ));
             }
             Self::ChevronDown => path(&[(6.0, 9.0), (12.0, 15.0), (18.0, 9.0)]),
+            Self::ChevronUp => path(&[(6.0, 15.0), (12.0, 9.0), (18.0, 15.0)]),
             Self::ChevronRight => path(&[(9.0, 6.0), (15.0, 12.0), (9.0, 18.0)]),
             Self::ChevronLeft => path(&[(15.0, 6.0), (9.0, 12.0), (15.0, 18.0)]),
             Self::Panel => {

@@ -93,6 +93,16 @@ fn stage_ii_screens_and_dialogs_name_every_control() {
         app.workbench.mode = mode;
         assert_named(&format!("{mode:?}"), &mut app, &context);
     }
+    // KTLO-18 criterion 6: the Problems section expanded over the code, in
+    // both modes that show it, as the button leaves it.
+    app.problems_expanded = true;
+    app.problems_epoch += 1;
+    for mode in [Mode::Code, Mode::Split] {
+        app.workbench.mode = mode;
+        assert_named(&format!("{mode:?}, problems expanded"), &mut app, &context);
+    }
+    app.problems_expanded = false;
+    app.problems_epoch += 1;
     app.workbench.mode = Mode::Code;
     let path = SCENARIO.to_owned();
     let prompts = [
@@ -268,7 +278,7 @@ fn the_inspector_names_the_controls_of_every_demo_block() {
 fn tab_visits_the_window_in_reading_order_with_named_stops() {
     let directory = shop();
     let (context, mut app) = open(directory.path());
-    let visited = tab_order(&mut app, &context, 21);
+    let visited = tab_order(&mut app, &context, 23);
     assert!(
         !visited.iter().any(|name| name == "<unnamed>"),
         "{visited:#?}"
@@ -281,6 +291,10 @@ fn tab_visits_the_window_in_reading_order_with_named_stops() {
         "New",
         "Project files",
         "Resize project files",
+        // egui orders Tab by drawing, and the Problems section is drawn before
+        // the code it sits under, as its rows and *Apply fix* always were.
+        "Expand problems",
+        "Resize problems",
         "Contents of scenarios/promotion-and-cart-price.afs",
     ];
     let mut at = 0;
