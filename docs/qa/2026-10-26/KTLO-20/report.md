@@ -1,7 +1,9 @@
 # KTLO-20: A sleeping dog keeps the empty board company — QA report
 
-- Branch: `feat/ktlo-20-sleeping-dog`, from `main` at `22e94d4`; binary and
-  captures built at the branch head.
+- Branch and commit: `feat/ktlo-20-sleeping-dog` at `5fc0b8b` (verified),
+  with `main` merged in at `eab0a72`. The `after-*` release captures were taken
+  at `95a3c97`, before `main` was merged in, and were not retaken; the
+  double-scale captures of criterion 7, taken at `cdd8146`, show the same layout.
 - Built with: `cargo build -p apiforge-desktop --release --locked`
 - Compared against the mock-up the owner approved in
   [#46](https://github.com/jakubiszon26/apiforge/issues/46), copied into this
