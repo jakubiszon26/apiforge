@@ -437,3 +437,64 @@ backend, Lavapipe), with empty scratch `XDG_DATA_HOME` and `XDG_CONFIG_HOME`.
 | 2 | Pass: `--screenshot … --folder <demo> --mode code --size 960x540` showed the explorer tree and the scenario open in Code with "No problems"; exit 0. Capture: [smoke2-code-960x540.png](smoke2-code-960x540.png). |
 | 3–5, 7–10 | Not run: no interface change. The workspace suite that covers them passes. |
 | 6 | Pass: `apiforge run --folder <demo> --scenario scenarios/promotion-and-cart-price.afs` printed the 18 steps `ok`, then `Passed`; exit 0, empty stderr; stdout SHA-256 `618147c5…`, the recorded fixture of criterion 9. |
+
+## Review round 1
+
+The automated review of PR #109 found 14 points. `origin/main` was merged
+first (`d42ba3f`; docs and a test's ignore reason only). The fixes are
+`de1be62` (mcp, project), `8a2a1c9` (cli) and `1e15002` (guide), each code
+fix with a test:
+
+- **Environment that is not Unicode.** Secrets are read with `vars_os`, and a
+  variable whose name or value is not Unicode is skipped instead of
+  panicking the server.
+  `mcp03_review_a_variable_that_is_not_unicode_is_skipped_not_a_panic`.
+- **Secrets file size.** The file is refused by its size before it is read,
+  and never read past 1 MiB.
+  `mcp03_review_a_secrets_file_over_the_limit_is_refused_by_its_size` gives
+  a 16 GiB sparse file (Unix) the refusal in under two seconds.
+- **A new document's path.** `check_text` on an unregistered path looks each
+  level up in its parent directory instead of scanning the tree:
+  - `components/product.afs/nested.afs` is `path_exists` (a file where a
+    folder would be), no longer an I/O error;
+  - a case collision behind more than 10 000 entries (the tree scan's limit)
+    is found;
+  - the cost no longer grows with the project.
+
+  Tests: `mcp03_review_a_file_in_place_of_a_folder_is_a_registration_problem`
+  and `mcp03_review_a_case_collision_beyond_the_tree_scan_limit_is_found`.
+- **The EOF test.** It now pauses 2 s per step, longer than rmcp's 5 s
+  drain, and asserts what scenario 12 observed by hand: no response to the
+  run, `apiforge mcp: run: cancelled` on stderr, exit 0, within 15 s.
+- **The test seams.** Both are capped at the ten-minute deadline. A value
+  that is not whole milliseconds (`300ms`) stops the server with exit code 2
+  and names the variable. Unit test
+  `a_seam_is_whole_milliseconds_capped_at_the_deadline`; over the binary,
+  `mcp03_a_test_seam_that_is_not_a_number_stops_the_server`.
+- **The guide.** `path_rejected` is no longer listed among `check_text`'s
+  `problems`: it is an error. The Tools intro says `check_text` also takes a
+  new document's path, and the seams' limits are stated.
+- **Smaller points.** The `result_too_large` hint names what each tool can
+  narrow. A test covers a character across a position checkpoint
+  (`mcp03_review_a_character_across_a_checkpoint_counts_once`).
+
+Not changed, with the reasons on the PR:
+- **Required inputs.** The rule stays as the Run inputs dialog's, which the
+  ticket's criterion 5 names: an input that is not declared optional and has
+  no default is required. The runner's `Port::is_required()` reads an
+  undeclared input as optional. That difference between the dialog and the
+  runner is reported for the owner; it is not changed here.
+- **Double bounding.** The server bounds every tool's error as well as its
+  result (carry-over 5), and the library bounds results for its own tests.
+
+Verification at `1e15002`, Linux:
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: no
+  warning.
+- `cargo test --workspace --all-targets --locked`: 1 199 passed, 0 failed,
+  30 ignored over 59 test binaries.
+- `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`: exit 0.
+
+The scenario language and the analysis are unchanged in this round, so the
+budget and the fuzzers were not run again. Windows: the CI run of the pushed
+branch.
