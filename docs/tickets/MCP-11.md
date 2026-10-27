@@ -1,8 +1,8 @@
 # MCP-11: The whole workflow, end to end — the sprint's acceptance
 
 - Size: S · Owner review: 30 min (the owner watches the run) · Risk: none
-- State: Backlog (issue #95) · after every other MCP ticket (its test is written first
-  and ignored with this ticket's name until the parts land)
+- State: Backlog (issue #95) · after every other MCP ticket (its test is
+  written first and ignored with this ticket's name until the parts land)
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md#the-sprints-key-acceptance-criterion)
 

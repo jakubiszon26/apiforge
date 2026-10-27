@@ -2,8 +2,8 @@
 
 - Size: M · Owner review: 30 min · Risk: none on screen; the project's
   Git-tracked files are written by a new caller (decisions 1, 2, 10)
-- State: Backlog (issue #63) · MCP-00 decisions 1, 2 = A taken 2026-10-27;
-  decision 10 = A taken 2026-10-27 · after MCP-03 · revised 2026-10-27 (MCP-00 revision
+- State: Backlog (issue #63) · MCP-00 decisions 1, 2 and 10 = A taken
+  2026-10-27 · after MCP-03 · revised 2026-10-27 (MCP-00 revision
   2: the agent session replaces the lock per write; validation before the
   first write; versions; secrets in the text; paths)
 - Analysis model: Fable · Implementation model: —
