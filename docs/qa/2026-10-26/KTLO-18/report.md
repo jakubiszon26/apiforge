@@ -150,20 +150,23 @@ as the problem rows and *Apply fix* already were. Tests:
 
 ## Verification
 
+The machine is a 3-core host shared with other builds; the load average
+during these runs was 10–23.
+
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
   --locked -- -D warnings` and `apiforge-convert-v1 --fixtures --check`: pass
-  at `1e7feb6`.
-- `cargo test --workspace --all-targets --locked`: every crate passed at
-  `6c5ae7a` (desktop: 367 passed, 19 ignored).
-- At `1e7feb6`, under a load average of 15–23 on this 3-core machine from
-  other builds, every crate but the desktop passed; the desktop had 365 passed
-  and 2 failed: `a_large_source_follows_the_caret_once_its_edit_is_analysed`
-  ("storage did not become idle") and
-  `failed_recovery_keeps_the_current_project_until_the_user_decides`. Both
-  passed three runs in three alone right after. The first is the 15-second
-  opening wait recorded in KTLO-12's ticket as a pre-existing race under load;
+  at `1de53d8` (this branch with `main` at `b2c68cd` merged in).
+- `cargo test --workspace --all-targets --locked` at `1de53d8`, load 15–17:
+  every crate passed except the desktop, 377 passed and 2 failed:
+  `a_large_source_follows_the_caret_once_its_edit_is_analysed` ("storage did
+  not become idle") and
+  `failed_recovery_keeps_the_current_project_until_the_user_decides`. The
+  desktop suite of the same build then passed in full twice (379 passed,
+  20 ignored) at load 11. `main`'s desktop suite, built from `b2c68cd`, failed
+  the first of the two in one run of two under load 14–16: it is the
+  15-second opening wait KTLO-12's ticket records as a pre-existing race;
   neither test expands the section.
-- The same load found a real KTLO-18 defect first:
+- The load also found a real KTLO-18 defect:
   `the_problems_section_expands_in_split_too` failed 2 runs in 12 at
   960 × 540 (strip 128.25 px instead of 90.25), because the expanded height
   was taken once, on the first frame after the click. `1e7feb6` makes the
