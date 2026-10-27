@@ -101,12 +101,18 @@ passed in 9.5–11.2 s. The complete run above followed.
 
 ### 5. CI
 
-Pending at the time of writing; recorded in the pull request.
+The branch's CI run on `6268877` (the fix and this report's first version):
+[40530289651](https://github.com/jakubiszon26/apiforge/actions/runs/40530289651),
+**success** — `Build & Test` passed on `ubuntu-24.04` and on `windows-2022`,
+and both logs show `the_prepared_demo_shop_analyses_without_a_problem_in_any_document`
+and `demos_match_the_reference_structure` `ok`. The later commit changes only
+this report; its runs are on the pull request.
 
 ## Windows
 
 Not run locally. The change is demo data and fixtures, the same on both
-platforms; the only Windows evidence is the branch's CI run.
+platforms; the only Windows evidence is the branch's CI run above, where the
+acceptance test passed on `windows-2022`.
 
 ## Not verified
 
