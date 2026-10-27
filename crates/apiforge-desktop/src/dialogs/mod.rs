@@ -8,11 +8,13 @@
 pub mod assign_variable;
 pub mod component;
 pub mod environment;
+pub mod run_inputs;
 pub mod settings;
 
 pub use assign_variable::AssignVariableDialog;
 pub use component::ComponentDialog;
 pub use environment::{EnvironmentDialog, SessionSecrets};
+pub use run_inputs::{RunInputs, RunInputsDialog};
 pub use settings::SettingsDialog;
 
 use crate::icons::Icon;
