@@ -10,6 +10,7 @@ impl FolderApp {
         };
         let name = session.manifest().name.clone();
         let read_only = session.is_read_only();
+        let observing = self.observing();
         let unsaved = session
             .documents()
             .iter()
@@ -68,8 +69,10 @@ impl FolderApp {
             .inner
             .on_hover_text(self.root.display().to_string());
             if read_only {
+                // Another process holds the project and this window follows
+                // it (MCP-07); a folder this user cannot write is read-only.
                 ui.label(
-                    RichText::new("Read-only")
+                    RichText::new(if observing { "Observing" } else { "Read-only" })
                         .size(theme::FONT_META)
                         .color(theme::WARNING),
                 );
