@@ -413,3 +413,24 @@ fn the_block_library_names_every_control_expanded_and_collapsed() {
         frame(&mut app, &context, vec![key(Key::B, COMMAND)]);
     }
 }
+
+/// KTLO-24 criterion 6: the audit passes in Code, Diagram and Split with no
+/// file open, where the band of tabs is gone.
+#[test]
+fn the_window_with_no_file_open_names_every_control() {
+    let directory = shop();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, SCENARIO);
+    app.close_tab(&id);
+    for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+        app.workbench.mode = mode;
+        wait_storage(&mut app, &context);
+        frame(&mut app, &context, vec![]);
+        assert!(app.workbench.tabs().is_empty(), "{mode:?}: no tab is open");
+        assert!(
+            !exposes(&mut app, &context, "Close promotion-and-cart-price.afs"),
+            "{mode:?}: no tab's cross is exposed"
+        );
+        assert_named(&format!("{mode:?} with no file open"), &mut app, &context);
+    }
+}
