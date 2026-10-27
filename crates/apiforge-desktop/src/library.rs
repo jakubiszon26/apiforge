@@ -153,7 +153,6 @@ impl Library {
         trailing: impl FnOnce(&mut egui::Ui),
         enabled: bool,
     ) -> Vec<Action> {
-        let mut actions = Vec::new();
         let components = latest_components(context.project);
         ui.horizontal(|ui| {
             let heading = ui.label(
@@ -178,6 +177,21 @@ impl Library {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
         });
+        self.show_sections(ui, context, enabled)
+    }
+
+    /// What [`Self::show_blocks_with`] draws below its caption row: the search,
+    /// the section switch and the sections, disabled unless `enabled`. The
+    /// folder window's Diagram panel draws it under its *Library | Files* tabs
+    /// instead of the caption (KTLO-11).
+    pub fn show_sections(
+        &mut self,
+        ui: &mut egui::Ui,
+        context: &Context<'_>,
+        enabled: bool,
+    ) -> Vec<Action> {
+        let mut actions = Vec::new();
+        let components = latest_components(context.project);
         if !enabled {
             ui.disable();
         }

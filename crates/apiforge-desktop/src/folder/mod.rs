@@ -1053,21 +1053,23 @@ impl FolderApp {
         self.board_command(&document_id, &model, cleanup, snapshot.editable, command);
     }
 
-    /// The block library beside the board (KTLO-05b): the shared block sections
-    /// in a left panel, disabled when the board is read-only. The caller places
-    /// it left of the board in Diagram, and in Split only when the window is
-    /// wide enough for a fourth panel. Collapsed, it is a rail with one button
-    /// that brings it back (KTLO-17).
+    /// The panel left of the board. In Split it is the block library (KTLO-05b),
+    /// beside a document's board when the window is wide enough. In Diagram it
+    /// has two tabs, *Library* and *Files* (KTLO-11), and is drawn whatever the
+    /// active tab, so the project's files stay at hand beside a text file or an
+    /// empty board. The blocks are disabled when the board is read-only.
+    /// Collapsed, it is a rail with a button per tab that brings it back
+    /// (KTLO-17).
     fn library_panel(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
-        let Some(document_id) = active else {
+        let tabs = self.workbench.mode == Mode::Diagram;
+        let board = active.and_then(|document_id| {
+            let snapshot = self.snapshot(document_id)?;
+            let model = snapshot.model.clone()?;
+            Some((document_id, snapshot, model))
+        });
+        if board.is_none() && !tabs {
             return;
-        };
-        let Some(snapshot) = self.snapshot(document_id) else {
-            return;
-        };
-        let Some(model) = snapshot.model.clone() else {
-            return;
-        };
+        }
         if self.workbench.panels.library_collapsed {
             // Folded to a rail (KTLO-17); the board takes the panel's width, and
             // the panel's own width is kept for when it comes back.
@@ -1080,20 +1082,41 @@ impl FolderApp {
                         .inner_margin(egui::Margin::symmetric(5, 10)),
                 )
                 .show(ui, |ui| {
-                    let show = widgets::icon_button(Icon::Panel, "Show block library").compact();
-                    if ui.add(show).clicked() {
-                        self.toggle_library();
+                    let library = widgets::icon_button(Icon::Panel, "Show block library").compact();
+                    if ui.add(library).clicked() {
+                        self.expand_library(tabs.then_some(false));
+                    }
+                    let files = widgets::icon_button(Icon::Folder, "Show project files").compact();
+                    if tabs && ui.add(files).clicked() {
+                        self.expand_library(Some(true));
                     }
                 });
             return;
         }
-        let cleanup = self.cleanup(document_id);
+        let mut files = tabs && self.workbench.panels.library_files;
+        // Diagram's panel is wider, for the explorer's names (KTLO-11). Split
+        // keeps the library's range under its own name, so that showing it never
+        // narrows the width Diagram comes back to.
+        let (id, range) = if tabs {
+            ("folder-library", 200.0..=420.0)
+        } else {
+            ("folder-split-library", 200.0..=320.0)
+        };
         let project = self.context_project();
-        let context = library_context(&project, document_id, &model, cleanup, snapshot.editable);
+        let library = board.as_ref().map(|(document_id, snapshot, model)| {
+            let cleanup = self.cleanup(document_id);
+            let context = library_context(&project, document_id, model, cleanup, snapshot.editable);
+            (context, cleanup)
+        });
+        let editable = board
+            .as_ref()
+            .is_some_and(|(_, snapshot, _)| snapshot.editable);
+        let enabled = !self.persistence.closing && !self.storage.blocks_edits();
         let mut collapse = false;
-        let panel = egui::Panel::left("folder-library")
+        let mut chosen = files;
+        let panel = egui::Panel::left(id)
             .default_size(self.workbench.panels.library)
-            .size_range(200.0..=320.0)
+            .size_range(range.clone())
             .frame(
                 egui::Frame::new()
                     .fill(theme::PANEL)
@@ -1102,27 +1125,88 @@ impl FolderApp {
             .show(ui, |ui| {
                 // The chevron stays usable on a read-only board; the blocks do not.
                 let chevron = |ui: &mut egui::Ui| {
-                    let button =
-                        widgets::icon_button(Icon::ChevronLeft, "Collapse block library").compact();
-                    collapse = ui.add(button).clicked();
+                    let name = if files {
+                        "Collapse project files"
+                    } else {
+                        "Collapse block library"
+                    };
+                    collapse = ui
+                        .add(widgets::icon_button(Icon::ChevronLeft, name).compact())
+                        .clicked();
                 };
-                self.library
-                    .show_blocks_with(ui, &context, chevron, snapshot.editable)
+                if !tabs {
+                    let (context, _) = library.as_ref().expect("Split draws a board's library");
+                    return self
+                        .library
+                        .show_blocks_with(ui, context, chevron, editable);
+                }
+                // The caption row: the tabs, drawn as *Main | Cleanup* above the
+                // board are, and the chevron.
+                ui.horizontal(|ui| {
+                    widgets::tab_value(ui, &mut chosen, false, "Library");
+                    widgets::tab_value(ui, &mut chosen, true, "Files");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), chevron);
+                });
+                ui.add_space(theme::SPACE_SM);
+                if files {
+                    ui.add_enabled_ui(enabled, |ui| self.explorer_panel(ui));
+                    return Vec::new();
+                }
+                match &library {
+                    Some((context, _)) => self.library.show_sections(ui, context, editable),
+                    None => {
+                        widgets::hint(ui, "Open a scenario or component to add its blocks.");
+                        Vec::new()
+                    }
+                }
             });
-        // The panel's outer width, kept in the project's view state (KTLO-05c).
-        self.workbench.panels.library = panel.response.rect.width();
+        // The panel's outer width, kept in the project's view state (KTLO-05c),
+        // once it differs from the stored width this panel can show: a resize,
+        // not Split's narrower range.
+        let width = panel.response.rect.width();
+        if (width
+            - self
+                .workbench
+                .panels
+                .library
+                .clamp(*range.start(), *range.end()))
+        .abs()
+            > 0.5
+        {
+            self.workbench.panels.library = width;
+        }
+        widgets::name_resize_handle(
+            ui.ctx(),
+            egui::Id::new(id),
+            if files {
+                "Resize project files"
+            } else {
+                "Resize block library"
+            },
+        );
+        if chosen != files {
+            files = chosen;
+            self.workbench.panels.library_files = files;
+            self.touched();
+        }
         if collapse {
             self.toggle_library();
         }
         let actions = panel.inner;
-        widgets::name_resize_handle(
-            ui.ctx(),
-            egui::Id::new("folder-library"),
-            "Resize block library",
-        );
-        for action in actions {
-            self.library_action(document_id, &model, cleanup, snapshot.editable, action);
+        if let Some(((document_id, snapshot, model), (_, cleanup))) = board.zip(library) {
+            for action in actions {
+                self.library_action(document_id, &model, cleanup, snapshot.editable, action);
+            }
         }
+    }
+
+    /// Brings the panel back from its rail, on the tab its button names when
+    /// `files` says one (Diagram); Split has no tabs (KTLO-11).
+    fn expand_library(&mut self, files: Option<bool>) {
+        if let Some(files) = files {
+            self.workbench.panels.library_files = files;
+        }
+        self.toggle_library();
     }
 
     /// Folds the block library to its rail, or brings it back (KTLO-17).
@@ -1144,8 +1228,11 @@ impl FolderApp {
     /// Whether the block library panel is in view. When it is not, the board's
     /// *Add step* popup carries its sections (KTLO-05d) and the empty board's
     /// hint does not mention it (KTLO-05a criterion 9, KTLO-17).
+    /// In Diagram the panel may show the project's files instead (KTLO-11).
     fn library_in_view(&self, context: &egui::Context) -> bool {
-        self.library_room(context) && !self.workbench.panels.library_collapsed
+        self.library_room(context)
+            && !self.workbench.panels.library_collapsed
+            && !(self.workbench.mode == Mode::Diagram && self.workbench.panels.library_files)
     }
 
     /// Applies a block library action to the board: a clicked block or operator

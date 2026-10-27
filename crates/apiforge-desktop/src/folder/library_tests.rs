@@ -32,8 +32,9 @@ fn node_count(harness: &crate::testing::FolderHarness, id: &str) -> usize {
     graph_of(&model(folder(harness), id), false).nodes.len()
 }
 
-/// Criterion 1: Diagram shows a panel named "Block library" with search, the
-/// Blocks / Variables / Operators sections and the project's components.
+/// Criterion 1: Diagram shows the block library, on the panel's *Library* tab
+/// since KTLO-11, with search, the Blocks / Variables / Operators sections and
+/// the project's components.
 #[test]
 fn diagram_shows_a_named_block_library_panel_with_its_sections() {
     let project = shop();
@@ -41,7 +42,7 @@ fn diagram_shows_a_named_block_library_panel_with_its_sections() {
     harness.get_by_label("Diagram").click();
     settle(&mut harness);
     for label in [
-        "Block library",
+        "Library",
         "Blocks",
         "Variables",
         "Operators",
@@ -219,7 +220,7 @@ fn the_library_fits_the_minimum_window_in_diagram() {
         assert_within_window(
             &harness,
             &[
-                "Block library",
+                "Library",
                 "Search blocks",
                 "Blocks",
                 "Variables",
@@ -507,7 +508,7 @@ fn ctrl_b(harness: &mut FolderHarness) {
 /// The library panel is shown: its caption, search and chevron are there and
 /// the rail is not.
 fn assert_expanded(harness: &FolderHarness, context: &str) {
-    for label in ["Block library", "Search blocks", "Collapse block library"] {
+    for label in ["Search blocks", "Collapse block library"] {
         assert!(
             harness.query_by_label(label).is_some(),
             "{context}: the expanded panel has {label:?}"
@@ -525,7 +526,7 @@ fn assert_collapsed(harness: &FolderHarness, context: &str) {
         harness.query_by_label("Show block library").is_some(),
         "{context}: the rail holds *Show block library*"
     );
-    for label in ["Block library", "Search blocks", "Collapse block library"] {
+    for label in ["Search blocks", "Collapse block library"] {
         assert!(
             harness.query_by_label(label).is_none(),
             "{context}: the collapsed library has no {label:?}"
@@ -589,7 +590,8 @@ fn ktlo17_collapsing_the_library_leaves_a_rail_and_widens_the_board() {
         let context = format!("Diagram at {size:?}");
         let mut harness = window(&project, size, "Diagram");
         assert_expanded(&harness, &context);
-        let caption = harness.get_by_label("Block library").rect();
+        // The caption row holds the *Library | Files* tabs since KTLO-11.
+        let caption = harness.get_by_label("Files").rect();
         let chevron = harness.get_by_label("Collapse block library").rect();
         let edge = library_edge(&harness).x;
         assert!(
@@ -798,7 +800,7 @@ fn ktlo17_the_rail_and_its_neighbours_fit_the_window() {
         let mut harness = window(&project, size, mode);
         // The inspector opens for one selected block.
         click(&mut harness, "Expected price (Value)");
-        let mut labels = vec!["Collapse block library", "Block library"];
+        let mut labels = vec!["Collapse block library", "Search blocks"];
         labels.extend(toolbar);
         labels.extend(inspector);
         assert_within_window(&harness, &labels);

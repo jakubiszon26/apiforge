@@ -70,6 +70,11 @@ pub struct PanelSizes {
     /// when set, so an expanded library leaves the file as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub library_collapsed: bool,
+    /// Whether the panel beside the board in Diagram shows the project's files
+    /// instead of the block library (KTLO-11). Written only when set, so a
+    /// project on the library leaves the file as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub library_files: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -225,6 +230,7 @@ mod tests {
                 diagnostics: 140.0,
                 library: 260.0,
                 library_collapsed: true,
+                library_files: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")
