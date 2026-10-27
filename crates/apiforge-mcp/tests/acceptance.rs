@@ -1471,3 +1471,123 @@ fn mcp03_carry_over_5_errors_are_bounded_as_results_are() {
         ErrorCode::ResultTooLarge
     );
 }
+
+// Review round 1 of PR #109 ---------------------------------------------------
+
+/// A name or value that is not Unicode on this platform.
+fn not_unicode() -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![b'a', 0xff])
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0x61, 0xD800])
+    }
+}
+
+#[test]
+fn mcp03_review_a_character_across_a_checkpoint_counts_once() {
+    // The crab takes bytes 255 to 258, across the checkpoint at byte 256.
+    let text = format!("{}🦀b", "a".repeat(255));
+    let lines = positions::Lines::new(&text);
+    assert_eq!(lines.position(255), (1, 256), "the crab");
+    for inside in 256..259 {
+        assert_eq!(
+            lines.position(inside),
+            (1, 256),
+            "inside the crab: {inside}"
+        );
+    }
+    assert_eq!(lines.position(259), (1, 257), "the b after it");
+    assert_eq!(lines.position(260), (1, 258), "the end");
+}
+
+#[test]
+fn mcp03_review_a_variable_that_is_not_unicode_is_skipped_not_a_panic() {
+    let environment = vec![
+        ("APIFORGE_SECRET_TOKEN".into(), "t".into()),
+        (not_unicode(), "x".into()),
+        ("APIFORGE_SECRET_BROKEN".into(), not_unicode()),
+        ("PATH".into(), not_unicode()),
+    ];
+    let found = executor::secrets_from(None, environment).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found["TOKEN"], "t");
+}
+
+#[test]
+fn mcp03_review_a_secrets_file_over_the_limit_is_refused_by_its_size() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("secrets.json");
+    fs::write(&file, r#"{"TOKEN": "t"}"#).unwrap();
+    let found = executor::secrets_from(Some(&file), Vec::new()).unwrap();
+    assert_eq!(found["TOKEN"], "t");
+
+    fs::write(&file, vec![b' '; executor::MAX_SECRETS_BYTES as usize + 1]).unwrap();
+    assert_eq!(
+        executor::secrets_from(Some(&file), Vec::new()).unwrap_err(),
+        "The secrets file is too large"
+    );
+    // Sixteen gibibytes, sparse: reading it in full before the check would
+    // not finish in time, or at all. (NTFS would allocate it, so Unix only.)
+    #[cfg(unix)]
+    {
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_len(16 << 30)
+            .unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            executor::secrets_from(Some(&file), Vec::new()).unwrap_err(),
+            "The secrets file is too large"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}
+
+#[test]
+fn mcp03_review_a_file_in_place_of_a_folder_is_a_registration_problem() {
+    let directory = checkout();
+    let root = directory.path();
+    let text = "scenario \"Nested\" {\n}\n";
+    for path in [
+        "components/product.afs/nested.afs",
+        "components/PRODUCT.afs/deeper/nested.afs",
+    ] {
+        let result = tools::check_text(root, path, text).unwrap();
+        assert!(!result.registered, "{path}");
+        assert!(!result.valid, "{path}");
+        assert_eq!(
+            result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+            [ErrorCode::PathExists],
+            "{path}"
+        );
+    }
+    let result = tools::check_text(root, "scenarios/new/nested.afs", text).unwrap();
+    assert!(result.problems.is_empty(), "{:?}", result.problems);
+}
+
+#[test]
+fn mcp03_review_a_case_collision_beyond_the_tree_scan_limit_is_found() {
+    let directory = checkout();
+    let root = directory.path();
+    // More entries than a tree scan returns, before the collision.
+    let bulk = root.join("aaa-bulk");
+    fs::create_dir(&bulk).unwrap();
+    for index in 0..10_001 {
+        fs::write(bulk.join(format!("{index}.txt")), "").unwrap();
+    }
+    let text = "scenario \"Draft\" {\n}\n";
+    fs::create_dir_all(root.join("zzz/Deep")).unwrap();
+    fs::write(root.join("zzz/Deep/Draft.afs"), text).unwrap();
+    let result = tools::check_text(root, "zzz/deep/draft.afs", text).unwrap();
+    assert_eq!(
+        result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+        [ErrorCode::PathExists]
+    );
+}

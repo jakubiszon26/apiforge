@@ -22,7 +22,7 @@ pub enum RegistrationProblem {
     /// only in letter case.
     PathRegistered,
     /// A file or directory exists at this path, or at one that differs only
-    /// in letter case.
+    /// in letter case, or a file stands where one of its folders would be.
     PathExists,
     /// Another component already declares this handle.
     HandleExists,
@@ -42,7 +42,9 @@ impl RegistrationProblem {
             Self::PathRegistered => {
                 "A document is already registered under this path or one differing only in case"
             }
-            Self::PathExists => "A file already exists at this path or one differing only in case",
+            Self::PathExists => {
+                "A file already exists at this path, at one differing only in case, or in place of one of its folders"
+            }
             Self::HandleExists => "Another component already uses this handle",
             Self::NoKind => "The header declares neither a scenario nor a component",
             Self::KindMismatch => "The header declares another kind of document",
@@ -156,19 +158,69 @@ impl ProjectSession {
     }
 }
 
-/// A file or directory is at `path`, or at a path that differs from it only
-/// in letter case.
+/// A file or directory is at `path` or at a path that differs from it only
+/// in letter case, or something other than a directory stands where one of
+/// its parent directories would be: either way a registration there would be
+/// refused. Each level is looked up in its parent directory alone, so the
+/// answer neither depends on the size of the project nor on the limits of a
+/// tree scan.
 fn exists(store: &ProjectStore, path: &ProjectPath) -> Result<bool> {
-    let file = store.root().join(path.as_str());
-    match std::fs::symlink_metadata(&file) {
-        Ok(_) => return Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(source) => return Err(ProjectError::Io { path: file, source }.into()),
+    let components: Vec<String> = path.as_str().split('/').map(str::to_lowercase).collect();
+    let Some((last, parents)) = components.split_last() else {
+        return Ok(false);
+    };
+    // Every directory that matches the parents so far, in any letter case.
+    let mut directories = vec![store.root().to_path_buf()];
+    for component in parents {
+        let mut next = Vec::new();
+        for directory in &directories {
+            for (entry, is_directory) in matching(directory, component)? {
+                if !is_directory {
+                    return Ok(true);
+                }
+                next.push(entry);
+            }
+        }
+        if next.is_empty() {
+            return Ok(false);
+        }
+        directories = next;
     }
-    let lower = path.as_str().to_lowercase();
-    Ok(store
-        .scan_tree()?
-        .entries
-        .iter()
-        .any(|entry| entry.path.to_lowercase() == lower))
+    for directory in &directories {
+        if !matching(directory, last)?.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The entries of `directory` whose name is `lower` in any letter case, with
+/// whether each is a directory (a link is not followed, so it is not). A
+/// directory that does not exist, or is not a directory, has none.
+fn matching(directory: &std::path::Path, lower: &str) -> Result<Vec<(std::path::PathBuf, bool)>> {
+    let io = |source| ProjectError::Io {
+        path: directory.to_path_buf(),
+        source,
+    };
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(Vec::new());
+        }
+        Err(source) => return Err(io(source).into()),
+    };
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(io)?;
+        if entry.file_name().to_string_lossy().to_lowercase() == lower {
+            let is_directory = entry.file_type().map_err(io)?.is_dir();
+            found.push((entry.path(), is_directory));
+        }
+    }
+    Ok(found)
 }

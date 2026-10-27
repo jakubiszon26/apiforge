@@ -1031,7 +1031,7 @@ pub fn bound<T: Serialize>(result: Result<T, ToolError>) -> Result<T, ToolError>
     if size > MAX_RESULT_BYTES {
         return Err(ToolError::new(
             ErrorCode::ResultTooLarge,
-            "The result exceeds 2 MiB and is never cut; narrow the request: run with full: false, or one path at a time",
+            "The result exceeds 2 MiB and is never cut; narrow the request where the tool allows it: run with full: false, check one path at a time",
         )
         .with_details(json!({ "bytes": size, "limit": MAX_RESULT_BYTES })));
     }

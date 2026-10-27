@@ -9,6 +9,8 @@ use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::{
+    ffi::OsString,
+    io::Read,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -119,16 +121,26 @@ pub fn execute_observed(
     })
 }
 
+/// The largest secrets file read.
+pub const MAX_SECRETS_BYTES: u64 = 1024 * 1024;
+
 /// Session secrets, from a file and from the environment
 /// (`APIFORGE_SECRET_<NAME>`). A name in both takes its value from the
 /// environment, which belongs to this invocation.
 pub fn secrets(path: Option<&Path>) -> Result<IndexMap<String, String>, String> {
+    secrets_from(path, std::env::vars_os())
+}
+
+/// As `secrets`, with the environment given. A variable whose name or value
+/// is not Unicode is not a secret and is skipped: it cannot be named in a
+/// document, and an unrelated one must not stop a run.
+pub fn secrets_from(
+    path: Option<&Path>,
+    environment: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Result<IndexMap<String, String>, String> {
     let mut found = IndexMap::new();
     if let Some(path) = path {
-        let bytes = std::fs::read(path).map_err(|error| format!("Cannot read secrets: {error}"))?;
-        if bytes.len() > 1024 * 1024 {
-            return Err("The secrets file is too large".into());
-        }
+        let bytes = read_secrets_file(path)?;
         let parsed: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|_| "The secrets file is not JSON".to_owned())?;
         let object = parsed
@@ -141,12 +153,38 @@ pub fn secrets(path: Option<&Path>) -> Result<IndexMap<String, String>, String> 
             found.insert(name.clone(), text.to_owned());
         }
     }
-    for (key, value) in std::env::vars() {
+    for (key, value) in environment {
+        let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
+            continue;
+        };
         if let Some(name) = key.strip_prefix(SECRET_PREFIX)
             && !name.is_empty()
         {
-            found.insert(name.to_owned(), value);
+            found.insert(name.to_owned(), value.to_owned());
         }
     }
     Ok(found)
+}
+
+/// The secrets file, refused by its size before it is read, and read no
+/// further than the limit in case the size was wrong (a pipe, a growing file).
+fn read_secrets_file(path: &Path) -> Result<Vec<u8>, String> {
+    let too_large = || "The secrets file is too large".to_owned();
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("Cannot read secrets: {error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("Cannot read secrets: {error}"))?
+        .len();
+    if length > MAX_SECRETS_BYTES {
+        return Err(too_large());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_SECRETS_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Cannot read secrets: {error}"))?;
+    if bytes.len() as u64 > MAX_SECRETS_BYTES {
+        return Err(too_large());
+    }
+    Ok(bytes)
 }
