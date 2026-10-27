@@ -238,8 +238,9 @@ Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
 
 ### Tools
 
-Each tool names a document by its registered path. It opens the saved project
-read-only for each call and writes nothing, not even `.apiforge/local`.
+Each tool names a document by its registered path; `check_text` also takes
+the path a new document would have. A tool opens the saved project read-only
+for each call and writes nothing, not even `.apiforge/local`.
 
 | Tool | Input | Result |
 | --- | --- | --- |
@@ -247,7 +248,7 @@ read-only for each call and writes nothing, not even `.apiforge/local`.
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
-| `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `path_rejected`, `invalid_text`) |
+| `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
 | `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document: `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`; with `full: true` the runner's JSON report instead of the steps |
 
@@ -283,7 +284,9 @@ in-flight requests); after that it is cancelled and its cleanup waited for up
 to ten seconds.
 Two environment variables are test seams for this and are not set in use:
 `APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline and
-`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run.
+`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run. Each is
+whole milliseconds, capped at ten minutes; any other value stops the server
+with exit code 2.
 
 ### Resources
 
