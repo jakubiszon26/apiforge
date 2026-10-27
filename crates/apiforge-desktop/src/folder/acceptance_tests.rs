@@ -940,4 +940,51 @@ mod mcp07 {
         }
         drop(owner);
     }
+
+    /// The bar and the badge for every holder, beside the approved captures
+    /// `docs/qa/2026-10-27/MCP-00/m1-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp07_holder_bar() {
+        use crate::testing::capture;
+        let holders = [
+            ("agent", Some(agent())),
+            ("window", Some(Holder::window().with_since(at(10, 40)))),
+            (
+                "apply",
+                Some(Holder::command("apply").with_since(at(10, 41))),
+            ),
+            ("unknown", None),
+        ];
+        for (name, holder) in holders {
+            for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+                let directory = shop();
+                let owner = match &holder {
+                    Some(holder) => hold(directory.path(), holder),
+                    None => {
+                        let owner = ProjectStore::open_exclusive(directory.path()).unwrap();
+                        fs::remove_file(directory.path().join(".apiforge/local/holder.json"))
+                            .unwrap();
+                        owner
+                    }
+                };
+                let mut harness = folder_harness(directory.path(), size);
+                let modes: &[&str] = if name == "agent" {
+                    &["Code", "Diagram", "Split"]
+                } else {
+                    &["Code"]
+                };
+                for mode in modes {
+                    choose(&mut harness, mode);
+                    capture(
+                        &mut harness,
+                        &format!("mcp07-{name}-{}-{suffix}", mode.to_lowercase()),
+                        None,
+                    );
+                }
+                drop(harness);
+                drop(owner);
+            }
+        }
+    }
 }
