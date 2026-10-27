@@ -1,8 +1,8 @@
 # KTLO-24: The bar with the open files hides itself when no file is open
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis — decisions 1 and 2 taken 2026-10-26; awaiting mock-up and
-  owner approval
+- State: Approved 2026-10-27 (issue #57) — decisions 1 and 2 = A taken
+  2026-10-26; decision 3, the mock-up as a whole, approved 2026-10-27
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-24-hide-tab-strip` (throwaway; deleted after the
   decision)
@@ -59,7 +59,7 @@ every tab closed (`testing::review` opens the demo project with a tab, so the
 view closes it first), as [design review](../gui-testing.md#design-review)
 describes; the notice view sets a dismissable notice before the capture.
 
-## Decisions for the owner (taken 2026-10-26: 1 = A, 2 = A; 3 pending)
+## Decisions for the owner (taken: 1 = A, 2 = A on 2026-10-26; 3 approved on 2026-10-27)
 
 1. **When does the band hide?**
    - **A (recommended, taken): at zero open files only.** With exactly one
