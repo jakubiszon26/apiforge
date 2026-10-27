@@ -299,3 +299,38 @@ fn a_live_folder_run_requires_its_project_lock_and_a_writable_journal() {
     assert!(run(directory.path(), "run", &arguments).status.success());
     assert!(!journal.exists(), "a finished run removes its own record");
 }
+
+/// MCP-07: `apply` names itself while it holds the project, so a window
+/// opened meanwhile can say *apiforge apply*. The description stays behind
+/// when it exits; a reader ignores it once no writer is live.
+#[test]
+fn apply_describes_itself_as_the_apply_command() {
+    let directory = tempfile::tempdir().unwrap();
+    prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+    let session = ProjectSession::open_saved_read_only(directory.path()).unwrap();
+    let scenario = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().kind == DocumentKind::Scenario)
+        .unwrap();
+    let path = scenario.entry().path.as_str().to_owned();
+    let input = directory.path().join("incoming.txt");
+    fs::write(&input, format!("{}// applied\n", scenario.text())).unwrap();
+    let output = run(
+        directory.path(),
+        "apply",
+        &[OsStr::new("--file"), OsStr::new(&path), input.as_os_str()],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let description =
+        fs::read_to_string(directory.path().join(".apiforge/local/holder.json")).unwrap();
+    assert!(
+        description.contains("\"role\":\"command\",\"client\":\"apply\""),
+        "{description}"
+    );
+    assert_eq!(session.store().holder().unwrap(), None, "apply has exited");
+}

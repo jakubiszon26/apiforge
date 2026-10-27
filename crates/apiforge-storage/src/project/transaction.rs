@@ -1,3 +1,4 @@
+use super::holder::{HOLDER_PATH, Holder};
 use super::io as disk;
 pub(super) use super::io::{create_directory, sync_parent};
 use super::io::{sync_directory, sync_surviving_parent};
@@ -131,7 +132,12 @@ impl ProjectStore {
     /// read-only. A writable opener creates `.apiforge/local` and its lock even
     /// before a manifest exists, so callers check for a manifest first.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        match Self::open_exclusive(root.as_ref()) {
+        Self::open_as(root, &Holder::window())
+    }
+
+    /// [`Self::open`] for a writer that describes itself as `holder`.
+    pub fn open_as(root: impl AsRef<Path>, holder: &Holder) -> Result<Self> {
+        match Self::open_exclusive_as(root.as_ref(), holder) {
             Err(ProjectError::Locked) => Self::open_read_only(root),
             Err(ProjectError::Io { source, .. })
                 if matches!(
@@ -149,7 +155,15 @@ impl ProjectStore {
         Self::new(root.as_ref(), None)
     }
 
+    /// The writer lock, held by a process that describes itself as a window.
     pub fn open_exclusive(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_exclusive_as(root, &Holder::window())
+    }
+
+    /// The writer lock. Once it is confirmed, `holder` replaces the
+    /// description beside it (MCP-07); the lock file itself is never written,
+    /// unlinked or replaced.
+    pub fn open_exclusive_as(root: impl AsRef<Path>, holder: &Holder) -> Result<Self> {
         let store = Self::new(root.as_ref(), None)?;
         for relative in [".apiforge", ".apiforge/local"] {
             ensure_directory(&path::resolve(&store.root, relative)?)?;
@@ -175,6 +189,13 @@ impl ProjectStore {
             sync_parent(&path)?;
         }
         sync_parent(&lock_path)?;
+        if let Some(line) = holder.to_line() {
+            let path = path::resolve(&store.root, HOLDER_PATH)?;
+            crate::write_atomic(&path, &line).map_err(|error| match error {
+                crate::DocumentError::Io { path, source } => ProjectError::Io { path, source },
+                other => ProjectError::io(&path, io::Error::other(other.to_string())),
+            })?;
+        }
         let transactions = path::resolve(&store.root, TRANSACTIONS)?;
         ensure_directory(&transactions)?;
         sync_directory(&transactions)?;
@@ -906,6 +927,20 @@ impl ProjectStore {
         let taken = take_confirmed_lock(|| file.try_lock_shared())
             .map_err(|error| ProjectError::io(&path, error))?;
         Ok(!taken)
+    }
+
+    /// Who holds the writer lock, while a writer is live: its description,
+    /// or [`Holder::unknown`] when it left none this build can read. `None`
+    /// when no writer is live, whatever description was left behind. Like
+    /// the probe, it never creates a file. A writer is answered its own.
+    pub fn holder(&self) -> Result<Option<Holder>> {
+        if !self.has_live_writer()? {
+            return Ok(None);
+        }
+        let path = path::resolve(&self.root, HOLDER_PATH)?;
+        Holder::read(&path)
+            .map(Some)
+            .map_err(|error| ProjectError::io(&path, error))
     }
 
     pub(super) fn writable(&self) -> Result<()> {
