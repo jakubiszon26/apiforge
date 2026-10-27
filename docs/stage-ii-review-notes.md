@@ -297,14 +297,21 @@ ignored until this is decided.
 ## A real workspace that migration refuses
 
 - Recorded: 2026-10-25
-- Status: open (KTLO-03, #5). Startup now stops in a *Migration stopped*
-  window instead of falling back silently. A synthetic workspace reproduces
-  the refusal with and without KTLO-04: a check whose inputs are stored as
-  `expected, actual` (its request was replaced on the board) prints and reads
-  back as `actual, expected`; the checkpoint's semantic digest hashes that
-  order, so the sealed checkpoint does not describe its own source
-  (`crates/apiforge-project/tests/migration_refusal.rs`). The fix awaits a
-  decision.
+- Status: the reproduced cause is fixed, awaiting acceptance (KTLO-03 part 2,
+  #5). A synthetic workspace reproduced the refusal with and without KTLO-04:
+  a check whose inputs are stored as `expected, actual` (its request was
+  replaced on the board) prints and reads back as `actual, expected`; the
+  checkpoint's semantic digest hashes that order, so the sealed checkpoint did
+  not describe its own source
+  (`crates/apiforge-project/tests/migration_refusal.rs`). Migration now seals
+  its checkpoints with the inputs and operands in the order the source reads
+  back (decision 6 of 2026-10-27) and the synthetic workspace migrates. A
+  migration that is still refused — for example a scenario that reads an
+  environment value the project never sets, which a folder source cannot
+  hold — stops in a *Migration stopped* window naming the project and the
+  scenario instead of falling back silently. Whether the owner's real
+  workspace now migrates is not verified. The paragraphs below are the
+  original record.
 
 Migration verifies every prepared project by reloading it through the new
 loader and comparing it with the workspace it came from. On a real six-project
