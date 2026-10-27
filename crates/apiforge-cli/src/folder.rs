@@ -147,7 +147,7 @@ pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::
     };
     let mut project = snapshot.context().clone();
     project.scenarios.push(scenario.clone());
-    let secrets = super::run::secrets(args.secrets.as_deref())?;
+    let secrets = apiforge_mcp::executor::secrets(args.secrets.as_deref())?;
     session.store().set_known_secrets(secrets.values().cloned());
     let journal = if args.live {
         Some(

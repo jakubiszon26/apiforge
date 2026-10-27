@@ -1,6 +1,12 @@
 //! `apiforge mcp [--folder <dir>]`: the project as an MCP server over stdio.
 //! Stdout belongs to the protocol; this command writes only to stderr.
-use std::{ffi::OsString, path::PathBuf};
+use apiforge_mcp::tools::RunSettings;
+use std::{ffi::OsString, path::PathBuf, time::Duration};
+
+/// Test seams: a shorter run deadline, and a pause after every run step so a
+/// simulation lasts long enough to be cancelled. Milliseconds; unset in use.
+const DEADLINE_SEAM: &str = "APIFORGE_MCP_TEST_DEADLINE_MS";
+const STEP_DELAY_SEAM: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
 
 pub const USAGE: &str = "apiforge mcp [--folder <directory>]";
 
@@ -27,11 +33,25 @@ pub fn run(args: &[OsString]) -> u8 {
             return 1;
         }
     };
-    match apiforge_mcp::serve_stdio(folder) {
+    match apiforge_mcp::serve_stdio_with(folder, settings()) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("apiforge mcp: {error}");
             1
         }
+    }
+}
+
+fn settings() -> RunSettings {
+    let milliseconds = |name| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .map(Duration::from_millis)
+    };
+    let defaults = RunSettings::default();
+    RunSettings {
+        deadline: milliseconds(DEADLINE_SEAM).unwrap_or(defaults.deadline),
+        step_delay: milliseconds(STEP_DELAY_SEAM),
     }
 }

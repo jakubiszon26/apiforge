@@ -188,7 +188,6 @@ dependencies = [
  "apiforge-runner",
  "apiforge-script",
  "apiforge-storage",
- "indexmap",
  "serde_json",
  "tempfile",
 ]
