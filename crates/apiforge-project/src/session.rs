@@ -763,13 +763,27 @@ impl ProjectSession {
         if semantic {
             self.require_comment_decision(index)?;
         }
-        let text = if semantic {
-            Some(
-                apiforge_script::print_folder_document(&self.context, &model)
-                    .map_err(|_| Error::Unprintable)?,
+        let (model, text) = if semantic {
+            let text = apiforge_script::print_folder_document(&self.context, &model)
+                .map_err(|_| Error::Unprintable)?;
+            // Keep the model the printed text reads back, with the edited
+            // model's identities and positions: a board edit may store blocks
+            // or inputs in an order the source cannot state, and the
+            // checkpoint sealed from the model must describe the source
+            // (KTLO-26).
+            let target = self.target(&document.entry);
+            let read_back = analysis::derive(
+                &target,
+                &text,
+                &self.context,
+                Some(&model),
+                None,
+                self.placer.as_ref(),
             )
+            .1;
+            (read_back.map_or(model, |(model, _)| model), Some(text))
         } else {
-            None
+            (model, None)
         };
         let document_id = document.entry.document_id.clone();
         let document = &mut self.documents[index];
