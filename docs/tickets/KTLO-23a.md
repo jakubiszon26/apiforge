@@ -1,9 +1,13 @@
 # KTLO-23a: A component runs from its tab — runner, session and the Run button
 
 - Size: M · Owner review: 45 min · Risk: `visible UI`
-- State: Approved 2026-10-27 (mock-up and decision 6); ready for acceptance tests
+- State: Awaiting acceptance (issue #53; branch `feat/ktlo-23a-component-run`)
+  — approved 2026-10-27 (mock-up and decision 6)
+- Actual: about 1570 changed lines without captures — over M (≤ 800), by
+  the tests: code 358, tests 1022 (desktop 600, runner 350, project 73), QA
+  report 182, this ticket 6; one round
 - Analysis and acceptance criteria: `docs/tickets/KTLO-23.md`
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Delivery
 
