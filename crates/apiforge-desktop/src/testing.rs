@@ -94,18 +94,23 @@ pub fn folder(harness: &FolderHarness) -> &FolderApp {
 /// requesting immediate repaints. Background work runs in real time, so this
 /// waits for it.
 pub fn settle(harness: &mut FolderHarness) {
+    assert!(settles(harness), "the folder window did not settle");
+}
+
+/// Whether the folder window settles as [`settle`] waits for it to, within the
+/// same time. A window that asks to be drawn again every frame never does.
+pub fn settles(harness: &mut FolderHarness) -> bool {
     let deadline = Instant::now() + SETTLE_TIMEOUT;
     loop {
         if folder(harness).is_analysed()
             && harness.try_run().is_ok()
             && folder(harness).is_analysed()
         {
-            return;
+            return true;
         }
-        assert!(
-            Instant::now() < deadline,
-            "the folder window did not settle"
-        );
+        if Instant::now() >= deadline {
+            return false;
+        }
         harness.step();
         std::thread::sleep(Duration::from_millis(1));
     }

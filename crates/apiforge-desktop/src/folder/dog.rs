@@ -57,6 +57,14 @@ impl Motion {
     }
 }
 
+/// Asks for the loop's next frame. The loop asks from here and nowhere else,
+/// so its request is told from the window's others — the watcher's check
+/// once a second, storage and analysis workers — by where it was made
+/// ([`egui::Context::repaint_causes`]), whenever those arrive.
+pub(super) fn next_frame(ctx: &egui::Context) {
+    ctx.request_repaint();
+}
+
 const OUTLINE: Color32 = Color32::from_rgb(0x33, 0x41, 0x55);
 const BODY: Color32 = Color32::from_rgb(0xCB, 0xD5, 0xE1);
 const GREY: Color32 = Color32::from_rgb(0x94, 0xA3, 0xB8);

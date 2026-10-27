@@ -27,7 +27,7 @@ impl FolderApp {
             // The loop runs only while the drawing is on screen: the frame
             // that draws it is the one that asks for the next.
             if drawn && self.animation {
-                ui.ctx().request_repaint();
+                dog::next_frame(ui.ctx());
             }
             return;
         };

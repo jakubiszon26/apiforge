@@ -12,9 +12,10 @@ use super::project_interaction_tests::{app, choose};
 use super::*;
 use crate::testing::{
     FolderHarness, MINIMUM, WIDE, assert_disjoint, assert_within_window, folder, folder_harness,
-    settle, shop_project,
+    settle, settles, shop_project,
 };
 use egui_kittest::kittest::Queryable;
+use std::path::Path;
 
 /// The drawing's accessible name. It is decoration, but a named one: a test
 /// measures it, and a screen reader says what the empty board shows.
@@ -52,24 +53,29 @@ fn empty_board(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarnes
     (project, harness)
 }
 
-/// Whether the window asked to be drawn again at once, as an animation does.
-/// Two passes: a repaint asked for during one pass is reported by the next.
-fn redraws_at_once(harness: &mut FolderHarness) -> bool {
-    harness.step();
-    harness.step();
-    harness.ctx.requested_repaint_last_pass()
-}
-
-/// Whether the drawing's own loop asked for the next frame. The diagram view
-/// asks for a repaint in one place only: the frame that draws the dog.
+/// Whether the drawing's loop asked for the next frame. The loop asks from
+/// `dog::next_frame` and nowhere else, so its request is told from the
+/// window's others by the file it was made in, whatever the watcher, storage
+/// and analysis threads ask for meanwhile. A frame's requests are reported
+/// once the next frame has begun, hence two steps. The path is compared by
+/// components: Windows writes it with backslashes.
 fn the_loop_redraws(harness: &mut FolderHarness) -> bool {
     harness.step();
     harness.step();
+    let dog = Path::new("folder").join("dog.rs");
     harness
         .ctx
         .repaint_causes()
         .iter()
-        .any(|cause| cause.file.ends_with("folder/diagram.rs"))
+        .any(|cause| Path::new(cause.file).ends_with(&dog))
+}
+
+/// Whether every frame asks for the next at once, as an animation does: the
+/// harness gives up after its few steps without reaching a frame that asks
+/// for none. The window's background threads only ever add requests, so a
+/// window that animates fails to settle whatever they do.
+fn never_settles(harness: &mut FolderHarness) -> bool {
+    harness.try_run().is_err()
 }
 
 /// Criterion 1: closing the last tab shows the drawing in Diagram and on the
@@ -262,8 +268,10 @@ fn an_empty_board_asks_for_no_redraw_in_the_test_harness() {
             !the_loop_redraws(&mut harness),
             "{mode} keeps the loop going in the test harness"
         );
+        // The watcher's check once a second may ask for a frame or two on
+        // its own; settling waits for that, as every other test does.
         assert!(
-            !redraws_at_once(&mut harness),
+            settles(&mut harness),
             "{mode} draws an empty board again every frame"
         );
     }
@@ -286,7 +294,7 @@ fn the_loop_runs_only_while_an_empty_board_is_visible() {
             "{mode} does not keep the drawing moving on an empty board"
         );
         assert!(
-            redraws_at_once(&mut harness),
+            never_settles(&mut harness),
             "{mode} does not ask for the next frame of the loop"
         );
     }
