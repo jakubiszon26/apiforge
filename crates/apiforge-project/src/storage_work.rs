@@ -281,6 +281,7 @@ impl ProjectSession {
             recovery: self.recovery.clone(),
             cache: self.cache.clone(),
             registry: self.registry,
+            loaded_generation: self.loaded_generation,
         }
     }
 }

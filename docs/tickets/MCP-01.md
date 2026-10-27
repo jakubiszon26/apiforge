@@ -3,8 +3,9 @@
 - Size: M · Owner review: 20 min · Risk: `default`
 - State: Approved; `ready:sol` 2026-10-27 (issue #60) · MCP-00 decisions
   8 = A and 9 = B taken 2026-10-27 · revised 2026-10-27 (MCP-00 revision
-  2: versions, contract, demo without warnings)
-- Analysis model: Fable · Implementation model: —
+  2: versions, contract, demo without warnings) · amended 2026-10-27 after
+  the implementation's escalation on #60 (criterion 5, appendix)
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Analysis: [MCP-00](MCP-00.md)
 
 ## Goal
@@ -64,7 +65,9 @@ Not applicable: no interface change.
    `75c55f5` shape, the warning comes back with its file, line and column;
    with a path, only that document. A project whose saved source has errors
    is reported, never refused. Beyond 1 000 diagnostics per document the
-   result says `omitted: n`; nothing is cut silently.
+   result says `omitted: n`; nothing is cut silently. The count comes from
+   the analysis crate, which caps at 1 000 (amended 2026-10-27, escalation
+   on #60).
 6. `print` returns the canonical text, byte for byte what `apiforge print`
    prints; for a document without a valid definition it is a tool error
    `invalid_text` with the diagnostics.
@@ -104,11 +107,28 @@ legacy JSON workspace (`--workspace`), which the server does not serve.
   session: the stable read guards against a transaction in progress.
 - `crates/apiforge-cli/src/main.rs`: a `mcp` arm before the `fmt` fallback,
   `mcp.rs` parsing `--folder`; the tokio runtime starts only in this arm.
-- `generation` is the head generation the store reads (`head()`),
-  `source_sha256` the `FileState::File { sha256 }` the session keeps.
+- `generation` is the head generation of the stable read the session was
+  loaded from (`ProjectSession::loaded_generation`, kept by `load_saved`
+  instead of discarded), `source_sha256` the `FileState::File { sha256 }`
+  the session keeps (`DocumentSession::saved_sha256`). A fresh clone has no
+  `.apiforge/local/head.json`, so its generation is 0 until the first commit
+  on that machine; the overview says `generation: 0`.
+- Two more crates are in scope (escalation of 2026-10-27, option A):
+  `apiforge-script` counts the diagnostics its lexer, parser and lowering
+  drop beyond `MAX_DIAGNOSTICS` (a warning an error replaces at the limit
+  included); `apiforge-project` carries the count through `Analysis` to
+  `DocumentSession::omitted_diagnostics`, which the server reports as
+  `omitted`.
+- Storage failures other than an interrupted transaction
+  (`recovery_required`, `wrote: false`) are `project_unreadable` with the
+  storage error's message; the code joins MCP-00's fixed list.
 - Tests: `crates/apiforge-mcp/tests/acceptance.rs` on
   `prepare_project(root, &demos::shop_project())` (criteria 3–9) and a
-  fixture derived from it with the injected warning; one stdio test spawns
-  `CARGO_BIN_EXE_apiforge` (criteria 1, 2).
+  fixture derived from it with the injected warning;
+  `crates/apiforge-script/tests/acceptance.rs` for the count; the stdio test
+  spawns `CARGO_BIN_EXE_apiforge` from `crates/apiforge-cli/tests/mcp.rs`
+  (criteria 1, 2, 8), because Cargo builds the binary only for the tests of
+  the package that owns it. A malformed line gets no answer; the test
+  asserts the server keeps answering after it.
 - Reuse: `folder.rs::select` and `check_document` move to the new crate;
   `run.rs::diagnostics` stays for the CLI's stderr format.

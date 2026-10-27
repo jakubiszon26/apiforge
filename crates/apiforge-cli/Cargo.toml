@@ -18,6 +18,7 @@ apiforge-runner.workspace = true
 indexmap.workspace = true
 apiforge-script.workspace = true
 apiforge-project.workspace = true
+apiforge-mcp.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

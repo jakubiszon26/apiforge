@@ -9,6 +9,7 @@ members = [
     "crates/apiforge-script",
     "crates/apiforge-layout",
     "crates/apiforge-cli",
+    "crates/apiforge-mcp",
     "tools/convert-v1",
 ]
 resolver = "3"
@@ -26,6 +27,7 @@ apiforge-storage = { path = "crates/apiforge-storage" }
 apiforge-project = { path = "crates/apiforge-project" }
 apiforge-layout = { path = "crates/apiforge-layout" }
 apiforge-script = { path = "crates/apiforge-script" }
+apiforge-mcp = { path = "crates/apiforge-mcp" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
 indexmap = { version = "=2.14.2", features = ["serde"] }
@@ -43,6 +45,9 @@ reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-
 tokio = { version = "=1.53.2", default-features = false, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "=0.7.19", default-features = false }
 url = "=2.5.8"
+# MCP server over stdio (MCP-00): protocol revisions 2026-07-28 and 2025-11-25.
+rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io", "macros"] }
+schemars = "=1.2.2"
 # Keep the tested egui release while the native editor is migrated.
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 rfd = "=0.17.2"

@@ -21,6 +21,12 @@ pub struct Token {
 /// Lossless and bounded: even rejected input is represented by tokens covering
 /// every byte. No token slice can split a UTF-8 character.
 pub fn lex(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    let (tokens, diagnostics, _) = lex_counted(source);
+    (tokens, diagnostics)
+}
+
+/// As `lex`, with the number of diagnostics dropped beyond `MAX_DIAGNOSTICS`.
+pub(crate) fn lex_counted(source: &str) -> (Vec<Token>, Vec<Diagnostic>, usize) {
     if source.len() > MAX_SOURCE_BYTES {
         return (
             vec![Token {
@@ -31,11 +37,13 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                 0..source.len(),
                 "Source exceeds the 1 MiB limit",
             )],
+            0,
         );
     }
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut omitted = 0;
     let mut at = 0;
     while at < bytes.len() {
         let start = at;
@@ -92,6 +100,8 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                         start..at,
                         "Unterminated string or interpolation",
                     ));
+                } else if !valid {
+                    omitted += 1;
                 }
                 TokenKind::String
             }
@@ -109,6 +119,8 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                 at += source[at..].chars().next().map_or(1, char::len_utf8);
                 if diagnostics.len() < MAX_DIAGNOSTICS {
                     diagnostics.push(Diagnostic::error(start..at, "Unexpected character"));
+                } else {
+                    omitted += 1;
                 }
                 TokenKind::Error
             }
@@ -118,7 +130,7 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             range: start..at,
         });
     }
-    (tokens, diagnostics)
+    (tokens, diagnostics, omitted)
 }
 
 pub(crate) fn scan_string(source: &str, start: usize, depth: usize) -> (usize, bool) {
