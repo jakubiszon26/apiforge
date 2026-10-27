@@ -33,7 +33,14 @@ pub fn run(args: &[OsString]) -> u8 {
             return 1;
         }
     };
-    match apiforge_mcp::serve_stdio_with(folder, settings()) {
+    let settings = match settings() {
+        Ok(settings) => settings,
+        Err(message) => {
+            eprintln!("apiforge mcp: {message}");
+            return 2;
+        }
+    };
+    match apiforge_mcp::serve_stdio_with(folder, settings) {
         Ok(()) => 0,
         Err(error) => {
             eprintln!("apiforge mcp: {error}");
@@ -42,16 +49,57 @@ pub fn run(args: &[OsString]) -> u8 {
     }
 }
 
-fn settings() -> RunSettings {
-    let milliseconds = |name| {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .map(Duration::from_millis)
-    };
+fn settings() -> Result<RunSettings, String> {
     let defaults = RunSettings::default();
-    RunSettings {
-        deadline: milliseconds(DEADLINE_SEAM).unwrap_or(defaults.deadline),
-        step_delay: milliseconds(STEP_DELAY_SEAM),
+    let seam = |name| milliseconds(name, std::env::var_os(name), defaults.deadline);
+    Ok(RunSettings {
+        deadline: seam(DEADLINE_SEAM)?.unwrap_or(defaults.deadline),
+        step_delay: seam(STEP_DELAY_SEAM)?,
+    })
+}
+
+/// A seam's value: whole milliseconds, at most `cap`, the ten-minute
+/// deadline, so a seam can shorten a run but never lengthen it. A value that
+/// is not a number stops the server instead of being ignored.
+fn milliseconds(
+    name: &str,
+    value: Option<OsString>,
+    cap: Duration,
+) -> Result<Option<Duration>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let milliseconds: u64 = value
+        .to_str()
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| format!("{name} must be a whole number of milliseconds"))?;
+    Ok(Some(Duration::from_millis(milliseconds).min(cap)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CAP: Duration = Duration::from_secs(600);
+
+    #[test]
+    fn a_seam_is_whole_milliseconds_capped_at_the_deadline() {
+        assert_eq!(milliseconds("X", None, CAP), Ok(None));
+        assert_eq!(
+            milliseconds("X", Some("300".into()), CAP),
+            Ok(Some(Duration::from_millis(300)))
+        );
+        assert_eq!(
+            milliseconds("X", Some("3600000".into()), CAP),
+            Ok(Some(CAP)),
+            "an hour is cut to ten minutes"
+        );
+        for bad in ["300ms", "", "-1", "1.5", " 300"] {
+            assert_eq!(
+                milliseconds("X", Some(bad.into()), CAP),
+                Err("X must be a whole number of milliseconds".to_owned()),
+                "{bad:?}"
+            );
+        }
     }
 }

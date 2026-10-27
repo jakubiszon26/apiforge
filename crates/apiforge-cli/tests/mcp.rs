@@ -571,6 +571,9 @@ fn mcp03_criterion_11_a_run_past_the_deadline_over_stdio() {
     assert_clean_end(server);
 }
 
+/// At EOF rmcp gives in-flight requests five seconds to finish. A run that
+/// takes longer (eight steps of two seconds here) is then cancelled: it gets
+/// no response, its cleanup runs, and the process ends.
 #[test]
 fn mcp03_eof_during_a_run_cancels_it_and_ends_the_process() {
     let directory = demo();
@@ -578,13 +581,48 @@ fn mcp03_eof_during_a_run_cancels_it_and_ends_the_process() {
     let mut server = Server::spawn_with(
         Some(root),
         root,
-        &[("APIFORGE_MCP_TEST_STEP_DELAY_MS", "300")],
+        &[("APIFORGE_MCP_TEST_STEP_DELAY_MS", "2000")],
     );
     initialize(&mut server);
     send_call(&mut server, 2, "run", json!({ "path": SCENARIO }));
     thread::sleep(Duration::from_millis(400));
-    let (status, elapsed, _, stderr) = server.close();
+    let (status, elapsed, stdout, stderr) = server.close();
     assert_eq!(status.code(), Some(0), "stderr: {stderr}");
-    assert!(elapsed < Duration::from_secs(5), "EOF took {elapsed:?}");
+    assert!(
+        stderr.contains("apiforge mcp: run: cancelled"),
+        "the run was cancelled: {stderr}"
+    );
+    assert!(
+        !stdout
+            .iter()
+            .any(|line| serde_json::from_str::<Value>(line).unwrap()["id"] == json!(2)),
+        "a run cancelled at EOF gets no response"
+    );
+    assert!(elapsed < Duration::from_secs(15), "EOF took {elapsed:?}");
     assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_a_test_seam_that_is_not_a_number_stops_the_server() {
+    let directory = demo();
+    let root = directory.path();
+    for name in [
+        "APIFORGE_MCP_TEST_DEADLINE_MS",
+        "APIFORGE_MCP_TEST_STEP_DELAY_MS",
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+            .args(["mcp", "--folder"])
+            .arg(root)
+            .env(name, "300ms")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{name}");
+        assert!(output.stdout.is_empty(), "{name}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains(&format!("{name} must be a whole number of milliseconds")),
+            "{stderr}"
+        );
+    }
 }
