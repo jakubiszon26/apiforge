@@ -52,11 +52,39 @@ The owner is not expected to read this section.
 The sections above the appendix fit on one page. If they do not, the ticket is
 too large: split it.
 
+## One acceptable result, one pull request
+
+A ticket delivers one result the owner can accept, and that result travels as
+**one pull request**, opened as a draft when the analysis starts:
+
+1. The first commit is the analysis: the ticket file, the mock-up captures,
+   and the decision card posted to the issue.
+2. The owner's decisions are recorded in the ticket file in a commit of the
+   same branch. The pull request stays a draft until the analysis is approved;
+   no implementation commit before that.
+3. The acceptance tests follow in their own commit, then the implementation,
+   then the QA report; the draft becomes ready for review.
+
+What this rules out: a pull request whose only content is a backlog row, a
+recorded decision or a sentence of a ticket. Those changes ride on the pull
+request of the ticket they describe, or on the next pull request that touches
+the backlog. A separate analysis pull request is right only when the analysis
+unblocks several tickets (KTLO-05a, LAY-00, MCP-00 are the pattern); a
+one-ticket analysis is the first commit of the ticket's own pull request.
+
+An analysis that stops at a decision the owner has not yet taken leaves the
+draft open with the `decision-needed` label on the issue; the branch waits,
+nothing else is started on it.
+
 ## Mock-ups
 
 An analysis that changes the interface includes a mock-up before approval. A
 mock-up answers "what will it look like at 960 × 540 and at 1600 × 1000", not
-"how will it work".
+"how will it work". A static capture does not show a gesture: when the change
+has an interaction (dragging, a mode that persists, a state shown while
+typing), the acceptance criteria name the gesture and the state, not only the
+control. KTLO-18 and KTLO-19 approved a button and shipped a panel whose edge
+still would not drag; the owner found it after acceptance.
 
 Acceptable forms, in order of preference:
 
