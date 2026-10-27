@@ -770,8 +770,9 @@ mod mcp07 {
     }
 
     /// Criterion 3: the holder lets go; within two seconds the window is the
-    /// writer, the badge and the bar are gone, Save is enabled and saves. The
-    /// text typed while observing is the text saved.
+    /// writer, the badge and the bar are gone, Save is enabled and saves.
+    /// MCP-08a (decision 12) pauses typing while observing, so the text is
+    /// typed after the take-back.
     #[test]
     fn a_released_project_is_taken_back_within_two_seconds_and_saves() {
         let directory = shop();
@@ -779,9 +780,6 @@ mod mcp07 {
         let mut harness = folder_harness(directory.path(), WIDE);
         let scenario = only(&harness, DocumentKind::Scenario);
         let label = editor(&harness, &scenario);
-        type_into(&mut harness, &label, "// typed while observing\n");
-        let typed = source_of(&harness, &scenario);
-        assert!(typed.contains("// typed while observing"));
         assert!(disabled(&harness, "Save"), "a read-only window cannot save");
 
         drop(owner);
@@ -794,11 +792,9 @@ mod mcp07 {
                 .query_by_label_contains("editing is paused here")
                 .is_none()
         );
-        assert_eq!(
-            source_of(&harness, &scenario),
-            typed,
-            "nothing typed is lost"
-        );
+        type_into(&mut harness, &label, "// typed after the take-back\n");
+        let typed = source_of(&harness, &scenario);
+        assert!(typed.contains("// typed after the take-back"));
         assert!(!disabled(&harness, "Save"));
         assert!(!disabled(&harness, "Save all"));
         choose(&mut harness, "Save");
@@ -827,10 +823,12 @@ mod mcp07 {
         app(&mut harness).activate_tab(&component);
         settle(&mut harness);
         let label = editor(&harness, &component);
-        type_into(&mut harness, &label, "// next revision\n");
         assert!(disabled(&harness, "Publish"));
         drop(owner);
         await_writer(&mut harness, Instant::now());
+        // Typing is paused while observing (MCP-08a), so the change that
+        // makes a next revision is typed once the window is the writer.
+        type_into(&mut harness, &label, "// next revision\n");
         assert!(!disabled(&harness, "Publish"));
     }
 
@@ -1012,6 +1010,612 @@ mod mcp07 {
                 drop(harness);
                 drop(owner);
             }
+        }
+    }
+}
+
+// ----- MCP-08a: observer mode — editing paused, every commit followed -------------
+
+mod mcp08a {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_core::format::Position;
+    use apiforge_project::{FixedPlacer, Holder, HolderRole};
+    use apiforge_storage::project::{DiagramFile, DocumentKey, IdentityBase};
+    use chrono::TimeZone;
+    use egui_kittest::kittest::NodeT;
+
+    /// The bar's region and its fixed wording (MCP-07).
+    const BAR: &str = "Project holder";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// The ticket's bound: the window shows a commit this soon after it.
+    const FOLLOW: Duration = Duration::from_secs(2);
+    /// The holder's edits, as the agent's would be.
+    const HOLDER: Origin = Origin(90);
+
+    fn agent() -> Holder {
+        let since = chrono::Local
+            .with_ymd_and_hms(2026, 10, 27, 10, 42, 11)
+            .single()
+            .expect("an unambiguous local time")
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        Holder::new(HolderRole::Agent, Some("Claude Code".into())).with_since(since)
+    }
+
+    /// The holder: a second session in this process that took the writer
+    /// lock first, as the MCP server's does, and writes through it.
+    fn holder(root: &std::path::Path) -> ProjectSession {
+        let session = ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &agent()).unwrap();
+        assert!(!session.is_read_only(), "the holder is the writer");
+        session
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    fn read_only(harness: &FolderHarness) -> bool {
+        folder(harness).session.as_ref().unwrap().is_read_only()
+    }
+
+    fn has_tab(harness: &FolderHarness, document_id: &str) -> bool {
+        folder(harness)
+            .workbench
+            .tabs()
+            .iter()
+            .any(|tab| tab.document_id == document_id)
+    }
+
+    /// Steps the window in real time until `shown` holds, and returns how
+    /// long that took after `committed`.
+    fn await_shown(
+        harness: &mut FolderHarness,
+        committed: Instant,
+        what: &str,
+        shown: impl Fn(&FolderHarness) -> bool,
+    ) -> Duration {
+        let deadline = committed + Duration::from_secs(10);
+        while !shown(harness) {
+            assert!(Instant::now() < deadline, "the window never showed {what}");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let taken = committed.elapsed();
+        settle(harness);
+        taken
+    }
+
+    fn await_writer(harness: &mut FolderHarness) {
+        await_shown(harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+    }
+
+    fn model_of(harness: &FolderHarness, document_id: &str) -> Document {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(document_id)
+            .unwrap()
+            .model()
+            .cloned()
+            .expect("a valid model")
+    }
+
+    fn blocks(model: &Document) -> Vec<(String, Position)> {
+        graph_of(model, false)
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.position.clone()))
+            .collect()
+    }
+
+    /// The blocks of a document's record in the checkpoint on disk.
+    fn checkpoint_blocks(root: &std::path::Path, document_id: &str) -> Vec<(String, Position)> {
+        let file = DiagramFile::from_bytes(&fs::read(root.join(".apiforge/diagram.json")).unwrap())
+            .unwrap();
+        let record = file
+            .records
+            .iter()
+            .find(|record| {
+                record.key
+                    == DocumentKey::Working {
+                        document_id: document_id.to_owned(),
+                    }
+            })
+            .expect("a save wrote a checkpoint");
+        let model = match &record.identity_base {
+            IdentityBase::Scenario(scenario) => Document::Scenario(scenario.clone()),
+            IdentityBase::Component(component) => Document::Component(component.clone()),
+        };
+        blocks(&model)
+    }
+
+    /// `model` with every block of its main board moved by `(dx, dy)`.
+    fn moved(model: &Document, dx: f64, dy: f64) -> Document {
+        let mut graph = graph_of(model, false).clone();
+        for node in &mut graph.nodes {
+            node.position.x += dx;
+            node.position.y += dy;
+        }
+        with_graph(model, false, graph)
+    }
+
+    /// The bar's last-change text (*10:43 · promotion.afs saved*), if any.
+    fn last_change(harness: &FolderHarness) -> Option<String> {
+        harness
+            .query_all_by_label_contains(" · ")
+            .filter_map(|node| node.accesskit_node().label())
+            .find(|label| {
+                !label.contains(PAUSED)
+                    && [" saved", " added", " deleted", " published"]
+                        .iter()
+                        .any(|end| label.ends_with(end))
+            })
+    }
+
+    /// Criterion 1: while another process holds the project, the window
+    /// observes. The code view takes no keystroke, the board no drop, wire or
+    /// move, the inspector and the explorer's commands are disabled; *Run*
+    /// still simulates; *Run live requests* is disabled.
+    #[test]
+    fn observing_pauses_every_edit_and_still_simulates() {
+        let directory = shop();
+        let _owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        assert!(has_label(&harness, "Observing"));
+        assert!(has_label(&harness, BAR));
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let before = source_of(&harness, &scenario);
+
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// typed while observing\n");
+        assert_eq!(
+            source_of(&harness, &scenario),
+            before,
+            "the code view takes no keystroke"
+        );
+        assert!(disabled(&harness, "New"), "the explorer cannot create");
+
+        choose(&mut harness, "Diagram");
+        let blocks_before = blocks(&model_of(&harness, &scenario));
+        assert!(
+            disabled(&harness, "HTTP request"),
+            "the library offers no block"
+        );
+        let start = harness.get_by_label("HTTP request").rect().center();
+        let board = harness.get_by_label("Diagram board").rect();
+        let drop = board.left_bottom() + egui::vec2(80.0, -80.0);
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + (drop - start) * (step as f32 / 8.0));
+            harness.step();
+        }
+        harness.drop_at(drop);
+        settle(&mut harness);
+        assert!(
+            disabled(&harness, "Output value of Expected price"),
+            "no wire starts from a socket"
+        );
+        // A card can still be selected, for reading; it cannot be moved.
+        let card = harness
+            .get_by_label("Expected price (Value)")
+            .rect()
+            .center();
+        harness.hover_at(card);
+        harness.step();
+        harness.drag_at(card);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(card + egui::vec2(15.0, 10.0) * step as f32);
+            harness.step();
+        }
+        harness.drop_at(card + egui::vec2(120.0, 80.0));
+        settle(&mut harness);
+        assert_eq!(
+            blocks(&model_of(&harness, &scenario)),
+            blocks_before,
+            "the board accepts no drop, wire or move"
+        );
+        choose(&mut harness, "Expected price (Value)");
+        assert!(
+            folder(&harness)
+                .selections
+                .get(&scenario)
+                .is_some_and(|selection| !selection.is_empty()),
+            "a block can still be selected"
+        );
+        assert!(
+            disabled(&harness, "Block name"),
+            "the inspector is disabled"
+        );
+        let document = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap();
+        assert!(!document.is_dirty() && !document.is_layout_dirty());
+
+        choose(&mut harness, "Run options");
+        assert!(
+            disabled(&harness, "Run live requests"),
+            "no live request is sent from an observing window"
+        );
+        harness.key_press(Key::Escape);
+        settle(&mut harness);
+        choose(&mut harness, "Run");
+        let report = finish_run(&mut harness);
+        assert!(!report.steps.is_empty(), "the simulation still runs");
+    }
+
+    /// Criterion 2: the holder saves a changed scenario with its blocks
+    /// moved; within two seconds the window shows the text, the blocks with
+    /// the identities and positions of the holder's checkpoint, and then the
+    /// diagnostics of a later save; the tab, the camera and the selection
+    /// stay where they were.
+    #[test]
+    fn the_holders_save_is_shown_within_two_seconds_where_the_person_was() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        choose(&mut harness, "Diagram");
+        choose(&mut harness, "Expected price (Value)");
+        choose(&mut harness, "Zoom in");
+        let selection = folder(&harness).selections.get(&scenario).cloned();
+        assert!(selection.as_ref().is_some_and(|ids| !ids.is_empty()));
+        let camera = folder(&harness).canvases[&scenario].camera();
+        assert!(camera.is_some(), "the camera was moved");
+
+        let text = owner
+            .document(&scenario)
+            .unwrap()
+            .text()
+            .replace("80 * 1", "80 * 2");
+        owner.edit_source(&scenario, &text, HOLDER).unwrap();
+        owner.settle(&scenario).unwrap();
+        let model = owner.document(&scenario).unwrap().model().cloned().unwrap();
+        owner
+            .apply_model_edit(&scenario, moved(&model, 240.0, 160.0), HOLDER)
+            .unwrap();
+        owner.save(&scenario).unwrap();
+        let taken = await_shown(&mut harness, Instant::now(), "the new text", |harness| {
+            source_of(harness, &scenario) == text
+        });
+        assert!(taken <= FOLLOW, "shown after {taken:?}");
+        assert_eq!(
+            blocks(&model_of(&harness, &scenario)),
+            checkpoint_blocks(directory.path(), &scenario),
+            "the identities and positions of the holder's checkpoint"
+        );
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert_eq!(folder(&harness).canvases[&scenario].camera(), camera);
+        assert_eq!(
+            folder(&harness).selections.get(&scenario).cloned(),
+            selection
+        );
+
+        let broken = format!("{text}\nbroken = \n");
+        owner.edit_source(&scenario, &broken, HOLDER).unwrap();
+        owner.save(&scenario).unwrap();
+        let taken = await_shown(&mut harness, Instant::now(), "the diagnostics", |harness| {
+            source_of(harness, &scenario) == broken
+        });
+        assert!(taken <= FOLLOW, "shown after {taken:?}");
+        choose(&mut harness, "Code");
+        assert!(
+            harness.query_by_label_contains("Line ").is_some(),
+            "Problems lists the new diagnostics"
+        );
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+    }
+
+    /// Criterion 3: a document the holder registers is listed within two
+    /// seconds, without a *reloaded* notice, and the active tab stays.
+    #[test]
+    fn a_document_the_holder_registers_is_listed_without_a_notice() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let active = folder(&harness).workbench.active().map(str::to_owned);
+        owner
+            .create_document(
+                DocumentKind::Scenario,
+                "scenarios/added-by-agent.afs",
+                "scenario \"Added by agent\" {\n  total = 2\n}\n",
+            )
+            .unwrap();
+        let taken = await_shown(
+            &mut harness,
+            Instant::now(),
+            "the new document",
+            |harness| {
+                harness
+                    .query_by_label_contains("added-by-agent.afs")
+                    .is_some()
+            },
+        );
+        assert!(taken <= FOLLOW, "listed after {taken:?}");
+        assert!(
+            folder(&harness).notice.is_none(),
+            "no notice: {:?}",
+            folder(&harness)
+                .notice
+                .as_ref()
+                .map(|notice| notice.text.clone())
+        );
+        assert_eq!(
+            folder(&harness).workbench.active().map(str::to_owned),
+            active
+        );
+        assert!(
+            last_change(&harness).is_some_and(|text| text.contains("added-by-agent.afs")),
+            "the bar says what changed last: {:?}",
+            last_change(&harness)
+        );
+    }
+
+    /// Criterion 4: a revision the holder publishes is shown in the
+    /// component's tab within two seconds, and a scenario calling it
+    /// analyses without error.
+    #[test]
+    fn a_revision_the_holder_publishes_is_followed() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let component = owner
+            .documents()
+            .iter()
+            .find(|document| {
+                document.entry().kind == DocumentKind::Component
+                    && document.text().starts_with("component active_promotion")
+            })
+            .expect("the shop's scenario calls the active_promotion component")
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        let revisions = owner.manifest().revisions.len();
+
+        let text = owner.document(&component).unwrap().text().to_owned();
+        let edited = text.replacen('"', "\"Published ", 1);
+        owner.edit_source(&component, &edited, HOLDER).unwrap();
+        owner.settle(&component).unwrap();
+        let published = owner.publish(&component, HOLDER).unwrap();
+        let calling = owner.document(&scenario).unwrap().text().replace(
+            "active_promotion@1(",
+            &format!("active_promotion@{}(", published.revision),
+        );
+        assert_ne!(calling, owner.document(&scenario).unwrap().text());
+        owner.edit_source(&scenario, &calling, HOLDER).unwrap();
+        owner.save(&scenario).unwrap();
+
+        let taken = await_shown(&mut harness, Instant::now(), "the revision", |harness| {
+            source_of(harness, &scenario) == calling
+        });
+        assert!(taken <= FOLLOW, "shown after {taken:?}");
+        assert!(
+            folder(&harness).notice.is_none(),
+            "followed without a reload notice: {:?}",
+            folder(&harness)
+                .notice
+                .as_ref()
+                .map(|notice| notice.text.clone())
+        );
+        assert_eq!(source_of(&harness, &component), edited);
+        assert_eq!(
+            folder(&harness).workbench.active(),
+            Some(component.as_str())
+        );
+        let session = folder(&harness).session.as_ref().unwrap();
+        assert_eq!(session.manifest().revisions.len(), revisions + 1);
+        assert_eq!(
+            session.document(&scenario).unwrap().analysis(),
+            AnalysisState::Valid,
+            "a scenario calling the new revision analyses without error"
+        );
+    }
+
+    /// Criterion 7: a tab whose document the holder deleted closes with a
+    /// notice; every other tab stays.
+    #[test]
+    fn a_tab_whose_document_the_holder_deleted_closes_with_a_notice() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let extra = owner
+            .create_document(
+                DocumentKind::Scenario,
+                "scenarios/short-lived.afs",
+                "scenario \"Short lived\" {\n  total = 2\n}\n",
+            )
+            .unwrap();
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        app(&mut harness).activate_tab(&extra);
+        settle(&mut harness);
+        let preview = owner
+            .preview_delete(&["scenarios/short-lived.afs"])
+            .unwrap();
+        owner.delete(&preview, HOLDER).unwrap();
+        let taken = await_shown(&mut harness, Instant::now(), "the closed tab", |harness| {
+            !has_tab(harness, &extra)
+        });
+        assert!(taken <= FOLLOW, "closed after {taken:?}");
+        assert!(has_tab(&harness, &scenario), "every other tab stays");
+        let notice = folder(&harness)
+            .notice
+            .as_ref()
+            .map(|notice| notice.text.clone())
+            .unwrap_or_default();
+        assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
+    }
+
+    /// Criterion 8: after following the holder's commits and taking the
+    /// project back, a save in the window succeeds with no conflict on the
+    /// checkpoint: its baseline is the one on disk.
+    #[test]
+    fn after_the_take_back_a_save_meets_no_checkpoint_conflict() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let text = owner
+            .document(&scenario)
+            .unwrap()
+            .text()
+            .replace("80 * 1", "80 * 3");
+        owner.edit_source(&scenario, &text, HOLDER).unwrap();
+        owner.settle(&scenario).unwrap();
+        let model = owner.document(&scenario).unwrap().model().cloned().unwrap();
+        owner
+            .apply_model_edit(&scenario, moved(&model, -120.0, 60.0), HOLDER)
+            .unwrap();
+        owner.save(&scenario).unwrap();
+        await_shown(&mut harness, Instant::now(), "the new text", |harness| {
+            source_of(harness, &scenario) == text
+        });
+        drop(owner);
+        await_writer(&mut harness);
+
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// the window's own change\n");
+        settle(&mut harness);
+        let model = model_of(&harness, &scenario);
+        let moved_model = moved(&model, 30.0, 20.0);
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .apply_model_edit(&scenario, moved_model, DIAGRAM)
+            .unwrap();
+        settle(&mut harness);
+        choose(&mut harness, "Save");
+        let session = folder(&harness).session.as_ref().unwrap();
+        let document = session.document(&scenario).unwrap();
+        assert!(
+            !document.is_dirty() && !document.is_layout_dirty(),
+            "saved: {:?}",
+            folder(&harness)
+                .notice
+                .as_ref()
+                .map(|notice| notice.text.clone())
+        );
+        assert!(document.conflict().is_none());
+        let saved = path_of(&harness, &scenario);
+        assert!(
+            fs::read_to_string(directory.path().join(saved))
+                .unwrap()
+                .contains("// the window's own change")
+        );
+        assert_eq!(
+            checkpoint_blocks(directory.path(), &scenario),
+            blocks(&model_of(&harness, &scenario)),
+            "the checkpoint holds the window's layout"
+        );
+    }
+
+    /// Criterion 9: at 960 × 540 the badge and the bar with its last-change
+    /// text stay inside the window in Code, Diagram and Split, the text
+    /// beside the holder and not over it.
+    #[test]
+    fn the_bar_with_its_last_change_fits_the_minimum_window_in_every_mode() {
+        let directory = shop();
+        let mut owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), MINIMUM);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let text = format!("{}// saved by the agent\n", source_of(&harness, &scenario));
+        owner.edit_source(&scenario, &text, HOLDER).unwrap();
+        owner.save(&scenario).unwrap();
+        await_shown(&mut harness, Instant::now(), "the commit", |harness| {
+            last_change(harness).is_some()
+        });
+        let change = last_change(&harness).unwrap();
+        assert!(
+            change.ends_with("promotion-and-cart-price.afs saved"),
+            "{change}"
+        );
+        let holder_text = format!("Claude Code via apiforge mcp · since 10:42 · {PAUSED}");
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            assert_within_window(&harness, &[BAR, change.as_str(), "Observing"]);
+            assert_disjoint(&harness, &[holder_text.as_str(), change.as_str()]);
+        }
+    }
+
+    /// The carry-over from the review of #106: *Project settings* opens with
+    /// every control disabled and *Environment* with its public part
+    /// disabled while observing; neither leaves configuration behind that
+    /// would stop the take-back.
+    #[test]
+    fn settings_open_disabled_while_observing_and_the_take_back_still_works() {
+        let directory = shop();
+        let owner = holder(directory.path());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        open_project_menu(&mut harness, "Project settings…");
+        assert!(has_label(&harness, "Project name"), "the dialog opens");
+        assert!(disabled(&harness, "Project name"));
+        assert!(disabled(&harness, "Apply settings"));
+        choose(&mut harness, "Cancel");
+        open_project_menu(&mut harness, "Test environment…");
+        assert!(
+            disabled(&harness, "Base URL"),
+            "the public part is disabled"
+        );
+        assert!(disabled(&harness, "New variable name"));
+        assert!(disabled(&harness, "New secret name"));
+        choose(&mut harness, "Cancel");
+        assert!(
+            !folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .is_manifest_dirty()
+        );
+        drop(owner);
+        await_writer(&mut harness);
+        assert!(!has_label(&harness, "Observing"));
+    }
+
+    /// The observer, the followed commit and the bar's last change, beside
+    /// the approved captures `docs/qa/2026-10-27/MCP-00/m1-observer-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp08a_observer() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let mut owner = holder(directory.path());
+            let mut harness = folder_harness(directory.path(), size);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            let text = owner
+                .document(&scenario)
+                .unwrap()
+                .text()
+                .replace("80 * 1", "80 * 2");
+            owner.edit_source(&scenario, &text, HOLDER).unwrap();
+            owner.save(&scenario).unwrap();
+            await_shown(&mut harness, Instant::now(), "the commit", |harness| {
+                last_change(harness).is_some()
+            });
+            for mode in ["Code", "Diagram", "Split"] {
+                choose(&mut harness, mode);
+                capture(
+                    &mut harness,
+                    &format!("mcp08a-observer-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+            drop(harness);
+            drop(owner);
         }
     }
 }
