@@ -66,7 +66,12 @@ fn finish(harness: &mut FolderHarness) -> RunResult {
     let active = folder(harness).workbench.active().unwrap().to_owned();
     folder(harness)
         .run_result(&active)
-        .expect("a run from the component's tab leaves a report")
+        .unwrap_or_else(|| {
+            panic!(
+                "a run from the component's tab leaves a report: {:?}",
+                folder(harness).notice.as_ref().map(|notice| &notice.text)
+            )
+        })
         .clone()
 }
 
@@ -468,6 +473,13 @@ fn ktlo23_live_requests_from_a_component_are_sent_and_journalled_under_its_name(
     assert!(!has(&harness, "while the scenario runs"));
     choose(&mut harness, "Cancel run");
     finish(&mut harness);
+    // The test address is not the project's; nothing asks to save it.
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .discard_configuration()
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !app(&mut harness).prepare_close() {
         assert!(Instant::now() < deadline, "the window closes");
