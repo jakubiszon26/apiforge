@@ -2,8 +2,12 @@
 
 - Size: M · Owner review: 30 min · Risk: `visible UI` (S · 20 min before
   decision 1 chose the animation)
+- Actual size: 1012 changed lines (`git diff --stat origin/main...HEAD` at
+  the head of pull request #52), 212 over the M cap of 800; accepted unsplit
+  by the owner on 2026-10-27 (decision 5).
 - State: Approved 2026-10-26 (issue #46) — mock-up approved as a whole;
-  decision 1 = B (animated), decision 2 = A (only the no-file hint)
+  decision 1 = B (animated), decision 2 = A (only the no-file hint);
+  decisions 4 and 5 on pull request #52 taken 2026-10-27
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-20-sleeping-dog`, commit 1506a9e (throwaway;
   deleted after the decision)
@@ -81,6 +85,20 @@ frame the owner approves; an animated dog breathes around it.
 3. **The mock-up as a whole:** size (220 points wide at the minimum window,
    280 at the default), place (above the hint, the pair centred), the letters in the
    application's bold font, and no drop shadow.
+
+### Decisions on pull request #52 (taken 2026-10-27)
+
+4. **Criterion 5, the accessibility tree: the hidden named nodes stay.** The
+   drawing and the empty board carry names ("Sleeping dog", "Diagram board")
+   marked hidden in the tree, so a screen reader announces only the hint and
+   the tests can still measure the drawing's box. Criterion 5 is met as to its
+   purpose.
+5. **Size: one pull request, the breach recorded.** The pull request changes
+   1012 lines, 212 over the M cap of 800, because 364 of them are the drawing
+   of the approved mock-up held as data. It was 939 when the owner decided;
+   the CI fix, the review fixes and these records add the rest. It is not
+   split: a second review of about 150 lines of animation would cost more
+   than it saves. The retrospective counts it.
 
 ## Acceptance criteria
 
