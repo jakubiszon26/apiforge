@@ -88,9 +88,17 @@ deviation from the letter of criterion 5 ("the dog adds none") and the owner
 may want it undone** — see the pull request.
 
 Design review of `review_empty_board` at 960 × 540, 1600 × 1000 and 960 × 540
-at double scale: nothing overlaps, nothing is cut off, the pair is centred,
-and at double scale the drawing and its letters are sharp and keep their
-proportions (criterion 7, reviewed by eye as the ticket asks).
+at double scale: nothing overlaps, nothing is cut off and the pair is centred.
+
+Criterion 7, double scale: [Diagram](review-diagram-960x540-2x.png) and
+[Split](review-split-960x540-2x.png) at 960 × 540 with double scale, each
+1920 × 1080 pixels, rendered by `review_empty_board` (`tools/gui/review.sh
+review_empty_board`) at commit `cdd8146`. Observed: the outline, the ears, the
+eyes and the "z z Z" are drawn at the doubled resolution with smooth curves and
+no blur or stair-stepping; the drawing has the shape, proportions and place
+above the hint of the single-scale captures, at twice the pixels. These are
+headless harness captures, which the ticket names for this criterion; the
+release binary was not captured at double scale (see "Not verified").
 
 ## Windows
 
@@ -113,6 +121,9 @@ for Windows on this report alone.
 - A board too small for the drawing (a very short window, or one whose run
   report leaves no room) falls back to the hint alone. No capture, and no
   test: the minimum window is 960 × 540 and fits the pair.
+- The release binary at double scale: criterion 7 rests on the harness
+  captures above. Xvfb draws at a scale of one, and no native double-scale
+  capture was taken.
 - Windows, other than the CI suite.
 
 ## Regression smoke list
