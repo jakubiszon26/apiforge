@@ -62,12 +62,13 @@ fn central_tops(harness: &FolderHarness, mode: &str) -> Vec<(&'static str, f32)>
     let empty = folder(harness).workbench.active().is_none();
     let code_area =
         |harness: &FolderHarness| harness.get_by_label(CODE_HINT).rect().top() - CODE_HINT_MARGIN;
+    // The empty board is named too when it has room for the sleeping dog
+    // (KTLO-20); without it the hint alone fills the board.
     let board = |harness: &FolderHarness| {
-        if empty {
-            harness.get_by_label(BOARD_HINT).rect().top()
-        } else {
-            harness.get_by_label("Diagram board").rect().top()
-        }
+        harness
+            .query_by_label("Diagram board")
+            .map(|board| board.rect().top())
+            .unwrap_or_else(|| harness.get_by_label(BOARD_HINT).rect().top())
     };
     let mut tops = Vec::new();
     match mode {
