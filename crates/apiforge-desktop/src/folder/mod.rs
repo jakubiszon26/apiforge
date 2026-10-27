@@ -18,6 +18,7 @@ mod diagram;
 mod dog;
 mod explorer;
 mod file_prompts;
+mod holder;
 mod navigation;
 mod opening;
 mod placement;
@@ -261,6 +262,10 @@ pub struct FolderApp {
     /// harness holds it at its rest frame: a board that asks to be drawn
     /// again every frame never settles.
     animation: bool,
+    /// Who holds the project while this window observes it (MCP-07); `None`
+    /// while this window is the writer, or read-only with no live holder.
+    holder: Option<holder::Observed>,
+    take_back: holder::TakeBack,
 }
 
 struct Clipboard {
@@ -401,6 +406,8 @@ impl FolderApp {
             picked_ready: Vec::new(),
             library: Library::default(),
             animation: !cfg!(test),
+            holder: None,
+            take_back: holder::TakeBack::default(),
         }
     }
 
@@ -452,14 +459,8 @@ impl FolderApp {
                 self.canvases.insert(tab.document_id.clone(), canvas);
             }
         }
-        if session.is_read_only() {
-            self.notice = Some(Notice {
-                text: "Another window is editing this project. This window is read-only: \
-                       changes cannot be saved."
-                    .into(),
-                error: true,
-            });
-        }
+        self.holder = None;
+        self.take_back = holder::TakeBack::default();
         self.seen = session.last_sequence();
         self.uninitialised = false;
         self.session = Some(session);
@@ -618,6 +619,9 @@ impl FolderApp {
             self.watcher.poll(session, now)
         };
         ui.ctx().request_repaint_after(wait);
+        if let Some(probe) = self.watcher.take_probe() {
+            self.follow_holder(probe);
+        }
         self.follow_events();
         if let Some(changes) = outcome {
             self.storage_project(
@@ -669,6 +673,8 @@ impl FolderApp {
                     self.notices(ui);
                 });
         }
+        // Across the whole window, under every panel and section (MCP-07).
+        self.holder_bar(ui);
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
         // Maximised run results leave no room for anything else (KTLO-19).

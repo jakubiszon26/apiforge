@@ -407,7 +407,8 @@ impl FolderApp {
         if warnings > 0 {
             status.push(count(warnings, "warning"));
         }
-        if read_only {
+        // While observing, the bar at the bottom says so (MCP-07, M1).
+        if read_only && !self.observing() {
             status.push("Read-only".into());
         }
         let expanded = self.problems_expanded;

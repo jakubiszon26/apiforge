@@ -19,6 +19,7 @@ indexmap.workspace = true
 eframe.workspace = true
 rfd.workspace = true
 image.workspace = true
+chrono.workspace = true
 
 [features]
 # Serves egui_inspection when EGUI_INSPECTION is set (ADR 0013). Never enabled in releases.

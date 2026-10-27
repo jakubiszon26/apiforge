@@ -628,3 +628,390 @@ fn a_mode_requested_at_startup_is_shown_and_not_written_back() {
         }
     }
 }
+
+// ----- MCP-07: the lock names its holder; the window takes the project back -----
+
+mod mcp07 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_storage::project::{Holder, HolderRole, ProjectStore};
+    use chrono::TimeZone;
+    use egui_kittest::kittest::NodeT;
+
+    /// The bar's region, named for assistive technology and for these tests.
+    const BAR: &str = "Project holder";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// Criterion 3's bound: the window is the writer this soon after a release.
+    const TAKE_BACK: Duration = Duration::from_secs(2);
+
+    /// 10:42 on the wall clock of the machine running the tests, as the
+    /// holder file spells it: UTC, RFC 3339.
+    fn at(hour: u32, minute: u32) -> String {
+        chrono::Local
+            .with_ymd_and_hms(2026, 10, 27, hour, minute, 11)
+            .single()
+            .expect("an unambiguous local time")
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    }
+
+    fn agent() -> Holder {
+        Holder::new(HolderRole::Agent, Some("Claude Code".into())).with_since(at(10, 42))
+    }
+
+    fn hold(root: &std::path::Path, holder: &Holder) -> ProjectStore {
+        ProjectStore::open_exclusive_as(root, holder).unwrap()
+    }
+
+    fn read_only(harness: &FolderHarness) -> bool {
+        folder(harness).session.as_ref().unwrap().is_read_only()
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// Steps the window in real time until it is the writer, and returns how
+    /// long that took after `released`.
+    fn await_writer(harness: &mut FolderHarness, released: Instant) -> Duration {
+        let deadline = released + Duration::from_secs(10);
+        while read_only(harness) {
+            assert!(
+                Instant::now() < deadline,
+                "the window never took the project back"
+            );
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let taken = released.elapsed();
+        settle(harness);
+        taken
+    }
+
+    /// Criterion 2: the bar names the holder and when it took the project;
+    /// the header badge says the window is observing; the old notice is gone.
+    #[test]
+    fn a_window_opened_while_another_process_holds_the_project_names_the_holder() {
+        for (holder, text) in [
+            (
+                agent(),
+                format!("Claude Code via apiforge mcp · since 10:42 · {PAUSED}"),
+            ),
+            (
+                Holder::window().with_since(at(10, 40)),
+                format!("Another API Forge window · since 10:40 · {PAUSED}"),
+            ),
+            (
+                Holder::command("apply").with_since(at(10, 41)),
+                format!("apiforge apply · since 10:41 · {PAUSED}"),
+            ),
+        ] {
+            let directory = shop();
+            let owner = hold(directory.path(), &holder);
+            let harness = folder_harness(directory.path(), WIDE);
+            assert!(read_only(&harness));
+            assert!(has_label(&harness, &text), "{text}");
+            assert!(has_label(&harness, "Observing"));
+            assert!(!has_label(&harness, "Read-only"));
+            assert!(has_label(&harness, BAR));
+            assert!(
+                harness
+                    .query_by_label_contains("Another window is editing this project")
+                    .is_none(),
+                "the notice under the tabs is gone"
+            );
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// Criterion 2: a lock held by an older build, which wrote no
+    /// description, or a description that cannot be read, gets the generic
+    /// wording.
+    #[test]
+    fn a_holder_that_wrote_no_readable_description_is_another_process() {
+        for description in [None, Some(&b"{ not a description"[..])] {
+            let directory = shop();
+            let owner = ProjectStore::open_exclusive(directory.path()).unwrap();
+            let file = directory.path().join(".apiforge/local/holder.json");
+            match description {
+                None => fs::remove_file(&file).unwrap(),
+                Some(bytes) => fs::write(&file, bytes).unwrap(),
+            }
+            let harness = folder_harness(directory.path(), WIDE);
+            assert!(has_label(&harness, &format!("Another process · {PAUSED}")));
+            assert!(has_label(&harness, "Observing"));
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// Review round 1 of #106: a description this user cannot read is the
+    /// generic wording too, not a plain read-only window. Unix only: Windows
+    /// permissions cannot be modelled with a mode here.
+    #[cfg(unix)]
+    #[test]
+    fn a_holder_whose_description_cannot_be_read_is_another_process() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let file = directory.path().join(".apiforge/local/holder.json");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        // Privileged users read it regardless; then there is nothing to verify.
+        if fs::read(&file).is_ok() {
+            return;
+        }
+        let harness = folder_harness(directory.path(), WIDE);
+        assert!(has_label(&harness, &format!("Another process · {PAUSED}")));
+        assert!(has_label(&harness, "Observing"));
+        drop(harness);
+        drop(owner);
+    }
+
+    /// Criterion 3: the holder lets go; within two seconds the window is the
+    /// writer, the badge and the bar are gone, Save is enabled and saves. The
+    /// text typed while observing is the text saved.
+    #[test]
+    fn a_released_project_is_taken_back_within_two_seconds_and_saves() {
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// typed while observing\n");
+        let typed = source_of(&harness, &scenario);
+        assert!(typed.contains("// typed while observing"));
+        assert!(disabled(&harness, "Save"), "a read-only window cannot save");
+
+        drop(owner);
+        let taken = await_writer(&mut harness, Instant::now());
+        assert!(taken <= TAKE_BACK, "taken back after {taken:?}");
+        assert!(!has_label(&harness, "Observing"));
+        assert!(!has_label(&harness, BAR));
+        assert!(
+            harness
+                .query_by_label_contains("editing is paused here")
+                .is_none()
+        );
+        assert_eq!(
+            source_of(&harness, &scenario),
+            typed,
+            "nothing typed is lost"
+        );
+        assert!(!disabled(&harness, "Save"));
+        assert!(!disabled(&harness, "Save all"));
+        choose(&mut harness, "Save");
+        let path = path_of(&harness, &scenario);
+        assert_eq!(
+            fs::read_to_string(directory.path().join(path)).unwrap(),
+            typed
+        );
+        assert!(
+            ProjectStore::open_read_only(directory.path())
+                .unwrap()
+                .holder()
+                .unwrap()
+                .is_some_and(|holder| holder.role() == Some(HolderRole::Window)),
+            "the window now names itself as the holder"
+        );
+    }
+
+    /// Criterion 3: *Publish* is enabled again on a component's tab.
+    #[test]
+    fn a_taken_back_window_can_publish_again() {
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let component = only(&harness, DocumentKind::Component);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        let label = editor(&harness, &component);
+        type_into(&mut harness, &label, "// next revision\n");
+        assert!(disabled(&harness, "Publish"));
+        drop(owner);
+        await_writer(&mut harness, Instant::now());
+        assert!(!disabled(&harness, "Publish"));
+    }
+
+    /// Criterion 4: while the holder holds the lock the window waits, however
+    /// long, and never touches the lock or the holder's description.
+    #[test]
+    fn a_held_project_is_never_taken_however_long_it_is_held() {
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let lock = directory.path().join(".apiforge/local/project.lock");
+        let description = directory.path().join(".apiforge/local/holder.json");
+        let described = fs::read(&description).unwrap();
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&lock).unwrap().ino()
+        };
+        let mut harness = folder_harness(directory.path(), WIDE);
+        let text = format!("Claude Code via apiforge mcp · since 10:42 · {PAUSED}");
+        let until = Instant::now() + watcher::POLL_INTERVAL * 4;
+        while Instant::now() < until {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        assert!(read_only(&harness));
+        assert!(has_label(&harness, &text));
+        assert!(has_label(&harness, "Observing"));
+        assert!(!owner.is_read_only(), "the holder still holds the project");
+        // Held, so only its length: Windows refuses to read a locked file.
+        assert_eq!(
+            fs::metadata(&lock).unwrap().len(),
+            0,
+            "the lock file is untouched"
+        );
+        assert_eq!(fs::read(&description).unwrap(), described);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&lock).unwrap().ino(), identity);
+        }
+        drop(owner);
+        await_writer(&mut harness, Instant::now());
+    }
+
+    /// Criterion 5: a holder that died with an activated transaction leaves
+    /// it to the window, which opens the recovery view it opens at start, now
+    /// able to finish it.
+    #[test]
+    fn a_transaction_left_by_the_holder_opens_the_recovery_view() {
+        use super::super::recovery_tests::{INTENDED, assert_active, interrupt, source_project};
+        let (directory, _) = source_project();
+        let owner = hold(directory.path(), &agent());
+        let mut harness = folder_harness(directory.path(), WIDE);
+        assert!(read_only(&harness));
+        interrupt(directory.path());
+        drop(owner);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !has_label(&harness, "Recover interrupted file operation") {
+            assert!(Instant::now() < deadline, "the recovery view opens");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        assert!(!disabled(&harness, "Finish intended operation"));
+        choose(&mut harness, "Finish intended operation");
+        assert_active(directory.path(), false);
+        assert_eq!(
+            fs::read_to_string(directory.path().join("main.afs")).unwrap(),
+            INTENDED
+        );
+        choose(&mut harness, "Reload project");
+        await_writer(&mut harness, Instant::now());
+        assert!(!has_label(&harness, "Observing"));
+    }
+
+    /// Criterion 5: a holder that died during a live run leaves its journal;
+    /// on take-back the window lists the interrupted run, as at start.
+    #[test]
+    fn a_live_run_interrupted_in_the_holder_is_reported_on_take_back() {
+        use apiforge_core::journal::{JournalRun, JournalSink};
+        let directory = shop();
+        let owner = hold(directory.path(), &Holder::command("run"));
+        let journal = apiforge_storage::JournalStore::open_project(owner.clone()).unwrap();
+        journal
+            .store
+            .begin_run(&JournalRun::new(
+                "interrupted",
+                "main",
+                "Main",
+                "2026-10-27T10:41:00Z",
+            ))
+            .unwrap();
+        drop(journal);
+        let mut harness = folder_harness(directory.path(), WIDE);
+        assert!(
+            !has_label(&harness, "Mark as handled"),
+            "not while observing"
+        );
+        drop(owner);
+        await_writer(&mut harness, Instant::now());
+        assert!(has_label(&harness, "Mark as handled"));
+    }
+
+    /// Criterion 6: at the minimum window the bar and the badge stay inside
+    /// the window in every mode, and the Problems caption and the diagram's
+    /// zoom bar sit above the bar.
+    #[test]
+    fn the_bar_and_the_badge_fit_the_minimum_window_in_every_mode() {
+        let directory = shop();
+        let owner = hold(directory.path(), &agent());
+        let mut harness = folder_harness(directory.path(), MINIMUM);
+        let text = format!("Claude Code via apiforge mcp · since 10:42 · {PAUSED}");
+        for (mode, above) in [
+            ("Code", &["PROBLEMS"][..]),
+            ("Diagram", &["Zoom out", "Zoom in", "Fit the view"][..]),
+            ("Split", &["PROBLEMS", "Zoom out", "Fit the view"][..]),
+        ] {
+            choose(&mut harness, mode);
+            assert_within_window(&harness, &[BAR, text.as_str(), "Observing"]);
+            let bar = harness.get_by_label(BAR).rect();
+            assert!(
+                (bar.height() - 36.0).abs() < 0.5,
+                "{mode}: the bar is 36 px high, not {}",
+                bar.height()
+            );
+            for label in above {
+                assert!(
+                    harness.get_by_label(label).rect().bottom() <= bar.top(),
+                    "{mode}: {label} sits above the bar"
+                );
+                assert_disjoint(&harness, &[BAR, label]);
+            }
+        }
+        drop(owner);
+    }
+
+    /// The bar and the badge for every holder, beside the approved captures
+    /// `docs/qa/2026-10-27/MCP-00/m1-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp07_holder_bar() {
+        use crate::testing::capture;
+        let holders = [
+            ("agent", Some(agent())),
+            ("window", Some(Holder::window().with_since(at(10, 40)))),
+            (
+                "apply",
+                Some(Holder::command("apply").with_since(at(10, 41))),
+            ),
+            ("unknown", None),
+        ];
+        for (name, holder) in holders {
+            for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+                let directory = shop();
+                let owner = match &holder {
+                    Some(holder) => hold(directory.path(), holder),
+                    None => {
+                        let owner = ProjectStore::open_exclusive(directory.path()).unwrap();
+                        fs::remove_file(directory.path().join(".apiforge/local/holder.json"))
+                            .unwrap();
+                        owner
+                    }
+                };
+                let mut harness = folder_harness(directory.path(), size);
+                let modes: &[&str] = if name == "agent" {
+                    &["Code", "Diagram", "Split"]
+                } else {
+                    &["Code"]
+                };
+                for mode in modes {
+                    choose(&mut harness, mode);
+                    capture(
+                        &mut harness,
+                        &format!("mcp07-{name}-{}-{suffix}", mode.to_lowercase()),
+                        None,
+                    );
+                }
+                drop(harness);
+                drop(owner);
+            }
+        }
+    }
+}

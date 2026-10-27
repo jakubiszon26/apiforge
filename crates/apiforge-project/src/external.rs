@@ -6,8 +6,8 @@
 use super::{EventKind, Origin, ProjectSession};
 use crate::{Error, Result, document::AnalysisState, document::Unavailable};
 use apiforge_storage::project::{
-    FileState, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange, ProjectError, ProjectManifest,
-    ProjectPath, ProjectStore, TreeScan,
+    FileState, Holder, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange, ProjectError,
+    ProjectManifest, ProjectPath, ProjectStore, TreeScan,
 };
 use std::collections::HashMap;
 
@@ -366,6 +366,64 @@ impl ProjectSession {
             let _ = self.save_recovery();
         }
         Ok(())
+    }
+
+    /// Becomes the writer of a project this session has been observing
+    /// read-only, once its writer is gone (MCP-07). `Ok(false)` while a writer
+    /// still holds the lock: it is never taken from a living holder, and the
+    /// lock is never replaced. On success the project is reread under the
+    /// lock as at start, with this session's unsaved work carried across as
+    /// [`Self::reload_project`] carries it. An activated transaction the
+    /// holder left behind is `RecoveryRequired`, and the lock is let go again
+    /// so recovery can take it.
+    pub fn take_writer(&mut self, holder: &Holder) -> Result<bool> {
+        if !self.store.is_read_only() {
+            return Ok(true);
+        }
+        if self.manifest_dirty {
+            return Err(Error::UnsavedConfiguration);
+        }
+        let store = match ProjectStore::open_exclusive_as(self.store.root(), holder) {
+            Err(ProjectError::Locked) => return Ok(false),
+            result => result?,
+        };
+        let recovery = self.recovery_contents();
+        let open_texts: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path().to_owned())
+            .collect();
+        let next = Self::load(store, self.placer.clone(), self.epoch + 1)?;
+        let sequence = self.sequence;
+        *self = next;
+        self.events.clear();
+        self.sequence = sequence;
+        self.emit(
+            Origin::SESSION,
+            None,
+            EventKind::ContextChanged {
+                generation: self.context_generation,
+            },
+        );
+        for draft in recovery.documents {
+            self.recovery
+                .held
+                .retain(|held| held.document_id != draft.document_id);
+            self.adopt_draft(draft)?;
+        }
+        for draft in recovery.texts {
+            self.recovery
+                .held_texts
+                .retain(|held| held.path != draft.path);
+            self.recovery.held_texts.push(draft);
+        }
+        for path in open_texts {
+            let _ = self.open_text_file(&path);
+        }
+        if self.has_unsaved_work() {
+            let _ = self.save_recovery();
+        }
+        Ok(true)
     }
 
     /// Discards unsaved configuration, for example to follow a changed registry.
