@@ -1,23 +1,24 @@
-# MCP-02: A language reference the model reads from the server
+# MCP-02: A language reference for models, tested
 
 - Size: M (mostly documentation) · Owner review: 30 min · Risk: none
-- State: Backlog (issue #61) · MCP-00 decision 7 = A taken 2026-10-27
+- State: Approved; `ready:sol` 2026-10-27 (issue #61) · MCP-00 decision
+  7 = A taken 2026-10-27 · revised 2026-10-27: the document and its tests
+  only; the tool and the resources moved to MCP-03, which needs the server
+  of MCP-01
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 
 ## Goal
 
 A model that has never seen `.afs` writes a correct scenario after reading
-one page: the reference it gets from the server is complete for what the
-window accepts, matches the binary that serves it, and is proven by tests to
-parse.
+one page: the reference is complete for what the window accepts, matches the
+grammar of the binary that will serve it, and is proven by tests to parse,
+format unchanged and lower.
 
 ## What the owner will see
 
 - New: `docs/language/reference.md`, the `.afs` reference for people and
-  models, with a version line; the tool `language_reference` and the
-  resources `apiforge://reference` and `apiforge://source/<path>` in Claude
-  Code (`@apiforge:apiforge://reference` in a prompt attaches it).
+  models, with a version line.
 - Changed: ADR 0005's consequence "the reference for users and MCP is
   generated from this ADR in M7" is amended: the reference is written and
   maintained by hand, and a grammar change updates the ADR, the reference and
@@ -35,49 +36,42 @@ Not applicable: no interface change.
    inputs (`param`, `input`, defaults, `@optional`, `@label`), `start` and
    `@after`, requests (method, path template `{{…}}`, `headers`, `query`,
    `body`, `timeout`, `sample`), expressions and operators, `var`, `assert`
-   and its predicates (`==`, `~= … within`, `nonempty`, …), `if … else`,
-   `cleanup`, `export`, component calls with `Handle@revision(…)`, comments
-   and labels, and what cannot be expressed (layout). It ends with one
-   complete scenario and one complete component, and a list of the
-   diagnostics a model meets most and what to do about each.
+   and its predicates, `if … else`, `cleanup`, `export`, component calls with
+   `Handle@revision(…)`, comments and labels, and what cannot be expressed
+   (layout). It ends with one complete scenario and one complete component,
+   and a list of the diagnostics a model meets most and what to do about
+   each — including `stale_source`, `comments_would_be_lost` and
+   `secret_in_text` from the server, and the note that `check_text` checks a
+   proposal while `run` executes the saved source.
 2. The reference opens with `Reference version: 1 · grammar of ADR 0005 as
-   of <date>`; `language_reference` and `project_overview` return that
-   version and the crate version.
-3. A test extracts every fenced `afs` block of the reference, parses it with
-   no error, formats it unchanged (idempotent canonical form), and lowers the
-   complete scenario and component against a fixture project that publishes
-   the components they call — so the reference cannot drift from the
-   grammar without failing the suite.
-4. The reference is embedded with `include_str!`, so the text the tool
-   returns is the text of the binary; the test compares them.
-5. `resources/list` returns `apiforge://reference` and one
-   `apiforge://source/<path>` per registered document; `resources/read`
-   returns the reference or the saved text as `text/plain`.
-6. The reference is under 50 000 characters, so Claude Code shows it inline
-   instead of saving it to a file; a test asserts the length.
-7. The verification commands of the development guide pass; ADR 0005 and the
+   of <date>`.
+3. A test in `apiforge-project` extracts every fenced `afs` block of the
+   reference, parses it with no error, formats it unchanged (idempotent
+   canonical form), and lowers the complete scenario and component against a
+   fixture project that publishes the components they call — so the
+   reference cannot drift from the grammar without failing the suite.
+4. The reference is under 50 000 characters, so Claude Code shows it inline
+   instead of saving it to a file; the test asserts the length.
+5. The verification commands of the development guide pass; ADR 0005 and the
    roadmap are amended as above.
 
 ## Not in scope
 
-Completion, hover and go-to-definition for a model (`complete::describe`
-exists; nothing asks for it yet). A Polish version. An MCP prompt (slash
-command) that writes a scenario — once the reference exists a prompt is one
-line of code and can join MCP-03 or a later ticket.
+Serving the reference (`language_reference`, `apiforge://reference`) and the
+source resources: MCP-03, after MCP-01. Completion, hover and go-to-definition
+for a model. A Polish version. An MCP prompt that writes a scenario.
 
 ## Technical appendix
 
 - Source of truth: ADR 0005 sections *Lexical structure* to *Comments and
   labels* (lines 58–236), the printer (`apiforge-script/src/print.rs`) for
   the canonical form, `complete.rs::predicate_words`/`method_words` for the
-  complete lists, and the two canonical examples `fixtures/scripts/checkout.afs`
-  and `lookup.afs`, which the reference may reuse verbatim.
-- Test: `crates/apiforge-mcp/tests/reference.rs`; fenced blocks tagged `afs`
-  are parsed with `apiforge_script::parse` and `format_tree`; the complete
-  examples lower with `LowerContext` over a project built with
+  complete lists, and `fixtures/scripts/checkout.afs` and `lookup.afs`, which
+  the reference may reuse verbatim.
+- Test: `crates/apiforge-project/tests/reference.rs`, reading the file with
+  `include_str!("../../../docs/language/reference.md")`; fenced blocks tagged
+  `afs` are parsed with `apiforge_script::parse` and `format_tree`; the
+  complete examples lower with `LowerContext` over a project built with
   `prepare_project` plus `publish`.
-- Resources in `rmcp`: `ServerHandler::list_resources`/`read_resource`; the
-  `resources` capability joins `tools` in the server info of MCP-01.
-- Expected size: reference 250–350 lines, test 80, resources 60, ADR and
-  roadmap amendments 10 — an M by lines, of which the owner reads the
-  reference once.
+- Expected size: reference 250–350 lines, test 80, ADR and roadmap
+  amendments 10.
