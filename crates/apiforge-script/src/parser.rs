@@ -9,7 +9,7 @@ use std::{collections::HashSet, ops::Range};
 type Result<T> = std::result::Result<T, ()>;
 
 pub fn parse(source: &str) -> SyntaxTree {
-    let (tokens, mut diagnostics) = lexer::lex(source);
+    let (tokens, mut diagnostics, mut omitted) = lexer::lex_counted(source);
     let file = if source.len() > MAX_SOURCE_BYTES {
         None
     } else {
@@ -19,18 +19,20 @@ pub fn parse(source: &str) -> SyntaxTree {
             parser.error("Unexpected text after the file");
         }
         diagnostics.extend(parser.diagnostics);
+        omitted += parser.omitted;
+        omitted += diagnostics.len().saturating_sub(MAX_DIAGNOSTICS);
+        diagnostics.truncate(MAX_DIAGNOSTICS);
         if let Some(file) = &mut file {
-            attach_comments(source, &tokens, file, &mut diagnostics);
+            omitted += attach_comments(source, &tokens, file, &mut diagnostics);
         }
         file
     };
-    diagnostics.truncate(MAX_DIAGNOSTICS);
     SyntaxTree {
         source: source.into(),
         tokens,
         file,
         diagnostics,
-        omitted_diagnostics: 0,
+        omitted_diagnostics: omitted,
     }
 }
 
@@ -43,6 +45,8 @@ struct Parser<'a> {
     base: usize,
     depth: usize,
     diagnostics: Vec<Diagnostic>,
+    /// Diagnostics dropped beyond `MAX_DIAGNOSTICS`.
+    omitted: usize,
     parameter_names: HashSet<String>,
     input_names: HashSet<String>,
 }
@@ -63,6 +67,7 @@ impl<'a> Parser<'a> {
             base,
             depth,
             diagnostics: vec![],
+            omitted: 0,
             parameter_names: HashSet::new(),
             input_names: HashSet::new(),
         }
@@ -128,12 +133,16 @@ impl<'a> Parser<'a> {
     fn error_at(&mut self, range: Range<usize>, message: impl Into<String>) {
         if self.diagnostics.len() < MAX_DIAGNOSTICS {
             self.diagnostics.push(Diagnostic::error(range, message));
+        } else {
+            self.omitted += 1;
         }
     }
     fn append_diagnostics(&mut self, diagnostics: impl IntoIterator<Item = Diagnostic>) {
         let remaining = MAX_DIAGNOSTICS.saturating_sub(self.diagnostics.len());
+        let mut diagnostics = diagnostics.into_iter();
         self.diagnostics
-            .extend(diagnostics.into_iter().take(remaining));
+            .extend(diagnostics.by_ref().take(remaining));
+        self.omitted += diagnostics.count();
     }
     fn identifier(&mut self) -> Result<String> {
         if self
@@ -916,7 +925,8 @@ impl<'a> Parser<'a> {
                     return Err(());
                 }
                 let fragment = &inner[at + 2..end - 2];
-                let (tokens, errors) = lexer::lex(fragment);
+                let (tokens, errors, omitted) = lexer::lex_counted(fragment);
+                self.omitted += omitted;
                 let base = range.start + width + at + 2;
                 self.append_diagnostics(errors.into_iter().map(|mut d| {
                     d.range = d.range.start + base..d.range.end + base;
@@ -927,6 +937,7 @@ impl<'a> Parser<'a> {
                 if nested.peek() != "" {
                     nested.error("Unexpected text in interpolation");
                 }
+                self.omitted += nested.omitted;
                 self.append_diagnostics(nested.diagnostics);
                 parts.push(Part::Value(expr?));
                 at = end;
@@ -1100,7 +1111,7 @@ fn attach_comments(
     tokens: &[Token],
     file: &mut File,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> usize {
     let comments: Vec<_> = tokens
         .iter()
         .filter(|t| t.kind == TokenKind::Comment)
@@ -1148,14 +1159,21 @@ fn attach_comments(
             );
         }
     });
+    let mut omitted = 0;
     for (index, token) in comments.iter().enumerate() {
-        if !used.contains(&index) && diagnostics.len() < MAX_DIAGNOSTICS {
+        if used.contains(&index) {
+            continue;
+        }
+        if diagnostics.len() < MAX_DIAGNOSTICS {
             diagnostics.push(Diagnostic {
                 range: token.range.clone(),
                 severity: Severity::Warning,
                 message: crate::UNATTACHED_COMMENT.into(),
                 fix: None,
             });
+        } else {
+            omitted += 1;
         }
     }
+    omitted
 }

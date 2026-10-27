@@ -79,6 +79,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
     let mut lower = Lower {
         project: context.project,
         diagnostics: tree.diagnostics.clone(),
+        omitted: tree.omitted_diagnostics,
         nodes: HashMap::new(),
         scopes: HashMap::new(),
         parameters: HashSet::new(),
@@ -116,7 +117,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
     Lowered {
         document,
         diagnostics: lower.diagnostics,
-        omitted_diagnostics: 0,
+        omitted_diagnostics: lower.omitted,
     }
 }
 
@@ -175,6 +176,8 @@ fn validation_project(document: &Document, context: &LowerContext<'_>) -> Projec
 struct Lower<'a> {
     project: &'a Project,
     diagnostics: Vec<Diagnostic>,
+    /// Diagnostics dropped beyond `MAX_DIAGNOSTICS`, the parser's included.
+    omitted: usize,
     nodes: HashMap<String, Node>,
     scopes: HashMap<String, bool>, // true for cleanup
     parameters: HashSet<String>,
@@ -262,8 +265,12 @@ impl Lower<'_> {
             .iter()
             .any(|d| d.severity == Severity::Error)
         {
+            // The error takes the place of the last warning, which is dropped.
             self.diagnostics.pop();
             self.diagnostics.push(Diagnostic::error(range, message));
+            self.omitted += 1;
+        } else {
+            self.omitted += 1;
         }
     }
     fn file(&mut self, file: &File) -> Document {
@@ -865,6 +872,8 @@ impl Lower<'_> {
                 severity: Severity::Warning,
                 ..Diagnostic::error(range, message)
             });
+        } else {
+            self.omitted += 1;
         }
     }
     /// The board's connection rule, applied to values written in code: a whole
