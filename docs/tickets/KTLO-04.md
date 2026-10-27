@@ -1,8 +1,9 @@
 # KTLO-04: Identity checkpoint at initialise, register_existing and import
 
 - Size: S–M · Owner review: 30 min · Risk: `format`
-- State: Approved 2026-10-26 (issue #6) — seal at the first successful analysis;
-  analysis written 2026-10-27
+- State: Awaiting acceptance in PR #74 (issue #6) — seal at the first
+  successful analysis, decided 2026-10-26; analysis 2026-10-27; implemented
+  the same day, actual 593 changed lines (M, inside the S–M estimate), 1 round
 - Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
@@ -25,9 +26,13 @@ suspects the same gap behind the refused migration.
   first later analysis that turns valid for an invalid one. Reopening the
   project then shows the same node identities and positions.
 - Removed or hidden: nothing.
-- Migrated or converted: nothing retroactively. A document registered before
-  this change and never since analysed gets its record at its next successful
-  analysis, which is the same rule.
+- Migrated or converted: nothing by a separate step. A document that has no
+  record yet — registered before this change, or fixed on disk while the
+  project was closed — gets its record at its next successful analysis in a
+  session that can write, which is the next writable open of the project
+  (the window, `apiforge apply`, a live CLI run): one small commit to
+  `diagram.json` per such document during the load. Read-only sessions
+  (`apiforge check`, a second window) write nothing.
 - Default behaviour that changes: a registration or import of a valid source
   now writes one more Git-tracked file. That is the owner's decision of
   2026-10-26 (`format`).
@@ -53,10 +58,13 @@ can still drift; the acceptance test states this limitation.
    and the node ids read before and after reopening are equal.
 2. The same for `register_existing` (a found `.afs` registered in an open
    session) — one more case in the same test or its own test.
-3. An invalid source registered or imported seals nothing; when its text is
-   edited into a valid document and the analysis applies, the record appears
-   then (a test that registers invalid text, edits it to valid, settles, reopens
-   and compares ids).
+3. An invalid source registered or imported seals nothing. A source fixed
+   *on disk* (another editor, a pull) is sealed by the analysis that finds it
+   valid; a source fixed *in the session* is sealed by its save, not by its
+   analysis — ADR 0010: shared checkpoints describe saved valid source, so an
+   unsaved edit never seals (a test for each half; the implementation guards
+   on: the session can write, the document is not dirty, no external
+   conflict, no record under its key yet).
 4. A document registered, closed before its analysis finished and reopened
    gets fresh ids — the stated limitation — asserted as such, so the test names
    what the decision accepted.
@@ -76,22 +84,21 @@ change to the record format; sealing on save.
 
 ## Technical appendix
 
-- `ProjectSession::create` (`session.rs:434-436`) is the pattern:
-  `analyse_now(index)` then `seal_new_checkpoint(index)`. `import`
-  (`register.rs:328`) and `register_existing` (`register.rs:398`) call
-  `analyse_now` and stop; `initialise`/`initialise_with` (`register.rs:125-134`)
-  go through the same path. Adding `seal_new_checkpoint` after each
-  `analyse_now` covers every valid source at once.
-- "First successful analysis" for a source that was invalid at registration:
-  where the analysis result is applied and `seal_valid(index)` is called
-  (`session.rs:638`), also call `seal_new_checkpoint(index)` when the shared
-  file has no record under this document's key (`DiagramFile.records` lacks
-  `DocumentKey::Working { document_id }`). `seal_new_checkpoint` already
-  returns early when the bytes are unchanged, so an existing record is never
-  rewritten by this path; saves keep their own route.
+- One seam is enough: where an analysis result is applied and
+  `seal_valid(index)` is called (`apply_analysis`, `session.rs:638`), a guarded
+  `seal_first_checkpoint(index)` seals when the session can write, the
+  document is clean and unconflicted, and the shared file has no record under
+  its key. `initialise` analyses inside `load_saved`, and `import` and
+  `register_existing` apply their `analyse_now` results through the same
+  path, so separate calls after `analyse_now` (as this appendix first said)
+  would do nothing; `create_document`'s own `seal_new_checkpoint` call became
+  redundant and went. `seal_new_checkpoint` returns early on unchanged bytes,
+  so an existing record is never rewritten by this path.
 - `seal_valid` (`execution.rs:118`) seals the in-memory valid snapshot, not
   the file; do not confuse the two.
-- Migration: `migration.rs` builds the folder through the session API, so the
-  change in the session covers it; criterion 5 pins that.
-- Size: the change is a handful of lines; the tests and this ticket are the
-  bulk — expect S.
+- Migration: `prepare_project` writes every record directly, not through the
+  session; criterion 5 held before the change and pins that it keeps holding.
+- Not measured: the cost of a writable open that seals many record-less
+  documents at once (one commit each). Noted for the backlog if it shows.
+- Size: 49 lines of code (`session.rs` 43, `register.rs` 6), 336 of tests,
+  208 of QA report.
