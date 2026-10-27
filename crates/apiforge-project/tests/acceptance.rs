@@ -675,3 +675,324 @@ fn a_selection_survives_an_exclusive_job_that_left_its_file_alone() {
         &in_text
     );
 }
+
+// ---------------------------------------------------------------------------
+// KTLO-26 (#79): a board edit that removes the request feeding a check and
+// wires a new one back, then saves.
+
+type Ids = Vec<(String, String)>;
+
+/// The (handle, identity) of every block of both graphs of a scenario model, in
+/// stored order.
+fn ids_of(model: &Document) -> Ids {
+    let Document::Scenario(scenario) = model else {
+        panic!("a scenario model")
+    };
+    scenario
+        .graph
+        .nodes
+        .iter()
+        .chain(&scenario.cleanup.nodes)
+        .map(|node| (node.handle.clone(), node.id.clone()))
+        .collect()
+}
+
+/// The saved checkpoint record of the working document `document_id`.
+fn record_of(root: &Path, document_id: &str) -> apiforge_storage::project::DiagramRecord {
+    let bytes = std::fs::read(root.join(".apiforge/diagram.json")).unwrap();
+    let file = apiforge_storage::project::DiagramFile::from_bytes(&bytes).unwrap();
+    file.records
+        .into_iter()
+        .find(|record| {
+            record.key
+                == apiforge_storage::project::DocumentKey::Working {
+                    document_id: document_id.into(),
+                }
+        })
+        .expect("the document has a record")
+}
+
+/// The saved source of the document at `path`, lowered with the folder
+/// policy, as the next load lowers it before it consults the checkpoint.
+fn lowered_saved_source(
+    root: &Path,
+    path: &str,
+    context: &apiforge_core::format::Project,
+) -> (String, Document) {
+    let text = std::fs::read_to_string(root.join(path)).unwrap();
+    let lowered = apiforge_script::lower(
+        &apiforge_script::parse(&text),
+        &apiforge_script::LowerContext::folder(context),
+    );
+    let Some(document) = lowered.document else {
+        panic!("the saved source lowers: {:?}", lowered.diagnostics)
+    };
+    (text, document)
+}
+
+fn base_of(document: &Document) -> apiforge_storage::project::IdentityBase {
+    match document {
+        Document::Scenario(scenario) => {
+            apiforge_storage::project::IdentityBase::Scenario(scenario.clone())
+        }
+        Document::Component(component) => {
+            apiforge_storage::project::IdentityBase::Component(component.clone())
+        }
+    }
+}
+
+/// The semantic digest a checkpoint of `document` for `text` carries.
+fn digest_of(text: &str, document: &Document, context: &apiforge_core::format::Project) -> String {
+    apiforge_storage::project::DiagramRecord::capture(
+        apiforge_storage::project::DocumentKey::Working {
+            document_id: "digest".into(),
+        },
+        text,
+        base_of(document),
+        context,
+    )
+    .unwrap()
+    .semantic_digest
+}
+
+/// `model` with every block's inputs in the order `source_order` gives the
+/// block of the same handle; blocks and everything else untouched.
+fn with_inputs_in_source_order(model: &Document, source_order: &Document) -> Document {
+    let (Document::Scenario(model), Document::Scenario(source)) = (model, source_order) else {
+        panic!("scenario models")
+    };
+    let mut model = model.clone();
+    let order: std::collections::HashMap<_, _> = source
+        .graph
+        .nodes
+        .iter()
+        .chain(&source.cleanup.nodes)
+        .map(|node| {
+            (
+                node.handle.clone(),
+                node.inputs.keys().cloned().collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    for node in model.graph.nodes.iter_mut().chain(&mut model.cleanup.nodes) {
+        let keys = &order[&node.handle];
+        node.inputs
+            .sort_by_key(|name, _| keys.iter().position(|key| key == name));
+    }
+    Document::Scenario(model)
+}
+
+/// The input names of the cleanup check, in stored order.
+fn check_inputs(model: &Document) -> Vec<String> {
+    let Document::Scenario(scenario) = model else {
+        panic!("a scenario model")
+    };
+    let check = scenario
+        .cleanup
+        .nodes
+        .iter()
+        .find(|node| node.kind == apiforge_core::model::NodeKind::Assert)
+        .expect("the cleanup has a check");
+    check.inputs.keys().cloned().collect()
+}
+
+/// The board's edit of the demo scenario's cleanup, as the Diagram mode makes
+/// it: delete the request whose status the check compares (which removes the
+/// check's `actual`), add a new request and wire its status back into
+/// `actual`, which appends it after `expected`.
+fn rewired(model: &Document, context: &apiforge_core::format::Project) -> Document {
+    use apiforge_core::{
+        block::Block,
+        edit::{add_node, connect},
+        format::Position,
+        graph::delete_nodes,
+        model::NodeKind,
+    };
+    let Document::Scenario(scenario) = model else {
+        panic!("a scenario model")
+    };
+    let mut scenario = scenario.clone();
+    let cleanup = &scenario.cleanup;
+    let request = cleanup
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Request)
+        .expect("the cleanup starts with a request")
+        .clone();
+    let check = cleanup
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Assert)
+        .expect("the cleanup has a check")
+        .id
+        .clone();
+    let graph = delete_nodes(
+        cleanup,
+        &std::collections::HashSet::from([request.id.as_str()]),
+    );
+    let added = add_node(
+        &graph,
+        Block::Request,
+        Position { x: 80.0, y: 240.0 },
+        None,
+        None,
+    )
+    .unwrap();
+    let mut graph = added.graph;
+    // The person fills the new request in the inspector as the old one was.
+    let node = graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == added.node_id)
+        .unwrap();
+    node.config = request.config.clone();
+    node.inputs = request.inputs.clone();
+    node.handle = "delete_cart_again".into();
+    let graph = connect(
+        &graph,
+        context,
+        &added.node_id,
+        "status",
+        &check,
+        "actual",
+        &[],
+    )
+    .unwrap();
+    scenario.cleanup = graph;
+    Document::Scenario(scenario)
+}
+
+/// KTLO-26 (#79), the board path. A board edit that deletes the request whose
+/// status the cleanup check compares, adds a new request and wires its status
+/// back into the check's `actual`, then saves, should seal a checkpoint that
+/// describes the saved source, so that the next load restores the saved model
+/// exactly rather than reconciling against it.
+///
+/// It does not today. The edit leaves the check's inputs stored as
+/// `expected, actual`; `apply_model_edit` prints the source (which reads them
+/// back as `actual, expected`) but keeps the edited model as it is, and `save`
+/// seals the checkpoint from that model. The semantic digest serialises the
+/// inputs in stored order, so the record's digest is not the digest of the
+/// saved source lowered, `describes` is false, and the reload reconciles: the
+/// blocks keep their identities (reconciled by handle) and positions, but the
+/// reloaded model lists the cleanup's blocks and the check's inputs in source
+/// order, unlike the model that was saved. The record stays stale until the
+/// document is saved again.
+#[test]
+#[ignore = "KTLO-26: reproduction; the decision is the owner's"]
+fn ktlo_26_a_board_edit_that_rewires_a_check_seals_a_checkpoint_that_describes_its_source() {
+    let directory = prepared_demo();
+    let root = directory.path();
+    let mut session = ProjectSession::open(root).unwrap();
+    let id = only(&session, DocumentKind::Scenario);
+    let path = session
+        .document(&id)
+        .unwrap()
+        .entry()
+        .path
+        .as_str()
+        .to_owned();
+    let context = (**session.context()).clone();
+    let before = session.document(&id).unwrap().model().unwrap().clone();
+    assert_eq!(check_inputs(&before), ["actual", "expected"]);
+
+    let edited = rewired(&before, &context);
+    assert_eq!(
+        check_inputs(&edited),
+        ["expected", "actual"],
+        "the board's delete and connect append `actual` after `expected`"
+    );
+    session
+        .apply_model_edit(&id, edited.clone(), Origin(7))
+        .unwrap();
+    let outcome = session.save(&id).unwrap();
+    assert!(outcome.checkpoint, "the save writes a checkpoint");
+    let saved = session.document(&id).unwrap().model().unwrap().clone();
+    assert_eq!(saved, edited, "the session keeps the edited model as it is");
+    let record = record_of(root, &id);
+    drop(session);
+
+    let (text, lowered) = lowered_saved_source(root, &path, &context);
+    assert_eq!(check_inputs(&lowered), ["actual", "expected"]);
+    assert_eq!(
+        apiforge_script::semantic(&saved, &context),
+        apiforge_script::semantic(&lowered, &context),
+        "the same semantics, compared as values"
+    );
+    // The cause: only the inputs' order separates the two digests.
+    let source_digest = digest_of(&text, &lowered, &context);
+    assert_eq!(
+        digest_of(
+            &text,
+            &with_inputs_in_source_order(&saved, &lowered),
+            &context
+        ),
+        source_digest,
+        "the saved model with its inputs in source order digests as the source"
+    );
+
+    let reopened = ProjectSession::open_saved_read_only(root).unwrap();
+    let after = reopened.document(&id).unwrap().model().unwrap().clone();
+    let describes = record.describes(&text, &base_of(&lowered), &context);
+    assert!(
+        describes,
+        "the sealed checkpoint does not describe its source: record digest {}, \
+         source digest {source_digest}; ids saved {:?}, reopened {:?}; inputs saved {:?}, \
+         reopened {:?}",
+        record.semantic_digest,
+        ids_of(&saved),
+        ids_of(&after),
+        check_inputs(&saved),
+        check_inputs(&after),
+    );
+    assert_eq!(
+        ids_of(&after),
+        ids_of(&saved),
+        "the reload restores the saved blocks"
+    );
+    assert_eq!(after, saved, "the reload restores the saved model exactly");
+}
+
+/// KTLO-26 (#79), the text path, for contrast. The same rewiring made by
+/// editing the source (the very text the board edit prints) seals a checkpoint
+/// that describes it: the model comes from lowering the text, so its inputs are
+/// in source order, and the reload restores the saved model exactly. Source
+/// cannot state the other order: `assert a == b` always lowers to `actual`,
+/// then `expected`.
+#[test]
+fn ktlo_26_the_same_rewiring_typed_as_source_seals_a_checkpoint_that_describes_it() {
+    let directory = prepared_demo();
+    let root = directory.path();
+    let mut session = ProjectSession::open(root).unwrap();
+    let id = only(&session, DocumentKind::Scenario);
+    let path = session
+        .document(&id)
+        .unwrap()
+        .entry()
+        .path
+        .as_str()
+        .to_owned();
+    let context = (**session.context()).clone();
+    let before = session.document(&id).unwrap().model().unwrap().clone();
+    let printed = apiforge_script::print_folder_document(&context, &rewired(&before, &context))
+        .expect("the board's edit prints");
+
+    session.edit_source(&id, &printed, Origin(7)).unwrap();
+    let outcome = session.save(&id).unwrap();
+    assert!(outcome.checkpoint, "the save writes a checkpoint");
+    let saved = session.document(&id).unwrap().model().unwrap().clone();
+    assert_eq!(check_inputs(&saved), ["actual", "expected"]);
+    let record = record_of(root, &id);
+    drop(session);
+
+    let (text, lowered) = lowered_saved_source(root, &path, &context);
+    assert_eq!(text, printed);
+    assert!(
+        record.describes(&text, &base_of(&lowered), &context),
+        "the checkpoint describes its source"
+    );
+    let reopened = ProjectSession::open_saved_read_only(root).unwrap();
+    let after = reopened.document(&id).unwrap().model().unwrap().clone();
+    assert_eq!(ids_of(&after), ids_of(&saved));
+    assert_eq!(after, saved, "the reload restores the saved model exactly");
+}
