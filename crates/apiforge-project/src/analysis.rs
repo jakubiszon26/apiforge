@@ -137,7 +137,7 @@ pub(crate) fn derive_counted(
     };
     let lowered = apiforge_script::lower(&tree, &lower_context);
     let mut diagnostics = lowered.diagnostics.clone();
-    let omitted = lowered.omitted_diagnostics;
+    let mut omitted = lowered.omitted_diagnostics;
     if lowered.has_errors() {
         return (diagnostics, omitted, None);
     }
@@ -145,10 +145,16 @@ pub(crate) fn derive_counted(
         return (diagnostics, omitted, None);
     };
     if kind(&document) != target.kind {
-        diagnostics.push(Diagnostic::error(
-            0..text.len(),
-            "This code describes a different kind of document",
-        ));
+        // A project-level error is never the one the limit drops.
+        apiforge_script::push_error(
+            &mut diagnostics,
+            &mut omitted,
+            Diagnostic::error(
+                0..text.len(),
+                "This code describes a different kind of document",
+            ),
+            true,
+        );
         return (diagnostics, omitted, None);
     }
     normalise(&mut document, target);
@@ -169,10 +175,13 @@ pub(crate) fn derive_counted(
         (None, None) => (empty, Restored::Fresh),
     };
     let Ok(reconciled) = apiforge_script::reconcile(&identity, &lowered) else {
-        diagnostics.push(Diagnostic::error(
-            0..text.len(),
-            "This code describes a different document",
-        ));
+        // A project-level error is never the one the limit drops.
+        apiforge_script::push_error(
+            &mut diagnostics,
+            &mut omitted,
+            Diagnostic::error(0..text.len(), "This code describes a different document"),
+            true,
+        );
         return (diagnostics, omitted, None);
     };
     let mut document = reconciled.document;
@@ -180,10 +189,13 @@ pub(crate) fn derive_counted(
     placer.place(&mut document, &reconciled.unpositioned, context);
     if apiforge_script::validate_document_model(&document, &LowerContext::folder(context)).is_err()
     {
-        diagnostics.push(Diagnostic::error(
-            0..text.len(),
-            "The definition is not valid in this project",
-        ));
+        // A project-level error is never the one the limit drops.
+        apiforge_script::push_error(
+            &mut diagnostics,
+            &mut omitted,
+            Diagnostic::error(0..text.len(), "The definition is not valid in this project"),
+            true,
+        );
         return (diagnostics, omitted, None);
     }
     (diagnostics, omitted, Some((document, restored)))

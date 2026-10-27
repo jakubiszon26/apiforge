@@ -9,9 +9,9 @@ use apiforge_core::format::Project;
 use apiforge_script::Document;
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, MANIFEST_PATH,
-    ProjectChange, ProjectManifest, ProjectPath, ProjectSnapshot, ProjectStore,
+    ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot, ProjectStore,
 };
-use std::{path::Path, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 #[path = "comments.rs"]
 mod comments;
@@ -224,8 +224,23 @@ impl ProjectSession {
     /// limit does not fail the load: that document is `Unavailable::TooLarge`
     /// and the others are served (MCP-03).
     pub fn open_saved_tolerant(root: impl AsRef<Path>) -> Result<Self> {
-        let _ = root;
-        unimplemented!("MCP-03")
+        if !has_manifest(root.as_ref())? {
+            return Err(Error::NotAProject);
+        }
+        let store = ProjectStore::open_read_only(root)?;
+        let (manifest, snapshot, too_large) = match store.load() {
+            Ok((manifest, snapshot)) => (manifest, snapshot, HashSet::new()),
+            Err(ProjectError::Limit) => load_tolerating_large_sources(&store)?,
+            Err(error) => return Err(error.into()),
+        };
+        Self::from_snapshot(
+            store,
+            Arc::new(FixedPlacer),
+            1,
+            manifest,
+            snapshot,
+            &too_large,
+        )
     }
 
     /// Stable saved definitions under the writer lock. Never falls back to a
@@ -316,9 +331,22 @@ impl ProjectSession {
     }
 
     fn load_saved(store: ProjectStore, placer: Arc<dyn Placer>, epoch: u64) -> Result<Self> {
+        let (manifest, snapshot) = store.load()?;
+        Self::from_snapshot(store, placer, epoch, manifest, snapshot, &HashSet::new())
+    }
+
+    /// A session over one stable read. A registered source in `too_large` was
+    /// left out of the read: it is `Unavailable::TooLarge`.
+    fn from_snapshot(
+        store: ProjectStore,
+        placer: Arc<dyn Placer>,
+        epoch: u64,
+        manifest: ProjectManifest,
+        snapshot: ProjectSnapshot,
+        too_large: &HashSet<ProjectPath>,
+    ) -> Result<Self> {
         let diagram_path = ProjectPath::new(DIAGRAM_PATH)?;
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
-        let (manifest, snapshot) = store.load()?;
         let diagram = match snapshot.files.get(&diagram_path).and_then(Option::as_deref) {
             Some(bytes) => DiagramFile::from_bytes(bytes).ok(),
             None => Some(DiagramFile {
@@ -350,7 +378,12 @@ impl ProjectSession {
             loaded_generation: snapshot.generation,
         };
         for entry in manifest.documents {
-            session.documents.push(document_from(&snapshot, entry));
+            let large = too_large.contains(&entry.path);
+            let mut document = document_from(&snapshot, entry);
+            if large {
+                document.unavailable = Some(Unavailable::TooLarge);
+            }
+            session.documents.push(document);
         }
         for index in 0..session.documents.len() {
             session.analyse_now(index)?;
@@ -1185,6 +1218,55 @@ fn document_from(snapshot: &ProjectSnapshot, entry: DocumentEntry) -> DocumentSe
         document.analysis = AnalysisState::Invalid;
     }
     document
+}
+
+/// The registry, the checkpoint, the published revisions and every registered
+/// source within the 1 MiB limit, in one stable read; the registered sources
+/// over the limit are returned instead of read. A published revision or a
+/// registry over its limit still fails the load.
+fn load_tolerating_large_sources(
+    store: &ProjectStore,
+) -> Result<(ProjectManifest, ProjectSnapshot, HashSet<ProjectPath>)> {
+    let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
+    let first = store.read(std::slice::from_ref(&manifest_path))?;
+    let registry = first.files[&manifest_path]
+        .clone()
+        .ok_or(ProjectError::InvalidMetadata)?;
+    let manifest = ProjectManifest::from_bytes(&registry)?;
+    let mut too_large = HashSet::new();
+    for entry in &manifest.documents {
+        match store.read(std::slice::from_ref(&entry.path)) {
+            Ok(_) => {}
+            Err(ProjectError::Limit) => {
+                too_large.insert(entry.path.clone());
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if too_large.is_empty() {
+        return Err(ProjectError::Limit.into());
+    }
+    let mut paths = vec![manifest_path.clone(), ProjectPath::new(DIAGRAM_PATH)?];
+    paths.extend(
+        manifest
+            .documents
+            .iter()
+            .map(|entry| entry.path.clone())
+            .filter(|path| !too_large.contains(path)),
+    );
+    paths.extend(manifest.revisions.iter().map(|entry| entry.path.clone()));
+    let snapshot = store.read(&paths)?;
+    // The registry the sources were chosen by is the one read with them.
+    if snapshot.files[&manifest_path].as_deref() != Some(registry.as_slice()) {
+        return Err(ProjectError::Busy.into());
+    }
+    for entry in &manifest.revisions {
+        let state = snapshot.state(&entry.path);
+        if !matches!(state, Some(FileState::File { sha256, .. }) if sha256 == entry.source_hash) {
+            return Err(ProjectError::InvalidMetadata.into());
+        }
+    }
+    Ok((manifest, snapshot, too_large))
 }
 
 fn has_manifest(root: &Path) -> Result<bool> {
