@@ -39,14 +39,20 @@ right under the app header; the band comes back the moment a file is opened.
 
 ## Mock-up
 
-To be captured on `mock/ktlo-24-hide-tab-strip` and committed under
-`docs/qa/2026-10-26/KTLO-24/`: `mock-code-empty-960x540.png`,
+Captured on `mock/ktlo-24-hide-tab-strip` (commit `ae6306c`, 2026-10-27)
+under `docs/qa/2026-10-26/KTLO-24/`: `mock-code-empty-960x540.png`,
 `mock-diagram-empty-960x540.png`, `mock-split-empty-960x540.png`,
 `mock-diagram-empty-1600x1000.png` (the band gone, the hint or the dog of
 KTLO-20 directly under the app header), `mock-diagram-notice-960x540.png`
 (no file open, the band back with one notice) and
 `mock-diagram-one-tab-960x540.png` (one file open, the strip as today).
 Posted on the issue.
+
+Measured on the mock-up at 960 × 540 against `main`: the empty board starts
+at y = 57 instead of 94, so 37 px come back — the 36 px band and the panel's
+1 px separator. With one tab open the band is 40 px on both, so opening the
+first file moves the board down by 41 px. With a notice and no tab the band
+is 46 px (74 px on `main`, where the empty strip sits above the notice).
 
 Rendering notes: the mock-up is a `review_` view of the folder modes with
 every tab closed (`testing::review` opens the demo project with a tab, so the
@@ -82,7 +88,8 @@ describes; the notice view sets a dismissable notice before the capture.
    960 × 540 and 1600 × 1000).
 2. Opening a file from the project files panel while no tab is open brings
    the band back: the file's tab and its *Close …* button are in the tree and
-   the central area starts under the strip, at the height it has today.
+   the central area starts under the strip, at the height it has today
+   (40 px with a tab open, measured on the mock-up).
 3. Closing the last tab with its cross, and with Ctrl+W, leaves the window
    as in criterion 1; a freshly opened project with no file open starts as
    in criterion 1.
@@ -125,7 +132,11 @@ the notices' text or placement while a tab is open; an animated collapse.
   `add_space` in `tab_strip` (keep the `followed_tab = None`). The band then
   has no height to remember, so no panel id epoch is needed.
 - `tabs_width` and `tabs_offset` are only written when the strip is drawn;
-  nothing reads them in the empty state.
+  nothing reads them in the empty state. The mock-up built exactly this
+  recipe and the 361 existing desktop tests passed with the band hidden.
+- `notify` is private to the `folder` module; the criterion 4 test needs a
+  test-visible way to set the dismissable notice (the mock-up widened it to
+  `pub(crate)` for its review view).
 - Tests: `folder/acceptance_tests.rs` for criteria 1–4 and 6 — the app
   header's rect via its `"Project"` button row (as `header_tests.rs:106`
   does), the central area via `"Diagram board"`, the project files panel
