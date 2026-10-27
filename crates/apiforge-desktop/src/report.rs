@@ -136,6 +136,8 @@ pub struct ReportPanel {
     height: f32,
     compact_height: f32,
     size_epoch: u64,
+    /// The panel fills the window below the tab strip (KTLO-19); never remembered.
+    maximised: bool,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
     last_run_id: Option<String>,
@@ -152,6 +154,7 @@ impl Default for ReportPanel {
             height: 320.0,
             compact_height: 180.0,
             size_epoch: 0,
+            maximised: false,
             #[cfg(test)]
             last_handle: None,
             last_run_id: None,
@@ -169,11 +172,23 @@ impl ReportPanel {
         self.last_handle.unwrap()
     }
 
+    /// Whether the open panel fills the window, so the caller draws nothing else.
+    pub fn is_maximised(&self) -> bool {
+        self.open && self.maximised
+    }
+
+    /// Returns a maximised panel to its normal height.
+    pub fn restore(&mut self) {
+        self.maximised = false;
+    }
+
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
 
         let was_open = self.open;
+        let maximised = self.is_maximised();
+        let full = ui.available_height();
         let compact = ui.available_height() < 460.0;
         let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
         let maximum = (ui.available_height() - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
@@ -184,15 +199,25 @@ impl ReportPanel {
         }
         .clamp(min_height, maximum);
         let collapsed_height = if compact { 44.0 } else { 48.0 };
-        let panel_id = if was_open {
+        let panel_id = if maximised {
+            egui::Id::new("report-maximised")
+        } else if was_open {
             egui::Id::new(("report-expanded", compact, self.size_epoch))
         } else {
             egui::Id::new("report-collapsed")
         };
         let response = egui::Panel::bottom(panel_id)
-            .resizable(self.open)
-            .default_size(if self.open { height } else { collapsed_height })
-            .size_range(if self.open {
+            .resizable(self.open && !maximised)
+            .default_size(if maximised {
+                full
+            } else if self.open {
+                height
+            } else {
+                collapsed_height
+            })
+            .size_range(if maximised {
+                full..=full
+            } else if self.open {
                 min_height..=maximum
             } else {
                 collapsed_height..=collapsed_height
@@ -216,7 +241,8 @@ impl ReportPanel {
                     }
                 }
             });
-        if was_open {
+        // Maximised, the normal height is kept and there is nothing to resize.
+        if was_open && !maximised {
             let actual_height = response.response.rect.height().clamp(min_height, maximum);
             if compact {
                 self.compact_height = actual_height;
@@ -358,6 +384,7 @@ impl ReportPanel {
                 .clicked()
             {
                 self.open = !self.open;
+                self.maximised = false;
             }
             if let Some(run) = context.run {
                 let (label, color) = run_pill(run.status);
@@ -366,7 +393,7 @@ impl ReportPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut policy = context.error_policy;
                 ui.add_enabled_ui(!context.running && !context.document_locked, |ui| {
-                    egui::ComboBox::from_id_salt("report-error-policy")
+                    let combo = egui::ComboBox::from_id_salt("report-error-policy")
                         .selected_text(error_policy_label(policy))
                         .width(190.0)
                         .show_ui(ui, |ui| {
@@ -381,9 +408,23 @@ impl ReportPanel {
                                 error_policy_label(ErrorPolicy::Stop),
                             );
                         });
+                    widgets::named(combo.response, "When a step fails");
                 });
                 if policy != context.error_policy {
                     actions.push(Action::SetErrorPolicy(policy));
+                }
+                ui.add_space(4.0);
+                let name = if self.is_maximised() {
+                    "Restore run results"
+                } else {
+                    "Maximise run results"
+                };
+                if ui
+                    .add(widgets::icon_button(Icon::Fit, name).compact())
+                    .clicked()
+                {
+                    self.maximised = !self.is_maximised();
+                    self.open = true;
                 }
                 ui.add_space(8.0);
                 if context.stale {
@@ -716,10 +757,13 @@ impl ReportPanel {
             } else {
                 Sense::hover()
             };
-            let key_response = ui.add(
-                egui::Label::new(RichText::new(label).monospace().size(12.0).color(key_color))
-                    .sense(sense)
-                    .truncate(),
+            let key_response = widgets::named(
+                ui.add(
+                    egui::Label::new(RichText::new(label).monospace().size(12.0).color(key_color))
+                        .sense(sense)
+                        .truncate(),
+                ),
+                label,
             );
             if let Some((node_id, port)) = interactive
                 && valid_path

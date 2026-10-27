@@ -19,6 +19,8 @@ pub(super) struct Runs {
     pending_review: Option<JournalReview>,
     pub secrets: dialogs::SessionSecrets,
     pub exporting: bool,
+    /// The active tab and mode the report was last drawn for (KTLO-19).
+    view: Option<(Option<String>, Mode)>,
 }
 
 pub(super) struct JournalReview {
@@ -28,6 +30,22 @@ pub(super) struct JournalReview {
 }
 
 impl FolderApp {
+    /// The active tab's run results fill the window (KTLO-19).
+    pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
+        self.runs.panel.is_maximised()
+            && active.is_some_and(|id| self.runs.reports.contains_key(id))
+    }
+
+    /// Escape returns maximised run results to their height; the board, which
+    /// has its own uses of Escape, is not drawn meanwhile.
+    pub(super) fn restore_report_on_escape(&mut self, context: &egui::Context) {
+        if self.runs.panel.is_maximised()
+            && context.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            self.runs.panel.restore();
+        }
+    }
+
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
         let (prepared, report) = self.runs.reports.get(id)?;
         (!self.session.as_ref()?.run_is_stale(prepared)).then(|| report.clone())
@@ -253,6 +271,12 @@ impl FolderApp {
     }
 
     pub(super) fn run_report(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
+        // Another tab or mode restores the layout (KTLO-19).
+        let view = Some((active.map(str::to_owned), self.workbench.mode));
+        if self.runs.view != view {
+            self.runs.view = view;
+            self.runs.panel.restore();
+        }
         let Some(id) = active else { return };
         let Some((prepared, result)) = self.runs.reports.get(id).cloned() else {
             return;

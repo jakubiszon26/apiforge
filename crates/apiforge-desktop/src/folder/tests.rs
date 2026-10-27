@@ -7,6 +7,8 @@ mod acceptance_tests;
 mod accessibility_tests;
 #[path = "activation_tests.rs"]
 mod activation_tests;
+#[path = "dog_tests.rs"]
+mod dog_tests;
 #[path = "editor_tests.rs"]
 mod editor_tests;
 #[path = "header_tests.rs"]
@@ -21,6 +23,8 @@ mod popup_tests;
 mod project_interaction_tests;
 #[path = "recovery_tests.rs"]
 mod recovery_tests;
+#[path = "report_tests.rs"]
+mod report_tests;
 #[path = "storage_tests.rs"]
 mod storage_tests;
 
