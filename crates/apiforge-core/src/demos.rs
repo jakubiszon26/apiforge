@@ -90,14 +90,17 @@ pub fn shop_project() -> Project {
             Some("Product"),
             reference("fetch", "body", ""),
         )],
-        graph: graph(vec![request(
-            "fetch",
-            "Fetch product",
-            "/products/:id",
-            vec![("id", parameter("id"))],
-            product_sample(),
-            HttpMethod::Get,
-            at(80.0, 80.0),
+        graph: graph(vec![contracted(
+            request(
+                "fetch",
+                "Fetch product",
+                "/products/:id",
+                vec![("id", parameter("id"))],
+                product_sample(),
+                HttpMethod::Get,
+                at(80.0, 80.0),
+            ),
+            "Product",
         )]),
         action: None,
     }
@@ -194,14 +197,17 @@ pub fn shop_project() -> Project {
                 HttpMethod::Post,
                 at(650.0, 90.0),
             ),
-            request(
-                "read",
-                "Fetch cart",
-                "/carts/:id",
-                vec![("id", reference("create", "body", "id"))],
-                cart_sample,
-                HttpMethod::Get,
-                at(950.0, 90.0),
+            contracted(
+                request(
+                    "read",
+                    "Fetch cart",
+                    "/carts/:id",
+                    vec![("id", reference("create", "body", "id"))],
+                    cart_sample,
+                    HttpMethod::Get,
+                    at(950.0, 90.0),
+                ),
+                "Cart",
             ),
         ]),
         action: Some(object_action("product", "Product")),
@@ -808,6 +814,13 @@ fn request(
         node_inputs.push(("body", body.clone()));
     }
     node(id, NodeKind::Request, name, position, node_inputs, config)
+}
+
+/// A request whose response is declared to follow `contract_id`, so that an
+/// Export of that contract can take the whole response.
+fn contracted(mut node: Node, contract_id: &str) -> Node {
+    node.config.contract_id = Some(contract_id.into());
+    node
 }
 
 /// A URL whose `:name` and `{{name}}` placeholders are values of `arguments`.

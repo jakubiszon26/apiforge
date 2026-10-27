@@ -24,8 +24,9 @@ only after choosing Initialise, which can register its existing sources. `--scre
 Starting with no arguments works from the application data directory: it opens
 the project recorded there, migrates a legacy workspace the first time, or
 creates one project if the directory holds neither. `--managed` asks for the
-same thing explicitly. A migration that fails reports why and opens the previous
-workspace window instead, which `--legacy` also does on request.
+same thing explicitly. A migration that is refused activates nothing and stops in
+a *Migration stopped* window that names the project and the scenario and offers
+*Open the previous workspace* (what `--legacy` opens on request) or *Quit*.
 `--check` validates a document without a window: exit code 0 for a valid document, 1
 for a document or read error and 2 for invalid arguments. Diagnostics never print
 field or secret values. Imports are limited to 16 MiB and perform no HTTP requests.

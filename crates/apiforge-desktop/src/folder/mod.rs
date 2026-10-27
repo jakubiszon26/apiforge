@@ -9,7 +9,7 @@
 //! path still opens the workspace.
 
 mod activation;
-pub use activation::{Start, decide as managed_start};
+pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;

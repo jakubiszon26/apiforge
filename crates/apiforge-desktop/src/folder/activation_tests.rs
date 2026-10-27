@@ -278,15 +278,17 @@ fn a_migration_that_cannot_finish_activates_nothing_and_reports_it() {
     assert!(data.path().join(CATALOGUE_FILE).exists());
 }
 
-/// KTLO-03 criterion 4: a migration that refuses is its own start, naming
-/// the project, the scenario and the reason. Nothing is activated.
+/// KTLO-03 criterion 4: a migration that refuses is its own start, and the
+/// window it opens is the stop window, not the workspace window. Nothing is
+/// activated.
 #[test]
 fn ktlo03_a_refused_migration_starts_the_stop_window_not_the_workspace_window() {
     use crate::testing::legacy_workspace::*;
     let data = tempfile::tempdir().unwrap();
     drop(write(data.path(), &with_a_broken_project()));
 
-    let Start::Refused(refusal) = decide(data.path()) else {
+    let start = decide(data.path());
+    let Start::Refused(refusal) = &start else {
         panic!("a refused migration is reported as its own start");
     };
     assert_eq!(refusal.project.as_deref(), Some(REFUSED_PROJECT_NAME));
@@ -294,11 +296,15 @@ fn ktlo03_a_refused_migration_starts_the_stop_window_not_the_workspace_window() 
     assert!(
         refusal
             .reason
-            .contains("a scenario differs after reloading"),
+            .contains("a scenario cannot be written as code without loss"),
         "{}",
         refusal.reason
     );
     assert!(!data.path().join(CATALOGUE_FILE).exists());
+    assert!(matches!(
+        crate::opening_for(data.path().to_owned(), start),
+        Ok(crate::Opening::Stopped(_))
+    ));
 }
 
 /// KTLO-03 decision 4: the causes that are not a refused migration keep

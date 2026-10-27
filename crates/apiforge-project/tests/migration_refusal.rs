@@ -22,62 +22,33 @@ fn input_names(node: &Node) -> Vec<&str> {
     node.inputs.keys().map(String::as_str).collect()
 }
 
-/// Criterion 1. Of the six projects, the fifth, "Order desk", is refused with
-/// `Verification { reason: "a scenario differs after reloading" }`, nothing is
-/// activated and the four projects prepared before it stay in staging.
+/// Criterion 1, the cause. The six-project workspace was refused on its
+/// fifth project, "Order desk", with `Verification { reason: "a scenario
+/// differs after reloading" }`, nothing activated and four projects left in
+/// staging: before KTLO-04 (`280d6bd`) and with it (`18f25a5`, part 1's QA
+/// report). Migration now seals its checkpoints in source order (decision 6
+/// of 2026-10-27), so the workspace migrates (criterion 2); what remains true
+/// is the cause, stated here on the models.
 ///
-/// Why: its check had its request replaced on the board, so the legacy model
-/// holds the check's inputs as `expected, actual`. Printed and read back, the
-/// source gives them as `actual, expected`. Compared as values the semantics
-/// are equal, so the printer accepts the source, but the checkpoint's semantic digest hashes the
-/// inputs in their stored order: the checkpoint sealed from the legacy model
-/// does not describe its own source, the reload falls back to reconciling
-/// against it, and the reconciled scenario lists its blocks in source order,
-/// which differs from the workspace.
+/// Its check had its request replaced on the board, so the legacy model holds
+/// the check's inputs as `expected, actual`. Printed and read back, the source
+/// gives them as `actual, expected`. Compared as values the semantics are
+/// equal, so the printer accepts the source, but the checkpoint's semantic
+/// digest hashes the inputs in their stored order: a checkpoint sealed from
+/// the legacy order does not describe its own source, the reload falls back to
+/// reconciling against it, and the reconciled scenario lists its blocks in
+/// source order, which differs from the workspace.
 #[test]
-fn a_six_project_workspace_is_refused_on_a_check_whose_request_was_replaced() {
-    let directory = tempfile::tempdir().unwrap();
+fn a_check_whose_request_was_replaced_stores_its_inputs_out_of_source_order() {
     let workspace = six_projects();
-    let store = write(directory.path(), &workspace);
-
-    let error = migrate_workspace(&store).expect_err("the workspace is refused");
-    match &error {
-        Error::Migration(MigrationError::Verification {
-            project_id, reason, ..
-        }) => {
-            assert_eq!(project_id, REFUSED_PROJECT_ID, "{error}");
-            assert_eq!(*reason, "a scenario differs after reloading", "{error}");
-        }
-        other => panic!("expected a verification refusal, got {other:?}"),
-    }
-    assert!(
-        !directory.path().join(CATALOGUE_FILE).exists(),
-        "nothing is activated"
-    );
-    let index: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(directory.path().join("migration/index.json")).unwrap(),
-    )
-    .unwrap();
-    let prepared: Vec<&str> = index["projects"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry["projectId"].as_str().unwrap())
-        .collect();
-    let demos: Vec<String> = workspace.projects[..4]
-        .iter()
-        .map(|project| project.id.clone())
-        .collect();
-    assert_eq!(prepared, demos, "the four projects before it stay staged");
-
     // The cause, stated on the models themselves.
     let project = workspace
         .projects
         .iter()
-        .find(|project| project.id == REFUSED_PROJECT_ID)
+        .find(|project| project.id == ORDER_DESK_ID)
         .unwrap();
     let legacy = &project.scenarios[0];
-    assert_eq!(legacy.name, REFUSED_SCENARIO_NAME);
+    assert_eq!(legacy.name, ORDER_TOTAL_NAME);
     let mut context: Project = project.clone();
     context.scenarios.clear();
     let document = Document::Scenario(legacy.clone());
@@ -137,10 +108,10 @@ fn tree(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
     files
 }
 
-/// Criterion 2. With KTLO-04 merged, the six projects migrate: six folders,
-/// every scenario equal after reloading, the catalogue activated.
+/// Criterion 2. With KTLO-04 merged and migration sealing its checkpoints in
+/// source order (decision 6), the six projects migrate: six folders, every
+/// scenario equal after reloading, the catalogue activated.
 #[test]
-#[ignore = "KTLO-03: still refused with KTLO-04 merged; the cause is the input order the checkpoint's semantic digest hashes (criterion 1), and how to fix it is the owner's decision"]
 fn the_six_project_workspace_migrates_with_ktlo_04_merged() {
     let directory = tempfile::tempdir().unwrap();
     let workspace = six_projects();
@@ -182,7 +153,9 @@ fn the_six_project_workspace_migrates_with_ktlo_04_merged() {
 /// Criterion 3. A migration that is still refused names the project and the
 /// scenario; the originals are byte-identical before and after, the staged
 /// folders are left in staging, and nothing is activated: no catalogue and no
-/// project folder.
+/// project folder. The broken project's scenario reads an environment value
+/// the project never sets, which a folder source cannot hold, so it cannot be
+/// written as code (`legacy_workspace::partner_feed`).
 #[test]
 fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing() {
     let directory = tempfile::tempdir().unwrap();
@@ -206,12 +179,22 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
 
     let error = migrate_workspace(&store).expect_err("the broken project is refused");
     let message = error.to_string();
+    match &error {
+        Error::Migration(MigrationError::Verification {
+            project_id,
+            project_name,
+            scenario,
+            reason,
+        }) => {
+            assert_eq!(project_id, REFUSED_PROJECT_ID, "{message}");
+            assert_eq!(project_name, REFUSED_PROJECT_NAME, "{message}");
+            assert_eq!(scenario.as_deref(), Some(REFUSED_SCENARIO_NAME));
+            assert_eq!(*reason, "a scenario cannot be written as code without loss");
+        }
+        other => panic!("expected a refusal naming the project, got {other:?}"),
+    }
     assert!(message.contains(REFUSED_PROJECT_NAME), "{message}");
     assert!(message.contains(REFUSED_SCENARIO_NAME), "{message}");
-    assert!(
-        message.contains("a scenario differs after reloading"),
-        "{message}"
-    );
     assert_eq!(originals(directory.path()), before, "originals untouched");
     assert!(!directory.path().join(CATALOGUE_FILE).exists());
     assert!(
@@ -219,13 +202,22 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
         "no project is published"
     );
 
-    // The staged folders stay for inspection, and the next start, which
-    // migrates again before it decides what to show, is refused the same way.
-    let staged = tree(&directory.path().join("migration"));
+    // The staged folders stay for inspection: the project prepared before the
+    // refused one, and the refused one's folder, which is refused before
+    // anything is written into it. The next start, which migrates again
+    // before it decides what to show, is refused the same way.
+    let staging = directory.path().join("migration");
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(staging.join("index.json")).unwrap()).unwrap();
+    let staged = staging.join(index["migrationId"].as_str().unwrap());
     assert!(
-        staged.keys().any(|path| path.contains(REFUSED_PROJECT_ID)),
-        "the refused project's staged folder is kept: {:?}",
-        staged.keys().collect::<Vec<_>>()
+        staged.join("support-desk/apiforge.project.json").is_file(),
+        "the project before it stays staged: {:?}",
+        tree(&staging).keys().collect::<Vec<_>>()
+    );
+    assert!(
+        staged.join(REFUSED_PROJECT_ID).is_dir(),
+        "the refused project's staged folder is kept"
     );
     drop(store);
     let store =
