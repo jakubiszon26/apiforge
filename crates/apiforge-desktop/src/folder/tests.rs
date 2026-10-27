@@ -7,6 +7,8 @@ mod acceptance_tests;
 mod accessibility_tests;
 #[path = "activation_tests.rs"]
 mod activation_tests;
+#[path = "component_run_tests.rs"]
+mod component_run_tests;
 #[path = "dog_tests.rs"]
 mod dog_tests;
 #[path = "editor_tests.rs"]
@@ -536,31 +538,59 @@ fn every_mode_draws_at_the_minimum_window_with_an_invalid_document() {
     }
 }
 
+/// KTLO-23a adds a component tab (decision 6): its toolbar, with *Publish*,
+/// *Run options* and *Run*, is wider than a scenario's, and the title keeps
+/// one width on both kinds of tab.
 #[test]
 fn long_project_names_do_not_overlap_header_actions_in_writable_or_read_only_windows() {
     let name = "Customer integration and contract verification workspace";
-    let (directory, _) = named_folder(name);
+    let (directory, scenario) = named_folder(name);
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let component = session
+        .create_document(
+            DocumentKind::Component,
+            "components/helper.afs",
+            "component Helper \"Helper\" {\n  export result: number = 2\n}\n",
+        )
+        .unwrap();
+    drop(session);
     let (context, mut writer) = open(directory.path());
     let (read_context, mut reader) = open(directory.path());
     assert!(reader.session.as_ref().unwrap().is_read_only());
     for (app, context) in [(&mut writer, &context), (&mut reader, &read_context)] {
         for size in [egui::vec2(960.0, 540.0), egui::vec2(1600.0, 1000.0)] {
-            let _ = painted(app, context, size);
-            let labels = painted(app, context, size);
-            let title = labels
-                .iter()
-                .find(|(text, rect)| text == name && rect.top() < 40.0)
-                .expect("the project name is visible")
-                .1;
-            assert!(title.height() <= 18.0, "the header uses compact UI text");
-            let project = labels.iter().find(|(text, _)| text == "Project").unwrap().1;
-            let code = labels.iter().find(|(text, _)| text == "Code").unwrap().1;
-            assert!(project.right() + 8.0 <= title.left());
-            assert!(title.right() + 8.0 <= code.left(), "{title:?}, {code:?}");
-            for action in ["Save", "Save all", "Run options", "Run"] {
-                let rect = labels.iter().find(|(text, _)| text == action).unwrap().1;
-                assert!(rect.right() <= size.x, "{action} remains visible");
+            let mut titles = Vec::new();
+            for (tab, actions) in [
+                (&scenario, &["Save", "Save all", "Run options", "Run"][..]),
+                (
+                    &component,
+                    &["Save", "Save all", "Publish", "Run options", "Run"][..],
+                ),
+            ] {
+                app.workbench.open(tab);
+                let _ = painted(app, context, size);
+                let labels = painted(app, context, size);
+                let title = labels
+                    .iter()
+                    .find(|(text, rect)| text == name && rect.top() < 40.0)
+                    .expect("the project name is visible")
+                    .1;
+                assert!(title.height() <= 18.0, "the header uses compact UI text");
+                let project = labels.iter().find(|(text, _)| text == "Project").unwrap().1;
+                let code = labels.iter().find(|(text, _)| text == "Code").unwrap().1;
+                assert!(project.right() + 8.0 <= title.left());
+                assert!(title.right() + 8.0 <= code.left(), "{title:?}, {code:?}");
+                for action in actions {
+                    let rect = labels
+                        .iter()
+                        .find(|(text, rect)| text == action && rect.top() < 40.0)
+                        .unwrap_or_else(|| panic!("{action} on the header"))
+                        .1;
+                    assert!(rect.right() <= size.x, "{action} remains visible");
+                }
+                titles.push(title.width());
             }
+            assert_eq!(titles[0], titles[1], "one title width on every tab");
         }
     }
 }

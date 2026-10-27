@@ -153,3 +153,76 @@ fn unsaved_export_keeps_exact_source_fields_and_public_dirty_settings() {
     assert!(session.document(&id).unwrap().is_dirty());
     assert!(session.is_manifest_dirty());
 }
+
+/// KTLO-23a criteria 2–4: a component document prepares a run of its working
+/// text, saved or not, with the published revisions it calls; nothing on disk
+/// changes.
+#[test]
+fn ktlo23_a_component_prepares_a_run_of_its_working_text_and_its_pinned_calls() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Components").unwrap();
+    let helper = session
+        .create_document(
+            DocumentKind::Component,
+            "components/helper.afs",
+            "component Helper \"Helper\" {\n  export result: number = 2\n}\n",
+        )
+        .unwrap();
+    session.publish(&helper, Origin::SESSION).unwrap();
+    let outer = session
+        .create_document(
+            DocumentKind::Component,
+            "components/outer.afs",
+            "component Outer \"Outer\" {\n  call = (Helper@1())\n  export inner: number = call.result\n}\n",
+        )
+        .unwrap();
+    let saved = std::fs::read(directory.path().join("components/helper.afs")).unwrap();
+    let edited = session
+        .document(&helper)
+        .unwrap()
+        .text()
+        .replace("= 2", "= 3");
+    session
+        .edit_source(&helper, &edited, Origin::SESSION)
+        .unwrap();
+
+    let prepared = session.prepare_run(&helper).unwrap();
+    assert!(!prepared.last_valid);
+    assert!(prepared.unsaved);
+    let project = prepared.project().unwrap();
+    assert!(project.scenarios.is_empty(), "a component runs on its own");
+    let own: Vec<_> = project
+        .components
+        .iter()
+        .filter(|component| component.handle == "Helper")
+        .collect();
+    assert_eq!(own.len(), 1, "only the working text of the helper runs");
+    assert_eq!(
+        own[0].revision, 2,
+        "its next revision, unused by revision 1"
+    );
+    assert!(
+        serde_json::to_string(&own[0].graph)
+            .unwrap()
+            .contains(":3}"),
+        "the unsaved value"
+    );
+
+    let project = session.prepare_run(&outer).unwrap().project().unwrap();
+    let mut revisions: Vec<(String, u32)> = project
+        .components
+        .iter()
+        .map(|component| (component.handle.clone(), component.revision))
+        .collect();
+    revisions.sort();
+    assert_eq!(
+        revisions,
+        [("Helper".to_owned(), 1), ("Outer".to_owned(), 1)],
+        "the outer component and the published revision it pins"
+    );
+    assert_eq!(
+        std::fs::read(directory.path().join("components/helper.afs")).unwrap(),
+        saved,
+        "preparing a run writes nothing"
+    );
+}
