@@ -6,9 +6,9 @@
   with one change: *Library | Files* are underline tabs like *Main | Cleanup*,
   not a segmented row; decision 1 = A (Diagram only), decision 2 = A
   (remembered). Depends on KTLO-17 (the rail).
-- Actual: 1203 changed lines without captures — size L, over the M
+- Actual: 1208 changed lines without captures — size L, over the M
   estimate (≤ 800): code 187, acceptance and storage tests 736, older tests
-  adjusted to the tab row 40, review view 30, QA report 195, this ticket 15;
+  adjusted to the tab row 40, review view 30, QA report 200, this ticket 15;
   one round. Not split: the code is 187 lines; the tests, one per criterion
   at both window sizes plus the explorer tests run on *Files*, are most of
   it. QA report: `docs/qa/2026-10-26/KTLO-11/report.md`
