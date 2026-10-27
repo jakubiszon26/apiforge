@@ -31,7 +31,10 @@ component no longer has to be called from a scenario to be tested.
   *Run inputs* dialog asks for the values before the run and remembers them
   for the session.
 - **Changed:** the hover text of *Run* reads "Simulate the selected scenario
-  or component…". The command line is unchanged (see Not in scope).
+  or component…". The header keeps 650 px for its toolbar instead of 620 on
+  every tab (decision 6), so at 960 px a long project title is 30 px shorter
+  (192 instead of 224 px) before it is cut; "Demo shop" is unaffected. The
+  command line is unchanged (see Not in scope).
 - **Removed or hidden:** nothing.
 - **Migrated or converted:** nothing. No file changes: the run is in memory,
   and the live-run journal records the component's name where it records a
