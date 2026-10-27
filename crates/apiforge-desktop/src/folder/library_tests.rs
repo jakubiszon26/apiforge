@@ -1102,6 +1102,17 @@ fn ktlo11_the_explorer_on_files_does_what_it_does_in_code() {
             // Refresh lists a file written outside the window.
             std::fs::write(project.path().join("notes.txt"), "notes\n").unwrap();
             click(&mut harness, "Refresh");
+            // The scan it starts runs on a worker, which settling does not
+            // wait for.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while !explorer_labels(&harness)
+                .iter()
+                .any(|row| row == "notes.txt")
+                && std::time::Instant::now() < deadline
+            {
+                harness.step();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
             assert!(
                 explorer_labels(&harness)
                     .iter()
