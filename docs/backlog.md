@@ -126,6 +126,7 @@ criteria:
 | [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) | S · 15 min · `visible UI`, `default` |
 | [#79](https://github.com/jakubiszon26/apiforge/issues/79) | KTLO-26 A board edit keeps the model the printed source reads back, so the checkpoint it seals describes its source; [ticket](tickets/KTLO-26.md); decision A 2026-10-27 | S · 10 min · `format` |
 | [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning | S · 5 min |
+| [#84](https://github.com/jakubiszon26/apiforge/issues/84) | KTLO-27 An empty optional input in the Run inputs dialog means "absent"; [ticket](tickets/KTLO-27.md); after KTLO-23b, owner decision of 2026-10-27 on #54 | S · 10 min · `visible UI` |
 
 ## Later
 

@@ -657,3 +657,28 @@ fn the_run_inputs_dialog_names_every_control() {
     }
     assert!(app.runs.handle.is_none(), "nothing runs");
 }
+
+/// KTLO-27 criterion 4: with an optional input the audit passes, and the
+/// optional marker is part of that field's name.
+#[test]
+fn the_run_inputs_dialog_names_an_optional_field_as_optional() {
+    use super::component_run_tests::{NOTE_FIELD, NOTES, shop_with_notes};
+    let directory = shop_with_notes();
+    let (context, mut app) = open(directory.path());
+    let id = document(&app, NOTES);
+    app.workbench.open(&id);
+    app.request_run(&id, false);
+    assert!(
+        exposes(&mut app, &context, NOTE_FIELD),
+        "the optional field is named with its marker"
+    );
+    for mode in [Mode::Diagram, Mode::Split, Mode::Code] {
+        app.workbench.mode = mode;
+        assert_named(
+            &format!("{mode:?}, Run inputs, optional"),
+            &mut app,
+            &context,
+        );
+    }
+    assert!(app.runs.handle.is_none(), "nothing runs");
+}

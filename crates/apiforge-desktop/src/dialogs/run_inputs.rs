@@ -6,6 +6,10 @@
 //! values and the types written in code, so a field's text becomes a value of
 //! its input's type: text as typed, a finite number, `true` or `false`, and
 //! JSON for an object, a list or any value.
+//!
+//! An input the component declares optional and gives no default may be left
+//! empty: it is then absent, as when a caller omits it (KTLO-27, owner
+//! decision of 2026-10-27 on #54).
 
 use super::{Action, Chrome, Outcome, autofocus, json_field, json_text, parse_json, text_field};
 use crate::widgets;
@@ -35,18 +39,35 @@ struct Field {
     title: String,
     value_type: ValueType,
     contract: Option<String>,
+    /// Declared optional, with no default: empty, the input is absent.
+    optional: bool,
     source: Source,
     text: String,
 }
 
 impl Field {
-    /// The accessible name of the field: its title and type.
+    /// The accessible name of the field: its title and type, and the optional
+    /// marker.
     fn accessible_name(&self) -> String {
-        format!("{} · {}", self.title, type_name(self.value_type))
+        let name = format!("{} · {}", self.title, type_name(self.value_type));
+        if self.optional {
+            format!("{name} · optional")
+        } else {
+            name
+        }
     }
 
     fn value(&self) -> Option<Result<Value, String>> {
         value(self.value_type, &self.text)
+    }
+
+    /// Whether the field lets the dialog run: a valid value, or empty when
+    /// optional.
+    fn ready(&self) -> bool {
+        match self.value() {
+            Some(value) => value.is_ok(),
+            None => self.optional,
+        }
     }
 }
 
@@ -95,6 +116,7 @@ impl RunInputsDialog {
                             .find(|contract| &contract.id == id)
                             .map_or_else(|| id.clone(), |contract| contract.name.clone())
                     }),
+                    optional: port.required == Some(false) && port.default().is_none(),
                     source,
                     text: value
                         .map(|value| text(port.value_type, value))
@@ -109,7 +131,8 @@ impl RunInputsDialog {
         }
     }
 
-    /// Applies with the value of every input once each has a valid one.
+    /// Applies once every input has a valid value or is optional and empty,
+    /// with the values of those that have one.
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<RunInputs> {
         let chrome = Chrome {
             id: "run-inputs-dialog",
@@ -121,9 +144,7 @@ impl RunInputsDialog {
         };
         let mut state = (&mut self.fields, &mut self.focused);
         match chrome.show(ctx, &mut state, body, |(fields, _)| {
-            fields
-                .iter()
-                .all(|field| matches!(field.value(), Some(Ok(_))))
+            fields.iter().all(Field::ready)
         }) {
             Action::Apply => Outcome::Applied(
                 self.fields
@@ -140,20 +161,34 @@ impl RunInputsDialog {
 fn body(ui: &mut Ui, (fields, focused): &mut (&mut Vec<Field>, &mut bool)) {
     widgets::hint(
         ui,
-        "An input without a default needs a value before this component can run.",
+        if fields.iter().any(|field| field.optional) {
+            "An input without a default needs a value before this component can run, \
+             unless it is optional: left empty, it is absent."
+        } else {
+            "An input without a default needs a value before this component can run."
+        },
     );
-    let first_empty = fields.iter().position(|field| field.text.trim().is_empty());
+    let empty = |field: &&Field| field.text.trim().is_empty();
+    let first_empty = fields
+        .iter()
+        .position(|field| empty(&field) && !field.optional)
+        .or_else(|| fields.iter().position(|field| empty(&field)));
     for (index, field) in fields.iter_mut().enumerate() {
         widgets::field_name(ui, &field.title);
-        let kind = match &field.contract {
+        let mut kind = match &field.contract {
             Some(contract) => format!("{} · {contract} contract", type_name(field.value_type)),
             None => type_name(field.value_type).to_owned(),
         };
+        if field.optional {
+            kind.push_str(" · optional");
+        }
         widgets::hint(
             ui,
             match field.source {
+                _ if field.optional && empty(&&*field) => format!("{kind} · empty means absent"),
                 Source::Remembered => format!("{kind} · kept from the last run"),
                 Source::Default => format!("{kind} · pre-filled from its default"),
+                Source::Empty if field.optional => format!("{kind} · no default"),
                 Source::Empty => format!("{kind} · no default, enter a value to run"),
             },
         );
@@ -305,5 +340,29 @@ mod tests {
             json!({"a": 1})
         );
         assert_eq!(dialog.fields[2].accessible_name(), "item · Object");
+    }
+
+    #[test]
+    fn only_a_declared_optional_input_without_a_default_may_stay_empty() {
+        let port = |name: &str, required: Option<bool>, default: Option<Value>| Port {
+            required,
+            default_value: default.map_or(OptionalJson::Missing, OptionalJson::Present),
+            ..Port::new(name, ValueType::String)
+        };
+        let inputs = [
+            port("optional", Some(false), None),
+            port("required", Some(true), None),
+            port("undeclared", None, None),
+            port("defaulted", Some(false), Some(json!("x"))),
+        ];
+        let mut dialog = RunInputsDialog::new("Echo", &inputs, &[], None);
+        dialog.fields[3].text.clear();
+        let ready: Vec<bool> = dialog.fields.iter().map(Field::ready).collect();
+        assert_eq!(ready, [true, false, false, false]);
+        assert_eq!(
+            dialog.fields[0].accessible_name(),
+            "optional · Text · optional"
+        );
+        assert_eq!(dialog.fields[1].accessible_name(), "required · Text");
     }
 }
