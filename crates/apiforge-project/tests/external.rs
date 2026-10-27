@@ -351,7 +351,7 @@ mod observer {
         holder.save(&id).unwrap();
 
         let outcome = poll(&mut observer);
-        assert!(outcome.project_reloaded, "{outcome:?}");
+        assert!(outcome.project_reloaded, "the commit is followed");
         assert!(observer.epoch() > epoch, "a reload starts a new epoch");
         assert_eq!(observer.document(&id).unwrap().text(), CHANGED);
         assert_eq!(blocks(&observer, &id), blocks(&holder, &id));
@@ -369,7 +369,7 @@ mod observer {
         assert_eq!(holder.document(&id).unwrap().text(), SCENARIO);
 
         let outcome = poll(&mut observer);
-        assert!(outcome.project_reloaded, "{outcome:?}");
+        assert!(outcome.project_reloaded, "the commit is followed");
         assert_eq!(blocks(&observer, &id), blocks(&holder, &id));
     }
 
@@ -400,7 +400,7 @@ mod observer {
         // Saving rewrites the holder's recovery file, still with the draft.
         holder.save(&other).unwrap();
         let outcome = poll(&mut observer);
-        assert!(outcome.project_reloaded, "{outcome:?}");
+        assert!(outcome.project_reloaded, "the commit is followed");
         assert_eq!(observer.document(&id).unwrap().text(), SCENARIO);
         assert!(observer.recovered_drafts().is_empty());
     }
@@ -416,7 +416,7 @@ mod observer {
         holder.edit_source(&id, CHANGED, HOLDER).unwrap();
         holder.save(&id).unwrap();
         let outcome = poll(&mut observer);
-        assert!(outcome.project_reloaded, "{outcome:?}");
+        assert!(outcome.project_reloaded, "the commit is followed");
         assert!(observer.epoch() > epoch, "a reload starts a new epoch");
         let model = observer.document(&id).unwrap().model().cloned();
 
@@ -442,10 +442,10 @@ mod observer {
         let preview = holder.preview_delete(&["scenarios/other.afs"]).unwrap();
         holder.delete(&preview, HOLDER).unwrap();
         let outcome = poll(&mut observer);
-        assert!(outcome.project_reloaded, "{outcome:?}");
+        assert!(outcome.project_reloaded, "the commit is followed");
         assert_eq!(observer.documents().len(), 1);
         assert!(observer.document(&id).is_some());
-        assert_eq!(outcome.followed.len(), 1, "{outcome:?}");
+        assert_eq!(outcome.followed.len(), 1);
         assert_eq!(outcome.followed[0].kind, CommitChangeKind::Deleted);
         assert_eq!(outcome.followed[0].path, "scenarios/other.afs");
     }
@@ -465,7 +465,7 @@ mod observer {
         assert_eq!(
             kinds,
             [CommitChangeKind::Saved, CommitChangeKind::Settings],
-            "{outcome:?}"
+            "both changes are named"
         );
         assert_eq!(
             outcome.followed[0].document_id.as_deref(),
