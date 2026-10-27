@@ -405,6 +405,16 @@ impl FolderApp {
         ui.horizontal(|ui| {
             widgets::caption(ui, "PROBLEMS");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // At the row's right end, after the status as in the approved
+                // mock-up, pointing the way the section moves (KTLO-18).
+                let (icon, label) = if expanded {
+                    (Icon::ChevronDown, "Restore problems")
+                } else {
+                    (Icon::ChevronUp, "Expand problems")
+                };
+                toggle = ui
+                    .add(widgets::icon_button(icon, label).compact())
+                    .clicked();
                 ui.label(
                     RichText::new(status.join("  ·  "))
                         .size(theme::FONT_LABEL)
@@ -414,16 +424,6 @@ impl FolderApp {
                             theme::MUTED
                         }),
                 );
-                // Between the caption and the status, pointing the way the
-                // section moves (KTLO-18).
-                let (icon, label) = if expanded {
-                    (Icon::ChevronDown, "Restore problems")
-                } else {
-                    (Icon::ChevronUp, "Expand problems")
-                };
-                toggle = ui
-                    .add(widgets::icon_button(icon, label).compact())
-                    .clicked();
             });
         });
         if toggle {
