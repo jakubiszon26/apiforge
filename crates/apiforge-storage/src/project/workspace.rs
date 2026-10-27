@@ -452,6 +452,97 @@ mod tests {
         );
     }
 
+    /// KTLO-11 criterion 6: the chosen *Files* tab of the left panel in
+    /// Diagram round-trips with the panel sizes.
+    #[test]
+    fn the_files_tab_round_trips() {
+        let panels = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 380.0,
+            "libraryFiles": true,
+        });
+        assert_eq!(panels_through_load_and_save(panels.clone()), panels);
+        let collapsed = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 380.0,
+            "libraryCollapsed": true,
+            "libraryFiles": true,
+        });
+        assert_eq!(
+            panels_through_load_and_save(collapsed.clone()),
+            collapsed,
+            "the tab is kept with the rail (KTLO-17)"
+        );
+    }
+
+    /// KTLO-11 criterion 6: a view state without the field opens on *Library*,
+    /// and *Library* adds nothing to the file.
+    #[test]
+    fn a_view_state_without_the_files_tab_opens_on_the_library() {
+        let panels = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 240.0,
+        });
+        assert_eq!(panels_through_load_and_save(panels.clone()), panels);
+        let library = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 240.0,
+            "libraryFiles": false,
+        }));
+        assert_eq!(library, panels);
+    }
+
+    /// KTLO-11 criterion 6 (KTLO-05c's tolerance of unknown fields): the panel
+    /// sizes this build writes with the *Files* tab load in a build without
+    /// the field, whose panel sizes are KTLO-17's.
+    #[test]
+    fn a_view_state_with_the_files_tab_loads_in_a_build_without_it() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[serde(rename_all = "camelCase")]
+        struct PanelSizesOfKtlo17 {
+            documents: f32,
+            split_code: f32,
+            diagnostics: f32,
+            #[serde(default = "default_library_width")]
+            library: f32,
+            #[serde(default)]
+            library_collapsed: bool,
+        }
+        let written = panels_through_load_and_save(serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 400.0,
+            "libraryCollapsed": true,
+            "libraryFiles": true,
+        }));
+        assert_eq!(
+            written["libraryFiles"],
+            serde_json::json!(true),
+            "this build writes the field"
+        );
+        let older: PanelSizesOfKtlo17 = serde_json::from_value(written).unwrap();
+        assert_eq!(
+            older,
+            PanelSizesOfKtlo17 {
+                documents: 220.0,
+                split_code: 480.0,
+                diagnostics: 140.0,
+                library: 400.0,
+                library_collapsed: true,
+            },
+            "the older build keeps every size and flag it knows"
+        );
+    }
+
     #[test]
     fn a_read_only_session_does_not_write_view_state() {
         let (directory, _writer) = store();

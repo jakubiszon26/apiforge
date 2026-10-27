@@ -1070,9 +1070,20 @@ fn external_edits_reload_clean_tabs_and_pause_saving_unsaved_ones() {
 
 #[test]
 fn the_explorer_is_driven_by_the_keyboard() {
+    explorer_keyboard(Mode::Code);
+}
+
+/// KTLO-11 criterion 3: the same keys on Diagram's *Files* tab.
+#[test]
+fn ktlo11_the_explorer_on_files_is_driven_by_the_keyboard() {
+    explorer_keyboard(Mode::Diagram);
+}
+
+fn explorer_keyboard(mode: Mode) {
     let directory = shop();
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
+    show_explorer(&mut app, &context, mode);
     let id = document(&app, COMPONENT);
     app.explorer.selected = Some("components".into());
     context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
@@ -1108,6 +1119,7 @@ fn the_explorer_is_driven_by_the_keyboard() {
         vec![key(Key::ArrowLeft, Modifiers::NONE)],
     );
     assert_eq!(app.explorer.selected.as_deref(), Some("components"));
+    assert_eq!(app.workbench.mode, mode, "the explorer keeps the mode");
 }
 
 #[test]
@@ -1288,6 +1300,21 @@ fn row_at(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos
     find(app, context, name).unwrap_or_else(|| panic!("no visible explorer row {name}"))
 }
 
+/// Shows the explorer in `mode`: Code's own panel, or the *Files* tab of the
+/// panel beside the board in Diagram (KTLO-11), chosen by a click.
+fn show_explorer(app: &mut FolderApp, context: &egui::Context, mode: Mode) {
+    app.workbench.mode = mode;
+    frame(app, context, vec![]);
+    if mode == Mode::Diagram {
+        let files = painted(app, context, egui::vec2(1600.0, 1000.0))
+            .into_iter()
+            .find(|(text, rect)| text == "Files" && rect.center().x < 260.0)
+            .map(|(_, rect)| rect.center())
+            .expect("the panel beside the board has a *Files* tab (KTLO-11)");
+        click(app, context, files);
+    }
+}
+
 fn click(app: &mut FolderApp, context: &egui::Context, at: egui::Pos2) {
     frame(app, context, vec![egui::Event::PointerMoved(at)]);
     for pressed in [true, false] {
@@ -1310,10 +1337,21 @@ fn click(app: &mut FolderApp, context: &egui::Context, at: egui::Pos2) {
 
 #[test]
 fn one_explorer_click_opens_a_file_and_the_project_row_is_its_own_destination() {
+    explorer_clicks(Mode::Code);
+}
+
+/// KTLO-11 criteria 2 and 3: the same clicks on Diagram's *Files* tab.
+#[test]
+fn ktlo11_one_click_on_files_opens_a_file_and_the_project_row_is_its_own_destination() {
+    explorer_clicks(Mode::Diagram);
+}
+
+fn explorer_clicks(mode: Mode) {
     let directory = shop();
     std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
+    show_explorer(&mut app, &context, mode);
     let scenario = document(&app, SCENARIO);
     let component = document(&app, COMPONENT);
     // Another document is active to begin with.
@@ -1354,14 +1392,26 @@ fn one_explorer_click_opens_a_file_and_the_project_row_is_its_own_destination() 
     );
     click(&mut app, &context, chevron);
     assert!(app.explorer_rows().len() > 1);
+    assert_eq!(app.workbench.mode, mode, "the explorer keeps the mode");
 }
 
 #[test]
 fn the_keyboard_reaches_the_project_row_and_opens_a_text_file() {
+    explorer_project_row(Mode::Code);
+}
+
+/// KTLO-11 criteria 2 and 3: the same on Diagram's *Files* tab.
+#[test]
+fn ktlo11_the_keyboard_on_files_reaches_the_project_row_and_opens_a_text_file() {
+    explorer_project_row(Mode::Diagram);
+}
+
+fn explorer_project_row(mode: Mode) {
     let directory = shop();
     std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
     let (context, mut app) = open(directory.path());
     watch(&mut app, &context);
+    show_explorer(&mut app, &context, mode);
     let at = row_at(&mut app, &context, "README.md");
     click(&mut app, &context, at);
     assert_eq!(
@@ -1388,6 +1438,7 @@ fn the_keyboard_reaches_the_project_row_and_opens_a_text_file() {
         vec![key(Key::ArrowRight, Modifiers::NONE)],
     );
     assert!(app.explorer_rows().len() > 1);
+    assert_eq!(app.workbench.mode, mode, "the explorer keeps the mode");
 }
 
 #[test]
