@@ -164,11 +164,16 @@ width Diagram comes back to. Test: `ktlo11_the_panel_widens_to_420_in_diagram_on
 
 ## Windows
 
-Not run on Windows by hand. CI runs the desktop suite, including the KTLO-11
-tests, on the Windows runner and uploads the standard captures
-(`qa-captures-windows-2022`: Diagram on *Library*, as a new project opens;
-the CI step does not click *Files* or the rail); see the pull request's
-checks. Not accepted for Windows on this report alone.
+Not run on Windows by hand. CI run 40513418762 on `ca8f12f` (the branch
+after merging `main`) passed on `windows-2022`, including the desktop suite
+with the KTLO-11 tests. Its `qa-captures-windows-2022` artifact holds all six
+standard captures; the CI step does not click, so Diagram is on *Library*, as
+a new project opens. [windows-diagram-960x540.png](windows-diagram-960x540.png)
+shows the *Library | Files* tabs and the chevron on the panel's top row, as
+on Linux (with a component's tooltip under the runner's pointer). The three
+`*-1600x1000.png` captures are 1024 × 768, because the runner's display is
+smaller (warnings on the run), so they are not cited as 1600 × 1000. Not
+accepted for Windows on this report alone.
 
 ## Not verified
 
