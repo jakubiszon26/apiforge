@@ -99,6 +99,9 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 - `apiforge run --folder --component <name>`: the command line runs a saved
   component the way the window will after KTLO-23 (owner decision of
   2026-10-26 kept it out of that ticket).
+- The *Run results* panel does not scroll to the selected step and cuts the
+  fifth step off at its default height of 320 px (seen in the KTLO-23
+  mock-up).
 - Removal of the legacy JSON mode once the KTLO-06 parity list is closed.
 - Roadmap M7 editor features ([roadmap](roadmap.md)).
 - Windows release gates: interactive native QA and directory durability
