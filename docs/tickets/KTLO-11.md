@@ -1,10 +1,17 @@
 # KTLO-11: Project files in Diagram — the left panel switches between Library and Files
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `format`
-- State: Approved 2026-10-26 (issue #14) — mock-up approved with one change:
-  *Library | Files* are underline tabs like *Main | Cleanup*, not a
-  segmented row; decision 1 = A (Diagram only), decision 2 = A (remembered).
-  Depends on KTLO-17 (the rail).
+- State: Awaiting acceptance (issue #14; pull request from
+  `feat/ktlo-11-library-files-tabs`). Approved 2026-10-26 — mock-up approved
+  with one change: *Library | Files* are underline tabs like *Main | Cleanup*,
+  not a segmented row; decision 1 = A (Diagram only), decision 2 = A
+  (remembered). Depends on KTLO-17 (the rail).
+- Actual: 1188 changed lines without captures — size L, over the M
+  estimate (≤ 800): code 187, acceptance and storage tests 725, older tests
+  adjusted to the tab row 40, review view 30, QA report 191, this ticket 15;
+  one round. Not split: the code is 187 lines; the tests, one per criterion
+  at both window sizes plus the explorer tests run on *Files*, are most of
+  it. QA report: `docs/qa/2026-10-26/KTLO-11/report.md`
 - Analysis model: Fable · Implementation model: Opus 5.5
 - Mock-up branch: `mock/ktlo-ui-wishes` (throwaway; deleted after the decision)
 - Opened on 2026-10-25 as "scenario navigation in Diagram mode" (KTLO-05a
