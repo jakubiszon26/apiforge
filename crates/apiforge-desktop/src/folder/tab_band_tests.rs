@@ -396,9 +396,24 @@ fn the_recovery_backup_notice_brings_the_band_back_until_it_is_resolved() {
     }
 }
 
+/// Waits until the view change of the last click is written to the
+/// project's view state, which starts a second after the change. A walk of
+/// the keyboard focus that overlapped that write skipped the project files
+/// panel.
+fn view_written(harness: &mut FolderHarness) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while folder(harness).changed_at.is_some() {
+        assert!(Instant::now() < deadline, "the view state was not written");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    settle(harness);
+}
+
 /// The controls Tab visits from the app header's first one, Project, until it
 /// comes back to Project: each one's name and rect.
 fn tab_cycle(harness: &mut FolderHarness) -> Vec<(String, egui::Rect)> {
+    view_written(harness);
     harness.get_by_label("Project").focus();
     settle(harness);
     let mut visited = Vec::new();
