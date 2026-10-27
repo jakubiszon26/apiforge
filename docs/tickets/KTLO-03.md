@@ -10,7 +10,7 @@
   and 7 taken 2026-10-27 after part 1. Part 2 — the *Migration stopped*
   window (the rest of 4, and 5) and the fix of decision 6 (criterion 2), with
   criterion 3's new broken fixture — awaits acceptance in the part 2 pull
-  request, 1 164 changed lines — over M (see *Size*). QA report for both parts:
+  request, 1 165 changed lines — over M (see *Size*). QA report for both parts:
   `docs/qa/2026-10-27/KTLO-03/report.md`
 - Mock-up branch: `mock/ktlo-03-migration-stop` (throwaway; captures in
   `docs/qa/2026-10-27/KTLO-03/`, posted on #5)
@@ -168,10 +168,10 @@ person sees, before any project window exists, in the application's theme.
 - **Size.** Over M with the window, so split at the appendix's seam: part 1
   (criteria 1–3 and `Start::Refused`) is one pull request; part 2 (the window,
   the rest of criterion 4, and 5) follows from `main` once part 1 is merged. Part 2, measured with `git diff --stat
-  origin/main...HEAD` (captures not counted), is **1 164 changed lines, over
+  origin/main...HEAD` (captures not counted), is **1 165 changed lines, over
   M's 800**: the window 524 (code 250, tests 274), the fix of decision 6 and
-  the named refusal 123 (`migration.rs`), the fixture and project tests 184,
-  docs 333 (QA report 226, ticket 79, review notes 23, development
+  the named refusal 123 (`migration.rs`), the fixture and project tests 182,
+  docs 336 (QA report 229, ticket 79, review notes 23, development
   guide 5). Decision 7 put the window and the fix in one pull request; the
   tests are not trimmed.
 
