@@ -159,6 +159,8 @@ pub struct ProjectSession {
     cache: Option<apiforge_storage::project::LastValidRead>,
     /// The registry as last observed by an external check.
     registry: RegistryState,
+    /// The head generation of the stable read this session was loaded from.
+    loaded_generation: u64,
 }
 
 impl std::fmt::Debug for ProjectSession {
@@ -334,6 +336,7 @@ impl ProjectSession {
             recovery: RecoveryState::default(),
             cache: None,
             registry: RegistryState::Current,
+            loaded_generation: snapshot.generation,
         };
         for entry in manifest.documents {
             session.documents.push(document_from(&snapshot, entry));
@@ -346,6 +349,12 @@ impl ProjectSession {
 
     pub fn store(&self) -> &ProjectStore {
         &self.store
+    }
+    /// The head generation of the stable read this session was loaded from
+    /// (0 before the project's first commit on this machine). Commits made by
+    /// the session itself do not advance it; `reload` does.
+    pub fn loaded_generation(&self) -> u64 {
+        self.loaded_generation
     }
     pub fn is_read_only(&self) -> bool {
         self.store.is_read_only()
@@ -536,6 +545,7 @@ impl ProjectSession {
         document.source_version += 1;
         document.analysis = AnalysisState::Pending;
         document.diagnostics.clear();
+        document.omitted_diagnostics = 0;
         document.model = None;
         document.model_source = None;
         document.layout_dirty = false;
@@ -616,6 +626,7 @@ impl ProjectSession {
         }
         let document = &mut self.documents[index];
         document.diagnostics = analysis.diagnostics;
+        document.omitted_diagnostics = analysis.omitted_diagnostics;
         let version = document.source_version;
         let valid = analysis.model.is_some();
         match analysis.model {
@@ -794,6 +805,7 @@ impl ProjectSession {
                 document.set_text(text);
                 document.source_version += 1;
                 document.diagnostics.clear();
+                document.omitted_diagnostics = 0;
                 let version = document.source_version;
                 self.emit(
                     origin,

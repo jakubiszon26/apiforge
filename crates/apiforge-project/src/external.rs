@@ -438,6 +438,7 @@ impl ProjectSession {
         let document = &mut self.documents[index];
         document.conflict = None;
         document.diagnostics.clear();
+        document.omitted_diagnostics = 0;
         match observed {
             ObservedFile::Bytes(bytes) => {
                 document.saved = FileState::of(&bytes);
