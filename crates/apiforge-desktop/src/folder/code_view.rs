@@ -48,19 +48,29 @@ impl FolderApp {
             self.workbench.mode as u8,
             self.problems_epoch,
         ));
+        // Until its edge is dragged, an expanded section follows the ceiling
+        // every frame: a height taken once would keep whatever the first frame
+        // after the click had room for, and would not follow the window.
+        if expanded
+            && ui
+                .ctx()
+                .read_response(diagnostics.with("__resize"))
+                .is_some_and(|handle| handle.dragged() || handle.drag_stopped())
+        {
+            self.problems_dragged = true;
+        }
+        let panel = egui::Panel::bottom(diagnostics).resizable(true);
+        let panel = if !expanded {
+            panel
+                .default_size(self.workbench.panels.diagnostics)
+                .size_range(PROBLEMS_HEIGHTS)
+        } else if self.problems_dragged {
+            panel.size_range(*PROBLEMS_HEIGHTS.start()..=ceiling)
+        } else {
+            panel.exact_size(ceiling)
+        };
         let mut reveal = None;
-        let shown = egui::Panel::bottom(diagnostics)
-            .resizable(true)
-            .default_size(if expanded {
-                ceiling
-            } else {
-                self.workbench.panels.diagnostics
-            })
-            .size_range(if expanded {
-                *PROBLEMS_HEIGHTS.start()..=ceiling
-            } else {
-                PROBLEMS_HEIGHTS
-            })
+        let shown = panel
             .frame(
                 egui::Frame::new()
                     .fill(theme::PANEL)
@@ -428,6 +438,7 @@ impl FolderApp {
         });
         if toggle {
             self.problems_expanded = !expanded;
+            self.problems_dragged = false;
             self.problems_epoch = self.problems_epoch.wrapping_add(1);
             // The new panel id has no resize response from the previous frame,
             // so its handle would stay unnamed for one frame.

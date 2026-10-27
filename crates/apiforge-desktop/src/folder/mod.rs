@@ -206,6 +206,9 @@ pub struct FolderApp {
     /// Changes with every expand and restore, so egui forgets a height the
     /// handle dragged under the other state, as the run results panel does.
     problems_epoch: u64,
+    /// The edge of the expanded section has been dragged, so it keeps the
+    /// height it was dragged to instead of following the window.
+    problems_dragged: bool,
     /// The block whose statement the code view last revealed.
     revealed: Option<String>,
     /// The statement under the caret, for a document, source version and caret:
@@ -358,6 +361,7 @@ impl FolderApp {
             scroll_restore: None,
             problems_expanded: false,
             problems_epoch: 0,
+            problems_dragged: false,
             revealed: None,
             caret_statement: None,
             completion_names: None,
