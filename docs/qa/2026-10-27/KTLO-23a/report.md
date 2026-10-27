@@ -2,7 +2,8 @@
 
 - Branch: `feat/ktlo-23a-component-run`; captures from the release binary of
   `bdc037c` (the implementation and its test-helper correction, on top of
-  `main` at `280d6bd`, KTLO-18 and KTLO-22 included)
+  `main` at `280d6bd`, KTLO-18 and KTLO-22 included), before `main` with
+  KTLO-24 (the tab strip) and KTLO-04 (sealing) was merged in at `fde299f`
 - Built with: `cargo build --release -p apiforge-desktop --locked`
 - Compared against mock-up: [docs/tickets/KTLO-23.md](../../../tickets/KTLO-23.md)
   (`../KTLO-23/mock-*.png`), approved as a whole (decision 5); header width
@@ -12,7 +13,9 @@
   --all-targets --locked --no-fail-fast` (isolated `XDG_CONFIG_HOME` and
   `XDG_DATA_HOME`; 1055 passed, 0 failed) and `apiforge-convert-v1 --fixtures
   --check`: all pass. The 18 KTLO-23a tests (11 desktop, 6 runner, 1 project)
-  passed ten runs in a row.
+  passed ten runs in a row. After merging `main` (`fde299f`) all four pass
+  again (1072 passed, 0 failed) and the 11 desktop tests passed ten runs in
+  a row; the captures were not retaken.
 
 ## Captures
 
