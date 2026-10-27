@@ -61,8 +61,7 @@ at 960 × 540 and 1600 × 1000 for the agent, another window and `apply`.
    the probe says a writer is live**; a holder file with no live writer is
    ignored. The lock file itself stays empty (on Windows the lock is
    mandatory and the file cannot be read while held) and is still never
-   unlinked or replaced (KTLO-21's tests pass
-   unchanged).
+   unlinked or replaced (KTLO-21's tests pass unchanged).
 2. A window opened while a process holds the lock shows the bar with that
    process's description; while the lock is held by an older build that
    wrote no holder file, or the holder file is unreadable, it shows the

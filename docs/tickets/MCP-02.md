@@ -1,9 +1,10 @@
 # MCP-02: A language reference for models, tested
 
 - Size: M (mostly documentation) · Owner review: 30 min · Risk: none
-- State: Approved; `ready:sol` 2026-10-27 (issue #61) · MCP-00 decision 7 = A taken 2026-10-27 ·
-  revised 2026-10-27: the document and its tests only; the tool and the
-  resources moved to MCP-03, which needs the server of MCP-01
+- State: Approved; `ready:sol` 2026-10-27 (issue #61) · MCP-00 decision
+  7 = A taken 2026-10-27 · revised 2026-10-27: the document and its tests
+  only; the tool and the resources moved to MCP-03, which needs the server
+  of MCP-01
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

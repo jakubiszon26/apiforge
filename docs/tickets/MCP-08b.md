@@ -2,7 +2,8 @@
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #91) · MCP-00 decisions 10 and 11 = A taken
-  2026-10-27 · mock-up M1 round 4 approved 2026-10-27 · after MCP-08a and MCP-04
+  2026-10-27 · mock-up M1 round 4 approved 2026-10-27 · after MCP-08a and
+  MCP-04
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 
@@ -18,8 +19,9 @@ file edited by hand.
 - New: when an agent asks and nothing is unsaved, the window becomes the
   observer at once and the bottom bar says who has the project; a *Take
   back* button at the right end of the bar (the window's compact action
-  button with the Undo icon, its right edge aligned with *Run*); the agent's `saved` makes the window follow at once
-  rather than at the next poll; when the agent finishes, the window is
+  button with the Undo icon, its right edge aligned with *Run*); the
+  agent's `saved` makes the window follow at once rather than at the next
+  poll; when the agent finishes, the window is
   writable within two seconds. With unsaved work the window refuses: *An
   agent asked to edit this project; save your work first* in the window and
   the matching refusal in the agent's result (MCP-08c turns this into a
@@ -48,7 +50,8 @@ approved 2026-10-27: `docs/qa/2026-10-27/MCP-00/m1-observer-*.png`.
    the next poll would have).
 3. Window first, unsaved work: the write is refused with `handover_refused`
    and the reason *the window has unsaved work*; the window shows the
-   matching text in the bar; nothing is written; the person's text is untouched.
+   matching text in the bar; nothing is written; the person's text is
+   untouched.
 4. Server first: a window opened while the agent holds the project reads the
    holder, connects, and is an observer from the start; the agent's later
    commits appear within two seconds.

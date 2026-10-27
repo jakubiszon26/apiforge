@@ -516,15 +516,16 @@ owner: the settings dialog's footer *Apply changes, then use Save all…* reads
 oddly while observing and needs its wording; at 960 × 540 on a component tab
 (which has *Publish*) the two badges *Observing · Live allowed* may collide
 with the mode tabs — MCP-09 solves it (a shorter badge or a tooltip-only
-state) and its QA proves it. Owner decisions of 2026-10-27 on the captures: M2 and M3 approved as a
-whole (the settings footer and *Apply settings* hidden while observing,
-MCP-09). M1 and M4 went through four rounds: the notice under the tabs with
-a plain button (round 1, button rejected), the window's own button style
-(round 2), everything moved to a bottom status bar at the owner's suggestion
-(round 3), and the bar's margins corrected (round 4, **approved**): the
-committed `m1-*` and `m4-*` captures are round 4; the `m3-header-*` capture
-still shows the round-1 notice, which M3 does not decide. At 960 px with a
-run status the bar shortens the holder text, never the status (MCP-10).
+state) and its QA proves it. Owner decisions of 2026-10-27 on the captures:
+M2 and M3 approved as a whole (the settings footer and *Apply settings*
+hidden while observing, MCP-09). M1 and M4 went through four rounds: the
+notice under the tabs with a plain button (round 1, button rejected), the
+window's own button style (round 2), everything moved to a bottom status bar
+at the owner's suggestion (round 3), and the bar's margins corrected (round
+4, **approved**): the committed `m1-*` and `m4-*` captures are round 4; the
+`m3-header-*` capture still shows the round-1 notice, which M3 does not
+decide. At 960 px with a run status the bar shortens the holder text, never
+the status (MCP-10).
 
 ## Tickets
 
@@ -621,12 +622,13 @@ absence explicitly.
 `open_exclusive` (`transaction.rs:152`) opens the lock read-write and never
 truncates it; MCP-07 writes `{"program","role","since","endpoint"}` to
 `.apiforge/local/holder.json` after the confirmed lock — not into the lock
-file, which Windows' mandatory lock makes unreadable while held. `has_live_writer` (`:896`) probes with a shared try-lock over
-the KTLO-21 window. Head generation (`head.json`) advances on every commit
-and is what `generation` reports. `set_known_secrets` (`:238`) feeds the
-staging check. `ProjectPath::working_source` (`path.rs:50`) rejects `..`,
-absolute paths and technical directories; symlinks are refused at operation
-time (`:109`).
+file, which Windows' mandatory lock makes unreadable while held.
+`has_live_writer` (`:896`) probes with a shared try-lock over the KTLO-21
+window. Head generation (`head.json`) advances on every commit and is what
+`generation` reports. `set_known_secrets` (`:238`) feeds the staging check.
+`ProjectPath::working_source` (`path.rs:50`) rejects `..`, absolute paths
+and technical directories; symlinks are refused at operation time
+(`:109`).
 
 ### What the window does today that the observer changes
 

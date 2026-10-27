@@ -96,8 +96,8 @@ the prompt with unsaved work (MCP-08c); the live toggle (MCP-09); run status
   `session.document(shown)` exists after the reload, keeps `self.canvases`
   by document id (the camera), and re-selects the block by its identity when
   it survived.
-- Last-change text in the bar: from the external check's diff (paths whose fingerprint
-  changed) and the time of the scan.
+- Last-change text in the bar: from the external check's diff (paths whose
+  fingerprint changed) and the time of the scan.
 - Tests: `folder/acceptance_tests.rs` with the lock taken by the test process
   and writes through a second `ProjectSession` (exclusive) in the test;
   `project_interaction_tests.rs::follow_disk` is the pattern.
