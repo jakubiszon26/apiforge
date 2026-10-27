@@ -108,3 +108,41 @@ decision of 2026-10-26: scheduled for the sprint after KTLO, in this order:
 | [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows: wires between neighbours run straight; [ticket](tickets/LAY-04.md) | M · 20 min |
 | [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape of a tidied scenario — owner decision with mock-ups; [ticket](tickets/LAY-06.md) | S · 30 min · `visible UI` · `decision-needed` |
 | [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes between columns: a short wire does not cross a long one; [ticket](tickets/LAY-05.md) | M · 15 min · measured again after LAY-04 |
+
+### MCP server: a model works on a project without the window
+
+Analysed 2026-10-27 ([MCP-00](tickets/MCP-00.md)) at the owner's request of
+2026-10-26: a `mcp` subcommand of the `apiforge` binary over stdio, so that
+Claude Code or another MCP client reads, checks, edits and runs the scenarios
+of a folder project through API Forge's own session — the same files and
+bytes the window writes. The owner's decisions (writes, invalid text,
+publishing, live requests, the lock beside an open window, the window's
+wording, the reference, the default folder, which sprint follows KTLO) are
+asked on the MCP-00 issue; the owner called it a sprint of its own. Proposed
+exit criteria:
+
+- [ ] In the demo shop folder, `claude mcp add apiforge -- apiforge mcp`
+      lets a model list the project, read and check every source with line
+      and column, print, run a simulation and check a proposed text, with
+      nothing written to the project (MCP-01, MCP-03).
+- [ ] The language reference a model receives is a tested document whose
+      examples parse, format unchanged and lower (MCP-02).
+- [ ] With the owner's decisions 1–3 taken, the model saves, registers and
+      publishes through the server under the writer lock, never while the
+      window holds the project, and the window follows what it wrote
+      (MCP-04, MCP-05).
+- [ ] Live requests are off unless the person starts the server with
+      `--allow-live`; secrets never pass through a tool (MCP-06).
+- [ ] The window names who holds the project and becomes writable when they
+      leave, through mock-up, acceptance tests and QA report (MCP-07).
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md) | S (docs) · 30 min plus the discussion · `decision-needed` |
+| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
+| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference the model reads from the server; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
+| [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation and check a proposed text from the server; [ticket](tickets/MCP-03.md); after MCP-01 | S · 15 min |
+| [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save a scenario or component from the server; [ticket](tickets/MCP-04.md); decisions 1, 2, 5 | M · 30 min |
+| [#64](https://github.com/jakubiszon26/apiforge/issues/64) | MCP-05 Publish a component from the server; [ticket](tickets/MCP-05.md); decision 3, after MCP-04 | S · 15 min |
+| [#65](https://github.com/jakubiszon26/apiforge/issues/65) | MCP-06 Live requests from the server behind `--allow-live`; [ticket](tickets/MCP-06.md); decision 4, after MCP-03 | S · 20 min |
+| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The window names who holds the project and becomes writable when they leave; [ticket](tickets/MCP-07.md); decision 6, mock-up required | S · 20 min · `visible UI`, `default` |
