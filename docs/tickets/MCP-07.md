@@ -20,15 +20,18 @@ holder that is still there.
 
 ## What the owner will see
 
-- New: the read-only notice names the holder and when it took the project:
-  *Claude Code via apiforge mcp (since 10:42) is editing this project. This
-  window follows its changes.* For another window: *Another API Forge window
-  (since 10:40)…*; for the command line: *apiforge apply (since 10:41)…*. An
-  older build that wrote nothing into the lock gets today's wording. The
-  exact wording is mock-up M1's.
+- New: a status bar at the bottom of the window (36 px, only while the
+  window is not the writer) names the holder and when it took the project:
+  *Claude Code via apiforge mcp · since 10:42 · editing is paused here; this
+  window follows every change*. For another window: *Another API Forge
+  window · since 10:40 · …*; for the command line: *apiforge apply · since
+  10:41 · …*. The header badge reads *Observing*. The notice under the tabs
+  that says *Another window is editing this project* goes. An older build
+  that wrote nothing into the lock gets a generic *Another process* wording
+  in the bar. Mock-up M1, round 4, approved 2026-10-27.
 - Changed: a read-only window checks once a second (with the existing
   external check) whether the holder is gone and, when it is, takes the lock,
-  drops the badge and the notice, and enables *Save*, *Save all* and
+  drops the badge and the bar, and enables *Save*, *Save all* and
   *Publish*. If the holder left an activated transaction, the window's
   recovery view opens as at start; if it left an interrupted live run, the
   journal notice appears as at start.
@@ -38,9 +41,9 @@ holder that is still there.
 
 ## Mock-up
 
-M1 (MCP-00): an annotated review capture of the folder window's header and
-notice at 960 × 540 and 1600 × 1000 with the wording for the agent, another
-window and `apply`, from a throwaway `review_*` test, posted on the issue.
+M1 (MCP-00), round 4, approved 2026-10-27:
+`docs/qa/2026-10-27/MCP-00/m1-*.png` — the header badge and the bottom bar
+at 960 × 540 and 1600 × 1000 for the agent, another window and `apply`.
 
 ## Decisions for the owner
 
@@ -56,11 +59,11 @@ window and `apply`, from a throwaway `review_*` test, posted on the issue.
    path or a secret — and `ProjectStore::holder()` reads it from a read-only
    store; the file is still never unlinked or replaced (KTLO-21's tests pass
    unchanged).
-2. A window opened while a process holds the lock shows the notice with that
+2. A window opened while a process holds the lock shows the bar with that
    process's description; while a lock file from an older build (empty) is
-   held, it shows today's wording.
+   held, it shows the generic wording.
 3. When the holder releases the lock, the read-only window becomes the writer
-   within two seconds: the badge and the notice disappear, *Save* is enabled,
+   within two seconds: the badge and the bar disappear, *Save* is enabled,
    and a save succeeds (headless interaction test: take the lock in the test,
    open the window, release, settle, assert through named widgets).
 4. The take-back never steals: while the holder still holds the lock, the
@@ -70,8 +73,9 @@ window and `apply`, from a throwaway `review_*` test, posted on the issue.
 5. A holder that left an activated transaction: the window, on take-back,
    opens the recovery view it opens at start; a holder that left an
    interrupted live run: the journal notice appears, as at start.
-6. At 960 × 540 the longer notice stays inside the window
-   (`assert_within_window`) in Code, Diagram and Split.
+6. At 960 × 540 the bar and the badge stay inside the window
+   (`assert_within_window`) in Code, Diagram and Split; the Problems panel
+   and the diagram's zoom bar sit above the bar without overlap.
 7. The QA report compares the implementation against M1; the verification
    commands of the development guide pass.
 

@@ -503,10 +503,10 @@ a throwaway branch, at 960 × 540 and 1600 × 1000, posted to the issue.
 
 | Mock-up | Shows | Ticket |
 | --- | --- | --- |
-| M1 | The holder's name in the notice for an agent, another window and `apply`; the *Observing* badge; the paused editor; *Take back*; the last-change line | MCP-07, MCP-08a, MCP-08b |
+| M1 | The *Observing* badge in the header and a **status bar at the bottom of the window** (36 px, shown only while observing): the holder's name for an agent, another window and `apply`; the last-change line; *Take back* at the right end | MCP-07, MCP-08a, MCP-08b |
 | M2 | The hand-over prompt with unsaved work: the files, *Save all and hand over*, *Not now* | MCP-08c |
 | M3 | *Project settings* in observer mode with the *Agent* section and the live toggle; the *Live allowed* badge in the header | MCP-09 |
-| M4 | The agent run status line: running, then passed | MCP-10 |
+| M4 | The agent's run status in the same bar, in place of the last-change line: running, then passed | MCP-10 |
 
 The captures are under `docs/qa/2026-10-27/MCP-00/` (`m1-*`, `m2-*`, `m3-*`,
 `m4-*`, rendered 2026-10-27 from the throwaway branch `mock/mcp-00-m1-m4`)
@@ -515,10 +515,15 @@ owner: the settings dialog's footer *Apply changes, then use Save all…* reads
 oddly while observing and needs its wording; at 960 × 540 on a component tab
 (which has *Publish*) the two badges *Observing · Live allowed* may collide
 with the mode tabs — MCP-09 solves it (a shorter badge or a tooltip-only
-state) and its QA proves it. Owner decision of 2026-10-27 on the captures: M2, M3 and M4 approved as a
-whole; M1 approved except the *Take back* button, found ugly — a second
-round renders it in the window's own button style and goes to #66; the
-settings footer and *Apply settings* are hidden while observing (MCP-09).
+state) and its QA proves it. Owner decisions of 2026-10-27 on the captures: M2 and M3 approved as a
+whole (the settings footer and *Apply settings* hidden while observing,
+MCP-09). M1 and M4 went through four rounds: the notice under the tabs with
+a plain button (round 1, button rejected), the window's own button style
+(round 2), everything moved to a bottom status bar at the owner's suggestion
+(round 3), and the bar's margins corrected (round 4, **approved**): the
+committed `m1-*` and `m4-*` captures are round 4; the `m3-header-*` capture
+still shows the round-1 notice, which M3 does not decide. At 960 px with a
+run status the bar shortens the holder text, never the status (MCP-10).
 
 ## Tickets
 
