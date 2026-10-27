@@ -1,8 +1,9 @@
 # MCP-07: The lock names its holder; the window says who and takes the project back — QA report
 
 - Branch: `feat/mcp-07-lock-holder`. Captures are from the release binary of
-  `452f53c`, which is the implementation on `main` at `2c9c64c`. This report
-  is the only commit after it.
+  `452f53c`, which is the implementation on `main` at `2c9c64c`. The commit
+  under review is `6f2aa60`: review round 1's fixes after a merge of `main`
+  (#103, #104). See *Review round 1* below.
 - Built with: `cargo build --release --locked` (Rust 1.99.0)
 - Compared against mock-up: `docs/qa/2026-10-27/MCP-00/m1-*.png` (M1, round
   4, approved 2026-10-27; on PR #103). The *Take back* button and the
@@ -52,6 +53,44 @@
   the host cannot send. They are covered by the `egui_kittest` acceptance
   tests through named widgets. Captures named `harness-*.png` are a design
   review aid, not QA evidence.
+
+## Review round 1
+
+The review of 2026-10-27 found two blocking defects. Both are fixed in `6f2aa60`.
+
+1. **Windows CI was red.** Three tests read the lock file while it was
+   held, and Windows refuses that read (error 33, `ERROR_LOCK_VIOLATION`):
+   - `mcp07::a_held_project_is_never_taken_however_long_it_is_held`;
+   - two storage tests.
+
+   They now check only the file's length. The production code never reads
+   the lock file.
+2. **An unreadable `holder.json` hid the bar.** A file this user cannot
+   read, such as mode 000 or another user's private file, made `holder()`
+   return an error. The window dropped that error and showed a plain
+   *Read-only* badge with no bar, so criterion 2 failed. Now, while a
+   writer is live, any description that cannot be opened or read is
+   `Holder::unknown()`, and the window shows *Another process · …*.
+
+   New Unix-only tests cover a mode-000 file:
+   - `mcp07_an_unreadable_description_with_a_live_writer_is_an_unknown_holder` (storage);
+   - `a_holder_whose_description_cannot_be_read_is_another_process` (desktop).
+
+   Windows permissions cannot be modelled with a file mode, so these tests
+   are compiled for Unix only, not ignored.
+
+The bar's text is now formatted once per description instead of on every
+frame. Its wording is unchanged.
+
+Verification on `6f2aa60`, all exit 0:
+- `cargo fmt --all -- --check`
+- clippy with `-D warnings`
+- the workspace tests: 1139 passed, 0 failed, 30 ignored
+- the fixture check
+
+The MCP-07 storage and desktop tests passed three runs in a row. The
+release-binary captures were not retaken: what this round changed is
+neither drawn differently nor reached by them.
 
 ## Linux
 
