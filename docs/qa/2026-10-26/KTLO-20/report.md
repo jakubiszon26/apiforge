@@ -10,7 +10,9 @@
   merged into it.
 - Owner decisions carried out: animated on a four-second loop, only while an
   empty board is visible, off in the test harness; only the "no file open"
-  hint; the mock-up approved as a whole.
+  hint; the mock-up approved as a whole (2026-10-26); the drawing's nodes
+  named but hidden in the accessibility tree, and one pull request over the
+  M cap (2026-10-27).
 - Verification: the development guide's commands; output in the pull request.
 
 ## Captures
@@ -83,9 +85,11 @@ decorative picture — and only the hint is announced, as today. It does carry a
 name behind that flag ("Sleeping dog"), as does the empty board area ("Diagram
 board", the name the canvas already uses when a document fills it), because
 `docs/gui-testing.md` asks that a widget a test must measure be nameable; the
-assertions on the drawing's box and place rest on those two names. **This is a
-deviation from the letter of criterion 5 ("the dog adds none") and the owner
-may want it undone** — see the pull request.
+assertions on the drawing's box and place rest on those two names. So the
+drawing's nodes exist in the tree, named, but marked hidden; a screen reader
+announces only the hint. **Criterion 5 is met as to its purpose, by the owner's
+decision of 2026-10-27** (decision 4 of the ticket, issue #46): the hidden
+named nodes stay.
 
 Design review of `review_empty_board` at 960 × 540, 1600 × 1000 and 960 × 540
 at double scale: nothing overlaps, nothing is cut off and the pair is centred.
