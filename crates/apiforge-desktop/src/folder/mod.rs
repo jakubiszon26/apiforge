@@ -572,6 +572,13 @@ impl FolderApp {
         });
     }
 
+    /// Shows a dismissable notice, as an action that reports its outcome
+    /// does, for design review views outside this module.
+    #[cfg(test)]
+    pub(crate) fn debug_notify(&mut self, text: &str) {
+        self.notify(text, false);
+    }
+
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -639,19 +646,23 @@ impl FolderApp {
                     |ui| self.header(ui),
                 );
             });
-        egui::Panel::top("folder-tabs")
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::PANEL)
-                    .inner_margin(egui::Margin::symmetric(8, 4)),
-            )
-            .show(ui, |ui| {
-                ui.add_enabled_ui(
-                    !self.persistence.closing && !self.storage.blocks_edits(),
-                    |ui| self.tab_strip(ui),
-                );
-                self.notices(ui);
-            });
+        // With no file open and no notice due the band takes no height at all,
+        // so the central area meets the app header (KTLO-24).
+        if !self.workbench.tabs().is_empty() || self.has_notices() {
+            egui::Panel::top("folder-tabs")
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::PANEL)
+                        .inner_margin(egui::Margin::symmetric(8, 4)),
+                )
+                .show(ui, |ui| {
+                    ui.add_enabled_ui(
+                        !self.persistence.closing && !self.storage.blocks_edits(),
+                        |ui| self.tab_strip(ui),
+                    );
+                    self.notices(ui);
+                });
+        }
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
         // Maximised run results leave no room for anything else (KTLO-19).
