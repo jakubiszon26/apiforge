@@ -88,7 +88,7 @@ Not applicable: no interface change.
 ## Not in scope
 
 Running, checking a proposal, the reference and resources (MCP-03); every
-write (MCP-04 to MCP-06); the window (MCP-07, MCP-08); Streamable HTTP; the
+write (MCP-04 to MCP-06); the window (MCP-07 to MCP-10); Streamable HTTP; the
 legacy JSON workspace (`--workspace`), which the server does not serve.
 
 ## Technical appendix

@@ -38,7 +38,7 @@ Not applicable.
    revision); the window never reloaded by hand, no file was edited outside
    the server, the person's active tab survived.
 2. Separate cases, each a test: unsaved work in the window at the request
-   (refusal or prompt as the owner decided); an invalid proposal
+   (the prompt of MCP-08c, decision 13 = A); an invalid proposal
    (`wrote: false`, nothing on disk); a stale write; the client lost (EOF)
    mid-session and the window writable within two seconds; the server killed
    with a transaction activated and the window's recovery view; *Take back*

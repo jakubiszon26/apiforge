@@ -388,7 +388,8 @@ on the store with `set_known_secrets` at start and at each reread.
 - A call that could not do what was asked is `isError: true` with
   `{ code, message, wrote, details }`. A run that completed with the verdict
   `failed` is **not** an error. Codes are a fixed list (`not_a_project`,
-  `unknown_document`, `invalid_text`, `stale_source`, `stale_project`,
+  `unknown_document`, `invalid_text`, `invalid_inputs`, `not_a_component`,
+  `invalid_checkpoint`, `stale_source`, `stale_project`,
   `held_by_window`, `handover_pending`, `handover_refused`, `held_by_other`,
   `live_disabled`, `comments_would_be_lost`, `secret_in_text`,
   `secret_in_source`, `path_rejected`, `path_exists`, `handle_exists`,

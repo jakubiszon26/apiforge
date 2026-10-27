@@ -37,8 +37,9 @@ and never overridden by the start flag while the window is open.
 
 ## Mock-up
 
-M3: *Project settings* with the *Agent* section in observer mode, and the
-header with the *Live allowed* badge, at 960 × 540 and 1600 × 1000.
+M3, approved 2026-10-27: `docs/qa/2026-10-27/MCP-00/m3-*.png` — *Project
+settings* with the *Agent* section in observer mode, and the header with the
+*Live allowed* badge, at 960 × 540 and 1600 × 1000.
 
 ## Acceptance criteria
 

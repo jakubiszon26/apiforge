@@ -20,15 +20,16 @@ behalf.
   and *Not now*. *Save all and hand over* saves everything (invalid text
   included, as Ctrl+S does), then hands over as MCP-08b does. *Not now*
   leaves the person editing; the agent gets `handover_refused` with *the
-  person chose to keep editing*. Decision 13 B adds *Discard and hand over*;
-  recommended not.
+  person chose to keep editing*. *Discard and hand over* (decision 13 B)
+  was declined: 13 = A.
 - Changed: MCP-08b's refusal with unsaved work becomes this prompt.
 - Removed, hidden, migrated, defaults: nothing.
 
 ## Mock-up
 
-M2: the prompt at 960 × 540 and 1600 × 1000 with two unsaved documents and a
-dirty project setting listed.
+M2, approved 2026-10-27: `docs/qa/2026-10-27/MCP-00/m2-*.png` — the prompt
+at 960 × 540 and 1600 × 1000 with two unsaved documents and a dirty project
+setting listed.
 
 ## Acceptance criteria
 
