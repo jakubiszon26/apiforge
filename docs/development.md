@@ -278,7 +278,9 @@ response, as the protocol says, while stderr says `apiforge mcp: run:
 cancelled`. A run still going after ten minutes is cancelled the same way
 and answered with `status: cancelled`, `ended_by: timed_out`; a step whose
 request was on its way is marked `may_have_reached_api`. At the end of stdin
-a run in progress is cancelled and its cleanup waited for up to ten seconds.
+a run in progress has five seconds to finish and be answered (rmcp's drain of
+in-flight requests); after that it is cancelled and its cleanup waited for up
+to ten seconds.
 Two environment variables are test seams for this and are not set in use:
 `APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline and
 `APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run.

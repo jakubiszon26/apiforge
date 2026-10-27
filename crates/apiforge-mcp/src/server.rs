@@ -337,8 +337,8 @@ pub fn serve_stdio(folder: PathBuf) -> io::Result<()> {
 }
 
 /// As `serve_stdio`, with the run limits of `settings`. At the end of stdin a
-/// run in progress is cancelled, and its cleanup is waited for up to ten
-/// seconds.
+/// run in progress has rmcp's five-second drain to finish and be answered;
+/// after that it is cancelled, and its cleanup is waited for up to ten seconds.
 pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -354,7 +354,8 @@ pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()
             Err(error) => return Err(io::Error::other(error.to_string())),
         };
         service.waiting().await.map_err(io::Error::other)?;
-        // Ending the service cancelled every request, a run among them.
+        // Ending the service, after its drain, cancelled every request still
+        // running, a run among them.
         let started = Instant::now();
         while runs.is_busy() && started.elapsed() < CLEANUP_WAIT {
             tokio::time::sleep(Duration::from_millis(20)).await;
