@@ -46,6 +46,8 @@ pub struct Context<'a> {
     pub running: bool,
     pub stale: bool,
     pub files_busy: bool,
+    /// Mock-up KTLO-23 (throwaway): a component has no error policy to toggle.
+    pub show_policy: bool,
     pub document_locked: bool,
 }
 
@@ -164,6 +166,12 @@ impl Default for ReportPanel {
 }
 
 impl ReportPanel {
+    /// Mock-up KTLO-23 (throwaway): a taller panel, so the export step shows.
+    #[cfg(test)]
+    pub(crate) fn mock_height(&mut self, height: f32) {
+        self.height = height;
+    }
+
     #[cfg(test)]
     pub(crate) fn debug_resize_handle(&self) -> (egui::Id, egui::Rect, f32) {
         self.last_handle.unwrap()
@@ -366,6 +374,9 @@ impl ReportPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut policy = context.error_policy;
                 ui.add_enabled_ui(!context.running && !context.document_locked, |ui| {
+                    if !context.show_policy {
+                        return;
+                    }
                     egui::ComboBox::from_id_salt("report-error-policy")
                         .selected_text(error_policy_label(policy))
                         .width(190.0)
@@ -1261,6 +1272,7 @@ mod tests {
             running: false,
             stale: false,
             files_busy: false,
+            show_policy: true,
             document_locked: false,
         };
         let draw = |panel: &mut ReportPanel| {
@@ -1370,6 +1382,7 @@ mod tests {
                     running: false,
                     stale: false,
                     files_busy: false,
+                    show_policy: true,
                     document_locked: false,
                 };
                 assert!(panel.show(ui, &empty).is_empty());
@@ -1385,6 +1398,7 @@ mod tests {
                     running: false,
                     stale: true,
                     files_busy: false,
+                    show_policy: true,
                     document_locked: false,
                 };
                 let _ = panel.show(ui, &populated);
@@ -1408,6 +1422,7 @@ mod tests {
                 running: false,
                 stale: false,
                 files_busy: false,
+                show_policy: true,
                 document_locked: false,
             };
             let draw = |panel: &mut ReportPanel, events| {

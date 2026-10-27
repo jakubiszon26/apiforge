@@ -2092,6 +2092,7 @@ impl App {
                 running: self.is_running(),
                 stale: self.is_run_stale(),
                 files_busy: self.files.busy(),
+                show_policy: true,
                 document_locked: self.document_locked(),
             };
             self.report.show(ui, &context)

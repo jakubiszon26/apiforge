@@ -12,6 +12,8 @@ mod activation;
 pub use activation::{Start, decide as managed_start};
 mod analysis;
 mod chrome;
+#[cfg(test)]
+pub(crate) use chrome::MOCK_RESERVED;
 mod code_view;
 mod conflict_view;
 mod diagram;
@@ -99,6 +101,8 @@ enum Prompt {
         live: bool,
     },
     Journal(Box<runs::JournalReview>),
+    /// Mock-up KTLO-23b (throwaway): the Run inputs dialog.
+    MockRunInputs(Box<dialogs::run_inputs::RunInputsDialog>),
     AssignResult {
         document_id: String,
         cleanup: bool,

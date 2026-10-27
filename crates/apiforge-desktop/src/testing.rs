@@ -361,6 +361,196 @@ mod review {
         }
     }
 
+    // ---- Throwaway mock-up for KTLO-23: a component runs from its tab ----
+
+    const MOCK_COMPONENT: &str = "components/add-to-cart.afs";
+    const MOCK_SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const MOCK_HEADER: [&str; 9] = [
+        "Project",
+        "Code",
+        "Diagram",
+        "Split",
+        "Save",
+        "Save all",
+        "Publish",
+        "Run options",
+        "Run",
+    ];
+
+    fn mock_app(harness: &mut FolderHarness) -> &mut FolderApp {
+        harness.state_mut().as_mut().unwrap()
+    }
+
+    /// The component tab active, in `mode`.
+    fn mock_component_tab(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarness) {
+        let project = shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        mock_app(&mut harness).mock_open(MOCK_COMPONENT);
+        settle(&mut harness);
+        harness.get_by_label(mode).click();
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// The header row's widgets, their edges and the gaps between them.
+    fn mock_measure_header(harness: &FolderHarness, view: &str) -> String {
+        let window = harness.ctx.content_rect();
+        let title = harness
+            .query_all_by_label("Demo shop")
+            .map(|node| node.rect())
+            .find(|rect| rect.top() < 50.0)
+            .unwrap();
+        let mut out = format!("{view}: window {:.0} px\n", window.width());
+        out += &format!("  title  {:>6.1}..{:>6.1}\n", title.left(), title.right());
+        let rects: Vec<(&str, egui::Rect)> = MOCK_HEADER
+            .iter()
+            .map(|label| (*label, harness.get_by_label(label).rect()))
+            .collect();
+        for (label, rect) in &rects {
+            out += &format!(
+                "  {label:<12} {:>6.1}..{:>6.1} (w {:>5.1}) inside {}\n",
+                rect.left(),
+                rect.right(),
+                rect.width(),
+                window.contains_rect(*rect)
+            );
+        }
+        let code = rects[1].1;
+        let run = rects[8].1;
+        let save = rects[4].1;
+        out += &format!(
+            "  toolbar Code..Run {:.1} px (reserved 620); Save..Run {:.1} px; \
+             title right {:.1} vs Code left {:.1}; Run right margin {:.1}\n",
+            run.right() - code.left(),
+            run.right() - save.left(),
+            title.right(),
+            code.left(),
+            window.right() - run.right()
+        );
+        out
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mock_23_component_run() {
+        let mut measured = String::new();
+        // 1. The header with the component tab active, in every mode.
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            for mode in ["Code", "Split", "Diagram"] {
+                let (_project, harness) = mock_component_tab(size, mode);
+                measured += &mock_measure_header(&harness, &format!("{mode} {suffix}"));
+                drop(harness);
+            }
+            let (_project, mut harness) = mock_component_tab(size, "Diagram");
+            capture(
+                &mut harness,
+                &format!("mock-header-component-{suffix}"),
+                None,
+            );
+            let header = MOCK_HEADER
+                .iter()
+                .map(|label| harness.get_by_label(label).rect())
+                .reduce(|a, b| a.union(b))
+                .unwrap()
+                .expand2(egui::vec2(12.0, 8.0));
+            capture(
+                &mut harness,
+                &format!("mock-header-component-row-{suffix}"),
+                Some(header.with_min_x(0.0).with_max_x(size.x)),
+            );
+        }
+        // For comparison: the scenario tab as on main today.
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            harness.get_by_label("Diagram").click();
+            settle(&mut harness);
+            let view = format!("scenario tab {suffix}");
+            let window = harness.ctx.content_rect();
+            let code = harness.get_by_label("Code").rect();
+            let run = harness.get_by_label("Run").rect();
+            measured += &format!(
+                "{view}: toolbar Code..Run {:.1} px, Run right margin {:.1}\n",
+                run.right() - code.left(),
+                window.right() - run.right()
+            );
+        }
+
+        // 1b. A long project name at 960 px: the title against Code, with the
+        // reservation of main (620) and larger ones.
+        let long = "Customer integration and contract verification workspace";
+        for reserved in [620u32, 640, 650] {
+            crate::folder::MOCK_RESERVED.store(reserved, std::sync::atomic::Ordering::Relaxed);
+            for kind in ["component", "scenario"] {
+                let directory = tempfile::tempdir().unwrap();
+                let mut demo = apiforge_core::demos::shop_project();
+                demo.name = long.into();
+                apiforge_project::prepare_project(directory.path(), &demo).unwrap();
+                let mut harness = folder_harness(directory.path(), MINIMUM);
+                if kind == "component" {
+                    mock_app(&mut harness).mock_open(MOCK_COMPONENT);
+                    settle(&mut harness);
+                }
+                harness.get_by_label("Diagram").click();
+                settle(&mut harness);
+                let title = harness
+                    .query_all_by_label(long)
+                    .map(|node| node.rect())
+                    .find(|rect| rect.top() < 50.0)
+                    .unwrap();
+                let code = harness.get_by_label("Code").rect();
+                let run = harness.get_by_label("Run").rect();
+                measured += &format!(
+                    "long name, {kind} tab, reserved {reserved}: title {:.1}..{:.1} (w {:.1}), \
+                     Code left {:.1}, gap {:.1}, Run right {:.1}\n",
+                    title.left(),
+                    title.right(),
+                    title.width(),
+                    code.left(),
+                    code.left() - title.right(),
+                    run.right()
+                );
+                let row = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(MINIMUM.x, run.bottom() + 8.0),
+                );
+                capture(
+                    &mut harness,
+                    &format!("mock-header-long-name-{kind}-{reserved}-960x540"),
+                    Some(row),
+                );
+            }
+        }
+        crate::folder::MOCK_RESERVED.store(620, std::sync::atomic::Ordering::Relaxed);
+
+        // 2. Run results after a component run, the export step selected.
+        let (_project, mut harness) = mock_component_tab(WIDE, "Diagram");
+        mock_app(&mut harness).mock_component_run(MOCK_COMPONENT, MOCK_SCENARIO);
+        settle(&mut harness);
+        capture(&mut harness, "mock-run-results-component-1600x1000", None);
+        drop(harness);
+
+        // 3. The Run inputs dialog over the component's board.
+        for (size, suffix, typed) in [
+            (MINIMUM, "960x540", vec![]),
+            (WIDE, "1600x1000", vec![]),
+            (
+                WIDE,
+                "1600x1000-filled",
+                vec![("product", "{ \"id\": 123 }"), ("quantity", "2")],
+            ),
+        ] {
+            let (_project, mut harness) = mock_component_tab(size, "Diagram");
+            mock_app(&mut harness).mock_run_inputs(MOCK_COMPONENT, &typed);
+            settle(&mut harness);
+            capture(&mut harness, &format!("mock-run-inputs-{suffix}"), None);
+        }
+
+        std::fs::create_dir_all(capture_dir()).unwrap();
+        std::fs::write(capture_dir().join("mock-23-measurements.txt"), &measured).unwrap();
+        eprintln!("{measured}");
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {

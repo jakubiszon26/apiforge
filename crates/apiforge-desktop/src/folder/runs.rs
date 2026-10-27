@@ -283,6 +283,12 @@ impl FolderApp {
                 running: self.runs.handle.is_some(),
                 stale,
                 files_busy: false,
+                show_policy: matches!(
+                    snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.model.as_deref()),
+                    Some(Document::Scenario(_))
+                ),
                 document_locked: stale
                     || snapshot.as_ref().is_none_or(|snapshot| !snapshot.editable),
             },
@@ -523,5 +529,165 @@ impl FolderApp {
         } else {
             Some(Prompt::Journal(Box::new(review)))
         }
+    }
+}
+
+/// Mock-up KTLO-23 (throwaway, never merged). Nothing can run a component
+/// today, so the run record below is staged by hand in the shape the runner
+/// gives a scenario run; it is not computed.
+#[cfg(test)]
+impl FolderApp {
+    fn mock_document(&self, path: &str) -> String {
+        self.session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .map(|document| document.id().to_owned())
+            .unwrap()
+    }
+
+    fn mock_component(&self, id: &str) -> apiforge_core::format::Component {
+        match self.snapshot(id).unwrap().model.as_deref() {
+            Some(Document::Component(component)) => component.clone(),
+            _ => panic!("{id} is not a component"),
+        }
+    }
+
+    /// Opens the document at `path` in a tab and makes it active.
+    pub(crate) fn mock_open(&mut self, path: &str) {
+        let id = self.mock_document(path);
+        self.workbench.open(&id);
+    }
+
+    /// A finished component run in the report panel, with the `export` step
+    /// selected there and on the component's board.
+    pub(crate) fn mock_component_run(&mut self, component_path: &str, scenario_path: &str) {
+        use apiforge_core::format::OptionalJson;
+        use apiforge_core::model::NodeKind;
+        use apiforge_core::run::{RequestSnapshot, RunStatus, StepResult};
+        use indexmap::IndexMap;
+        use serde_json::{Value, json};
+
+        let id = self.mock_document(component_path);
+        let component = self.mock_component(&id);
+        // A prepared run is only a staleness key here; any document gives one.
+        let scenario = self.mock_document(scenario_path);
+        let prepared = self
+            .session
+            .as_mut()
+            .unwrap()
+            .prepare_run(&scenario)
+            .unwrap();
+        let product = json!({ "id": 123, "name": "Coffee", "price": 100,
+            "promotion": { "active": true, "price": 80 } });
+        let cart = json!({ "id": "sample-cart", "productId": 123, "quantity": 1, "total": 80 });
+        let item = json!({ "productId": 123, "quantity": 1 });
+        let map = |pairs: Vec<(&str, Value)>| -> IndexMap<String, Value> {
+            pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()
+        };
+        let request = |method: &str, path: &str, body: OptionalJson| RequestSnapshot {
+            method: method.into(),
+            url: format!("{}{path}", apiforge_core::demos::SHOP_BASE_URL),
+            headers: [("Content-Type".to_owned(), "application/json".to_owned())]
+                .into_iter()
+                .collect(),
+            body,
+        };
+        let mut export = None;
+        let steps: Vec<StepResult> = component
+            .graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let mut step = StepResult::new(node, Phase::Main);
+                step.duration_ms = [1, 0, 42, 37, 0, 0][index.min(5)];
+                match (node.kind, node.handle.as_str()) {
+                    (NodeKind::Value, handle)
+                        if handle.contains("body") || handle.contains("item") =>
+                    {
+                        step.inputs = map(vec![("productId", json!(123)), ("quantity", json!(1))]);
+                        step.outputs = map(vec![("value", item.clone())]);
+                    }
+                    (NodeKind::Value, _) => {
+                        step.inputs = map(vec![("product", product.clone())]);
+                        step.outputs = map(vec![("value", json!(123))]);
+                    }
+                    (NodeKind::Request, handle) if handle.contains("create") => {
+                        step.inputs = map(vec![("body", item.clone())]);
+                        step.outputs = map(vec![
+                            ("body", cart.clone()),
+                            ("status", json!(200)),
+                            ("headers", json!({})),
+                        ]);
+                        step.request = Some(request(
+                            "POST",
+                            "/carts",
+                            OptionalJson::Present(item.clone()),
+                        ));
+                    }
+                    (NodeKind::Request, _) => {
+                        step.inputs = map(vec![("id", json!("sample-cart"))]);
+                        step.outputs = map(vec![
+                            ("body", cart.clone()),
+                            ("status", json!(200)),
+                            ("headers", json!({})),
+                        ]);
+                        step.request =
+                            Some(request("GET", "/carts/sample-cart", OptionalJson::Missing));
+                    }
+                    (NodeKind::Export, _) => {
+                        step.inputs = map(vec![("value", cart.clone())]);
+                        step.outputs = map(vec![("value", cart.clone())]);
+                        export = Some(node.id.clone());
+                    }
+                    _ => {}
+                }
+                step
+            })
+            .collect();
+        let result = RunResult {
+            id: "mock-component-run".into(),
+            scenario_id: component.id.clone(),
+            mode: RunMode::Simulation,
+            started_at: "2026-10-27T09:00:00Z".into(),
+            finished_at: Some("2026-10-27T09:00:00.080Z".into()),
+            status: RunStatus::Passed,
+            steps,
+            diagnostic: false,
+            snapshot: None,
+            error: None,
+            notice: None,
+        };
+        self.runs.reports.insert(id.clone(), (prepared, result));
+        self.runs.panel.open = true;
+        self.runs.panel.mock_height(380.0);
+        if let Some(node) = export {
+            self.selections.insert(id, vec![node]);
+        }
+    }
+
+    /// The Run inputs dialog for the component at `path`, as it opens, or
+    /// with `typed` entered into the named inputs.
+    pub(crate) fn mock_run_inputs(&mut self, path: &str, typed: &[(&str, &str)]) {
+        let id = self.mock_document(path);
+        let component = self.mock_component(&id);
+        let contracts: Vec<(String, String)> = self
+            .context_project()
+            .contracts
+            .iter()
+            .map(|contract| (contract.id.clone(), contract.name.clone()))
+            .collect();
+        let mut dialog = dialogs::run_inputs::RunInputsDialog::new(
+            &component.name,
+            &component.inputs,
+            &contracts,
+        );
+        for (name, text) in typed {
+            dialog.set(name, text);
+        }
+        self.prompt = Some(Prompt::MockRunInputs(Box::new(dialog)));
     }
 }

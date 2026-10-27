@@ -19,7 +19,13 @@ impl FolderApp {
         let active = self.workbench.active();
         let run_document = active
             .and_then(|id| session.document(id))
-            .filter(|document| document.entry().kind == DocumentKind::Scenario)
+            // Mock-up KTLO-23 (throwaway): a component tab runs as a scenario tab does.
+            .filter(|document| {
+                matches!(
+                    document.entry().kind,
+                    DocumentKind::Scenario | DocumentKind::Component
+                )
+            })
             .map(|document| document.id().to_owned());
         let publish = active
             .and_then(|id| session.document(id))
@@ -41,7 +47,7 @@ impl FolderApp {
             self.navigation_menu(ui);
             // Keep room for the full scenario toolbar and the read-only badge.
             // A long project name must not paint into the Code tab at 960 px.
-            let reserved = 620.0 + if read_only { 80.0 } else { 0.0 };
+            let reserved = mock_reserved() + if read_only { 80.0 } else { 0.0 };
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
@@ -77,7 +83,7 @@ impl FolderApp {
                     if ui
                         .add(widgets::action(Icon::Play, "Run").primary())
                         .on_hover_text(
-                            "Simulate the selected scenario, including unsaved valid code",
+                            "Simulate the selected scenario or component, including unsaved valid code",
                         )
                         .clicked()
                     {
@@ -421,6 +427,10 @@ impl FolderApp {
             Prompt::Settings(dialog) => self.project_settings_prompt(context, *dialog),
             Prompt::Environment(dialog) => self.environment_prompt(context, *dialog),
             Prompt::Run { prepared, live } => self.run_prompt(context, *prepared, live),
+            Prompt::MockRunInputs(mut dialog) => match dialog.show(context) {
+                dialogs::Outcome::Open => Some(Prompt::MockRunInputs(dialog)),
+                _ => None,
+            },
             Prompt::Journal(review) => self.journal_prompt(context, *review),
             Prompt::AssignResult {
                 document_id,
@@ -889,4 +899,13 @@ fn tab_face(
         return Some(false);
     }
     None
+}
+
+/// Mock-up KTLO-23 (throwaway): the toolbar reservation, 620 px on main, set
+/// by the review view to compare the proposal.
+pub(crate) static MOCK_RESERVED: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(620);
+
+fn mock_reserved() -> f32 {
+    MOCK_RESERVED.load(std::sync::atomic::Ordering::Relaxed) as f32
 }
