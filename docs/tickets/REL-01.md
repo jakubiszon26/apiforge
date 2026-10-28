@@ -1,9 +1,10 @@
 # REL-01: A GitHub release with an AppImage, a Windows ZIP and Linux tar.gz
 
 - Size: M · Owner review: 30 min · Risk: `visible UI` (the application icon only)
-- State: Analysis · decisions 1–4 taken 2026-10-28 (all the recommended
-  option) · before MCP-11 (#95) · charged to the UX capacity line (30 min)
-- Analysis model: Fable · Implementation model: —
+- State: Implementation · decisions 1–4 taken 2026-10-28 (all the
+  recommended option) · before MCP-11 (#95) · charged to the UX capacity line
+  (30 min) · the dry run follows the pull request
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -137,10 +138,28 @@ decision for its own ticket).
 
 ## Open points
 
-1. The placeholder icon's look: shown on the issue before the rc tag; the
-   recommendation is to accept it for v0.1.0 and ticket a designed icon.
+1. The icon: closed 2026-10-28. The owner supplied the icon
+   (`packaging/icon/apiforge.svg`, a dog on a dark squircle) in place of a
+   placeholder. Its PNGs are rendered with resvg 0.48.1 and the bundled
+   Adwaita Mono as the only font
+   ([development guide](../development.md#releases)).
 2. Release notes with no earlier tag cover every merged pull request since
    the repository began (111 of them); acceptable for a first pre-release.
+
+## Taken during implementation (2026-10-28)
+
+- The owner's icon replaces the placeholder (open point 1).
+- The README is rewritten for the first release, at the owner's request.
+- Licence: GPL-3.0-or-later, copyright The API Forge contributors, external
+  contributions under the Developer Certificate of Origin, no CLA; `LICENSE`
+  is in every archive and the AppImage.
+- The AppImage carries six libraries, not two: the trace in the QA report
+  found `libxcb-xkb`, `libXcursor`, `libXfixes` and `libXi` missing from a
+  bare Ubuntu 24.04 as well.
+- The clean-runner job also starts the AppImage in a bare `ubuntu:24.04`
+  container, because the hosted runner image already carries most X
+  libraries; the runner step adds `fuse3`, which the pinned static runtime
+  mounts through.
 
 ## Technical appendix
 
