@@ -1644,12 +1644,27 @@ fn read(root: &Path, path: &str) -> (String, String, u64) {
 }
 
 /// The project as Git sees it: every file outside the machine-local
-/// `.apiforge/local`.
+/// `.apiforge/local`, which is not even read: on Windows the writer's lock
+/// file there cannot be read while the lock is held.
 fn shared(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
-    tree(root)
-        .into_iter()
-        .filter(|(path, _)| !path.starts_with(".apiforge/local"))
-        .collect()
+    fn walk(root: &Path, at: &Path, files: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
+        for entry in fs::read_dir(at).unwrap() {
+            let path = entry.unwrap().path();
+            let relative = path.strip_prefix(root).unwrap().to_owned();
+            if relative == Path::new(".apiforge").join("local") {
+                continue;
+            }
+            if path.is_dir() {
+                files.insert(relative, None);
+                walk(root, &path, files);
+            } else {
+                files.insert(relative, Some(fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    walk(root, root, &mut files);
+    files
 }
 
 /// The head generation, 0 before the first commit on this machine.
