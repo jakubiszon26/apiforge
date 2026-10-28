@@ -71,13 +71,91 @@ impl Secrets {
     }
 }
 
-/// The 1-based line of the first known value in `text`, if one is there.
-pub fn secret_line(_text: &str, _values: &[String]) -> Option<usize> {
-    unimplemented!("MCP-06")
+/// The 1-based line of the first known value in `text`, if one is there. A
+/// value is found as written and in its JSON-escaped form, as the storage's
+/// staging check finds it.
+pub fn secret_line(text: &str, values: &[String]) -> Option<usize> {
+    values
+        .iter()
+        .filter(|value| !value.is_empty())
+        .flat_map(|value| {
+            let escaped = serde_json::to_string(value)
+                .ok()
+                .map(|quoted| quoted[1..quoted.len() - 1].to_owned());
+            [Some(value.clone()), escaped]
+        })
+        .flatten()
+        .filter_map(|form| text.find(&form))
+        .min()
+        .map(|offset| 1 + text[..offset].matches('\n').count())
 }
 
 /// Refuses a saved source that contains a known value: `secret_in_source`
 /// with the line, never a modified text.
-pub fn withhold(_text: &str, _values: &[String]) -> Result<(), ToolError> {
-    unimplemented!("MCP-06")
+pub fn withhold(text: &str, values: &[String]) -> Result<(), ToolError> {
+    match secret_line(text, values) {
+        None => Ok(()),
+        Some(line) => Err(ToolError::new(
+            ErrorCode::SecretInSource,
+            format!(
+                "The saved source contains the value of a known secret on line {line}; it is withheld and the value is not repeated. Replace the value with the secret's name, env.name"
+            ),
+        )
+        .with_details(serde_json::json!({ "line": line }))),
+    }
+}
+
+/// A text with every known value replaced by `[REDACTED]`, for what the
+/// server reports from a file it did not write, such as the run journal.
+pub fn redact(text: &str, values: &[String]) -> String {
+    let mut ordered: Vec<&String> = values.iter().filter(|value| !value.is_empty()).collect();
+    // The longest first, so a value that contains another is masked whole.
+    ordered.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    ordered.into_iter().fold(text.to_owned(), |text, value| {
+        text.replace(value.as_str(), "[REDACTED]")
+    })
+}
+
+/// Refuses a text argument that carries a known value: `secret_in_text`,
+/// the value never repeated.
+pub fn refuse_in_text(text: &str, values: &[String]) -> Result<(), ToolError> {
+    match secret_line(text, values) {
+        None => Ok(()),
+        Some(_) => Err(ToolError::new(
+            ErrorCode::SecretInText,
+            "The text contains the value of a known secret; nothing was done and the value is not repeated. Name the secret instead: env.name",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_is_found_on_its_line_raw_or_escaped() {
+        let values = vec!["s\"q".to_owned(), String::new()];
+        assert_eq!(secret_line("a\nb s\"q\n", &values), Some(2));
+        assert_eq!(secret_line("a\nb\nc s\\\"q", &values), Some(3));
+        assert_eq!(secret_line("nothing here", &values), None);
+        assert_eq!(secret_line("", &[String::new()]), None);
+    }
+
+    #[test]
+    fn redaction_masks_the_longest_value_first() {
+        let values = vec!["abc".to_owned(), "abcdef".to_owned()];
+        assert_eq!(
+            redact("x abcdef y abc", &values),
+            "x [REDACTED] y [REDACTED]"
+        );
+    }
+
+    #[test]
+    fn the_debug_form_names_no_value() {
+        let secrets = Secrets::with_environment(
+            None,
+            vec![("APIFORGE_SECRET_A".into(), "visible-value".into())],
+        );
+        assert!(!format!("{secrets:?}").contains("visible-value"));
+    }
 }

@@ -1,10 +1,25 @@
 //! Live requests from the server (MCP-06): the permission slot, and what the
 //! run journal says about runs an earlier process left unfinished.
-use crate::tools::LiveRequests;
+use crate::{
+    error::{ErrorCode, ToolError},
+    secrets,
+    tools::LiveRequests,
+};
+use apiforge_core::journal::{CleanupState, JournalRun};
+use apiforge_storage::{
+    JournalStore, StorageError,
+    project::{ProjectError, ProjectStore},
+};
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
+
+/// The refusal while no window is connected and the flag was not given.
+pub const NOT_ENABLED: &str = "live requests are not enabled on this server";
+/// The refusal while a connected window's setting is off.
+pub const OFF_IN_SETTINGS: &str = "live requests are off in this project's settings";
 
 /// Who allows live requests right now. While a window is connected over the
 /// control channel it decides (MCP-09); otherwise the start flag does.
@@ -39,13 +54,13 @@ impl LivePermission {
 
     /// A connected window's setting: the test seam MCP-09 wires to the
     /// control channel's `permission { live }`.
-    pub fn set_window(&self, _live: bool) {
-        unimplemented!("MCP-06")
+    pub fn set_window(&self, live: bool) {
+        self.slot.send_replace(Permission::Window { live });
     }
 
     /// The window's channel is gone: the start flag applies again.
     pub fn window_disconnected(&self) {
-        unimplemented!("MCP-06")
+        self.slot.send_replace(Permission::Flag(self.flag));
     }
 
     /// Follows every change of the slot.
@@ -55,7 +70,27 @@ impl LivePermission {
 
     /// What `project_overview.live_requests` reports.
     pub fn describe(&self) -> LiveRequests {
-        unimplemented!("MCP-06: {}", self.flag)
+        let (allowed, source) = match self.current() {
+            Permission::Flag(true) => (true, "--allow-live"),
+            Permission::Flag(false) => (false, "no --allow-live"),
+            Permission::Window { live: true } => (true, "window setting"),
+            Permission::Window { live: false } => (false, "off in the project's settings"),
+        };
+        LiveRequests {
+            allowed,
+            source: source.to_owned(),
+        }
+    }
+
+    /// Refuses a live run unless the current permission allows it.
+    pub(crate) fn check(&self) -> Result<(), ToolError> {
+        let message = match self.current() {
+            Permission::Flag(true) | Permission::Window { live: true } => return Ok(()),
+            Permission::Flag(false) => NOT_ENABLED,
+            Permission::Window { live: false } => OFF_IN_SETTINGS,
+        };
+        Err(ToolError::new(ErrorCode::LiveDisabled, message)
+            .with_details(json!({ "source": self.describe().source })))
     }
 }
 
@@ -83,4 +118,58 @@ pub struct InterruptedRequest {
     /// `Sending`, `Performed` or `Possibly performed`, as `apiforge run`
     /// prints it.
     pub state: String,
+}
+
+/// The runs `journal` holds, as the model reads them: only the requests
+/// that may have changed the API, as `apiforge run` lists them, with every
+/// known value masked again (the journal was redacted with the secrets of
+/// the process that wrote it).
+pub(crate) fn interrupted(runs: &[JournalRun], values: &[String]) -> Vec<InterruptedRun> {
+    let masked = |text: &str| secrets::redact(text, values);
+    runs.iter()
+        .map(|run| InterruptedRun {
+            scenario: masked(&run.scenario_name),
+            started_at: run.started_at.clone(),
+            cleanup_started: run.cleanup == CleanupState::Started,
+            requests: run
+                .effects()
+                .map(|entry| InterruptedRequest {
+                    step: masked(entry.display_name()),
+                    method: entry.method.clone(),
+                    url: masked(&entry.url),
+                    state: entry.state.label().to_owned(),
+                })
+                .collect(),
+            elided: run.elided,
+        })
+        .collect()
+}
+
+/// What the project's journal holds, read without opening it for writing:
+/// through `store` when it holds the project (this server's agent session),
+/// otherwise only while no other process holds it, since another writer's
+/// journal may describe a run still in progress.
+pub(crate) fn read_journal(store: &ProjectStore) -> Result<(Vec<JournalRun>, bool), ToolError> {
+    if store.is_read_only() {
+        match store.has_live_writer() {
+            Ok(false) => {}
+            Ok(true) => return Ok((Vec::new(), false)),
+            Err(error) => return Err(journal_error(error.into())),
+        }
+    }
+    JournalStore::read_project(store)
+        .map(|read| (read.runs, read.unreadable))
+        .map_err(journal_error)
+}
+
+/// A journal that cannot be opened or read: an interrupted transaction is
+/// `recovery_required`, anything else `project_unreadable`.
+pub(crate) fn journal_error(error: StorageError) -> ToolError {
+    match error {
+        StorageError::Project(ProjectError::RecoveryRequired) => ToolError::new(
+            ErrorCode::RecoveryRequired,
+            "The project has an interrupted file operation; the API Forge window finishes it when it opens the project",
+        ),
+        error => ToolError::new(ErrorCode::ProjectUnreadable, error.to_string()),
+    }
 }

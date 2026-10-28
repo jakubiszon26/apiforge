@@ -5,11 +5,14 @@ use crate::{
     agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
-    live::LivePermission,
+    live::{self, LivePermission},
     resources,
-    secrets::Secrets,
-    tools::{self, RunArguments, RunReport, RunSettings, Runs},
+    secrets::{self, Secrets},
+    tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
 };
+use apiforge_core::run::RunMode;
+use apiforge_project::ProjectSession;
+use apiforge_storage::{JournalStore, project::ProjectStore};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::schema_for_output, wrapper::Parameters},
@@ -26,11 +29,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    collections::VecDeque,
+    pin::Pin,
+    sync::{Mutex, OnceLock},
+    task::{Context, Poll},
+};
+use std::{
     io,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
+use tokio::io::{AsyncRead, ReadBuf};
 
 /// The order `tools/list` returns: the overview and the reference first,
 /// then reading, checking, printing and running, then writing.
@@ -50,7 +60,7 @@ const TOOL_ORDER: [&str; 10] = [
 /// How long the end of stdin waits for a run's cleanup.
 const CLEANUP_WAIT: Duration = Duration::from_secs(10);
 
-const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing. write_source and create_document save a checked text: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -99,8 +109,13 @@ pub struct ApiforgeServer {
     cleanup_delay: Option<Duration>,
     /// Cancelled at the end of stdin: the client is gone.
     client_lost: CancellationToken,
+    /// The live runs this server answered, by `request_id`, oldest first.
+    answered: Arc<Mutex<VecDeque<(String, RunReport)>>>,
     tool_router: ToolRouter<Self>,
 }
+
+/// The live results a server remembers for a repeated `request_id`.
+const ANSWERED: usize = 64;
 
 #[tool_router(router = tool_router)]
 impl ApiforgeServer {
@@ -132,6 +147,7 @@ impl ApiforgeServer {
             secrets: settings.secrets,
             cleanup_delay: settings.cleanup_delay,
             client_lost: CancellationToken::new(),
+            answered: Arc::default(),
             tool_router: Self::tool_router(),
         }
     }
@@ -152,10 +168,106 @@ impl ApiforgeServer {
         arguments: RunArguments,
         cancel: CancellationToken,
     ) -> Result<RunReport, ToolError> {
-        if arguments.live {
-            unimplemented!("MCP-06: {:?} {:?}", self.secrets, self.cleanup_delay);
+        self.run_for(arguments, cancel, None)
+    }
+
+    /// `run` for the client named `client`, which a live run's agent
+    /// session writes into the holder description.
+    fn run_for(
+        &self,
+        arguments: RunArguments,
+        cancel: CancellationToken,
+        client: Option<String>,
+    ) -> Result<RunReport, ToolError> {
+        let secrets = self.secrets.read()?;
+        let values: Vec<String> = secrets.values().cloned().collect();
+        if let Some(id) = &arguments.request_id {
+            secrets::refuse_in_text(id, &values)?;
         }
-        tools::run(&self.folder, &arguments, &self.runs, cancel)
+        if !arguments.live {
+            let mut report =
+                tools::simulate(&self.folder, &arguments, &self.runs, cancel, secrets)?;
+            let (interrupted, unreadable) = self.read_journal()?;
+            report.interrupted = live::interrupted(&interrupted, &values);
+            report.journal_unreadable = unreadable;
+            return tools::bound(Ok(report));
+        }
+        if let Some(recorded) = self.recorded(&arguments) {
+            return Ok(recorded);
+        }
+        self.permission.check()?;
+        let _slot = self.runs.claim()?;
+        let store = self.agent.writer(client)?;
+        let report = self.run_live(&arguments, cancel, store, secrets, &values)?;
+        if let Some(id) = &arguments.request_id {
+            self.record(id, &report);
+        }
+        Ok(report)
+    }
+
+    /// A live run on the agent session's `store`: journalled before each
+    /// request, the permission checked immediately before the start.
+    fn run_live(
+        &self,
+        arguments: &RunArguments,
+        cancel: CancellationToken,
+        store: ProjectStore,
+        secrets: indexmap::IndexMap<String, String>,
+        values: &[String],
+    ) -> Result<RunReport, ToolError> {
+        crate::folder::validate(&arguments.path)?;
+        let mut session =
+            ProjectSession::from_store_saved(store.clone()).map_err(tools::storage_error)?;
+        let prepared = tools::prepare(&mut session, arguments, RunMode::Live, secrets)?;
+        drop(session);
+        let journal = JournalStore::open_project(store).map_err(live::journal_error)?;
+        // A change of the permission after this point does not stop the run
+        // (MCP-00 decision 16 A).
+        self.permission.check()?;
+        let (mut report, before) = tools::execute(
+            prepared,
+            arguments,
+            Some(journal),
+            &self.runs,
+            cancel,
+            self.cleanup_delay,
+        )?;
+        report.interrupted = live::interrupted(&before.interrupted, values);
+        report.journal_unreadable = before.unreadable;
+        tools::bound(Ok(report))
+    }
+
+    /// The recorded result of a live run with the same `request_id`.
+    fn recorded(&self, arguments: &RunArguments) -> Option<RunReport> {
+        let id = arguments.request_id.as_ref()?;
+        let answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
+        answered
+            .iter()
+            .find(|(answered, _)| answered == id)
+            .map(|(_, report)| RunReport {
+                replayed: true,
+                ..report.clone()
+            })
+    }
+
+    fn record(&self, id: &str, report: &RunReport) {
+        let mut answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
+        answered.retain(|(answered, _)| answered != id);
+        if answered.len() == ANSWERED {
+            answered.pop_front();
+        }
+        answered.push_back((id.to_owned(), report.clone()));
+    }
+
+    /// The project's journal as this server may read it: through its agent
+    /// session's lock, or while no other process holds the project.
+    fn read_journal(&self) -> Result<(Vec<apiforge_core::journal::JournalRun>, bool), ToolError> {
+        let store = match self.agent.held() {
+            Some(store) => store,
+            None => ProjectStore::open_read_only(&**self.folder)
+                .map_err(|error| live::journal_error(error.into()))?,
+        };
+        live::read_journal(&store)
     }
 
     /// `project_overview` as the tool answers it.
@@ -163,31 +275,34 @@ impl ApiforgeServer {
         let mut overview = tools::project_overview(&self.folder)?;
         if overview.holder == tools::Holder::AnotherProcess && self.agent.is_active() {
             overview.holder = tools::Holder::AgentSession;
+            overview.interrupted_runs = self.read_journal()?.0.len();
         }
-        if self.permission.current() != crate::live::Permission::Flag(false) {
-            overview.live_requests = self.permission.describe();
-        }
+        overview.live_requests = self.permission.describe();
         Ok(overview)
     }
 
     /// `read_source` as the tool answers it.
     pub fn read_source_tool(&self, path: &str) -> Result<tools::SourceText, ToolError> {
-        tools::read_source(&self.folder, path)
+        tools::read_source_with(&self.folder, path, &self.secrets.values()?)
     }
 
-    /// `check_text` as the tool answers it.
+    /// `check_text` as the tool answers it: a text that carries a known
+    /// secret value is refused before it is analysed.
     pub fn check_text_tool(&self, path: &str, text: &str) -> Result<tools::TextCheck, ToolError> {
+        if text.len() <= MAX_TEXT_BYTES {
+            secrets::refuse_in_text(text, &self.secrets.values()?)?;
+        }
         tools::check_text(&self.folder, path, text)
     }
 
     /// `print` as the tool answers it.
     pub fn print_tool(&self, path: &str) -> Result<tools::Printed, ToolError> {
-        tools::print(&self.folder, path)
+        tools::print_with(&self.folder, path, &self.secrets.values()?)
     }
 
     /// `resources/read` of `uri`: the text, or the tools' refusal.
     pub fn resource_text(&self, uri: &str) -> Result<String, ToolError> {
-        resources::read(&self.folder, uri)
+        resources::read_with(&self.folder, uri, &self.secrets.values()?)
     }
 
     /// The server's run slot, shared by every clone.
@@ -281,18 +396,41 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "Simulates the saved scenario or component at `path` with the sample responses written in it: nothing is sent and nothing is written. Returns `status` (passed, failed or cancelled; a failed verdict is a result, not an error), every step with handle, label, status, message and, for a failed comparison, expected and actual, a component's steps nested beneath it, the generation and source_sha256. A component runs alone with `inputs` by name, its defaults filling the rest. `full: true` returns the runner's complete JSON report instead of the steps. run executes the saved source; check_text checks a proposal. One run at a time; a cancelled request or the ten-minute deadline stops the run and its cleanup still runs.",
+        description = "Runs the saved scenario or component at `path`: a simulation with the sample responses written in it, which sends nothing, or with `live: true` real requests to the project's API, only when the person allowed live requests (project_overview.live_requests; otherwise `live_disabled`). Returns `status` (passed, failed or cancelled; a failed verdict is a result, not an error), every step with handle, label, status, message and, for a failed comparison, expected and actual, a component's steps nested beneath it, the generation and source_sha256, and `interrupted`: live runs an earlier process left unfinished, with the requests that may have changed the API. A component runs alone with `inputs` by name, its defaults filling the rest. `full: true` returns the runner's complete JSON report instead of the steps. run executes the saved source; check_text checks a proposal. A live run records each request in the project's run journal before sending it and takes the project for this agent session as write_source does; while a window or another process holds the project it is refused (`held_by_window`, `held_by_other`). Known secret values are `[REDACTED]` in every report. Repeat a live run's `request_id` only to recover a lost answer: this server returns the recorded result and sends nothing. One run at a time; a cancelled request or the ten-minute deadline stops the run, its cleanup still runs, and a request on its way is marked `may_have_reached_api`.",
         output_schema = schema_for_output::<tools::RunReport>(),
-        annotations(title = "Run (simulation)", read_only_hint = true)
+        annotations(
+            title = "Run",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn run(
         &self,
         Parameters(arguments): Parameters<RunArguments>,
-        cancel: CancellationToken,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let server = self.clone();
+        let client = context.client_info().map(|client| client.name);
+        // A live run also stops when the client is gone: the end of stdin
+        // cancels it at once rather than after rmcp's drain.
+        let (cancel, _forwarding) = if arguments.live {
+            let token = self.client_lost.child_token();
+            let (request, forwarded) = (context.ct.clone(), token.clone());
+            tokio::spawn(async move {
+                tokio::select! {
+                    () = request.cancelled() => forwarded.cancel(),
+                    () = forwarded.cancelled() => {}
+                }
+            });
+            // The run's own token ends the forwarding when the call returns.
+            (token.clone(), Some(token.drop_guard()))
+        } else {
+            (context.ct.clone(), None)
+        };
         call("run", move || {
-            let report = server.run_tool(arguments, cancel)?;
+            let report = server.run_for(arguments, cancel, client)?;
             match report.ended_by {
                 EndedBy::Completed => {}
                 EndedBy::Cancelled => eprintln!("apiforge mcp: run: cancelled"),
@@ -518,8 +656,14 @@ pub fn serve_stdio_with(folder: PathBuf, settings: ServerSettings) -> io::Result
     let server = ApiforgeServer::with_settings(folder, settings);
     let runs = server.runs().clone();
     let agent = server.agent().clone();
+    let eof = Arc::new(OnceLock::new());
+    let stdin = EndOfInput {
+        inner: tokio::io::stdin(),
+        lost: server.client_lost().clone(),
+        at: eof.clone(),
+    };
     let result = runtime.block_on(async move {
-        let service = match server.serve(rmcp::transport::stdio()).await {
+        let service = match server.serve((stdin, tokio::io::stdout())).await {
             Ok(service) => service,
             // The client went away before choosing a lifecycle: a normal end.
             Err(ServerInitializeError::ConnectionClosed(_)) => return Ok(()),
@@ -527,8 +671,9 @@ pub fn serve_stdio_with(folder: PathBuf, settings: ServerSettings) -> io::Result
         };
         service.waiting().await.map_err(io::Error::other)?;
         // Ending the service, after its drain, cancelled every request still
-        // running, a run among them.
-        let started = Instant::now();
+        // running, a run among them; a live run was cancelled at EOF. Its
+        // cleanup gets ten seconds from the end of stdin.
+        let started = eof.get().copied().unwrap_or_else(Instant::now);
         while runs.is_busy() && started.elapsed() < CLEANUP_WAIT {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -539,4 +684,33 @@ pub fn serve_stdio_with(folder: PathBuf, settings: ServerSettings) -> io::Result
     let _ = agent.finish_editing();
     runtime.shutdown_timeout(Duration::from_millis(500));
     result
+}
+
+/// Stdin that says when it ends: the client is gone, so a live run in
+/// progress is cancelled at once instead of after rmcp's drain.
+struct EndOfInput<R> {
+    inner: R,
+    lost: CancellationToken,
+    at: Arc<OnceLock<Instant>>,
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for EndOfInput<R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buffer.filled().len();
+        let polled = Pin::new(&mut self.inner).poll_read(context, buffer);
+        let ended = match &polled {
+            Poll::Ready(Ok(())) => buffer.filled().len() == before && buffer.remaining() > 0,
+            Poll::Ready(Err(_)) => true,
+            Poll::Pending => false,
+        };
+        if ended {
+            let _ = self.at.set(Instant::now());
+            self.lost.cancel();
+        }
+        polled
+    }
 }

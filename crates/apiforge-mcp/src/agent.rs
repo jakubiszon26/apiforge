@@ -169,6 +169,20 @@ impl AgentSession {
         self.active.load(Ordering::Acquire)
     }
 
+    /// The writer lock for a live run (MCP-06): the session's, taken now
+    /// when the project is free, refused with the holder otherwise. The
+    /// store knows the session's secrets.
+    pub(crate) fn writer(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
+        self.set_client(client);
+        let mut state = self.state();
+        self.store(&mut state)
+    }
+
+    /// The session's store while it holds the lock.
+    pub(crate) fn held(&self) -> Option<ProjectStore> {
+        self.state().store.clone()
+    }
+
     /// Replaces the text of a registered document, exactly, when it is the
     /// version the model read and has no error.
     pub fn write_source(&self, arguments: &WriteSourceArguments) -> Result<WriteResult, ToolError> {
