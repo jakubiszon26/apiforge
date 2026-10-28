@@ -218,6 +218,34 @@ changed.
   `unsafe`), and the window's channel thread sending one message at a time
   (each bounded to two seconds, same-user peers).
 
+## After acceptance: a race in the take-back during a write
+
+Windows push run 40669262333 on `6b096d3` failed
+`take_back_during_a_write_lets_it_commit_or_fail_whole` ("never showed a
+settled holder"); the pull request's run of the same commit passed. A
+product race, fixed in `ea67b0a`: when the server handled *Take back*
+before the write that was in flight, the session ended and that write found
+the lock free and took the project again without asking, before the window
+could take it back. The window, told `released`, reconnected to the agent
+but kept its pending take-back, so *Take back* stayed greyed with no way to
+ask again.
+
+- The server: a session ended by *Take back* lets the window take the free
+  lock first; the next write, also one already waiting, waits up to 3 s for
+  the window to hold the project, then asks it like any other write
+  (criterion 5).
+- The window: `released` or a lost connection answers a pending take-back,
+  so *Take back* is offered again should the agent hold the project again.
+
+`origin/main` with MCP-06 was merged after the fix (`21872fc`). On the
+merged head the MCP-08a and MCP-08b tests passed 20 times in a row (22
+tests each run), and the workspace suite passed: 1 286 passed, 0 failed,
+33 ignored, MCP-06's tests among them. The merged run also showed a race in
+an MCP-08a test, `a_document_the_holder_registers_is_listed_without_a_notice`:
+its wait asked for exactly one node naming the new file, and the bar names
+it too once the commit is followed. The wait now accepts any number of
+such nodes; its assertions are unchanged.
+
 ## Windows
 
 From CI run 40656947002 of this branch at `47ed5e4` (windows-2022), the
