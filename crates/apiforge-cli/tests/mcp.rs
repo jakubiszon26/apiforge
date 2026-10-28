@@ -1722,6 +1722,7 @@ fn mcp12_cli_window_process() {
     for eof in [false, true] {
         let directory = demo();
         let root = directory.path();
+        #[cfg(unix)]
         let temp = tempfile::tempdir().unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
