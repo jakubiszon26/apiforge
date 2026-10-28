@@ -44,6 +44,9 @@ pub struct Watcher {
     pub recovery_required: bool,
     /// The latest answer to who holds the project, until the window takes it.
     probe: Option<Option<Holder>>,
+    /// How long between two checks: [`POLL_INTERVAL`], longer in tests that
+    /// prove a change was followed without waiting for a check.
+    interval: Duration,
 }
 
 impl Watcher {
@@ -60,7 +63,16 @@ impl Watcher {
             problem: None,
             recovery_required: false,
             probe: None,
+            interval: POLL_INTERVAL,
         }
+    }
+
+    /// Checks every `interval` from now on instead of once a second: a test
+    /// seam (MCP-08b), so that only a rescan can explain a prompt follow.
+    #[cfg(test)]
+    pub fn set_interval(&mut self, interval: Duration) {
+        self.interval = interval;
+        self.due = Some(Instant::now() + interval);
     }
 
     /// Checks again as soon as possible, for example after a file operation.
@@ -144,11 +156,13 @@ impl Watcher {
         if self.running || now < due {
             return (
                 outcome,
-                due.saturating_duration_since(now).max(POLL_INTERVAL / 4),
+                due.saturating_duration_since(now)
+                    .max(POLL_INTERVAL / 4)
+                    .min(self.interval),
             );
         }
         self.running = true;
-        self.due = Some(now + POLL_INTERVAL);
+        self.due = Some(now + self.interval);
         let check = session.external_check();
         let observed = session.is_read_only().then(|| session.store().clone());
         let sender = self.sender.clone();
@@ -166,7 +180,7 @@ impl Watcher {
                 }
             }
         });
-        (outcome, POLL_INTERVAL)
+        (outcome, self.interval.min(POLL_INTERVAL))
     }
 
     /// Checks the folder now and applies the result, for tests. A check

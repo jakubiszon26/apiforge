@@ -11,6 +11,8 @@ pub mod positions;
 pub mod reference;
 pub mod resources;
 mod server;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub mod tools;
 
 pub use error::{ErrorCode, ToolError, Wrote};

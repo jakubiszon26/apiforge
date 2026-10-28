@@ -30,8 +30,9 @@ workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-# The agent session of MCP-04 beside a window, and the storage's I/O fault seam.
-apiforge-mcp.workspace = true
+# The agent session of MCP-04 beside a window, a server spawned over stdio
+# (MCP-08b), and the storage's I/O fault seam.
+apiforge-mcp = { workspace = true, features = ["test-support"] }
 apiforge-storage = { workspace = true, features = ["fault-injection"] }
 egui_kittest.workspace = true
 egui_inspection.workspace = true

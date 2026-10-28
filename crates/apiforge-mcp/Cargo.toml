@@ -19,6 +19,11 @@ tokio.workspace = true
 tokio-util.workspace = true
 indexmap.workspace = true
 
+[features]
+# A spawned server driven over stdio, for other crates' tests (MCP-08b).
+# Never enabled in a release build.
+test-support = []
+
 [dev-dependencies]
 tempfile.workspace = true
 # The storage's I/O fault seam for the transaction tests of MCP-04.
