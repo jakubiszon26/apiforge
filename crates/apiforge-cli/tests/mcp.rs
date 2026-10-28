@@ -9,6 +9,12 @@
 //! A slow simulation comes from the server's test seam
 //! `APIFORGE_MCP_TEST_STEP_DELAY_MS`, a short deadline from
 //! `APIFORGE_MCP_TEST_DEADLINE_MS`.
+//!
+//! MCP-04 (#63) over real stdio: `write_source`, `create_document` and
+//! `finish_editing`; the agent session holding the writer lock until
+//! `finish_editing` or EOF, with the client's name in the holder file; a
+//! write based on a version `apiforge apply` replaced; a secret from
+//! `APIFORGE_SECRET_<NAME>` in the text.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -22,7 +28,7 @@ use std::{
 
 const PRODUCT: &str = "components/product.afs";
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-const TOOLS: [&str; 7] = [
+const TOOLS: [&str; 10] = [
     "project_overview",
     "language_reference",
     "read_source",
@@ -30,6 +36,16 @@ const TOOLS: [&str; 7] = [
     "check_text",
     "print",
     "run",
+    "write_source",
+    "create_document",
+    "finish_editing",
+];
+/// The tools that change the project or its writer lock (MCP-04), with their
+/// `destructiveHint` and `idempotentHint`.
+const WRITE_TOOLS: [(&str, bool, bool); 3] = [
+    ("write_source", true, true),
+    ("create_document", false, false),
+    ("finish_editing", false, true),
 ];
 
 fn demo() -> tempfile::TempDir {
@@ -173,7 +189,18 @@ fn assert_tools(list: &Value) {
         assert!(!tool["description"].as_str().unwrap().is_empty(), "{tool}");
         assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
         assert_eq!(tool["outputSchema"]["type"], "object", "{tool}");
-        assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+        let name = tool["name"].as_str().unwrap();
+        match WRITE_TOOLS.iter().find(|(write, _, _)| *write == name) {
+            None => assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}"),
+            Some((_, destructive, idempotent)) => {
+                assert_eq!(tool["annotations"]["readOnlyHint"], false, "{tool}");
+                assert_eq!(
+                    tool["annotations"]["destructiveHint"], *destructive,
+                    "{tool}"
+                );
+                assert_eq!(tool["annotations"]["idempotentHint"], *idempotent, "{tool}");
+            }
+        }
     }
 }
 
@@ -625,4 +652,249 @@ fn mcp03_a_test_seam_that_is_not_a_number_stops_the_server() {
             "{stderr}"
         );
     }
+}
+
+// MCP-04 (#63) ---------------------------------------------------------------
+
+const DRAFT_TEXT: &str = "scenario \"Draft\" {\n}\n";
+
+/// Another writer's attempt to take the project: `true` while the lock is
+/// held. A successful attempt releases the lock at once.
+fn locked(root: &Path) -> bool {
+    use apiforge_storage::project::{ProjectError, ProjectStore};
+    match ProjectStore::open_exclusive(root) {
+        Err(ProjectError::Locked) => true,
+        Ok(_) => false,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+/// Waits up to a second after `since` for the lock to be free.
+fn released_within_a_second(root: &Path, since: Instant) {
+    while locked(root) {
+        assert!(
+            since.elapsed() < Duration::from_secs(1),
+            "the lock is still held a second later"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn commented(text: &str) -> String {
+    text.replacen(" {\n", " {\n  // Checked by the model.\n", 1)
+}
+
+fn holder(root: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(root.join(".apiforge/local/holder.json")).unwrap())
+        .unwrap()
+}
+
+/// The saved text and its hash, over stdio.
+fn read(server: &mut Server, id: u64, path: &str) -> (String, String) {
+    let read = call(server, id, "read_source", json!({ "path": path }));
+    let read = structured(&read);
+    (
+        read["text"].as_str().unwrap().to_owned(),
+        read["source_sha256"].as_str().unwrap().to_owned(),
+    )
+}
+
+#[test]
+fn mcp04_criterion_7_the_session_keeps_the_lock_until_eof_and_names_the_client() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, SCENARIO);
+    let written = call(
+        &mut server,
+        3,
+        "write_source",
+        json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
+    );
+    assert_eq!(structured(&written)["wrote"], true);
+    assert_eq!(
+        std::fs::read_to_string(root.join(SCENARIO)).unwrap(),
+        commented(&text)
+    );
+    assert!(locked(root), "the lock is kept after the write returns");
+    let described = holder(root);
+    assert_eq!(described["program"], "apiforge");
+    assert_eq!(described["role"], "agent");
+    assert_eq!(
+        described["client"], "acceptance",
+        "the client from initialize"
+    );
+    let overview = call(&mut server, 4, "project_overview", json!({}));
+    assert_eq!(structured(&overview)["holder"], "agent_session");
+
+    // A second write in the same session, after a pause.
+    thread::sleep(Duration::from_millis(300));
+    assert!(locked(root));
+    let created = call(
+        &mut server,
+        5,
+        "create_document",
+        json!({ "kind": "scenario", "path": "scenarios/draft.afs", "text": DRAFT_TEXT }),
+    );
+    assert_eq!(structured(&created)["wrote"], true);
+    assert!(locked(root));
+
+    drop(server.stdin.take());
+    released_within_a_second(root, Instant::now());
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp04_criterion_7_finish_editing_releases_the_lock_over_stdio() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    let discover = server.request(1, "server/discover", json!({ "_meta": meta() }));
+    assert!(discover["result"].is_object(), "{discover}");
+    let read = server.request(
+        2,
+        "tools/call",
+        json!({ "_meta": meta(), "name": "read_source", "arguments": { "path": SCENARIO } }),
+    );
+    let read = structured(&read).clone();
+    let written = server.request(
+        3,
+        "tools/call",
+        json!({ "_meta": meta(), "name": "write_source", "arguments": {
+            "path": SCENARIO,
+            "text": commented(read["text"].as_str().unwrap()),
+            "expected_source_sha256": read["source_sha256"],
+            "expected_generation": read["generation"],
+        } }),
+    );
+    assert_eq!(structured(&written)["wrote"], true);
+    assert_eq!(
+        holder(root)["client"],
+        "acceptance",
+        "the client from the request metadata"
+    );
+    assert!(locked(root));
+    let finished = server.request(
+        4,
+        "tools/call",
+        json!({ "_meta": meta(), "name": "finish_editing", "arguments": {} }),
+    );
+    let answered = Instant::now();
+    assert_eq!(structured(&finished)["finished"], true);
+    released_within_a_second(root, answered);
+    let overview = server.request(
+        5,
+        "tools/call",
+        json!({ "_meta": meta(), "name": "project_overview", "arguments": {} }),
+    );
+    assert_eq!(structured(&overview)["holder"], "none");
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp04_criterion_3_a_write_based_on_a_version_apply_replaced_is_stale() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, SCENARIO);
+
+    let incoming = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        incoming.path(),
+        text.replace("on_error continue", "on_error stop"),
+    )
+    .unwrap();
+    let applied = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .args(["apply", "--folder"])
+        .arg(root)
+        .args(["--file", SCENARIO])
+        .arg(incoming.path())
+        .output()
+        .unwrap();
+    assert!(applied.status.success(), "{applied:?}");
+    let current = std::fs::read(root.join(SCENARIO)).unwrap();
+
+    let stale = call(
+        &mut server,
+        3,
+        "write_source",
+        json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
+    );
+    tool_error(&stale, "stale_source");
+    let (_, current_hash) = read(&mut server, 4, SCENARIO);
+    assert_eq!(
+        stale["result"]["structuredContent"]["details"]["source_sha256"],
+        current_hash.as_str()
+    );
+    assert_eq!(std::fs::read(root.join(SCENARIO)).unwrap(), current);
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp04_criterion_9_a_secret_from_the_environment_is_refused_and_never_echoed() {
+    const SECRET: &str = "s3cr3t-token-over-stdio";
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn_with(Some(root), root, &[("APIFORGE_SECRET_TOKEN", SECRET)]);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, SCENARIO);
+    let leaked = text.replacen(" {\n", &format!(" {{\n  // token {SECRET}\n"), 1);
+    let refused = call(
+        &mut server,
+        4,
+        "write_source",
+        json!({ "path": SCENARIO, "text": leaked, "expected_source_sha256": hash }),
+    );
+    tool_error(&refused, "secret_in_text");
+    let created = call(
+        &mut server,
+        5,
+        "create_document",
+        json!({
+            "kind": "scenario",
+            "path": "scenarios/leak.afs",
+            "text": format!("scenario \"Leak\" {{\n  // {SECRET}\n}}\n"),
+        }),
+    );
+    tool_error(&created, "secret_in_text");
+    assert_eq!(std::fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+    assert!(!root.join("scenarios/leak.afs").exists());
+    let (status, _, stdout, stderr) = server.close();
+    assert_eq!(status.code(), Some(0));
+    for line in &stdout {
+        assert!(!line.contains(SECRET), "stdout echoed the secret: {line}");
+    }
+    assert!(!stderr.contains(SECRET), "stderr echoed the secret");
+}
+
+#[test]
+fn mcp04_criterion_8_a_window_holding_the_project_refuses_the_write_over_stdio() {
+    use apiforge_storage::project::ProjectStore;
+    let directory = demo();
+    let root = directory.path();
+    let window = ProjectStore::open_exclusive(root).unwrap();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, SCENARIO);
+    let refused = call(
+        &mut server,
+        3,
+        "write_source",
+        json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
+    );
+    tool_error(&refused, "held_by_window");
+    assert!(
+        refused["result"]["structuredContent"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("API Forge window"),
+        "{refused}"
+    );
+    // Reads in the same session still work.
+    assert_eq!(read(&mut server, 4, SCENARIO).0, text);
+    drop(window);
+    assert_clean_end(server);
+    assert_eq!(std::fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
 }

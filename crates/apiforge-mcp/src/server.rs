@@ -2,6 +2,7 @@
 //! protocol messages only; the server's own lines go to stderr and never
 //! quote an argument.
 use crate::{
+    agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
     resources,
@@ -30,8 +31,8 @@ use std::{
 };
 
 /// The order `tools/list` returns: the overview and the reference first,
-/// then reading, checking, printing and running.
-const TOOL_ORDER: [&str; 7] = [
+/// then reading, checking, printing and running, then writing.
+const TOOL_ORDER: [&str; 10] = [
     "project_overview",
     "language_reference",
     "read_source",
@@ -39,12 +40,15 @@ const TOOL_ORDER: [&str; 7] = [
     "check_text",
     "print",
     "run",
+    "write_source",
+    "create_document",
+    "finish_editing",
 ];
 
 /// How long the end of stdin waits for a run's cleanup.
 const CLEANUP_WAIT: Duration = Duration::from_secs(10);
 
-const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing. These tools read the saved project and write nothing.";
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing. write_source and create_document save a checked text: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -73,6 +77,7 @@ pub struct CheckTextArguments {
 pub struct ApiforgeServer {
     folder: Arc<PathBuf>,
     runs: Runs,
+    agent: Arc<AgentSession>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -85,6 +90,7 @@ impl ApiforgeServer {
     /// A server whose runs follow `settings`.
     pub fn with_run_settings(folder: PathBuf, settings: RunSettings) -> Self {
         Self {
+            agent: Arc::new(AgentSession::new(folder.clone())),
             folder: Arc::new(folder),
             runs: Runs::new(settings),
             tool_router: Self::tool_router(),
@@ -96,6 +102,11 @@ impl ApiforgeServer {
         &self.runs
     }
 
+    /// The server's agent session, shared by every clone.
+    pub fn agent(&self) -> &Arc<AgentSession> {
+        &self.agent
+    }
+
     #[tool(
         description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project, whether live requests are allowed, and the version of the language reference. Reads the saved project; writes nothing.",
         output_schema = schema_for_output::<tools::ProjectOverview>(),
@@ -103,7 +114,15 @@ impl ApiforgeServer {
     )]
     async fn project_overview(&self) -> Result<CallToolResult, ErrorData> {
         let folder = self.folder.clone();
-        call("project_overview", move || tools::project_overview(&folder)).await
+        let agent = self.agent.clone();
+        call("project_overview", move || {
+            let mut overview = tools::project_overview(&folder)?;
+            if overview.holder == tools::Holder::AnotherProcess && agent.is_active() {
+                overview.holder = tools::Holder::AgentSession;
+            }
+            Ok(overview)
+        })
+        .await
     }
 
     #[tool(
@@ -198,6 +217,64 @@ impl ApiforgeServer {
             Ok(report)
         })
         .await
+    }
+
+    #[tool(
+        description = "Saves a new text for the registered document at `path`, exactly as given. The text is checked in the project's context first and saved only without errors (warnings allowed), together with its layout checkpoint, the same bytes as a save in the window. Name the version you read: `expected_source_sha256` from read_source (a different hash on disk is `stale_source`, nothing written) and optionally `expected_generation` (`stale_project`). The first write takes the project for this agent session and keeps it until finish_editing; while a window or another process holds the project the write is refused (`held_by_window`, `held_by_other`). A text containing a known secret value is `secret_in_text`. The same text and hash twice is a no-op.",
+        output_schema = schema_for_output::<crate::agent::WriteResult>(),
+        annotations(
+            title = "Write source",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn write_source(
+        &self,
+        Parameters(arguments): Parameters<WriteSourceArguments>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let agent = self.agent.clone();
+        agent.set_client(context.client_info().map(|client| client.name));
+        call("write_source", move || agent.write_source(&arguments)).await
+    }
+
+    #[tool(
+        description = "Registers a new scenario or component at `path` with `text`, exactly as given. Nothing is written unless the document passes check_text as a new document: the path is a free working source (`path_rejected`, `path_exists`), the header declares `kind`, a component's handle is free (`handle_exists`) and the text has no error (`invalid_text` with the diagnostics). The source, its registry entry and its layout checkpoint are committed in one transaction. Takes the project for this agent session as write_source does.",
+        output_schema = schema_for_output::<crate::agent::CreateResult>(),
+        annotations(
+            title = "Create document",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn create_document(
+        &self,
+        Parameters(arguments): Parameters<CreateDocumentArguments>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let agent = self.agent.clone();
+        agent.set_client(context.client_info().map(|client| client.name));
+        call("create_document", move || agent.create_document(&arguments)).await
+    }
+
+    #[tool(
+        description = "Ends this agent session: the server releases the project, and a window waiting for it can save again. Call it when your edits are done. A later write starts a new session.",
+        output_schema = schema_for_output::<crate::agent::Finished>(),
+        annotations(
+            title = "Finish editing",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn finish_editing(&self) -> Result<CallToolResult, ErrorData> {
+        let agent = self.agent.clone();
+        call("finish_editing", move || Ok(agent.finish_editing())).await
     }
 }
 
@@ -346,6 +423,7 @@ pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()
         .build()?;
     let server = ApiforgeServer::with_run_settings(folder, settings);
     let runs = server.runs().clone();
+    let agent = server.agent().clone();
     let result = runtime.block_on(async move {
         let service = match server.serve(rmcp::transport::stdio()).await {
             Ok(service) => service,
@@ -362,6 +440,9 @@ pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()
         }
         Ok(())
     });
+    // The end of stdin ends the agent session: the writer lock is released
+    // before the runtime winds down.
+    let _ = agent.finish_editing();
     runtime.shutdown_timeout(Duration::from_millis(500));
     result
 }

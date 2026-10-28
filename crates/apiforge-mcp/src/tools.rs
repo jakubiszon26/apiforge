@@ -41,7 +41,7 @@ pub const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
 /// anything else.
 pub const MAX_TEXT_BYTES: usize = apiforge_script::MAX_SOURCE_BYTES;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Scenario,
@@ -61,6 +61,8 @@ pub enum Severity {
 pub enum Holder {
     None,
     AnotherProcess,
+    /// This server, for the agent session it keeps until `finish_editing`.
+    AgentSession,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]

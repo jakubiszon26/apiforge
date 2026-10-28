@@ -253,6 +253,16 @@ impl ProjectSession {
         )
     }
 
+    /// A session over the saved definitions of a store the caller already
+    /// holds, such as the writer lock an agent session keeps across calls
+    /// (MCP-04): no local recovery and no last-valid cache. A registered
+    /// source over the 1 MiB limit is `Unavailable::TooLarge`, as in
+    /// [`Self::open_saved_tolerant`].
+    pub fn from_store_saved(store: ProjectStore) -> Result<Self> {
+        let _ = store;
+        unimplemented!("MCP-04")
+    }
+
     /// Stable saved definitions under the writer lock. Never falls back to a
     /// read-only session when another writer owns the project.
     pub fn open_saved_exclusive(root: impl AsRef<Path>) -> Result<Self> {

@@ -158,6 +158,22 @@ impl ProjectSession {
     }
 }
 
+impl ProjectSession {
+    /// Registers a new document only when [`Self::check_new_document`] finds
+    /// nothing wrong with it (MCP-04): its source, its registry entry and the
+    /// checkpoint sealed from the validated model commit in one transaction.
+    /// A refusal returns the check and writes nothing.
+    pub fn create_document_sealed(
+        &mut self,
+        kind: DocumentKind,
+        path: &str,
+        text: &str,
+    ) -> Result<std::result::Result<String, NewDocumentCheck>> {
+        let _ = (kind, path, text);
+        unimplemented!("MCP-04")
+    }
+}
+
 /// A file or directory is at `path` or at a path that differs from it only
 /// in letter case, or something other than a directory stands where one of
 /// its parent directories would be: either way a registration there would be
