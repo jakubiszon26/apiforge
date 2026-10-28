@@ -242,10 +242,23 @@ merged head the MCP-08a and MCP-08b tests passed 20 times in a row (22
 tests each run), and the workspace suite passed: 1 286 passed, 0 failed,
 33 ignored, MCP-06's tests among them. The merged run also showed a race in
 an MCP-08a test, `a_document_the_holder_registers_is_listed_without_a_notice`:
-its wait asked for exactly one node whose label contains the new file's
-name, and the bar's last change contains it too once the commit is
-followed. The wait now asks for the explorer's row by its exact name;
-its assertions are unchanged.
+its wait used `query_by_label_contains`, which panics when more than one
+node matches, and once the commit is followed the bar's last change
+contains the file's name as well as the explorer's row. The wait now finds
+the row by its exact name (`query_by_label`), which the bar's longer text
+cannot match; its assertions are unchanged.
+
+The pre-merge review then found that the hand-over's first fix for Windows
+(`f804722`: grant only with no check in flight, then postpone the next
+check) left the race open. A new test,
+`a_granting_window_reads_nothing_until_the_agent_has_saved`, with checks due
+every 20 ms, failed three runs of three on that code: checks started
+between the window's decision and the agent's `saved`, the first in the
+same frame as the decision, and once a check was in flight at the grant.
+Since the following commit the window holds every check from its decision
+to hand over until the agent's first `saved` (or `released`, the lost
+connection, or ten seconds, the bound the window already gives a grant):
+nothing can read the files the agent's first commit replaces.
 
 ## Windows
 

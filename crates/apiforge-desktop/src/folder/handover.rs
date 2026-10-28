@@ -283,6 +283,15 @@ pub(super) struct Handover {
     /// A request was refused for unsaved work: the bar says so until the
     /// work is saved.
     pub(super) refused: bool,
+    /// For tests: when the window decided to hand the project over, whether
+    /// a check was in flight when it granted, and when the agent first said
+    /// it saved.
+    #[cfg(test)]
+    pub(super) decided: Option<Instant>,
+    #[cfg(test)]
+    pub(super) granted_busy: Option<bool>,
+    #[cfg(test)]
+    pub(super) first_saved: Option<Instant>,
 }
 
 impl Handover {
@@ -300,6 +309,12 @@ impl Handover {
             taking_back: false,
             agent_running: false,
             refused: false,
+            #[cfg(test)]
+            decided: None,
+            #[cfg(test)]
+            granted_busy: None,
+            #[cfg(test)]
+            first_saved: None,
         }
     }
 
@@ -410,9 +425,15 @@ impl FolderApp {
                 }
             }
             Event::Message { link, message } if Some(link) == handover.link => match message {
-                Message::Saved { .. } => self.watcher.rescan(),
+                Message::Saved { .. } => {
+                    #[cfg(test)]
+                    handover.first_saved.get_or_insert_with(Instant::now);
+                    self.watcher.release_hold();
+                    self.watcher.rescan();
+                }
                 Message::Released => {
                     handover.let_go();
+                    self.watcher.release_hold();
                     self.watcher.rescan();
                 }
                 Message::Run { state, .. } => {
@@ -463,6 +484,7 @@ impl FolderApp {
                     // free or about to be, and the next check finds out.
                     handover.link = None;
                     handover.let_go();
+                    self.watcher.release_hold();
                     self.watcher.rescan();
                 }
             }
@@ -531,6 +553,14 @@ impl FolderApp {
     fn release(&mut self, link: u64, client: Option<String>) {
         self.handover.pending = None;
         self.handover.releasing = Some((link, false));
+        #[cfg(test)]
+        {
+            self.handover.decided = Some(Instant::now());
+        }
+        // From now until the agent's first save no check reads the project
+        // (no check is in flight: the request waited for it). An agent that
+        // never saves is not waited for longer than a grant is.
+        self.watcher.hold(Instant::now() + GRANT);
         let identity = self.session.as_ref().map(ProjectSession::storage_identity);
         self.close_run_journal();
         self.storage_project(
@@ -540,6 +570,9 @@ impl FolderApp {
             |session| session.release_writer(),
             move |app, result| {
                 let lost = app.handover.releasing.take().is_some_and(|(_, lost)| lost);
+                if lost || !matches!(result, Ok(true)) {
+                    app.watcher.release_hold();
+                }
                 match result {
                     Ok(true) => {
                         app.handed_over(link, client);
@@ -599,11 +632,13 @@ impl FolderApp {
             project_reloaded: true,
             ..Default::default()
         });
+        #[cfg(test)]
+        {
+            self.handover.granted_busy = Some(self.watcher.is_busy());
+        }
+        // The project was just reread; the agent commits next and says so,
+        // which ends the watcher's hold.
         self.handover.channel.send(link, Message::Granted);
-        // The project was just reread; the agent commits next and says so.
-        // A check now would read the files the agent is replacing, which
-        // Windows can refuse it (MCP-08b, CI on Windows).
-        self.watcher.postpone();
     }
 
     /// While observing an agent that names an endpoint, keeps a connection

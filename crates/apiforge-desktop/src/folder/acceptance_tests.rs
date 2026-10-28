@@ -2214,6 +2214,70 @@ mod mcp08b {
         drop(server);
     }
 
+    /// Review of #114 (the Windows failure of run 40660700539): from the
+    /// window's decision to hand over until the agent says it saved, the
+    /// window starts no check of its own and has none in flight, so it never
+    /// reads the files the agent's first commit replaces. Checks here are due
+    /// every 20 ms, so a check that is not held back would start.
+    #[test]
+    fn a_granting_window_reads_nothing_until_the_agent_has_saved() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        app(&mut harness)
+            .watcher
+            .set_interval(Duration::from_millis(20));
+        let mut server = agent(root, "Claude Code");
+        let (text, _) = read(&mut server, SCENARIO);
+        let answer = write(
+            &mut harness,
+            &mut server,
+            SCENARIO,
+            &commented(&text, "Written by the agent."),
+        );
+        assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while folder(&harness).handover.first_saved.is_none() {
+            assert!(Instant::now() < deadline, "the agent never said it saved");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let handover = &folder(&harness).handover;
+        let decided = handover.decided.expect("the window decided to hand over");
+        let saved = handover.first_saved.unwrap();
+        assert_eq!(
+            handover.granted_busy,
+            Some(false),
+            "no check was in flight when the window granted"
+        );
+        let early: Vec<_> = folder(&harness)
+            .watcher
+            .started
+            .iter()
+            .filter(|started| **started >= decided && **started < saved)
+            .map(|started| started.duration_since(decided))
+            .collect();
+        assert!(
+            early.is_empty(),
+            "checks started between the decision and the agent's save: {early:?}"
+        );
+        // Told, the window looks at once.
+        let told = Instant::now();
+        while !folder(&harness)
+            .watcher
+            .started
+            .iter()
+            .any(|started| *started >= saved)
+        {
+            assert!(told.elapsed() < BOUND, "the window never looked");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(harness);
+        drop(server);
+    }
+
     /// Criterion 3: with unsaved work the window refuses; the write is
     /// `handover_refused` with the reason; the window says so in the bar;
     /// nothing is written and the person's text is untouched.
