@@ -174,9 +174,10 @@ publish job refuses a tagged commit that is not on `main`. Then:
    `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon,
    `LICENSE`, the font licences and the libraries of
    `packaging/appimage-libraries.txt`, which the binary finds through its
-   RUNPATH (`patchelf`), never through `LD_LIBRARY_PATH`; packed by
-   appimagetool 1.9.1 with the type2 runtime 20251108; both are downloaded
-   by their release URLs and checked against the SHA-256 in the workflow.
+   RUNPATH (`patchelf`); the AppImage does not set `LD_LIBRARY_PATH`.
+   Packed by appimagetool 1.9.1 with the type2 runtime 20251108; both are
+   downloaded by their release URLs and checked against the SHA-256 in the
+   workflow.
 3. On `ubuntu-24.04` it starts the AppImage with `--version`, `--check` and
    `--screenshot` (`packaging/appimage-window.sh`), once on the runner and
    once in a bare `ubuntu:24.04` container with only `libfuse2t64`, `xvfb`,
