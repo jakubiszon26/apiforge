@@ -110,6 +110,9 @@ pub struct AgentSession {
     /// Whether the session holds the lock, readable while a write holds
     /// `state`: the overview never waits for a write.
     active: AtomicBool,
+    /// The session's store while it holds the lock, readable while a write
+    /// holds `state`, for the journal reads of the overview and `run`.
+    held: Mutex<Option<ProjectStore>>,
 }
 
 #[derive(Default)]
@@ -151,6 +154,7 @@ impl AgentSession {
             secrets,
             state: Mutex::default(),
             active: AtomicBool::new(false),
+            held: Mutex::default(),
         }
     }
 
@@ -178,9 +182,20 @@ impl AgentSession {
         self.store(&mut state)
     }
 
-    /// The session's store while it holds the lock.
+    /// The session's store while it holds the lock. Never waits for a
+    /// write.
     pub(crate) fn held(&self) -> Option<ProjectStore> {
-        self.state().store.clone()
+        self.held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn set_held(&self, store: Option<ProjectStore>) {
+        *self
+            .held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = store;
     }
 
     /// Replaces the text of a registered document, exactly, when it is the
@@ -310,6 +325,7 @@ impl AgentSession {
         let mut state = self.state();
         state.recovery_required = false;
         let finished = state.store.take().is_some();
+        self.set_held(None);
         self.active.store(false, Ordering::Release);
         Finished { finished }
     }
@@ -333,6 +349,7 @@ impl AgentSession {
             None => {
                 let store = self.take_lock(state.client.clone())?;
                 state.store = Some(store.clone());
+                self.set_held(Some(store.clone()));
                 self.active.store(true, Ordering::Release);
                 store
             }

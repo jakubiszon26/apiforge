@@ -2768,7 +2768,7 @@ fn mcp06_criterion_2_a_live_run_against_the_demo_api_passes_redacted() {
     let report = server
         .run_tool(live(SCENARIO), CancellationToken::new())
         .unwrap();
-    assert_eq!(report.status, Verdict::Passed, "{report:#?}");
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.error);
     assert!(report.live);
     assert_eq!(report.ended_by, EndedBy::Completed);
     assert!(report.redacted);
@@ -2831,7 +2831,7 @@ fn mcp06_criterion_3_a_live_run_needs_the_agent_session() {
     let report = server
         .run_tool(live(SCENARIO), CancellationToken::new())
         .unwrap();
-    assert_eq!(report.status, Verdict::Passed, "{report:#?}");
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.error);
     assert!(server.agent().is_active(), "the run took the agent session");
     assert!(locked(root), "and the session keeps the lock");
     assert_eq!(server.overview_tool().unwrap().holder, Holder::AgentSession);
@@ -2925,7 +2925,7 @@ fn mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run() {
     thread::sleep(Duration::from_millis(250));
     server.permission().set_window(false);
     let report = running.join().unwrap().unwrap();
-    assert_eq!(report.status, Verdict::Passed, "{report:#?}");
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.error);
     assert_eq!(report.ended_by, EndedBy::Completed);
     let error = server
         .run_tool(live(SCENARIO), CancellationToken::new())
@@ -2973,7 +2973,7 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             cancel.cancel();
         }
         let report = running.join().unwrap().unwrap();
-        assert_eq!(report.status, Verdict::Cancelled, "{report:#?}");
+        assert_eq!(report.status, Verdict::Cancelled, "{:?}", report.error);
         assert_eq!(
             report.ended_by,
             if timed_out {
@@ -2988,7 +2988,7 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             .into_iter()
             .filter(|step| step.may_have_reached_api)
             .collect();
-        assert_eq!(marked.len(), 1, "{steps:#?}");
+        assert_eq!(marked.len(), 1, "{} steps", steps.len());
         assert_eq!(marked[0].handle, "fetch_product");
         assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
         assert!(
@@ -3049,7 +3049,7 @@ fn mcp06_criterion_8_an_interrupted_run_is_reported_by_the_next_run() {
         let report = server
             .run_tool(arguments.clone(), CancellationToken::new())
             .unwrap();
-        assert_eq!(report.status, Verdict::Passed, "{report:#?}");
+        assert_eq!(report.status, Verdict::Passed, "{:?}", report.error);
         assert_eq!(report.interrupted.len(), 1, "live: {}", arguments.live);
         let run = &report.interrupted[0];
         assert_eq!(run.scenario, "Promotion and cart price");
@@ -3235,4 +3235,82 @@ fn mcp06_criterion_12_the_development_guide_explains_live_runs() {
     ] {
         assert!(section.contains(needle), "the MCP section names {needle}");
     }
+}
+
+// ----- MCP-06 review round 1 -----
+
+/// A `request_id` names one run: the same id for another document is
+/// refused, and an id whose result the server dropped to keep its list short
+/// is `unknown_outcome`, never run again.
+#[test]
+fn mcp06_review_a_request_id_names_one_run_and_is_never_run_twice() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = demo_api(root);
+    let server = live_server(root, true, &[]);
+    let with_id = |id: &str, path: &str| RunArguments {
+        request_id: Some(id.into()),
+        ..live(path)
+    };
+    for number in 0..=64 {
+        let report = server
+            .run_tool(
+                with_id(&number.to_string(), SCENARIO),
+                CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(report.status, Verdict::Passed, "{:?}", report.error);
+    }
+    let error = server
+        .run_tool(with_id("64", PRODUCT), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInputs);
+    assert_eq!(error.details["path"], SCENARIO);
+    drop(api);
+    let listener = Listener::start();
+    point_at(root, &listener.base_url());
+    let replayed = server
+        .run_tool(with_id("64", SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert!(replayed.replayed);
+    let error = server
+        .run_tool(with_id("0", SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        ErrorCode::UnknownOutcome,
+        "the oldest was dropped"
+    );
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(listener.accepted(), 0, "nothing was sent");
+}
+
+/// While this server's own live run is in progress its journal entry is not
+/// an interrupted run; a journal that cannot be read does not fail a
+/// simulation.
+#[test]
+fn mcp06_review_the_server_own_run_is_not_interrupted() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let api = Listener::start();
+    point_at(&root, &api.base_url());
+    let server = live_server(&root, true, &[]);
+    let cancel = CancellationToken::new();
+    let running = {
+        let (server, cancel) = (server.clone(), cancel.clone());
+        thread::spawn(move || server.run_tool(live(SCENARIO), cancel))
+    };
+    wait_for_journal(&root);
+    assert_eq!(server.overview_tool().unwrap().interrupted_runs, 0);
+    cancel.cancel();
+    assert_eq!(running.join().unwrap().unwrap().status, Verdict::Cancelled);
+    assert!(server.agent().finish_editing().finished);
+
+    fs::write(root.join(JOURNAL), b"not a journal").unwrap();
+    let report = server
+        .run_tool(arguments(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert!(report.journal_unreadable);
+    assert!(report.interrupted.is_empty());
 }

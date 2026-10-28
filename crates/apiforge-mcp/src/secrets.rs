@@ -106,14 +106,15 @@ pub fn withhold(text: &str, values: &[String]) -> Result<(), ToolError> {
 }
 
 /// A text with every known value replaced by `[REDACTED]`, for what the
-/// server reports from a file it did not write, such as the run journal.
+/// server reports from a file it did not write, such as the run journal: the
+/// runner's redactor, so a value is masked raw and in the encoded forms a URL
+/// gives it, the longest first.
 pub fn redact(text: &str, values: &[String]) -> String {
-    let mut ordered: Vec<&String> = values.iter().filter(|value| !value.is_empty()).collect();
-    // The longest first, so a value that contains another is masked whole.
-    ordered.sort_by_key(|value| std::cmp::Reverse(value.len()));
-    ordered.into_iter().fold(text.to_owned(), |text, value| {
-        text.replace(value.as_str(), "[REDACTED]")
-    })
+    let mut redactor = apiforge_runner::redact::Redactor::new();
+    for value in values {
+        redactor.add(value);
+    }
+    redactor.redact_str(text)
 }
 
 /// Refuses a text argument that carries a known value: `secret_in_text`,
@@ -139,6 +140,15 @@ mod tests {
         assert_eq!(secret_line("a\nb\nc s\\\"q", &values), Some(3));
         assert_eq!(secret_line("nothing here", &values), None);
         assert_eq!(secret_line("", &[String::new()]), None);
+    }
+
+    #[test]
+    fn redaction_masks_encoded_forms() {
+        let values = vec!["a b&c".to_owned()];
+        assert_eq!(
+            redact("?q=a%20b%26c&r=a+b%26c", &values),
+            "?q=[REDACTED]&r=[REDACTED]"
+        );
     }
 
     #[test]

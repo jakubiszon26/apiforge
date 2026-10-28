@@ -981,7 +981,16 @@ fn point_at(root: &Path, base_url: &str) {
     let manifest = std::fs::read_to_string(&path).unwrap();
     let current: Value = serde_json::from_str(&manifest).unwrap();
     let current = current["environment"]["baseUrl"].as_str().unwrap();
-    std::fs::write(&path, manifest.replace(current, base_url)).unwrap();
+    let changed = manifest.replace(current, base_url);
+    assert_ne!(changed, manifest, "the base URL was not replaced");
+    std::fs::write(&path, changed).unwrap();
+}
+
+/// `text` with `from` replaced once, which must be there.
+fn replaced(text: &str, from: &str, to: &str) -> String {
+    let changed = text.replacen(from, to, 1);
+    assert_ne!(changed, text, "the fixture lacks {from:?}");
+    changed
 }
 
 /// The demo scenario with two declared secrets, `TOKEN` and `FILE`, that
@@ -991,7 +1000,8 @@ fn with_secrets(root: &Path) {
     let manifest = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
         &path,
-        manifest.replace(
+        replaced(
+            &manifest,
             "\"secretNames\": []",
             "\"secretNames\": [\"TOKEN\", \"FILE\"]",
         ),
@@ -1001,10 +1011,10 @@ fn with_secrets(root: &Path) {
     let scenario = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
         &path,
-        scenario.replacen(
+        replaced(
+            &scenario,
             "  cleanup {\n",
             "  @label(\"Echo\")\n  echo = GET \"/products/124?q={{env.TOKEN}}\" {\n    headers { \"X-Echo\": \"{{env.FILE}}\" }\n    sample 200 { id: 124 }\n  }\n  cleanup {\n",
-            1,
         ),
     )
     .unwrap();
@@ -1171,6 +1181,11 @@ fn mcp06_criterion_7_eof_during_a_live_run_empties_the_journal() {
         json!({ "path": SCENARIO, "live": true }),
     );
     wait_for_journal(root);
+    let started = Instant::now();
+    while api.accepted() == 0 {
+        assert!(started.elapsed() < Duration::from_secs(10), "no connection");
+        thread::sleep(Duration::from_millis(5));
+    }
     assert!(locked(root), "the live run holds the agent session");
     let (status, elapsed, _, stderr) = server.close_within(Duration::from_secs(15));
     assert_eq!(status.code(), Some(0), "stderr: {stderr}");
@@ -1276,7 +1291,7 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
         json!({ "path": SCENARIO, "live": true }),
     );
     let report = structured(&report);
-    assert_eq!(report["status"], "passed", "{report}");
+    assert_eq!(report["status"], "passed", "{}", report["error"]);
     assert_eq!(report["live"], true);
     assert_reported(&report["interrupted"], &journalled);
     assert_clean_end(live);
@@ -1331,7 +1346,12 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    assert_eq!(structured(&report)["status"], "passed", "{report}");
+    assert_eq!(
+        structured(&report)["status"],
+        "passed",
+        "{}",
+        report["result"]["structuredContent"]["error"]
+    );
     let full = call(
         &mut server,
         next(),

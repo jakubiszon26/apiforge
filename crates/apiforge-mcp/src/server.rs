@@ -28,8 +28,9 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use serde_json::{Map, Value};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     pin::Pin,
     sync::{Mutex, OnceLock},
     task::{Context, Poll},
@@ -109,13 +110,27 @@ pub struct ApiforgeServer {
     cleanup_delay: Option<Duration>,
     /// Cancelled at the end of stdin: the client is gone.
     client_lost: CancellationToken,
-    /// The live runs this server answered, by `request_id`, oldest first.
-    answered: Arc<Mutex<VecDeque<(String, RunReport)>>>,
+    /// The live runs this server answered, by `request_id`.
+    answered: Arc<Mutex<Answered>>,
+    /// While a live run of this server is in progress, the journal's runs
+    /// from before it: the one it adds is not an interrupted run.
+    journal_before: Arc<Mutex<Option<HashSet<String>>>>,
     tool_router: ToolRouter<Self>,
 }
 
 /// The live results a server remembers for a repeated `request_id`.
 const ANSWERED: usize = 64;
+
+/// The run a `request_id` answered: the path and the inputs.
+type AnsweredRun = (String, Option<Map<String, Value>>);
+
+/// The live results by `request_id`, oldest first, with the run each
+/// answered; and the ids whose result was dropped to keep the list short.
+#[derive(Debug, Default)]
+struct Answered {
+    recent: VecDeque<(String, AnsweredRun, RunReport)>,
+    dropped: HashSet<String>,
+}
 
 #[tool_router(router = tool_router)]
 impl ApiforgeServer {
@@ -148,6 +163,7 @@ impl ApiforgeServer {
             cleanup_delay: settings.cleanup_delay,
             client_lost: CancellationToken::new(),
             answered: Arc::default(),
+            journal_before: Arc::default(),
             tool_router: Self::tool_router(),
         }
     }
@@ -187,12 +203,14 @@ impl ApiforgeServer {
         if !arguments.live {
             let mut report =
                 tools::simulate(&self.folder, &arguments, &self.runs, cancel, secrets)?;
-            let (interrupted, unreadable) = self.read_journal()?;
+            // The simulation has run; a journal that cannot be read is said,
+            // not an error.
+            let (interrupted, unreadable) = self.read_journal().unwrap_or((Vec::new(), true));
             report.interrupted = live::interrupted(&interrupted, &values);
             report.journal_unreadable = unreadable;
             return tools::bound(Ok(report));
         }
-        if let Some(recorded) = self.recorded(&arguments) {
+        if let Some(recorded) = self.recorded(&arguments)? {
             return Ok(recorded);
         }
         self.permission.check()?;
@@ -200,7 +218,7 @@ impl ApiforgeServer {
         let store = self.agent.writer(client)?;
         let report = self.run_live(&arguments, cancel, store, secrets, &values)?;
         if let Some(id) = &arguments.request_id {
-            self.record(id, &report);
+            self.record(id, &arguments, &report);
         }
         Ok(report)
     }
@@ -224,6 +242,14 @@ impl ApiforgeServer {
         // A change of the permission after this point does not stop the run
         // (MCP-00 decision 16 A).
         self.permission.check()?;
+        let _running = JournalBefore::set(
+            &self.journal_before,
+            journal
+                .interrupted
+                .iter()
+                .map(|run| run.run_id.clone())
+                .collect(),
+        );
         let (mut report, before) = tools::execute(
             prepared,
             arguments,
@@ -237,26 +263,52 @@ impl ApiforgeServer {
         tools::bound(Ok(report))
     }
 
-    /// The recorded result of a live run with the same `request_id`.
-    fn recorded(&self, arguments: &RunArguments) -> Option<RunReport> {
-        let id = arguments.request_id.as_ref()?;
+    /// The recorded result of a live run with the same `request_id`. An id
+    /// that answered another run is refused; one whose result this server no
+    /// longer holds is `unknown_outcome`, never run again.
+    fn recorded(&self, arguments: &RunArguments) -> Result<Option<RunReport>, ToolError> {
+        let Some(id) = arguments.request_id.as_ref() else {
+            return Ok(None);
+        };
         let answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
-        answered
+        if answered.dropped.contains(id) {
+            return Err(ToolError::new(
+                ErrorCode::UnknownOutcome,
+                "This server answered a live run with this request_id but no longer holds its result; nothing was sent. The API may have received that run's requests once; use a new request_id to run again",
+            ));
+        }
+        let Some((_, run, report)) = answered
+            .recent
             .iter()
-            .find(|(answered, _)| answered == id)
-            .map(|(_, report)| RunReport {
-                replayed: true,
-                ..report.clone()
-            })
+            .find(|(answered, _, _)| answered == id)
+        else {
+            return Ok(None);
+        };
+        if *run != (arguments.path.clone(), arguments.inputs.clone()) {
+            return Err(ToolError::new(
+                ErrorCode::InvalidInputs,
+                "This request_id answered a live run of another document or other inputs; nothing was sent. Use a new request_id for a new run",
+            )
+            .with_details(json!({ "path": run.0 })));
+        }
+        Ok(Some(RunReport {
+            replayed: true,
+            ..report.clone()
+        }))
     }
 
-    fn record(&self, id: &str, report: &RunReport) {
+    fn record(&self, id: &str, arguments: &RunArguments, report: &RunReport) {
         let mut answered = self.answered.lock().unwrap_or_else(|p| p.into_inner());
-        answered.retain(|(answered, _)| answered != id);
-        if answered.len() == ANSWERED {
-            answered.pop_front();
+        answered.recent.retain(|(answered, _, _)| answered != id);
+        if answered.recent.len() == ANSWERED
+            && let Some((dropped, _, _)) = answered.recent.pop_front()
+        {
+            answered.dropped.insert(dropped);
         }
-        answered.push_back((id.to_owned(), report.clone()));
+        let run = (arguments.path.clone(), arguments.inputs.clone());
+        answered
+            .recent
+            .push_back((id.to_owned(), run, report.clone()));
     }
 
     /// The project's journal as this server may read it: through its agent
@@ -267,7 +319,15 @@ impl ApiforgeServer {
             None => ProjectStore::open_read_only(&**self.folder)
                 .map_err(|error| live::journal_error(error.into()))?,
         };
-        live::read_journal(&store)
+        let (mut runs, unreadable) = live::read_journal(&store)?;
+        if let Some(before) = &*self
+            .journal_before
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+        {
+            runs.retain(|run| before.contains(&run.run_id));
+        }
+        Ok((runs, unreadable))
     }
 
     /// `project_overview` as the tool answers it.
@@ -712,5 +772,22 @@ impl<R: AsyncRead + Unpin> AsyncRead for EndOfInput<R> {
             self.lost.cancel();
         }
         polled
+    }
+}
+
+/// Marks a live run of this server as in progress for the journal reads of
+/// the overview and `run`, until dropped.
+struct JournalBefore(Arc<Mutex<Option<HashSet<String>>>>);
+
+impl JournalBefore {
+    fn set(slot: &Arc<Mutex<Option<HashSet<String>>>>, before: HashSet<String>) -> Self {
+        *slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(before);
+        Self(slot.clone())
+    }
+}
+
+impl Drop for JournalBefore {
+    fn drop(&mut self) {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
 }
