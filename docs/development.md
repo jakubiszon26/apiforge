@@ -345,7 +345,10 @@ endpoint in the holder file: the window while it is the writer, the server
 during an agent session. An endpoint is a random name, `apiforge-` and 32
 hexadecimal digits, never a path: on Unix the socket `socket` in a directory
 of that name, private to the user, under `$XDG_RUNTIME_DIR` or the temporary
-directory; on Windows the named pipe `\\.\pipe\<name>`. Messages are
+directory; on Windows the named pipe `\\.\pipe\<name>`, which keeps
+Windows' default access rules, so another user signed in to the same machine
+can open it (the workspace forbids the `unsafe` code a narrower rule needs;
+the owner accepted this risk on 2026-10-28, MCP-08b). Messages are
 newline-delimited JSON with `version: 1`; a line that is not one is ignored
 and logged on stderr (`apiforge mcp: channel: …` in the server,
 `apiforge: channel: …` in the window).
