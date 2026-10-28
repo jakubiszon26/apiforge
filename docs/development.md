@@ -308,12 +308,15 @@ saved project afresh under that lock.
   diagnostics otherwise; warnings are saved) and only over the version the
   model names: a different hash on disk is `stale_source` with the current
   `details.source_sha256`, and a different `expected_generation` is
-  `stale_project` with the current `details.generation`. The bytes on disk
+  `stale_project` with the current `details.generation`; a checkpoint or
+  registry another program changed without the lock is `stale_project`
+  too. The bytes on disk
   equal `text` and the checkpoint is written: the same files, the same bytes
   as a save in the window. When the disk already holds exactly `text`, the
   call is the same write repeated and changes nothing.
 - `create_document` writes nothing unless the text passes `check_text` as a
-  new document of `kind`: `path_exists` (with the existing file's
+  new document of `kind`: `path_exists` (also for a folder of the path that
+  exists in another letter case; with the existing file's
   `details.source_sha256`, so a retry after a lost answer can tell),
   `handle_exists`, `path_rejected` or `invalid_text` (a header of another
   kind, or errors, with the diagnostics). The source, its registry entry and
