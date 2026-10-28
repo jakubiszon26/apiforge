@@ -242,6 +242,17 @@ cleartext-logging alerts, all in the acceptance tests. Fixed:
   before asserting it; assertion messages print the run's error, not the
   report (CodeQL).
 
+On the second head, CI's Windows job failed
+`mcp06_criterion_7_with_the_cleanup_blocked_the_entry_stays` once (*no
+request was journalled* within ten seconds) and CodeQL still flagged four
+assertion messages. The tests polled `journal.json` every 5 ms while the
+runner replaced it, which Windows can refuse while the file is open; they
+now wait for the request to reach the listener (it is journalled before it
+is sent) and read the file only then, and the flagged messages are gone.
+The server itself no longer reads the journal while its own live run
+writes it: the overview and `run` answer from the runs read before that
+run started.
+
 The Windows job of the first CI run failed one MCP-07 window test
 (`a_transaction_left_by_the_holder_opens_the_recovery_view`, the window not
 taking the project back within ten seconds); the desktop crate is unchanged
