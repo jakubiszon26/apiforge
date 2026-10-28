@@ -1930,4 +1930,93 @@ mod mcp05 {
         drop(harness);
         drop(agent);
     }
+
+    /// The project as Git sees it: every file outside `.apiforge/local`.
+    fn shared(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fn walk(
+            root: &std::path::Path,
+            at: &std::path::Path,
+            files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+        ) {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap();
+                if relative == std::path::Path::new(".apiforge").join("local") {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk(root, &path, files);
+                } else {
+                    files.insert(
+                        relative.to_string_lossy().replace('\\', "/"),
+                        fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = std::collections::BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+
+    /// Criterion 1's "the same transaction as the window's Publish", through
+    /// the window: *Publish* pressed in the component's header in one copy
+    /// of the project and `publish` from the server in another leave the
+    /// same files with the same bytes.
+    #[test]
+    fn the_windows_publish_and_the_servers_write_the_same_bytes() {
+        let window = shop_project();
+        let server = tempfile::tempdir().unwrap();
+        for (relative, bytes) in shared(window.path()) {
+            let target = server.path().join(&relative);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, bytes).unwrap();
+        }
+        assert_eq!(shared(server.path()), shared(window.path()));
+
+        let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
+        let saved = fs::read(server.path().join(PRODUCT)).unwrap();
+        let published = agent
+            .publish(&PublishArguments {
+                path: PRODUCT.into(),
+                expected_source_sha256: sha256(&saved),
+                accept_comment_loss: false,
+                expected_generation: None,
+                request_id: None,
+            })
+            .unwrap();
+        assert_eq!(published.revision, 2);
+        drop(agent);
+
+        let mut harness = folder_harness(window.path(), WIDE);
+        let product = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap()
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        choose(&mut harness, "Publish");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while listed(&harness) != [1, 2] {
+            assert!(Instant::now() < deadline, "the window never published");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        drop(harness);
+
+        let window = shared(window.path());
+        assert_eq!(
+            window.get(&published.revision_path),
+            shared(server.path()).get(&published.revision_path),
+            "the revision file"
+        );
+        assert_eq!(window, shared(server.path()), "every shared file");
+    }
 }
