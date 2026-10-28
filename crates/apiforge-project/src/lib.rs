@@ -20,11 +20,11 @@ pub use migration::{
 };
 pub use prepare::prepare_project;
 pub use session::{
-    ConflictDecision, ConflictPreview, ConflictTarget, Declaration, DeletePreview, DraftStatus,
-    Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict, ExternalOutcome,
-    ImportCandidate, ImportItem, NewDocumentCheck, ObservedFile, Origin, PreparedRun,
-    ProjectSession, Published, Registration, RegistrationProblem, RegistryState, SaveOutcome,
-    SessionIdentity, SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot,
+    CommitChange, CommitChangeKind, ConflictDecision, ConflictPreview, ConflictTarget, Declaration,
+    DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict,
+    ExternalOutcome, ImportCandidate, ImportItem, NewDocumentCheck, ObservedFile, Origin,
+    PreparedRun, ProjectSession, Published, Registration, RegistrationProblem, RegistryState,
+    SaveOutcome, SessionIdentity, SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot,
     TextFileSession, declaration, rename_handle,
 };
 

@@ -33,6 +33,10 @@ pub(super) struct JournalReview {
     legacy: bool,
 }
 
+/// Why no live request leaves an observing window (MCP-08a).
+pub(super) const LIVE_PAUSED: &str =
+    "Live requests are not sent from this window while another process holds the project.";
+
 impl FolderApp {
     /// The active tab's run results fill the window (KTLO-19).
     pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
@@ -99,6 +103,10 @@ impl FolderApp {
     }
 
     pub(super) fn request_run(&mut self, id: &str, live: bool) {
+        if live && self.observing() {
+            self.notify(LIVE_PAUSED, true);
+            return;
+        }
         if self.watcher.recovery_required {
             self.notify("Resolve project recovery and reload before running.", true);
             return;
@@ -146,6 +154,11 @@ impl FolderApp {
         live: bool,
         inputs: Option<dialogs::RunInputs>,
     ) {
+        // A confirmation shown before this window began observing.
+        if live && self.observing() {
+            self.notify(LIVE_PAUSED, true);
+            return;
+        }
         if self.watcher.recovery_required {
             self.notify("Resolve project recovery and reload before running.", true);
             return;

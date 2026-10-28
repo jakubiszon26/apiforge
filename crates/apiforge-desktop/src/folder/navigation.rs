@@ -199,12 +199,14 @@ impl FolderApp {
             }
             if self.session.is_some() {
                 ui.separator();
-                let writable = self
-                    .session
-                    .as_ref()
-                    .is_some_and(|session| !session.is_read_only());
+                // Observing, the settings open for reading (MCP-08a).
+                let available = self.observing()
+                    || self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| !session.is_read_only());
                 if ui
-                    .add_enabled(writable, egui::Button::new("Project settings…"))
+                    .add_enabled(available, egui::Button::new("Project settings…"))
                     .clicked()
                 {
                     ui.close();

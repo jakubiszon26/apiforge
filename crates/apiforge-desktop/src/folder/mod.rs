@@ -49,8 +49,9 @@ use apiforge_core::{
     graph::create_operator_node,
 };
 use apiforge_project::{
-    AnalysisState, DeletePreview, Document, DocumentKind, EventKind, ExternalConflict,
-    ExternalOutcome, ModelState, Origin, ProjectSession, Registration, RegistryState, Unavailable,
+    AnalysisState, CommitChangeKind, DeletePreview, Document, DocumentKind, EventKind,
+    ExternalConflict, ExternalOutcome, ModelState, Origin, ProjectSession, Registration,
+    RegistryState, Unavailable,
 };
 use apiforge_script::{Diagnostic, Severity};
 use apiforge_storage::{
@@ -170,6 +171,33 @@ struct SurveyRow {
     kind: Option<DocumentKind>,
 }
 
+/// Whether the session has `tab`'s document or text file.
+fn session_has(session: Option<&ProjectSession>, tab: &str) -> bool {
+    session.is_some_and(|session| match tab.strip_prefix(TEXT_TAB) {
+        Some(path) => session.text_file(path).is_some(),
+        None => session.document(tab).is_some(),
+    })
+}
+
+/// The bar's words for a followed commit: its first change, and how many
+/// more there were.
+fn describe_commit(changes: &[apiforge_project::CommitChange]) -> Option<String> {
+    let first = changes.first()?;
+    let name = file_name(&first.path);
+    let text = match first.kind {
+        CommitChangeKind::Published => format!("{name} published"),
+        CommitChangeKind::Added => format!("{name} added"),
+        CommitChangeKind::Deleted => format!("{name} deleted"),
+        CommitChangeKind::Saved => format!("{name} saved"),
+        CommitChangeKind::Layout => format!("{name} layout saved"),
+        CommitChangeKind::Settings => "project settings saved".to_owned(),
+    };
+    Some(match changes.len() {
+        1 => text,
+        count => format!("{text} and {} more", count - 1),
+    })
+}
+
 /// A message under the tabs; errors stay until dismissed.
 struct Notice {
     text: String,
@@ -266,6 +294,9 @@ pub struct FolderApp {
     /// while this window is the writer, or read-only with no live holder.
     holder: Option<holder::Observed>,
     take_back: holder::TakeBack,
+    /// What the holder's last followed commit changed, with its time, for
+    /// the bar (MCP-08a): *10:43 · promotion.afs saved*.
+    last_change: Option<String>,
 }
 
 struct Clipboard {
@@ -345,6 +376,9 @@ struct Snapshot {
     model_state: ModelState,
     unavailable: Option<Unavailable>,
     editable: bool,
+    /// Editing is paused while this window observes another holder (MCP-08a):
+    /// the board stays legible and selectable, without the read-only notice.
+    paused: bool,
     held: bool,
     dirty: bool,
     layout_dirty: bool,
@@ -408,6 +442,7 @@ impl FolderApp {
             animation: !cfg!(test),
             holder: None,
             take_back: holder::TakeBack::default(),
+            last_change: None,
         }
     }
 
@@ -461,6 +496,7 @@ impl FolderApp {
         }
         self.holder = None;
         self.take_back = holder::TakeBack::default();
+        self.last_change = None;
         self.seen = session.last_sequence();
         self.uninitialised = false;
         self.session = Some(session);
@@ -547,6 +583,7 @@ impl FolderApp {
             .recovered_drafts()
             .iter()
             .any(|(_, draft)| draft.document_id == document_id);
+        let paused = self.observing();
         Some(Snapshot {
             path: document.entry().path.as_str().to_owned(),
             kind: document.entry().kind,
@@ -556,7 +593,9 @@ impl FolderApp {
             model: document.shared_model().cloned(),
             model_state: document.model_state(),
             unavailable: document.unavailable(),
+            paused,
             editable: document.accepts_model_edits()
+                && !paused
                 && !held
                 && !self.persistence.closing
                 && !self.storage.blocks_edits(),
@@ -924,12 +963,37 @@ impl FolderApp {
         }
     }
 
+    /// Forgets selected blocks a reload took away; the others stay selected,
+    /// by their identity.
+    fn keep_existing_selections(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        self.selections.retain(|document_id, selection| {
+            let Some(model) = session
+                .document(document_id)
+                .and_then(|document| document.model())
+            else {
+                return false;
+            };
+            selection.retain(|id| {
+                [false, true].into_iter().any(|cleanup| {
+                    let graph = graph_of(model, cleanup);
+                    graph.nodes.iter().any(|node| &node.id == id)
+                        || graph.proxies.iter().any(|proxy| &proxy.id == id)
+                })
+            });
+            true
+        });
+    }
+
     /// Reports what an external change did; a reloaded project may have lost
     /// documents, so their tabs close.
     fn follow_external(&mut self, outcome: ExternalOutcome) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
+        let followed = !outcome.followed.is_empty();
         if outcome.project_reloaded {
             let gone: Vec<String> = self
                 .workbench
@@ -944,12 +1008,53 @@ impl FolderApp {
                 })
                 .map(|tab| tab.document_id.clone())
                 .collect();
+            // A followed commit names what it deleted, so the person learns
+            // why a tab closed (MCP-08a criterion 7).
+            let deleted: Vec<String> = outcome
+                .followed
+                .iter()
+                .filter(|change| change.kind == CommitChangeKind::Deleted)
+                .filter(|change| {
+                    change
+                        .document_id
+                        .as_ref()
+                        .is_some_and(|id| gone.contains(id))
+                })
+                .map(|change| file_name(&change.path).to_owned())
+                .collect();
             for document_id in gone {
                 self.close_tab(&document_id);
             }
-            self.shown = None;
+            // The person keeps their place: the document shown, its camera
+            // and the blocks still there stay selected (MCP-08a).
+            if self
+                .shown
+                .as_deref()
+                .is_some_and(|shown| session_has(self.session.as_ref(), shown))
+            {
+                // Its text history is of a text that is no longer there.
+                if let Some(shown) = &self.shown {
+                    code::clear_history(&self.ui_context, editor_id(shown));
+                }
+            } else {
+                self.shown = None;
+            }
+            self.keep_existing_selections();
             self.reload_field_drafts();
             self.restore_text_tabs();
+            if !deleted.is_empty() {
+                self.notify(
+                    format!(
+                        "Closed {}: deleted while this window was observing.",
+                        deleted.join(", ")
+                    ),
+                    false,
+                );
+            }
+        }
+        if followed {
+            self.last_change = describe_commit(&outcome.followed)
+                .map(|text| format!("{} · {text}", chrono::Local::now().format("%H:%M")));
         }
         let name = |id: &String| {
             self.session
@@ -1032,7 +1137,8 @@ impl FolderApp {
             || shortcut(Modifiers::COMMAND, Key::Y);
         // Check the longer shortcut first: Ctrl+Shift+Z also matches Ctrl+Z.
         let undo = !redo && shortcut(Modifiers::COMMAND, Key::Z);
-        if undo || redo {
+        // Nothing is undone while observing: editing is paused (MCP-08a).
+        if (undo || redo) && !self.observing() {
             self.step_model_history(&active, undo);
         }
         if self.workbench.mode == Mode::Code {

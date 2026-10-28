@@ -452,26 +452,28 @@ fn the_view_and_unsaved_work_come_back_after_closing_the_window() {
     );
 }
 
+/// Beside another window that holds the project, this window observes:
+/// typing is paused (MCP-08a, decision 12), so there is nothing unsaved that
+/// Ctrl+S could lose or that would hold the window open. Until MCP-08a a
+/// read-only window kept typed edits in memory and refused to close.
 #[test]
-fn a_read_only_window_keeps_edits_in_memory_and_refuses_to_close_silently() {
+fn a_window_observing_another_takes_no_typing_and_closes() {
     let directory = shop();
     let (_writer_context, _writer) = open(directory.path());
     let (context, mut reader) = open(directory.path());
     assert!(reader.session.as_ref().unwrap().is_read_only());
+    assert!(reader.observing());
     let scenario = document(&reader, SCENARIO);
     let original = std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap();
     type_into_code(&mut reader, &context, "// mine\n");
-    reader.notice = None;
+    assert_eq!(text(&reader, &scenario), original);
     frame(&mut reader, &context, vec![key(Key::S, COMMAND)]);
     wait_storage(&mut reader, &context);
-    assert!(reader.notice.as_ref().is_some_and(|notice| notice.error));
     assert_eq!(
         std::fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
         original
     );
-    assert!(!await_close(&mut reader, &context));
-    assert!(reader.close_error().is_some());
-    assert!(text(&reader, &scenario).starts_with("// mine"));
+    assert!(await_close(&mut reader, &context));
 }
 
 #[test]

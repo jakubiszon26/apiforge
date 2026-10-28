@@ -191,6 +191,7 @@ impl FolderApp {
         if let Some(offset) = self.scroll_restore.take() {
             scroll = scroll.vertical_scroll_offset(offset);
         }
+        let interactive = !self.observing();
         let output = ui
             .add_enabled_ui(
                 !snapshot.held && !self.persistence.closing && !self.storage.blocks_edits(),
@@ -205,6 +206,7 @@ impl FolderApp {
                                 line_numbers: true,
                                 wrap: false,
                                 font_size: 13.0,
+                                interactive,
                                 ..code::Context::default()
                             },
                         )
@@ -220,7 +222,7 @@ impl FolderApp {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if output.inner.changed {
+        if output.inner.changed && interactive {
             match session.edit_text(&snapshot.path, &text, CODE) {
                 Ok(_) => self.changed_at = Some(Instant::now()),
                 Err(error) => self.notify(error.to_string(), true),

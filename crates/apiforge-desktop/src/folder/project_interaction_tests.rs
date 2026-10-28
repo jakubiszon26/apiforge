@@ -453,6 +453,9 @@ fn secret_values_stay_in_the_session_and_only_names_are_saved() {
     assert!(folder(&reopened).runs.secrets.is_empty());
 }
 
+/// Observing another window, the project settings open for reading only
+/// (MCP-08a: before it the menu entry was disabled) and the environment
+/// offers only the session's secret values.
 #[test]
 fn a_read_only_window_offers_only_session_secret_values() {
     let (directory, _) = named_folder("Read-only settings");
@@ -461,14 +464,36 @@ fn a_read_only_window_offers_only_session_secret_values() {
     assert!(folder(&harness).session.as_ref().unwrap().is_read_only());
     choose(&mut harness, "Project");
     assert!(
+        !harness
+            .get_by_label("Test environment…")
+            .accesskit_node()
+            .is_disabled()
+    );
+    choose(&mut harness, "Project settings…");
+    assert!(
         harness
-            .get_by_label("Project settings…")
+            .get_by_label("Project name")
             .accesskit_node()
             .is_disabled()
     );
     assert!(
-        !harness
-            .get_by_label("Test environment…")
+        harness
+            .get_by_label("Apply settings")
+            .accesskit_node()
+            .is_disabled()
+    );
+    choose(&mut harness, "Cancel");
+    open_project_menu(&mut harness, "Test environment…");
+    assert!(
+        harness
+            .get_by_label("Base URL")
+            .accesskit_node()
+            .is_disabled(),
+        "the public part is disabled"
+    );
+    assert!(
+        harness
+            .get_by_label("New secret name")
             .accesskit_node()
             .is_disabled()
     );

@@ -97,12 +97,24 @@ impl ProjectStore {
         if before.active_transaction_id.is_some() {
             // The scan does not wait for the writer lock. While this owner's
             // worker holds it, the active transaction is a commit in progress;
-            // only one left behind with the lock free needs recovery.
-            return Err(match self.owner.worker.try_lock() {
-                Err(std::sync::TryLockError::WouldBlock) => ProjectError::Busy,
-                _ if self.head()?.active_transaction_id.is_none() => ProjectError::Busy,
-                _ => ProjectError::RecoveryRequired,
-            });
+            // only one left behind with the lock free needs recovery. A
+            // reader beside a living writer in another process sees that
+            // writer's commit in progress (MCP-08a, planning decision 2).
+            // The worker is only asked, never held while the probe waits.
+            let own_commit = matches!(
+                self.owner.worker.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            );
+            return Err(
+                if own_commit
+                    || self.head()?.active_transaction_id.is_none()
+                    || (self.is_read_only() && self.has_live_writer()?)
+                {
+                    ProjectError::Busy
+                } else {
+                    ProjectError::RecoveryRequired
+                },
+            );
         }
         let mut entries = Vec::new();
         let mut truncated = false;
