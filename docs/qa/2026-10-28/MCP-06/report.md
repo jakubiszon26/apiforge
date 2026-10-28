@@ -213,5 +213,36 @@ pipe.
 ## Regression smoke list
 
 Not run: nothing in the window changes and the desktop crate is untouched.
-The workspace suite, which covers items 3 to 10 headlessly, passes; item 6
-(a simulation sends nothing) is also scenario 3 above.
+The workspace suite, which covers items 3 to 10 headlessly, passes.
+
+## Review round 1
+
+The automated review of PR #113 (cubic) found eleven points and CodeQL three
+cleartext-logging alerts, all in the acceptance tests. Fixed:
+
+- **A dropped `request_id` would run again.** The server keeps the last 64
+  live results; an older id it answered is now `unknown_outcome` and sends
+  nothing. The same id for another document or other inputs is
+  `invalid_inputs`. Test:
+  `mcp06_review_a_request_id_names_one_run_and_is_never_run_twice`.
+- **The server's own run counted as interrupted.** While a live run of this
+  server is in progress, the overview and `run` report only the journal's
+  runs from before it. **A journal that cannot be read** no longer fails a
+  simulation that has run; the result says `journal_unreadable: true`. Test:
+  `mcp06_review_the_server_own_run_is_not_interrupted`.
+- **The journal read waited for a write.** The agent session's store is kept
+  in a slot of its own, so the overview never waits for a write.
+- **Encoded secrets in an older journal.** Interrupted entries are masked by
+  the runner's redactor, which knows a value's percent- and form-encoded
+  forms.
+- The guide says that a journal entry exists while its run is in progress,
+  and gives `run`'s annotations in the contract; the smoke-list line no
+  longer cites a scenario that counted nothing; the stdio helpers fail when
+  a fixture's text is not replaced; the EOF test waits for the connection
+  before asserting it; assertion messages print the run's error, not the
+  report (CodeQL).
+
+The Windows job of the first CI run failed one MCP-07 window test
+(`a_transaction_left_by_the_holder_opens_the_recovery_view`, the window not
+taking the project back within ten seconds); the desktop crate is unchanged
+here, and the same commit's second run passed it on Windows.

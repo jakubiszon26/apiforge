@@ -373,8 +373,10 @@ session, or uses the session's lock, exactly as `write_source` does, and is
 refused with `held_by_window` or `held_by_other` and the holder while another
 process holds the project; a simulation still runs then. Each request is
 recorded in the project's run journal, `.apiforge/local/journal.json`, before
-it is sent, as the window records its own (ADR 0009); a run that reaches its
-end removes its entry, so an entry on disk always describes an interruption.
+it is sent, as the window records its own (ADR 0009). The entry exists while
+the run is in progress and is removed when it reaches its end, so an entry
+still on disk once its process has stopped describes an interruption; this
+server's own run in progress is never reported as one.
 The next `run`, simulated or live, lists what an earlier process left there
 under `interrupted`: per run the scenario, its start and whether its cleanup
 had begun, and the requests that may have changed the API with method,
@@ -383,8 +385,11 @@ redacted URL and state (`Sending`, `Performed`, `Possibly performed`), as
 `interrupted_runs`. They stay until the window marks them handled. While
 another process holds the project its journal is its own and is not read. A
 live run repeated with a `request_id` this server has answered returns the
-recorded result with `replayed: true` and sends nothing; a new server does not
-remember an id, and exactly-once is not promised.
+recorded result with `replayed: true` and sends nothing; the same id for
+another document or other inputs is `invalid_inputs`. The server keeps the
+last 64 results; an older id it answered is `unknown_outcome`, never run
+again. A new server does not remember an id, and exactly-once is not
+promised.
 
 #### The four ends of a live run
 
@@ -420,9 +425,11 @@ unregistered path is `resource_not_found` with `data.code`
 ### The contract
 
 - Every tool has an input and an output schema; `tools/list` returns them in
-  the order above. The read tools carry `readOnlyHint: true`; `write_source`
-  is `destructiveHint: true` and `idempotentHint: true`, `create_document`
-  neither, `finish_editing` only idempotent. A result carries
+  the order above. The read tools carry `readOnlyHint: true`; `run` does
+  not, since a live run sends requests and writes the journal: it is
+  `destructiveHint: true`, `openWorldHint: true` and not idempotent;
+  `write_source` is `destructiveHint: true` and `idempotentHint: true`,
+  `create_document` neither, `finish_editing` only idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
 - A call that could not do what was asked is `isError: true` with
   `structuredContent` `{ code, message, wrote, details }`. The codes form a
@@ -440,7 +447,7 @@ unregistered path is `resource_not_found` with `data.code`
   `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,
   `path_rejected`, `result_too_large`, `secret_in_text` (`check_text`, a
   `request_id`) and `secret_in_source`; `wrote` is always `false` for them.
-  A live run adds `held_by_window` and `held_by_other`.
+  A live run adds `held_by_window`, `held_by_other` and `unknown_outcome`.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
   `held_by_other`, `secret_in_text`, `path_exists`, `handle_exists` and
   `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
