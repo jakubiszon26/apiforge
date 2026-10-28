@@ -1663,8 +1663,12 @@ fn head_generation(root: &Path) -> u64 {
 }
 
 fn head_active(root: &Path) -> bool {
-    let bytes = fs::read(root.join(".apiforge/local/head.json")).unwrap();
-    !serde_json::from_slice::<Value>(&bytes).unwrap()["activeTransactionId"].is_null()
+    match fs::read(root.join(".apiforge/local/head.json")) {
+        Ok(bytes) => {
+            !serde_json::from_slice::<Value>(&bytes).unwrap()["activeTransactionId"].is_null()
+        }
+        Err(_) => false,
+    }
 }
 
 /// Another writer's attempt to take the project: `true` while the lock is
@@ -1878,21 +1882,30 @@ fn mcp04_criterion_2_a_text_with_errors_is_not_saved() {
     let root = directory.path();
     let (text, hash, _) = read(root, PRODUCT);
     let before = shared(root);
+    // A call of a component that does not exist, on the second line.
+    let broken = text.replacen(" {\n", " {\n  broken = nosuch@1(id: 1)\n", 1);
+    assert_ne!(broken, text);
     let error = agent(root)
-        .write_source(&write_args(PRODUCT, &inject_mismatch(&text), &hash))
+        .write_source(&write_args(PRODUCT, &broken, &hash))
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidText);
     assert_eq!(error.wrote, Wrote::No);
     let diagnostics = error.details["diagnostics"].as_array().unwrap();
-    let mismatch = diagnostics
+    let found = diagnostics
         .iter()
-        .find(|d| d["message"] == MISMATCH)
+        .find(|d| d["severity"] == "error" && d["line"] == 2)
         .unwrap_or_else(|| panic!("{diagnostics:?}"));
-    assert_eq!(mismatch["severity"], "error");
-    assert!(mismatch["line"].as_u64().unwrap() > 1);
-    assert!(mismatch["column"].as_u64().unwrap() >= 1);
-    assert!(mismatch["end_line"].as_u64().is_some());
+    assert!(found["column"].as_u64().unwrap() > 1);
+    assert_eq!(found["end_line"], 2);
+    assert!(found["end_column"].as_u64().unwrap() > found["column"].as_u64().unwrap());
     assert_eq!(shared(root), before, "the file is unchanged");
+
+    // A warning alone does not stop the save (KTLO-25's type mismatch).
+    let saved = agent(root)
+        .write_source(&write_args(PRODUCT, &inject_mismatch(&text), &hash))
+        .unwrap();
+    assert!(saved.wrote);
+    assert!(saved.diagnostics.iter().any(|d| d.message == MISMATCH));
 }
 
 /// Criterion 3: the disk changed with `apply` between the model's read and
@@ -2444,7 +2457,7 @@ fn mcp04_criterion_10_identities_survive_a_server_save() {
                     node.handle.clone(),
                     (
                         node.id.clone(),
-                        serde_json::to_value(&node.kind).unwrap(),
+                        serde_json::to_value(node.kind).unwrap(),
                         serde_json::to_value(&node.position).unwrap(),
                     ),
                 )
