@@ -333,6 +333,10 @@ impl Handover {
         self.granted_at = None;
         self.stale = true;
         self.agent_running = false;
+        // The take-back asked for is answered. Should the agent hold the
+        // project again before the window takes it, *Take back* is offered
+        // anew rather than left waiting for an answer that has come.
+        self.taking_back = false;
     }
 
     /// The person waits for the agent's run to end before the take-back.

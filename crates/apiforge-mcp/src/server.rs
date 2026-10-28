@@ -461,7 +461,7 @@ fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> A
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
-        agent.finish_editing();
+        agent.give_back();
     });
     hub
 }

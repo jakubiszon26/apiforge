@@ -34,6 +34,9 @@ const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 /// How long the server keeps trying for a lock the window has just granted:
 /// a check of the window's may still hold it for a moment.
 const GRANTED_LOCK: Duration = Duration::from_secs(2);
+/// How long a write after *Take back* lets the window take the free lock
+/// before it asks the window for the project again.
+const YIELD: Duration = Duration::from_secs(3);
 /// The reason a window gives when it keeps the project for unsaved work.
 pub const UNSAVED_WORK: &str = "the window has unsaved work";
 
@@ -120,6 +123,9 @@ pub struct AgentSession {
     active: AtomicBool,
     /// The control channel to windows, when the server has one (MCP-08b).
     hub: OnceLock<Arc<Hub>>,
+    /// The session ended because the person asked for the project back: the
+    /// next write lets the window take it first.
+    yielded: AtomicBool,
 }
 
 #[derive(Default)]
@@ -150,6 +156,7 @@ impl AgentSession {
             state: Mutex::default(),
             active: AtomicBool::new(false),
             hub: OnceLock::new(),
+            yielded: AtomicBool::new(false),
         }
     }
 
@@ -162,6 +169,7 @@ impl AgentSession {
             state: Mutex::default(),
             active: AtomicBool::new(false),
             hub: OnceLock::new(),
+            yielded: AtomicBool::new(false),
         }
     }
 
@@ -315,7 +323,20 @@ impl AgentSession {
     /// Ends the session and releases the writer lock; connected windows are
     /// told `released`. A write in flight finishes first: it holds the state.
     pub fn finish_editing(&self) -> Finished {
+        self.end(false)
+    }
+
+    /// Ends the session because a window asked for the project back (MCP-08b,
+    /// *Take back*): as [`Self::finish_editing`], and the next write, even
+    /// one already waiting, lets the window take the free lock first and
+    /// then asks it like any other write.
+    pub fn give_back(&self) -> Finished {
+        self.end(true)
+    }
+
+    fn end(&self, yielded: bool) -> Finished {
         let mut state = self.state();
+        self.yielded.store(yielded, Ordering::Release);
         state.recovery_required = false;
         let finished = state.store.take().is_some();
         self.active.store(false, Ordering::Release);
@@ -371,6 +392,17 @@ impl AgentSession {
         let manifest = ProjectPath::new(MANIFEST_PATH).map_err(storage)?;
         if read(&probe, std::slice::from_ref(&manifest))?.files[&manifest].is_none() {
             return Err(tools::storage_error(apiforge_project::Error::NotAProject));
+        }
+        if self.yielded.swap(false, Ordering::AcqRel) {
+            // The person took the project back: the free lock is the
+            // window's to take, and this write asks it afterwards. A window
+            // that does not take it in time (it closed) is not waited for.
+            let deadline = Instant::now() + YIELD;
+            while Instant::now() < deadline
+                && !matches!(probe.holder(), Ok(Some(holder)) if holder.role() == Some(HolderRole::Window))
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
         let hub = self.hub.get();
         let holder = Holder::new(HolderRole::Agent, client.clone())
