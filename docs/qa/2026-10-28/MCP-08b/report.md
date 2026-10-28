@@ -242,9 +242,10 @@ merged head the MCP-08a and MCP-08b tests passed 20 times in a row (22
 tests each run), and the workspace suite passed: 1 286 passed, 0 failed,
 33 ignored, MCP-06's tests among them. The merged run also showed a race in
 an MCP-08a test, `a_document_the_holder_registers_is_listed_without_a_notice`:
-its wait asked for exactly one node naming the new file, and the bar names
-it too once the commit is followed. The wait now accepts any number of
-such nodes; its assertions are unchanged.
+its wait asked for exactly one node whose label contains the new file's
+name, and the bar's last change contains it too once the commit is
+followed. The wait now asks for the explorer's row by its exact name;
+its assertions are unchanged.
 
 ## Windows
 

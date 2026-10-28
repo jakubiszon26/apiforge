@@ -1343,14 +1343,9 @@ mod mcp08a {
             &mut harness,
             Instant::now(),
             "the new document",
-            // The explorer's row; the bar names the file as well once the
-            // commit is followed, so more than one node may match.
-            |harness| {
-                harness
-                    .query_all_by_label_contains("added-by-agent.afs")
-                    .next()
-                    .is_some()
-            },
+            // The explorer's row, named exactly by the file: the bar's
+            // last change names the file too, inside a longer text.
+            |harness| harness.query_by_label("added-by-agent.afs").is_some(),
         );
         assert!(taken <= FOLLOW, "listed after {taken:?}");
         assert!(
