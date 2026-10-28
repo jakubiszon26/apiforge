@@ -347,7 +347,7 @@ fn open_document(folder: &Path, path: &str) -> Result<(ProjectSession, String), 
     Ok((session, id))
 }
 
-fn storage_error(error: apiforge_project::Error) -> ToolError {
+pub(crate) fn storage_error(error: apiforge_project::Error) -> ToolError {
     let code = match &error {
         apiforge_project::Error::NotAProject => ErrorCode::NotAProject,
         apiforge_project::Error::Storage(ProjectError::RecoveryRequired) => {
@@ -371,7 +371,7 @@ fn unavailable(document: &DocumentSession) -> Option<String> {
 }
 
 /// The kept diagnostics with positions, and how many the analysis omitted.
-fn diagnostics(document: &DocumentSession) -> (Vec<Diagnostic>, usize) {
+pub(crate) fn diagnostics(document: &DocumentSession) -> (Vec<Diagnostic>, usize) {
     positioned(
         document.text(),
         document.diagnostics(),
@@ -381,7 +381,7 @@ fn diagnostics(document: &DocumentSession) -> (Vec<Diagnostic>, usize) {
 
 /// Diagnostics of `text` with positions; the analysis keeps at most
 /// `MAX_DIAGNOSTICS`, and this never returns more.
-fn positioned(
+pub(crate) fn positioned(
     text: &str,
     found: &[apiforge_script::Diagnostic],
     omitted: usize,
@@ -691,14 +691,14 @@ fn check_proposal(folder: &Path, path: &str, text: &str) -> Result<TextCheck, To
     })
 }
 
-fn kind(kind: DocumentKind) -> Kind {
+pub(crate) fn kind(kind: DocumentKind) -> Kind {
     match kind {
         DocumentKind::Scenario => Kind::Scenario,
         DocumentKind::Component => Kind::Component,
     }
 }
 
-fn problem(problem: RegistrationProblem) -> Problem {
+pub(crate) fn problem(problem: RegistrationProblem) -> Problem {
     Problem {
         code: match problem {
             RegistrationProblem::PathRejected => ErrorCode::PathRejected,
