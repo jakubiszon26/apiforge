@@ -1,0 +1,276 @@
+
+=== 1. Without --allow-live (criterion 1)
+## start apiforge mcp --folder <checkout> 
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:34127/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\
+-- live_requests: {"allowed": false, "source": "no --allow-live"}, interrupted_runs: 0
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"live_disabled\",\n  \"message\": \"live requests are not enabled on this server\",\n  \"wrote\": false,\n  \"details\": {\n    \"source
+-- code: "live_disabled", message: "live requests are not enabled on this server", wrote: false
+## stdin closed; exit code 0 after 0.0 s; stderr: ['apiforge mcp: run: live_disabled']
+## connections the listener accepted: 0; .apiforge/local exists: False
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:34127/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\
+-- live_requests: {"allowed": true, "source": "--allow-live"}
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}}
+<< {"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"project_overview","description":"What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered
+-- run annotations: {"title": "Run", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true}
+-- run description, first sentence: Runs the saved scenario or component at `path`: a simulation with the sample responses written in it, which sends nothing, or with `live: true` real requests to the project's API, only when the person allowed live requests (project_overview.live_requests; otherwise `live_disabled`).
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+
+=== 2. A live run against the demo API, a declared secret (criterion 2)
+## start apiforge mcp --folder <checkout> --allow-live --secrets <scratch>/secrets.json with APIFORGE_SECRET_TOKEN=<value>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generation
+-- live: true, status: "passed", ended_by: "completed", step_count: 19, generation: 0, source_sha256: "a6c89e47510813c931aec34705ae4a78475d1296bb4c18218162adf4094d1768", redacted: true, interrupted: []
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true, "full": true}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generation
+-- full report: status passed; echo step request url "http://127.0.0.1:4399/demo/shop/products/124?q=[REDACTED]"; [REDACTED] occurs 4 times
+## journal after the runs: None
+## holder while the session lasts: {"version":1,"program":"apiforge","role":"agent","client":"qa","since":"2026-10-28T08:23:24Z","endpoint":null}
+## another writer refused: True
+
+=== 3. Held by another process; a simulation still works (criterion 3)
+## start apiforge mcp --folder <checkout> --allow-live --secrets <scratch>/secrets.json with APIFORGE_SECRET_TOKEN=<value>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"held_by_other\",\n  \"message\": \"qa via apiforge mcp has held this project since 2026-10-28T08:23:24Z; nothing was written. Write aga
+-- code: "held_by_other", message: "qa via apiforge mcp has held this project since 2026-10-28T08:23:24Z; nothing was written. Write again when it has finished editing", details: {"holder": {"role": "agent", "client": "qa", "since": "2026-10-28T08:23:24Z"}}
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": false,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generatio
+-- live: false, status: "passed", step_count: 19
+## stdin closed; exit code 0 after 0.0 s; stderr: ['apiforge mcp: run: held_by_other']
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "finish_editing", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"finished\": true\n}"}],"structuredContent":{"finished":true},"isError":false}}
+-- finished: true
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+
+=== 4. request_id replayed (criterion 9)
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true, "request_id": "qa-1"}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generation
+-- status: "passed", request_id: "qa-1"
+## base URL now points at a listener that counts connections
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true, "request_id": "qa-1"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generation
+-- status: "passed", request_id: "qa-1", replayed: true
+## connections the listener accepted: 0
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+
+=== 5. Cancelled, then timed out, against an endpoint that never answers (criterion 6)
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+## journal while the request is on its way: {
+  "version": 1,
+  "runs": [
+    {
+      "runId": "2713b02c-18a8-4b43-8346-fd61e0f94471",
+      "scenarioId": "promotion",
+      "scenarioName": "Promotion and cart price",
+      "startedAt": "2026-10-28T08:23:26.896Z",
+      "cleanup": "notStarted",
+      "entries": [
+        {
+          "sequence": 1,
+          "nodeId": "fetch",
+          "handle": "fetch_product",
+          "label": "Fetch product",
+          "phase": "main",
+          "method": "GET",
+          "url": "http://127.0.0.1:47219/demo/shop/products/123",
+          "startedAt": "2026-10-28T08:23:26.903Z",
+          "state": "inFlight"
+        }
+      ],
+      "elided": 0
+    }
+  ]
+}
+>> {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "qa"}}
+## journal removed 0.04 s after the cancellation
+## stdin closed; exit code 0 after 0.0 s; stderr: ['apiforge mcp: run: cancelled']
+## start apiforge mcp --folder <checkout> --allow-live with APIFORGE_MCP_TEST_DEADLINE_MS=<value>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"cancelled\",\n  \"ended_by\": \"timed_out\",\n  \"generat
+-- status: "cancelled", ended_by: "timed_out"
+-- product cancelled main; fetch_product cancelled main may_have_reached_api; product cancelled main; active_promotion cancelled main; expected_price cancelled main; add_to_cart cancelled main; promotional_price cancelled main; field_inna_nazwa cancelled main; delete_cart skipped cleanup; cart_was_deleted skipped cleanup
+## journal after the run: None
+## stdin closed; exit code 0 after 0.0 s; stderr: ['apiforge mcp: run: timed_out']
+
+=== 6. EOF during a live run: cleanup in time, then blocked (criterion 7)
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+## stdin closed; exit code 0 after 0.1 s; stderr: ['apiforge mcp: run: cancelled']
+## journal: None; another writer refused: False
+## start apiforge mcp --folder <checkout> --allow-live with APIFORGE_MCP_TEST_CLEANUP_DELAY_MS=<value>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+## stdin closed; exit code 0 after 10.5 s; stderr: []
+## journal left: {
+  "version": 1,
+  "runs": [
+    {
+      "runId": "a45c12e6-dc58-4a0f-a0d4-285db41760ed",
+      "scenarioId": "promotion",
+      "scenarioName": "Promotion and cart price",
+      "startedAt": "2026-10-28T08:23:29.224Z",
+      "cleanup": "notStarted",
+      "entries": [
+        {
+          "sequence": 1,
+          "nodeId": "fetch",
+          "handle": "fetch_product",
+          "label": "Fetch product",
+          "phase": "main",
+          "method": "GET",
+          "url": "http://127.0.0.1:38515/demo/shop/products/123",
+          "startedAt": "2026-10-28T08:23:29.231Z",
+          "state": "uncertain",
+          "detail": "cancelled while the request was being sent"
+        }
+      ],
+      "elided": 0
+    }
+  ]
+}
+## another writer refused: False
+## start apiforge mcp --folder <checkout> 
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:38515/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\
+-- interrupted_runs: 1
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": false,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generatio
+-- live: false, status: "passed", interrupted: [{"scenario": "Promotion and cart price", "started_at": "2026-10-28T08:23:29.224Z", "cleanup_started": false, "requests": [{"step": "Fetch product", "method": "GET", "url": "http://127.0.0.1:38515/demo/shop/products/123", "state": "Possibly performed"}], "elided": 0}]
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+
+=== 7. A killed server (criterion 8)
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+## SIGKILL; journal left: {
+  "version": 1,
+  "runs": [
+    {
+      "runId": "c89b8ad7-2bfe-4a2b-8309-2366af91a7ed",
+      "scenarioId": "promotion",
+      "scenarioName": "Promotion and cart price",
+      "startedAt": "2026-10-28T08:23:40.607Z",
+      "cleanup": "notStarted",
+      "entries": [
+        {
+          "sequence": 1,
+          "nodeId": "fetch",
+          "handle": "fetch_product",
+          "label": "Fetch product",
+          "phase": "main",
+          "method": "GET",
+          "url": "http://127.0.0.1:51627/demo/shop/products/123",
+          "startedAt": "2026-10-28T08:23:40.618Z",
+          "state": "inFlight"
+        }
+      ],
+      "elided": 0
+    }
+  ]
+}
+## another writer refused: False
+## the same requests as `apiforge run --folder <checkout> --scenario ... --live` prints them (a live run of the CLI against the demo API):
+##   A live run of "Promotion and cart price" from 2026-10-28T08:23:40.607Z did not finish. These requests may have changed the API:
+##     GET http://127.0.0.1:51627/demo/shop/products/123 — Sending
+## journal after the CLI's own run: {
+  "version": 1,
+  "runs": [
+    {
+      "runId": "c89b8ad7-2bfe-4a2b-8309-2366af91a7ed",
+      "scenarioId": "promotion",
+      "scenarioName": "Promotion and cart price",
+      "startedAt": "2026-10-28T08:23:40.607Z",
+      "cleanup": "notStarted",
+      "entries": [
+        {
+          "sequence": 1,
+          "nodeId": "fetch",
+          "handle": "fetch_product",
+          "label": "Fetch product",
+          "phase": "main",
+          "method": "GET",
+          "url": "http://127.0.0.1:51627/demo/shop/products/123",
+          "startedAt": "2026-10-28T08:23:40.618Z",
+          "state": "inFlight"
+        }
+      ],
+      "elided": 0
+    }
+  ]
+}
+## start apiforge mcp --folder <checkout> 
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:4399/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\n
+-- interrupted_runs: 1
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": false,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generatio
+-- live: false, status: "passed", interrupted: [{"scenario": "Promotion and cart price", "started_at": "2026-10-28T08:23:40.607Z", "cleanup_started": false, "requests": [{"step": "Fetch product", "method": "GET", "url": "http://127.0.0.1:51627/demo/shop/products/123", "state": "Sending"}], "elided": 0}]
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+## start apiforge mcp --folder <checkout> --allow-live
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": true,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generation
+-- live: true, status: "passed", interrupted: [{"scenario": "Promotion and cart price", "started_at": "2026-10-28T08:23:40.607Z", "cleanup_started": false, "requests": [{"step": "Fetch product", "method": "GET", "url": "http://127.0.0.1:51627/demo/shop/products/123", "state": "Sending"}], "elided": 0}]
+## stdin closed; exit code 0 after 0.0 s; stderr: []
+
+=== 8. A saved source with a secret is withheld (criterion 11)
+## start apiforge mcp --folder <checkout>  with APIFORGE_SECRET_TOKEN=<value>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "components/product.afs"}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"secret_in_source\",\n  \"message\": \"The saved source contains the value of a known secret on line 2; it is withheld and the value is 
+-- code: "secret_in_source", message: "The saved source contains the value of a known secret on line 2; it is withheld and the value is not repeated. Replace the value with the secret's name, env.name", details: {"line": 2}
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "print", "arguments": {"path": "components/product.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"secret_in_source\",\n  \"message\": \"The saved source contains the value of a known secret on line 2; it is withheld and the value is 
+-- code: "secret_in_source", details: {"line": 2}
+>> {"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "apiforge://source/components/product.afs"}}
+<< {"jsonrpc":"2.0","id":4,"error":{"code":-32603,"message":"The saved source contains the value of a known secret on line 2; it is withheld and the value is not repeated. Replace the value with the secret's name, env.name"
+-- resources/read error data: {"code": "secret_in_source", "message": "The saved source contains the value of a known secret on line 2; it is withheld and the value is not repeated. Replace the value with the secret's name, env.name"}
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "check_text", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "text": "// <value of APIFORGE_SECRET_TOKEN>\n"}}}
+<< {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"secret_in_text\",\n  \"message\": \"The text contains the value of a known secret; nothing was done and the value is not repeated. Name
+-- code: "secret_in_text", message: "The text contains the value of a known secret; nothing was done and the value is not repeated. Name the secret instead: env.name"
+## stdin closed; exit code 0 after 0.0 s; stderr: ['apiforge mcp: read_source: secret_in_source', 'apiforge mcp: print: secret_in_source', 'apiforge mcp: resources/read: secret_in_source', 'apiforge mcp: check_text: secret_in_text']
+## occurrences of a secret value in everything collected: 0
+## occurrences of a secret value in everything collected: 0
