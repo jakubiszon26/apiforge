@@ -21,6 +21,8 @@ indexmap.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# The storage's I/O fault seam for the transaction tests of MCP-04.
+apiforge-storage = { workspace = true, features = ["fault-injection"] }
 
 [lints]
 workspace = true

@@ -1651,3 +1651,200 @@ mod mcp08a {
         }
     }
 }
+
+// ----- MCP-04: the window beside the server's agent session ------------------
+
+mod mcp04 {
+    use super::*;
+    use crate::testing::{MINIMUM, shop_project};
+    use apiforge_mcp::{
+        ErrorCode,
+        agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
+        tools::Kind,
+    };
+    use apiforge_storage::project::{
+        FileState, ProjectError,
+        faults::{self, Boundary, Phase},
+    };
+    use std::path::Path;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const DISCOUNT: &str = "components/discount.afs";
+    const DISCOUNT_TEXT: &str = "component discount \"Discount\" {\n  description \"A tenth off a price.\"\n  @label(\"Price\")\n  input price: number = 100\n  @label(\"Discounted\")\n  export discounted: number = param.price * 0.9\n}\n";
+    const UNSAVED: &str = "Changed outside API Forge while unsaved here";
+
+    fn sha256(bytes: &[u8]) -> String {
+        match FileState::of(bytes) {
+            FileState::File { sha256, .. } => sha256,
+            _ => unreachable!(),
+        }
+    }
+
+    fn commented(text: &str, note: &str) -> String {
+        text.replacen(" {\n", &format!(" {{\n  // {note}\n"), 1)
+    }
+
+    /// The server's agent session, started by a write of the saved text that
+    /// changes nothing: from then on it holds the writer lock.
+    fn begin(root: &Path) -> AgentSession {
+        let agent = AgentSession::with_environment(root.to_owned(), Vec::new());
+        let saved = fs::read(root.join(SCENARIO)).unwrap();
+        agent
+            .write_source(&write(
+                std::str::from_utf8(&saved).unwrap(),
+                &sha256(&saved),
+            ))
+            .unwrap();
+        assert!(agent.is_active());
+        agent
+    }
+
+    fn write(text: &str, expected: &str) -> WriteSourceArguments {
+        WriteSourceArguments {
+            path: SCENARIO.into(),
+            text: text.into(),
+            expected_source_sha256: expected.into(),
+            expected_generation: None,
+        }
+    }
+
+    fn scenario(harness: &FolderHarness) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == SCENARIO)
+            .unwrap()
+            .id()
+            .to_owned()
+    }
+
+    /// Criterion 11: a read-only window follows a `write_source` on a clean
+    /// document within one scan and shows no conflict.
+    #[test]
+    fn a_read_only_window_follows_a_write_on_a_clean_document() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = begin(root);
+        let mut harness = folder_harness(root, WIDE);
+        assert!(folder(&harness).session.as_ref().unwrap().is_read_only());
+        let id = scenario(&harness);
+        let saved = fs::read(root.join(SCENARIO)).unwrap();
+        let written = commented(std::str::from_utf8(&saved).unwrap(), "From the model.");
+        agent
+            .write_source(&write(&written, &sha256(&saved)))
+            .unwrap();
+
+        follow_disk(&mut harness);
+        let app = folder(&harness);
+        let snapshot = app.snapshot(&id).unwrap();
+        assert_eq!(snapshot.text, written, "followed within one scan");
+        assert_eq!(snapshot.conflict, None);
+        assert!(
+            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            "no conflict is reported"
+        );
+        assert!(harness.query_by_label_contains(UNSAVED).is_none());
+        drop(harness);
+        drop(agent);
+    }
+
+    /// Criterion 11: on a document with unsaved work in the window, the
+    /// window reports the change outside and keeps the unsaved text.
+    #[test]
+    fn a_write_on_a_document_unsaved_in_the_window_keeps_the_unsaved_text() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = begin(root);
+        let mut harness = folder_harness(root, WIDE);
+        let id = scenario(&harness);
+        let saved = fs::read(root.join(SCENARIO)).unwrap();
+        let saved_text = std::str::from_utf8(&saved).unwrap();
+        let local = commented(saved_text, "Typed in the window.");
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&id, &local, CODE)
+            .unwrap();
+        settle(&mut harness);
+
+        let written = commented(saved_text, "From the model.");
+        agent
+            .write_source(&write(&written, &sha256(&saved)))
+            .unwrap();
+        follow_disk(&mut harness);
+        assert!(
+            harness.query_by_label_contains(UNSAVED).is_some(),
+            "the window says the file changed outside while unsaved here"
+        );
+        let snapshot = folder(&harness).snapshot(&id).unwrap();
+        assert_eq!(snapshot.text, local, "the unsaved text stays in place");
+        assert_eq!(
+            fs::read_to_string(root.join(SCENARIO)).unwrap(),
+            written,
+            "the disk holds the model's text"
+        );
+        drop(harness);
+        drop(agent);
+    }
+
+    /// Criterion 6: a creation that failed after its activation leaves
+    /// recoverable intent; once the agent session has ended, the window's
+    /// recovery view finishes it.
+    #[test]
+    fn the_window_finishes_a_creation_that_failed_after_activation() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = AgentSession::with_environment(root.to_owned(), Vec::new());
+        let error = faults::with_hook(
+            |event| {
+                if event.boundary == Boundary::Replace
+                    && event.phase == Phase::Before
+                    && event.path.ends_with(".apiforge/diagram.json")
+                {
+                    return Err(ProjectError::Io {
+                        path: event.path.clone(),
+                        source: std::io::Error::other("injected on the checkpoint's install"),
+                    });
+                }
+                Ok(())
+            },
+            || {
+                agent.create_document(&CreateDocumentArguments {
+                    kind: Kind::Component,
+                    path: DISCOUNT.into(),
+                    text: DISCOUNT_TEXT.into(),
+                    expected_generation: None,
+                })
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::RecoveryRequired);
+        assert!(agent.finish_editing().finished);
+
+        let mut harness = folder_harness(root, MINIMUM);
+        assert!(has_label(&harness, "Recover interrupted file operation"));
+        choose(&mut harness, "Finish intended operation");
+        assert!(has_label(&harness, "Reload project after recovery"));
+        choose(&mut harness, "Open project");
+        let session = folder(&harness).session.as_ref().unwrap();
+        let document = session
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == DISCOUNT)
+            .expect("the created component is registered");
+        assert_eq!(document.text(), DISCOUNT_TEXT);
+        assert_eq!(
+            fs::read_to_string(root.join(DISCOUNT)).unwrap(),
+            DISCOUNT_TEXT
+        );
+        let diagram = fs::read_to_string(root.join(".apiforge/diagram.json")).unwrap();
+        assert!(
+            diagram.contains(document.id()),
+            "the checkpoint carries its sealed identities"
+        );
+    }
+}

@@ -1,6 +1,8 @@
 //! All folder persistence boundaries pass here. Test-only, thread-local probes
 //! inject errors or stop a child process at the actual filesystem operation,
-//! including before/after file sync, replacement and directory sync.
+//! including before/after file sync, replacement and directory sync. Other
+//! crates' tests reach them through the `fault-injection` feature
+//! (`project::faults`), never enabled in a release build.
 use super::{ProjectError, Result, path};
 use std::{
     fs::{self, File},
@@ -9,7 +11,7 @@ use std::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Boundary {
+pub enum Boundary {
     TemporaryCreate,
     Write,
     FileSync,
@@ -22,7 +24,7 @@ pub(super) enum Boundary {
     Cleanup,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Phase {
+pub enum Phase {
     Before,
     After,
 }
@@ -135,22 +137,23 @@ pub(super) fn cleanup_directory(path: &Path) -> Result<()> {
     sync_parent(path)
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "fault-injection")))]
 fn probe(_: Boundary, _: Phase, _: &Path) -> Result<()> {
     Ok(())
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "fault-injection"))]
 fn probe(boundary: Boundary, phase: Phase, path: &Path) -> Result<()> {
     testing::visit(boundary, phase, path)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "fault-injection"))]
 pub(super) mod testing {
     use super::*;
     use std::{cell::RefCell, path::PathBuf};
 
+    /// One filesystem operation at one of its boundaries.
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(in crate::project) struct Event {
+    pub struct Event {
         pub boundary: Boundary,
         pub phase: Phase,
         pub path: PathBuf,
@@ -167,7 +170,9 @@ pub(super) mod testing {
             None => Ok(()),
         })
     }
-    pub(in crate::project) fn with_hook<T>(
+    /// Runs `run` with `hook` called at every persistence boundary this
+    /// thread passes; an error from the hook is the operation's error.
+    pub fn with_hook<T>(
         hook: impl FnMut(&Event) -> Result<()> + 'static,
         run: impl FnOnce() -> T,
     ) -> T {

@@ -6,8 +6,14 @@
 //! MCP-03 (#62): `check_text`, `run`, `language_reference` and the resources,
 //! criteria 1 to 12, and the five carry-overs from the review of MCP-01 (the
 //! `mcp03_` tests). Their stdio side is in `crates/apiforge-cli/tests/mcp.rs`.
+//!
+//! MCP-04 (#63): `write_source`, `create_document`, `finish_editing` and the
+//! agent session that holds the writer lock, criteria 1 to 10 (the `mcp04_`
+//! tests). EOF on stdin and the client's name are tested over stdio in
+//! `crates/apiforge-cli/tests/mcp.rs`; the window's side (criteria 6 and 11)
+//! in `crates/apiforge-desktop/src/folder/agent_session_tests.rs`.
 use apiforge_mcp::{
-    ErrorCode, ToolError,
+    ErrorCode, ToolError, Wrote,
     executor::{self, CancellationToken, DEADLINE, EndedBy},
     positions, reference, resources,
     tools::{
@@ -295,7 +301,7 @@ fn criterion_4_an_unknown_path_names_the_registered_paths() {
     let directory = checkout();
     let error = tools::read_source(directory.path(), "components/missing.afs").unwrap_err();
     assert_eq!(error.code, ErrorCode::UnknownDocument);
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
     let mut paths: Vec<_> = error.details["registered_paths"]
         .as_array()
         .unwrap()
@@ -440,7 +446,7 @@ fn criterion_6_print_of_an_invalid_source_is_invalid_text_with_the_diagnostics()
     });
     let error = tools::print(root, PRODUCT).unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidText);
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
     let diagnostics = error.details["diagnostics"].as_array().unwrap();
     assert!(!diagnostics.is_empty());
     assert_eq!(diagnostics[0]["severity"], "error");
@@ -524,7 +530,7 @@ fn criterion_9_an_unreadable_project_is_project_unreadable() {
     fs::write(root.join("apiforge.project.json"), "{").unwrap();
     let error = tools::project_overview(root).unwrap_err();
     assert_eq!(error.code, ErrorCode::ProjectUnreadable);
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
     assert!(!error.message.is_empty());
 }
 
@@ -762,7 +768,7 @@ fn mcp03_criterion_1_a_text_over_one_mebibyte_is_too_large_before_anything_else(
     for path in [PRODUCT, "../x.afs", "components/new.afs"] {
         let error = tools::check_text(directory.path(), path, &text).unwrap_err();
         assert_eq!(error.code, ErrorCode::TooLarge, "{path}");
-        assert!(!error.wrote);
+        assert_eq!(error.wrote, Wrote::No);
     }
     let error = tools::check_text(tempfile::tempdir().unwrap().path(), PRODUCT, &text).unwrap_err();
     assert_eq!(error.code, ErrorCode::TooLarge, "outside a project too");
@@ -991,7 +997,7 @@ fn mcp03_criterion_5_a_component_runs_alone_with_its_inputs() {
     let error = simulate(root, &arguments(PROMOTION)).unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInputs);
     assert_eq!(error.details["missing"], json!(["product"]));
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
 
     let error = simulate(root, &with_inputs(PRODUCT, json!({ "nope": 1 }))).unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInputs);
@@ -1109,7 +1115,7 @@ fn mcp03_criterion_8_live_is_refused_and_sends_nothing() {
         error.message,
         "live requests are not enabled on this server"
     );
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
     let report = simulate(root, &arguments(SCENARIO)).unwrap();
     assert_eq!(report.status, Verdict::Passed, "a simulation sends nothing");
     thread::sleep(Duration::from_millis(200));
@@ -1457,7 +1463,7 @@ fn mcp03_carry_over_5_errors_are_bounded_as_results_are() {
     let error = tools::bound::<()>(Err(large)).unwrap_err();
     assert_eq!(error.code, ErrorCode::ResultTooLarge);
     assert_eq!(error.details["limit"], json!(tools::MAX_RESULT_BYTES));
-    assert!(!error.wrote);
+    assert_eq!(error.wrote, Wrote::No);
 
     let small = ToolError::new(
         ErrorCode::UnknownDocument,
@@ -1591,4 +1597,1010 @@ fn mcp03_review_a_case_collision_beyond_the_tree_scan_limit_is_found() {
         result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
         [ErrorCode::PathExists]
     );
+}
+
+// ----- MCP-04 (#63): the agent session, write_source and create_document -----
+
+use apiforge_mcp::agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments};
+use apiforge_storage::project::{
+    DocumentKind, Holder as LockHolder, HolderRole, ProjectError, ProjectStore,
+    faults::{self, Boundary, Phase as IoPhase},
+};
+
+const DIAGRAM: &str = ".apiforge/diagram.json";
+const DISCOUNT: &str = "components/discount.afs";
+const DISCOUNT_TEXT: &str = "component discount \"Discount\" {\n  description \"A tenth off a price.\"\n  @label(\"Price\")\n  input price: number = 100\n  @label(\"Discounted\")\n  export discounted: number = param.price * 0.9\n}\n";
+const DRAFT: &str = "scenarios/draft.afs";
+const DRAFT_TEXT: &str = "scenario \"Draft\" {\n}\n";
+const SECRET: &str = "s3cr3t-token-for-mcp04";
+
+/// An agent session that reads no secret from the process environment.
+fn agent(root: &Path) -> AgentSession {
+    AgentSession::with_environment(root.to_owned(), Vec::new())
+}
+
+fn write_args(path: &str, text: &str, expected: &str) -> WriteSourceArguments {
+    WriteSourceArguments {
+        path: path.into(),
+        text: text.into(),
+        expected_source_sha256: expected.into(),
+        expected_generation: None,
+    }
+}
+
+fn create_args(kind: Kind, path: &str, text: &str) -> CreateDocumentArguments {
+    CreateDocumentArguments {
+        kind,
+        path: path.into(),
+        text: text.into(),
+        expected_generation: None,
+    }
+}
+
+/// The saved hash `read_source` returns: the version a model writes from.
+fn read(root: &Path, path: &str) -> (String, String, u64) {
+    let read = tools::read_source(root, path).unwrap();
+    (read.text, read.source_sha256.unwrap(), read.generation)
+}
+
+/// The project as Git sees it: every file outside the machine-local
+/// `.apiforge/local`, which is not even read: on Windows the writer's lock
+/// file there cannot be read while the lock is held.
+fn shared(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn walk(root: &Path, at: &Path, files: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
+        for entry in fs::read_dir(at).unwrap() {
+            let path = entry.unwrap().path();
+            let relative = path.strip_prefix(root).unwrap().to_owned();
+            if relative == Path::new(".apiforge").join("local") {
+                continue;
+            }
+            if path.is_dir() {
+                files.insert(relative, None);
+                walk(root, &path, files);
+            } else {
+                files.insert(relative, Some(fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    walk(root, root, &mut files);
+    files
+}
+
+/// The head generation, 0 before the first commit on this machine.
+fn head_generation(root: &Path) -> u64 {
+    match fs::read(root.join(".apiforge/local/head.json")) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).unwrap()["generation"]
+            .as_u64()
+            .unwrap(),
+        Err(_) => 0,
+    }
+}
+
+fn head_active(root: &Path) -> bool {
+    match fs::read(root.join(".apiforge/local/head.json")) {
+        Ok(bytes) => {
+            !serde_json::from_slice::<Value>(&bytes).unwrap()["activeTransactionId"].is_null()
+        }
+        Err(_) => false,
+    }
+}
+
+/// Another writer's attempt to take the project: `true` while the lock is
+/// held. A successful attempt releases the lock at once.
+fn locked(root: &Path) -> bool {
+    match ProjectStore::open_exclusive(root) {
+        Err(ProjectError::Locked) => true,
+        Ok(_) => false,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+/// The checkpoint records by the document id of a working document, or by
+/// their whole key for a published revision.
+fn records(root: &Path) -> BTreeMap<String, Value> {
+    let bytes = fs::read(root.join(DIAGRAM)).unwrap();
+    let file: Value = serde_json::from_slice(&bytes).unwrap();
+    file["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| {
+            let key = &record["key"];
+            let key = key["documentId"]
+                .as_str()
+                .map_or_else(|| key.to_string(), str::to_owned);
+            (key, record.clone())
+        })
+        .collect()
+}
+
+/// The registry entry of `path`, if one is registered.
+fn entry(root: &Path, path: &str) -> Option<Value> {
+    let registry: Value = serde_json::from_slice(&fs::read(root.join(MANIFEST)).unwrap()).unwrap();
+    registry["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["path"] == path)
+        .cloned()
+}
+
+fn document_id(root: &Path, path: &str) -> String {
+    entry(root, path).expect("registered")["documentId"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    for entry in fs::read_dir(from).unwrap() {
+        let path = entry.unwrap().path();
+        let target = to.join(path.file_name().unwrap());
+        if path.is_dir() {
+            fs::create_dir(&target).unwrap();
+            copy_tree(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap();
+        }
+    }
+}
+
+/// A change a model might make that keeps the document valid.
+fn commented(text: &str) -> String {
+    let changed = text.replacen(" {\n", " {\n  // Checked by the model.\n", 1);
+    assert_ne!(changed, text);
+    changed
+}
+
+/// The demo scenario with one more request block before its cleanup.
+fn with_ping(text: &str) -> String {
+    let changed = text.replacen(
+        "  cleanup {\n",
+        "  @label(\"Ping\")\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n  cleanup {\n",
+        1,
+    );
+    assert_ne!(changed, text);
+    changed
+}
+
+fn error_text(error: &ToolError) -> String {
+    serde_json::to_string(error).unwrap()
+}
+
+fn injected(path: &Path, what: &str) -> ProjectError {
+    ProjectError::Io {
+        path: path.to_owned(),
+        source: std::io::Error::other(what.to_owned()),
+    }
+}
+
+/// `apiforge apply`, as the command does it: the saved text replaced under
+/// the writer lock by a command-line holder.
+fn apply(root: &Path, path: &str, text: &str) {
+    let mut session =
+        ProjectSession::open_saved_exclusive_as(root, &LockHolder::command("apply")).unwrap();
+    let id = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == path)
+        .unwrap()
+        .id()
+        .to_owned();
+    session
+        .edit_source(&id, text, apiforge_project::Origin::SESSION)
+        .unwrap();
+    session.settle(&id).unwrap();
+    session.save(&id).unwrap();
+}
+
+/// Criterion 1: the text replaces the document's, exactly; the checkpoint is
+/// written; the result names what the commit wrote; every other file is
+/// untouched. The same edit saved by the window in a copy of the project
+/// leaves the same files with the same bytes.
+#[test]
+fn mcp04_criterion_1_write_source_saves_exactly_with_the_checkpoint() {
+    let directory = checkout();
+    let root = directory.path();
+    let window = tempfile::tempdir().unwrap();
+    copy_tree(root, window.path());
+    let (text, hash, generation) = read(root, SCENARIO);
+    let text = commented(&text);
+    let before = shared(root);
+    let records_before = records(root);
+
+    let agent = agent(root);
+    let result = agent
+        .write_source(&write_args(SCENARIO, &text, &hash))
+        .unwrap();
+    assert!(result.wrote);
+    assert_eq!(result.path, SCENARIO);
+    let mut changed = result.changed.clone();
+    changed.sort();
+    assert_eq!(changed, [DIAGRAM, SCENARIO]);
+    assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+    assert_eq!(result.source_sha256, sha256(&root.join(SCENARIO)));
+    assert_eq!(result.generation, head_generation(root));
+    assert!(result.generation > generation);
+    assert!(result.valid);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity == Severity::Warning),
+        "only warnings"
+    );
+
+    // The checkpoint describes the saved text; every other record is kept.
+    let records_after = records(root);
+    let id = document_id(root, SCENARIO);
+    assert_eq!(
+        records_after[&id]["sourceHash"].as_str(),
+        Some(result.source_sha256.as_str())
+    );
+    for (other, record) in &records_before {
+        if *other != id {
+            assert_eq!(&records_after[other], record, "{other}");
+        }
+    }
+
+    // Every other file is untouched.
+    let after = shared(root);
+    assert_eq!(after.len(), before.len());
+    for (path, bytes) in &before {
+        if path != Path::new(SCENARIO) && path != Path::new(DIAGRAM) {
+            assert_eq!(after.get(path), Some(bytes), "{}", path.display());
+        }
+    }
+
+    // The window's save of the same text: the same files, the same bytes.
+    let mut session = ProjectSession::open(window.path()).unwrap();
+    let id = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == SCENARIO)
+        .unwrap()
+        .id()
+        .to_owned();
+    session
+        .edit_source(&id, &text, apiforge_project::Origin::SESSION)
+        .unwrap();
+    session.save(&id).unwrap();
+    drop(session);
+    assert_eq!(shared(window.path()), shared(root));
+}
+
+/// Criterion 1: the same text and hash twice is a no-op.
+#[test]
+fn mcp04_criterion_1_the_same_write_twice_changes_nothing_more() {
+    let directory = checkout();
+    let root = directory.path();
+    let (text, hash, _) = read(root, SCENARIO);
+    let arguments = write_args(SCENARIO, &commented(&text), &hash);
+    let agent = agent(root);
+    let first = agent.write_source(&arguments).unwrap();
+    let after_first = shared(root);
+    let again = agent.write_source(&arguments).unwrap();
+    assert!(!again.wrote);
+    assert!(again.changed.is_empty());
+    assert_eq!(again.source_sha256, first.source_sha256);
+    assert_eq!(again.generation, first.generation);
+    assert_eq!(shared(root), after_first);
+}
+
+/// Criterion 2: a text with errors is not saved; the diagnostics come with
+/// their positions.
+#[test]
+fn mcp04_criterion_2_a_text_with_errors_is_not_saved() {
+    let directory = checkout();
+    let root = directory.path();
+    let (text, hash, _) = read(root, PRODUCT);
+    let before = shared(root);
+    // A call of a component that does not exist, on the second line.
+    let broken = text.replacen(" {\n", " {\n  broken = nosuch@1(id: 1)\n", 1);
+    assert_ne!(broken, text);
+    let error = agent(root)
+        .write_source(&write_args(PRODUCT, &broken, &hash))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidText);
+    assert_eq!(error.wrote, Wrote::No);
+    let diagnostics = error.details["diagnostics"].as_array().unwrap();
+    let found = diagnostics
+        .iter()
+        .find(|d| d["severity"] == "error" && d["line"] == 2)
+        .unwrap_or_else(|| panic!("{diagnostics:?}"));
+    assert!(found["column"].as_u64().unwrap() > 1);
+    assert_eq!(found["end_line"], 2);
+    assert!(found["end_column"].as_u64().unwrap() > found["column"].as_u64().unwrap());
+    assert_eq!(shared(root), before, "the file is unchanged");
+
+    // A warning alone does not stop the save (KTLO-25's type mismatch).
+    let saved = agent(root)
+        .write_source(&write_args(PRODUCT, &inject_mismatch(&text), &hash))
+        .unwrap();
+    assert!(saved.wrote);
+    assert!(saved.diagnostics.iter().any(|d| d.message == MISMATCH));
+}
+
+/// Criterion 3: the disk changed with `apply` between the model's read and
+/// its write: `stale_source` with the current hash; a different generation
+/// is `stale_project`. Nothing is written either way.
+#[test]
+fn mcp04_criterion_3_a_stale_hash_or_generation_writes_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let (text, hash, generation) = read(root, SCENARIO);
+    let applied = text.replace("on_error continue", "on_error stop");
+    assert_ne!(applied, text);
+    apply(root, SCENARIO, &applied);
+    let current = sha256(&root.join(SCENARIO));
+    let current_generation = head_generation(root);
+    assert_ne!(current_generation, generation);
+    let before = shared(root);
+
+    let agent = agent(root);
+    let error = agent
+        .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::StaleSource);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(error.details["source_sha256"], current.as_str());
+    assert_eq!(shared(root), before);
+
+    let mut stale = write_args(SCENARIO, &commented(&applied), &current);
+    stale.expected_generation = Some(generation);
+    let error = agent.write_source(&stale).unwrap_err();
+    assert_eq!(error.code, ErrorCode::StaleProject);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(error.details["generation"], current_generation);
+    assert_eq!(shared(root), before);
+
+    let mut stale = create_args(Kind::Scenario, DRAFT, DRAFT_TEXT);
+    stale.expected_generation = Some(generation);
+    let error = agent.create_document(&stale).unwrap_err();
+    assert_eq!(error.code, ErrorCode::StaleProject);
+    assert_eq!(shared(root), before);
+
+    // Based on the current version, the write is saved.
+    let mut fresh = write_args(SCENARIO, &commented(&applied), &current);
+    fresh.expected_generation = Some(current_generation);
+    assert!(agent.write_source(&fresh).unwrap().wrote);
+}
+
+/// Criterion 4: `check_new_document` validates without writing and compares
+/// the header's kind with the kind asked for.
+#[test]
+fn mcp04_criterion_4_check_new_document_compares_the_kind_and_writes_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = tree(root);
+    let session = ProjectSession::open_saved_read_only(root).unwrap();
+    let check = session
+        .check_new_document(Some(DocumentKind::Component), DRAFT, DRAFT_TEXT)
+        .unwrap();
+    assert_eq!(
+        check.problems,
+        [apiforge_project::RegistrationProblem::KindMismatch]
+    );
+    assert!(!check.is_valid());
+    let check = session
+        .check_new_document(Some(DocumentKind::Component), DISCOUNT, DISCOUNT_TEXT)
+        .unwrap();
+    assert!(check.is_valid(), "{:?}", check.diagnostics);
+    assert_eq!(check.handle.as_deref(), Some("discount"));
+    drop(session);
+    assert_eq!(tree(root), before);
+}
+
+/// Criterion 4: every refusal of `create_document` leaves no source, no
+/// registry entry and no checkpoint.
+#[test]
+fn mcp04_criterion_4_create_document_refuses_on_any_error() {
+    let directory = checkout();
+    let root = directory.path();
+    fs::write(root.join(DRAFT), DRAFT_TEXT).unwrap();
+    let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
+    let renamed = product.replacen("component product", "component other_product", 1);
+    let broken = "scenario \"Broken\" {\n  x = nosuch@1(id: 1)\n}\n";
+    let before = shared(root);
+    let agent = agent(root);
+    let cases = [
+        (
+            Kind::Component,
+            PRODUCT,
+            renamed.as_str(),
+            ErrorCode::PathExists,
+        ),
+        (
+            Kind::Component,
+            "components/Product.afs",
+            renamed.as_str(),
+            ErrorCode::PathExists,
+        ),
+        (Kind::Scenario, DRAFT, DRAFT_TEXT, ErrorCode::PathExists),
+        (
+            Kind::Scenario,
+            "scenarios/DRAFT.afs",
+            DRAFT_TEXT,
+            ErrorCode::PathExists,
+        ),
+        (
+            Kind::Component,
+            "components/copy.afs",
+            product.as_str(),
+            ErrorCode::HandleExists,
+        ),
+        (
+            Kind::Scenario,
+            "../outside.afs",
+            DRAFT_TEXT,
+            ErrorCode::PathRejected,
+        ),
+        (
+            Kind::Scenario,
+            ".apiforge/inside.afs",
+            DRAFT_TEXT,
+            ErrorCode::PathRejected,
+        ),
+        (
+            Kind::Scenario,
+            "scenarios/notes.txt",
+            DRAFT_TEXT,
+            ErrorCode::PathRejected,
+        ),
+        (
+            Kind::Component,
+            "components/draft.afs",
+            DRAFT_TEXT,
+            ErrorCode::InvalidText,
+        ),
+        (
+            Kind::Scenario,
+            "scenarios/broken.afs",
+            broken,
+            ErrorCode::InvalidText,
+        ),
+    ];
+    for (kind, path, text, code) in cases {
+        let error = agent
+            .create_document(&create_args(kind, path, text))
+            .unwrap_err();
+        assert_eq!(error.code, code, "{path}");
+        assert_eq!(error.wrote, Wrote::No, "{path}");
+        assert!(!error.message.contains(path), "the path is not quoted");
+        if code == ErrorCode::InvalidText {
+            assert!(error.details["diagnostics"].is_array(), "{path}");
+        }
+        assert_eq!(shared(root), before, "{path}: nothing is written");
+    }
+    let error = agent
+        .create_document(&create_args(Kind::Scenario, "scenarios/broken.afs", broken))
+        .unwrap_err();
+    assert!(
+        error.details["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["severity"] == "error" && d["line"] == 2),
+        "an error on line 2"
+    );
+}
+
+/// Criterion 5: source, registry entry and checkpoint in one transaction,
+/// one head generation advance.
+#[test]
+fn mcp04_criterion_5_create_document_commits_everything_in_one_transaction() {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = agent(root);
+    // The session starts with a write that changes nothing, so the head
+    // generation below counts only the creation.
+    let (text, hash, _) = read(root, SCENARIO);
+    assert!(
+        !agent
+            .write_source(&write_args(SCENARIO, &text, &hash))
+            .unwrap()
+            .wrote
+    );
+    let before = head_generation(root);
+
+    let created = agent
+        .create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT))
+        .unwrap();
+    assert!(created.wrote);
+    assert_eq!(created.path, DISCOUNT);
+    assert_eq!(created.kind, Kind::Component);
+    assert_eq!(created.handle.as_deref(), Some("discount"));
+    assert_eq!(
+        created.generation,
+        before + 1,
+        "one head generation advance"
+    );
+    assert_eq!(created.generation, head_generation(root));
+    let mut changed = created.changed.clone();
+    changed.sort();
+    assert_eq!(changed, [DIAGRAM, MANIFEST, DISCOUNT]);
+    assert_eq!(
+        fs::read_to_string(root.join(DISCOUNT)).unwrap(),
+        DISCOUNT_TEXT
+    );
+    assert_eq!(created.source_sha256, sha256(&root.join(DISCOUNT)));
+    let entry = entry(root, DISCOUNT).expect("registered");
+    assert_eq!(entry["kind"], "component");
+    let record = &records(root)[entry["documentId"].as_str().unwrap()];
+    assert_eq!(
+        record["sourceHash"].as_str(),
+        Some(created.source_sha256.as_str())
+    );
+
+    // The window opening the project finds the identities sealed: nothing
+    // is left to write.
+    assert!(agent.finish_editing().finished);
+    let sealed = fs::read(root.join(DIAGRAM)).unwrap();
+    let session = ProjectSession::open(root).unwrap();
+    assert!(
+        session
+            .documents()
+            .iter()
+            .any(|document| document.entry().path.as_str() == DISCOUNT)
+    );
+    drop(session);
+    assert_eq!(fs::read(root.join(DIAGRAM)).unwrap(), sealed);
+    assert_eq!(head_generation(root), before + 1);
+}
+
+/// Criterion 5: a fault between the staged files, before activation, leaves
+/// nothing installed.
+#[test]
+fn mcp04_criterion_5_a_fault_before_activation_installs_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = agent(root);
+    let (text, hash, _) = read(root, SCENARIO);
+    agent
+        .write_source(&write_args(SCENARIO, &text, &hash))
+        .unwrap();
+    let before = shared(root);
+    let generation = head_generation(root);
+    let staged = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = staged.clone();
+    let error = faults::with_hook(
+        move |event| {
+            let in_staging = event
+                .path
+                .components()
+                .any(|part| part.as_os_str() == "transactions");
+            if in_staging
+                && event.boundary == Boundary::TemporaryCreate
+                && event.phase == IoPhase::Before
+            {
+                seen.set(seen.get() + 1);
+                if seen.get() == 2 {
+                    return Err(injected(&event.path, "between the staged files"));
+                }
+            }
+            Ok(())
+        },
+        || agent.create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT)),
+    )
+    .unwrap_err();
+    assert_eq!(staged.get(), 2, "the fault was reached");
+    assert_eq!(error.wrote, Wrote::No);
+    assert_ne!(error.code, ErrorCode::RecoveryRequired);
+    assert!(!head_active(root));
+    assert_eq!(head_generation(root), generation);
+    assert_eq!(shared(root), before, "nothing installed");
+    // The session goes on.
+    assert!(
+        agent
+            .create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT))
+            .unwrap()
+            .wrote
+    );
+}
+
+/// Criterion 6: a fault after activation, on the checkpoint's install, is
+/// `recovery_required` with `wrote: "unknown"`, and every later write of the
+/// session is refused with the same code. The server does not repair; the
+/// next writer finishes the operation (the window's recovery view in the
+/// desktop's `agent_session_tests`).
+#[test]
+fn mcp04_criterion_6_a_failure_after_activation_is_recovery_required() {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = agent(root);
+    let error = faults::with_hook(
+        |event| {
+            if event.boundary == Boundary::Replace
+                && event.phase == IoPhase::Before
+                && event.path.ends_with(DIAGRAM)
+            {
+                return Err(injected(&event.path, "on the checkpoint's install"));
+            }
+            Ok(())
+        },
+        || agent.create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT)),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::RecoveryRequired);
+    assert_eq!(error.wrote, Wrote::Unknown);
+    assert_eq!(serde_json::to_value(&error).unwrap()["wrote"], "unknown");
+    assert!(head_active(root));
+
+    let (text, hash) = (
+        fs::read_to_string(root.join(PRODUCT)).unwrap(),
+        sha256(&root.join(PRODUCT)),
+    );
+    let error = agent
+        .write_source(&write_args(PRODUCT, &commented(&text), &hash))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::RecoveryRequired);
+    let error = agent
+        .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::RecoveryRequired);
+    assert!(!root.join(DRAFT).exists());
+    assert_eq!(fs::read_to_string(root.join(PRODUCT)).unwrap(), text);
+    assert!(head_active(root), "the server does not repair on its own");
+
+    // The next writer finishes the operation.
+    assert!(agent.finish_editing().finished);
+    let store = ProjectStore::open_exclusive(root).unwrap();
+    store.recover().unwrap();
+    drop(store);
+    assert!(!head_active(root));
+    assert_eq!(
+        fs::read_to_string(root.join(DISCOUNT)).unwrap(),
+        DISCOUNT_TEXT
+    );
+    assert!(records(root).contains_key(&document_id(root, DISCOUNT)));
+}
+
+/// Criterion 7: the first write takes the writer lock and the session keeps
+/// it across calls until `finish_editing`; the holder file describes the
+/// agent.
+#[test]
+fn mcp04_criterion_7_the_session_holds_the_lock_until_finish_editing() {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = agent(root);
+    agent.set_client(Some("Claude Code".into()));
+    assert!(!agent.is_active());
+    assert!(!locked(root), "reading takes no lock");
+
+    let (text, hash, _) = read(root, SCENARIO);
+    let written = agent
+        .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+        .unwrap();
+    assert!(agent.is_active());
+    assert!(locked(root), "the lock is kept after the write returns");
+
+    let holder: Value =
+        serde_json::from_slice(&fs::read(root.join(".apiforge/local/holder.json")).unwrap())
+            .unwrap();
+    assert_eq!(holder["program"], "apiforge");
+    assert_eq!(holder["role"], "agent");
+    assert_eq!(holder["client"], "Claude Code");
+    assert!(holder["since"].as_str().unwrap().ends_with('Z'));
+    let described = ProjectStore::open_read_only(root)
+        .unwrap()
+        .holder()
+        .unwrap()
+        .expect("a live writer");
+    assert_eq!(described.role(), Some(HolderRole::Agent));
+    assert_eq!(described.client(), Some("Claude Code"));
+
+    // The read tools answer meanwhile, and a pause does not end the session.
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        tools::read_source(root, SCENARIO).unwrap().source_sha256,
+        Some(written.source_sha256.clone())
+    );
+    assert!(locked(root));
+    let second = agent
+        .write_source(&write_args(
+            SCENARIO,
+            &commented(&commented(&text)),
+            &written.source_sha256,
+        ))
+        .unwrap();
+    assert!(second.wrote);
+    assert!(locked(root));
+
+    let finished = Instant::now();
+    assert!(agent.finish_editing().finished);
+    assert!(!agent.is_active());
+    while locked(root) {
+        assert!(
+            finished.elapsed() < Duration::from_secs(1),
+            "the lock is released within a second of finish_editing"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!agent.finish_editing().finished, "nothing left to finish");
+
+    // A later write starts a new session.
+    agent
+        .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+        .unwrap();
+    assert!(agent.is_active());
+    assert!(locked(root));
+}
+
+/// Criterion 8: a write while another process holds the lock quotes the
+/// holder, writes nothing and leaves the read tools working.
+#[test]
+fn mcp04_criterion_8_a_write_while_another_process_holds_the_project_is_refused() {
+    let cases = [
+        (
+            LockHolder::window(),
+            ErrorCode::HeldByWindow,
+            "API Forge window",
+        ),
+        (
+            LockHolder::command("apply"),
+            ErrorCode::HeldByOther,
+            "apiforge apply",
+        ),
+        (
+            LockHolder::new(HolderRole::Agent, Some("Other client".into())),
+            ErrorCode::HeldByOther,
+            "Other client via apiforge mcp",
+        ),
+    ];
+    for (holder, code, named) in cases {
+        let directory = checkout();
+        let root = directory.path();
+        let (text, hash, _) = read(root, SCENARIO);
+        let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+        let since = holder.since().unwrap().to_owned();
+        let before = shared(root);
+        let agent = agent(root);
+        for error in [
+            agent
+                .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+                .unwrap_err(),
+            agent
+                .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+                .unwrap_err(),
+        ] {
+            assert_eq!(error.code, code, "{named}");
+            assert_eq!(error.wrote, Wrote::No);
+            assert!(error.message.contains(named), "names {named}");
+            assert!(error.message.contains(&since), "says since when");
+            let lower = error.message.to_lowercase();
+            assert!(
+                !lower.contains("directly") && !lower.contains("edit the file"),
+                "no advice to edit the file directly"
+            );
+            assert_eq!(error.details["holder"]["since"], since.as_str());
+        }
+        assert!(!agent.is_active());
+        assert_eq!(shared(root), before, "nothing written");
+        assert!(tools::read_source(root, SCENARIO).is_ok());
+        assert!(tools::check(root, None).is_ok());
+        assert!(tools::check_text(root, SCENARIO, &text).is_ok());
+
+        // Once the holder lets go, the write goes through.
+        drop(owner);
+        assert!(
+            agent
+                .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+                .unwrap()
+                .wrote
+        );
+    }
+}
+
+/// Criterion 8: a holder that left no readable description is another
+/// process.
+#[test]
+fn mcp04_criterion_8_a_holder_without_a_description_is_held_by_other() {
+    let directory = checkout();
+    let root = directory.path();
+    let _owner = ProjectStore::open_exclusive(root).unwrap();
+    fs::remove_file(root.join(".apiforge/local/holder.json")).unwrap();
+    let error = agent(root)
+        .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::HeldByOther);
+    assert!(
+        error.message.contains("Another process"),
+        "the generic wording"
+    );
+    assert!(!root.join(DRAFT).exists());
+}
+
+/// Criterion 9: a known secret value in the text is refused and never echoed.
+#[test]
+fn mcp04_criterion_9_a_known_secret_in_the_text_is_refused() {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = AgentSession::with_environment(
+        root.to_owned(),
+        vec![("APIFORGE_SECRET_TOKEN".into(), SECRET.into())],
+    );
+    let (text, hash, _) = read(root, SCENARIO);
+    let leaked = text.replacen(" {\n", &format!(" {{\n  // token {SECRET}\n"), 1);
+    let component = DISCOUNT_TEXT.replace("A tenth off a price.", SECRET);
+    let before = shared(root);
+    for error in [
+        agent
+            .write_source(&write_args(SCENARIO, &leaked, &hash))
+            .unwrap_err(),
+        agent
+            .create_document(&create_args(Kind::Component, DISCOUNT, &component))
+            .unwrap_err(),
+    ] {
+        assert_eq!(error.code, ErrorCode::SecretInText);
+        assert_eq!(error.wrote, Wrote::No);
+        assert!(
+            !error_text(&error).contains(SECRET),
+            "the value is not echoed"
+        );
+    }
+    assert_eq!(shared(root), before, "nothing written");
+}
+
+/// Criterion 10: blocks whose handle and kind did not change keep their
+/// identities and positions; a new block has the identity the server sealed.
+#[test]
+fn mcp04_criterion_10_identities_survive_a_server_save() {
+    type Identity = (String, Value, Value);
+    let directory = checkout();
+    let root = directory.path();
+    let nodes = |session: &ProjectSession| -> BTreeMap<String, Identity> {
+        let document = session
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == SCENARIO)
+            .unwrap();
+        let Some(apiforge_project::Document::Scenario(scenario)) = document.model() else {
+            panic!("a valid scenario")
+        };
+        scenario
+            .graph
+            .nodes
+            .iter()
+            .chain(&scenario.cleanup.nodes)
+            .map(|node| {
+                (
+                    node.handle.clone(),
+                    (
+                        node.id.clone(),
+                        serde_json::to_value(node.kind).unwrap(),
+                        serde_json::to_value(&node.position).unwrap(),
+                    ),
+                )
+            })
+            .collect()
+    };
+    let before = nodes(&ProjectSession::open_saved_read_only(root).unwrap());
+    let (text, hash, _) = read(root, SCENARIO);
+    let agent = agent(root);
+    agent
+        .write_source(&write_args(SCENARIO, &with_ping(&text), &hash))
+        .unwrap();
+    assert!(agent.finish_editing().finished);
+
+    let sealed = fs::read(root.join(DIAGRAM)).unwrap();
+    let session = ProjectSession::open(root).unwrap();
+    let after = nodes(&session);
+    assert!(!before.is_empty());
+    for (handle, identity) in &before {
+        assert_eq!(after.get(handle), Some(identity), "{handle}");
+    }
+    let ping = &after["ping"];
+    let record = &records(root)[&document_id(root, SCENARIO)];
+    let checkpointed: Vec<&Value> = record["identityBase"]["document"]["graph"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|node| node["handle"] == "ping")
+        .collect();
+    assert_eq!(checkpointed.len(), 1, "{record}");
+    assert_eq!(checkpointed[0]["id"].as_str(), Some(ping.0.as_str()));
+    assert_eq!(checkpointed[0]["position"], ping.2);
+    drop(session);
+    assert_eq!(
+        fs::read(root.join(DIAGRAM)).unwrap(),
+        sealed,
+        "opening the project in the window changes no identity"
+    );
+}
+
+// ----- MCP-04 review round 1 of #111 -----
+
+/// A new document under a folder that exists only in another letter case
+/// would create a second spelling of that folder: `path_exists`, checked
+/// and created alike, and nothing is written.
+#[test]
+fn mcp04_review_a_folder_in_another_letter_case_is_path_exists() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = shared(root);
+    let check = tools::check_text(root, "Components/discount.afs", DISCOUNT_TEXT).unwrap();
+    assert_eq!(
+        check.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+        [ErrorCode::PathExists]
+    );
+    let error = agent(root)
+        .create_document(&create_args(
+            Kind::Component,
+            "Components/discount.afs",
+            DISCOUNT_TEXT,
+        ))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PathExists);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(shared(root), before);
+}
+
+/// The storage's own check finds a file changed on disk after the session
+/// read it (another program writing without the lock): the document itself
+/// is `stale_source`, a new document's path `path_exists`, the checkpoint
+/// `stale_project`. Nothing is written. The overview's question whether the
+/// session is active is answered during the write.
+#[test]
+fn mcp04_review_a_file_changed_during_the_commit_names_what_changed() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let agent = Arc::new(agent(&root));
+    let (text, hash, _) = read(&root, SCENARIO);
+    // The session starts with a write that changes nothing.
+    agent
+        .write_source(&write_args(SCENARIO, &text, &hash))
+        .unwrap();
+    let cases = [
+        (SCENARIO, ErrorCode::StaleSource, false),
+        (DISCOUNT, ErrorCode::PathExists, true),
+        (DIAGRAM, ErrorCode::StaleProject, false),
+    ];
+    for (changed, code, creating) in cases {
+        let target = root.join(changed);
+        let original = fs::read(&target).ok();
+        let during = agent.clone();
+        let error = faults::with_hook(
+            {
+                let target = target.clone();
+                let mut done = false;
+                move |event| {
+                    let in_staging = event
+                        .path
+                        .components()
+                        .any(|part| part.as_os_str() == "transactions");
+                    if in_staging && !done {
+                        done = true;
+                        assert!(
+                            during.is_active(),
+                            "answered while the write holds the session"
+                        );
+                        let mut bytes = fs::read(&target).unwrap_or_default();
+                        bytes.extend_from_slice(b"\n// written by another program\n");
+                        fs::write(&target, bytes).unwrap();
+                    }
+                    Ok(())
+                }
+            },
+            || {
+                if creating {
+                    agent.create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT))
+                } else {
+                    agent
+                        .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+                        .map(|_| unreachable!("the write must be refused"))
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, code, "{changed}");
+        assert_eq!(error.wrote, Wrote::No, "{changed}");
+        assert!(!head_active(&root), "{changed}: nothing activated");
+        match original {
+            Some(bytes) => fs::write(&target, bytes).unwrap(),
+            None => fs::remove_file(&target).unwrap(),
+        }
+    }
+    assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+    assert!(entry(&root, DISCOUNT).is_none());
 }

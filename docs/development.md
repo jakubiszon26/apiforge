@@ -238,9 +238,10 @@ Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
 
 ### Tools
 
-Each tool names a document by its registered path; `check_text` also takes
-the path a new document would have. A tool opens the saved project read-only
-for each call and writes nothing, not even `.apiforge/local`.
+Each tool names a document by its registered path; `check_text` and
+`create_document` also take the path a new document would have. A read tool
+opens the saved project read-only for each call and writes nothing, not even
+`.apiforge/local`; the three write tools work through the agent session below.
 
 | Tool | Input | Result |
 | --- | --- | --- |
@@ -251,6 +252,9 @@ for each call and writes nothing, not even `.apiforge/local`.
 | `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
 | `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document: `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`; with `full: true` the runner's JSON report instead of the steps |
+| `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
+| `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
+| `finish_editing` | — | `finished`: whether an agent session ended and released the project |
 
 `check_text` checks a proposed text without saving it, while `run` executes
 the saved source, so a model that wants to run its draft writes it first.
@@ -288,6 +292,47 @@ Two environment variables are test seams for this and are not set in use:
 whole milliseconds, capped at ten minutes; any other value stops the server
 with exit code 2.
 
+### The agent session
+
+The first call of `write_source` or `create_document` takes the project's
+writer lock for an agent session
+([ADR 0014](decisions/0014-agent-sessions.md)): the holder file names role
+`agent` and the client's name from `initialize` or the request metadata, and
+a window opened meanwhile observes. The server keeps the lock across calls,
+however long the pause, until `finish_editing`, the end of stdin or the end of
+the process; a later write starts a new session. `project_overview` reports
+this server's own session as `holder: "agent_session"`. Each write reads the
+saved project afresh under that lock.
+
+- `write_source` saves only a text without errors (`invalid_text` with the
+  diagnostics otherwise; warnings are saved) and only over the version the
+  model names: a different hash on disk is `stale_source` with the current
+  `details.source_sha256`, and a different `expected_generation` is
+  `stale_project` with the current `details.generation`; a checkpoint or
+  registry another program changed without the lock is `stale_project`
+  too. The bytes on disk
+  equal `text` and the checkpoint is written: the same files, the same bytes
+  as a save in the window. When the disk already holds exactly `text`, the
+  call is the same write repeated and changes nothing.
+- `create_document` writes nothing unless the text passes `check_text` as a
+  new document of `kind`: `path_exists` (also for a folder of the path that
+  exists in another letter case; with the existing file's
+  `details.source_sha256`, so a retry after a lost answer can tell),
+  `handle_exists`, `path_rejected` or `invalid_text` (a header of another
+  kind, or errors, with the diagnostics). The source, its registry entry and
+  its checkpoint commit in one transaction, one generation.
+- A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
+  each call) is `secret_in_text`, the value never repeated.
+- While a window holds the project a write is `held_by_window`; another
+  process, an agent or `apiforge apply`, is `held_by_other`. The message and
+  `details.holder` name the holder and since when; the read tools still
+  answer.
+- A commit that fails after its activation is `recovery_required` with
+  `wrote: "unknown"`; every later write of the session is refused with the
+  same code (`wrote: false`). The server does not repair: after
+  `finish_editing`, the window's recovery view finishes the operation when
+  it opens the project.
+
 ### Resources
 
 `resources/list` returns `apiforge://reference`, the language reference, and
@@ -302,8 +347,10 @@ unregistered path is `resource_not_found` with `data.code`
 
 ### The contract
 
-- Every tool has an input and an output schema and `readOnlyHint: true`;
-  `tools/list` returns them in the order above. A result carries
+- Every tool has an input and an output schema; `tools/list` returns them in
+  the order above. The read tools carry `readOnlyHint: true`; `write_source`
+  is `destructiveHint: true` and `idempotentHint: true`, `create_document`
+  neither, `finish_editing` only idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
 - A call that could not do what was asked is `isError: true` with
   `structuredContent` `{ code, message, wrote, details }`. The codes form a
@@ -320,6 +367,10 @@ unregistered path is `resource_not_found` with `data.code`
   (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
   `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,
   `path_rejected` and `result_too_large`; `wrote` is always `false` for them.
+  The write tools add `stale_source`, `stale_project`, `held_by_window`,
+  `held_by_other`, `secret_in_text`, `path_exists`, `handle_exists` and
+  `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
+  only for a commit that failed after its activation.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
   `.apiforge/diagram.json` or a Windows reserved name is `path_rejected`.

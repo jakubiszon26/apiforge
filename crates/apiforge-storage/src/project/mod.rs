@@ -18,6 +18,17 @@ mod transaction;
 mod trash;
 mod workspace;
 
+/// The persistence boundaries as a test seam for other crates (MCP-04): a
+/// thread-local hook sees every filesystem operation of a commit and can
+/// fail it. Only with the `fault-injection` feature, which no release enables.
+#[cfg(feature = "fault-injection")]
+pub mod faults {
+    pub use super::io::{
+        Boundary, Phase,
+        testing::{Event, with_hook},
+    };
+}
+
 pub use cache::{CacheNotice, CacheProvenance, LastValidRead, LastValidSnapshot};
 pub use conflict::{
     ConflictArchive, RecoveryCandidate, RecoveryCandidateStatus, RecoveryCompletion,

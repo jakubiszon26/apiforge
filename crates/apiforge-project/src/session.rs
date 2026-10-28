@@ -249,7 +249,12 @@ impl ProjectSession {
         if !has_manifest(root.as_ref())? {
             return Err(Error::NotAProject);
         }
-        let store = ProjectStore::open_read_only(root)?;
+        Self::load_tolerant(ProjectStore::open_read_only(root)?)
+    }
+
+    /// One stable read of `store` in which a registered source over the 1 MiB
+    /// limit is `Unavailable::TooLarge` instead of a failed load.
+    fn load_tolerant(store: ProjectStore) -> Result<Self> {
         let (manifest, snapshot, too_large) = match store.load() {
             Ok((manifest, snapshot)) => (manifest, snapshot, HashSet::new()),
             Err(ProjectError::Limit) => load_tolerating_large_sources(&store)?,
@@ -263,6 +268,18 @@ impl ProjectSession {
             snapshot,
             &too_large,
         )
+    }
+
+    /// A session over the saved definitions of a store the caller already
+    /// holds, such as the writer lock an agent session keeps across calls
+    /// (MCP-04): no local recovery and no last-valid cache. A registered
+    /// source over the 1 MiB limit is `Unavailable::TooLarge`, as in
+    /// [`Self::open_saved_tolerant`].
+    pub fn from_store_saved(store: ProjectStore) -> Result<Self> {
+        if !has_manifest(store.root())? {
+            return Err(Error::NotAProject);
+        }
+        Self::load_tolerant(store)
     }
 
     /// Stable saved definitions under the writer lock. Never falls back to a

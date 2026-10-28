@@ -1,9 +1,10 @@
 //! The error every tool answers with when it could not do what was asked
 //! (MCP-00, "The contract"). Codes form a fixed list documented in the
 //! development guide; a message never quotes an argument or a source text.
-use schemars::JsonSchema;
-use serde::Serialize;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::{Serialize, Serializer};
 use serde_json::Value;
+use std::borrow::Cow;
 
 /// The fixed list of error codes. Only some are used by the read tools;
 /// the others are reserved for the tools of later tickets so the list is
@@ -74,13 +75,44 @@ impl ErrorCode {
     }
 }
 
-/// `{ code, message, wrote, details }`. The read tools never write, so
-/// `wrote` is always `false` here.
+/// Whether a call that could not do what was asked changed the project:
+/// `false`, or `"unknown"` when a commit failed after its activation and the
+/// project needs recovery. An error never answers `true`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wrote {
+    No,
+    Unknown,
+}
+
+impl Serialize for Wrote {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::No => serializer.serialize_bool(false),
+            Self::Unknown => serializer.serialize_str("unknown"),
+        }
+    }
+}
+
+impl JsonSchema for Wrote {
+    fn schema_name() -> Cow<'static, str> {
+        "Wrote".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "false, or \"unknown\" when a commit failed after its activation",
+            "oneOf": [{ "const": false }, { "const": "unknown" }]
+        })
+    }
+}
+
+/// `{ code, message, wrote, details }`. A refusal wrote nothing; only a
+/// commit that failed after its activation is `wrote: "unknown"`.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct ToolError {
     pub code: ErrorCode,
     pub message: String,
-    pub wrote: bool,
+    pub wrote: Wrote,
     /// Structured context for the model: registered paths, diagnostics, how
     /// to narrow a request. An empty object when there is none.
     pub details: Value,
@@ -91,13 +123,18 @@ impl ToolError {
         Self {
             code,
             message: message.into(),
-            wrote: false,
+            wrote: Wrote::No,
             details: Value::Object(Default::default()),
         }
     }
 
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = details;
+        self
+    }
+
+    pub fn with_wrote(mut self, wrote: Wrote) -> Self {
+        self.wrote = wrote;
         self
     }
 }

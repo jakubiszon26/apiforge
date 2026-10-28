@@ -16,5 +16,10 @@ tempfile.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
+[features]
+# The I/O fault seam of `project::faults` for other crates' tests (MCP-04).
+# Never enabled in a release build.
+fault-injection = []
+
 [lints]
 workspace = true
