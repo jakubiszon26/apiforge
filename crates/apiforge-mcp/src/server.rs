@@ -10,7 +10,7 @@ use crate::{
     secrets::{self, Secrets},
     tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
 };
-use apiforge_core::run::RunMode;
+use apiforge_core::{journal::JournalRun, run::RunMode};
 use apiforge_project::ProjectSession;
 use apiforge_storage::{JournalStore, project::ProjectStore};
 use rmcp::{
@@ -114,7 +114,7 @@ pub struct ApiforgeServer {
     answered: Arc<Mutex<Answered>>,
     /// While a live run of this server is in progress, the journal's runs
     /// from before it: the one it adds is not an interrupted run.
-    journal_before: Arc<Mutex<Option<HashSet<String>>>>,
+    journal_before: Arc<Mutex<Option<Before>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -244,11 +244,7 @@ impl ApiforgeServer {
         self.permission.check()?;
         let _running = JournalBefore::set(
             &self.journal_before,
-            journal
-                .interrupted
-                .iter()
-                .map(|run| run.run_id.clone())
-                .collect(),
+            (journal.interrupted.clone(), journal.unreadable),
         );
         let (mut report, before) = tools::execute(
             prepared,
@@ -312,22 +308,23 @@ impl ApiforgeServer {
     }
 
     /// The project's journal as this server may read it: through its agent
-    /// session's lock, or while no other process holds the project.
-    fn read_journal(&self) -> Result<(Vec<apiforge_core::journal::JournalRun>, bool), ToolError> {
-        let store = match self.agent.held() {
-            Some(store) => store,
-            None => ProjectStore::open_read_only(&**self.folder)
-                .map_err(|error| live::journal_error(error.into()))?,
-        };
-        let (mut runs, unreadable) = live::read_journal(&store)?;
+    /// session's lock, or while no other process holds the project. While
+    /// this server's own live run writes it, the file is not read: the runs
+    /// from before that run are the interrupted ones.
+    fn read_journal(&self) -> Result<(Vec<JournalRun>, bool), ToolError> {
         if let Some(before) = &*self
             .journal_before
             .lock()
             .unwrap_or_else(|p| p.into_inner())
         {
-            runs.retain(|run| before.contains(&run.run_id));
+            return Ok(before.clone());
         }
-        Ok((runs, unreadable))
+        let store = match self.agent.held() {
+            Some(store) => store,
+            None => ProjectStore::open_read_only(&**self.folder)
+                .map_err(|error| live::journal_error(error.into()))?,
+        };
+        live::read_journal(&store)
     }
 
     /// `project_overview` as the tool answers it.
@@ -775,12 +772,16 @@ impl<R: AsyncRead + Unpin> AsyncRead for EndOfInput<R> {
     }
 }
 
+/// The journal's runs from before this server's live run, and whether it
+/// could be read.
+type Before = (Vec<JournalRun>, bool);
+
 /// Marks a live run of this server as in progress for the journal reads of
 /// the overview and `run`, until dropped.
-struct JournalBefore(Arc<Mutex<Option<HashSet<String>>>>);
+struct JournalBefore(Arc<Mutex<Option<Before>>>);
 
 impl JournalBefore {
-    fn set(slot: &Arc<Mutex<Option<HashSet<String>>>>, before: HashSet<String>) -> Self {
+    fn set(slot: &Arc<Mutex<Option<Before>>>, before: Before) -> Self {
         *slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(before);
         Self(slot.clone())
     }

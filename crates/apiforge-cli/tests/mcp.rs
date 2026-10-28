@@ -1024,9 +1024,20 @@ fn journal(root: &Path) -> Option<String> {
     std::fs::read_to_string(root.join(JOURNAL)).ok()
 }
 
-/// Waits up to ten seconds for the run journal to hold a request.
-fn wait_for_journal(root: &Path) -> String {
+/// Waits up to ten seconds for a request to reach `api`, then for the run
+/// journal to show it. A request is journalled before it is sent, so the
+/// file is read only once the request has arrived: polling it meanwhile
+/// would race the runner's atomic replace, which Windows refuses while the
+/// file is open.
+fn wait_for_journal(root: &Path, api: &Listener) -> String {
     let started = Instant::now();
+    while api.accepted() == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no request was sent"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
     loop {
         if let Some(text) = journal(root)
             && serde_json::from_str::<Value>(&text).is_ok_and(|journal| {
@@ -1041,7 +1052,7 @@ fn wait_for_journal(root: &Path) -> String {
             started.elapsed() < Duration::from_secs(10),
             "no request was journalled"
         );
-        thread::sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -1180,7 +1191,7 @@ fn mcp06_criterion_7_eof_during_a_live_run_empties_the_journal() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    wait_for_journal(root);
+    wait_for_journal(root, &api);
     let started = Instant::now();
     while api.accepted() == 0 {
         assert!(started.elapsed() < Duration::from_secs(10), "no connection");
@@ -1217,7 +1228,7 @@ fn mcp06_criterion_7_with_the_cleanup_blocked_the_entry_stays() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    wait_for_journal(root);
+    wait_for_journal(root, &api);
     let (status, elapsed, _, stderr) = server.close_within(Duration::from_secs(20));
     assert_eq!(status.code(), Some(0), "stderr: {stderr}");
     assert!(
@@ -1255,7 +1266,7 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    let journalled = wait_for_journal(root);
+    let journalled = wait_for_journal(root, &api);
     server.child.kill().unwrap();
     server.child.wait().unwrap();
     assert_eq!(
@@ -1403,19 +1414,26 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    let journalled = wait_for_journal(root);
+    let journalled = wait_for_journal(root, &api);
     server.send(
         &json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": run_id, "reason": "acceptance" } })
             .to_string(),
     );
+    // The run's slot frees once its cleanup has run; the journal file is
+    // not polled while the runner rewrites it.
     let started = Instant::now();
-    while journal(root).is_some() {
+    loop {
+        let response = call(&mut server, next(), "run", json!({ "path": PRODUCT }));
+        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+            break;
+        }
         assert!(
             started.elapsed() < Duration::from_secs(10),
             "the run did not end"
         );
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(Duration::from_millis(100));
     }
+    assert_eq!(journal(root), None, "the cancelled run removed its entry");
     let finished = call(&mut server, next(), "finish_editing", json!({}));
     assert_eq!(structured(&finished)["finished"], true);
     let (status, _, stdout, stderr) = server.close();
