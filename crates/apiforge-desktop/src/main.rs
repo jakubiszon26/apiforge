@@ -67,6 +67,8 @@ enum Arguments {
         size: Option<(u32, u32)>,
     },
     Help,
+    /// The binary's name and version (REL-01).
+    Version,
 }
 
 fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'static str> {
@@ -76,6 +78,7 @@ fn arguments(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, &'
     let result = match first.as_ref().map(|value| value.to_str()) {
         None => Arguments::Managed,
         Some(Some("--help" | "-h")) => Arguments::Help,
+        Some(Some("--version")) => Arguments::Version,
         Some(Some("--project")) => Arguments::Window(path("Missing file path")?),
         Some(Some("--folder")) => Arguments::Folder(path("Missing folder path")?),
         Some(Some("--managed")) => Arguments::Managed,
@@ -202,6 +205,7 @@ const HELP: &str = "API Forge
   apiforge-desktop --legacy             open the previous JSON workspace instead
   apiforge-desktop --check FILE         validate a document without opening a window
   apiforge-desktop --smoke-test FILE    open a window, draw a few frames and exit
+  apiforge-desktop --version            print the version and exit
   apiforge-desktop --screenshot OUT.png [--project FILE | --folder PATH] [--select NODE]
                    [--mode code|diagram|split] [--size WxH]
                                         capture the window and exit; --mode needs --folder
@@ -221,6 +225,10 @@ fn main() -> ExitCode {
     match arguments {
         Arguments::Help => {
             println!("{HELP}");
+            ExitCode::SUCCESS
+        }
+        Arguments::Version => {
+            println!("apiforge-desktop {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Arguments::Check(path) => match files::read_document(&path) {
@@ -474,6 +482,10 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     let viewport = eframe::egui::ViewportBuilder::default()
         .with_title("API Forge")
         .with_app_id("apiforge");
+    // REL-01: the application icon, which X11 window managers show for the
+    // window; Wayland takes it from the desktop file named by the app ID.
+    #[cfg(target_os = "linux")]
+    let viewport = viewport.with_icon(Arc::new(window_icon()));
     // The stop window has one size and is centred, like a dialog; it grows
     // into the workspace window if the person opens the previous workspace.
     let stopped = matches!(opening, Opening::Stopped(_));
@@ -547,9 +559,31 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     }
 }
 
+/// The application icon at 256 px, rendered from packaging/icon/apiforge.svg.
+const ICON_PNG: &[u8] = include_bytes!("../../../packaging/icon/apiforge-256.png");
+
+/// The application icon for the window. The image is part of the binary and
+/// a test decodes it, so a failure here is a defect of the build.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn window_icon() -> eframe::egui::IconData {
+    eframe::icon_data::from_png_bytes(ICON_PNG).expect("the bundled icon is a valid PNG")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REL-01: the bundled icon decodes to a 256 px square with transparency
+    /// at its corners, as the window manager and the AppImage expect.
+    #[test]
+    fn the_window_icon_is_the_256_px_application_icon() {
+        let icon = window_icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        assert_eq!(icon.rgba[3], 0, "the corner is transparent");
+        let centre = (128 * 256 + 128) * 4;
+        assert_eq!(icon.rgba[centre + 3], 255, "the centre is opaque");
+    }
 
     fn parse(args: &[&str]) -> Result<Arguments, &'static str> {
         arguments(args.iter().map(OsString::from))
@@ -589,6 +623,15 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    /// REL-01 (#115), criterion 5: `--version` is an argument of its own, and
+    /// what it prints is the binary's name and the workspace version.
+    #[test]
+    fn version_is_an_argument_of_its_own() {
+        assert_eq!(format!("{:?}", parse(&["--version"])), "Ok(Version)");
+        assert!(parse(&["--version", "fixtures/workspace.json"]).is_err());
+        assert!(parse(&["--check", "x.json", "--version"]).is_err());
     }
 
     fn screenshot(

@@ -146,6 +146,70 @@ under X11 and `libxkbcommon-dev` does not pull in; the root `.gitattributes` kee
 every `.json` and `.afs` file at LF on checkout, so the byte-for-byte fixture check
 also passes on Windows.
 
+## Releases
+
+A release is a GitHub pre-release built by
+[`release.yml`](../.github/workflows/release.yml) from a pushed tag
+([REL-01](tickets/REL-01.md)). Nothing else starts that workflow. To release
+the workspace version, tag a commit that is on `main`:
+
+```bash
+git tag v0.1.0 origin/main && git push origin v0.1.0
+```
+
+A tag `v<version>-rc.<N>` releases the same version as a dry run. The workflow
+stops before building unless the tag, with any `-rc.N` suffix removed, equals
+`v` followed by the `version` of `[workspace.package]` in `Cargo.toml`; its
+publish job refuses a tagged commit that is not on `main`. Then:
+
+1. On `ubuntu-22.04` (glibc 2.35) and `windows-2022` it runs the workspace
+   tests, builds both binaries in release mode, packs
+   `apiforge-<tag>-x86_64-unknown-linux-gnu.tar.gz` and
+   `apiforge-<tag>-x86_64-pc-windows-msvc.zip`, compares each with
+   `packaging/manifest-linux.txt` or `manifest-windows.txt`, and runs
+   `packaging/mcp-smoke.py` against the `apiforge` binary of the extracted
+   archive: `initialize`, `tools/list` with the tools of
+   `crates/apiforge-cli/tests/mcp.rs`, exit 0 at EOF.
+2. On Linux it builds `apiforge-desktop-<tag>-x86_64.AppImage` from an
+   `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon,
+   `LICENSE`, the font licences and the libraries of
+   `packaging/appimage-libraries.txt`, which the binary finds through its
+   RUNPATH (`patchelf`); the AppImage does not set `LD_LIBRARY_PATH`.
+   Packed by appimagetool 1.9.1 with the type2 runtime 20251108; both are
+   downloaded by their release URLs and checked against the SHA-256 in the
+   workflow.
+3. On `ubuntu-24.04` it starts the AppImage with `--version`, `--check` and
+   `--screenshot` (`packaging/appimage-window.sh`), once on the runner and
+   once in a bare `ubuntu:24.04` container with only `libfuse2t64`, `xvfb`,
+   `mesa-vulkan-drivers` and `libvulkan1`, and validates its desktop file.
+4. Only when every job above has passed, the publish job writes
+   `SHA256SUMS.txt`, checks that the four asset names carry the tag, and
+   creates the pre-release with notes generated from the merged pull
+   requests, followed by the sums. It is the only job with write
+   permission.
+
+A failed job publishes nothing; delete the tag, fix, and tag again. Changes to
+`packaging/` run `python3 -I packaging/test_release.py`, which the workflow
+also runs first.
+
+The application icon is `packaging/icon/apiforge.svg`. Its PNGs are rendered
+once and committed, so no build needs an SVG renderer: resvg 0.48.1
+(`cargo install resvg --version =0.48.1 --locked`), with the bundled Adwaita
+Mono as its only font so that the result does not depend on the fonts
+installed:
+
+```bash
+for size in 16 32 48 64 128 256 512; do
+  resvg --skip-system-fonts \
+    --use-font-file crates/apiforge-desktop/assets/fonts/AdwaitaMono-Regular.ttf \
+    --monospace-family 'Adwaita Mono' -w "$size" -h "$size" \
+    packaging/icon/apiforge.svg "packaging/icon/apiforge-$size.png"
+done
+```
+
+The window carries the 256 px image on Linux; the AppImage uses it for its
+launcher entry.
+
 ## Running a scenario from the command line
 
 ```bash

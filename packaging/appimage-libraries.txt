@@ -1,0 +1,11 @@
+# The libraries the AppImage carries in usr/lib (REL-01), copied from the
+# ubuntu-22.04 builder. winit loads them at run time under X11, and a bare
+# ubuntu:24.04 with only xvfb and the Mesa Vulkan driver lacks them (traced
+# with LD_DEBUG=files on the window's --screenshot, 2026-10-28). glibc, libX11,
+# libxcb, Wayland, GL and Vulkan stay the host's, as in every AppImage.
+libxkbcommon.so.0
+libxkbcommon-x11.so.0
+libxcb-xkb.so.1
+libXcursor.so.1
+libXfixes.so.3
+libXi.so.6
