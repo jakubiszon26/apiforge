@@ -3860,3 +3860,160 @@ fn mcp05_review_an_oversized_component_is_too_large() {
     assert_eq!(error.wrote, Wrote::No);
     assert_eq!(shared(root), before);
 }
+
+// MCP-12: holder discovery is descriptive only; a foreign journal is not ours.
+#[test]
+fn mcp12_overview_describes_every_holder_without_writing_or_connecting() {
+    let directory = checkout();
+    let root = directory.path();
+    let endpoint = "apiforge-0123456789abcdef0123456789abcdef";
+    let cases = [
+        (
+            LockHolder::window().with_endpoint(Some(endpoint.into())),
+            "window",
+            true,
+        ),
+        (LockHolder::window(), "window", false),
+        (
+            LockHolder::window().with_endpoint(Some("../socket".into())),
+            "window",
+            false,
+        ),
+        (LockHolder::command("apply"), "another_process", false),
+        (
+            LockHolder::new(HolderRole::Agent, Some("Foreign agent".into())),
+            "another_process",
+            false,
+        ),
+    ];
+    for (holder, expected, eligible) in cases {
+        let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+        fs::write(
+            root.join(".apiforge/local/journal.json"),
+            b"foreign unreadable journal",
+        )
+        .unwrap();
+        let before = all_bytes(root);
+        let overview = serde_json::to_value(tools::project_overview(root).unwrap()).unwrap();
+        assert_eq!(overview["holder"], expected);
+        assert_eq!(overview["hands_over_on_write"], eligible);
+        assert_eq!(
+            overview["holder_details"],
+            json!({
+                "role": holder.role(), "client": holder.client(), "since": holder.since()
+            })
+        );
+        assert_eq!(overview["interrupted_runs"], 0);
+        assert_eq!(
+            all_bytes(root),
+            before,
+            "overview creates and changes nothing"
+        );
+        assert!(
+            !overview.to_string().contains(endpoint),
+            "no endpoint leaks"
+        );
+        fs::remove_file(root.join(".apiforge/local/journal.json")).unwrap();
+        drop(owner);
+        let overview = serde_json::to_value(tools::project_overview(root).unwrap()).unwrap();
+        assert_eq!(
+            overview["holder"], "none",
+            "stale metadata describes nobody"
+        );
+        assert_eq!(overview["holder_details"], Value::Null);
+        assert_eq!(overview["hands_over_on_write"], false);
+    }
+    for description in [
+        None,
+        Some("not JSON"),
+        Some(
+            r#"{"version":9,"program":"apiforge","role":"window","client":null,"since":"now","endpoint":null}"#,
+        ),
+    ] {
+        let owner = ProjectStore::open_exclusive_as(root, &LockHolder::window()).unwrap();
+        let file = root.join(".apiforge/local/holder.json");
+        match description {
+            Some(text) => fs::write(file, text).unwrap(),
+            None => fs::remove_file(file).unwrap(),
+        }
+        let before = all_bytes(root);
+        let overview = serde_json::to_value(tools::project_overview(root).unwrap()).unwrap();
+        assert_eq!(overview["holder"], "another_process");
+        assert_eq!(overview["holder_details"], Value::Null);
+        assert_eq!(overview["hands_over_on_write"], false);
+        assert_eq!(all_bytes(root), before);
+        drop(owner);
+    }
+}
+
+/// Includes local metadata: merely calling overview must not advertise a server.
+fn all_bytes(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn visit(root: &Path, here: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(here).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(root, &path, found);
+            } else if path.file_name().unwrap() != "project.lock" {
+                found.insert(
+                    path.strip_prefix(root).unwrap().to_owned(),
+                    fs::read(path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut found = BTreeMap::new();
+    visit(root, root, &mut found);
+    found
+}
+
+#[test]
+fn mcp12_unreachable_windows_keep_reads_and_never_advise_closing() {
+    for endpoint in [
+        None,
+        Some("apiforge-0123456789abcdef0123456789abcdef"),
+        Some("invalid"),
+    ] {
+        let directory = checkout();
+        let root = directory.path();
+        let holder = LockHolder::window().with_endpoint(endpoint.map(str::to_owned));
+        let _owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+        let before = shared(root);
+        let server = apiforge_mcp::ApiforgeServer::new(root.to_owned());
+        let error = server
+            .agent()
+            .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::HeldByWindow);
+        assert_eq!(error.wrote, Wrote::No);
+        assert_eq!(error.details["holder"]["role"], "window");
+        assert!(
+            !error.message.to_lowercase().contains("close"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("reading"));
+        assert_eq!(shared(root), before);
+        assert!(tools::read_source(root, SCENARIO).is_ok());
+    }
+}
+
+#[test]
+fn mcp12_stale_window_description_never_blocks_a_free_writer() {
+    let directory = checkout();
+    let root = directory.path();
+    drop(
+        ProjectStore::open_exclusive_as(
+            root,
+            &LockHolder::window()
+                .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into())),
+        )
+        .unwrap(),
+    );
+    let server = apiforge_mcp::ApiforgeServer::new(root.to_owned());
+    let created = server
+        .agent()
+        .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
+        .unwrap();
+    assert!(serde_json::to_value(created).unwrap()["wrote"] == true);
+    assert!(tools::read_source(root, DRAFT).is_ok());
+}

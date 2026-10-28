@@ -1895,6 +1895,7 @@ mod mcp08b {
             .and_then(|milliseconds| milliseconds.parse().ok())
             .map(Duration::from_millis);
         let settings = apiforge_mcp::ServerSettings {
+            allow_live: std::env::var("APIFORGE_MCP12_ALLOW_LIVE").as_deref() == Ok("1"),
             run: apiforge_mcp::tools::RunSettings {
                 step_delay,
                 ..Default::default()
@@ -2137,6 +2138,192 @@ mod mcp08b {
                 .all(|character| character.is_ascii_hexdigit() && !character.is_uppercase()),
             "{endpoint:?}"
         );
+    }
+
+    // MCP-12 isolates complete processes instead of changing global environment.
+    #[test]
+    fn mcp12_different_environments_handover_and_observation() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "folder::tests::acceptance_tests::mcp08b::mcp12_window_process",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("APIFORGE_MCP12_TEMP", temp.path());
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let runtime = PathBuf::from(format!(
+                "/run/user/{}",
+                fs::metadata(temp.path()).unwrap().uid()
+            ));
+            assert!(
+                runtime.is_dir(),
+                "MCP-12 requires provisioning {} before tests",
+                runtime.display()
+            );
+            command.env("XDG_RUNTIME_DIR", runtime);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "launched by MCP-12 with an isolated window environment"]
+    fn mcp12_window_process() {
+        let Some(temp) = std::env::var_os("APIFORGE_MCP12_TEMP").map(PathBuf::from) else {
+            return;
+        };
+        // First write from a server whose runtime and temporary base differ.
+        for eof in [false, true] {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, WIDE);
+            let endpoint = await_endpoint(&mut harness, root, HolderRole::Window);
+            #[cfg(target_os = "linux")]
+            assert!(address(&endpoint).starts_with("/run/user"));
+            #[cfg(not(target_os = "linux"))]
+            let _ = endpoint;
+            let mut server = mcp12_agent(root, &temp, false);
+            let overview = server.call("project_overview", json!({}));
+            assert_eq!(structured(&overview)["holder"], "window");
+            assert_eq!(structured(&overview)["hands_over_on_write"], true);
+            let created = call(
+                &mut harness,
+                &mut server,
+                "create_document",
+                json!({
+                    "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+                }),
+            );
+            assert_eq!(structured(&created)["wrote"], true, "{created}");
+            await_until(&mut harness, Instant::now(), "the new saved source", |h| {
+                folder(h)
+                    .session
+                    .as_ref()
+                    .unwrap()
+                    .documents()
+                    .iter()
+                    .any(|d| d.entry().path.as_str() == "scenarios/mcp12.afs")
+            });
+            assert!(read_only(&harness));
+            if eof {
+                let ended = server.close();
+                assert!(ended.status.success(), "{}", ended.stderr);
+            } else {
+                let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+                assert_eq!(structured(&finished)["finished"], true);
+            }
+            await_until(&mut harness, Instant::now(), "window ownership", |h| {
+                !read_only(h)
+            });
+        }
+        // Reverse direction: server listens in /tmp, later window has XDG.
+        let directory = shop();
+        let root = directory.path();
+        let mut server = mcp12_agent(root, Path::new("/tmp"), false);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let result = server.call("write_source", json!({"path": SCENARIO, "text": commented(&text, "Before window."), "expected_source_sha256": hash}));
+        assert_eq!(structured(&result)["wrote"], true);
+        let mut harness = folder_harness(root, WIDE);
+        app(&mut harness).watcher.set_interval(NO_POLL);
+        await_until(&mut harness, Instant::now(), "observer connection", |h| {
+            has_label(h, TAKE_BACK)
+        });
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let written = commented(&text, "After window.");
+        let result = write(&mut harness, &mut server, SCENARIO, &written);
+        assert_eq!(structured(&result)["wrote"], true);
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "save event without polling",
+            |h| source_of(h, &scenario) == written,
+        );
+        let ended = server.close();
+        assert!(ended.status.success());
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "window ownership after EOF",
+            |h| !read_only(h),
+        );
+        drop(harness);
+        // A permitted first live call also requests hand-over. Permission-off
+        // remains live_disabled and leaves ownership in the window.
+        for permitted in [false, true] {
+            let directory = shop();
+            let root = directory.path();
+            let api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+            let manifest = root.join("apiforge.project.json");
+            let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+            config["environment"]["baseUrl"] = json!(api.base_url());
+            fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+            let mut harness = folder_harness(root, WIDE);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let mut server = mcp12_agent(root, &temp, permitted);
+            let result = call(
+                &mut harness,
+                &mut server,
+                "run",
+                json!({"path": SCENARIO, "live": true}),
+            );
+            if permitted {
+                assert_eq!(structured(&result)["status"], "passed", "{result}");
+                assert!(read_only(&harness));
+                call(&mut harness, &mut server, "finish_editing", json!({}));
+                await_until(
+                    &mut harness,
+                    Instant::now(),
+                    "ownership after live run",
+                    |h| !read_only(h),
+                );
+            } else {
+                assert_eq!(tool_error(&result)["code"], "live_disabled");
+                assert!(!read_only(&harness));
+            }
+        }
+    }
+
+    fn mcp12_agent(root: &Path, temp: &Path, allow_live: bool) -> StdioServer {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--ignored",
+            "--exact",
+            "folder::tests::acceptance_tests::mcp08b::server_process",
+            "--nocapture",
+            "--quiet",
+            "--test-threads=1",
+        ]);
+        #[cfg(windows)]
+        {
+            command.env_clear();
+            for name in ["PATH", "SystemRoot"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        #[cfg(unix)]
+        command.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", temp);
+        #[cfg(windows)]
+        let _ = temp;
+        command.env(FOLDER, root).env(
+            "APIFORGE_MCP12_ALLOW_LIVE",
+            if allow_live { "1" } else { "0" },
+        );
+        let mut server = StdioServer::spawn(command);
+        server.initialize("MCP-12 client");
+        server
     }
 
     /// Criterion 1: the window that holds the project listens and names its

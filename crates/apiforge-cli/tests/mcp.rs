@@ -1596,3 +1596,204 @@ fn mcp05_criterion_7_a_window_holding_the_project_refuses_publish_over_stdio() {
         "no revision was registered"
     );
 }
+
+#[test]
+fn mcp12_stdio_exposes_holder_contract_and_handover_guidance() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    let init = server.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "MCP-12 client", "version": "1"}
+        }),
+    );
+    assert!(
+        init["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("hand")
+    );
+    server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let listed = server.request(2, "tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    let overview = tools
+        .iter()
+        .find(|tool| tool["name"] == "project_overview")
+        .unwrap();
+    let schema = &overview["outputSchema"];
+    let holder_schema = &schema["properties"]["holder"];
+    assert_eq!(holder_schema["type"], "string");
+    let mut values: Vec<_> = holder_schema["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    values.sort();
+    assert_eq!(
+        values,
+        ["agent_session", "another_process", "none", "window"]
+    );
+    for field in ["holder_details", "hands_over_on_write"] {
+        assert!(schema["properties"].get(field).is_some(), "{schema}");
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(field))
+        );
+    }
+    assert!(
+        overview["description"]
+            .as_str()
+            .unwrap()
+            .contains("hands_over_on_write")
+    );
+    let run = tools.iter().find(|tool| tool["name"] == "run").unwrap();
+    let guidance = run["description"].as_str().unwrap();
+    assert!(guidance.contains("hand"));
+    assert!(guidance.contains("unsaved"));
+    assert!(guidance.contains("held_by_other"));
+    assert!(guidance.contains("live_disabled"));
+    let before = call(&mut server, 3, "project_overview", json!({}));
+    assert_eq!(structured(&before)["holder"], "none");
+    assert_eq!(structured(&before)["holder_details"], Value::Null);
+    assert_eq!(structured(&before)["hands_over_on_write"], false);
+    let created = call(
+        &mut server,
+        4,
+        "create_document",
+        json!({
+            "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+        }),
+    );
+    assert_eq!(structured(&created)["wrote"], true);
+    let active = call(&mut server, 5, "project_overview", json!({}));
+    assert_eq!(structured(&active)["holder"], "agent_session");
+    assert_eq!(structured(&active)["holder_details"]["role"], "agent");
+    assert_eq!(
+        structured(&active)["holder_details"]["client"],
+        "MCP-12 client"
+    );
+    assert_eq!(structured(&active)["hands_over_on_write"], false);
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp12_actual_cli_connects_with_a_filtered_environment() {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args([
+        "--ignored",
+        "--exact",
+        "mcp12_cli_window_process",
+        "--nocapture",
+    ]);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = format!(
+            "/run/user/{}",
+            std::fs::metadata(temp.path()).unwrap().uid()
+        );
+        assert!(
+            Path::new(&runtime).is_dir(),
+            "MCP-12 requires provisioned {runtime}"
+        );
+        command.env("XDG_RUNTIME_DIR", runtime);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[ignore = "launched by MCP-12 with the window's isolated runtime environment"]
+fn mcp12_cli_window_process() {
+    use apiforge_channel::{Listener, Message, Received};
+    use apiforge_storage::project::{Holder, ProjectStore};
+    for eof in [false, true] {
+        let directory = demo();
+        let root = directory.path();
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut listener = {
+            let _context = runtime.enter();
+            Listener::bind().unwrap()
+        };
+        let owner = ProjectStore::open_exclusive_as(
+            root,
+            &Holder::window().with_endpoint(Some(listener.endpoint().name().to_owned())),
+        )
+        .unwrap();
+        let window = thread::spawn(move || {
+            runtime.block_on(async move {
+                let mut connection = listener.accept().await.unwrap();
+                assert!(matches!(
+                    connection.reader.next().await.unwrap(),
+                    Some(Received::Message(Message::Request { .. }))
+                ));
+                drop(owner);
+                connection.writer.send(&Message::Granted).await.unwrap();
+                let mut saved = false;
+                loop {
+                    match connection.reader.next().await.unwrap() {
+                        Some(Received::Message(Message::Saved { .. })) => saved = true,
+                        Some(Received::Message(Message::Released)) | None => break,
+                        _ => {}
+                    }
+                }
+                assert!(saved, "the CLI sent its saved event");
+            })
+        });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_apiforge"));
+        command.arg("mcp").arg("--folder").arg(root);
+        #[cfg(unix)]
+        command
+            .env_remove("XDG_RUNTIME_DIR")
+            .env("TMPDIR", temp.path());
+        #[cfg(windows)]
+        {
+            command.env_clear();
+            for name in ["PATH", "SystemRoot"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        let mut server = Server::spawn_command(command, root);
+        initialize(&mut server);
+        let overview = call(&mut server, 2, "project_overview", json!({}));
+        assert_eq!(structured(&overview)["holder"], "window");
+        assert_eq!(structured(&overview)["hands_over_on_write"], true);
+        let created = call(
+            &mut server,
+            3,
+            "create_document",
+            json!({
+                "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+            }),
+        );
+        assert_eq!(structured(&created)["wrote"], true, "{created}");
+        if !eof {
+            let finished = call(&mut server, 4, "finish_editing", json!({}));
+            assert_eq!(structured(&finished)["finished"], true);
+        }
+        assert_clean_end(server);
+        window.join().unwrap();
+        assert!(
+            ProjectStore::open_exclusive(root).is_ok(),
+            "ownership returns on finish and EOF"
+        );
+    }
+}

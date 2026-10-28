@@ -62,6 +62,16 @@ jobs:
       - name: Run Clippy lints
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Provision Linux user runtime for MCP-12 environment tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          runtime="/run/user/$(id -u)"
+          if ! test -d "$runtime"; then
+            sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" "$runtime"
+          fi
+          test "$(stat -c %u "$runtime")" = "$(id -u)"
+
       - name: Run workspace unit and integration tests
         run: cargo test --workspace --all-targets --locked
 

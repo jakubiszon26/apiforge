@@ -1191,3 +1191,42 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mcp12_diagnostics {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_unreachable_live_window_endpoints_on_windows_mounts_get_the_qualified_hint() {
+        let window = Holder::window()
+            .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into()));
+        for (path, hint) in [
+            ("/mnt/c/project", true),
+            ("/mnt/C/project", true),
+            ("/mnt/cat/project", false),
+            ("/mnt/1/project", false),
+            ("/mnt/c", false),
+            ("/home/project", false),
+        ] {
+            let error = unreachable(&window, Path::new(path));
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert_eq!(
+                error.message.contains("Windows/WSL"),
+                hint,
+                "{path}: {}",
+                error.message
+            );
+            if hint {
+                assert!(error.message.contains("if"));
+                assert!(error.message.contains("same side"));
+            }
+            assert!(error.message.contains("reading"));
+            assert!(
+                !held(&window).message.contains("Windows/WSL"),
+                "metadata alone is not a diagnosis"
+            );
+        }
+    }
+}

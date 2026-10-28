@@ -567,3 +567,6 @@ mod tests {
         });
     }
 }
+
+#[cfg(all(test, unix))]
+mod discovery_tests;
