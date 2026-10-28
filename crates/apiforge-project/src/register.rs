@@ -404,7 +404,7 @@ impl ProjectSession {
     }
 
     /// Handles of published revisions and of every working component's header.
-    fn component_handles(&self) -> HashSet<String> {
+    pub(super) fn component_handles(&self) -> HashSet<String> {
         let mut handles: HashSet<String> = self
             .manifest
             .revisions

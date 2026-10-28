@@ -394,3 +394,26 @@ fn a_failed_comparison_prints_what_it_wanted_and_what_it_got() {
         "only the comparison that failed explains itself: {text}"
     );
 }
+
+/// MCP-03 (#62) criterion 9: the executor moved into `apiforge-mcp` and
+/// returns data; `apiforge run` prints from it exactly what it printed before.
+/// `fixtures/demo-shop-run.txt` is the command's stdout on the demo shop,
+/// recorded before the move.
+#[test]
+fn mcp03_criterion_9_a_folder_run_prints_what_it_printed_before_the_shared_executor() {
+    let directory = tempfile::tempdir().unwrap();
+    apiforge_project::prepare_project(directory.path(), &apiforge_core::demos::shop_project())
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .args(["run", "--folder"])
+        .arg(directory.path())
+        .args(["--scenario", "scenarios/promotion-and-cart-price.afs"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        include_str!("fixtures/demo-shop-run.txt")
+    );
+    assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+}

@@ -2,16 +2,33 @@
 //! `print` on the demo shop, criteria 3 to 9. The stdio transport (criteria 1
 //! and 2) is tested in `crates/apiforge-cli/tests/mcp.rs`, where Cargo builds
 //! the `apiforge` binary.
+//!
+//! MCP-03 (#62): `check_text`, `run`, `language_reference` and the resources,
+//! criteria 1 to 12, and the five carry-overs from the review of MCP-01 (the
+//! `mcp03_` tests). Their stdio side is in `crates/apiforge-cli/tests/mcp.rs`.
 use apiforge_mcp::{
-    ErrorCode, positions,
-    tools::{self, Holder, Kind, Severity},
+    ErrorCode, ToolError,
+    executor::{self, CancellationToken, DEADLINE, EndedBy},
+    positions, reference, resources,
+    tools::{
+        self, Holder, Kind, Phase, RunArguments, RunSettings, Runs, Severity, Step, StepStatus,
+        Verdict,
+    },
 };
 use apiforge_project::{ProjectSession, prepare_project};
 use apiforge_storage::project::FileState;
+use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
+    net::TcpListener,
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
 };
 
 const PRODUCT: &str = "components/product.afs";
@@ -142,7 +159,9 @@ fn criterion_3_the_overview_describes_the_demo_shop() {
     assert!(!overview.live_requests.allowed);
     assert_eq!(overview.live_requests.source, "no --allow-live");
     assert_eq!(overview.server_version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(overview.reference_version, "");
+    // MCP-03 criterion 12: the version of the reference `language_reference`
+    // serves (empty until MCP-03).
+    assert_eq!(overview.reference_version, "1");
 }
 
 #[test]
@@ -507,4 +526,1069 @@ fn criterion_9_an_unreadable_project_is_project_unreadable() {
     assert_eq!(error.code, ErrorCode::ProjectUnreadable);
     assert!(!error.wrote);
     assert!(!error.message.is_empty());
+}
+
+// MCP-03 (#62) ---------------------------------------------------------------
+
+const PROMOTION: &str = "components/active-promotion.afs";
+const MANIFEST: &str = "apiforge.project.json";
+const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
+
+/// Every top-level step of the demo scenario, the cleanup's last.
+const DEMO_STEPS: [&str; 8] = [
+    "product",
+    "active_promotion",
+    "expected_price",
+    "add_to_cart",
+    "promotional_price",
+    "field_inna_nazwa",
+    "delete_cart",
+    "cart_was_deleted",
+];
+
+/// The sample product of `components/product.afs`, a valid `Product`.
+fn sample_product() -> Value {
+    json!({
+        "id": 123,
+        "name": "Whole bean coffee",
+        "price": 100,
+        "promotion": {
+            "type": "fixed_price",
+            "active": true,
+            "price": 80,
+            "inna_nazwa": "Autumn offer"
+        }
+    })
+}
+
+fn arguments(path: &str) -> RunArguments {
+    RunArguments {
+        path: path.into(),
+        ..RunArguments::default()
+    }
+}
+
+fn with_inputs(path: &str, inputs: Value) -> RunArguments {
+    RunArguments {
+        inputs: Some(inputs.as_object().unwrap().clone()),
+        ..arguments(path)
+    }
+}
+
+fn simulate(root: &Path, arguments: &RunArguments) -> Result<tools::RunReport, ToolError> {
+    tools::run(root, arguments, &Runs::default(), CancellationToken::new())
+}
+
+fn count(steps: &[Step]) -> usize {
+    steps
+        .iter()
+        .map(|step| 1 + step.steps.as_deref().map_or(0, count))
+        .sum()
+}
+
+fn flatten(steps: &[Step]) -> Vec<&Step> {
+    let mut all = Vec::new();
+    for step in steps {
+        all.push(step);
+        if let Some(children) = &step.steps {
+            all.extend(flatten(children));
+        }
+    }
+    all
+}
+
+fn handles(steps: &[Step]) -> Vec<&str> {
+    steps.iter().map(|step| step.handle.as_str()).collect()
+}
+
+/// The text a diagnostic's range covers, from its 1-based line and column in
+/// Unicode scalar values.
+fn covered<'a>(text: &'a str, diagnostic: &tools::Diagnostic) -> &'a str {
+    let offset = |line: usize, column: usize| {
+        let start: usize = text
+            .split_inclusive('\n')
+            .take(line - 1)
+            .map(str::len)
+            .sum();
+        start
+            + text[start..]
+                .char_indices()
+                .nth(column - 1)
+                .map_or(text.len() - start, |(at, _)| at)
+    };
+    &text[offset(diagnostic.line, diagnostic.column)
+        ..offset(diagnostic.end_line, diagnostic.end_column)]
+}
+
+/// A listener that counts the connections it accepts and answers none.
+struct Listener {
+    address: std::net::SocketAddr,
+    accepted: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Listener {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (counter, stopped) = (accepted.clone(), stop.clone());
+        thread::spawn(move || {
+            // Accepted sockets stay open and unanswered until the test ends.
+            let mut open = Vec::new();
+            while !stopped.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((socket, _)) => {
+                        counter.fetch_add(1, Ordering::AcqRel);
+                        open.push(socket);
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            address,
+            accepted,
+            stop,
+        }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::Acquire)
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}/demo/shop", self.address)
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+    }
+}
+
+/// The demo scenario as `apiforge run --folder` prepares it.
+fn demo_request(root: &Path, mode: apiforge_core::run::RunMode) -> apiforge_runner::RunRequest {
+    let mut session = ProjectSession::open_saved_read_only(root).unwrap();
+    let id = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == SCENARIO)
+        .unwrap()
+        .id()
+        .to_owned();
+    let snapshot = session.current_snapshot(&id).unwrap();
+    let apiforge_storage::project::IdentityBase::Scenario(scenario) = snapshot.document() else {
+        unreachable!()
+    };
+    let mut project = snapshot.context().clone();
+    project.scenarios.push(scenario.clone());
+    let mut request = apiforge_runner::RunRequest::new(project, scenario.id.clone(), mode);
+    request.target = apiforge_runner::RunTarget::Scenario;
+    request
+}
+
+#[test]
+fn mcp03_criterion_1_check_text_reports_the_proposal_for_a_registered_path() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = tree(root);
+    let saved = fs::read_to_string(root.join(PRODUCT)).unwrap();
+    let overview = tools::project_overview(root).unwrap();
+
+    let proposal = inject_mismatch(&saved);
+    let result = tools::check_text(root, PRODUCT, &proposal).unwrap();
+    assert!(result.registered);
+    assert_eq!(result.path, PRODUCT);
+    assert_eq!(result.kind, Some(Kind::Component));
+    assert_eq!(result.handle.as_deref(), Some("product"));
+    assert!(result.valid, "a warning leaves the text valid");
+    assert!(result.problems.is_empty());
+    assert_eq!(result.diagnostics.len(), 1);
+    assert_eq!(result.diagnostics[0].severity, Severity::Warning);
+    assert_eq!(result.diagnostics[0].message, MISMATCH);
+    assert_eq!(result.omitted, 0);
+    assert_eq!(result.generation, overview.generation);
+    assert_eq!(
+        result.source_sha256,
+        Some(sha256(&root.join(PRODUCT))),
+        "the saved document the text would replace"
+    );
+    let mut used: Vec<_> = result
+        .used
+        .iter()
+        .map(|used| {
+            (
+                used.handle.as_str(),
+                used.revision,
+                used.source_sha256.as_str(),
+            )
+        })
+        .collect();
+    used.sort();
+    let mut revisions: Vec<_> = overview
+        .revisions
+        .iter()
+        .map(|r| (r.handle.as_str(), r.revision, r.source_sha256.as_str()))
+        .collect();
+    revisions.sort();
+    assert_eq!(used, revisions);
+
+    // Positions as `read_source` gives them for the same text saved.
+    let saved_copy = checkout();
+    fs::write(saved_copy.path().join(PRODUCT), &proposal).unwrap();
+    let read = tools::read_source(saved_copy.path(), PRODUCT).unwrap();
+    assert_eq!(result.diagnostics, read.diagnostics);
+
+    let broken = saved.replacen("export product", "export ???", 1);
+    let result = tools::check_text(root, PRODUCT, &broken).unwrap();
+    assert!(!result.valid);
+    assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    fs::write(saved_copy.path().join(PRODUCT), &broken).unwrap();
+    let read = tools::read_source(saved_copy.path(), PRODUCT).unwrap();
+    assert_eq!(result.diagnostics, read.diagnostics);
+
+    assert_eq!(tree(root), before, "the file on disk is unchanged");
+    assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_criterion_1_a_text_over_one_mebibyte_is_too_large_before_anything_else() {
+    let directory = checkout();
+    let text = "a".repeat(tools::MAX_TEXT_BYTES + 1);
+    for path in [PRODUCT, "../x.afs", "components/new.afs"] {
+        let error = tools::check_text(directory.path(), path, &text).unwrap_err();
+        assert_eq!(error.code, ErrorCode::TooLarge, "{path}");
+        assert!(!error.wrote);
+    }
+    let error = tools::check_text(tempfile::tempdir().unwrap().path(), PRODUCT, &text).unwrap_err();
+    assert_eq!(error.code, ErrorCode::TooLarge, "outside a project too");
+}
+
+#[test]
+fn mcp03_criterion_2_an_unregistered_path_is_checked_as_a_new_document() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = tree(root);
+    let component = fs::read_to_string(root.join(PRODUCT)).unwrap().replacen(
+        "component product",
+        "component new_product",
+        1,
+    );
+
+    let result = tools::check_text(root, "components/new-product.afs", &component).unwrap();
+    assert!(!result.registered);
+    assert_eq!(result.kind, Some(Kind::Component));
+    assert_eq!(result.handle.as_deref(), Some("new_product"));
+    assert!(result.problems.is_empty(), "{:?}", result.problems);
+    assert!(result.valid, "{:?}", result.diagnostics);
+    assert_eq!(result.source_sha256, None);
+    assert_eq!(result.used.len(), 3);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity == Severity::Warning)
+    );
+
+    let scenario = fs::read_to_string(root.join(SCENARIO)).unwrap();
+    let result = tools::check_text(root, "scenarios/second.afs", &scenario).unwrap();
+    assert!(!result.registered);
+    assert_eq!(result.kind, Some(Kind::Scenario));
+    assert_eq!(result.handle, None);
+    assert!(result.valid, "{:?}", result.diagnostics);
+
+    assert_eq!(tree(root), before, "nothing is created or registered");
+    assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_criterion_2_the_errors_a_registration_would_meet() {
+    let directory = checkout();
+    let root = directory.path();
+    fs::write(
+        root.join("scenarios/draft.afs"),
+        "scenario \"Draft\" {\n}\n",
+    )
+    .unwrap();
+    let before = tree(root);
+    let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
+    let renamed = product.replacen("component product", "component other_product", 1);
+    let codes = |path: &str, text: &str| {
+        let result = tools::check_text(root, path, text).unwrap();
+        assert!(!result.registered, "{path}");
+        assert!(!result.valid, "{path}");
+        for problem in &result.problems {
+            assert!(!problem.message.contains(path), "the path is not quoted");
+            assert!(!problem.message.is_empty());
+        }
+        result
+            .problems
+            .iter()
+            .map(|problem| problem.code)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        codes("components/copy.afs", &product),
+        [ErrorCode::HandleExists],
+        "the handle is taken"
+    );
+    assert_eq!(
+        codes("components/Product.afs", &renamed),
+        [ErrorCode::PathExists],
+        "a registered path differing in case"
+    );
+    assert_eq!(
+        codes("scenarios/draft.afs", "scenario \"Draft\" {\n}\n"),
+        [ErrorCode::PathExists],
+        "an unregistered file on disk"
+    );
+    assert_eq!(
+        codes("scenarios/DRAFT.afs", "scenario \"Draft\" {\n}\n"),
+        [ErrorCode::PathExists],
+        "a file on disk differing in case"
+    );
+
+    let result = tools::check_text(root, "components/headless.afs", "hello = 1\n").unwrap();
+    assert_eq!(result.kind, None);
+    assert_eq!(result.handle, None);
+    assert!(!result.valid);
+    assert_eq!(
+        result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+        [ErrorCode::InvalidText],
+        "the header has no kind"
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error),
+        "with the ordinary diagnostics"
+    );
+
+    assert_eq!(tree(root), before);
+    assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_criterion_3_unpublished_revisions_unknown_handles_and_missing_variables_are_named() {
+    let directory = checkout();
+    let root = directory.path();
+    let text = "scenario \"Calls\" {\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
+    for path in [SCENARIO, "scenarios/calls.afs"] {
+        let result = tools::check_text(root, path, text).unwrap();
+        assert!(!result.valid, "{path}");
+        let named = |name: &str, message: &str| {
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.severity == Severity::Error
+                        && d.message == message
+                        && covered(text, d).contains(name)),
+                "{path}: no error {message:?} on {name:?}: {:#?}",
+                result.diagnostics
+            );
+        };
+        named("product@2", "Component revision does not exist");
+        named("nosuch@1", "Unknown operator or nested component call");
+        named("env.MISSING", "Unknown environment name");
+    }
+}
+
+#[test]
+fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = tree(root);
+    let overview = tools::project_overview(root).unwrap();
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+
+    assert_eq!(report.status, Verdict::Passed);
+    assert_eq!(report.ended_by, EndedBy::Completed);
+    assert_eq!(report.path, SCENARIO);
+    assert!(report.redacted);
+    assert_eq!(report.generation, overview.generation);
+    assert_eq!(report.source_sha256, Some(sha256(&root.join(SCENARIO))));
+    assert_eq!(report.used.len(), 3);
+    assert!(report.report.is_none(), "compact by default");
+    let steps = report.steps.as_deref().unwrap();
+    assert_eq!(report.step_count, 18);
+    assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
+    assert_eq!(handles(steps), DEMO_STEPS);
+    assert_eq!(steps[0].label.as_deref(), Some("Product"));
+    assert_eq!(
+        handles(steps[0].steps.as_deref().unwrap()),
+        ["fetch_product", "product"],
+        "a component's steps nested beneath it"
+    );
+    assert!(
+        flatten(steps)
+            .iter()
+            .all(|s| s.status == StepStatus::Passed)
+    );
+    assert_eq!(steps[6].phase, Phase::Cleanup);
+    assert_eq!(steps[0].phase, Phase::Main);
+    assert_eq!(tree(root), before, "a simulation writes nothing");
+    assert!(!root.join(".apiforge/local").exists());
+}
+
+#[test]
+fn mcp03_criterion_4_a_failed_verdict_is_a_result_not_an_error() {
+    let directory = checkout();
+    let root = directory.path();
+    edit(root, SCENARIO, |text| {
+        text.replace("expected_price = 80 * 1", "expected_price = 81 * 1")
+    });
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(report.status, Verdict::Failed);
+    assert_eq!(report.ended_by, EndedBy::Completed);
+    let steps = report.steps.unwrap();
+    let price = steps
+        .iter()
+        .find(|step| step.handle == "promotional_price")
+        .unwrap();
+    assert_eq!(price.status, StepStatus::Failed);
+    assert!(price.message.is_some());
+    assert_eq!(price.expected, Some(json!(81)));
+    assert_eq!(price.actual, Some(json!(80)));
+    assert!(
+        steps
+            .iter()
+            .filter(|step| step.status == StepStatus::Passed)
+            .all(|step| step.expected.is_none() && step.actual.is_none()),
+        "expected and actual only on a failed comparison"
+    );
+}
+
+#[test]
+fn mcp03_criterion_5_a_component_runs_alone_with_its_inputs() {
+    let directory = checkout();
+    let root = directory.path();
+
+    // `id` has the default 123.
+    let report = simulate(root, &arguments(PRODUCT)).unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    let steps = report.steps.unwrap();
+    assert_eq!(handles(&steps), ["fetch_product", "product"]);
+    assert!(steps.iter().all(|step| step.phase == Phase::Main));
+
+    for inputs in [json!({ "id": 7 }), json!({ "id": "7" })] {
+        let report = simulate(root, &with_inputs(PRODUCT, inputs.clone())).unwrap();
+        assert_eq!(report.status, Verdict::Passed, "{inputs}");
+    }
+    let report = simulate(
+        root,
+        &with_inputs(PROMOTION, json!({ "product": sample_product() })),
+    )
+    .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+
+    let error = simulate(root, &arguments(PROMOTION)).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInputs);
+    assert_eq!(error.details["missing"], json!(["product"]));
+    assert!(!error.wrote);
+
+    let error = simulate(root, &with_inputs(PRODUCT, json!({ "nope": 1 }))).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInputs);
+    assert_eq!(error.details["unknown"], json!(["nope"]));
+
+    let error = simulate(root, &with_inputs(PRODUCT, json!({ "id": "seven" }))).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInputs);
+    assert_eq!(error.details["invalid"], json!(["id"]));
+
+    let error = simulate(root, &with_inputs(SCENARIO, json!({ "id": 1 }))).unwrap_err();
+    assert_eq!(
+        error.code,
+        ErrorCode::InvalidInputs,
+        "a scenario takes none"
+    );
+}
+
+#[test]
+fn mcp03_criterion_6_compact_by_default_and_the_full_report_on_request() {
+    let directory = checkout();
+    let root = directory.path();
+    let compact = simulate(root, &arguments(SCENARIO)).unwrap();
+    let text = serde_json::to_string_pretty(&compact).unwrap();
+    assert!(
+        text.chars().count() < 10_000,
+        "{} characters",
+        text.chars().count()
+    );
+
+    let full = simulate(
+        root,
+        &RunArguments {
+            full: true,
+            ..arguments(SCENARIO)
+        },
+    )
+    .unwrap();
+    assert!(full.steps.is_none());
+    let report = full.report.unwrap();
+    assert_eq!(report["status"], "passed");
+    assert_eq!(report["mode"], "simulation");
+    assert_eq!(report["steps"].as_array().unwrap().len(), 8);
+    assert!(report["steps"][0]["outputs"].is_object());
+    assert_eq!(full.step_count, 18);
+}
+
+#[test]
+fn mcp03_criterion_6_a_result_over_two_mebibytes_is_refused_never_cut() {
+    let directory = checkout();
+    let root = directory.path();
+    let strings = vec![format!("\"{}\"", "x".repeat(90_000)); 8].join(", ");
+    fs::write(
+        root.join(SCENARIO),
+        format!(
+            "scenario \"Big\" {{\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
+        ),
+    )
+    .unwrap();
+    let compact = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(compact.status, Verdict::Passed);
+
+    let error = simulate(
+        root,
+        &RunArguments {
+            full: true,
+            ..arguments(SCENARIO)
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResultTooLarge);
+    assert!(error.message.contains("full: false"), "{}", error.message);
+    assert_eq!(error.details["limit"], json!(tools::MAX_RESULT_BYTES));
+    assert!(error.details["bytes"].as_u64().unwrap() > tools::MAX_RESULT_BYTES as u64);
+}
+
+#[test]
+fn mcp03_criterion_7_run_refuses_an_invalid_or_unregistered_document() {
+    let directory = checkout();
+    let root = directory.path();
+    edit(root, PRODUCT, |text| {
+        text.replacen("export product", "export ???", 1)
+    });
+    let error = simulate(root, &arguments(PRODUCT)).unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidText);
+    let diagnostics = error.details["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics[0]["severity"], "error");
+
+    let error = simulate(root, &arguments("components/missing.afs")).unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownDocument);
+    assert!(error.details["registered_paths"].is_array());
+    let error = simulate(root, &arguments("../x.afs")).unwrap_err();
+    assert_eq!(error.code, ErrorCode::PathRejected);
+}
+
+#[test]
+fn mcp03_criterion_8_live_is_refused_and_sends_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = Listener::start();
+    edit(root, MANIFEST, |text| {
+        text.replace(DEMO_BASE_URL, &api.base_url())
+    });
+    // The listener is reachable: a live run of the CLI's executor reaches it.
+    let error = simulate(
+        root,
+        &RunArguments {
+            live: true,
+            request_id: Some("live-1".into()),
+            ..arguments(SCENARIO)
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LiveDisabled);
+    assert_eq!(
+        error.message,
+        "live requests are not enabled on this server"
+    );
+    assert!(!error.wrote);
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(report.status, Verdict::Passed, "a simulation sends nothing");
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(api.accepted(), 0, "the API saw no request");
+}
+
+#[test]
+fn mcp03_criterion_9_the_shared_executor_returns_data_and_prints_nothing() {
+    let source = include_str!("../src/executor.rs");
+    for printing in [
+        "println!",
+        "print!(",
+        "eprintln!",
+        "eprint!(",
+        "stdout",
+        "stderr",
+    ] {
+        assert!(!source.contains(printing), "{printing} in the executor");
+    }
+    let directory = checkout();
+    let request = demo_request(directory.path(), apiforge_core::run::RunMode::Simulation);
+    let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
+    assert_eq!(outcome.ended_by, EndedBy::Completed);
+    assert_eq!(outcome.report.status, apiforge_core::run::RunStatus::Passed);
+    assert_eq!(outcome.report.steps.len(), 8);
+    assert!(outcome.interrupted_before.is_empty());
+    assert!(!outcome.journal_unreadable);
+}
+
+#[test]
+fn mcp03_criterion_10_cancelling_a_run_stops_it_and_runs_the_cleanup() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let runs = Runs::new(RunSettings {
+        deadline: DEADLINE,
+        step_delay: Some(Duration::from_millis(200)),
+    });
+    let cancel = CancellationToken::new();
+    let running = {
+        let (root, runs, cancel) = (root.clone(), runs.clone(), cancel.clone());
+        thread::spawn(move || tools::run(&root, &arguments(SCENARIO), &runs, cancel))
+    };
+    let started = Instant::now();
+    while !runs.is_busy() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the run did not start"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let second = tools::run(&root, &arguments(PRODUCT), &runs, CancellationToken::new());
+    assert_eq!(second.unwrap_err().code, ErrorCode::RunInProgress);
+    assert_eq!(
+        tools::project_overview(&root).unwrap().name,
+        "Demo shop",
+        "reads are answered meanwhile"
+    );
+    thread::sleep(Duration::from_millis(500));
+    cancel.cancel();
+    let report = running.join().unwrap().unwrap();
+
+    assert_eq!(report.status, Verdict::Cancelled);
+    assert_eq!(report.ended_by, EndedBy::Cancelled);
+    let steps = report.steps.unwrap();
+    let main: Vec<_> = steps.iter().filter(|s| s.phase == Phase::Main).collect();
+    assert_eq!(main[0].status, StepStatus::Passed, "the steps done so far");
+    assert!(
+        main.iter().any(|s| s.status == StepStatus::Cancelled),
+        "{main:#?}"
+    );
+    let cleanup: Vec<_> = steps.iter().filter(|s| s.phase == Phase::Cleanup).collect();
+    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+    assert!(
+        cleanup.iter().all(|s| s.status != StepStatus::Cancelled),
+        "the cleanup ran: {cleanup:#?}"
+    );
+    assert!(!runs.is_busy(), "the slot is free again");
+}
+
+#[test]
+fn mcp03_criterion_11_the_deadline_ends_a_run_as_timed_out() {
+    let directory = checkout();
+    let runs = Runs::new(RunSettings {
+        deadline: Duration::from_millis(300),
+        step_delay: Some(Duration::from_millis(200)),
+    });
+    let report = tools::run(
+        directory.path(),
+        &arguments(SCENARIO),
+        &runs,
+        CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(report.status, Verdict::Cancelled);
+    assert_eq!(report.ended_by, EndedBy::TimedOut);
+    let steps = report.steps.unwrap();
+    assert!(steps.iter().any(|s| s.status == StepStatus::Cancelled));
+    assert!(steps.iter().any(|s| s.phase == Phase::Cleanup));
+    assert!(!runs.is_busy());
+    // The server's tools still answer.
+    assert_eq!(
+        simulate(directory.path(), &arguments(PRODUCT))
+            .unwrap()
+            .status,
+        Verdict::Passed
+    );
+}
+
+#[test]
+fn mcp03_criterion_11_the_in_flight_request_is_marked_as_possibly_delivered() {
+    for cancelled_by_caller in [false, true] {
+        let directory = checkout();
+        let root = directory.path();
+        // A slow step: a listener that accepts and never answers.
+        let api = Listener::start();
+        edit(root, MANIFEST, |text| {
+            text.replace(DEMO_BASE_URL, &api.base_url())
+        });
+        let request = demo_request(root, apiforge_core::run::RunMode::Live);
+        let cancel = CancellationToken::new();
+        if cancelled_by_caller {
+            let cancel = cancel.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(400));
+                cancel.cancel();
+            });
+        }
+        let deadline = if cancelled_by_caller {
+            DEADLINE
+        } else {
+            Duration::from_millis(400)
+        };
+        let outcome = executor::execute(request, None, cancel, deadline).unwrap();
+        assert_eq!(
+            outcome.ended_by,
+            if cancelled_by_caller {
+                EndedBy::Cancelled
+            } else {
+                EndedBy::TimedOut
+            }
+        );
+        assert_eq!(
+            outcome.report.status,
+            apiforge_core::run::RunStatus::Cancelled
+        );
+        assert!(api.accepted() >= 1, "the request was on its way");
+        let steps = tools::steps(&outcome.report);
+        let marked: Vec<_> = flatten(&steps)
+            .into_iter()
+            .filter(|step| step.may_have_reached_api)
+            .collect();
+        assert_eq!(marked.len(), 1, "{steps:#?}");
+        assert_eq!(marked[0].handle, "fetch_product");
+        assert_eq!(marked[0].status, StepStatus::Cancelled);
+    }
+}
+
+#[test]
+fn mcp03_criterion_12_the_language_reference_and_its_version() {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/language/reference.md");
+    let text = fs::read_to_string(file).unwrap();
+    let served = tools::language_reference().unwrap();
+    assert_eq!(served.text, text);
+    assert_eq!(served.version, "1");
+    assert!(text.starts_with("Reference version: 1 "));
+    assert_eq!(reference::version(), "1");
+    let directory = checkout();
+    assert_eq!(
+        tools::project_overview(directory.path())
+            .unwrap()
+            .reference_version,
+        served.version
+    );
+}
+
+#[test]
+fn mcp03_criterion_12_resources_list_and_read() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = tree(root);
+    let listed = resources::list(root).unwrap();
+    let uris: Vec<_> = listed.iter().map(|r| r.uri.as_str()).collect();
+    assert_eq!(
+        uris,
+        [
+            "apiforge://reference",
+            "apiforge://source/scenarios/promotion-and-cart-price.afs",
+            "apiforge://source/components/add-to-cart.afs",
+            "apiforge://source/components/product.afs",
+            "apiforge://source/components/active-promotion.afs",
+        ]
+    );
+    assert!(listed.iter().all(|r| !r.name.is_empty()));
+    assert_eq!(resources::MIME_TYPE, "text/plain");
+
+    assert_eq!(
+        resources::read(root, "apiforge://reference").unwrap(),
+        reference::TEXT
+    );
+    for uri in [
+        "apiforge://source/components/product.afs",
+        "apiforge://source/components%2Fproduct.afs",
+    ] {
+        assert_eq!(
+            resources::read(root, uri).unwrap(),
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            "{uri}"
+        );
+    }
+    for uri in [
+        "apiforge://source/%2e%2e/x.afs",
+        "apiforge://source/..%2Fx.afs",
+        "apiforge://source/.apiforge/diagram.json",
+        "apiforge://source/%2Eapiforge%2Frevisions%2Fget-product%2F1.afs",
+        "apiforge://source//etc/x.afs",
+        "apiforge://source/components/CON.afs",
+        "apiforge://source/%ff.afs",
+    ] {
+        let error = resources::read(root, uri).unwrap_err();
+        assert_eq!(error.code, ErrorCode::PathRejected, "{uri}");
+        assert!(!error.message.contains(uri));
+    }
+    let error = resources::read(root, "apiforge://source/components/missing.afs").unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownDocument);
+    let error = resources::read(root, "apiforge://elsewhere").unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownDocument);
+    assert_eq!(tree(root), before);
+}
+
+#[test]
+fn mcp03_carry_over_1_project_level_errors_are_kept_within_the_limit() {
+    let notes = (0..1101)
+        .map(|index| format!("// note {index}\n"))
+        .collect::<String>();
+
+    // The folder-pin error is found while lowering, after 1 000 warnings.
+    let directory = checkout();
+    let root = directory.path();
+    let scenario = fs::read_to_string(root.join(SCENARIO)).unwrap();
+    edit(root, SCENARIO, |text| {
+        format!(
+            "{}{notes}",
+            text.replace("product = product@1(id: 123)", "product = product(id: 123)")
+        )
+    });
+    // A component file that holds a scenario: the kind check comes last.
+    fs::write(root.join(PRODUCT), format!("{scenario}{notes}")).unwrap();
+
+    let session = ProjectSession::open_saved_read_only(root).unwrap();
+    for (path, message) in [
+        (
+            SCENARIO,
+            "Folder component calls require an explicit revision",
+        ),
+        (PRODUCT, "This code describes a different kind of document"),
+    ] {
+        let document = session
+            .documents()
+            .iter()
+            .find(|d| d.entry().path.as_str() == path)
+            .unwrap();
+        assert_eq!(document.diagnostics().len(), 1000, "{path}");
+        assert_eq!(document.omitted_diagnostics(), 102, "{path}: 1 102 found");
+        assert!(
+            document.diagnostics().iter().any(|d| d.message == message),
+            "{path}: the project-level error is kept"
+        );
+        let result = tools::check(root, Some(path)).unwrap();
+        let checked = &result.documents[0];
+        assert!(!checked.valid);
+        assert_eq!((checked.diagnostics.len(), checked.omitted), (1000, 102));
+        assert!(checked.diagnostics.iter().any(|d| d.message == message));
+    }
+}
+
+#[test]
+fn mcp03_carry_over_3_a_source_over_one_mebibyte_is_unavailable_and_the_rest_served() {
+    let directory = checkout();
+    let root = directory.path();
+    let large = "// padding\n".repeat(tools::MAX_TEXT_BYTES / 11 + 1);
+    assert!(large.len() > tools::MAX_TEXT_BYTES);
+    fs::write(root.join(PRODUCT), &large).unwrap();
+
+    let overview = tools::project_overview(root).unwrap();
+    let product = overview
+        .documents
+        .iter()
+        .find(|d| d.path == PRODUCT)
+        .unwrap();
+    assert_eq!(product.unavailable.as_deref(), Some("too_large"));
+    assert_eq!(product.source_sha256, None);
+
+    let source = tools::read_source(root, PRODUCT).unwrap();
+    assert_eq!(source.unavailable.as_deref(), Some("too_large"));
+    assert!(source.text.is_empty());
+    assert!(!source.valid);
+    assert!(tools::read_source(root, SCENARIO).unwrap().valid);
+
+    let checked = tools::check(root, None).unwrap();
+    assert!(!checked.valid);
+    for document in &checked.documents {
+        if document.path == PRODUCT {
+            assert_eq!(document.unavailable.as_deref(), Some("too_large"));
+            assert!(!document.valid);
+        } else {
+            assert!(document.valid, "{}", document.path);
+            assert_eq!(document.unavailable, None);
+        }
+    }
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(
+        report.status,
+        Verdict::Passed,
+        "it runs the published revision"
+    );
+    let listed = resources::list(root).unwrap();
+    assert_eq!(listed.len(), 5);
+}
+
+#[test]
+fn mcp03_carry_over_4_positions_do_not_rescan_a_long_line() {
+    // One line of 500 000 two-byte characters, looked up 200 000 times near
+    // its end, as 200 diagnostics per character of the last thousand: a
+    // lookup that rescans the line prefix counts 10^11 characters.
+    let text = "é".repeat(500_000);
+    let lines = positions::Lines::new(&text);
+    let started = Instant::now();
+    for index in 0..200_000 {
+        let back = index % 1_000;
+        let offset = text.len() - 2 * back;
+        assert_eq!(lines.position(offset), (1, 500_001 - back));
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(lines.position(1), (1, 1), "inside a character: its start");
+}
+
+#[test]
+fn mcp03_carry_over_5_errors_are_bounded_as_results_are() {
+    let large = ToolError::new(ErrorCode::InvalidText, "The text has errors")
+        .with_details(json!({ "diagnostics": "d".repeat(3 * 1024 * 1024) }));
+    let error = tools::bound::<()>(Err(large)).unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResultTooLarge);
+    assert_eq!(error.details["limit"], json!(tools::MAX_RESULT_BYTES));
+    assert!(!error.wrote);
+
+    let small = ToolError::new(
+        ErrorCode::UnknownDocument,
+        "No registered document has this path",
+    );
+    assert_eq!(tools::bound::<()>(Err(small.clone())).unwrap_err(), small);
+    assert_eq!(tools::bound(Ok(7)).unwrap(), 7);
+    let large = "r".repeat(3 * 1024 * 1024);
+    assert_eq!(
+        tools::bound(Ok(large)).unwrap_err().code,
+        ErrorCode::ResultTooLarge
+    );
+}
+
+// Review round 1 of PR #109 ---------------------------------------------------
+
+/// A name or value that is not Unicode on this platform.
+fn not_unicode() -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![b'a', 0xff])
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0x61, 0xD800])
+    }
+}
+
+#[test]
+fn mcp03_review_a_character_across_a_checkpoint_counts_once() {
+    // The crab takes bytes 255 to 258, across the checkpoint at byte 256.
+    let text = format!("{}🦀b", "a".repeat(255));
+    let lines = positions::Lines::new(&text);
+    assert_eq!(lines.position(255), (1, 256), "the crab");
+    for inside in 256..259 {
+        assert_eq!(
+            lines.position(inside),
+            (1, 256),
+            "inside the crab: {inside}"
+        );
+    }
+    assert_eq!(lines.position(259), (1, 257), "the b after it");
+    assert_eq!(lines.position(260), (1, 258), "the end");
+}
+
+#[test]
+fn mcp03_review_a_variable_that_is_not_unicode_is_skipped_not_a_panic() {
+    let environment = vec![
+        ("APIFORGE_SECRET_TOKEN".into(), "t".into()),
+        (not_unicode(), "x".into()),
+        ("APIFORGE_SECRET_BROKEN".into(), not_unicode()),
+        ("PATH".into(), not_unicode()),
+    ];
+    let found = executor::secrets_from(None, environment).unwrap();
+    // Names only: a failing assertion must not print a secret's value.
+    assert_eq!(found.keys().collect::<Vec<_>>(), ["TOKEN"]);
+    assert!(found["TOKEN"] == "t");
+}
+
+#[test]
+fn mcp03_review_a_secrets_file_over_the_limit_is_refused_by_its_size() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("secrets.json");
+    fs::write(&file, r#"{"TOKEN": "t"}"#).unwrap();
+    let found = executor::secrets_from(Some(&file), Vec::new()).unwrap();
+    assert!(found["TOKEN"] == "t");
+
+    fs::write(&file, vec![b' '; executor::MAX_SECRETS_BYTES as usize + 1]).unwrap();
+    assert_eq!(
+        executor::secrets_from(Some(&file), Vec::new()).unwrap_err(),
+        "The secrets file is too large"
+    );
+    // Sixteen gibibytes, sparse: reading it in full before the check would
+    // not finish in time, or at all. (NTFS would allocate it, so Unix only.)
+    #[cfg(unix)]
+    {
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_len(16 << 30)
+            .unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            executor::secrets_from(Some(&file), Vec::new()).unwrap_err(),
+            "The secrets file is too large"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}
+
+#[test]
+fn mcp03_review_a_file_in_place_of_a_folder_is_a_registration_problem() {
+    let directory = checkout();
+    let root = directory.path();
+    let text = "scenario \"Nested\" {\n}\n";
+    for path in [
+        "components/product.afs/nested.afs",
+        "components/PRODUCT.afs/deeper/nested.afs",
+    ] {
+        let result = tools::check_text(root, path, text).unwrap();
+        assert!(!result.registered, "{path}");
+        assert!(!result.valid, "{path}");
+        assert_eq!(
+            result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+            [ErrorCode::PathExists],
+            "{path}"
+        );
+    }
+    let result = tools::check_text(root, "scenarios/new/nested.afs", text).unwrap();
+    assert!(result.problems.is_empty(), "{:?}", result.problems);
+}
+
+#[test]
+fn mcp03_review_a_case_collision_beyond_the_tree_scan_limit_is_found() {
+    let directory = checkout();
+    let root = directory.path();
+    // More entries than a tree scan returns, before the collision.
+    let bulk = root.join("aaa-bulk");
+    fs::create_dir(&bulk).unwrap();
+    for index in 0..10_001 {
+        fs::write(bulk.join(format!("{index}.txt")), "").unwrap();
+    }
+    let text = "scenario \"Draft\" {\n}\n";
+    fs::create_dir_all(root.join("zzz/Deep")).unwrap();
+    fs::write(root.join("zzz/Deep/Draft.afs"), text).unwrap();
+    let result = tools::check_text(root, "zzz/deep/draft.afs", text).unwrap();
+    assert_eq!(
+        result.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+        [ErrorCode::PathExists]
+    );
 }

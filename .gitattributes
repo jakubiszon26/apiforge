@@ -2,3 +2,5 @@
 # compared byte for byte, so they stay at LF on every checkout, Windows included.
 *.json text eol=lf
 *.afs text eol=lf
+# Recorded command output, compared byte for byte with what a command prints.
+crates/apiforge-cli/tests/fixtures/*.txt text eol=lf
