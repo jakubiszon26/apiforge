@@ -1264,7 +1264,7 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
         &mut server,
         2,
         "run",
-        json!({ "path": SCENARIO, "live": true }),
+        json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
     );
     let journalled = wait_for_journal(root, &api);
     server.child.kill().unwrap();
@@ -1305,6 +1305,18 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
     assert_eq!(report["status"], "passed", "{}", report["error"]);
     assert_eq!(report["live"], true);
     assert_reported(&report["interrupted"], &journalled);
+    // Criterion 9: the killed server's request_id is unknown_outcome here.
+    let retried = call(
+        &mut live,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
+    );
+    tool_error(&retried, "unknown_outcome");
+    assert_reported(
+        &retried["result"]["structuredContent"]["details"]["interrupted"],
+        &journalled,
+    );
     assert_clean_end(live);
 }
 

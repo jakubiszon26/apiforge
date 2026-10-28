@@ -3128,16 +3128,48 @@ fn mcp06_criterion_9_an_answered_request_id_returns_the_recorded_result() {
     assert!(listener.accepted() >= 1, "a new id sends");
 }
 
-/// Criterion 9's second half as written: a new server answers
-/// `unknown_outcome` for an id it never saw. A server cannot tell an id it
-/// never saw from a new one, so this waits for the owner's decision.
+/// Criterion 9's second half (owner decision A, 2026-10-28): a live run's
+/// `request_id` is recorded in `.apiforge/local/agent-requests.json` before
+/// its first request goes out, so a new server answers `unknown_outcome`
+/// for an id an earlier server started, with the journal's interrupted runs,
+/// and sends nothing. A record that cannot be read refuses a live run with a
+/// `request_id` rather than risk running it twice.
 #[test]
-#[ignore = "MCP-06: criterion 9's unknown_outcome for an unseen request_id awaits the owner's decision on #65"]
-fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_unseen_id() {
+fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_id_an_earlier_server_started() {
     let directory = checkout();
     let root = directory.path();
-    let listener = Listener::start();
-    point_at(root, &listener.base_url());
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let earlier = live_server(root, true, &[]);
+    let cancel = CancellationToken::new();
+    let running = {
+        let (server, cancel) = (earlier.clone(), cancel.clone());
+        thread::spawn(move || {
+            server.run_tool(
+                RunArguments {
+                    request_id: Some("lost-before-a-restart".into()),
+                    ..live(SCENARIO)
+                },
+                cancel,
+            )
+        })
+    };
+    wait_for_journal(root, &api);
+    let record: Value = serde_json::from_slice(
+        &fs::read(root.join(".apiforge/local/agent-requests.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        record["requests"][0]["id"], "lost-before-a-restart",
+        "recorded before the request went out"
+    );
+    assert_eq!(record["requests"][0]["path"], SCENARIO);
+    cancel.cancel();
+    running.join().unwrap().unwrap();
+    assert!(earlier.agent().finish_editing().finished);
+    drop(earlier);
+    let sent = api.accepted();
+
     let server = live_server(root, true, &[]);
     let error = server
         .run_tool(
@@ -3149,9 +3181,50 @@ fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_unseen_id() {
         )
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::UnknownOutcome);
+    assert_eq!(error.wrote, Wrote::No);
     assert!(error.details["interrupted"].is_array());
+    assert_eq!(error.details["path"], SCENARIO);
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(listener.accepted(), 0);
+    assert_eq!(api.accepted(), sent, "nothing was sent");
+
+    // A new id runs; a record that cannot be read refuses an id.
+    let _demo = demo_api(root);
+    let report = server
+        .run_tool(
+            RunArguments {
+                request_id: Some("a-new-id".into()),
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    fs::write(
+        root.join(".apiforge/local/agent-requests.json"),
+        b"{ broken",
+    )
+    .unwrap();
+    let refused = live_server(root, true, &[]);
+    assert!(server.agent().finish_editing().finished);
+    let error = refused
+        .run_tool(
+            RunArguments {
+                request_id: Some("another-id".into()),
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ProjectUnreadable);
+    assert_eq!(error.details["file"], ".apiforge/local/agent-requests.json");
+    let without_id = refused
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(
+        without_id.status,
+        Verdict::Passed,
+        "a run without an id still works"
+    );
 }
 
 /// Criterion 11: a saved source that contains a known secret value is

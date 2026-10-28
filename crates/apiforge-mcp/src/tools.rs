@@ -841,6 +841,13 @@ pub(crate) struct Prepared {
     request: RunRequest,
 }
 
+impl Prepared {
+    /// The registered path that runs.
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
+}
+
 /// The saved scenario or component at `arguments.path` prepared as a run
 /// of `mode`; the session's store learns `secrets`, so a staged text that
 /// contains one is refused.

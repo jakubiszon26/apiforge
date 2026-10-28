@@ -6,7 +6,7 @@ use crate::{
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
     live::{self, LivePermission},
-    resources,
+    requests, resources,
     secrets::{self, Secrets},
     tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
 };
@@ -199,6 +199,7 @@ impl ApiforgeServer {
         let values: Vec<String> = secrets.values().cloned().collect();
         if let Some(id) = &arguments.request_id {
             secrets::refuse_in_text(id, &values)?;
+            requests::check_id(id)?;
         }
         if !arguments.live {
             let mut report =
@@ -216,6 +217,11 @@ impl ApiforgeServer {
         self.permission.check()?;
         let _slot = self.runs.claim()?;
         let store = self.agent.writer(client)?;
+        if let Some(id) = &arguments.request_id
+            && let Some(started) = requests::find(&store, id)?
+        {
+            return Err(self.unknown_outcome(&started, &values));
+        }
         let report = self.run_live(&arguments, cancel, store, secrets, &values)?;
         if let Some(id) = &arguments.request_id {
             self.record(id, &arguments, &report);
@@ -238,10 +244,16 @@ impl ApiforgeServer {
             ProjectSession::from_store_saved(store.clone()).map_err(tools::storage_error)?;
         let prepared = tools::prepare(&mut session, arguments, RunMode::Live, secrets)?;
         drop(session);
-        let journal = JournalStore::open_project(store).map_err(live::journal_error)?;
+        let prepared_path = prepared.path().to_owned();
+        let journal = JournalStore::open_project(store.clone()).map_err(live::journal_error)?;
         // A change of the permission after this point does not stop the run
         // (MCP-00 decision 16 A).
         self.permission.check()?;
+        // Like the journal, the record of the id is on disk before the first
+        // request goes out.
+        if let Some(id) = &arguments.request_id {
+            requests::record(&store, id, &prepared_path)?;
+        }
         let _running = JournalBefore::set(
             &self.journal_before,
             (journal.interrupted.clone(), journal.unreadable),
@@ -257,6 +269,24 @@ impl ApiforgeServer {
         report.interrupted = live::interrupted(&before.interrupted, values);
         report.journal_unreadable = before.unreadable;
         tools::bound(Ok(report))
+    }
+
+    /// An id an earlier process started: what happened is unknown to this
+    /// server, and nothing is sent again.
+    fn unknown_outcome(&self, started: &requests::Started, values: &[String]) -> ToolError {
+        let interrupted = self
+            .read_journal()
+            .map(|(runs, _)| live::interrupted(&runs, values))
+            .unwrap_or_default();
+        ToolError::new(
+            ErrorCode::UnknownOutcome,
+            "An earlier apiforge mcp process started a live run with this request_id; its outcome is unknown to this server and nothing was sent. The API may have received its requests once: `interrupted` lists what the run journal kept. Use a new request_id to run again",
+        )
+        .with_details(json!({
+            "path": started.path,
+            "started_at": started.started_at,
+            "interrupted": interrupted,
+        }))
     }
 
     /// The recorded result of a live run with the same `request_id`. An id
