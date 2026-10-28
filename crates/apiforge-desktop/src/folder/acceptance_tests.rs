@@ -1863,6 +1863,7 @@ mod mcp08b {
     };
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "components/product.afs";
     /// Tells [`server_process`] which folder to serve.
     const FOLDER: &str = "APIFORGE_HANDOVER_TEST_FOLDER";
     const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
@@ -2737,6 +2738,99 @@ mod mcp08b {
     /// The bar while the agent holds the project (mock-up M1, round 4):
     /// *Take back* at its right end, its right edge on *Run*'s, inside the
     /// window and clear of the texts, in every mode at both sizes.
+    /// The revisions of the product component the window's session lists.
+    fn product_revisions(harness: &FolderHarness) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// MCP-05 beside MCP-08b: a publication while a clean window holds the
+    /// project asks it, as a write does; the window hands the project over
+    /// and lists the new revision it was told of, without a check of its
+    /// own.
+    #[test]
+    fn a_publication_asks_the_window_and_the_revision_is_shown() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        app(&mut harness).watcher.set_interval(NO_POLL);
+        assert_eq!(product_revisions(&harness), [1]);
+
+        let mut server = agent(root, "Claude Code");
+        let (_, hash) = read(&mut server, PRODUCT);
+        let answer = call(
+            &mut harness,
+            &mut server,
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+        );
+        let returned = Instant::now();
+        let published = structured(&answer);
+        assert_eq!(published["wrote"], true, "{answer}");
+        assert_eq!(published["revision"], 2);
+        let took = await_until(&mut harness, returned, "the new revision", |harness| {
+            product_revisions(harness) == [1, 2]
+        });
+        assert!(
+            took < BOUND,
+            "shown {took:?} after the publication returned"
+        );
+        assert!(read_only(&harness), "the window let the project go");
+        assert!(contains(&harness, &format!("{AGENT} · ")));
+        assert_eq!(
+            holder(root).and_then(|holder| holder.role()),
+            Some(HolderRole::Agent)
+        );
+        drop(harness);
+        drop(server);
+    }
+
+    /// MCP-05 beside MCP-08b: unsaved work in the window refuses the
+    /// hand-over a publication asks for; nothing is published.
+    #[test]
+    fn unsaved_work_refuses_a_publication_and_nothing_is_published() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// typed by the person\n");
+        let registry = fs::read(root.join("apiforge.project.json")).unwrap();
+
+        let mut server = agent(root, "Claude Code");
+        let (_, hash) = read(&mut server, PRODUCT);
+        let answer = call(
+            &mut harness,
+            &mut server,
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+        );
+        let error = tool_error(&answer);
+        assert_eq!(error["code"], "handover_refused", "{answer}");
+        assert_eq!(error["wrote"], false);
+        settle(&mut harness);
+        assert!(contains(&harness, REFUSED), "the window says why");
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(
+            fs::read(root.join("apiforge.project.json")).unwrap(),
+            registry,
+            "no revision was registered"
+        );
+        assert_eq!(product_revisions(&harness), [1]);
+        drop(harness);
+        drop(server);
+    }
+
     #[test]
     fn take_back_sits_at_the_right_end_of_the_bar_under_run() {
         for size in [MINIMUM, WIDE] {
@@ -2815,5 +2909,177 @@ mod mcp08b {
             drop(harness);
             drop(server);
         }
+    }
+}
+
+// ----- MCP-05: the window beside a publication from the server ---------------
+
+mod mcp05 {
+    use super::*;
+    use crate::testing::shop_project;
+    use apiforge_mcp::agent::{AgentSession, PublishArguments};
+    use apiforge_storage::project::FileState;
+
+    const PRODUCT: &str = "components/product.afs";
+
+    fn sha256(bytes: &[u8]) -> String {
+        match FileState::of(bytes) {
+            FileState::File { sha256, .. } => sha256,
+            _ => unreachable!(),
+        }
+    }
+
+    /// The revisions of the product component the window's session lists.
+    fn listed(harness: &FolderHarness) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// Criterion 8: the window, open read-only beside the server, lists the
+    /// revision the server published after its project reload: the
+    /// registry changed and nothing is unsaved.
+    #[test]
+    fn a_read_only_window_lists_the_revision_the_server_published() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = AgentSession::with_environment(root.to_owned(), Vec::new());
+        let saved = fs::read(root.join(PRODUCT)).unwrap();
+        let arguments = PublishArguments {
+            path: PRODUCT.into(),
+            expected_source_sha256: sha256(&saved),
+            accept_comment_loss: false,
+            expected_generation: None,
+            request_id: None,
+        };
+        // The window opens while the agent session holds the project: the
+        // first publication takes the lock, the second is the one followed.
+        agent.publish(&arguments).unwrap();
+        assert!(agent.is_active());
+        let mut harness = folder_harness(root, WIDE);
+        assert!(folder(&harness).session.as_ref().unwrap().is_read_only());
+        assert_eq!(listed(&harness), [1, 2]);
+
+        let published = agent.publish(&arguments).unwrap();
+        assert_eq!(published.revision, 3);
+        follow_disk(&mut harness);
+        assert_eq!(listed(&harness), [1, 2, 3], "the new revision is listed");
+        let app = folder(&harness);
+        assert!(
+            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            "no conflict is reported"
+        );
+        let session = app.session.as_ref().unwrap();
+        let product = session
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap();
+        assert_eq!(product.entry().base_revision, Some(3));
+        assert!(
+            session
+                .documents()
+                .iter()
+                .all(|document| !document.is_dirty() && !document.is_layout_dirty()),
+            "nothing is unsaved"
+        );
+        drop(harness);
+        drop(agent);
+    }
+
+    /// The project as Git sees it: every file outside `.apiforge/local`.
+    fn shared(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fn walk(
+            root: &std::path::Path,
+            at: &std::path::Path,
+            files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+        ) {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap();
+                if relative == std::path::Path::new(".apiforge").join("local") {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk(root, &path, files);
+                } else {
+                    files.insert(
+                        relative.to_string_lossy().replace('\\', "/"),
+                        fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = std::collections::BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+
+    /// Criterion 1's "the same transaction as the window's Publish", through
+    /// the window: *Publish* pressed in the component's header in one copy
+    /// of the project and `publish` from the server in another leave the
+    /// same files with the same bytes.
+    #[test]
+    fn the_windows_publish_and_the_servers_write_the_same_bytes() {
+        let window = shop_project();
+        let server = tempfile::tempdir().unwrap();
+        for (relative, bytes) in shared(window.path()) {
+            let target = server.path().join(&relative);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, bytes).unwrap();
+        }
+        assert_eq!(shared(server.path()), shared(window.path()));
+
+        let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
+        let saved = fs::read(server.path().join(PRODUCT)).unwrap();
+        let published = agent
+            .publish(&PublishArguments {
+                path: PRODUCT.into(),
+                expected_source_sha256: sha256(&saved),
+                accept_comment_loss: false,
+                expected_generation: None,
+                request_id: None,
+            })
+            .unwrap();
+        assert_eq!(published.revision, 2);
+        drop(agent);
+
+        let mut harness = folder_harness(window.path(), WIDE);
+        let product = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap()
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        choose(&mut harness, "Publish");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while listed(&harness) != [1, 2] {
+            assert!(Instant::now() < deadline, "the window never published");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        drop(harness);
+
+        let window = shared(window.path());
+        assert_eq!(
+            window.get(&published.revision_path),
+            shared(server.path()).get(&published.revision_path),
+            "the revision file"
+        );
+        assert_eq!(window, shared(server.path()), "every shared file");
     }
 }

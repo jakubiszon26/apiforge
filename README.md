@@ -88,20 +88,23 @@ open beside it.
    | `check_text` | Check a proposed text before saving anything |
    | `run` | Simulate a scenario or a component; with permission, run it live |
    | `write_source`, `create_document`, `finish_editing` | Save a source or register a new one, only when the text is valid and only over the version it read |
+   | `publish` | Turn a component into its next immutable revision, the same transaction as *Publish* in the window |
 
 4. **Watch in the window.** While the agent holds the project, the open
    window observes: editing pauses there, the bottom bar names the agent, and
    every change the agent commits appears within two seconds, keeping your
-   place. When the agent finishes, the window takes the project back.
+   place. A window with nothing unsaved hands the project over when the agent
+   first writes; *Take back* in the bottom bar returns it to you, and when
+   the agent finishes the window takes the project back by itself.
 
 5. **Live requests stay yours.** A model cannot allow live requests: the
    person starts the server with `--allow-live`. Secrets come from
    `APIFORGE_SECRET_<NAME>` in the server's environment or a `--secrets`
    file, and no secret value leaves the server in any result, error or log.
 
-Coming in the next releases: publishing component revisions from the server,
-handing the project over from the window on request, and a per-project
-switch for live requests. The full contract is in the
+Coming in the next releases: a per-project switch for live requests in the
+window, a prompt to save and hand over when the window has unsaved work, and
+the agent's run status in the bottom bar. The full contract is in the
 [development guide](docs/development.md#mcp-server).
 
 ![The window observing an agent: editing paused, the agent named in the bottom bar](docs/images/agent-observer.png)

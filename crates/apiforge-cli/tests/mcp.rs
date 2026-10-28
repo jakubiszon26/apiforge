@@ -22,6 +22,10 @@
 //! next server reporting the journal's entry; a whole session grepped for
 //! two secret values. Live requests go to the demo API in this process or a
 //! loopback listener that never answers.
+//!
+//! MCP-05 (#64) over real stdio: `publish` in the tool list with its
+//! annotations; the comment-loss refusal and the consent; a repeated
+//! `request_id` answered from the record; a window holding the project.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -35,7 +39,7 @@ use std::{
 
 const PRODUCT: &str = "components/product.afs";
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-const TOOLS: [&str; 10] = [
+const TOOLS: [&str; 11] = [
     "project_overview",
     "language_reference",
     "read_source",
@@ -45,15 +49,17 @@ const TOOLS: [&str; 10] = [
     "run",
     "write_source",
     "create_document",
+    "publish",
     "finish_editing",
 ];
-/// The tools that change the project or its writer lock (MCP-04), or may
-/// send live requests (`run`, MCP-06), with their `destructiveHint` and
-/// `idempotentHint`.
-const WRITE_TOOLS: [(&str, bool, bool); 4] = [
+/// The tools that change the project or its writer lock (MCP-04, MCP-05),
+/// or may send live requests (`run`, MCP-06), with their `destructiveHint`
+/// and `idempotentHint`.
+const WRITE_TOOLS: [(&str, bool, bool); 5] = [
     ("run", true, false),
     ("write_source", true, true),
     ("create_document", false, false),
+    ("publish", false, false),
     ("finish_editing", false, true),
 ];
 
@@ -1485,4 +1491,108 @@ fn mcp06_a_secrets_file_that_cannot_be_read_stops_the_server() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("The secrets file is not JSON"), "{stderr}");
     assert!(!stderr.contains(TOKEN));
+}
+
+// MCP-05 (#64) ---------------------------------------------------------------
+
+/// Criteria 1, 4 and 6 over stdio: the refusal that lists the comments, the
+/// consent bound to the hash, a repeated `request_id` answered from the
+/// record, and the overview listing the revision with its hash.
+#[test]
+fn mcp05_publish_over_stdio() {
+    const LOOSE: &str = "// A loose note from the model.";
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, PRODUCT);
+    let written = call(
+        &mut server,
+        3,
+        "write_source",
+        json!({ "path": PRODUCT, "text": format!("{LOOSE}\n\n{text}"), "expected_source_sha256": hash }),
+    );
+    let hash = structured(&written)["source_sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let refused = call(
+        &mut server,
+        4,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash, "request_id": "qa-1" }),
+    );
+    tool_error(&refused, "comments_would_be_lost");
+    assert_eq!(
+        refused["result"]["structuredContent"]["details"]["comments"][0]["text"],
+        LOOSE
+    );
+
+    let arguments = json!({
+        "path": PRODUCT,
+        "expected_source_sha256": hash,
+        "accept_comment_loss": true,
+        "request_id": "qa-1",
+    });
+    let published = call(&mut server, 5, "publish", arguments.clone());
+    let published = structured(&published).clone();
+    assert_eq!(published["wrote"], true);
+    assert_eq!(published["replayed"], false);
+    assert_eq!(published["handle"], "product");
+    assert_eq!(published["revision"], 2);
+    let revision_path = published["revision_path"].as_str().unwrap();
+    assert!(root.join(revision_path).is_file());
+
+    let again = call(&mut server, 6, "publish", arguments);
+    let again = structured(&again).clone();
+    assert_eq!(again["replayed"], true);
+    assert_eq!(again["revision"], 2);
+    assert_eq!(again["source_sha256"], published["source_sha256"]);
+    assert!(
+        !root
+            .join(revision_path.replace("/2.afs", "/3.afs"))
+            .exists()
+    );
+
+    let overview = call(&mut server, 7, "project_overview", json!({}));
+    let overview = structured(&overview);
+    assert!(
+        overview["revisions"].as_array().unwrap().iter().any(|r| {
+            r["handle"] == "product"
+                && r["revision"] == 2
+                && r["source_sha256"] == published["source_sha256"]
+        }),
+        "{overview}"
+    );
+    assert_eq!(overview["holder"], "agent_session");
+    assert!(locked(root), "the lock stays with the session");
+    assert_clean_end(server);
+}
+
+/// Criterion 7 over stdio: a window holding the project refuses `publish`.
+#[test]
+fn mcp05_criterion_7_a_window_holding_the_project_refuses_publish_over_stdio() {
+    use apiforge_storage::project::ProjectStore;
+    let directory = demo();
+    let root = directory.path();
+    let manifest = std::fs::read(root.join("apiforge.project.json")).unwrap();
+    let window = ProjectStore::open_exclusive(root).unwrap();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (_, hash) = read(&mut server, 2, PRODUCT);
+    let refused = call(
+        &mut server,
+        3,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+    );
+    tool_error(&refused, "held_by_window");
+    drop(window);
+    assert_clean_end(server);
+    assert_eq!(
+        std::fs::read(root.join("apiforge.project.json")).unwrap(),
+        manifest,
+        "no revision was registered"
+    );
 }
