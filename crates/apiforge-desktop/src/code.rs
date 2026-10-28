@@ -45,6 +45,9 @@ pub struct Context<'a> {
     /// A project text file such as `.gitignore` is not a definition, so the
     /// language's names and shapes say nothing about it.
     pub plain: bool,
+    /// Whether the text takes the keyboard and the pointer. An observing
+    /// folder window shows code it cannot save, so it pauses typing (MCP-08a).
+    pub interactive: bool,
 }
 
 impl Default for Context<'_> {
@@ -57,6 +60,7 @@ impl Default for Context<'_> {
             wrap: false,
             font_size: 13.0,
             plain: false,
+            interactive: true,
         }
     }
 }
@@ -413,6 +417,7 @@ impl CodeEditor {
                 .code_editor()
                 .desired_width(f32::INFINITY)
                 .lock_focus(true)
+                .interactive(context.interactive)
                 .layouter(&mut layouter);
             if gutter.is_some() {
                 // An editor with line numbers is its panel's content, not a form

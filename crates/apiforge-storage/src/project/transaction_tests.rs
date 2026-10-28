@@ -492,3 +492,76 @@ fn a_scan_after_an_interrupted_commit_still_requires_recovery() {
         Err(ProjectError::RecoveryRequired)
     ));
 }
+
+/// MCP-08a criterion 5: an observer in another process reads the project
+/// while the holder commits a source and its checkpoint together. Held
+/// between every staged file and every replaced target, a stable read sees
+/// the old source with the old checkpoint or the new with the new, or is
+/// told to come back; never one without the other.
+#[test]
+fn an_observer_never_reads_a_source_without_its_checkpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    let observer = ProjectStore::open_read_only(directory.path()).unwrap();
+    let (mut old, mut later) = (0, 0);
+    writer
+        .commit_with_hook(save_plan(), |boundary| {
+            match observer.load() {
+                Ok((_, snapshot)) => {
+                    let source = snapshot.files[&path("scenarios/main.afs")].clone();
+                    let checkpoint = snapshot.files[&path(".apiforge/diagram.json")].clone();
+                    match (source.as_deref(), checkpoint) {
+                        (Some(b"scenario \"Main\" {}\n"), None) => old += 1,
+                        (Some(b"scenario \"Saved\" {}\n"), Some(_)) => {}
+                        (source, checkpoint) => panic!(
+                            "{boundary}: a mixed read: {:?} with checkpoint {}",
+                            source.map(String::from_utf8_lossy),
+                            checkpoint.is_some()
+                        ),
+                    }
+                }
+                // The holder's activated transaction: the next poll reads again.
+                Err(ProjectError::Busy | ProjectError::RecoveryRequired) => later += 1,
+                Err(error) => panic!("{boundary}: {error:?}"),
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(old > 0, "the old pair is read before activation");
+    assert!(later > 0, "an activated commit is waited for");
+    let (_, snapshot) = observer.load().unwrap();
+    assert_eq!(
+        snapshot.files[&path("scenarios/main.afs")].as_deref(),
+        Some(b"scenario \"Saved\" {}\n".as_slice())
+    );
+    assert!(snapshot.files[&path(".apiforge/diagram.json")].is_some());
+}
+
+/// MCP-08a (planning decision 2): while the holder is alive, an observer's
+/// check that meets the holder's transaction is busy, so the next poll reads
+/// again, and never the recovery an abandoned transaction needs.
+#[test]
+fn an_observers_check_during_a_living_holders_commit_is_busy() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    initialise(&writer);
+    let observer = ProjectStore::open_read_only(directory.path()).unwrap();
+    let mut scans = Vec::new();
+    writer
+        .commit_with_hook(save_plan(), |boundary| {
+            if boundary == "operation" {
+                scans.push(observer.scan_tree().map(|_| ()));
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(!scans.is_empty(), "the commit replayed its operations");
+    for scan in scans {
+        assert!(
+            matches!(scan, Err(ProjectError::Busy)),
+            "a living holder's commit is not a recovery: {scan:?}"
+        );
+    }
+    assert!(observer.scan_tree().is_ok(), "the next check scans again");
+}

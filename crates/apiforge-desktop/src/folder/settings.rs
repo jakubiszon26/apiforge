@@ -4,19 +4,29 @@ use super::*;
 impl FolderApp {
     pub(super) fn open_project_settings(&mut self) {
         let Some(session) = &self.session else { return };
-        if session.is_read_only() {
-            return;
-        }
-        self.prompt = Some(Prompt::Settings(Box::new(
-            dialogs::SettingsDialog::project(session.context()),
-        )));
+        let dialog = dialogs::SettingsDialog::project(session.context());
+        // Observing, the settings are shown with every control disabled
+        // (MCP-08a; MCP-09 enables its own toggle); a read-only window that
+        // is not observing does not open them.
+        let dialog = match (session.is_read_only(), self.observing()) {
+            (false, _) => dialog,
+            (true, true) => dialog.read_only(),
+            (true, false) => return,
+        };
+        self.prompt = Some(Prompt::Settings(Box::new(dialog)));
     }
 
     pub(super) fn open_environment(&mut self) {
         let Some(session) = &self.session else { return };
-        self.prompt = Some(Prompt::Environment(Box::new(
-            dialogs::EnvironmentDialog::folder(&session.manifest().environment, &self.runs.secrets),
-        )));
+        let dialog =
+            dialogs::EnvironmentDialog::folder(&session.manifest().environment, &self.runs.secrets);
+        // Observing, only the session's secret values can change (MCP-08a).
+        let dialog = if self.observing() {
+            dialog.public_read_only()
+        } else {
+            dialog
+        };
+        self.prompt = Some(Prompt::Environment(Box::new(dialog)));
     }
 
     pub(super) fn project_settings_prompt(
@@ -24,6 +34,12 @@ impl FolderApp {
         context: &egui::Context,
         mut dialog: dialogs::SettingsDialog,
     ) -> Option<Prompt> {
+        // The window may have begun observing since the dialog opened.
+        let read_only = self
+            .session
+            .as_ref()
+            .is_some_and(ProjectSession::is_read_only);
+        dialog.set_read_only(read_only);
         match dialog.show(context) {
             dialogs::Outcome::Cancelled => return None,
             dialogs::Outcome::Applied(change) => {
@@ -124,10 +140,19 @@ impl FolderApp {
         context: &egui::Context,
         mut dialog: dialogs::EnvironmentDialog,
     ) -> Option<Prompt> {
+        let observing = self.observing();
+        dialog.set_public_read_only(observing);
         match dialog.show(context) {
             dialogs::Outcome::Cancelled => return None,
             dialogs::Outcome::Applied((environment, secrets)) => {
                 let session = self.session.as_ref()?;
+                // Observing, only the secret values apply: the public part
+                // is the holder's, as last followed, not the dialog's copy.
+                let environment = if observing {
+                    session.manifest().environment.clone()
+                } else {
+                    environment
+                };
                 if session.manifest().environment != environment && !session.is_read_only() {
                     self.queue_environment(environment, secrets, Some(dialog));
                     return self.prompt.take();

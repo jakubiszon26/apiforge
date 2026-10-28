@@ -293,3 +293,184 @@ fn an_observer_takes_the_writer_lock_only_when_it_is_free_and_keeps_its_text() {
         Some(HolderRole::Window)
     );
 }
+
+// ----- MCP-08a: an observer follows every commit of the holder ----------------
+
+mod observer {
+    use super::*;
+
+    /// The holder's edits, as the agent's would be.
+    const HOLDER: Origin = Origin(90);
+
+    /// The project held by the session that created it, and a second session
+    /// beside it, which can only observe.
+    fn held() -> (tempfile::TempDir, ProjectSession, ProjectSession, String) {
+        let (directory, holder, id) = project();
+        let observer = ProjectSession::open(directory.path()).unwrap();
+        assert!(observer.is_read_only(), "the holder keeps the lock");
+        (directory, holder, observer, id)
+    }
+
+    fn blocks(session: &ProjectSession, id: &str) -> Vec<(String, f64, f64)> {
+        let Some(Document::Scenario(scenario)) = session.document(id).unwrap().model() else {
+            panic!("a valid scenario");
+        };
+        scenario
+            .graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.position.x, node.position.y))
+            .collect()
+    }
+
+    /// Moves every block of the holder's scenario, as a layout edit does.
+    fn move_blocks(holder: &mut ProjectSession, id: &str, dx: f64, dy: f64) {
+        let Some(Document::Scenario(mut scenario)) = holder.document(id).unwrap().model().cloned()
+        else {
+            panic!("a valid scenario");
+        };
+        for node in &mut scenario.graph.nodes {
+            node.position.x += dx;
+            node.position.y += dy;
+        }
+        holder
+            .apply_model_edit(id, Document::Scenario(scenario), HOLDER)
+            .unwrap();
+    }
+
+    /// ADR 0014 decision 5: a commit of the holder is followed by reloading
+    /// the project in a new epoch, with the identities and positions of the
+    /// holder's checkpoint, not ones this session would derive itself.
+    #[test]
+    fn a_commit_is_followed_with_the_holders_identities_and_positions() {
+        let (_directory, mut holder, mut observer, id) = held();
+        let epoch = observer.epoch();
+        holder.edit_source(&id, CHANGED, HOLDER).unwrap();
+        holder.settle(&id).unwrap();
+        move_blocks(&mut holder, &id, 240.0, 160.0);
+        holder.save(&id).unwrap();
+
+        let outcome = poll(&mut observer);
+        assert!(outcome.project_reloaded, "the commit is followed");
+        assert!(observer.epoch() > epoch, "a reload starts a new epoch");
+        assert_eq!(observer.document(&id).unwrap().text(), CHANGED);
+        assert_eq!(blocks(&observer, &id), blocks(&holder, &id));
+        assert!(poll(&mut observer).is_empty(), "the commit is the baseline");
+    }
+
+    /// MCP-08a criterion 2, planning decision 3: a commit that changes only
+    /// the checkpoint, the blocks moved and the source untouched, is
+    /// followed too; the shared diagram file is fingerprinted directly.
+    #[test]
+    fn a_layout_only_commit_is_followed() {
+        let (_directory, mut holder, mut observer, id) = held();
+        move_blocks(&mut holder, &id, -80.0, 40.0);
+        holder.save(&id).unwrap();
+        assert_eq!(holder.document(&id).unwrap().text(), SCENARIO);
+
+        let outcome = poll(&mut observer);
+        assert!(outcome.project_reloaded, "the commit is followed");
+        assert_eq!(blocks(&observer, &id), blocks(&holder, &id));
+    }
+
+    /// Planning decision 1: the observer shows the saved state only. The
+    /// holder's unsaved work in its recovery file belongs to the holder, at
+    /// opening and after following a commit alike.
+    #[test]
+    fn an_observer_shows_the_saved_state_not_the_holders_unsaved_work() {
+        let (directory, mut holder, id) = project();
+        let other = holder
+            .create_document(DocumentKind::Scenario, "scenarios/other.afs", OTHER)
+            .unwrap();
+        let unsaved = SCENARIO.replace('2', "5");
+        holder.edit_source(&id, &unsaved, HOLDER).unwrap();
+        assert!(
+            holder.save_recovery().unwrap(),
+            "the holder protects its work"
+        );
+
+        let mut observer = ProjectSession::open(directory.path()).unwrap();
+        assert!(observer.is_read_only());
+        assert_eq!(observer.document(&id).unwrap().text(), SCENARIO);
+        assert!(observer.recovered_drafts().is_empty());
+
+        holder
+            .edit_source(&other, &OTHER.replace('1', "4"), HOLDER)
+            .unwrap();
+        // Saving rewrites the holder's recovery file, still with the draft.
+        holder.save(&other).unwrap();
+        let outcome = poll(&mut observer);
+        assert!(outcome.project_reloaded, "the commit is followed");
+        assert_eq!(observer.document(&id).unwrap().text(), SCENARIO);
+        assert!(observer.recovered_drafts().is_empty());
+    }
+
+    /// MCP-08a criterion 6: an analysis of the text before a followed commit
+    /// that finishes after it is refused; the model stays the committed one.
+    #[test]
+    fn a_late_analysis_of_the_previous_text_is_refused_after_a_followed_commit() {
+        let (_directory, mut holder, mut observer, id) = held();
+        let epoch = observer.epoch();
+        // Started on the old text, delayed until after the commit.
+        let late = observer.analysis_for(&id).unwrap();
+        holder.edit_source(&id, CHANGED, HOLDER).unwrap();
+        holder.save(&id).unwrap();
+        let outcome = poll(&mut observer);
+        assert!(outcome.project_reloaded, "the commit is followed");
+        assert!(observer.epoch() > epoch, "a reload starts a new epoch");
+        let model = observer.document(&id).unwrap().model().cloned();
+
+        assert!(matches!(
+            observer.apply_analysis(late.run()),
+            Err(Error::StaleAnalysis)
+        ));
+        let document = observer.document(&id).unwrap();
+        assert_eq!(document.text(), CHANGED);
+        assert_eq!(document.model().cloned(), model, "never the earlier state");
+    }
+
+    /// MCP-08a criterion 7 at the session: a document the holder deleted is
+    /// gone after the reload; the others stay.
+    #[test]
+    fn a_document_the_holder_deleted_is_gone_after_the_reload() {
+        let (directory, mut holder, id) = project();
+        holder
+            .create_document(DocumentKind::Scenario, "scenarios/other.afs", OTHER)
+            .unwrap();
+        let mut observer = ProjectSession::open(directory.path()).unwrap();
+        assert_eq!(observer.documents().len(), 2);
+        let preview = holder.preview_delete(&["scenarios/other.afs"]).unwrap();
+        holder.delete(&preview, HOLDER).unwrap();
+        let outcome = poll(&mut observer);
+        assert!(outcome.project_reloaded, "the commit is followed");
+        assert_eq!(observer.documents().len(), 1);
+        assert!(observer.document(&id).is_some());
+        assert_eq!(outcome.followed.len(), 1);
+        assert_eq!(outcome.followed[0].kind, CommitChangeKind::Deleted);
+        assert_eq!(outcome.followed[0].path, "scenarios/other.afs");
+    }
+
+    /// Review of #110: a commit that saves a source and the project's
+    /// settings together names both, the source first.
+    #[test]
+    fn a_commit_of_a_source_and_settings_names_both() {
+        let (_directory, mut holder, mut observer, id) = held();
+        holder
+            .edit_configuration(|manifest| manifest.name = "Renamed".into(), HOLDER)
+            .unwrap();
+        holder.edit_source(&id, CHANGED, HOLDER).unwrap();
+        holder.save(&id).unwrap();
+        let outcome = poll(&mut observer);
+        let kinds: Vec<_> = outcome.followed.iter().map(|change| change.kind).collect();
+        assert_eq!(
+            kinds,
+            [CommitChangeKind::Saved, CommitChangeKind::Settings],
+            "both changes are named"
+        );
+        assert_eq!(
+            outcome.followed[0].document_id.as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(observer.manifest().name, "Renamed");
+    }
+}

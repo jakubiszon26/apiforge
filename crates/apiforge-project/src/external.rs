@@ -53,6 +53,9 @@ pub struct ExternalCheck {
     documents: Vec<(String, ProjectPath, FileState)>,
     /// Open text files, by path: their identity, unlike a document's.
     texts: Vec<(ProjectPath, FileState)>,
+    /// For an observer only: the checkpoint and every registered revision
+    /// file as loaded, fingerprinted directly (MCP-08a, planning decision 3).
+    observed: Option<(FileState, Vec<(ProjectPath, FileState)>)>,
 }
 
 /// What a check found. Applying it to a session of a different epoch, or to
@@ -65,6 +68,45 @@ pub struct ExternalChanges {
     manifest: Option<ObservedFile>,
     documents: Vec<(String, FileState, ObservedFile)>,
     texts: Vec<(String, FileState, Option<Vec<u8>>)>,
+    /// The check ran beside a living holder: this session observes it.
+    observer: bool,
+    /// An observer's checkpoint or a revision file differs from the loaded one.
+    committed_outside_sources: bool,
+}
+
+/// What a followed commit changed, for the window to say so (MCP-08a).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitChange {
+    /// The registered path of the document concerned, or the project file.
+    pub path: String,
+    /// The document concerned; `None` for the project's settings.
+    pub document_id: Option<String>,
+    pub kind: CommitChangeKind,
+}
+
+/// What an observer's check did about the holder's commit.
+enum Following {
+    /// Not an observer's commit to follow: the ordinary rules apply.
+    NotFollowed,
+    /// The holder's commit is still in progress; the session stays as it was
+    /// and the next check reads again.
+    Later,
+    Followed(Vec<CommitChange>),
+}
+
+/// In the order a window names them first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommitChangeKind {
+    /// A new revision of the component at `path`.
+    Published,
+    Added,
+    Deleted,
+    /// The source changed.
+    Saved,
+    /// Only the document's blocks moved: its checkpoint changed.
+    Layout,
+    /// Only the project file changed: name, environment or contracts.
+    Settings,
 }
 
 /// What applying a check changed, for notification.
@@ -77,8 +119,11 @@ pub struct ExternalOutcome {
     /// Paths of open text files whose unsaved work cannot follow the disk.
     pub text_conflicts: Vec<String>,
     pub registry: Option<RegistryState>,
-    /// The project was reloaded because its registry changed.
+    /// The project was reloaded because its registry changed, or, in an
+    /// observer, because the holder committed.
     pub project_reloaded: bool,
+    /// What the holder's commit changed, when an observer followed it.
+    pub followed: Vec<CommitChange>,
 }
 
 impl ExternalOutcome {
@@ -174,6 +219,28 @@ impl ExternalCheck {
             };
             texts.push((path.as_str().to_owned(), saved.clone(), bytes));
         }
+        let mut committed_outside_sources = false;
+        // A read-only session without a living holder (a folder this user
+        // cannot write, a holder that is gone) keeps following file by file.
+        let observed = match &self.observed {
+            Some(observed) if self.store.has_live_writer()? => Some(observed),
+            _ => None,
+        };
+        if let Some((diagram, revisions)) = observed {
+            let diagram_path = ProjectPath::new(super::DIAGRAM_PATH)?;
+            for (path, saved) in std::iter::once((&diagram_path, diagram))
+                .chain(revisions.iter().map(|(path, saved)| (path, saved)))
+            {
+                match self.store.file_state(path) {
+                    Ok(current) if &current != saved => {
+                        committed_outside_sources = true;
+                        break;
+                    }
+                    Ok(_) | Err(ProjectError::Limit) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
         Ok(ExternalChanges {
             epoch: self.epoch,
             manifest_base: self.manifest.clone(),
@@ -181,6 +248,8 @@ impl ExternalCheck {
             manifest,
             documents,
             texts,
+            observer: observed.is_some(),
+            committed_outside_sources,
         })
     }
 }
@@ -204,6 +273,10 @@ impl ProjectSession {
                 })
                 .collect(),
             texts: self.text_baselines(),
+            observed: self
+                .store
+                .is_read_only()
+                .then(|| (self.diagram_saved.clone(), self.revisions_saved.clone())),
         }
     }
 
@@ -217,6 +290,17 @@ impl ProjectSession {
         let mut outcome = ExternalOutcome::default();
         if changes.epoch != self.epoch || changes.manifest_base != self.manifest_saved {
             return Ok(outcome);
+        }
+        if changes.observer && self.store.is_read_only() && !self.has_unsaved_work() {
+            match self.follow_commit(&changes)? {
+                Following::NotFollowed => {}
+                Following::Later => return Ok(outcome),
+                Following::Followed(followed) => {
+                    outcome.project_reloaded = true;
+                    outcome.followed = followed;
+                    return Ok(outcome);
+                }
+            }
         }
         if let Some(observed) = &changes.manifest {
             let state = match observed {
@@ -326,6 +410,130 @@ impl ProjectSession {
             super::ConflictDecision::KeepDeleted,
             Origin::SESSION,
         )
+    }
+
+    /// An observer follows every commit of the holder by reloading the saved
+    /// project from one stable read in a new epoch (ADR 0014 decision 5), with
+    /// the holder's checkpoint: never the holder's unsaved drafts or this
+    /// machine's cache (planning decision 1). Not followed when nothing
+    /// committed changed or the registry is unusable (the registry state
+    /// reports it); later while the holder's commit is still in progress.
+    fn follow_commit(&mut self, changes: &ExternalChanges) -> Result<Following> {
+        let registry_valid = match &changes.manifest {
+            None => true,
+            Some(ObservedFile::Bytes(bytes)) => ProjectManifest::from_bytes(bytes)
+                .is_ok_and(|manifest| manifest.id == self.manifest.id),
+            Some(_) => false,
+        };
+        let committed = changes.manifest.is_some()
+            || !changes.documents.is_empty()
+            || changes.committed_outside_sources;
+        if !committed || !registry_valid {
+            return Ok(Following::NotFollowed);
+        }
+        let next = match Self::load_saved(self.store.clone(), self.placer.clone(), self.epoch + 1) {
+            Err(Error::Storage(ProjectError::Busy | ProjectError::RecoveryRequired)) => {
+                return Ok(Following::Later);
+            }
+            result => result?,
+        };
+        let before = std::mem::replace(self, next);
+        self.sequence = before.sequence;
+        for file in &before.texts {
+            let _ = self.open_text_file(file.path());
+        }
+        self.emit(
+            Origin::SESSION,
+            None,
+            EventKind::ContextChanged {
+                generation: self.context_generation,
+            },
+        );
+        Ok(Following::Followed(self.commit_changes(&before)))
+    }
+
+    /// What differs between `before` and this session, published revisions
+    /// first, then registrations, sources and layouts, then settings.
+    fn commit_changes(&self, before: &Self) -> Vec<CommitChange> {
+        let mut followed = Vec::new();
+        let mut change = |path: &ProjectPath, id: &str, kind| {
+            followed.push(CommitChange {
+                path: path.as_str().to_owned(),
+                document_id: Some(id.to_owned()),
+                kind,
+            })
+        };
+        for revision in &self.manifest.revisions {
+            if !before.manifest.revisions.contains(revision) {
+                match self
+                    .documents
+                    .iter()
+                    .find(|document| document.entry.entity_id == revision.component_id)
+                {
+                    Some(document) => change(
+                        &document.entry.path,
+                        &document.entry.document_id,
+                        CommitChangeKind::Published,
+                    ),
+                    None => change(
+                        &revision.path,
+                        &revision.component_id,
+                        CommitChangeKind::Published,
+                    ),
+                }
+            }
+        }
+        let record = |session: &Self, id: &str| {
+            session.diagram.as_ref().and_then(|file| {
+                file.records
+                    .iter()
+                    .find(|record| {
+                        record.key
+                            == apiforge_storage::project::DocumentKey::Working {
+                                document_id: id.to_owned(),
+                            }
+                    })
+                    .cloned()
+            })
+        };
+        for document in &self.documents {
+            let id = &document.entry.document_id;
+            match before.document(id) {
+                None => change(&document.entry.path, id, CommitChangeKind::Added),
+                Some(old)
+                    if old.saved != document.saved || old.entry.path != document.entry.path =>
+                {
+                    change(&document.entry.path, id, CommitChangeKind::Saved)
+                }
+                Some(_) if record(before, id) != record(self, id) => {
+                    change(&document.entry.path, id, CommitChangeKind::Layout)
+                }
+                Some(_) => {}
+            }
+        }
+        for document in &before.documents {
+            if self.document(&document.entry.document_id).is_none() {
+                change(
+                    &document.entry.path,
+                    &document.entry.document_id,
+                    CommitChangeKind::Deleted,
+                );
+            }
+        }
+        // The registry also changes with a registration or a publication;
+        // only the public settings are the project's own change.
+        if self.manifest.name != before.manifest.name
+            || self.manifest.environment != before.manifest.environment
+            || self.manifest.contracts != before.manifest.contracts
+        {
+            followed.push(CommitChange {
+                path: MANIFEST_PATH.to_owned(),
+                document_id: None,
+                kind: CommitChangeKind::Settings,
+            });
+        }
+        followed.sort_by_key(|change| change.kind as u8);
+        followed
     }
 
     /// Rereads the whole project after an external registry change, keeping

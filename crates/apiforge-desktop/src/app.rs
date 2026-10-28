@@ -897,6 +897,7 @@ impl App {
                         wrap: false,
                         font_size: 13.0,
                         plain: false,
+                        interactive: true,
                     },
                 )
             })
@@ -2332,6 +2333,7 @@ impl App {
                     .is_some_and(|clipboard| clipboard.context == context),
                 context: &context,
                 library_in_view: true,
+                read_only: false,
                 header_leading: None,
                 library: None,
             };

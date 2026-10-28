@@ -282,6 +282,7 @@ impl ProjectSession {
             cache: self.cache.clone(),
             registry: self.registry,
             loaded_generation: self.loaded_generation,
+            revisions_saved: self.revisions_saved.clone(),
         }
     }
 }
