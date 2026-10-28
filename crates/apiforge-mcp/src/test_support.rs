@@ -17,8 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// How long a blocking request waits for its answer.
-const ANSWER: Duration = Duration::from_secs(30);
+/// How long a blocking request waits for its answer: longer than the
+/// thirty seconds a write waits for a window's answer.
+const ANSWER: Duration = Duration::from_secs(45);
 
 pub struct StdioServer {
     child: Child,

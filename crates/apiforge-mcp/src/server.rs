@@ -217,7 +217,11 @@ impl ApiforgeServer {
             if !runs.is_busy() {
                 *lock(&running) = Some(arguments.path.clone());
             }
-            let report = tools::run(&folder, &arguments, &runs, cancel)?;
+            let report = tools::run(&folder, &arguments, &runs, cancel);
+            if !runs.is_busy() {
+                *lock(&running) = None;
+            }
+            let report = report?;
             match report.ended_by {
                 EndedBy::Completed => {}
                 EndedBy::Cancelled => eprintln!("apiforge mcp: run: cancelled"),

@@ -319,10 +319,12 @@ impl AgentSession {
         state.recovery_required = false;
         let finished = state.store.take().is_some();
         self.active.store(false, Ordering::Release);
-        drop(state);
+        // Still under the state: a write that waits for it starts a new
+        // session only after the windows were told this one ended.
         if let Some(hub) = self.hub.get() {
             hub.release();
         }
+        drop(state);
         Finished { finished }
     }
 

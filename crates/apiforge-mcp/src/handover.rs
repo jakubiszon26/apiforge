@@ -186,21 +186,7 @@ impl Hub {
             .iter()
             .map(|link| (link.id, link.writer.clone()))
             .collect();
-        if writers.is_empty() {
-            return;
-        }
-        let failed = self.handle.block_on(async {
-            let mut failed = Vec::new();
-            for (id, writer) in writers {
-                let sent =
-                    tokio::time::timeout(SEND, async { writer.lock().await.send(message).await })
-                        .await;
-                if !matches!(sent, Ok(Ok(()))) {
-                    failed.push(id);
-                }
-            }
-            failed
-        });
+        let failed = self.send(writers, message);
         if !failed.is_empty() {
             eprintln!("apiforge mcp: channel: a window could not be told and was let go");
             lock(&self.links).retain(|link| {
@@ -213,13 +199,41 @@ impl Hub {
         }
     }
 
-    /// The session ended: every window is told `released`, and let go.
+    /// The session ended: the windows connected now are told `released` and
+    /// let go; one that connects meanwhile stays, for the next session.
     pub(crate) fn release(&self) {
-        self.broadcast(&Message::Released);
         let links = std::mem::take(&mut *lock(&self.links));
+        let writers = links
+            .iter()
+            .map(|link| (link.id, link.writer.clone()))
+            .collect();
+        self.send(writers, &Message::Released);
         for link in links {
             link.reader.abort();
         }
+    }
+
+    /// Sends `message` to each writer; returns the ones that failed.
+    fn send(
+        &self,
+        writers: Vec<(u64, Arc<tokio::sync::Mutex<Writer>>)>,
+        message: &Message,
+    ) -> Vec<u64> {
+        if writers.is_empty() {
+            return Vec::new();
+        }
+        self.handle.block_on(async {
+            let mut failed = Vec::new();
+            for (id, writer) in writers {
+                let sent =
+                    tokio::time::timeout(SEND, async { writer.lock().await.send(message).await })
+                        .await;
+                if !matches!(sent, Ok(Ok(()))) {
+                    failed.push(id);
+                }
+            }
+            failed
+        })
     }
 
     fn add(self: &Arc<Self>, connection: Connection) {
@@ -252,6 +266,9 @@ async fn accept(hub: Weak<Hub>, mut listener: Listener) {
                 None => break,
             },
             Err(error) => {
+                if hub.strong_count() == 0 {
+                    break;
+                }
                 eprintln!(
                     "apiforge mcp: channel: a connection failed: {}",
                     error.kind()

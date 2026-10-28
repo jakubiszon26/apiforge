@@ -1007,11 +1007,6 @@ impl ProjectStore {
     }
 }
 
-/// Creates a directory unless a concurrent opener already did.
-/// `Ok(true)` when `take` acquired the lock, `Ok(false)` when it was still held
-/// after the whole confirmation window. Returns as soon as `take` succeeds, so
-/// an inherited descriptor costs only the rest of its own lifetime; a lock a
-/// live owner keeps costs the full window.
 /// One JSON line beside the lock, replaced atomically; an unknown holder
 /// writes nothing.
 fn write_holder(root: &Path, holder: &Holder) -> Result<()> {
@@ -1025,6 +1020,10 @@ fn write_holder(root: &Path, holder: &Holder) -> Result<()> {
     })
 }
 
+/// `Ok(true)` when `take` acquired the lock, `Ok(false)` when it was still held
+/// after the whole confirmation window. Returns as soon as `take` succeeds, so
+/// an inherited descriptor costs only the rest of its own lifetime; a lock a
+/// live owner keeps costs the full window.
 fn take_confirmed_lock(
     mut take: impl FnMut() -> std::result::Result<(), TryLockError>,
 ) -> std::result::Result<bool, io::Error> {

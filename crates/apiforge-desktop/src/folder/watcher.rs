@@ -75,6 +75,14 @@ impl Watcher {
         self.due = Some(Instant::now() + interval);
     }
 
+    /// The next check waits a whole interval from now, unless a rescan or
+    /// the window's focus asks sooner.
+    pub fn postpone(&mut self) {
+        if !self.running {
+            self.due = Some(Instant::now() + self.interval);
+        }
+    }
+
     /// Checks again as soon as possible, for example after a file operation.
     pub fn rescan(&mut self) {
         self.due = None;

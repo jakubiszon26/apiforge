@@ -501,6 +501,7 @@ impl FolderApp {
         self.holder = None;
         self.take_back = holder::TakeBack::default();
         self.handover.reset_observing();
+        self.handover.forget_requests();
         self.last_change = None;
         self.seen = session.last_sequence();
         self.uninitialised = false;

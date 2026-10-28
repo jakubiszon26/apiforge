@@ -340,6 +340,23 @@ impl Handover {
         self.taking_back && self.agent_running
     }
 
+    /// Another project is open: a request made to the previous one is
+    /// refused, and one being released is not retried.
+    pub(super) fn forget_requests(&mut self) {
+        if let Some((link, _)) = self.pending.take() {
+            self.channel.send(
+                link,
+                Message::Refused {
+                    reason: "the window opened another project".to_owned(),
+                },
+            );
+            self.channel.close(link);
+        }
+        if let Some((_, lost)) = &mut self.releasing {
+            *lost = true;
+        }
+    }
+
     /// The window is the writer again: what belonged to the agent is gone.
     pub(super) fn reset_observing(&mut self) {
         if let Some(link) = self.link.take() {
@@ -479,7 +496,9 @@ impl FolderApp {
             self.handover.refused = true;
             return;
         }
+        // A check in flight reads the files the agent is about to replace.
         if self.storage.is_busy()
+            || self.watcher.is_busy()
             || self.runs.handle.is_some()
             || self.prompt.is_some()
             || self.watcher.recovery_required
@@ -508,6 +527,7 @@ impl FolderApp {
     fn release(&mut self, link: u64, client: Option<String>) {
         self.handover.pending = None;
         self.handover.releasing = Some((link, false));
+        let identity = self.session.as_ref().map(ProjectSession::storage_identity);
         self.close_run_journal();
         self.storage_project(
             "Handing the project over…",
@@ -527,9 +547,21 @@ impl FolderApp {
                         }
                     }
                     // Unsaved work appeared, or the window changed while the
-                    // project was read: decide again.
+                    // project was read: decide again, for the same project
+                    // and a waiting agent only, and the newest request first.
                     Ok(false) | Err(apiforge_project::Error::StaleStorage) => {
-                        app.handover.pending = Some((link, client));
+                        let same = identity
+                            .as_ref()
+                            .is_some_and(|identity| app.session_matches(identity));
+                        if lost {
+                            app.handover.channel.close(link);
+                        } else if !same {
+                            app.refuse(link, "the window opened another project");
+                        } else if app.handover.pending.is_some() {
+                            app.handover.channel.close(link);
+                        } else {
+                            app.handover.pending = Some((link, client));
+                        }
                         app.open_run_journal();
                     }
                     Err(error) => {
@@ -564,7 +596,10 @@ impl FolderApp {
             ..Default::default()
         });
         self.handover.channel.send(link, Message::Granted);
-        self.watcher.rescan();
+        // The project was just reread; the agent commits next and says so.
+        // A check now would read the files the agent is replacing, which
+        // Windows can refuse it (MCP-08b, CI on Windows).
+        self.watcher.postpone();
     }
 
     /// While observing an agent that names an endpoint, keeps a connection

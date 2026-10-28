@@ -1984,22 +1984,29 @@ mod mcp08b {
     }
 
     /// Starts a slow simulation of the scenario and returns its request once
-    /// it holds the server's run slot, which is when a second run is refused.
-    /// The server answers requests concurrently, so the second is sent only
-    /// after the first has had time to start.
+    /// it holds the server's run slot. The slot is probed with runs of a
+    /// document that does not exist: `run_in_progress` while the slot is
+    /// held, otherwise at once `unknown_document`, never a second run.
     fn start_run(harness: &mut FolderHarness, server: &mut StdioServer) -> u64 {
-        let run = server.start_call("run", json!({ "path": SCENARIO }));
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_millis(500) {
+        let mut run = server.start_call("run", json!({ "path": SCENARIO }));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let probe = call(harness, server, "run", json!({ "path": "missing.afs" }));
+            if probe["result"]["structuredContent"]["code"] == "run_in_progress" {
+                return run;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the run never held the slot: {probe}"
+            );
+            // A probe that came first held the slot for a moment, and the
+            // run was refused: start it again.
+            if server.poll(run).is_some() {
+                run = server.start_call("run", json!({ "path": SCENARIO }));
+            }
             harness.step();
-            std::thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(20));
         }
-        let second = call(harness, server, "run", json!({ "path": SCENARIO }));
-        assert_eq!(
-            second["result"]["structuredContent"]["code"], "run_in_progress",
-            "the run never started: {second}"
-        );
-        run
     }
 
     /// A write that hands the project to the agent: the window was clean.
@@ -2081,18 +2088,20 @@ mod mcp08b {
     }
 
     /// Where a same-user client finds `endpoint`: a socket in a private
-    /// directory under the runtime directory (the temporary directory when
-    /// the runtime directory would make a socket path over 100 bytes), or a
-    /// named pipe.
+    /// directory under the runtime directory (the temporary directory, then
+    /// `/tmp`, when it would make a socket path over 100 bytes), or a named
+    /// pipe.
     #[cfg(unix)]
     fn address(endpoint: &str) -> PathBuf {
         let socket = |directory: PathBuf| directory.join(endpoint).join("socket");
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .filter(|directory| directory.is_absolute())
+            .into_iter()
+            .chain([std::env::temp_dir()])
             .map(socket)
-            .filter(|path| path.as_os_str().len() <= 100)
-            .unwrap_or_else(|| socket(std::env::temp_dir()))
+            .find(|path| path.as_os_str().len() <= 100)
+            .unwrap_or_else(|| socket(PathBuf::from("/tmp")))
     }
 
     #[cfg(windows)]
@@ -2404,7 +2413,12 @@ mod mcp08b {
             &mut harness,
             Instant::now(),
             "a settled holder",
-            |harness| !read_only(harness) || has_label(harness, TAKE_BACK),
+            // Taken back, or handed over again to a write that came after
+            // the release: Take back is enabled only in a new hand-over.
+            |harness| {
+                !read_only(harness)
+                    || (has_label(harness, TAKE_BACK) && !disabled(harness, TAKE_BACK))
+            },
         );
         drop(harness);
         drop(server);

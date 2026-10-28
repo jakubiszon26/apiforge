@@ -146,23 +146,24 @@ impl Endpoint {
         &self.0
     }
 
-    /// Where the socket is: `<runtime directory>/<name>/socket`, the
-    /// directory private to this user. The runtime directory is
-    /// `$XDG_RUNTIME_DIR` when it is an absolute path that leaves the socket
-    /// path within [`MAX_SOCKET_PATH`] bytes, otherwise the temporary
-    /// directory: the system limits a socket path to a little over a hundred
-    /// bytes.
+    /// Where the socket is: `<base>/<name>/socket`, the directory private to
+    /// this user. The base is the first of `$XDG_RUNTIME_DIR` (when
+    /// absolute), the temporary directory and `/tmp` that keeps the socket
+    /// path within [`MAX_SOCKET_PATH`] bytes: the system limits a socket path
+    /// to a little over a hundred bytes. Both ends compute it from their
+    /// environment, which processes of one user session share; the holder
+    /// file names only the endpoint, never a path.
     #[cfg(unix)]
     pub fn socket_path(&self) -> PathBuf {
-        let within = |directory: &PathBuf| {
-            directory.join(&self.0).join("socket").as_os_str().len() <= MAX_SOCKET_PATH
-        };
+        let socket = |directory: PathBuf| directory.join(&self.0).join("socket");
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
-            .filter(|directory| directory.is_absolute() && within(directory))
-            .unwrap_or_else(std::env::temp_dir)
-            .join(&self.0)
-            .join("socket")
+            .filter(|directory| directory.is_absolute())
+            .into_iter()
+            .chain([std::env::temp_dir()])
+            .map(socket)
+            .find(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
+            .unwrap_or_else(|| socket(PathBuf::from("/tmp")))
     }
 
     /// `\\.\pipe\<name>`.
