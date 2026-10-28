@@ -11,18 +11,12 @@
 
 use apiforge_core::format::OptionalJson;
 use apiforge_core::run::{RunMode, RunResult, RunStatus, StepResult, StepStatus};
-use apiforge_runner::{RunRequest, RunnerService};
+use apiforge_mcp::executor::{self, CancellationToken, DEADLINE, EndedBy};
+use apiforge_runner::RunRequest;
 use apiforge_storage::{JournalStore, WorkspaceStore};
-use indexmap::IndexMap;
-use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
+use std::{ffi::OsString, path::PathBuf};
 
 pub const USAGE: &str = "apiforge run (--workspace <doc.json> | --folder <directory>) --scenario <name|id|relative.afs> [--live] [--secrets <file.json>] [--json]";
-
-/// The prefix of an environment variable holding one session secret.
-const SECRET_PREFIX: &str = "APIFORGE_SECRET_";
-
-/// How long the command waits for a run that never reports back.
-const DEADLINE: Duration = Duration::from_secs(600);
 
 pub struct Args {
     pub path: PathBuf,
@@ -109,7 +103,7 @@ fn execute(args: Args) -> Result<RunStatus, String> {
         .ok_or("Active project does not exist")?;
     let index = super::document::scenario_index(project, &args.scenario)?;
     let scenario = &project.scenarios[index];
-    let secrets = secrets(args.secrets.as_deref())?;
+    let secrets = executor::secrets(args.secrets.as_deref())?;
 
     let journal = if args.live {
         Some(JournalStore::open(store).map_err(|error| error.to_string())?)
@@ -133,38 +127,24 @@ fn execute(args: Args) -> Result<RunStatus, String> {
     execute_request(request, journal, args.json)
 }
 
+/// Runs `request` with the shared executor and prints what it returns.
 pub(super) fn execute_request(
     request: RunRequest,
     journal: Option<apiforge_storage::LoadedJournal>,
     json: bool,
 ) -> Result<RunStatus, String> {
-    let mut service = RunnerService::new(Arc::new(|| {}))
-        .map_err(|error| format!("Cannot start the runner: {error}"))?;
-    if let Some(journal) = journal {
+    // What an earlier run left unfinished is said before this one adds to it.
+    if let Some(journal) = &journal {
         report_interrupted(&journal.interrupted);
         if journal.unreadable {
             eprintln!("An unreadable interrupted-run journal was preserved for review.");
         }
-        service = service.with_journal(Arc::new(journal.store));
     }
-    let handle = service.start(request).map_err(|error| error.to_string())?;
-    let deadline = std::time::Instant::now() + DEADLINE;
-    let mut report: Option<RunResult> = None;
-    while !handle.is_finished() {
-        if std::time::Instant::now() > deadline {
-            handle.cancel();
-            return Err("The run did not finish within ten minutes".into());
-        }
-        if let Some(latest) = handle.latest() {
-            report = Some(latest);
-        }
-        std::thread::sleep(Duration::from_millis(20));
+    let outcome = executor::execute(request, journal, CancellationToken::new(), DEADLINE)?;
+    if outcome.ended_by == EndedBy::TimedOut {
+        return Err("The run did not finish within ten minutes".into());
     }
-    if let Some(latest) = handle.latest() {
-        report = Some(latest);
-    }
-    let report = report.ok_or("The run produced no report")?;
-    service.shutdown(Duration::from_secs(10));
+    let report = outcome.report;
     if json {
         let text = serde_json::to_string_pretty(&report).map_err(|_| "Cannot print the report")?;
         println!("{text}");
@@ -172,37 +152,6 @@ pub(super) fn execute_request(
         print_report(&report);
     }
     Ok(report.status)
-}
-
-/// Session secrets, from a file and from the environment. A name in both takes
-/// its value from the environment, which belongs to this invocation.
-pub(super) fn secrets(path: Option<&std::path::Path>) -> Result<IndexMap<String, String>, String> {
-    let mut found = IndexMap::new();
-    if let Some(path) = path {
-        let bytes = std::fs::read(path).map_err(|error| format!("Cannot read secrets: {error}"))?;
-        if bytes.len() > 1024 * 1024 {
-            return Err("The secrets file is too large".into());
-        }
-        let parsed: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|_| "The secrets file is not JSON".to_owned())?;
-        let object = parsed
-            .as_object()
-            .ok_or("The secrets file must be an object of names and text values")?;
-        for (name, value) in object {
-            let text = value
-                .as_str()
-                .ok_or("The secrets file must be an object of names and text values")?;
-            found.insert(name.clone(), text.to_owned());
-        }
-    }
-    for (key, value) in std::env::vars() {
-        if let Some(name) = key.strip_prefix(SECRET_PREFIX)
-            && !name.is_empty()
-        {
-            found.insert(name.to_owned(), value);
-        }
-    }
-    Ok(found)
 }
 
 /// Says what an earlier run left unfinished, before this one adds to it.

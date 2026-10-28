@@ -1,12 +1,12 @@
 # MCP-07: The lock names its holder; the window says who and takes the project back when it is free
 
 - Size: S · Owner review: 20 min · Risk: `visible UI`, `default`
-- State: Backlog (issue #66) · MCP-00 decision 6 = A taken 2026-10-27 ·
-  mock-up M1 approved 2026-10-27 in round 4 (the bottom status bar with
-  the *Take back* button of MCP-08b) · revised 2026-10-27 (MCP-00
-  revision 2: the holder description gains the endpoint field; the take-back
-  happens only when the lock is free, never from a living process; the
-  observer behaviour moved to MCP-08a)
+- State: Merged in #106 on 2026-10-27 (issue #66) · MCP-00 decision 6 = A taken
+  2026-10-27 · mock-up M1 approved 2026-10-27 in round 4 (the bottom status bar
+  with the *Take back* button of MCP-08b) · revised 2026-10-27 (MCP-00 revision
+  2: the holder description gains the endpoint field; the take-back happens only
+  when the lock is free, never from a living process; the observer behaviour
+  moved to MCP-08a)
 - Analysis model: Fable · Implementation model: —
 - Analysis: [MCP-00](MCP-00.md)
 

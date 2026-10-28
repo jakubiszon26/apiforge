@@ -1,7 +1,7 @@
 # MCP-01: `apiforge mcp` answers Claude Code — overview, read, check, print
 
 - Size: M · Owner review: 20 min · Risk: `default`
-- State: Approved; `ready:sol` 2026-10-27 (issue #60) · MCP-00 decisions
+- State: Merged in #105 on 2026-10-27 (issue #60) · MCP-00 decisions
   8 = A and 9 = B taken 2026-10-27 · revised 2026-10-27 (MCP-00 revision
   2: versions, contract, demo without warnings) · amended 2026-10-27 after
   the implementation's escalation on #60 (criterion 5, appendix)

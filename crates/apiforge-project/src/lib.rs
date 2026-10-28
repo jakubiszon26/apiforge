@@ -22,10 +22,10 @@ pub use prepare::prepare_project;
 pub use session::{
     CommitChange, CommitChangeKind, ConflictDecision, ConflictPreview, ConflictTarget, Declaration,
     DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict,
-    ExternalOutcome, ImportCandidate, ImportItem, ObservedFile, Origin, PreparedRun,
-    ProjectSession, Published, Registration, RegistryState, SaveOutcome, SessionIdentity,
-    SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot, TextFileSession, declaration,
-    rename_handle,
+    ExternalOutcome, ImportCandidate, ImportItem, NewDocumentCheck, ObservedFile, Origin,
+    PreparedRun, ProjectSession, Published, Registration, RegistrationProblem, RegistryState,
+    SaveOutcome, SessionIdentity, SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot,
+    TextFileSession, declaration, rename_handle,
 };
 
 pub use apiforge_script::Document;

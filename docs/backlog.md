@@ -92,7 +92,7 @@ for additions; the MCP sprint has one. Exit criteria:
 | [#53](https://github.com/jakubiszon26/apiforge/issues/53) | KTLO-23a A component runs from its tab — runner, session and the Run button; [ticket](tickets/KTLO-23.md) | M · 45 min · `visible UI` |
 | [#54](https://github.com/jakubiszon26/apiforge/issues/54) | KTLO-23b A component runs from its tab — the Run inputs dialog; [ticket](tickets/KTLO-23b.md); after KTLO-23a | S · 20 min · `visible UI` |
 
-## Sprint: MCP (planned, after KTLO)
+## Sprint: MCP (in progress since 2026-10-27)
 
 An MCP server: a model works on a project while the owner watches in the
 window that is already open. Analysed 2026-10-27 ([MCP-00](tickets/MCP-00.md))
@@ -153,10 +153,10 @@ criteria:
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 | S (docs) · 30 min plus the discussion · decisions 1–18 taken 2026-10-27 |
-| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print, with versions; [ticket](tickets/MCP-01.md) | M · 20 min · `default` |
-| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference for models, tested — the document; [ticket](tickets/MCP-02.md) | M (docs) · 30 min |
-| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The lock names its holder; the window says who and takes the project back when it is free; [ticket](tickets/MCP-07.md); decision 6, mock-up M1 | S · 20 min · `visible UI`, `default` |
+| [#59](https://github.com/jakubiszon26/apiforge/issues/59) | MCP-00 Analysis and the owner's decisions; [ticket](tickets/MCP-00.md); revision 2 of 2026-10-27 — merged in #67 and #103 | S (docs) · 30 min plus the discussion · decisions 1–18 taken 2026-10-27 |
+| [#60](https://github.com/jakubiszon26/apiforge/issues/60) | MCP-01 `apiforge mcp` answers Claude Code: overview, read, check, print, with versions; [ticket](tickets/MCP-01.md) — merged in #105 | M · 20 min · `default` |
+| [#61](https://github.com/jakubiszon26/apiforge/issues/61) | MCP-02 A language reference for models, tested — the document; [ticket](tickets/MCP-02.md) — merged in #104 | M (docs) · 30 min |
+| [#66](https://github.com/jakubiszon26/apiforge/issues/66) | MCP-07 The lock names its holder; the window says who and takes the project back when it is free; [ticket](tickets/MCP-07.md); decision 6, mock-up M1 — merged in #106 | S · 20 min · `visible UI`, `default` |
 | [#62](https://github.com/jakubiszon26/apiforge/issues/62) | MCP-03 Run a simulation (scenario or component), check a proposal, serve the reference and resources; the executor returns data; cancellation and timeout; [ticket](tickets/MCP-03.md); after MCP-01, MCP-02 | M · 20 min |
 | [#63](https://github.com/jakubiszon26/apiforge/issues/63) | MCP-04 Save and create from the server — the agent session, validation before the first write, versions, secrets, paths; [ticket](tickets/MCP-04.md); decisions 1, 2, 10; after MCP-03 | M · 30 min |
 | [#90](https://github.com/jakubiszon26/apiforge/issues/90) | MCP-08a Observer mode: editing paused while another holds the project; the window follows every commit by reload within two seconds, keeping its navigation; [ticket](tickets/MCP-08a.md); decisions 10, 12, mock-up M1; after MCP-07 | M · 30 min · `visible UI`, `default`, `removal` |

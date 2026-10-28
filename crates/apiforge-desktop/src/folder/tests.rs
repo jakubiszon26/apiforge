@@ -2753,7 +2753,7 @@ fn completion_names_follow_a_newly_analysed_model() {
 /// cargo test -p apiforge-desktop --release --locked frame_budgets -- --ignored --nocapture
 /// ```
 #[test]
-#[ignore = "timing; run in release"]
+#[ignore = "KTLO-31: timing, run in release as the development guide's budget step says"]
 fn frame_budgets() {
     let budget = |milliseconds: u64| Duration::from_millis(milliseconds);
     let mut over = Vec::new();

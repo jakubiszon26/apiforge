@@ -258,20 +258,11 @@ fn located(
 }
 impl Lower<'_> {
     fn error(&mut self, range: Range<usize>, message: &'static str) {
-        if self.diagnostics.len() < crate::MAX_DIAGNOSTICS {
-            self.diagnostics.push(Diagnostic::error(range, message));
-        } else if !self
-            .diagnostics
-            .iter()
-            .any(|d| d.severity == Severity::Error)
-        {
-            // The error takes the place of the last warning, which is dropped.
-            self.diagnostics.pop();
-            self.diagnostics.push(Diagnostic::error(range, message));
-            self.omitted += 1;
-        } else {
-            self.omitted += 1;
-        }
+        self.push_error(Diagnostic::error(range, message));
+    }
+    /// At the limit an error takes the place of the last warning.
+    fn push_error(&mut self, error: Diagnostic) {
+        crate::push_error(&mut self.diagnostics, &mut self.omitted, error, false);
     }
     fn file(&mut self, file: &File) -> Document {
         let component = matches!(file.kind, FileKind::Component { .. });
@@ -393,7 +384,7 @@ impl Lower<'_> {
                             if self.folder && revision.is_none() {
                                 let range = ungroup(expr).range.start
                                     ..ungroup(expr).range.start + name.len();
-                                self.diagnostics.push(Diagnostic {
+                                self.push_error(Diagnostic {
                                     range: range.clone(),
                                     severity: Severity::Error,
                                     message: "Folder component calls require an explicit revision"
