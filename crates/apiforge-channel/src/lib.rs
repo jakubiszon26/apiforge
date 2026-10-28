@@ -22,6 +22,9 @@ pub const VERSION: u32 = 1;
 /// A message is one short line; a longer one ends the connection.
 pub const MAX_LINE: usize = 64 * 1024;
 const PREFIX: &str = "apiforge-";
+/// The longest socket path used: Linux allows 107 bytes, macOS 103.
+#[cfg(unix)]
+pub const MAX_SOCKET_PATH: usize = 100;
 
 /// What one side tells the other.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,12 +148,21 @@ impl Endpoint {
 
     /// Where the socket is: `<runtime directory>/<name>/socket`, the
     /// directory private to this user. The runtime directory is
-    /// `$XDG_RUNTIME_DIR` when it is an absolute path, otherwise the temporary
-    /// directory; a socket path is limited to about a hundred bytes, which
-    /// both keep well under.
+    /// `$XDG_RUNTIME_DIR` when it is an absolute path that leaves the socket
+    /// path within [`MAX_SOCKET_PATH`] bytes, otherwise the temporary
+    /// directory: the system limits a socket path to a little over a hundred
+    /// bytes.
     #[cfg(unix)]
     pub fn socket_path(&self) -> PathBuf {
-        runtime_directory().join(&self.0).join("socket")
+        let within = |directory: &PathBuf| {
+            directory.join(&self.0).join("socket").as_os_str().len() <= MAX_SOCKET_PATH
+        };
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .filter(|directory| directory.is_absolute() && within(directory))
+            .unwrap_or_else(std::env::temp_dir)
+            .join(&self.0)
+            .join("socket")
     }
 
     /// `\\.\pipe\<name>`.
@@ -164,14 +176,6 @@ impl std::fmt::Display for Endpoint {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.0)
     }
-}
-
-#[cfg(unix)]
-fn runtime_directory() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|directory| directory.is_absolute())
-        .unwrap_or_else(std::env::temp_dir)
 }
 
 trait Stream: AsyncRead + AsyncWrite + Send {}

@@ -2081,15 +2081,18 @@ mod mcp08b {
     }
 
     /// Where a same-user client finds `endpoint`: a socket in a private
-    /// directory under the runtime directory, or a named pipe.
+    /// directory under the runtime directory (the temporary directory when
+    /// the runtime directory would make a socket path over 100 bytes), or a
+    /// named pipe.
     #[cfg(unix)]
     fn address(endpoint: &str) -> PathBuf {
+        let socket = |directory: PathBuf| directory.join(endpoint).join("socket");
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .filter(|directory| directory.is_absolute())
-            .unwrap_or_else(std::env::temp_dir)
-            .join(endpoint)
-            .join("socket")
+            .map(socket)
+            .filter(|path| path.as_os_str().len() <= 100)
+            .unwrap_or_else(|| socket(std::env::temp_dir()))
     }
 
     #[cfg(windows)]
