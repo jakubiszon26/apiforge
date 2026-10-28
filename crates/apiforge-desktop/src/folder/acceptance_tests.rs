@@ -1848,3 +1848,86 @@ mod mcp04 {
         );
     }
 }
+
+// ----- MCP-05: the window beside a publication from the server ---------------
+
+mod mcp05 {
+    use super::*;
+    use crate::testing::shop_project;
+    use apiforge_mcp::agent::{AgentSession, PublishArguments};
+    use apiforge_storage::project::FileState;
+
+    const PRODUCT: &str = "components/product.afs";
+
+    fn sha256(bytes: &[u8]) -> String {
+        match FileState::of(bytes) {
+            FileState::File { sha256, .. } => sha256,
+            _ => unreachable!(),
+        }
+    }
+
+    /// The revisions of the product component the window's session lists.
+    fn listed(harness: &FolderHarness) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// Criterion 8: the window, open read-only beside the server, lists the
+    /// revision the server published after its project reload: the
+    /// registry changed and nothing is unsaved.
+    #[test]
+    fn a_read_only_window_lists_the_revision_the_server_published() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = AgentSession::with_environment(root.to_owned(), Vec::new());
+        let saved = fs::read(root.join(PRODUCT)).unwrap();
+        let arguments = PublishArguments {
+            path: PRODUCT.into(),
+            expected_source_sha256: sha256(&saved),
+            accept_comment_loss: false,
+            expected_generation: None,
+            request_id: None,
+        };
+        // The window opens while the agent session holds the project: the
+        // first publication takes the lock, the second is the one followed.
+        agent.publish(&arguments).unwrap();
+        assert!(agent.is_active());
+        let mut harness = folder_harness(root, WIDE);
+        assert!(folder(&harness).session.as_ref().unwrap().is_read_only());
+        assert_eq!(listed(&harness), [1, 2]);
+
+        let published = agent.publish(&arguments).unwrap();
+        assert_eq!(published.revision, 3);
+        follow_disk(&mut harness);
+        assert_eq!(listed(&harness), [1, 2, 3], "the new revision is listed");
+        let app = folder(&harness);
+        assert!(
+            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            "no conflict is reported"
+        );
+        let session = app.session.as_ref().unwrap();
+        let product = session
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap();
+        assert_eq!(product.entry().base_revision, Some(3));
+        assert!(
+            session
+                .documents()
+                .iter()
+                .all(|document| !document.is_dirty() && !document.is_layout_dirty()),
+            "nothing is unsaved"
+        );
+        drop(harness);
+        drop(agent);
+    }
+}
