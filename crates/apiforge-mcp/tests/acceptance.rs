@@ -3468,12 +3468,8 @@ fn mcp05_criterion_1_publish_writes_the_next_revision() {
     assert_eq!(published.revision, 2);
     assert_eq!(published.generation, head_generation(root));
     assert!(published.generation > generation);
-    assert!(
-        published.revision_path.starts_with(".apiforge/revisions/")
-            && published.revision_path.ends_with("/2.afs"),
-        "{}",
-        published.revision_path
-    );
+    assert!(published.revision_path.starts_with(".apiforge/revisions/"));
+    assert!(published.revision_path.ends_with("/2.afs"));
     let revision_file = root.join(&published.revision_path);
     assert_eq!(published.source_sha256, sha256(&revision_file));
     let mut changed = published.changed.clone();
@@ -3843,5 +3839,24 @@ fn mcp05_a_request_id_is_bounded_and_never_a_secret() {
         assert!(!error_text(&error).contains(SECRET), "never echoed");
     }
     assert!(!agent.is_active());
+    assert_eq!(shared(root), before);
+}
+
+// ----- MCP-05 review round 1 of #117 -----
+
+/// A component the session cannot read as source keeps its own code: over
+/// 1 MiB it is `too_large`, not `invalid_text`. Nothing is written.
+#[test]
+fn mcp05_review_an_oversized_component_is_too_large() {
+    let directory = checkout();
+    let root = directory.path();
+    let large = "// padding\n".repeat(tools::MAX_TEXT_BYTES / 11 + 1);
+    fs::write(root.join(PRODUCT), &large).unwrap();
+    let before = shared(root);
+    let error = agent(root)
+        .publish(&publish_args(PRODUCT, &sha256(&root.join(PRODUCT))))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TooLarge, "{}", error.message);
+    assert_eq!(error.wrote, Wrote::No);
     assert_eq!(shared(root), before);
 }

@@ -25,7 +25,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::VecDeque,
     ffi::OsString,
     path::PathBuf,
     sync::{
@@ -184,16 +184,20 @@ struct State {
 
 /// How many publications a server remembers by `request_id`.
 const ANSWERED: usize = 64;
+/// How many ids of dropped results a server remembers as answered. An id
+/// older than that is unknown again: the overview's revisions tell.
+const DROPPED: usize = 1024;
 
 /// The arguments a `request_id` answered: the path and the expected hash.
 type AnsweredCall = (String, String);
 
 /// The answered publications, oldest first, with the arguments each
-/// answered; and the ids whose result was dropped to keep the list short.
+/// answered; and, oldest first, the ids whose result was dropped to keep the
+/// list short. Both are bounded.
 #[derive(Default)]
 struct Answered {
     recent: VecDeque<(String, AnsweredCall, PublishResult)>,
-    dropped: HashSet<String>,
+    dropped: VecDeque<String>,
 }
 
 impl Answered {
@@ -204,7 +208,7 @@ impl Answered {
         let Some(id) = arguments.request_id.as_ref() else {
             return Ok(None);
         };
-        if self.dropped.contains(id) {
+        if self.dropped.iter().any(|dropped| dropped == id) {
             return Err(ToolError::new(
                 ErrorCode::UnknownOutcome,
                 "This server answered a publication with this request_id but no longer holds its result; nothing was written. project_overview lists every revision with its source_sha256",
@@ -229,10 +233,14 @@ impl Answered {
 
     fn record(&mut self, id: &str, arguments: &PublishArguments, result: &PublishResult) {
         self.recent.retain(|(answered, _, _)| answered != id);
+        self.dropped.retain(|dropped| dropped != id);
         if self.recent.len() == ANSWERED
             && let Some((dropped, _, _)) = self.recent.pop_front()
         {
-            self.dropped.insert(dropped);
+            if self.dropped.len() == DROPPED {
+                self.dropped.pop_front();
+            }
+            self.dropped.push_back(dropped);
         }
         self.recent
             .push_back((id.to_owned(), call_of(arguments), result.clone()));
@@ -456,8 +464,11 @@ impl AgentSession {
             return Ok(recorded);
         }
         let store = self.store(&mut state)?;
-        let watched = watched(&path)?;
-        let before = read(&store, &watched)?;
+        // The working source is not read: publishing never rewrites it, and a
+        // source over the limit is the session's `too_large`, not a storage
+        // failure. What a publication changes: the checkpoint and registry.
+        let watched = &watched(&path)?[1..];
+        let before = read(&store, watched)?;
         let mut session = ProjectSession::from_store_saved(store.clone()).map_err(load_error)?;
         expect_generation(&before, arguments.expected_generation)?;
         let id = folder::select(&session, &arguments.path)?;
@@ -465,11 +476,20 @@ impl AgentSession {
         if document.entry().kind != DocumentKind::Component {
             return Err(not_a_component());
         }
-        if document.unavailable().is_some() {
-            return Err(ToolError::new(
-                ErrorCode::InvalidText,
-                "The saved component cannot be read as source; read_source says why",
-            ));
+        match document.unavailable() {
+            None => {}
+            Some(Unavailable::TooLarge) => {
+                return Err(ToolError::new(
+                    ErrorCode::TooLarge,
+                    "The saved component exceeds the 1 MiB limit and cannot be published",
+                ));
+            }
+            Some(_) => {
+                return Err(ToolError::new(
+                    ErrorCode::ProjectUnreadable,
+                    "The saved component cannot be read as source; read_source says why",
+                ));
+            }
         }
         let saved = document.saved_sha256().map(str::to_owned);
         if saved.as_deref() != Some(arguments.expected_source_sha256.as_str()) {
@@ -519,6 +539,9 @@ impl AgentSession {
             Ok(published) => published,
             Err(error) => return Err(publish_failed(&mut state, &store, error, &path)),
         };
+        // From here the revision exists: nothing may fail before the result
+        // is recorded, or a retry with the same request_id would publish a
+        // second revision.
         let revision = session
             .manifest()
             .revisions
@@ -527,17 +550,15 @@ impl AgentSession {
                 entry.component_id == published.component_id && entry.revision == published.revision
             })
             .cloned()
-            .ok_or_else(|| {
-                ToolError::new(
-                    ErrorCode::ProjectUnreadable,
-                    "The published revision is missing from the registry",
-                )
-            })?;
-        let after = read(&store, &watched)?;
+            .expect("a publication registers the revision it wrote");
         // The revision did not exist before: the transaction expected it
-        // missing.
+        // missing. A publication always writes the registry and the
+        // checkpoint, which is what `changed` says if they cannot be read.
         let mut changed = vec![revision.path.as_str().to_owned()];
-        changed.extend(self::changed(&watched, &before, &after));
+        match read(&store, watched) {
+            Ok(after) => changed.extend(self::changed(watched, &before, &after)),
+            Err(_) => changed.extend(watched.iter().map(|p| p.as_str().to_owned())),
+        }
         let result = PublishResult {
             path: path.as_str().to_owned(),
             handle: revision.handle,
@@ -979,6 +1000,33 @@ mod tests {
                 .recorded(&arguments("c.afs", "h", "p-1"))
                 .unwrap()
                 .is_some()
+        );
+    }
+
+    /// The ids of dropped results are bounded too (review of #117): many
+    /// unique ids never grow the record past `ANSWERED + DROPPED`.
+    #[test]
+    fn the_ids_of_dropped_results_are_bounded() {
+        let mut answered = Answered::default();
+        let total = ANSWERED + DROPPED + 10;
+        for index in 0..total {
+            let id = format!("p-{index}");
+            answered.record(&id, &arguments("c.afs", "h", &id), &result(2));
+        }
+        assert_eq!(answered.recent.len(), ANSWERED);
+        assert_eq!(answered.dropped.len(), DROPPED);
+        // The oldest are forgotten; the newest dropped are still answered.
+        assert_eq!(
+            answered.recorded(&arguments("c.afs", "h", "p-0")).unwrap(),
+            None
+        );
+        let newest_dropped = format!("p-{}", total - ANSWERED - 1);
+        assert_eq!(
+            answered
+                .recorded(&arguments("c.afs", "h", &newest_dropped))
+                .unwrap_err()
+                .code,
+            ErrorCode::UnknownOutcome
         );
     }
 }
