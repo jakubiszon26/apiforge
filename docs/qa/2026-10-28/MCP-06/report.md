@@ -2,10 +2,11 @@
 
 - Branch and commit: `feat/mcp-06-live-runs`. Acceptance tests `4485edc`;
   implementation `c60c935` (storage) and `66f65eb` (mcp, cli); development
-  guide `f08038f`.
+  guide `f08038f`; review round 1 up to `66aa5f7`; criterion 9 (owner
+  decision A) `33424db`, guide `7e84e5b`.
 - Built with: `cargo build --release --locked -p apiforge-cli -p
-  apiforge-demo-api` at `f08038f` (release binaries `apiforge` and
-  `apiforge-demo-api`).
+  apiforge-demo-api` at `7e84e5b` (release binaries `apiforge` and
+  `apiforge-demo-api`); the transcript was recorded again with them.
 - Mock-up: not applicable; nothing in the window changes. Issue:
   [#65](https://github.com/jakubiszon26/apiforge/issues/65). Ticket:
   [`docs/tickets/MCP-06.md`](../../../tickets/MCP-06.md).
@@ -83,7 +84,7 @@ in the same session passed with 19 steps. `finish_editing` on the first
 server released the project. The window as holder (`held_by_window`) is
 covered by the test only.
 
-### Scenario 4: a repeated `request_id` (criterion 9, first half)
+### Scenario 4: a repeated `request_id` on the same server (criterion 9)
 
 Test: `mcp06_criterion_9_an_answered_request_id_returns_the_recorded_result`.
 
@@ -92,8 +93,7 @@ the demo API. The base URL was then pointed at the counting listener, and the
 same call returned the recorded result with `replayed: true`; the listener
 accepted 0 connections.
 
-The second half of criterion 9 — *a new server answers `unknown_outcome` for
-an id it never saw* — is not implemented: see [Not verified](#not-verified).
+Across a restart: scenario 9.
 
 ### Scenario 5: cancelled and timed out (criterion 6)
 
@@ -102,7 +102,7 @@ Test: `mcp06_criterion_6_a_cancelled_or_timed_out_live_run`.
 Observed: as expected. With the request on its way to the listener the
 journal held one run with one entry, `GET …/products/123`, `state:
 "inFlight"`, written before the request was sent (transcript, scenario 5).
-`notifications/cancelled` for the call: the journal file was removed 0.04 s
+`notifications/cancelled` for the call: the journal file was removed 0.02 s
 later, the call got no response, and stderr said `apiforge mcp: run:
 cancelled`. A server with the deadline shortened to 800 ms
 (`APIFORGE_MCP_TEST_DEADLINE_MS`) answered `status: cancelled`, `ended_by:
@@ -169,6 +169,38 @@ resources, `write_source`, `create_document`, `finish_editing` — plus
 refused writes and a refused `request_id` carrying either value, and asserts
 the same for stdout, stderr and a journal taken mid-run.
 
+### Scenario 9: a `request_id` across a restart (criterion 9, owner decision A)
+
+Tests: `mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_id_an_earlier_server_started`,
+the `request_id` part of `mcp06_criterion_8_a_killed_server_leaves_the_journal_entry`
+(stdio), and the record's unit tests (`the_record_keeps_the_newest_ids`,
+`a_long_id_is_refused`, `a_local_record_is_a_plain_json_name_of_its_own`).
+
+Expected (decision A, 2026-10-28 on #65): the id is recorded in
+`.apiforge/local/agent-requests.json` before the first request goes out; a
+new server answers `unknown_outcome` for an id an earlier server started,
+with the journal's interrupted runs, and sends nothing; a record that cannot
+be read refuses a live run with an id instead of running it.
+
+Observed: as expected. With the request on its way, the record held
+`{"id": "qa-restart", "path": "scenarios/promotion-and-cart-price.afs",
+"startedAt": …}`; the server was killed after the listener's first
+connection. A new server answered the same id with `unknown_outcome`: *An
+earlier apiforge mcp process started a live run with this request_id; its
+outcome is unknown to this server and nothing was sent*, with `details.path`,
+`details.started_at` and `details.interrupted` holding the killed run's `GET
+…/products/123`, `Sending`. The listener still counted one connection, so
+nothing was sent. A new id, `qa-new`, then ran and passed against the demo
+API. With the record replaced by `{ broken`, a live run with an id answered
+`project_unreadable`, naming `.apiforge/local/agent-requests.json` in the
+message and in `details.file`, and sent nothing; a live run without an id
+passed; the broken record was left untouched for the person to move aside.
+
+Retention: the record keeps the 1 000 most recent ids, the oldest dropped
+first, and an id is at most 256 bytes (`too_large`), so the file stays well
+under the storage's 16 MiB limit. It is untracked and machine-local; the
+project's format does not change.
+
 ### Verification (criteria 12 and 13)
 
 The development guide's *MCP server* section has a *Live requests* part with
@@ -177,8 +209,8 @@ four ends of a live run* (test
 `mcp06_criterion_12_the_development_guide_explains_live_runs`). At
 `f08038f`: `cargo fmt --all -- --check`, `cargo clippy --workspace
 --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets
---locked` (every binary passed; the MCP library acceptance file 72 passed and
-1 ignored, the stdio file 20 passed) and `cargo run -p apiforge-convert-v1
+--locked` (every binary passed; at `7e84e5b` the MCP library acceptance file
+75 passed and none ignored, the stdio file 20 passed) and `cargo run -p apiforge-convert-v1
 --locked -- --fixtures --check` passed.
 
 ## Windows
@@ -192,15 +224,10 @@ pipe.
 
 ## Not verified
 
-- **Criterion 9, second half: not implemented, an owner decision.** *A new
-  server answers `unknown_outcome` for an id it never saw* cannot be met as
-  written: a server cannot tell an id it never saw from the first use of a
-  new id, so every first live run with a `request_id` would be refused. The
-  server remembers ids in memory only (as MCP-05 plans for `publish`); a new
-  server runs an unseen id, and every result carries the journal's
-  `interrupted` runs, so a model that lost an answer across a restart sees
-  what may have happened. The test is written as the ticket states it and
-  ignored: `mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_unseen_id`.
+- Criterion 9 across a restart is implemented as the owner decided (A): an
+  id *an earlier server started* is `unknown_outcome`. An id no server ever
+  recorded runs, since no server can tell it from a new one; an id dropped
+  from the record after 1 000 newer ones is forgotten.
 - **Claude Code with `--allow-live`: not verified by the implementing agent;
   left to the owner.** Registered with `claude mcp add apiforge --
   /path/to/apiforge mcp --allow-live`, `/mcp` should show `run` as a tool
@@ -257,3 +284,42 @@ The Windows job of the first CI run failed one MCP-07 window test
 (`a_transaction_left_by_the_holder_opens_the_recovery_view`, the window not
 taking the project back within ten seconds); the desktop crate is unchanged
 here, and the same commit's second run passed it on Windows.
+
+## Review round 2
+
+The owner decided criterion 9 = A on #65 (2026-10-28): record live-run
+request ids under `.apiforge/local/`, untracked, so a new server answers
+`unknown_outcome` for an id an earlier server started; the `run`
+annotations are accepted as built. Done in `33424db` and `7e84e5b`:
+
+- `ProjectStore::read_local` and `write_local` keep plain machine-local
+  records beside the journal, `.apiforge/local/<name>.json`, refusing the
+  store's own files (`journal.json`, `head.json`, `holder.json`); the write
+  is atomic, under the writer lock and the store's I/O queue.
+- `.apiforge/local/agent-requests.json` gets the id, the path and the time
+  before the first request goes out, in the same place in the run as the
+  journal's first record. Retention: the 1 000 most recent ids; an id is at
+  most 256 bytes.
+- A new server that finds the id answers `unknown_outcome` with the record's
+  path and start and the journal's interrupted runs, and sends nothing. An
+  unreadable record (damaged, or of another version) fails safe: a live run
+  with an id is `project_unreadable` naming the file, which is never
+  overwritten; a run without an id still works.
+- The criterion-9 test is no longer ignored. As written in the ticket it
+  started from a fresh server and an id no server had used; under decision A
+  it first lets an earlier server record the id, which is what the decision
+  means by *an id it never saw*.
+- The development guide describes the record, its retention and the
+  unreadable case; scenario 9 above shows it on the release binary.
+
+The full verification passed again at `7e84e5b` (fmt, clippy, the workspace
+tests, the fixture check, the release build).
+
+**Windows flake.** In this pull request's first CI run (`c3feaef`, run
+40656690200) the MCP-07 window test
+`folder::tests::acceptance_tests::mcp07::a_transaction_left_by_the_holder_opens_the_recovery_view`
+failed on `windows-2022` with *the window never took the project back*
+(`acceptance_tests.rs:680`, the ten-second take-back wait). The desktop
+crate is not touched here; the same commit's second run (40656754393) and
+every later Windows run passed it. It is a pre-existing timing flake of
+MCP-07's take-back on Windows, not caused by this ticket.
