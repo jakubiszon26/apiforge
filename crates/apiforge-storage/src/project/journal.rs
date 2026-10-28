@@ -15,7 +15,14 @@ impl ProjectStore {
         if self.head()?.active_transaction_id.is_some() {
             return Err(ProjectError::RecoveryRequired.into());
         }
-        let path = path::resolve(self.root(), ".apiforge/local/journal.json")?;
+        let path = self.journal_path()?;
         action(&path)
     }
+
+    /// Where the project's run journal lives, `.apiforge/local/journal.json`.
+    pub(crate) fn journal_path(&self) -> Result<PathBuf> {
+        path::resolve(self.root(), JOURNAL)
+    }
 }
+
+const JOURNAL: &str = ".apiforge/local/journal.json";

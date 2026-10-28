@@ -6,7 +6,7 @@ mod session;
 
 pub use file::StorageError as DocumentError;
 pub use file::{Loaded, public_project, write_atomic};
-pub use journal::{JournalStore, LoadedJournal};
+pub use journal::{JournalStore, LoadedJournal, ReadJournal};
 pub use session::{
     CodeDraft, DraftTarget, Drafts, LoadedDrafts, StorageError, WorkspaceStore, draft_base_hash,
 };
