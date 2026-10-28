@@ -3856,7 +3856,7 @@ fn mcp05_review_an_oversized_component_is_too_large() {
     let error = agent(root)
         .publish(&publish_args(PRODUCT, &sha256(&root.join(PRODUCT))))
         .unwrap_err();
-    assert_eq!(error.code, ErrorCode::TooLarge, "{}", error.message);
+    assert_eq!(error.code, ErrorCode::TooLarge);
     assert_eq!(error.wrote, Wrote::No);
     assert_eq!(shared(root), before);
 }
