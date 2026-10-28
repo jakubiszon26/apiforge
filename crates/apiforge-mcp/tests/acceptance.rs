@@ -12,6 +12,12 @@
 //! tests). EOF on stdin and the client's name are tested over stdio in
 //! `crates/apiforge-cli/tests/mcp.rs`; the window's side (criteria 6 and 11)
 //! in `crates/apiforge-desktop/src/folder/agent_session_tests.rs`.
+//!
+//! MCP-06 (#65): live runs through `run(path, live: true)`, the permission
+//! slot, the run journal and the ends of a run, secrets (the `mcp06_`
+//! tests), against the demo API in this process or a loopback listener that
+//! never answers. EOF, a killed server and the whole session's secret grep
+//! are over stdio in `crates/apiforge-cli/tests/mcp.rs`.
 use apiforge_mcp::{
     ErrorCode, ToolError, Wrote,
     executor::{self, CancellationToken, DEADLINE, EndedBy},
@@ -2603,4 +2609,792 @@ fn mcp04_review_a_file_changed_during_the_commit_names_what_changed() {
     }
     assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
     assert!(entry(&root, DISCOUNT).is_none());
+}
+
+// ----- MCP-06 (#65): live requests, the four ends of a run, secrets -----
+
+use apiforge_core::journal::{EffectState, JournalEntry, JournalRun, JournalSink};
+use apiforge_mcp::{ApiforgeServer, ServerSettings, live::Permission, secrets::Secrets};
+
+/// The value of `APIFORGE_SECRET_TOKEN` in these tests.
+const TOKEN: &str = "tok-mcp06-9f3c1e-live";
+const JOURNAL: &str = ".apiforge/local/journal.json";
+const NOT_ENABLED: &str = "live requests are not enabled on this server";
+const OFF_IN_SETTINGS: &str = "live requests are off in this project's settings";
+
+/// A server as `apiforge mcp [--allow-live]` starts it, reading
+/// `APIFORGE_SECRET_<NAME>` from `environment` instead of the process's.
+fn live_server(root: &Path, allow_live: bool, environment: &[(&str, &str)]) -> ApiforgeServer {
+    live_server_with(root, allow_live, environment, RunSettings::default())
+}
+
+fn live_server_with(
+    root: &Path,
+    allow_live: bool,
+    environment: &[(&str, &str)],
+    run: RunSettings,
+) -> ApiforgeServer {
+    ApiforgeServer::with_settings(
+        root.to_owned(),
+        ServerSettings {
+            run,
+            allow_live,
+            secrets: Secrets::with_environment(
+                None,
+                environment
+                    .iter()
+                    .map(|(name, value)| ((*name).into(), (*value).into()))
+                    .collect(),
+            ),
+            cleanup_delay: None,
+        },
+    )
+}
+
+fn live(path: &str) -> RunArguments {
+    RunArguments {
+        live: true,
+        ..arguments(path)
+    }
+}
+
+/// Points the project's base URL at `base_url`, the shop's root.
+fn point_at(root: &Path, base_url: &str) {
+    let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    let current: Value = serde_json::from_str(&manifest).unwrap();
+    let current = current["environment"]["baseUrl"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    edit(root, MANIFEST, |text| text.replace(&current, base_url));
+}
+
+/// The demo API in this process on a free loopback port, with the project
+/// pointed at it.
+fn demo_api(root: &Path) -> apiforge_demo_api::DemoServerHandle {
+    let api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", api.base_url()));
+    api
+}
+
+/// The demo scenario with a declared secret `TOKEN` that one more request
+/// sends in its query and a header.
+fn with_secret(root: &Path) {
+    edit(root, MANIFEST, |text| {
+        text.replace("\"secretNames\": []", "\"secretNames\": [\"TOKEN\"]")
+    });
+    edit(root, SCENARIO, |text| {
+        text.replacen(
+            "  cleanup {\n",
+            "  @label(\"Echo\")\n  echo = GET \"/products/124?q={{env.TOKEN}}\" {\n    headers { \"X-Echo\": \"{{env.TOKEN}}\" }\n    sample 200 { id: 124 }\n  }\n  cleanup {\n",
+            1,
+        )
+    });
+}
+
+fn journal(root: &Path) -> Option<Value> {
+    fs::read(root.join(JOURNAL))
+        .ok()
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+}
+
+/// Waits up to ten seconds for a request to reach `api`, then for the run
+/// journal to show it. A request is journalled before it is sent, so the
+/// file is read only once the request has arrived: polling it meanwhile
+/// would race the runner's atomic replace, which Windows refuses while the
+/// file is open.
+fn wait_for_journal(root: &Path, api: &Listener) -> Value {
+    let started = Instant::now();
+    while api.accepted() == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no request was sent"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    loop {
+        if let Some(journal) = journal(root)
+            && journal["runs"][0]["entries"]
+                .as_array()
+                .is_some_and(|entries| !entries.is_empty())
+        {
+            return journal;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no request was journalled"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_until_busy(server: &ApiforgeServer) {
+    let started = Instant::now();
+    while !server.runs().is_busy() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the run did not start"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Criterion 1: without `--allow-live` a live run is `live_disabled`, sends
+/// nothing and takes nothing; the overview says why.
+#[test]
+fn mcp06_criterion_1_without_allow_live_nothing_is_sent() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let server = live_server(root, false, &[]);
+    let error = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LiveDisabled);
+    assert_eq!(error.message, NOT_ENABLED);
+    assert_eq!(error.wrote, Wrote::No);
+    let overview = server.overview_tool().unwrap();
+    assert!(!overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.source, "no --allow-live");
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(api.accepted(), 0, "the API saw no request");
+    assert!(!locked(root), "the refusal took no lock");
+    assert!(journal(root).is_none());
+
+    let allowed = live_server(root, true, &[]).overview_tool().unwrap();
+    assert!(allowed.live_requests.allowed);
+    assert_eq!(allowed.live_requests.source, "--allow-live");
+}
+
+/// Criterion 2: with `--allow-live` the demo shop runs against the demo API
+/// and passes; the declared secret is `[REDACTED]` everywhere in the result.
+#[test]
+fn mcp06_criterion_2_a_live_run_against_the_demo_api_passes_redacted() {
+    let directory = checkout();
+    let root = directory.path();
+    let _api = demo_api(root);
+    with_secret(root);
+    let server = live_server(root, true, &[("APIFORGE_SECRET_TOKEN", TOKEN)]);
+    let report = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert!(report.live);
+    assert_eq!(report.ended_by, EndedBy::Completed);
+    assert!(report.redacted);
+    assert_eq!(report.generation, head_generation(root));
+    assert_eq!(
+        report.source_sha256.as_deref(),
+        Some(&*sha256(&root.join(SCENARIO)))
+    );
+    assert!(report.interrupted.is_empty());
+    assert!(
+        handles(report.steps.as_deref().unwrap()).contains(&"echo"),
+        "the secret's request ran"
+    );
+    assert!(!serde_json::to_string(&report).unwrap().contains(TOKEN));
+
+    let full = server
+        .run_tool(
+            RunArguments {
+                full: true,
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(full.status, Verdict::Passed);
+    let text = serde_json::to_string(&full).unwrap();
+    assert!(text.contains("[REDACTED]"), "the value is masked");
+    assert!(!text.contains(TOKEN), "the value never leaves the server");
+    assert!(journal(root).is_none(), "a finished run leaves no journal");
+}
+
+/// Criterion 3: a live run needs the agent session: refused with the holder
+/// while a window or another process holds the project, a simulation still
+/// works; a free project is taken for the session, which keeps it.
+#[test]
+fn mcp06_criterion_3_a_live_run_needs_the_agent_session() {
+    let directory = checkout();
+    let root = directory.path();
+    let _api = demo_api(root);
+    let server = live_server(root, true, &[]);
+    for (holder, code) in [
+        (LockHolder::window(), ErrorCode::HeldByWindow),
+        (LockHolder::command("apply"), ErrorCode::HeldByOther),
+    ] {
+        let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+        let error = server
+            .run_tool(live(SCENARIO), CancellationToken::new())
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.wrote, Wrote::No);
+        assert!(error.details["holder"]["since"].is_string(), "{error:?}");
+        let simulation = server
+            .run_tool(arguments(SCENARIO), CancellationToken::new())
+            .unwrap();
+        assert_eq!(simulation.status, Verdict::Passed);
+        assert!(!simulation.live);
+        assert!(journal(root).is_none(), "nothing was sent or journalled");
+        drop(owner);
+    }
+    let report = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert!(server.agent().is_active(), "the run took the agent session");
+    assert!(locked(root), "and the session keeps the lock");
+    assert_eq!(server.overview_tool().unwrap().holder, Holder::AgentSession);
+    let again = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(again.status, Verdict::Passed, "the session's lock is used");
+    assert!(server.agent().finish_editing().finished);
+    assert!(!locked(root));
+}
+
+/// Criterion 4: the permission slot. A window decides while it is
+/// connected, the flag otherwise; the test sets the slot as MCP-09's channel
+/// will.
+#[test]
+fn mcp06_criterion_4_the_window_decides_while_connected_the_flag_otherwise() {
+    let directory = checkout();
+    let root = directory.path();
+    let _api = demo_api(root);
+
+    let server = live_server(root, false, &[]);
+    assert_eq!(server.permission().current(), Permission::Flag(false));
+    server.permission().set_window(true);
+    assert_eq!(
+        server.permission().current(),
+        Permission::Window { live: true }
+    );
+    let overview = server.overview_tool().unwrap();
+    assert!(overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.source, "window setting");
+    let report = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed, "allowed without the flag");
+    assert!(report.live);
+    server.permission().window_disconnected();
+    assert_eq!(server.permission().current(), Permission::Flag(false));
+    let error = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LiveDisabled);
+    assert_eq!(error.message, NOT_ENABLED);
+    assert!(server.agent().finish_editing().finished);
+
+    let flagged = live_server(root, true, &[]);
+    flagged.permission().set_window(false);
+    let error = flagged
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LiveDisabled);
+    assert_eq!(
+        error.message, OFF_IN_SETTINGS,
+        "the window overrides the flag"
+    );
+    let overview = flagged.overview_tool().unwrap();
+    assert!(!overview.live_requests.allowed);
+    assert_eq!(
+        overview.live_requests.source,
+        "off in the project's settings"
+    );
+    flagged.permission().window_disconnected();
+    assert_eq!(flagged.permission().current(), Permission::Flag(true));
+    let report = flagged
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed, "the flag applies again");
+}
+
+/// Criterion 5: the permission is checked when the run starts; a change
+/// after the start does not stop it (decision 16 A); the next run is
+/// refused.
+#[test]
+fn mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let _api = demo_api(&root);
+    let server = live_server_with(
+        &root,
+        true,
+        &[],
+        RunSettings {
+            deadline: DEADLINE,
+            step_delay: Some(Duration::from_millis(100)),
+        },
+    );
+    let running = {
+        let server = server.clone();
+        thread::spawn(move || server.run_tool(live(SCENARIO), CancellationToken::new()))
+    };
+    wait_until_busy(&server);
+    thread::sleep(Duration::from_millis(250));
+    server.permission().set_window(false);
+    let report = running.join().unwrap().unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert_eq!(report.ended_by, EndedBy::Completed);
+    let error = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::LiveDisabled);
+    assert_eq!(error.message, OFF_IN_SETTINGS);
+}
+
+/// Criterion 6: a live run cancelled, or past its deadline, against an
+/// endpoint that never answers: the main phase stops, the cleanup runs and
+/// its steps are in the report, the in-flight request may have reached the
+/// API, and the journal's entry is gone at the end.
+#[test]
+fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
+    for timed_out in [false, true] {
+        let directory = checkout();
+        let root = directory.path().to_owned();
+        let api = Listener::start();
+        point_at(&root, &api.base_url());
+        let deadline = if timed_out {
+            Duration::from_millis(600)
+        } else {
+            DEADLINE
+        };
+        let server = live_server_with(
+            &root,
+            true,
+            &[],
+            RunSettings {
+                deadline,
+                step_delay: None,
+            },
+        );
+        let cancel = CancellationToken::new();
+        let running = {
+            let (server, cancel) = (server.clone(), cancel.clone());
+            thread::spawn(move || server.run_tool(live(SCENARIO), cancel))
+        };
+        let during = wait_for_journal(&root, &api);
+        let entry = &during["runs"][0]["entries"][0];
+        assert_eq!(entry["method"], "GET");
+        assert_eq!(entry["state"], "inFlight", "journalled before it was sent");
+        if !timed_out {
+            thread::sleep(Duration::from_millis(200));
+            cancel.cancel();
+        }
+        let report = running.join().unwrap().unwrap();
+        assert_eq!(report.status, Verdict::Cancelled);
+        assert_eq!(
+            report.ended_by,
+            if timed_out {
+                EndedBy::TimedOut
+            } else {
+                EndedBy::Cancelled
+            }
+        );
+        assert!(api.accepted() >= 1, "the request was on its way");
+        let steps = report.steps.unwrap();
+        let marked: Vec<_> = flatten(&steps)
+            .into_iter()
+            .filter(|step| step.may_have_reached_api)
+            .collect();
+        assert_eq!(marked.len(), 1, "{} steps", steps.len());
+        assert_eq!(marked[0].handle, "fetch_product");
+        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+        assert!(
+            steps[steps.len() - 2..]
+                .iter()
+                .all(|step| step.phase == Phase::Cleanup),
+            "the cleanup's steps are in the report"
+        );
+        assert!(journal(&root).is_none(), "the entry is removed at the end");
+        assert!(!server.runs().is_busy());
+    }
+}
+
+/// Criterion 8, in process: a run an earlier process left in the journal is
+/// returned under `interrupted` by the next run, live or not, with method,
+/// URL and state as `apiforge run` prints them; the overview counts it. The
+/// real kill is in `crates/apiforge-cli/tests/mcp.rs`.
+#[test]
+fn mcp06_criterion_8_an_interrupted_run_is_reported_by_the_next_run() {
+    let directory = checkout();
+    let root = directory.path();
+    let _api = demo_api(root);
+    {
+        // A server that died with a request on its way.
+        let store = ProjectStore::open_exclusive(root).unwrap();
+        let loaded = apiforge_storage::JournalStore::open_project(store).unwrap();
+        let run = JournalRun::new(
+            "run-1",
+            "promotion",
+            "Promotion and cart price",
+            "2026-10-28T10:00:00.000Z",
+        );
+        loaded.store.begin_run(&run).unwrap();
+        loaded
+            .store
+            .record(
+                "run-1",
+                &JournalEntry {
+                    sequence: 1,
+                    node_id: "node-1".into(),
+                    handle: "add_to_cart".into(),
+                    label: Some("Add to cart".into()),
+                    phase: apiforge_core::run::Phase::Main,
+                    method: "POST".into(),
+                    url: "http://127.0.0.1:9/demo/shop/carts".into(),
+                    started_at: "2026-10-28T10:00:01.000Z".into(),
+                    state: EffectState::InFlight,
+                    status: None,
+                    detail: None,
+                },
+            )
+            .unwrap();
+    }
+    assert!(journal(root).is_some());
+    let server = live_server(root, true, &[]);
+    assert_eq!(server.overview_tool().unwrap().interrupted_runs, 1);
+    for arguments in [arguments(SCENARIO), live(SCENARIO)] {
+        let report = server
+            .run_tool(arguments.clone(), CancellationToken::new())
+            .unwrap();
+        assert_eq!(report.status, Verdict::Passed);
+        assert_eq!(report.interrupted.len(), 1, "live: {}", arguments.live);
+        let run = &report.interrupted[0];
+        assert_eq!(run.scenario, "Promotion and cart price");
+        assert_eq!(run.started_at, "2026-10-28T10:00:00.000Z");
+        assert_eq!(run.requests.len(), 1);
+        let request = &run.requests[0];
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.url, "http://127.0.0.1:9/demo/shop/carts");
+        assert_eq!(request.state, EffectState::InFlight.label());
+        assert_eq!(request.step, "Add to cart");
+    }
+    // The interrupted run stays until the window marks it handled.
+    assert_eq!(server.overview_tool().unwrap().interrupted_runs, 1);
+}
+
+/// Criterion 9: a live run repeated with a `request_id` the server answered
+/// returns the recorded result and sends nothing.
+#[test]
+fn mcp06_criterion_9_an_answered_request_id_returns_the_recorded_result() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = demo_api(root);
+    let server = live_server(root, true, &[]);
+    let with_id = RunArguments {
+        request_id: Some("live-run-1".into()),
+        ..live(SCENARIO)
+    };
+    let first = server
+        .run_tool(with_id.clone(), CancellationToken::new())
+        .unwrap();
+    assert_eq!(first.status, Verdict::Passed);
+    assert!(!first.replayed);
+    assert_eq!(first.request_id.as_deref(), Some("live-run-1"));
+    // Anything sent now would reach a listener that counts it.
+    drop(api);
+    let listener = Listener::start();
+    point_at(root, &listener.base_url());
+    let second = server
+        .run_tool(with_id.clone(), CancellationToken::new())
+        .unwrap();
+    assert!(second.replayed, "the recorded result");
+    assert_eq!(second.status, first.status);
+    assert_eq!(second.steps, first.steps);
+    assert_eq!(second.generation, first.generation);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(listener.accepted(), 0, "nothing was sent");
+    // Another id is a new run: it reaches the listener and is cancelled.
+    let cancel = CancellationToken::new();
+    let other = {
+        let (server, cancel) = (server.clone(), cancel.clone());
+        thread::spawn(move || {
+            server.run_tool(
+                RunArguments {
+                    request_id: Some("live-run-2".into()),
+                    ..live(SCENARIO)
+                },
+                cancel,
+            )
+        })
+    };
+    wait_for_journal(root, &listener);
+    cancel.cancel();
+    let other = other.join().unwrap().unwrap();
+    assert!(!other.replayed);
+    assert!(listener.accepted() >= 1, "a new id sends");
+}
+
+/// Criterion 9's second half (owner decision A, 2026-10-28): a live run's
+/// `request_id` is recorded in `.apiforge/local/agent-requests.json` before
+/// its first request goes out, so a new server answers `unknown_outcome`
+/// for an id an earlier server started, with the journal's interrupted runs,
+/// and sends nothing. A record that cannot be read refuses a live run with a
+/// `request_id` rather than risk running it twice.
+#[test]
+fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_id_an_earlier_server_started() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let earlier = live_server(root, true, &[]);
+    let cancel = CancellationToken::new();
+    let running = {
+        let (server, cancel) = (earlier.clone(), cancel.clone());
+        thread::spawn(move || {
+            server.run_tool(
+                RunArguments {
+                    request_id: Some("lost-before-a-restart".into()),
+                    ..live(SCENARIO)
+                },
+                cancel,
+            )
+        })
+    };
+    wait_for_journal(root, &api);
+    let record: Value = serde_json::from_slice(
+        &fs::read(root.join(".apiforge/local/agent-requests.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        record["requests"][0]["id"], "lost-before-a-restart",
+        "recorded before the request went out"
+    );
+    assert_eq!(record["requests"][0]["path"], SCENARIO);
+    cancel.cancel();
+    running.join().unwrap().unwrap();
+    assert!(earlier.agent().finish_editing().finished);
+    drop(earlier);
+    let sent = api.accepted();
+
+    let server = live_server(root, true, &[]);
+    let error = server
+        .run_tool(
+            RunArguments {
+                request_id: Some("lost-before-a-restart".into()),
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownOutcome);
+    assert_eq!(error.wrote, Wrote::No);
+    assert!(error.details["interrupted"].is_array());
+    assert_eq!(error.details["path"], SCENARIO);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(api.accepted(), sent, "nothing was sent");
+
+    // A new id runs; a record that cannot be read refuses an id.
+    let _demo = demo_api(root);
+    let report = server
+        .run_tool(
+            RunArguments {
+                request_id: Some("a-new-id".into()),
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    fs::write(
+        root.join(".apiforge/local/agent-requests.json"),
+        b"{ broken",
+    )
+    .unwrap();
+    let refused = live_server(root, true, &[]);
+    assert!(server.agent().finish_editing().finished);
+    let error = refused
+        .run_tool(
+            RunArguments {
+                request_id: Some("another-id".into()),
+                ..live(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ProjectUnreadable);
+    assert_eq!(error.details["file"], ".apiforge/local/agent-requests.json");
+    let without_id = refused
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(
+        without_id.status,
+        Verdict::Passed,
+        "a run without an id still works"
+    );
+}
+
+/// Criterion 11: a saved source that contains a known secret value is
+/// withheld by `read_source`, `print` and the resource with
+/// `secret_in_source` and the line, never a modified text.
+#[test]
+fn mcp06_criterion_11_a_saved_source_with_a_secret_is_withheld() {
+    let directory = checkout();
+    let root = directory.path();
+    edit(root, PRODUCT, |text| {
+        text.replacen(" {\n", &format!(" {{\n  // {TOKEN}\n"), 1)
+    });
+    let server = live_server(root, false, &[("APIFORGE_SECRET_TOKEN", TOKEN)]);
+    let uri = format!("{}{PRODUCT}", resources::SOURCE_PREFIX);
+    for error in [
+        server.read_source_tool(PRODUCT).unwrap_err(),
+        server.print_tool(PRODUCT).unwrap_err(),
+        server.resource_text(&uri).unwrap_err(),
+    ] {
+        assert_eq!(error.code, ErrorCode::SecretInSource, "{error:?}");
+        assert_eq!(error.details["line"], 2);
+        assert_eq!(error.wrote, Wrote::No);
+        assert!(!error_text(&error).contains(TOKEN));
+    }
+    // The other documents are served; without the secret the file is read.
+    assert!(server.read_source_tool(SCENARIO).is_ok());
+    let plain = live_server(root, false, &[]);
+    assert!(
+        plain
+            .read_source_tool(PRODUCT)
+            .unwrap()
+            .text
+            .contains(TOKEN)
+    );
+}
+
+/// Criterion 10, in process: a text argument or a request id that carries a
+/// known value is refused, never echoed. The whole session over stdio, with
+/// stderr and the journal, is in `crates/apiforge-cli/tests/mcp.rs`.
+#[test]
+fn mcp06_criterion_10_no_tool_accepts_a_secret_value() {
+    let directory = checkout();
+    let root = directory.path();
+    let server = live_server(root, false, &[("APIFORGE_SECRET_TOKEN", TOKEN)]);
+    let text = fs::read_to_string(root.join(SCENARIO)).unwrap();
+    let leaked = text.replacen(" {\n", &format!(" {{\n  // {TOKEN}\n"), 1);
+    let error = server.check_text_tool(SCENARIO, &leaked).unwrap_err();
+    assert_eq!(error.code, ErrorCode::SecretInText);
+    assert!(!error_text(&error).contains(TOKEN));
+    let error = server
+        .run_tool(
+            RunArguments {
+                request_id: Some(TOKEN.into()),
+                ..arguments(SCENARIO)
+            },
+            CancellationToken::new(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        ErrorCode::SecretInText,
+        "a request id is echoed"
+    );
+    assert!(!error_text(&error).contains(TOKEN));
+}
+
+/// Criterion 12: the development guide's MCP section explains the flag, the
+/// environment, the journal and the four ends.
+#[test]
+fn mcp06_criterion_12_the_development_guide_explains_live_runs() {
+    let guide =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/development.md"))
+            .unwrap();
+    let start = guide.find("## MCP server").unwrap();
+    let section = &guide[start..];
+    let end = section[3..]
+        .find("\n## ")
+        .map_or(section.len(), |end| end + 3);
+    let section = &section[..end];
+    for needle in [
+        "### Live requests",
+        "--allow-live",
+        "--secrets",
+        "APIFORGE_SECRET_<NAME>",
+        ".apiforge/local/journal.json",
+        "interrupted",
+        "notifications/cancelled",
+        "timed_out",
+        "end of stdin",
+        "killed",
+        "APIFORGE_MCP_TEST_CLEANUP_DELAY_MS",
+    ] {
+        assert!(section.contains(needle), "the MCP section names {needle}");
+    }
+}
+
+// ----- MCP-06 review round 1 -----
+
+/// A `request_id` names one run: the same id for another document is
+/// refused, and an id whose result the server dropped to keep its list short
+/// is `unknown_outcome`, never run again.
+#[test]
+fn mcp06_review_a_request_id_names_one_run_and_is_never_run_twice() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = demo_api(root);
+    let server = live_server(root, true, &[]);
+    let with_id = |id: &str, path: &str| RunArguments {
+        request_id: Some(id.into()),
+        ..live(path)
+    };
+    for number in 0..=64 {
+        let report = server
+            .run_tool(
+                with_id(&number.to_string(), SCENARIO),
+                CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(report.status, Verdict::Passed);
+    }
+    let error = server
+        .run_tool(with_id("64", PRODUCT), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInputs);
+    assert_eq!(error.details["path"], SCENARIO);
+    drop(api);
+    let listener = Listener::start();
+    point_at(root, &listener.base_url());
+    let replayed = server
+        .run_tool(with_id("64", SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert!(replayed.replayed);
+    let error = server
+        .run_tool(with_id("0", SCENARIO), CancellationToken::new())
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        ErrorCode::UnknownOutcome,
+        "the oldest was dropped"
+    );
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(listener.accepted(), 0, "nothing was sent");
+}
+
+/// While this server's own live run is in progress its journal entry is not
+/// an interrupted run; a journal that cannot be read does not fail a
+/// simulation.
+#[test]
+fn mcp06_review_the_server_own_run_is_not_interrupted() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let api = Listener::start();
+    point_at(&root, &api.base_url());
+    let server = live_server(&root, true, &[]);
+    let cancel = CancellationToken::new();
+    let running = {
+        let (server, cancel) = (server.clone(), cancel.clone());
+        thread::spawn(move || server.run_tool(live(SCENARIO), cancel))
+    };
+    wait_for_journal(&root, &api);
+    assert_eq!(server.overview_tool().unwrap().interrupted_runs, 0);
+    cancel.cancel();
+    assert_eq!(running.join().unwrap().unwrap().status, Verdict::Cancelled);
+    assert!(server.agent().finish_editing().finished);
+
+    fs::write(root.join(JOURNAL), b"not a journal").unwrap();
+    let report = server
+        .run_tool(arguments(SCENARIO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert!(report.journal_unreadable);
+    assert!(report.interrupted.is_empty());
 }

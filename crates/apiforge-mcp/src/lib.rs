@@ -9,13 +9,16 @@ pub mod error;
 pub mod executor;
 pub mod folder;
 pub mod handover;
+pub mod live;
 pub mod positions;
 pub mod reference;
+pub mod requests;
 pub mod resources;
+pub mod secrets;
 mod server;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 pub mod tools;
 
 pub use error::{ErrorCode, ToolError, Wrote};
-pub use server::{ApiforgeServer, serve_stdio, serve_stdio_with};
+pub use server::{ApiforgeServer, ServerSettings, serve_stdio, serve_stdio_with};

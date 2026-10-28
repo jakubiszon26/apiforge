@@ -1895,8 +1895,11 @@ mod mcp08b {
             .ok()
             .and_then(|milliseconds| milliseconds.parse().ok())
             .map(Duration::from_millis);
-        let settings = apiforge_mcp::tools::RunSettings {
-            step_delay,
+        let settings = apiforge_mcp::ServerSettings {
+            run: apiforge_mcp::tools::RunSettings {
+                step_delay,
+                ..Default::default()
+            },
             ..Default::default()
         };
         apiforge_mcp::serve_stdio_with(PathBuf::from(folder), settings).unwrap();
