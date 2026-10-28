@@ -1217,11 +1217,10 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod mcp12_diagnostics {
     use super::*;
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn only_unreachable_live_window_endpoints_on_windows_mounts_get_the_qualified_hint() {
         let window = Holder::window()
