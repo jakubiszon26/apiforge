@@ -33,8 +33,9 @@ v0.1.0, a pre-release.
 - New: a *Releases* entry `v0.1.0` (pre-release) with four assets:
   - `apiforge-desktop-v0.1.0-x86_64.AppImage` — the window alone;
   - `apiforge-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` — `apiforge-desktop`,
-    `apiforge`, `README.md`, `CLAUDE-CODE.md`, `licenses/` (the bundled
-    fonts' licences; the repository has no LICENSE file of its own);
+    `apiforge`, `LICENSE`, `README.md`, `CLAUDE-CODE.md`, `licenses/` (the
+    bundled fonts' licences), below one top-level directory named like the
+    archive; `LICENSE` since the owner's licence decision of 2026-10-28;
   - `apiforge-v0.1.0-x86_64-pc-windows-msvc.zip` — the same with `.exe`;
   - `SHA256SUMS.txt` — one line per asset, `sha256sum -c` format; the sums
     are repeated at the end of the release notes.
@@ -133,8 +134,9 @@ Code signing (decision 2: unsigned); an aarch64 or musl build (decision 3);
 Flatpak; a Windows installer or an `.exe` resource icon; a designed icon
 (placeholder now, a ticket if the owner wants one); the CLI inside the
 AppImage; AppStream metadata and AppImage update information; a release that
-is not a pre-release; a `CHANGELOG`; a project LICENSE file (an owner
-decision for its own ticket).
+is not a pre-release; a `CHANGELOG`. (A project LICENSE file was out of
+scope here until the owner chose GPL-3.0-or-later on 2026-10-28 and folded it
+into this ticket; see *Taken during implementation*.)
 
 ## Open points
 
@@ -156,10 +158,11 @@ decision for its own ticket).
 - The AppImage carries six libraries, not two: the trace in the QA report
   found `libxcb-xkb`, `libXcursor`, `libXfixes` and `libXi` missing from a
   bare Ubuntu 24.04 as well.
-- The clean-runner job also starts the AppImage in a bare `ubuntu:24.04`
-  container, because the hosted runner image already carries most X
-  libraries; the runner step adds `fuse3`, which the pinned static runtime
-  mounts through.
+- Criterion 6's job installs the four packages and runs the AppImage twice:
+  on the hosted runner, which also gets `fuse3` because the pinned static
+  runtime mounts through `fusermount3`, and in a bare `ubuntu:24.04`
+  container with exactly the four packages, because the hosted image
+  already carries most X libraries and would hide a missing one.
 
 ## Technical appendix
 
@@ -167,30 +170,34 @@ decision for its own ticket).
   list of `rust.yml`, `cargo test`, `cargo build --release --locked -p
   apiforge-desktop -p apiforge-cli`, tar.gz + manifest check + MCP smoke,
   AppDir + AppImage), `build-windows` (windows-2022: test, build,
-  `Compress-Archive`, manifest check, MCP smoke), `smoke-appimage`
+  `packaging/release.py pack`, manifest check, MCP smoke), `smoke-appimage`
   (ubuntu-24.04, criterion 6), `publish` (needs all three; `gh api
   …/releases/generate-notes` → body + sums → `gh release create --prerelease
   --verify-tag --notes-file`). Actions as in `rust.yml` (`checkout@v4`,
   `upload/download-artifact@v4`, `dtolnay/rust-toolchain`); no third-party
   release action — the runner's `gh` publishes.
-- AppImage: a hand-made `AppDir/` (`usr/bin/apiforge-desktop`, `AppRun`
-  script exporting `LD_LIBRARY_PATH=$APPDIR/usr/lib`, `apiforge.desktop` with
+- AppImage: a hand-made `AppDir/` (`usr/bin/apiforge-desktop` with the
+  RUNPATH `$ORIGIN/../lib`, an `AppRun` script that only starts it — as
+  built, `LD_LIBRARY_PATH` is not used, so processes the window starts do not
+  inherit the bundled libraries — `apiforge.desktop` with
   `Exec=apiforge-desktop`, `Icon=apiforge`, `Categories=Development;`,
   `StartupWMClass=apiforge` to match `with_app_id("apiforge")`,
   `apiforge.png` and `.DirIcon`), packed by a **tagged** release of
   `AppImage/appimagetool` (1.9.x) downloaded by its release URL with its
   SHA-256 recorded in the workflow and checked before use, run with
   `--appimage-extract-and-run`; the `continuous` build is never used.
-  `usr/lib` bundles what winit dlopens and a stock runner lacks —
-  expected `libxkbcommon.so.0` and `libxkbcommon-x11.so.0` (the reason
-  `rust.yml` installs `libxkbcommon-x11-0`) — and leaves glibc, libX11,
-  Wayland, GL and Vulkan to the host as AppImages do; criterion 6 proves the
-  list.
+  `usr/lib` bundles what winit dlopens and a stock runner lacks — as
+  built, the six libraries of `packaging/appimage-libraries.txt`:
+  `libxkbcommon`, `libxkbcommon-x11`, `libxcb-xkb`, `libXcursor`,
+  `libXfixes` and `libXi`, found by an `LD_DEBUG` trace — and leaves glibc,
+  libX11, libxcb, Wayland, GL and Vulkan to the host as AppImages do;
+  criterion 6 proves the list.
 - Files: `packaging/{AppRun,apiforge.desktop,CLAUDE-CODE.md,mcp-smoke.py,
   manifest-linux.txt,manifest-windows.txt}`;
-  `crates/apiforge-desktop/assets/icon/apiforge.svg` (source) and
-  `apiforge-256.png` (committed, so CI needs no SVG renderer; loaded with the
-  `image` crate already in the workspace); `--version` in
+  as built, `packaging/icon/apiforge.svg` (the owner's icon, the source)
+  and its PNGs at 16–512 px (committed, so CI needs no SVG renderer); the
+  window embeds `packaging/icon/apiforge-256.png` through
+  `eframe::icon_data`; `--version` in
   `crates/apiforge-cli/src/main.rs` and `crates/apiforge-desktop/src/main.rs`
   from `CARGO_PKG_VERSION` (both crates take `version.workspace`).
 - Order: acceptance commit (Rust `--version` tests, `mcp-smoke.py`, the

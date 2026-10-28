@@ -158,9 +158,9 @@ git tag v0.1.0 origin/main && git push origin v0.1.0
 ```
 
 A tag `v<version>-rc.<N>` releases the same version as a dry run. The workflow
-stops before building when the tag, without `-rc.N`, is not `v` and the
-`version` of `[workspace.package]` in `Cargo.toml`, and its publish job
-refuses a tagged commit that is not on `main`. Then:
+stops before building unless the tag, with any `-rc.N` suffix removed, equals
+`v` followed by the `version` of `[workspace.package]` in `Cargo.toml`; its
+publish job refuses a tagged commit that is not on `main`. Then:
 
 1. On `ubuntu-22.04` (glibc 2.35) and `windows-2022` it runs the workspace
    tests, builds both binaries in release mode, packs
@@ -171,8 +171,10 @@ refuses a tagged commit that is not on `main`. Then:
    archive: `initialize`, `tools/list` with the tools of
    `crates/apiforge-cli/tests/mcp.rs`, exit 0 at EOF.
 2. On Linux it builds `apiforge-desktop-<tag>-x86_64.AppImage` from an
-   `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon
-   and the libraries of `packaging/appimage-libraries.txt`, packed by
+   `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon,
+   `LICENSE`, the font licences and the libraries of
+   `packaging/appimage-libraries.txt`, which the binary finds through its
+   RUNPATH (`patchelf`), never through `LD_LIBRARY_PATH`; packed by
    appimagetool 1.9.1 with the type2 runtime 20251108; both are downloaded
    by their release URLs and checked against the SHA-256 in the workflow.
 3. On `ubuntu-24.04` it starts the AppImage with `--version`, `--check` and

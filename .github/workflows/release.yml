@@ -83,7 +83,8 @@ jobs:
             xauth \
             mesa-vulkan-drivers \
             libvulkan1 \
-            desktop-file-utils
+            desktop-file-utils \
+            patchelf
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -135,21 +136,31 @@ jobs:
             "$RUNTIME_SHA256" "$tools/runtime-x86_64" | sha256sum -c -
           chmod +x "$tools/appimagetool"
 
-      # winit loads libxkbcommon and libxkbcommon-x11 at run time and a desktop
-      # without an X11 keyboard stack may lack them; glibc, X11, Wayland, GL and
-      # Vulkan stay the host's, as in every AppImage.
+      # winit loads the X11 keyboard and cursor libraries of
+      # packaging/appimage-libraries.txt at run time, and a desktop may lack
+      # them; glibc, libX11, libxcb, Wayland, GL and Vulkan stay the host's, as
+      # in every AppImage. The binary and the libraries find usr/lib through
+      # their RUNPATH, so LD_LIBRARY_PATH is never set for the processes the
+      # window starts.
       - name: Build the AppImage
         run: |
           appdir="$RUNNER_TEMP/AppDir"
-          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib"
+          fonts=crates/apiforge-desktop/assets/fonts
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/licenses"
           install -m 755 packaging/AppRun "$appdir/AppRun"
           install -m 755 target/release/apiforge-desktop "$appdir/usr/bin/"
+          patchelf --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/apiforge-desktop"
           install -m 644 packaging/apiforge.desktop LICENSE "$appdir/"
+          install -m 644 "$fonts/FONT-SOURCES.md" "$fonts/LICENSE-API-Forge-fonts.txt" \
+            "$fonts/LICENSE-DejaVu.txt" "$appdir/licenses/"
           install -m 644 packaging/icon/apiforge-256.png "$appdir/apiforge.png"
           ln -s apiforge.png "$appdir/.DirIcon"
-          for library in $(cat packaging/appimage-libraries.txt | sed 's/#.*//'); do
+          for library in $(sed 's/#.*//' packaging/appimage-libraries.txt); do
             cp -L "/usr/lib/x86_64-linux-gnu/$library" "$appdir/usr/lib/"
+            chmod 644 "$appdir/usr/lib/$library"
+            patchelf --set-rpath '$ORIGIN' "$appdir/usr/lib/$library"
           done
+          patchelf --print-rpath "$appdir/usr/bin/apiforge-desktop"
           desktop-file-validate "$appdir/apiforge.desktop"
           find "$appdir" -exec ls -ld {} +
           ARCH=x86_64 "$RUNNER_TEMP/appimage-tools/appimagetool" --appimage-extract-and-run \

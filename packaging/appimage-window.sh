@@ -30,6 +30,7 @@ for _ in $(seq 50); do
   test -e "/tmp/.X11-unix/X$display" && break
   sleep 0.1
 done
+test -e "/tmp/.X11-unix/X$display" || { echo "Xvfb :$display did not start within 5 s" >&2; exit 1; }
 export DISPLAY=":$display"
 
 mkdir -p "$(dirname "$output")"

@@ -144,7 +144,8 @@ class Archives(unittest.TestCase):
 
     def packed(self, names, suffix):
         stem = "apiforge-v0.1.0-target"
-        directory = os.path.join(self.temporary.name, "stage" + suffix, stem)
+        # A stage of its own per call, so no case inherits another's files.
+        directory = os.path.join(tempfile.mkdtemp(dir=self.temporary.name), stem)
         stage(directory, names)
         archive = os.path.join(self.temporary.name, stem + suffix)
         release.pack(directory, archive)

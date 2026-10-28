@@ -1,7 +1,7 @@
 #!/bin/sh
-# The AppImage's entry point (REL-01): the window with the few libraries the
-# AppImage carries in usr/lib ahead of the host's. glibc, X11, Wayland, GL and
-# Vulkan stay the host's.
+# The AppImage's entry point (REL-01). The window finds the X11 keyboard and
+# cursor libraries of usr/lib through its own RUNPATH ($ORIGIN/../lib, set
+# when the AppImage is built), so nothing here changes the environment that
+# the processes it starts, such as a browser opened by xdg-open, inherit.
 here="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
-export LD_LIBRARY_PATH="$here/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$here/usr/bin/apiforge-desktop" "$@"

@@ -6,7 +6,8 @@ Starts `BINARY mcp` on an empty temporary folder, sends `initialize` with
 protocol revision 2025-11-25 and `tools/list`, and checks that the server names
 itself `apiforge` at VERSION and lists exactly the tools of the `TOOLS` array in
 TOOLS_SOURCE (crates/apiforge-cli/tests/mcp.rs). It then closes stdin and
-expects exit code 0. Standard library only; it runs on Linux and Windows.
+expects exit code 0. A failure prints the server's stderr. Standard library
+only; it runs on Linux and Windows.
 """
 
 import json
@@ -19,6 +20,10 @@ import threading
 
 REVISION = "2025-11-25"
 TIMEOUT = 30
+
+
+class Failure(Exception):
+    """A check that failed; the server's stderr is added to the message."""
 
 
 def expected_tools(source):
@@ -68,12 +73,13 @@ def main():
                 try:
                     line = lines.get(timeout=TIMEOUT)
                 except queue.Empty:
-                    server.kill()
-                    sys.exit(f"no answer to request {request_id} in {TIMEOUT} s")
+                    raise Failure(f"no answer to request {request_id} in {TIMEOUT} s")
                 if line is None:
-                    sys.exit(f"the server closed stdout before answering {request_id}")
+                    raise Failure(f"the server closed stdout before answering {request_id}")
                 message = json.loads(line)
                 if message.get("id") == request_id:
+                    if "error" in message:
+                        raise Failure(f"request {request_id} answered an error: {message['error']}")
                     return message
 
         try:
@@ -92,26 +98,27 @@ def main():
             result = response(1).get("result") or {}
             info = result.get("serverInfo") or {}
             if result.get("protocolVersion") != REVISION:
-                sys.exit(f"initialize answered revision {result.get('protocolVersion')!r}")
+                raise Failure(f"initialize answered revision {result.get('protocolVersion')!r}")
             if (info.get("name"), info.get("version")) != ("apiforge", version):
-                sys.exit(f"initialize answered server {info!r}, not apiforge {version}")
+                raise Failure(f"initialize answered server {info!r}, not apiforge {version}")
             send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
             send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
             listed = [tool["name"] for tool in response(2)["result"]["tools"]]
             if sorted(listed) != sorted(tools):
-                sys.exit(f"tools/list answered {listed}, expected {tools}")
+                raise Failure(f"tools/list answered {listed}, expected {tools}")
 
             server.stdin.close()
             code = server.wait(timeout=TIMEOUT)
-        finally:
+            if code != 0:
+                raise Failure(f"the server exited with {code} at EOF")
+        except (Failure, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
             if server.poll() is None:
                 server.kill()
-                server.wait()
-        if code != 0:
-            stderr.join(timeout=TIMEOUT)
-            text = b"".join(errors).decode(errors="replace")
-            sys.exit(f"the server exited with {code} at EOF:\n{text}")
+            server.wait()
+            stderr.join(timeout=5)
+            text = b"".join(errors).decode(errors="replace").strip()
+            sys.exit(f"{error}\nstderr of apiforge mcp:\n{text or '(empty)'}")
     print(f"apiforge {version}: initialize {REVISION} and {len(tools)} tools, exit 0 at EOF")
 
 
