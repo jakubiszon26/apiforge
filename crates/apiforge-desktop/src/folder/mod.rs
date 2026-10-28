@@ -18,6 +18,7 @@ mod diagram;
 mod dog;
 mod explorer;
 mod file_prompts;
+mod handover;
 mod holder;
 mod navigation;
 mod opening;
@@ -294,6 +295,8 @@ pub struct FolderApp {
     /// while this window is the writer, or read-only with no live holder.
     holder: Option<holder::Observed>,
     take_back: holder::TakeBack,
+    /// The control channel to an agent's server (MCP-08b).
+    handover: handover::Handover,
     /// What the holder's last followed commit changed, with its time, for
     /// the bar (MCP-08a): *10:43 · promotion.afs saved*.
     last_change: Option<String>,
@@ -442,6 +445,7 @@ impl FolderApp {
             animation: !cfg!(test),
             holder: None,
             take_back: holder::TakeBack::default(),
+            handover: handover::Handover::new(Some(context.clone())),
             last_change: None,
         }
     }
@@ -496,6 +500,9 @@ impl FolderApp {
         }
         self.holder = None;
         self.take_back = holder::TakeBack::default();
+        self.handover.reset_observing();
+        self.handover.forget_requests();
+        self.watcher.release_hold();
         self.last_change = None;
         self.seen = session.last_sequence();
         self.uninitialised = false;
@@ -504,6 +511,7 @@ impl FolderApp {
         self.reload_field_drafts();
         self.restore_text_tabs();
         self.remember_project();
+        self.announce_endpoint();
     }
 
     /// Unfinished inspector text comes from the session, which owns it.
@@ -633,6 +641,8 @@ impl FolderApp {
         self.follow_dialogs();
         self.advance_departure();
         self.advance_switch();
+        // Before the watcher's poll, so a `saved` is looked at this frame.
+        self.follow_channel();
         if self.close_requested {
             self.close_requested = false;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

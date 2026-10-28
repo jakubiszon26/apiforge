@@ -12,6 +12,9 @@ apiforge-script.workspace = true
 apiforge-runner.workspace = true
 apiforge-storage.workspace = true
 apiforge-project.workspace = true
+# The control channel to an agent's server (MCP-08b).
+apiforge-channel.workspace = true
+tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
@@ -30,8 +33,9 @@ workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-# The agent session of MCP-04 beside a window, and the storage's I/O fault seam.
-apiforge-mcp.workspace = true
+# The agent session of MCP-04 beside a window, a server spawned over stdio
+# (MCP-08b), and the storage's I/O fault seam.
+apiforge-mcp = { workspace = true, features = ["test-support"] }
 apiforge-storage = { workspace = true, features = ["fault-injection"] }
 egui_kittest.workspace = true
 egui_inspection.workspace = true

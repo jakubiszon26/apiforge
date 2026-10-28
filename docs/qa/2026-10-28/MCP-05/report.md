@@ -268,3 +268,18 @@ cleartext-logging alert in the acceptance tests. All are fixed:
 - **CodeQL `rust/cleartext-logging`** at the assertion that printed the
   revision path in criterion 1's test (taint followed from the secret
   values through the session): the assertion no longer formats a value.
+
+## After the merge of MCP-08b
+
+MCP-08b (the hand-over on request) merged after the owner accepted this
+pull request, and main was merged into the branch. A publication takes the
+project through the same path as a write: while a window holds it, the
+window is asked, and with unsaved work it refuses (`handover_refused`). A
+publication now tells connected windows `saved` before it answers, as a
+write does. Two headless tests in the MCP-08b suite cover it, with the
+window's own checks switched off so that only the channel can tell it:
+`a_publication_asks_the_window_and_the_revision_is_shown` (the window hands
+over and lists revision 2 within two seconds of the answer) and
+`unsaved_work_refuses_a_publication_and_nothing_is_published`. The stdio
+transcripts above predate the merge: session 5's `held_by_window` is now
+the answer only for a window without a channel.

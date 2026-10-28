@@ -4,7 +4,7 @@
 - State: Backlog (issue #91) · MCP-00 decisions 10 and 11 = A taken
   2026-10-27 · mock-up M1 round 4 approved 2026-10-27 · after MCP-08a and
   MCP-04
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 - Analysis: [MCP-00](MCP-00.md)
 
 ## Goal
