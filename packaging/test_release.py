@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -19,6 +20,8 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+# Loading release.py by path would otherwise leave packaging/__pycache__.
+sys.dont_write_bytecode = True
 _spec = importlib.util.spec_from_file_location("release", os.path.join(HERE, "release.py"))
 release = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(release)
