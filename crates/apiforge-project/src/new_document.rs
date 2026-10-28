@@ -2,14 +2,16 @@
 //! before the first write"): the path, the header and the handle a
 //! registration would meet, and the text analysed in the project's context as
 //! if it were registered. Nothing is written.
-use super::{ProjectSession, declaration};
+use super::{DIAGRAM_PATH, EventKind, Origin, ProjectSession, declaration};
 use crate::{
-    Result,
-    analysis::{AnalysisInput, AnalysisTicket},
+    Error, Result,
+    analysis::{self, Analysis, AnalysisInput, AnalysisTicket},
+    document::DocumentSession,
 };
 use apiforge_script::Diagnostic;
 use apiforge_storage::project::{
-    DocumentEntry, DocumentKind, ProjectError, ProjectPath, ProjectStore,
+    DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, ProjectChange,
+    ProjectError, ProjectPath, ProjectStore,
 };
 
 /// Why a registration of the text at the path would be refused.
@@ -84,6 +86,23 @@ impl ProjectSession {
         path: &str,
         text: &str,
     ) -> Result<NewDocumentCheck> {
+        let identity = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        Ok(self.check_entry(kind, path, text, identity)?.0)
+    }
+
+    /// The check of a new document with the registry entry it would get,
+    /// `identity` being its document and entity ids, and the analysis of its
+    /// text as that document.
+    fn check_entry(
+        &self,
+        kind: Option<DocumentKind>,
+        path: &str,
+        text: &str,
+        (document_id, entity_id): (String, String),
+    ) -> Result<(NewDocumentCheck, Analysis, DocumentEntry)> {
         let mut problems = Vec::new();
         let valid_path = ProjectPath::working_source(path).ok();
         match &valid_path {
@@ -119,7 +138,7 @@ impl ProjectSession {
         // The text analysed as the document it would become: a registry
         // entry that is never pushed, the project's context, no identity base.
         let entry = DocumentEntry {
-            document_id: uuid::Uuid::new_v4().to_string(),
+            document_id,
             kind: kind
                 .or(declared.as_ref().map(|d| d.kind))
                 .unwrap_or(DocumentKind::Scenario),
@@ -127,7 +146,7 @@ impl ProjectSession {
                 Some(path) => path,
                 None => ProjectPath::working_source("new.afs")?,
             },
-            entity_id: uuid::Uuid::new_v4().to_string(),
+            entity_id,
             base_revision: None,
             recovered: false,
         };
@@ -147,14 +166,15 @@ impl ProjectSession {
             placer: self.placer.clone(),
         }
         .run();
-        Ok(NewDocumentCheck {
+        let check = NewDocumentCheck {
             kind: declared.map(|d| d.kind),
             handle,
             problems,
             analysis_valid: analysis.is_valid(),
-            diagnostics: analysis.diagnostics,
+            diagnostics: analysis.diagnostics.clone(),
             omitted_diagnostics: analysis.omitted_diagnostics,
-        })
+        };
+        Ok((check, analysis, entry))
     }
 }
 
@@ -169,8 +189,69 @@ impl ProjectSession {
         path: &str,
         text: &str,
     ) -> Result<std::result::Result<String, NewDocumentCheck>> {
-        let _ = (kind, path, text);
-        unimplemented!("MCP-04")
+        self.require_current_registry()?;
+        if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
+            return Err(Error::SourceTooLarge);
+        }
+        let identity = (self.new_document_id(), uuid::Uuid::new_v4().to_string());
+        let (check, analysis, entry) = self.check_entry(Some(kind), path, text, identity)?;
+        let model = match analysis.model {
+            Some((model, _)) if check.is_valid() => model,
+            _ => return Ok(Err(check)),
+        };
+        // The identities the window would seal at the first analysis of the
+        // registered source, computed before the commit instead of after it.
+        let mut diagram = self
+            .diagram
+            .clone()
+            .ok_or(Error::Storage(ProjectError::InvalidCheckpoint))?;
+        let key = DocumentKey::Working {
+            document_id: entry.document_id.clone(),
+        };
+        let record = DiagramRecord::capture(
+            key.clone(),
+            text,
+            analysis::identity_base(&model),
+            &self.context,
+        )?;
+        diagram.records.retain(|existing| existing.key != key);
+        diagram.records.push(record);
+        let diagram_bytes = diagram.to_bytes()?;
+        let mut manifest = self.manifest.clone();
+        manifest.documents.push(entry.clone());
+        let mut changes = self.parent_directories(&entry.path)?;
+        changes.push(ProjectChange::Write {
+            path: entry.path.clone(),
+            expected: FileState::Missing,
+            bytes: text.as_bytes().to_vec(),
+        });
+        changes.push(ProjectChange::Write {
+            path: ProjectPath::new(DIAGRAM_PATH)?,
+            expected: self.diagram_saved.clone(),
+            bytes: diagram_bytes.clone(),
+        });
+        changes.push(self.manifest_change(&manifest)?);
+        self.store.commit(changes)?;
+        self.refresh_local_baselines();
+        self.manifest_saved = FileState::of(&manifest.to_public_bytes()?);
+        self.manifest = manifest;
+        self.manifest_dirty = false;
+        self.diagram_saved = FileState::of(&diagram_bytes);
+        self.diagram = Some(diagram);
+        self.documents.push(DocumentSession::new(
+            entry.clone(),
+            text.into(),
+            FileState::of(text.as_bytes()),
+        ));
+        self.emit(
+            Origin::SESSION,
+            Some(&entry.document_id),
+            EventKind::DocumentRegistered,
+        );
+        // The record matches the saved text, so the analysis restores the
+        // sealed identities and writes nothing more.
+        self.analyse_now(self.documents.len() - 1)?;
+        Ok(Ok(entry.document_id))
     }
 }
 
