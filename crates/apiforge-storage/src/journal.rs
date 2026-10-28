@@ -85,6 +85,16 @@ pub struct LoadedJournal {
     pub unreadable: bool,
 }
 
+/// A project's journal as a reader sees it.
+#[derive(Debug, Default)]
+pub struct ReadJournal {
+    /// Every run the file holds. For a reader while no writer is live, or
+    /// for the writer before its own run starts, each one was interrupted.
+    pub runs: Vec<JournalRun>,
+    /// A journal file exists but could not be read.
+    pub unreadable: bool,
+}
+
 impl JournalStore {
     /// Opens the journal of a writable session.
     ///
@@ -116,6 +126,25 @@ impl JournalStore {
                 store,
                 path: location,
                 journal: Mutex::new(journal),
+            },
+        })
+    }
+
+    /// What a project's journal holds, read without opening it for writing:
+    /// a reader that is not the writer reports the runs an earlier process
+    /// left unfinished and changes nothing. A journal that cannot be read is
+    /// `unreadable` and left as it is; the next writer preserves it.
+    pub fn read_project(store: &crate::project::ProjectStore) -> Result<ReadJournal, StorageError> {
+        let path = store.journal_path()?;
+        Ok(match read(&path) {
+            Ok(journal) => ReadJournal {
+                runs: journal.map(|journal| journal.runs).unwrap_or_default(),
+                unreadable: false,
+            },
+            Err(error @ StorageError::UnsupportedJournalVersion) => return Err(error),
+            Err(_) => ReadJournal {
+                runs: Vec::new(),
+                unreadable: true,
             },
         })
     }

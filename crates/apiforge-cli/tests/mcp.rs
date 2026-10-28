@@ -15,6 +15,13 @@
 //! `finish_editing` or EOF, with the client's name in the holder file; a
 //! write based on a version `apiforge apply` replaced; a secret from
 //! `APIFORGE_SECRET_<NAME>` in the text.
+//!
+//! MCP-06 (#65) over real stdio: `--allow-live` and `--secrets`; EOF during
+//! a live run, with its cleanup finishing and blocked
+//! (`APIFORGE_MCP_TEST_CLEANUP_DELAY_MS`); a server killed mid-run and the
+//! next server reporting the journal's entry; a whole session grepped for
+//! two secret values. Live requests go to the demo API in this process or a
+//! loopback listener that never answers.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -40,9 +47,11 @@ const TOOLS: [&str; 10] = [
     "create_document",
     "finish_editing",
 ];
-/// The tools that change the project or its writer lock (MCP-04), with their
-/// `destructiveHint` and `idempotentHint`.
-const WRITE_TOOLS: [(&str, bool, bool); 3] = [
+/// The tools that change the project or its writer lock (MCP-04), or may
+/// send live requests (`run`, MCP-06), with their `destructiveHint` and
+/// `idempotentHint`.
+const WRITE_TOOLS: [(&str, bool, bool); 4] = [
+    ("run", true, false),
     ("write_source", true, true),
     ("create_document", false, false),
     ("finish_editing", false, true),
@@ -75,6 +84,10 @@ impl Server {
         if let Some(folder) = folder {
             command.arg("--folder").arg(folder);
         }
+        Self::spawn_command(command, current_dir)
+    }
+
+    fn spawn_command(mut command: Command, current_dir: &Path) -> Self {
         let mut child = command
             .current_dir(current_dir)
             .stdin(Stdio::piped())
@@ -897,4 +910,579 @@ fn mcp04_criterion_8_a_window_holding_the_project_refuses_the_write_over_stdio()
     drop(window);
     assert_clean_end(server);
     assert_eq!(std::fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+}
+
+// MCP-06 (#65) ---------------------------------------------------------------
+
+/// `APIFORGE_SECRET_TOKEN` and the `--secrets` file's `FILE` in these tests.
+const TOKEN: &str = "tok-mcp06-stdio-5d2e8a";
+const FILE_TOKEN: &str = "file-tok-mcp06-77ab31";
+const JOURNAL: &str = ".apiforge/local/journal.json";
+const MANIFEST: &str = "apiforge.project.json";
+const NOT_ENABLED: &str = "live requests are not enabled on this server";
+
+/// A listener that counts the connections it accepts and answers none: a
+/// request sent to it stays on its way.
+struct Listener {
+    address: std::net::SocketAddr,
+    accepted: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Listener {
+    fn start() -> Self {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (counter, stopped) = (accepted.clone(), stop.clone());
+        thread::spawn(move || {
+            let mut open = Vec::new();
+            while !stopped.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((socket, _)) => {
+                        counter.fetch_add(1, Ordering::AcqRel);
+                        open.push(socket);
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            address,
+            accepted,
+            stop,
+        }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}/demo/shop", self.address)
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Points the project's base URL at `base_url`, the shop's root.
+fn point_at(root: &Path, base_url: &str) {
+    let path = root.join(MANIFEST);
+    let manifest = std::fs::read_to_string(&path).unwrap();
+    let current: Value = serde_json::from_str(&manifest).unwrap();
+    let current = current["environment"]["baseUrl"].as_str().unwrap();
+    let changed = manifest.replace(current, base_url);
+    assert_ne!(changed, manifest, "the base URL was not replaced");
+    std::fs::write(&path, changed).unwrap();
+}
+
+/// `text` with `from` replaced once, which must be there.
+fn replaced(text: &str, from: &str, to: &str) -> String {
+    let changed = text.replacen(from, to, 1);
+    assert_ne!(changed, text, "the fixture lacks {from:?}");
+    changed
+}
+
+/// The demo scenario with two declared secrets, `TOKEN` and `FILE`, that
+/// one more request sends in its query and a header.
+fn with_secrets(root: &Path) {
+    let path = root.join(MANIFEST);
+    let manifest = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        replaced(
+            &manifest,
+            "\"secretNames\": []",
+            "\"secretNames\": [\"TOKEN\", \"FILE\"]",
+        ),
+    )
+    .unwrap();
+    let path = root.join(SCENARIO);
+    let scenario = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        replaced(
+            &scenario,
+            "  cleanup {\n",
+            "  @label(\"Echo\")\n  echo = GET \"/products/124?q={{env.TOKEN}}\" {\n    headers { \"X-Echo\": \"{{env.FILE}}\" }\n    sample 200 { id: 124 }\n  }\n  cleanup {\n",
+        ),
+    )
+    .unwrap();
+}
+
+fn journal(root: &Path) -> Option<String> {
+    std::fs::read_to_string(root.join(JOURNAL)).ok()
+}
+
+/// Waits up to ten seconds for a request to reach `api`, then for the run
+/// journal to show it. A request is journalled before it is sent, so the
+/// file is read only once the request has arrived: polling it meanwhile
+/// would race the runner's atomic replace, which Windows refuses while the
+/// file is open.
+fn wait_for_journal(root: &Path, api: &Listener) -> String {
+    let started = Instant::now();
+    while api.accepted() == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no request was sent"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    loop {
+        if let Some(text) = journal(root)
+            && serde_json::from_str::<Value>(&text).is_ok_and(|journal| {
+                journal["runs"][0]["entries"]
+                    .as_array()
+                    .is_some_and(|entries| !entries.is_empty())
+            })
+        {
+            return text;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "no request was journalled"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// How `apiforge run` prints a journalled request's state.
+fn state_label(state: &Value) -> &'static str {
+    match state.as_str().unwrap() {
+        "inFlight" => "Sending",
+        "completed" => "Performed",
+        "notSent" => "Not sent",
+        "uncertain" => "Possibly performed",
+        other => panic!("unknown state {other}"),
+    }
+}
+
+impl Server {
+    fn spawn_live(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_apiforge"));
+        command
+            .arg("mcp")
+            .arg("--folder")
+            .arg(root)
+            .args(args)
+            .envs(envs.iter().copied());
+        Self::spawn_command(command, root)
+    }
+
+    /// Closes stdin and waits up to `limit` for the process to end.
+    fn close_within(mut self, limit: Duration) -> (ExitStatus, Duration, Vec<String>, String) {
+        drop(self.stdin.take());
+        let closed = Instant::now();
+        let status = loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                break status;
+            }
+            if closed.elapsed() > limit {
+                let _ = self.child.kill();
+                panic!("the server did not end within {limit:?} of EOF");
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        let elapsed = closed.elapsed();
+        while let Ok(line) = self.lines.recv_timeout(Duration::from_secs(2)) {
+            self.stdout.push(line);
+        }
+        let stderr = self.stderr.join().unwrap();
+        (status, elapsed, self.stdout, stderr)
+    }
+}
+
+/// The interrupted run a journalled request belongs to, as the next server
+/// reports it: method, URL and state as `apiforge run` prints them.
+fn assert_reported(reported: &Value, journalled: &str) {
+    let journalled: Value = serde_json::from_str(journalled).unwrap();
+    let entry = &journalled["runs"][0]["entries"][0];
+    let runs = reported.as_array().unwrap();
+    assert_eq!(runs.len(), 1, "{reported}");
+    assert_eq!(runs[0]["scenario"], journalled["runs"][0]["scenarioName"]);
+    let request = &runs[0]["requests"][0];
+    assert_eq!(request["method"], entry["method"]);
+    assert_eq!(request["url"], entry["url"]);
+    assert_eq!(request["state"], state_label(&entry["state"]));
+}
+
+/// Criterion 1 over stdio: without `--allow-live` the run is refused and
+/// nothing is sent; the overview says why; with the flag it says so.
+#[test]
+fn mcp06_criterion_1_without_allow_live_over_stdio() {
+    let directory = demo();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let overview = call(&mut server, 2, "project_overview", json!({}));
+    assert_eq!(
+        structured(&overview)["live_requests"],
+        json!({ "allowed": false, "source": "no --allow-live" })
+    );
+    let refused = call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    tool_error(&refused, "live_disabled");
+    assert_eq!(
+        refused["result"]["structuredContent"]["message"],
+        NOT_ENABLED
+    );
+    assert_clean_end(server);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(api.accepted(), 0, "nothing was sent");
+    assert!(!root.join(".apiforge/local").exists(), "nothing was taken");
+
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    let overview = call(&mut server, 2, "project_overview", json!({}));
+    assert_eq!(
+        structured(&overview)["live_requests"],
+        json!({ "allowed": true, "source": "--allow-live" })
+    );
+    let tools = server.request(3, "tools/list", json!({}));
+    let run = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "run")
+        .unwrap()
+        .clone();
+    assert_eq!(run["annotations"]["openWorldHint"], true, "{run}");
+    let first = run["description"]
+        .as_str()
+        .unwrap()
+        .split(". ")
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(first.contains("real requests"), "{first}");
+    assert_clean_end(server);
+}
+
+/// Criterion 7: EOF during a live run cancels it at once; its cleanup ends
+/// in time, the journal is empty, the lock is released and the process
+/// exits.
+#[test]
+fn mcp06_criterion_7_eof_during_a_live_run_empties_the_journal() {
+    let directory = demo();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    send_call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    wait_for_journal(root, &api);
+    let started = Instant::now();
+    while api.accepted() == 0 {
+        assert!(started.elapsed() < Duration::from_secs(10), "no connection");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(locked(root), "the live run holds the agent session");
+    let (status, elapsed, _, stderr) = server.close_within(Duration::from_secs(15));
+    assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    assert!(elapsed < Duration::from_secs(10), "EOF took {elapsed:?}");
+    assert!(stderr.contains("apiforge mcp: run: cancelled"), "{stderr}");
+    assert!(api.accepted() >= 1);
+    assert_eq!(journal(root), None, "the cleanup ended and removed it");
+    assert!(!locked(root), "the lock is released");
+}
+
+/// Criterion 7 with the cleanup blocked (the test seam): the server waits
+/// ten seconds for it, then exits; the entry stays and the next server's
+/// `run` reports it under `interrupted`.
+#[test]
+fn mcp06_criterion_7_with_the_cleanup_blocked_the_entry_stays() {
+    let directory = demo();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn_live(
+        root,
+        &["--allow-live"],
+        &[("APIFORGE_MCP_TEST_CLEANUP_DELAY_MS", "600000")],
+    );
+    initialize(&mut server);
+    send_call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    wait_for_journal(root, &api);
+    let (status, elapsed, _, stderr) = server.close_within(Duration::from_secs(20));
+    assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    assert!(
+        elapsed >= Duration::from_secs(9) && elapsed < Duration::from_secs(14),
+        "the cleanup is waited for ten seconds: {elapsed:?}"
+    );
+    let journalled = journal(root).expect("the entry stays");
+    assert!(!locked(root), "the lock is released");
+
+    let mut next = Server::spawn(Some(root), root);
+    initialize(&mut next);
+    let overview = call(&mut next, 2, "project_overview", json!({}));
+    assert_eq!(structured(&overview)["interrupted_runs"], 1);
+    let report = call(&mut next, 3, "run", json!({ "path": SCENARIO }));
+    let report = structured(&report);
+    assert_eq!(report["status"], "passed");
+    assert_reported(&report["interrupted"], &journalled);
+    assert_clean_end(next);
+}
+
+/// Criterion 8: a server killed with a live request on its way leaves the
+/// journal entry; a new server's next `run`, simulated or live, returns it
+/// under `interrupted`, and its overview counts it.
+#[test]
+fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
+    let directory = demo();
+    let root = directory.path();
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    send_call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
+    );
+    let journalled = wait_for_journal(root, &api);
+    server.child.kill().unwrap();
+    server.child.wait().unwrap();
+    assert_eq!(
+        journal(root).as_deref(),
+        Some(&*journalled),
+        "the entry stays"
+    );
+    let entry = &serde_json::from_str::<Value>(&journalled).unwrap()["runs"][0]["entries"][0];
+    assert_eq!(entry["method"], "GET");
+    assert_eq!(entry["url"], format!("{}/products/123", api.base_url()));
+    assert_eq!(entry["state"], "inFlight");
+    assert!(!locked(root), "the operating system released the lock");
+
+    let mut next = Server::spawn(Some(root), root);
+    initialize(&mut next);
+    let overview = call(&mut next, 2, "project_overview", json!({}));
+    assert_eq!(structured(&overview)["interrupted_runs"], 1);
+    let report = call(&mut next, 3, "run", json!({ "path": SCENARIO }));
+    let report = structured(&report);
+    assert_eq!(report["live"], false);
+    assert_reported(&report["interrupted"], &journalled);
+    assert_eq!(report["interrupted"][0]["requests"][0]["state"], "Sending");
+    assert_clean_end(next);
+
+    let demo_api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", demo_api.base_url()));
+    let mut live = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut live);
+    let report = call(
+        &mut live,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    let report = structured(&report);
+    assert_eq!(report["status"], "passed", "{}", report["error"]);
+    assert_eq!(report["live"], true);
+    assert_reported(&report["interrupted"], &journalled);
+    // Criterion 9: the killed server's request_id is unknown_outcome here.
+    let retried = call(
+        &mut live,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
+    );
+    tool_error(&retried, "unknown_outcome");
+    assert_reported(
+        &retried["result"]["structuredContent"]["details"]["interrupted"],
+        &journalled,
+    );
+    assert_clean_end(live);
+}
+
+/// Criterion 10: with a secret in the environment and another in the
+/// `--secrets` file, a session of every tool — reads, checks, runs, refused
+/// writes with the value inside `text` — never returns a value: not in a
+/// result, not on stderr, not in the journal written mid-run.
+#[test]
+fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
+    let directory = demo();
+    let root = directory.path();
+    let demo_api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", demo_api.base_url()));
+    with_secrets(root);
+    let secrets = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(secrets.path(), json!({ "FILE": FILE_TOKEN }).to_string()).unwrap();
+    let mut server = Server::spawn_live(
+        root,
+        &[
+            "--allow-live",
+            "--secrets",
+            secrets.path().to_str().unwrap(),
+        ],
+        &[("APIFORGE_SECRET_TOKEN", TOKEN)],
+    );
+    initialize(&mut server);
+    server.request(2, "tools/list", json!({}));
+    let text = std::fs::read_to_string(root.join(SCENARIO)).unwrap();
+    let hash = read(&mut server, 3, SCENARIO).1;
+    let leaked = |value: &str| text.replacen(" {\n", &format!(" {{\n  // {value}\n"), 1);
+    let mut id = 4;
+    let mut next = || {
+        id += 1;
+        id
+    };
+    for (name, arguments) in [
+        ("project_overview", json!({})),
+        ("language_reference", json!({})),
+        ("check", json!({})),
+        ("check_text", json!({ "path": SCENARIO, "text": text })),
+        ("print", json!({ "path": SCENARIO })),
+        ("run", json!({ "path": SCENARIO })),
+    ] {
+        let response = call(&mut server, next(), name, arguments);
+        structured(&response);
+    }
+    let report = call(
+        &mut server,
+        next(),
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    assert_eq!(
+        structured(&report)["status"],
+        "passed",
+        "{}",
+        report["result"]["structuredContent"]["error"]
+    );
+    let full = call(
+        &mut server,
+        next(),
+        "run",
+        json!({ "path": SCENARIO, "live": true, "full": true }),
+    );
+    assert!(
+        structured(&full).to_string().contains("[REDACTED]"),
+        "the values are masked in the report"
+    );
+    for (name, arguments) in [
+        (
+            "check_text",
+            json!({ "path": SCENARIO, "text": leaked(TOKEN) }),
+        ),
+        (
+            "write_source",
+            json!({ "path": SCENARIO, "text": leaked(TOKEN), "expected_source_sha256": hash }),
+        ),
+        (
+            "write_source",
+            json!({ "path": SCENARIO, "text": leaked(FILE_TOKEN), "expected_source_sha256": hash }),
+        ),
+        (
+            "create_document",
+            json!({ "kind": "scenario", "path": "scenarios/leak.afs", "text": format!("scenario \"Leak\" {{\n  // {FILE_TOKEN}\n}}\n") }),
+        ),
+        ("run", json!({ "path": SCENARIO, "request_id": TOKEN })),
+    ] {
+        let response = call(&mut server, next(), name, arguments);
+        tool_error(&response, "secret_in_text");
+    }
+    let listed = server.request(next(), "resources/list", json!({}));
+    assert!(listed["result"]["resources"].is_array());
+    let read = server.request(
+        next(),
+        "resources/read",
+        json!({ "uri": format!("apiforge://source/{SCENARIO}") }),
+    );
+    assert!(read["result"]["contents"][0]["text"].is_string());
+
+    // The journal while a live request is on its way.
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let run_id = next();
+    send_call(
+        &mut server,
+        run_id,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    let journalled = wait_for_journal(root, &api);
+    server.send(
+        &json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": run_id, "reason": "acceptance" } })
+            .to_string(),
+    );
+    // The run's slot frees once its cleanup has run; the journal file is
+    // not polled while the runner rewrites it.
+    let started = Instant::now();
+    loop {
+        let response = call(&mut server, next(), "run", json!({ "path": PRODUCT }));
+        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the run did not end"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(journal(root), None, "the cancelled run removed its entry");
+    let finished = call(&mut server, next(), "finish_editing", json!({}));
+    assert_eq!(structured(&finished)["finished"], true);
+    let (status, _, stdout, stderr) = server.close();
+    assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    for value in [TOKEN, FILE_TOKEN] {
+        for line in &stdout {
+            assert!(!line.contains(value), "a result carried a secret value");
+        }
+        assert!(!stderr.contains(value), "stderr carried a secret value");
+        assert!(
+            !journalled.contains(value),
+            "the journal holds a secret value"
+        );
+    }
+    assert!(!root.join("scenarios/leak.afs").exists());
+    assert_eq!(std::fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+}
+
+/// The `--secrets` file is read at start; one that cannot be used stops the
+/// server with exit code 2 and never quotes its content.
+#[test]
+fn mcp06_a_secrets_file_that_cannot_be_read_stops_the_server() {
+    let directory = demo();
+    let root = directory.path();
+    let secrets = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(secrets.path(), format!("{{ \"TOKEN\": {TOKEN} }}")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .args(["mcp", "--folder"])
+        .arg(root)
+        .arg("--secrets")
+        .arg(secrets.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("The secrets file is not JSON"), "{stderr}");
+    assert!(!stderr.contains(TOKEN));
 }

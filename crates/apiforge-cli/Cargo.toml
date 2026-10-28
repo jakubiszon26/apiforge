@@ -22,6 +22,8 @@ apiforge-mcp.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Live runs over stdio against the local demo API (MCP-06).
+apiforge-demo-api.workspace = true
 
 [lints]
 workspace = true

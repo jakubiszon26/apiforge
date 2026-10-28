@@ -4,10 +4,11 @@
 use crate::{
     error::{ErrorCode, ToolError},
     executor::{self, CancellationToken, DEADLINE, EndedBy, Notify},
-    folder,
+    folder, live,
     positions::Lines,
-    reference,
+    reference, secrets,
 };
+use apiforge_core::journal::JournalRun;
 use apiforge_core::{
     format::Port,
     js,
@@ -19,6 +20,7 @@ use apiforge_project::{
 };
 use apiforge_runner::{RunRequest, RunTarget};
 use apiforge_script::MAX_DIAGNOSTICS;
+use apiforge_storage::LoadedJournal;
 use apiforge_storage::project::IdentityBase;
 use apiforge_storage::project::ProjectError;
 use indexmap::IndexMap;
@@ -117,6 +119,9 @@ pub struct ProjectOverview {
     pub generation: u64,
     pub holder: Holder,
     pub live_requests: LiveRequests,
+    /// Live runs an earlier process left unfinished in the project's run
+    /// journal; `run` lists them under `interrupted`.
+    pub interrupted_runs: usize,
     pub server_version: String,
     /// The version of the language reference `language_reference` serves.
     pub reference_version: String,
@@ -197,6 +202,12 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
         Ok(true) => Holder::AnotherProcess,
         Err(error) => return Err(storage_error(apiforge_project::Error::Storage(error))),
     };
+    // Another writer's journal may describe a run in progress; the server's
+    // own session reads it through its store (`ApiforgeServer`).
+    let interrupted_runs = match holder {
+        Holder::None => live::read_journal(session.store())?.0.len(),
+        _ => 0,
+    };
     bounded(ProjectOverview {
         name: manifest.name.clone(),
         base_url: manifest.environment.base_url.clone(),
@@ -245,14 +256,26 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
             allowed: false,
             source: "no --allow-live".into(),
         },
+        interrupted_runs,
         server_version: env!("CARGO_PKG_VERSION").into(),
         reference_version: reference::version().to_owned(),
     })
 }
 
 pub fn read_source(folder: &Path, path: &str) -> Result<SourceText, ToolError> {
+    read_source_with(folder, path, &[])
+}
+
+/// As `read_source`; a saved source that contains one of `secrets` is
+/// withheld with `secret_in_source`.
+pub fn read_source_with(
+    folder: &Path,
+    path: &str,
+    secrets: &[String],
+) -> Result<SourceText, ToolError> {
     let (session, id) = open_document(folder, path)?;
     let (document, valid) = folder::check_document(&session, &id)?;
+    secrets::withhold(document.text(), secrets)?;
     let (diagnostics, omitted) = diagnostics(document);
     bounded(SourceText {
         path: document.entry().path.as_str().to_owned(),
@@ -302,8 +325,15 @@ pub fn check(folder: &Path, path: Option<&str>) -> Result<CheckResult, ToolError
 }
 
 pub fn print(folder: &Path, path: &str) -> Result<Printed, ToolError> {
+    print_with(folder, path, &[])
+}
+
+/// As `print`; a saved source that contains one of `secrets` is withheld
+/// with `secret_in_source`, whether or not the canonical text keeps it.
+pub fn print_with(folder: &Path, path: &str, secrets: &[String]) -> Result<Printed, ToolError> {
     let (session, id) = open_document(folder, path)?;
     let (document, valid) = folder::check_document(&session, &id)?;
+    secrets::withhold(document.text(), secrets)?;
     let invalid = |message: &str, diagnostics: Vec<Diagnostic>, omitted: usize| {
         ToolError::new(ErrorCode::InvalidText, message)
             .with_details(json!({ "diagnostics": diagnostics, "omitted": omitted }))
@@ -477,11 +507,14 @@ pub struct RunArguments {
     /// The runner's complete JSON report instead of the compact steps.
     #[serde(default)]
     pub full: bool,
-    /// Real requests. Refused with `live_disabled` until live requests are
-    /// enabled on the server.
+    /// Real requests to the project's API, journalled before each is sent.
+    /// Refused with `live_disabled` unless the person allowed live requests
+    /// (`project_overview.live_requests`).
     #[serde(default)]
     pub live: bool,
-    /// Echoed in the result, so a retried call can be recognised.
+    /// Your id for this call, echoed in the result. A live run repeated with
+    /// an id this server has answered returns the recorded result and sends
+    /// nothing.
     #[serde(default)]
     pub request_id: Option<String>,
 }
@@ -540,6 +573,8 @@ pub struct Step {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct RunReport {
     pub path: String,
+    /// Real requests were sent (`live: true`).
+    pub live: bool,
     pub status: Verdict,
     pub ended_by: EndedBy,
     /// The project generation the run was prepared at.
@@ -564,6 +599,17 @@ pub struct RunReport {
     pub notice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// The recorded result of an earlier call with the same `request_id`;
+    /// nothing was sent for this one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub replayed: bool,
+    /// Live runs an earlier process left unfinished, from the project's run
+    /// journal: the requests that may have changed the API.
+    pub interrupted: Vec<crate::live::InterruptedRun>,
+    /// The run journal could not be read; a live run preserved it as
+    /// `journal.unreadable.json`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub journal_unreadable: bool,
 }
 
 /// The run limits of one server.
@@ -731,7 +777,7 @@ fn used_sources(session: &ProjectSession) -> Vec<UsedSource> {
 }
 
 /// Holds the server's run slot until dropped.
-struct Slot(Arc<AtomicBool>);
+pub(crate) struct Slot(Arc<AtomicBool>);
 
 impl Drop for Slot {
     fn drop(&mut self) {
@@ -740,7 +786,7 @@ impl Drop for Slot {
 }
 
 impl Runs {
-    fn claim(&self) -> Result<Slot, ToolError> {
+    pub(crate) fn claim(&self) -> Result<Slot, ToolError> {
         self.busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map(|_| Slot(self.busy.clone()))
@@ -754,32 +800,65 @@ impl Runs {
 }
 
 /// A simulation of the saved scenario or component at `arguments.path`.
+/// Secrets come from the process environment; `live: true` is refused, as
+/// on a server started without `--allow-live`.
 pub fn run(
     folder: &Path,
     arguments: &RunArguments,
     runs: &Runs,
     cancel: CancellationToken,
 ) -> Result<RunReport, ToolError> {
-    bound(simulate(folder, arguments, runs, cancel))
+    if arguments.live {
+        return Err(ToolError::new(ErrorCode::LiveDisabled, live::NOT_ENABLED));
+    }
+    let secrets = executor::secrets(None)
+        .map_err(|message| ToolError::new(ErrorCode::ProjectUnreadable, message))?;
+    bound(simulate(folder, arguments, runs, cancel, secrets))
 }
 
-fn simulate(
+/// A simulation with the server's secrets. Nothing is sent or written.
+pub(crate) fn simulate(
     folder: &Path,
     arguments: &RunArguments,
     runs: &Runs,
     cancel: CancellationToken,
+    secrets: IndexMap<String, String>,
 ) -> Result<RunReport, ToolError> {
-    if arguments.live {
-        return Err(ToolError::new(
-            ErrorCode::LiveDisabled,
-            "live requests are not enabled on this server",
-        ));
-    }
     let _slot = runs.claim()?;
     folder::validate(&arguments.path)?;
     let mut session = open(folder)?;
-    let id = folder::select(&session, &arguments.path)?;
-    let (document, valid) = folder::check_document(&session, &id)?;
+    let prepared = prepare(&mut session, arguments, RunMode::Simulation, secrets)?;
+    let (report, _) = execute(prepared, arguments, None, runs, cancel, None)?;
+    Ok(report)
+}
+
+/// A run ready to start: the request and what the report says about it.
+pub(crate) struct Prepared {
+    path: String,
+    source_sha256: Option<String>,
+    generation: u64,
+    used: Vec<UsedSource>,
+    request: RunRequest,
+}
+
+impl Prepared {
+    /// The registered path that runs.
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+/// The saved scenario or component at `arguments.path` prepared as a run
+/// of `mode`; the session's store learns `secrets`, so a staged text that
+/// contains one is refused.
+pub(crate) fn prepare(
+    session: &mut ProjectSession,
+    arguments: &RunArguments,
+    mode: RunMode,
+    secrets: IndexMap<String, String>,
+) -> Result<Prepared, ToolError> {
+    let id = folder::select(session, &arguments.path)?;
+    let (document, valid) = folder::check_document(session, &id)?;
     if !valid {
         let (diagnostics, omitted) = diagnostics(document);
         return Err(ToolError::new(
@@ -791,7 +870,7 @@ fn simulate(
     let path = document.entry().path.as_str().to_owned();
     let source_sha256 = document.saved_sha256().map(str::to_owned);
     let generation = session.loaded_generation();
-    let used = used_sources(&session);
+    let used = used_sources(session);
     let prepared = session.prepare_run(&id).map_err(storage_error)?;
     let project = prepared.project().map_err(storage_error)?;
     let (scenario_id, target) = match prepared.snapshot.document() {
@@ -817,58 +896,103 @@ fn simulate(
             },
         ),
     };
-    let secrets = executor::secrets(None)
-        .map_err(|message| ToolError::new(ErrorCode::ProjectUnreadable, message))?;
     session.store().set_known_secrets(secrets.values().cloned());
-    let request = RunRequest {
-        project,
-        scenario_id,
-        target,
-        mode: RunMode::Simulation,
-        target_node_id: None,
-        single_node_id: None,
-        previous_run: None,
-        secrets,
-    };
+    Ok(Prepared {
+        path,
+        source_sha256,
+        generation,
+        used,
+        request: RunRequest {
+            project,
+            scenario_id,
+            target,
+            mode,
+            target_node_id: None,
+            single_node_id: None,
+            previous_run: None,
+            secrets,
+        },
+    })
+}
+
+/// What a run's journal held before it started.
+pub(crate) struct JournalBefore {
+    pub interrupted: Vec<JournalRun>,
+    pub unreadable: bool,
+}
+
+/// Runs `prepared` to its end, journalled when `journal` is given, and
+/// reports it. `cleanup_delay` is the test seam that holds a stopping run's
+/// cleanup.
+pub(crate) fn execute(
+    prepared: Prepared,
+    arguments: &RunArguments,
+    journal: Option<LoadedJournal>,
+    runs: &Runs,
+    cancel: CancellationToken,
+    cleanup_delay: Option<Duration>,
+) -> Result<(RunReport, JournalBefore), ToolError> {
+    let live = prepared.request.mode == RunMode::Live;
     // The executor cancels its token at the deadline; the caller's stays.
     let token = cancel.child_token();
-    let notify: Notify = match runs.settings.step_delay {
-        Some(delay) => {
-            let stopping = token.clone();
-            Arc::new(move || {
-                if !stopping.is_cancelled() {
-                    std::thread::sleep(delay);
-                }
-            })
-        }
-        None => Arc::new(|| {}),
+    let step_delay = runs.settings.step_delay;
+    let notify: Notify = if step_delay.is_none() && cleanup_delay.is_none() {
+        Arc::new(|| {})
+    } else {
+        let stopping = token.clone();
+        Arc::new(move || {
+            let delay = if stopping.is_cancelled() {
+                cleanup_delay
+            } else {
+                step_delay
+            };
+            if let Some(delay) = delay {
+                std::thread::sleep(delay);
+            }
+        })
     };
-    let outcome = executor::execute_observed(request, None, token, runs.settings.deadline, notify)
-        .map_err(|message| ToolError::new(ErrorCode::InvalidText, message))?;
+    let outcome = executor::execute_observed(
+        prepared.request,
+        journal,
+        token,
+        runs.settings.deadline,
+        notify,
+    )
+    .map_err(|message| ToolError::new(ErrorCode::InvalidText, message))?;
     let report = &outcome.report;
-    Ok(RunReport {
-        path,
-        status: match report.status {
-            RunStatus::Passed => Verdict::Passed,
-            RunStatus::Cancelled => Verdict::Cancelled,
-            RunStatus::Failed | RunStatus::Running => Verdict::Failed,
+    Ok((
+        RunReport {
+            path: prepared.path,
+            live,
+            status: match report.status {
+                RunStatus::Passed => Verdict::Passed,
+                RunStatus::Cancelled => Verdict::Cancelled,
+                RunStatus::Failed | RunStatus::Running => Verdict::Failed,
+            },
+            ended_by: outcome.ended_by,
+            generation: prepared.generation,
+            source_sha256: prepared.source_sha256,
+            used: prepared.used,
+            redacted: true,
+            step_count: count(&report.steps),
+            steps: (!arguments.full).then(|| steps(report)),
+            report: arguments
+                .full
+                .then(|| serde_json::to_value(report))
+                .transpose()
+                .map_err(|error| ToolError::new(ErrorCode::InvalidText, error.to_string()))?,
+            error: report.error.clone(),
+            notice: report.notice.clone(),
+            request_id: arguments.request_id.clone(),
+            replayed: false,
+            interrupted: Vec::new(),
+            journal_unreadable: false,
         },
-        ended_by: outcome.ended_by,
-        generation,
-        source_sha256,
-        used,
-        redacted: true,
-        step_count: count(&report.steps),
-        steps: (!arguments.full).then(|| steps(report)),
-        report: arguments
-            .full
-            .then(|| serde_json::to_value(report))
-            .transpose()
-            .map_err(|error| ToolError::new(ErrorCode::InvalidText, error.to_string()))?,
-        error: report.error.clone(),
-        notice: report.notice.clone(),
-        request_id: arguments.request_id.clone(),
-    })
+        JournalBefore {
+            interrupted: outcome.interrupted_before,
+            unreadable: outcome.journal_unreadable,
+        },
+    ))
 }
 
 /// Every step, nested ones included.
