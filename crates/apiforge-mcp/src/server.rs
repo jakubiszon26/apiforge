@@ -236,8 +236,14 @@ impl ApiforgeServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let agent = self.agent.clone();
-        agent.set_client(context.client_info().map(|client| client.name));
-        call("write_source", move || agent.write_source(&arguments)).await
+        let client = context.client_info().map(|client| client.name);
+        // The session's state is held for a whole write: waited for on the
+        // blocking pool, never on the transport's threads.
+        call("write_source", move || {
+            agent.set_client(client);
+            agent.write_source(&arguments)
+        })
+        .await
     }
 
     #[tool(
@@ -257,8 +263,12 @@ impl ApiforgeServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         let agent = self.agent.clone();
-        agent.set_client(context.client_info().map(|client| client.name));
-        call("create_document", move || agent.create_document(&arguments)).await
+        let client = context.client_info().map(|client| client.name);
+        call("create_document", move || {
+            agent.set_client(client);
+            agent.create_document(&arguments)
+        })
+        .await
     }
 
     #[tool(
