@@ -210,10 +210,12 @@ Protocol on stdio, protocol revisions `2026-07-28` (`server/discover`) and
 `2025-11-25` (`initialize`):
 
 ```bash
-cargo run -p apiforge-cli --locked -- mcp [--folder /path/to/project]
+cargo run -p apiforge-cli --locked -- mcp [--folder /path/to/project] \
+  [--allow-live] [--secrets secrets.json]
 ```
 
-Without `--folder` it serves the directory it was started in. Stdout carries
+Without `--folder` it serves the directory it was started in. Live requests
+and secrets are described under [Live requests](#live-requests). Stdout carries
 protocol messages only; the server's own lines go to stderr and name the tool
 and the error code, never an argument. EOF on stdin ends the process with exit
 code 0.
@@ -245,13 +247,13 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
 | `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
-| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document: `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`; with `full: true` the runner's JSON report instead of the steps |
+| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `replayed` for a repeated `request_id`; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
 | `finish_editing` | — | `finished`: whether an agent session ended and released the project |
@@ -265,9 +267,9 @@ clone, before the first commit on that machine. A registered source over
 1 MiB does not stop the server: that document is `unavailable: "too_large"`
 and the others are served.
 
-`run` sends nothing: `live: true` is `live_disabled` (*live requests are not
-enabled on this server*) until live requests land (MCP-06). A failed verdict
-is a result, not an error. A component runs alone with `inputs`, a JSON
+A simulation sends nothing; `live: true` sends real requests only when the
+person allowed them ([Live requests](#live-requests)). A failed verdict is a
+result, not an error. A component runs alone with `inputs`, a JSON
 object of values by input name read by the rules of the Run inputs dialog
 (a value of the input's type, or text the dialog would read as one, such as
 `"7"` for a number); the defaults written in code fill the rest. A missing
@@ -283,14 +285,17 @@ response, as the protocol says, while stderr says `apiforge mcp: run:
 cancelled`. A run still going after ten minutes is cancelled the same way
 and answered with `status: cancelled`, `ended_by: timed_out`; a step whose
 request was on its way is marked `may_have_reached_api`. At the end of stdin
-a run in progress has five seconds to finish and be answered (rmcp's drain of
-in-flight requests); after that it is cancelled and its cleanup waited for up
-to ten seconds.
-Two environment variables are test seams for this and are not set in use:
-`APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline and
-`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run. Each is
-whole milliseconds, capped at ten minutes; any other value stops the server
-with exit code 2.
+a simulation in progress has five seconds to finish and be answered (rmcp's
+drain of in-flight requests); after that it is cancelled and its cleanup
+waited for up to ten seconds. A live run is cancelled at once
+([the four ends](#the-four-ends-of-a-live-run)).
+Three environment variables are test seams for this and are not set in use:
+`APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline,
+`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run and
+`APIFORGE_MCP_TEST_CLEANUP_DELAY_MS` after every step once a run is
+stopping, so that its cleanup outlasts the end of stdin. Each is whole
+milliseconds, capped at ten minutes; any other value stops the server with
+exit code 2.
 
 ### The agent session
 
@@ -333,6 +338,73 @@ saved project afresh under that lock.
   `finish_editing`, the window's recovery view finishes the operation when
   it opens the project.
 
+### Live requests
+
+**The flag.** `run(path, live: true)` sends the requests of the saved
+scenario or component to the project's base URL only while live requests are
+allowed, and the model cannot allow them: the person starts the server with
+`--allow-live`, in `.mcp.json` (`"args": ["mcp", "--allow-live"]`) or on
+`claude mcp add apiforge -- /path/to/apiforge mcp --allow-live`. Without it a
+live run is `live_disabled` (*live requests are not enabled on this server*)
+and sends nothing. The server keeps the current permission in one slot:
+the flag while no window is connected; MCP-09 lets a connected window's
+per-project setting decide instead (*live requests are off in this project's
+settings*), and the flag applies again when the window goes.
+`project_overview.live_requests` says `allowed` and its `source`
+(`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
+settings`). The permission is checked immediately before the run starts,
+under the writer lock; a change after that does not stop the run, whose
+cleanup must finish.
+
+**The environment.** Secrets come from `APIFORGE_SECRET_<NAME>` in the
+server's environment (the `env` of the entry in `.mcp.json`) and from the
+`--secrets` file, a JSON object of names and text values, as for `apiforge
+run`; a name in both takes the environment's value. The file is read at start
+— one that cannot be used stops the server with exit code 2 and a message that
+never quotes it — and again at each call. No known value leaves the server: a
+run's report is redacted by the runner as the window's is (`[REDACTED]`); a
+`text` or `request_id` argument that carries one is `secret_in_text`; a saved
+source that contains one is withheld by `read_source`, `print` and
+`resources/read` as `secret_in_source` with `details.line`, never as a modified
+text; errors and stderr never quote one.
+
+**The journal.** A live run is a write: it takes the project for the agent
+session, or uses the session's lock, exactly as `write_source` does, and is
+refused with `held_by_window` or `held_by_other` and the holder while another
+process holds the project; a simulation still runs then. Each request is
+recorded in the project's run journal, `.apiforge/local/journal.json`, before
+it is sent, as the window records its own (ADR 0009); a run that reaches its
+end removes its entry, so an entry on disk always describes an interruption.
+The next `run`, simulated or live, lists what an earlier process left there
+under `interrupted`: per run the scenario, its start and whether its cleanup
+had begun, and the requests that may have changed the API with method,
+redacted URL and state (`Sending`, `Performed`, `Possibly performed`), as
+`apiforge run` prints them; `project_overview` counts them in
+`interrupted_runs`. They stay until the window marks them handled. While
+another process holds the project its journal is its own and is not read. A
+live run repeated with a `request_id` this server has answered returns the
+recorded result with `replayed: true` and sends nothing; a new server does not
+remember an id, and exactly-once is not promised.
+
+#### The four ends of a live run
+
+- **Completed or failed**: the main phase and the cleanup ran; the journal's
+  entry is removed; the result is `passed` or `failed`.
+- **Cancelled or timed out**: a `notifications/cancelled` for the call, or the
+  ten-minute deadline, stops the main phase at the next step; the cleanup runs
+  and its steps are in the report; the entry is removed at the end; the result
+  is `status: cancelled` with `ended_by: cancelled` or `timed_out`, and the
+  request that was on its way is `may_have_reached_api`. A cancelled call gets
+  no response, as the protocol says; a timeout is not evidence that nothing
+  was sent.
+- **Client lost**: at the end of stdin a live run is cancelled at once, its
+  cleanup gets up to ten seconds from the end of stdin, then the lock is
+  released and the process exits. When the cleanup finished, the journal is
+  empty; when it did not, its entry stays for the next `run`.
+- **Process killed**: nothing runs; the operating system releases the lock and
+  the entry stays. The next `run` of a new server, or the window when it opens
+  the project, reports it as interrupted.
+
 ### Resources
 
 `resources/list` returns `apiforge://reference`, the language reference, and
@@ -366,7 +438,9 @@ unregistered path is `resource_not_found` with `data.code`
   `recovery_required` (an interrupted transaction), `unknown_document`
   (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
   `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,
-  `path_rejected` and `result_too_large`; `wrote` is always `false` for them.
+  `path_rejected`, `result_too_large`, `secret_in_text` (`check_text`, a
+  `request_id`) and `secret_in_source`; `wrote` is always `false` for them.
+  A live run adds `held_by_window` and `held_by_other`.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
   `held_by_other`, `secret_in_text`, `path_exists`, `handle_exists` and
   `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
