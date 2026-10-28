@@ -21,6 +21,8 @@ indexmap.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# Live runs against the local demo API (MCP-06).
+apiforge-demo-api.workspace = true
 # The storage's I/O fault seam for the transaction tests of MCP-04.
 apiforge-storage = { workspace = true, features = ["fault-injection"] }
 

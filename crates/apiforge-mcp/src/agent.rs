@@ -5,7 +5,8 @@
 //! version the model names, validates before the first byte, and commits.
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
-    executor, folder,
+    folder,
+    secrets::Secrets,
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
 use apiforge_project::{
@@ -103,9 +104,8 @@ pub struct Finished {
 /// wait for it.
 pub struct AgentSession {
     folder: PathBuf,
-    /// Where `APIFORGE_SECRET_<NAME>` is read from; the process environment
-    /// when `None`.
-    environment: Option<Vec<(OsString, OsString)>>,
+    /// Where the known secret values are read from, at each call.
+    secrets: Secrets,
     state: Mutex<State>,
     /// Whether the session holds the lock, readable while a write holds
     /// `state`: the overview never waits for a write.
@@ -134,20 +134,21 @@ impl std::fmt::Debug for AgentSession {
 
 impl AgentSession {
     pub fn new(folder: PathBuf) -> Self {
-        Self {
-            folder,
-            environment: None,
-            state: Mutex::default(),
-            active: AtomicBool::new(false),
-        }
+        Self::with_secrets(folder, Secrets::default())
     }
 
     /// A session that reads `APIFORGE_SECRET_<NAME>` from `environment`
     /// instead of the process environment: a test seam.
     pub fn with_environment(folder: PathBuf, environment: Vec<(OsString, OsString)>) -> Self {
+        Self::with_secrets(folder, Secrets::with_environment(None, environment))
+    }
+
+    /// A session whose known secret values come from `secrets`: the
+    /// server's environment and its `--secrets` file.
+    pub fn with_secrets(folder: PathBuf, secrets: Secrets) -> Self {
         Self {
             folder,
-            environment: Some(environment),
+            secrets,
             state: Mutex::default(),
             active: AtomicBool::new(false),
         }
@@ -322,7 +323,7 @@ impl AgentSession {
                 store
             }
         };
-        store.set_known_secrets(self.secrets()?.into_iter().map(|(_, value)| value));
+        store.set_known_secrets(self.secrets.values()?);
         Ok(store)
     }
 
@@ -349,20 +350,11 @@ impl AgentSession {
         Err(held(&Holder::unknown()))
     }
 
-    fn secrets(&self) -> Result<Vec<(String, String)>, ToolError> {
-        match &self.environment {
-            Some(environment) => executor::secrets_from(None, environment.clone()),
-            None => executor::secrets(None),
-        }
-        .map(|found| found.into_iter().collect())
-        .map_err(|message| ToolError::new(ErrorCode::ProjectUnreadable, message))
-    }
-
     /// A text containing a known secret value is refused before anything
     /// else touches the project; the value is never repeated.
     fn refuse_secrets(&self, text: &str) -> Result<(), ToolError> {
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
-        probe.set_known_secrets(self.secrets()?.into_iter().map(|(_, value)| value));
+        probe.set_known_secrets(self.secrets.values()?);
         probe
             .validate_managed_payload(text.as_bytes())
             .map_err(|_| secret_in_text())

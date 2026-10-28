@@ -182,6 +182,7 @@ name = "apiforge-cli"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-demo-api",
  "apiforge-layout",
  "apiforge-mcp",
  "apiforge-project",
@@ -258,6 +259,7 @@ name = "apiforge-mcp"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-demo-api",
  "apiforge-project",
  "apiforge-runner",
  "apiforge-script",

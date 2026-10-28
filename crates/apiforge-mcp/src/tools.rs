@@ -117,6 +117,9 @@ pub struct ProjectOverview {
     pub generation: u64,
     pub holder: Holder,
     pub live_requests: LiveRequests,
+    /// Live runs an earlier process left unfinished in the project's run
+    /// journal; `run` lists them under `interrupted`.
+    pub interrupted_runs: usize,
     pub server_version: String,
     /// The version of the language reference `language_reference` serves.
     pub reference_version: String,
@@ -245,6 +248,7 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
             allowed: false,
             source: "no --allow-live".into(),
         },
+        interrupted_runs: 0,
         server_version: env!("CARGO_PKG_VERSION").into(),
         reference_version: reference::version().to_owned(),
     })
@@ -477,11 +481,14 @@ pub struct RunArguments {
     /// The runner's complete JSON report instead of the compact steps.
     #[serde(default)]
     pub full: bool,
-    /// Real requests. Refused with `live_disabled` until live requests are
-    /// enabled on the server.
+    /// Real requests to the project's API, journalled before each is sent.
+    /// Refused with `live_disabled` unless the person allowed live requests
+    /// (`project_overview.live_requests`).
     #[serde(default)]
     pub live: bool,
-    /// Echoed in the result, so a retried call can be recognised.
+    /// Your id for this call, echoed in the result. A live run repeated with
+    /// an id this server has answered returns the recorded result and sends
+    /// nothing.
     #[serde(default)]
     pub request_id: Option<String>,
 }
@@ -540,6 +547,8 @@ pub struct Step {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct RunReport {
     pub path: String,
+    /// Real requests were sent (`live: true`).
+    pub live: bool,
     pub status: Verdict,
     pub ended_by: EndedBy,
     /// The project generation the run was prepared at.
@@ -564,6 +573,17 @@ pub struct RunReport {
     pub notice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// The recorded result of an earlier call with the same `request_id`;
+    /// nothing was sent for this one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub replayed: bool,
+    /// Live runs an earlier process left unfinished, from the project's run
+    /// journal: the requests that may have changed the API.
+    pub interrupted: Vec<crate::live::InterruptedRun>,
+    /// The run journal could not be read; a live run preserved it as
+    /// `journal.unreadable.json`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub journal_unreadable: bool,
 }
 
 /// The run limits of one server.
@@ -848,6 +868,7 @@ fn simulate(
     let report = &outcome.report;
     Ok(RunReport {
         path,
+        live: false,
         status: match report.status {
             RunStatus::Passed => Verdict::Passed,
             RunStatus::Cancelled => Verdict::Cancelled,
@@ -868,6 +889,9 @@ fn simulate(
         error: report.error.clone(),
         notice: report.notice.clone(),
         request_id: arguments.request_id.clone(),
+        replayed: false,
+        interrupted: Vec::new(),
+        journal_unreadable: false,
     })
 }
 

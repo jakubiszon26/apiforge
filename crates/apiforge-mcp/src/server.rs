@@ -5,8 +5,10 @@ use crate::{
     agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
+    live::LivePermission,
     resources,
-    tools::{self, RunArguments, RunSettings, Runs},
+    secrets::Secrets,
+    tools::{self, RunArguments, RunReport, RunSettings, Runs},
 };
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
@@ -73,28 +75,119 @@ pub struct CheckTextArguments {
     pub text: String,
 }
 
+/// How the server was started: `apiforge mcp [--allow-live] [--secrets
+/// <file>]` and the test seams.
+#[derive(Clone, Debug, Default)]
+pub struct ServerSettings {
+    pub run: RunSettings,
+    /// `--allow-live`: live requests are allowed while no window decides.
+    pub allow_live: bool,
+    /// `APIFORGE_SECRET_<NAME>` and the `--secrets` file.
+    pub secrets: Secrets,
+    /// A test seam: a pause after every snapshot once a run is stopping, so
+    /// its cleanup outlasts the end of stdin.
+    pub cleanup_delay: Option<Duration>,
+}
+
 #[derive(Clone, Debug)]
 pub struct ApiforgeServer {
     folder: Arc<PathBuf>,
     runs: Runs,
     agent: Arc<AgentSession>,
+    permission: LivePermission,
+    secrets: Secrets,
+    cleanup_delay: Option<Duration>,
+    /// Cancelled at the end of stdin: the client is gone.
+    client_lost: CancellationToken,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router(router = tool_router)]
 impl ApiforgeServer {
     pub fn new(folder: PathBuf) -> Self {
-        Self::with_run_settings(folder, RunSettings::default())
+        Self::with_settings(folder, ServerSettings::default())
     }
 
     /// A server whose runs follow `settings`.
     pub fn with_run_settings(folder: PathBuf, settings: RunSettings) -> Self {
+        Self::with_settings(
+            folder,
+            ServerSettings {
+                run: settings,
+                ..ServerSettings::default()
+            },
+        )
+    }
+
+    /// A server started with `settings`.
+    pub fn with_settings(folder: PathBuf, settings: ServerSettings) -> Self {
         Self {
-            agent: Arc::new(AgentSession::new(folder.clone())),
+            agent: Arc::new(AgentSession::with_secrets(
+                folder.clone(),
+                settings.secrets.clone(),
+            )),
             folder: Arc::new(folder),
-            runs: Runs::new(settings),
+            runs: Runs::new(settings.run),
+            permission: LivePermission::new(settings.allow_live),
+            secrets: settings.secrets,
+            cleanup_delay: settings.cleanup_delay,
+            client_lost: CancellationToken::new(),
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// The live permission slot: MCP-09's control channel writes it.
+    pub fn permission(&self) -> &LivePermission {
+        &self.permission
+    }
+
+    /// Cancelled when stdin ends.
+    pub fn client_lost(&self) -> &CancellationToken {
+        &self.client_lost
+    }
+
+    /// `run` as the tool answers it, on the calling thread.
+    pub fn run_tool(
+        &self,
+        arguments: RunArguments,
+        cancel: CancellationToken,
+    ) -> Result<RunReport, ToolError> {
+        if arguments.live {
+            unimplemented!("MCP-06: {:?} {:?}", self.secrets, self.cleanup_delay);
+        }
+        tools::run(&self.folder, &arguments, &self.runs, cancel)
+    }
+
+    /// `project_overview` as the tool answers it.
+    pub fn overview_tool(&self) -> Result<tools::ProjectOverview, ToolError> {
+        let mut overview = tools::project_overview(&self.folder)?;
+        if overview.holder == tools::Holder::AnotherProcess && self.agent.is_active() {
+            overview.holder = tools::Holder::AgentSession;
+        }
+        if self.permission.current() != crate::live::Permission::Flag(false) {
+            overview.live_requests = self.permission.describe();
+        }
+        Ok(overview)
+    }
+
+    /// `read_source` as the tool answers it.
+    pub fn read_source_tool(&self, path: &str) -> Result<tools::SourceText, ToolError> {
+        tools::read_source(&self.folder, path)
+    }
+
+    /// `check_text` as the tool answers it.
+    pub fn check_text_tool(&self, path: &str, text: &str) -> Result<tools::TextCheck, ToolError> {
+        tools::check_text(&self.folder, path, text)
+    }
+
+    /// `print` as the tool answers it.
+    pub fn print_tool(&self, path: &str) -> Result<tools::Printed, ToolError> {
+        tools::print(&self.folder, path)
+    }
+
+    /// `resources/read` of `uri`: the text, or the tools' refusal.
+    pub fn resource_text(&self, uri: &str) -> Result<String, ToolError> {
+        resources::read(&self.folder, uri)
     }
 
     /// The server's run slot, shared by every clone.
@@ -113,16 +206,8 @@ impl ApiforgeServer {
         annotations(title = "Project overview", read_only_hint = true)
     )]
     async fn project_overview(&self) -> Result<CallToolResult, ErrorData> {
-        let folder = self.folder.clone();
-        let agent = self.agent.clone();
-        call("project_overview", move || {
-            let mut overview = tools::project_overview(&folder)?;
-            if overview.holder == tools::Holder::AnotherProcess && agent.is_active() {
-                overview.holder = tools::Holder::AgentSession;
-            }
-            Ok(overview)
-        })
-        .await
+        let server = self.clone();
+        call("project_overview", move || server.overview_tool()).await
     }
 
     #[tool(
@@ -143,9 +228,9 @@ impl ApiforgeServer {
         &self,
         Parameters(arguments): Parameters<PathArguments>,
     ) -> Result<CallToolResult, ErrorData> {
-        let folder = self.folder.clone();
+        let server = self.clone();
         call("read_source", move || {
-            tools::read_source(&folder, &arguments.path)
+            server.read_source_tool(&arguments.path)
         })
         .await
     }
@@ -175,9 +260,9 @@ impl ApiforgeServer {
         &self,
         Parameters(arguments): Parameters<CheckTextArguments>,
     ) -> Result<CallToolResult, ErrorData> {
-        let folder = self.folder.clone();
+        let server = self.clone();
         call("check_text", move || {
-            tools::check_text(&folder, &arguments.path, &arguments.text)
+            server.check_text_tool(&arguments.path, &arguments.text)
         })
         .await
     }
@@ -191,8 +276,8 @@ impl ApiforgeServer {
         &self,
         Parameters(arguments): Parameters<PathArguments>,
     ) -> Result<CallToolResult, ErrorData> {
-        let folder = self.folder.clone();
-        call("print", move || tools::print(&folder, &arguments.path)).await
+        let server = self.clone();
+        call("print", move || server.print_tool(&arguments.path)).await
     }
 
     #[tool(
@@ -205,10 +290,9 @@ impl ApiforgeServer {
         Parameters(arguments): Parameters<RunArguments>,
         cancel: CancellationToken,
     ) -> Result<CallToolResult, ErrorData> {
-        let folder = self.folder.clone();
-        let runs = self.runs.clone();
+        let server = self.clone();
         call("run", move || {
-            let report = tools::run(&folder, &arguments, &runs, cancel)?;
+            let report = server.run_tool(arguments, cancel)?;
             match report.ended_by {
                 EndedBy::Completed => {}
                 EndedBy::Cancelled => eprintln!("apiforge mcp: run: cancelled"),
@@ -350,11 +434,11 @@ impl ServerHandler for ApiforgeServer {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        let folder = self.folder.clone();
+        let server = self.clone();
         let uri = request.uri;
         let read = {
             let uri = uri.clone();
-            blocking("resources/read", move || resources::read(&folder, &uri)).await?
+            blocking("resources/read", move || server.resource_text(&uri)).await?
         };
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(read, uri).with_mime_type(resources::MIME_TYPE),
@@ -420,18 +504,18 @@ async fn call<T: Serialize + Send + 'static>(
 
 /// Serves until stdin ends, then returns. The runtime exists only here.
 pub fn serve_stdio(folder: PathBuf) -> io::Result<()> {
-    serve_stdio_with(folder, RunSettings::default())
+    serve_stdio_with(folder, ServerSettings::default())
 }
 
 /// As `serve_stdio`, with the run limits of `settings`. At the end of stdin a
 /// run in progress has rmcp's five-second drain to finish and be answered;
 /// after that it is cancelled, and its cleanup is waited for up to ten seconds.
-pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()> {
+pub fn serve_stdio_with(folder: PathBuf, settings: ServerSettings) -> io::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()?;
-    let server = ApiforgeServer::with_run_settings(folder, settings);
+    let server = ApiforgeServer::with_settings(folder, settings);
     let runs = server.runs().clone();
     let agent = server.agent().clone();
     let result = runtime.block_on(async move {
