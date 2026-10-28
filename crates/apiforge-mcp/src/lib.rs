@@ -2,11 +2,13 @@
 //! Each read tool is a plain function over a fresh read-only
 //! `ProjectSession` (`tools`); the write tools go through the agent session
 //! (`agent`), which holds the writer lock until the model finishes editing;
-//! `server` exposes them over stdio with `rmcp`.
+//! `server` exposes them over stdio with `rmcp`; `handover` is the control
+//! channel to the window (MCP-08b).
 pub mod agent;
 pub mod error;
 pub mod executor;
 pub mod folder;
+pub mod handover;
 pub mod positions;
 pub mod reference;
 pub mod resources;

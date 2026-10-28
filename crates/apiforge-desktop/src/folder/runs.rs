@@ -102,6 +102,13 @@ impl FolderApp {
         );
     }
 
+    /// Lets go of the journal and of the runner that writes to it: both
+    /// hold the writer's store, which a hand-over gives up (MCP-08b).
+    pub(super) fn close_run_journal(&mut self) {
+        self.runs.runner = None;
+        self.runs.journal = None;
+    }
+
     pub(super) fn request_run(&mut self, id: &str, live: bool) {
         if live && self.observing() {
             self.notify(LIVE_PAUSED, true);

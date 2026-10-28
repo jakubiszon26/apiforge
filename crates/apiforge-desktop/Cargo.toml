@@ -12,6 +12,9 @@ apiforge-script.workspace = true
 apiforge-runner.workspace = true
 apiforge-storage.workspace = true
 apiforge-project.workspace = true
+# The control channel to an agent's server (MCP-08b).
+apiforge-channel.workspace = true
+tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true

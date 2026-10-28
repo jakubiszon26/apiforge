@@ -89,6 +89,13 @@ impl Holder {
         self
     }
 
+    /// The same holder listening on the control channel's `endpoint`, a
+    /// random name that is never a path (MCP-08b).
+    pub fn with_endpoint(mut self, endpoint: Option<String>) -> Self {
+        self.endpoint = endpoint;
+        self
+    }
+
     pub fn role(&self) -> Option<HolderRole> {
         self.role
     }
@@ -99,7 +106,8 @@ impl Holder {
     pub fn since(&self) -> Option<&str> {
         self.since.as_deref()
     }
-    /// Reserved for the control channel (MCP-08b); always `None` until then.
+    /// The name of the endpoint the holder's control channel listens on,
+    /// when it has one (MCP-08b). Whoever connects checks its shape first.
     pub fn endpoint(&self) -> Option<&str> {
         self.endpoint.as_deref()
     }

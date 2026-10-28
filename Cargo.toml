@@ -10,6 +10,7 @@ members = [
     "crates/apiforge-layout",
     "crates/apiforge-cli",
     "crates/apiforge-mcp",
+    "crates/apiforge-channel",
     "tools/convert-v1",
 ]
 resolver = "3"
@@ -28,6 +29,7 @@ apiforge-project = { path = "crates/apiforge-project" }
 apiforge-layout = { path = "crates/apiforge-layout" }
 apiforge-script = { path = "crates/apiforge-script" }
 apiforge-mcp = { path = "crates/apiforge-mcp" }
+apiforge-channel = { path = "crates/apiforge-channel" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip", "preserve_order"] }
 indexmap = { version = "=2.14.2", features = ["serde"] }

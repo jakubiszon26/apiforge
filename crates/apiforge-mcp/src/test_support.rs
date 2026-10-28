@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
-    sync::mpsc::{Receiver, RecvTimeoutError, channel},
+    sync::mpsc::{Receiver, channel},
     thread,
     time::{Duration, Instant},
 };
@@ -196,11 +196,8 @@ impl StdioServer {
             thread::sleep(Duration::from_millis(10));
         };
         let elapsed = started.elapsed();
-        loop {
-            match self.lines.recv_timeout(Duration::from_secs(2)) {
-                Ok(line) => self.keep(line),
-                Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
-            }
+        while let Ok(line) = self.lines.recv_timeout(Duration::from_secs(2)) {
+            self.keep(line);
         }
         let stderr = self
             .stderr

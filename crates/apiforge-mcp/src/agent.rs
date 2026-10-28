@@ -6,8 +6,10 @@
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
     executor, folder,
+    handover::{Answer, Hub},
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
+use apiforge_channel::Message;
 use apiforge_project::{
     DocumentKind, NewDocumentCheck, Origin, ProjectSession, RegistrationProblem, Unavailable,
 };
@@ -22,12 +24,18 @@ use std::{
     ffi::OsString,
     path::PathBuf,
     sync::{
-        Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
+/// How long the server keeps trying for a lock the window has just granted:
+/// a check of the window's may still hold it for a moment.
+const GRANTED_LOCK: Duration = Duration::from_secs(2);
+/// The reason a window gives when it keeps the project for unsaved work.
+pub const UNSAVED_WORK: &str = "the window has unsaved work";
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct WriteSourceArguments {
@@ -110,6 +118,8 @@ pub struct AgentSession {
     /// Whether the session holds the lock, readable while a write holds
     /// `state`: the overview never waits for a write.
     active: AtomicBool,
+    /// The control channel to windows, when the server has one (MCP-08b).
+    hub: OnceLock<Arc<Hub>>,
 }
 
 #[derive(Default)]
@@ -139,6 +149,7 @@ impl AgentSession {
             environment: None,
             state: Mutex::default(),
             active: AtomicBool::new(false),
+            hub: OnceLock::new(),
         }
     }
 
@@ -150,7 +161,16 @@ impl AgentSession {
             environment: Some(environment),
             state: Mutex::default(),
             active: AtomicBool::new(false),
+            hub: OnceLock::new(),
         }
+    }
+
+    /// Connects the session to windows over the control channel (MCP-08b):
+    /// it then names its endpoint as the holder, asks a window that holds
+    /// the project to hand it over, and tells connected windows what it
+    /// commits and when it lets go.
+    pub fn set_hub(&self, hub: Arc<Hub>) {
+        let _ = self.hub.set(hub);
     }
 
     /// The client's name from `initialize` or the request metadata, written
@@ -228,6 +248,7 @@ impl AgentSession {
         }
         let after = read(&store, &watched)?;
         let changed = changed(&watched, &before, &after);
+        self.saved(after.generation, &changed);
         Ok(WriteResult {
             path: path.as_str().to_owned(),
             wrote: !changed.is_empty(),
@@ -272,6 +293,7 @@ impl AgentSession {
         // The source did not exist before: the transaction expected it missing.
         let mut changed = vec![path.as_str().to_owned()];
         changed.extend(self::changed(watched, &before, &after));
+        self.saved(after.generation, &changed);
         Ok(CreateResult {
             path: path.as_str().to_owned(),
             kind: arguments.kind,
@@ -290,13 +312,28 @@ impl AgentSession {
         })
     }
 
-    /// Ends the session and releases the writer lock.
+    /// Ends the session and releases the writer lock; connected windows are
+    /// told `released`. A write in flight finishes first: it holds the state.
     pub fn finish_editing(&self) -> Finished {
         let mut state = self.state();
         state.recovery_required = false;
         let finished = state.store.take().is_some();
         self.active.store(false, Ordering::Release);
+        drop(state);
+        if let Some(hub) = self.hub.get() {
+            hub.release();
+        }
         Finished { finished }
+    }
+
+    /// Tells connected windows about a commit, before the tool answers.
+    fn saved(&self, generation: u64, changed: &[String]) {
+        if let (Some(hub), false) = (self.hub.get(), changed.is_empty()) {
+            hub.broadcast(&Message::Saved {
+                generation,
+                paths: changed.to_vec(),
+            });
+        }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -333,20 +370,84 @@ impl AgentSession {
         if read(&probe, std::slice::from_ref(&manifest))?.files[&manifest].is_none() {
             return Err(tools::storage_error(apiforge_project::Error::NotAProject));
         }
-        let holder = Holder::new(HolderRole::Agent, client);
+        let hub = self.hub.get();
+        let holder = Holder::new(HolderRole::Agent, client.clone())
+            .with_endpoint(hub.and_then(Hub::endpoint));
         // A holder that leaves between the refusal and the reading of its
         // description gets one more attempt.
         for _ in 0..2 {
             match ProjectStore::open_exclusive_as(&self.folder, &holder) {
                 Ok(store) => return Ok(store),
                 Err(ProjectError::Locked) => match probe.holder().map_err(storage)? {
-                    Some(holder) => return Err(held(&holder)),
+                    Some(found) => {
+                        // A window with a channel is asked; anyone else is
+                        // named in the refusal.
+                        if found.role() == Some(HolderRole::Window)
+                            && let (Some(hub), Some(endpoint)) = (hub, found.endpoint())
+                        {
+                            return self.ask(
+                                hub,
+                                endpoint,
+                                client.clone(),
+                                &holder,
+                                &probe,
+                                &found,
+                            );
+                        }
+                        return Err(held(&found));
+                    }
                     None => continue,
                 },
                 Err(error) => return Err(storage(error)),
             }
         }
         Err(held(&Holder::unknown()))
+    }
+
+    /// Asks the window that holds the project to hand it over (MCP-08b,
+    /// decision 11: a clean window does so at once). On `granted` the window
+    /// has let the lock go and keeps the connection to observe; a third
+    /// process that took the lock meanwhile is `held_by_other`.
+    fn ask(
+        &self,
+        hub: &Arc<Hub>,
+        endpoint: &str,
+        client: Option<String>,
+        holder: &Holder,
+        probe: &ProjectStore,
+        window: &Holder,
+    ) -> Result<ProjectStore, ToolError> {
+        let connection = match hub.ask(endpoint, client) {
+            Answer::Granted(connection) => connection,
+            Answer::Refused(reason) => return Err(refused(&reason, window)),
+            Answer::Pending => return Err(pending(window)),
+            Answer::Unreachable => return Err(held(window)),
+        };
+        let deadline = Instant::now() + GRANTED_LOCK;
+        loop {
+            match ProjectStore::open_exclusive_as(&self.folder, holder) {
+                Ok(store) => {
+                    hub.adopt(connection);
+                    return Ok(store);
+                }
+                Err(ProjectError::Locked) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(ProjectError::Locked) => {
+                    // The window let go, but another process took the
+                    // project: the window takes it back once it is free.
+                    hub.decline(connection);
+                    return Err(match probe.holder().map_err(storage)? {
+                        Some(other) if other.role() != Some(HolderRole::Window) => held(&other),
+                        _ => held(&Holder::unknown()),
+                    });
+                }
+                Err(error) => {
+                    hub.decline(connection);
+                    return Err(storage(error));
+                }
+            }
+        }
     }
 
     fn secrets(&self) -> Result<Vec<(String, String)>, ToolError> {
@@ -539,6 +640,36 @@ fn refusal(
     }))
 }
 
+/// The window kept the project and said why.
+fn refused(reason: &str, window: &Holder) -> ToolError {
+    let message = if reason == UNSAVED_WORK {
+        "The API Forge window that holds this project has unsaved work, so it kept the project; nothing was written. Ask the person to save their work there, then write again; reading works meanwhile"
+    } else {
+        "The API Forge window that holds this project did not hand it over; nothing was written. Write again later; reading works meanwhile"
+    };
+    ToolError::new(ErrorCode::HandoverRefused, message).with_details(json!({
+        "reason": reason,
+        "holder": description(window),
+    }))
+}
+
+/// Nobody answered in the window within thirty seconds.
+fn pending(window: &Holder) -> ToolError {
+    ToolError::new(
+        ErrorCode::HandoverPending,
+        "The API Forge window that holds this project has not answered yet; nothing was written. Write again in a moment; the window answers the next request at once",
+    )
+    .with_details(json!({ "holder": description(window) }))
+}
+
+fn description(holder: &Holder) -> serde_json::Value {
+    json!({
+        "role": holder.role(),
+        "client": holder.client(),
+        "since": holder.since(),
+    })
+}
+
 /// The refusal of a write while another process holds the project: who and
 /// since when. Never advice to edit a file directly.
 fn held(holder: &Holder) -> ToolError {
@@ -569,11 +700,5 @@ fn held(holder: &Holder) -> ToolError {
             "Another process holds this project; nothing was written. Write again when it has let go".to_owned(),
         ),
     };
-    ToolError::new(code, message).with_details(json!({
-        "holder": {
-            "role": holder.role(),
-            "client": holder.client(),
-            "since": holder.since(),
-        }
-    }))
+    ToolError::new(code, message).with_details(json!({ "holder": description(holder) }))
 }

@@ -5,9 +5,11 @@ use crate::{
     agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
+    handover::Hub,
     resources,
     tools::{self, RunArguments, RunSettings, Runs},
 };
+use apiforge_channel::{Message, RunMode, RunState};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, tool::schema_for_output, wrapper::Parameters},
@@ -26,7 +28,7 @@ use serde_json::json;
 use std::{
     io,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -78,6 +80,8 @@ pub struct ApiforgeServer {
     folder: Arc<PathBuf>,
     runs: Runs,
     agent: Arc<AgentSession>,
+    /// The path of the run in progress, for a window waiting for it.
+    running: Arc<Mutex<Option<String>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -93,6 +97,7 @@ impl ApiforgeServer {
             agent: Arc::new(AgentSession::new(folder.clone())),
             folder: Arc::new(folder),
             runs: Runs::new(settings),
+            running: Arc::default(),
             tool_router: Self::tool_router(),
         }
     }
@@ -207,7 +212,11 @@ impl ApiforgeServer {
     ) -> Result<CallToolResult, ErrorData> {
         let folder = self.folder.clone();
         let runs = self.runs.clone();
+        let running = self.running.clone();
         call("run", move || {
+            if !runs.is_busy() {
+                *lock(&running) = Some(arguments.path.clone());
+            }
             let report = tools::run(&folder, &arguments, &runs, cancel)?;
             match report.ended_by {
                 EndedBy::Completed => {}
@@ -220,7 +229,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "Saves a new text for the registered document at `path`, exactly as given. The text is checked in the project's context first and saved only without errors (warnings allowed), together with its layout checkpoint, the same bytes as a save in the window. Name the version you read: `expected_source_sha256` from read_source (a different hash on disk is `stale_source`, nothing written) and optionally `expected_generation` (`stale_project`). The first write takes the project for this agent session and keeps it until finish_editing; while a window or another process holds the project the write is refused (`held_by_window`, `held_by_other`). A text containing a known secret value is `secret_in_text`. The same text and hash twice is a no-op.",
+        description = "Saves a new text for the registered document at `path`, exactly as given. The text is checked in the project's context first and saved only without errors (warnings allowed), together with its layout checkpoint, the same bytes as a save in the window. Name the version you read: `expected_source_sha256` from read_source (a different hash on disk is `stale_source`, nothing written) and optionally `expected_generation` (`stale_project`). The first write takes the project for this agent session and keeps it until finish_editing. When an API Forge window holds the project the write asks it to hand the project over: a window with nothing unsaved does so at once and watches, one with unsaved work keeps it (`handover_refused`), one that has not answered in 30 seconds is `handover_pending`, one without the channel is `held_by_window`; another process holding the project is `held_by_other`. Nothing is written when refused. A text containing a known secret value is `secret_in_text`. The same text and hash twice is a no-op.",
         output_schema = schema_for_output::<crate::agent::WriteResult>(),
         annotations(
             title = "Write source",
@@ -418,6 +427,41 @@ async fn call<T: Serialize + Send + 'static>(
     Ok(result)
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The control channel for a server on `handle` (MCP-08b). A window's
+/// *Take back* waits for the run in progress, cleanup included, telling the
+/// window it waits; then the session ends after the write in flight, if any,
+/// and the window is told `released`.
+fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> Arc<Hub> {
+    let hub = Hub::new(handle);
+    server.agent.set_hub(hub.clone());
+    let agent = server.agent.clone();
+    let runs = server.runs.clone();
+    let running = server.running.clone();
+    let told = Arc::downgrade(&hub);
+    hub.on_take_back(move || {
+        if runs.is_busy() {
+            if let Some(hub) = told.upgrade() {
+                hub.broadcast(&Message::Run {
+                    path: lock(&running).clone().unwrap_or_default(),
+                    mode: RunMode::Simulation,
+                    state: RunState::Running,
+                });
+            }
+            while runs.is_busy() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        agent.finish_editing();
+    });
+    hub
+}
+
 /// Serves until stdin ends, then returns. The runtime exists only here.
 pub fn serve_stdio(folder: PathBuf) -> io::Result<()> {
     serve_stdio_with(folder, RunSettings::default())
@@ -432,6 +476,7 @@ pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()
         .enable_all()
         .build()?;
     let server = ApiforgeServer::with_run_settings(folder, settings);
+    let _hub = connect_windows(&server, runtime.handle().clone());
     let runs = server.runs().clone();
     let agent = server.agent().clone();
     let result = runtime.block_on(async move {
@@ -450,8 +495,8 @@ pub fn serve_stdio_with(folder: PathBuf, settings: RunSettings) -> io::Result<()
         }
         Ok(())
     });
-    // The end of stdin ends the agent session: the writer lock is released
-    // before the runtime winds down.
+    // The end of stdin ends the agent session: the writer lock is released,
+    // and a window told so, before the runtime winds down.
     let _ = agent.finish_editing();
     runtime.shutdown_timeout(Duration::from_millis(500));
     result

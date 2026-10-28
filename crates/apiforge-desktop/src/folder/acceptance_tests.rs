@@ -1983,6 +1983,25 @@ mod mcp08b {
         )
     }
 
+    /// Starts a slow simulation of the scenario and returns its request once
+    /// it holds the server's run slot, which is when a second run is refused.
+    /// The server answers requests concurrently, so the second is sent only
+    /// after the first has had time to start.
+    fn start_run(harness: &mut FolderHarness, server: &mut StdioServer) -> u64 {
+        let run = server.start_call("run", json!({ "path": SCENARIO }));
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(500) {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let second = call(harness, server, "run", json!({ "path": SCENARIO }));
+        assert_eq!(
+            second["result"]["structuredContent"]["code"], "run_in_progress",
+            "the run never started: {second}"
+        );
+        run
+    }
+
     /// A write that hands the project to the agent: the window was clean.
     fn hand_over(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) -> String {
         let (text, _) = read(server, SCENARIO);
@@ -2315,21 +2334,7 @@ mod mcp08b {
         await_endpoint(&mut harness, root, HolderRole::Window);
         let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "300")]);
         hand_over(&mut harness, &mut server, "Written by the agent.");
-        let run = server.start_call("run", json!({ "path": SCENARIO }));
-        // The run holds the server's run slot once a second run is refused.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let second = call(
-                &mut harness,
-                &mut server,
-                "run",
-                json!({ "path": SCENARIO }),
-            );
-            if second["result"]["structuredContent"]["code"] == "run_in_progress" {
-                break;
-            }
-            assert!(Instant::now() < deadline, "the run never started: {second}");
-        }
+        let run = start_run(&mut harness, &mut server);
 
         choose(&mut harness, TAKE_BACK);
         await_until(&mut harness, Instant::now(), "the wait", |harness| {
@@ -2560,16 +2565,21 @@ mod mcp08b {
         let root = directory.path();
         let mut harness = folder_harness(root, WIDE);
         await_endpoint(&mut harness, root, HolderRole::Window);
-        let interval = Duration::from_millis(100);
-        app(&mut harness).watcher.set_interval(interval);
         let mut server = agent(root, "Claude Code");
         let written = hand_over(&mut harness, &mut server, "First.");
+        // Checks every 100 ms during the pause: a window waiting for that
+        // often never settles, so the pause only steps it.
+        let interval = Duration::from_millis(100);
+        app(&mut harness).watcher.set_interval(interval);
         let paused = Instant::now();
         while paused.elapsed() < interval * 15 {
             harness.step();
             assert!(read_only(&harness), "never taken back by time");
             std::thread::sleep(Duration::from_millis(10));
         }
+        app(&mut harness)
+            .watcher
+            .set_interval(crate::folder::watcher::POLL_INTERVAL);
         assert!(has_label(&harness, "Observing"));
         let answer = write(
             &mut harness,
@@ -2697,18 +2707,7 @@ mod mcp08b {
                 );
             }
             choose(&mut harness, "Code");
-            let run = server.start_call("run", json!({ "path": SCENARIO }));
-            loop {
-                let second = call(
-                    &mut harness,
-                    &mut server,
-                    "run",
-                    json!({ "path": SCENARIO }),
-                );
-                if second["result"]["structuredContent"]["code"] == "run_in_progress" {
-                    break;
-                }
-            }
+            let run = start_run(&mut harness, &mut server);
             choose(&mut harness, TAKE_BACK);
             await_until(&mut harness, Instant::now(), "the wait", |harness| {
                 contains(harness, WAITING)

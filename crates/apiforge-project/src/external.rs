@@ -634,6 +634,43 @@ impl ProjectSession {
         Ok(true)
     }
 
+    /// Lets the writer lock go to another holder (MCP-08b), the inverse of
+    /// [`Self::take_writer`]: the saved project is reread read-only in a new
+    /// epoch, open text files stay open, and the lock is released once every
+    /// clone of the old store has been dropped. `Ok(false)` with unsaved
+    /// work, which is never saved, discarded or declared saved on the
+    /// person's behalf: the project stays with this session.
+    pub fn release_writer(&mut self) -> Result<bool> {
+        if self.store.is_read_only() {
+            return Ok(true);
+        }
+        if self.has_unsaved_work() {
+            return Ok(false);
+        }
+        let store = ProjectStore::open_read_only(self.store.root())?;
+        let open_texts: Vec<_> = self
+            .texts
+            .iter()
+            .map(|file| file.path().to_owned())
+            .collect();
+        let next = Self::load_saved(store, self.placer.clone(), self.epoch + 1)?;
+        let sequence = self.sequence;
+        *self = next;
+        self.events.clear();
+        self.sequence = sequence;
+        self.emit(
+            Origin::SESSION,
+            None,
+            EventKind::ContextChanged {
+                generation: self.context_generation,
+            },
+        );
+        for path in open_texts {
+            let _ = self.open_text_file(&path);
+        }
+        Ok(true)
+    }
+
     /// Discards unsaved configuration, for example to follow a changed registry.
     pub fn discard_configuration(&mut self) -> Result<()> {
         if !self.manifest_dirty {
@@ -675,7 +712,11 @@ impl ProjectSession {
         }
     }
 
-    fn has_unsaved_work(&self) -> bool {
+    /// Anything this session would lose by letting the project go: unsaved
+    /// configuration, held recovery drafts, documents whose source, layout
+    /// or fields differ from what is saved, unsaved text files. A window
+    /// hands the project over only without any (ADR 0014 decision 4).
+    pub fn has_unsaved_work(&self) -> bool {
         self.manifest_dirty
             || !self.recovery.held.is_empty()
             || self

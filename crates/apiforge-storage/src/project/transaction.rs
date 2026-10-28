@@ -189,13 +189,7 @@ impl ProjectStore {
             sync_parent(&path)?;
         }
         sync_parent(&lock_path)?;
-        if let Some(line) = holder.to_line() {
-            let path = path::resolve(&store.root, HOLDER_PATH)?;
-            crate::write_atomic(&path, &line).map_err(|error| match error {
-                crate::DocumentError::Io { path, source } => ProjectError::Io { path, source },
-                other => ProjectError::io(&path, io::Error::other(other.to_string())),
-            })?;
-        }
+        write_holder(&store.root, holder)?;
         let transactions = path::resolve(&store.root, TRANSACTIONS)?;
         ensure_directory(&transactions)?;
         sync_directory(&transactions)?;
@@ -941,6 +935,13 @@ impl ProjectStore {
         Ok(Some(Holder::read(&path)))
     }
 
+    /// Replaces the writer's own description, for example once it listens
+    /// on its control channel (MCP-08b). Only the writer describes itself.
+    pub fn describe(&self, holder: &Holder) -> Result<()> {
+        self.writable()?;
+        write_holder(&self.root, holder)
+    }
+
     pub(super) fn writable(&self) -> Result<()> {
         if self.is_read_only() {
             Err(ProjectError::ReadOnly)
@@ -1011,6 +1012,19 @@ impl ProjectStore {
 /// after the whole confirmation window. Returns as soon as `take` succeeds, so
 /// an inherited descriptor costs only the rest of its own lifetime; a lock a
 /// live owner keeps costs the full window.
+/// One JSON line beside the lock, replaced atomically; an unknown holder
+/// writes nothing.
+fn write_holder(root: &Path, holder: &Holder) -> Result<()> {
+    let Some(line) = holder.to_line() else {
+        return Ok(());
+    };
+    let path = path::resolve(root, HOLDER_PATH)?;
+    crate::write_atomic(&path, &line).map_err(|error| match error {
+        crate::DocumentError::Io { path, source } => ProjectError::Io { path, source },
+        other => ProjectError::io(&path, io::Error::other(other.to_string())),
+    })
+}
+
 fn take_confirmed_lock(
     mut take: impl FnMut() -> std::result::Result<(), TryLockError>,
 ) -> std::result::Result<bool, io::Error> {
