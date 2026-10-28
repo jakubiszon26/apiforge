@@ -2772,9 +2772,11 @@ fn mcp05_criterion_3_publishing_twice_yields_two_revisions() {
     let first = agent.publish(&publish_args(PRODUCT, &hash)).unwrap();
     let first_bytes = fs::read(root.join(&first.revision_path)).unwrap();
 
-    // The model changes the component, then publishes again.
+    // The model renames the component's title, then publishes again.
+    let renamed = text.replacen('"', "\"Renamed ", 1);
+    assert_ne!(renamed, text);
     let written = agent
-        .write_source(&write_args(PRODUCT, &commented(&text), &hash))
+        .write_source(&write_args(PRODUCT, &renamed, &hash))
         .unwrap();
     let second = agent
         .publish(&publish_args(PRODUCT, &written.source_sha256))
