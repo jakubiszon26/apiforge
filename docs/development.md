@@ -241,7 +241,7 @@ Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
 Each tool names a document by its registered path; `check_text` and
 `create_document` also take the path a new document would have. A read tool
 opens the saved project read-only for each call and writes nothing, not even
-`.apiforge/local`; the three write tools work through the agent session below.
+`.apiforge/local`; the four write tools work through the agent session below.
 
 | Tool | Input | Result |
 | --- | --- | --- |
@@ -254,6 +254,7 @@ opens the saved project read-only for each call and writes nothing, not even
 | `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document: `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
+| `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote`, `changed`, `replayed` |
 | `finish_editing` | — | `finished`: whether an agent session ended and released the project |
 
 `check_text` checks a proposed text without saving it, while `run` executes
@@ -294,8 +295,8 @@ with exit code 2.
 
 ### The agent session
 
-The first call of `write_source` or `create_document` takes the project's
-writer lock for an agent session
+The first call of `write_source`, `create_document` or `publish` takes the
+project's writer lock for an agent session
 ([ADR 0014](decisions/0014-agent-sessions.md)): the holder file names role
 `agent` and the client's name from `initialize` or the request metadata, and
 a window opened meanwhile observes. The server keeps the lock across calls,
@@ -321,6 +322,26 @@ saved project afresh under that lock.
   `handle_exists`, `path_rejected` or `invalid_text` (a header of another
   kind, or errors, with the diagnostics). The source, its registry entry and
   its checkpoint commit in one transaction, one generation.
+- `publish` publishes the saved working component, never a text in the
+  call: the same transaction as *Publish* in the window writes
+  `.apiforge/revisions/<component id>/<n>.afs` with the next unused `n`, its
+  registry entry and checkpoint, and advances the working document's base
+  revision; nothing existing is overwritten. A different hash on disk is
+  `stale_source` with the current `details.source_sha256`; a scenario is
+  `not_a_component`; a component with errors `invalid_text` with the
+  diagnostics; an unreadable checkpoint `invalid_checkpoint`; a saved
+  component holding a known secret value `secret_in_source`. Canonical
+  printing drops a comment that belongs to no statement, so such a
+  component is `comments_would_be_lost` with `details.comments` (line,
+  column, text) until the model calls again with `accept_comment_loss: true`
+  and the same hash; the consent holds for that call and that hash only.
+- A `publish` with a `request_id` this server has answered returns the
+  recorded result with `replayed: true` and publishes nothing. The server
+  keeps the last 64 in memory: the same id for another path or hash is
+  `invalid_inputs`, an id whose result was dropped is `unknown_outcome`,
+  and a restarted server knows none of them — `project_overview` lists every
+  revision with its `source_sha256`, which tells whether a lost publication
+  happened.
 - A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
   each call) is `secret_in_text`, the value never repeated.
 - While a window holds the project a write is `held_by_window`; another
@@ -350,7 +371,7 @@ unregistered path is `resource_not_found` with `data.code`
 - Every tool has an input and an output schema; `tools/list` returns them in
   the order above. The read tools carry `readOnlyHint: true`; `write_source`
   is `destructiveHint: true` and `idempotentHint: true`, `create_document`
-  neither, `finish_editing` only idempotent. A result carries
+  and `publish` neither, `finish_editing` only idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
 - A call that could not do what was asked is `isError: true` with
   `structuredContent` `{ code, message, wrote, details }`. The codes form a
@@ -369,8 +390,10 @@ unregistered path is `resource_not_found` with `data.code`
   `path_rejected` and `result_too_large`; `wrote` is always `false` for them.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
   `held_by_other`, `secret_in_text`, `path_exists`, `handle_exists` and
-  `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
-  only for a commit that failed after its activation.
+  `invalid_checkpoint`; `publish` also `not_a_component`,
+  `comments_would_be_lost`, `secret_in_source` and, for a `request_id`,
+  `invalid_inputs` and `unknown_outcome`; `wrote` is `false` for a refusal
+  and `"unknown"` only for a commit that failed after its activation.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
   `.apiforge/diagram.json` or a Windows reserved name is `path_rejected`.
