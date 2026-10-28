@@ -10,6 +10,7 @@ members = [
     "crates/apiforge-layout",
     "crates/apiforge-cli",
     "crates/apiforge-mcp",
+    "crates/apiforge-channel",
     "tools/convert-v1",
 ]
 resolver = "3"
@@ -29,6 +30,7 @@ apiforge-project = { path = "crates/apiforge-project" }
 apiforge-layout = { path = "crates/apiforge-layout" }
 apiforge-script = { path = "crates/apiforge-script" }
 apiforge-mcp = { path = "crates/apiforge-mcp" }
+apiforge-channel = { path = "crates/apiforge-channel" }
 # The local demo API, for tests that send live requests to it (MCP-06).
 apiforge-demo-api = { path = "crates/apiforge-demo-api" }
 serde = { version = "=1.0.229", features = ["derive"] }

@@ -392,15 +392,56 @@ saved project afresh under that lock.
   its checkpoint commit in one transaction, one generation.
 - A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
   each call) is `secret_in_text`, the value never repeated.
-- While a window holds the project a write is `held_by_window`; another
-  process, an agent or `apiforge apply`, is `held_by_other`. The message and
-  `details.holder` name the holder and since when; the read tools still
+- While a window holds the project the write asks it to hand the project
+  over (below). A window with unsaved work keeps it: `handover_refused` with
+  `details.reason` *the window has unsaved work*. A window that has not
+  answered within 30 seconds is `handover_pending`, and a window without a
+  channel (an older build) is `held_by_window`. Another process, an agent or
+  `apiforge apply`, is `held_by_other`. The message and `details.holder` name
+  the holder and since when; nothing is written; the read tools still
   answer.
 - A commit that fails after its activation is `recovery_required` with
   `wrote: "unknown"`; every later write of the session is refused with the
   same code (`wrote: false`). The server does not repair: after
   `finish_editing`, the window's recovery view finishes the operation when
   it opens the project.
+
+### The window and the agent
+
+The holder of a project listens on a control channel
+([ADR 0014](decisions/0014-agent-sessions.md), decision 4) and names its
+endpoint in the holder file: the window while it is the writer, the server
+during an agent session. An endpoint is a random name, `apiforge-` and 32
+hexadecimal digits, never a path: on Unix the socket `socket` in a directory
+of that name, private to the user, under `$XDG_RUNTIME_DIR` or the temporary
+directory; on Windows the named pipe `\\.\pipe\<name>`, which keeps
+Windows' default access rules, so another user signed in to the same machine
+can open it (the workspace forbids the `unsafe` code a narrower rule needs;
+the owner accepted this risk on 2026-10-28, MCP-08b). Messages are
+newline-delimited JSON with `version: 1`; a line that is not one is ignored
+and logged on stderr (`apiforge mcp: channel: …` in the server,
+`apiforge: channel: …` in the window).
+
+- **The window first.** The server's first write asks the window. A window
+  with nothing unsaved and nothing in progress hands the project over at
+  once, rereads it read-only where the person was, and observes; the write
+  proceeds. A window with unsaved work refuses and says *An agent asked to
+  edit this project; save your work first* in its bottom bar until the work
+  is saved. A window busy with storage work, its own run or a dialog
+  answers when it is done.
+- **The server first.** A window opened while an agent holds the project
+  connects to the server's endpoint and observes from the start.
+- **While the agent works**, every commit is told to the connected window,
+  which looks at once instead of at its next once-a-second check. The bar
+  ends in *Take back*: the server lets the save in flight commit or fail
+  whole and the run in flight finish, cleanup included (the bar says
+  *waiting for the agent's run to finish*), then ends the session; the
+  window is the writer again within two seconds. The agent's next write asks
+  again.
+- `finish_editing`, the end of stdin or the death of the server gives the
+  project back the same way; a transaction the server left activated opens
+  the window's recovery view. A window that closes while observing changes
+  nothing for the server, which logs the lost channel on stderr.
 
 ### Live requests
 
@@ -433,9 +474,9 @@ source that contains one is withheld by `read_source`, `print` and
 text; errors and stderr never quote one.
 
 **The journal.** A live run is a write: it takes the project for the agent
-session, or uses the session's lock, exactly as `write_source` does, and is
-refused with `held_by_window` or `held_by_other` and the holder while another
-process holds the project; a simulation still runs then. Each request is
+session, or uses the session's lock, exactly as `write_source` does: a
+window that holds the project is asked for it, and another process holding
+it is `held_by_other` with the holder; a simulation still runs then. Each request is
 recorded in the project's run journal, `.apiforge/local/journal.json`, before
 it is sent, as the window records its own (ADR 0009). The entry exists while
 the run is in progress and is removed when it reaches its end, so an entry
@@ -527,8 +568,8 @@ unregistered path is `resource_not_found` with `data.code`
   `request_id`) and `secret_in_source`; `wrote` is always `false` for them.
   A live run adds `held_by_window`, `held_by_other` and `unknown_outcome`.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
-  `held_by_other`, `secret_in_text`, `path_exists`, `handle_exists` and
-  `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
+  `handover_refused`, `handover_pending`, `held_by_other`, `secret_in_text`,
+  `path_exists`, `handle_exists` and `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
   only for a commit that failed after its activation.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,

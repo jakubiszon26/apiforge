@@ -6,6 +6,11 @@
 //! the window becomes the writer, never sooner and never by time, and runs the
 //! checks of a start: an activated transaction opens recovery, an interrupted
 //! live run its journal review.
+//!
+//! While an agent holds the project over the control channel (MCP-08b) the
+//! bar ends in *Take back*; while it waits for the agent's run to finish it
+//! says so; and a window that kept the project for unsaved work says why in
+//! the same bar.
 use super::*;
 use apiforge_storage::project::{Holder, HolderRole};
 
@@ -13,6 +18,12 @@ use apiforge_storage::project::{Holder, HolderRole};
 const BAR_HEIGHT: f32 = 36.0;
 /// What the window does while it observes; the same for every holder.
 const PAUSED: &str = "editing is paused here; this window follows every change";
+/// What the window does after *Take back* while the agent's run finishes.
+const WAITING: &str = "waiting for the agent's run to finish";
+/// Why the window kept the project when an agent asked for it (MCP-08b).
+const REFUSED: &str = "An agent asked to edit this project; save your work first";
+/// The bar's button while an agent holds the project (mock-up M1, round 4).
+pub(super) const TAKE_BACK: &str = "Take back";
 /// A client names itself; a longer name is cut so the bar keeps its line.
 const MAX_CLIENT_CHARS: usize = 40;
 
@@ -21,12 +32,23 @@ const MAX_CLIENT_CHARS: usize = 40;
 pub(super) struct Observed {
     holder: Holder,
     text: String,
+    /// The same, while *Take back* waits for the agent's run.
+    waiting: String,
 }
 
 impl Observed {
     pub(super) fn new(holder: Holder) -> Self {
-        let text = holder_text(&holder);
-        Self { holder, text }
+        let text = holder_text(&holder, PAUSED);
+        let waiting = holder_text(&holder, WAITING);
+        Self {
+            holder,
+            text,
+            waiting,
+        }
+    }
+
+    pub(super) fn holder(&self) -> &Holder {
+        &self.holder
     }
 }
 
@@ -66,6 +88,7 @@ impl FolderApp {
         }
         match probe {
             Some(holder) => {
+                self.handover.holder_seen(&holder);
                 if self
                     .holder
                     .as_ref()
@@ -80,19 +103,23 @@ impl FolderApp {
 
     /// The lock is free: become the writer, keeping what was typed here.
     fn take_back(&mut self) {
+        // An agent connected to this window that has not let go may be
+        // between the window's grant and its own lock (MCP-08b).
         if self.take_back.pending
             || self.take_back.recovering
             || self.take_back.stopped
             || self.persistence.closing
+            || self.handover.holds_back()
         {
             return;
         }
         self.take_back.pending = true;
+        let holder = self.window_holder();
         self.storage_project(
             "Taking the project back…",
             apiforge_project::StorageMode::Exclusive,
             false,
-            |session| session.take_writer(&Holder::window()),
+            move |session| session.take_writer(&holder),
             |app, result| {
                 app.take_back.pending = false;
                 match result {
@@ -123,6 +150,7 @@ impl FolderApp {
 
     /// The writer's start, for a session that has just become one.
     fn taken_back(&mut self) {
+        self.handover.reset_observing();
         self.holder = None;
         self.last_change = None;
         self.take_back = TakeBack::default();
@@ -136,17 +164,29 @@ impl FolderApp {
     }
 
     /// The status bar at the bottom while another process holds the project:
-    /// the holder at the left, in the warning colour, and what its last
-    /// followed commit changed at the right (mock-up M1, MCP-08a).
+    /// the holder at the left, in the warning colour, what its last followed
+    /// commit changed at the right, and *Take back* at the right end while
+    /// an agent holds it over the channel (mock-up M1, MCP-08a, MCP-08b).
+    /// While the window holds the project the bar shows only to say why it
+    /// kept it from an agent.
     pub(super) fn holder_bar(&mut self, ui: &mut egui::Ui) {
-        if !self.observing() {
-            return;
-        }
-        let Some(observed) = self.holder.as_ref() else {
-            return;
+        let observing = self.observing();
+        let (text, last_change, take_back) = match self.holder.as_ref() {
+            Some(observed) if observing => (
+                if self.handover.waits_for_run() {
+                    observed.waiting.clone()
+                } else {
+                    observed.text.clone()
+                },
+                self.last_change.clone(),
+                self.handover
+                    .is_linked()
+                    .then_some(!self.handover.taking_back),
+            ),
+            _ if !observing && self.handover.refused => (REFUSED.to_owned(), None, None),
+            _ => return,
         };
-        let text = observed.text.clone();
-        let last_change = self.last_change.clone();
+        let mut taken = false;
         let response = egui::Panel::bottom("folder-holder")
             .exact_size(BAR_HEIGHT)
             .resizable(false)
@@ -157,9 +197,16 @@ impl FolderApp {
                     .inner_margin(egui::Margin::symmetric(theme::SPACE_LG as i8, 0)),
             )
             .show(ui, |ui| {
-                // The last change first, from the right, so the holder's
-                // words give way to it on a narrow window.
+                // The button and the last change first, from the right, so
+                // the holder's words give way to them on a narrow window.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(enabled) = take_back {
+                        // Disabled, greyed, while the agent finishes.
+                        taken = ui
+                            .add_enabled(enabled, widgets::action(Icon::Undo, TAKE_BACK).compact())
+                            .clicked();
+                        ui.add_space(theme::SPACE_LG);
+                    }
                     if let Some(change) = last_change {
                         // At most half the bar: a long file name is cut,
                         // whole on hover, and the holder keeps its half.
@@ -199,11 +246,15 @@ impl FolderApp {
         region.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Project holder")
         });
+        if taken {
+            self.request_take_back();
+        }
     }
 }
 
-/// *Claude Code via apiforge mcp · since 10:42 · editing is paused here; …*
-pub(super) fn holder_text(holder: &Holder) -> String {
+/// *Claude Code via apiforge mcp · since 10:42 · editing is paused here; …*,
+/// with `doing` saying what the window does.
+pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
     let client = holder.client().map(|client| {
         client
             .chars()
@@ -212,7 +263,7 @@ pub(super) fn holder_text(holder: &Holder) -> String {
             .collect::<String>()
     });
     let who = match (holder.role(), client) {
-        (None, _) => return format!("Another process · {PAUSED}"),
+        (None, _) => return format!("Another process · {doing}"),
         (Some(HolderRole::Window), _) => "Another API Forge window".to_owned(),
         (Some(HolderRole::Agent), Some(client)) => format!("{client} via apiforge mcp"),
         (Some(HolderRole::Agent), None) => "An agent via apiforge mcp".to_owned(),
@@ -223,8 +274,8 @@ pub(super) fn holder_text(holder: &Holder) -> String {
         .since()
         .and_then(|since| wall_clock(since, &chrono::Local))
     {
-        Some(time) => format!("{who} · since {time} · {PAUSED}"),
-        None => format!("{who} · {PAUSED}"),
+        Some(time) => format!("{who} · since {time} · {doing}"),
+        None => format!("{who} · {doing}"),
     }
 }
 
@@ -258,17 +309,28 @@ mod tests {
 
     #[test]
     fn every_holder_is_named_and_a_client_cannot_break_the_line() {
-        let text = holder_text(&Holder::new(HolderRole::Agent, None).with_since("not a time"));
+        let text = holder_text(
+            &Holder::new(HolderRole::Agent, None).with_since("not a time"),
+            PAUSED,
+        );
         assert_eq!(text, format!("An agent via apiforge mcp · {PAUSED}"));
-        let text = holder_text(&Holder::command("run").with_since("not a time"));
+        let text = holder_text(&Holder::command("run").with_since("not a time"), PAUSED);
         assert_eq!(text, format!("apiforge run · {PAUSED}"));
         let long = format!("Claude\nCode{}", "x".repeat(100));
-        let text = holder_text(&Holder::new(HolderRole::Agent, Some(long)).with_since("-"));
+        let text = holder_text(
+            &Holder::new(HolderRole::Agent, Some(long)).with_since("-"),
+            PAUSED,
+        );
         assert!(!text.contains('\n'));
         assert!(text.starts_with(&format!("ClaudeCode{} via", "x".repeat(30))));
         assert_eq!(
-            holder_text(&Holder::unknown()),
+            holder_text(&Holder::unknown(), PAUSED),
             format!("Another process · {PAUSED}")
         );
+        let text = holder_text(
+            &Holder::new(HolderRole::Agent, Some("Claude Code".into())).with_since("-"),
+            WAITING,
+        );
+        assert_eq!(text, format!("Claude Code via apiforge mcp · {WAITING}"));
     }
 }
