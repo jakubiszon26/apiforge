@@ -1,0 +1,11 @@
+# The files of apiforge-<tag>-x86_64-unknown-linux-gnu.tar.gz, below its one
+# top-level directory of the same name (REL-01, criterion 3). The release
+# workflow fails when the archive holds anything else or lacks any of them.
+apiforge
+apiforge-desktop
+CLAUDE-CODE.md
+LICENSE
+README.md
+licenses/FONT-SOURCES.md
+licenses/LICENSE-API-Forge-fonts.txt
+licenses/LICENSE-DejaVu.txt
