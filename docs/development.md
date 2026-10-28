@@ -134,6 +134,14 @@ project step captures the migrated demo shop in Code, Diagram and Split at
 960 × 540 and 1600 × 1000 and uploads them as `qa-captures-<os>` for QA reports
 ([testing](process/testing.md#how-to-fetch-windows-captures-for-a-qa-report)).
 
+Linux acceptance tests also require `/run/user/<runner uid>` to exist and
+belong to the runner with private access. CI provisions it before the suite
+when absent; production discovery never creates it. The MCP-12 tests isolate
+window and server environments in subprocesses, with the window listening
+there and the server lacking XDG and using another TMPDIR. Windows runs the
+same handshake with the server environment cleared except PATH/SystemRoot
+(and the test helper's explicit control inputs).
+
 On Linux each probe gets a fresh 1920 × 1200 Xvfb display and Mesa's Lavapipe Vulkan
 driver; a missing driver fails the job instead of selecting another backend. On Windows
 the DX12 backend is used. Each probe is limited to 45 seconds and must exit
@@ -311,7 +319,7 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
@@ -374,6 +382,22 @@ the process; a later write starts a new session. `project_overview` reports
 this server's own session as `holder: "agent_session"`. Each write reads the
 saved project afresh under that lock.
 
+`project_overview.holder` is a string: `none`, `window`, `another_process`,
+or `agent_session` for this server's active session only. `holder_details` is
+null for no holder or an unreadable description; otherwise it has the same
+`role`, `client` and `since` as write refusals. Foreign agents remain
+`another_process`. `hands_over_on_write` is true only when a live window
+advertises a syntactically valid endpoint. It means a write may request
+hand-over: overview never connects, takes the lock or reads a foreign journal,
+and cannot promise a grant from an unreachable, busy or dirty window. First
+live runs may also request hand-over, only with the existing live permission.
+
+MCP-12 extends the prerelease output schema's holder values with `window` and
+adds those two required fields; old typed clients with a closed holder enum
+may need updating. `tools/list` publishes the exact schema. The crate version
+still supplies `serverInfo.version` and `server_version`; transport protocol,
+language-reference and local holder/channel versions retain their purposes.
+
 - `write_source` saves only a text without errors (`invalid_text` with the
   diagnostics otherwise; warnings are saved) and only over the version the
   model names: a different hash on disk is `stale_source` with the current
@@ -422,7 +446,9 @@ saved project afresh under that lock.
   to hand the project over (below). A window with unsaved work keeps it: `handover_refused` with
   `details.reason` *the window has unsaved work*. A window that has not
   answered within 30 seconds is `handover_pending`, and a window without a
-  channel (an older build) is `held_by_window`. Another process, an agent or
+  channel (an older build), or one that could not be reached, is `held_by_window`.
+  The refusal keeps reading available and does not ask to close the window.
+  Another process, an agent or
   `apiforge apply`, is `held_by_other`. The message and `details.holder` name
   the holder and since when; nothing is written; the read tools still
   answer.
@@ -447,6 +473,29 @@ the owner accepted this risk on 2026-10-28, MCP-08b). Messages are
 newline-delimited JSON with `version: 1`; a line that is not one is ignored
 and logged on stderr (`apiforge mcp: channel: …` in the server,
 `apiforge: channel: …` in the window).
+
+On Unix a client checks existing candidates in order: absolute
+`XDG_RUNTIME_DIR`, `/run/user/<uid>`, `temp_dir()`, `/tmp`, deduplicated and
+bounded by the socket path limit. The uid comes from the metadata of the same
+opened holder file whose description was read, never an environment variable
+or serialized field. Both MCP hand-over and the desktop observer use this
+rule. Only an existing socket and its endpoint directory owned by that uid,
+with no group/world access and neither node a symlink, qualify. Discovery
+changes nothing on disk. It skips absent/unsafe candidates, selects the first
+valid socket and attempts that connection once; failure never replays the
+request against another candidate. Missing owner metadata fails conservatively.
+These checks narrow ordinary filesystem races; same-user malicious processes
+are outside that guarantee. Listening locations, holder JSON and Windows
+named-pipe behaviour are unchanged.
+
+This bounded list cannot find arbitrary custom XDG or temporary directories
+when their environment values are missing or different. Use a shared approved
+candidate (normally `/run/user/<uid>` on Linux); no filesystem search is made.
+On Windows/WSL both processes must run on the same side. A failed connection
+to a live window on Linux `/mnt/<single ASCII letter>/…` adds a qualified
+same-side hint; this path is evidence of a possible mismatch, not proof of
+Windows ownership. Invisible cross-OS locks cannot be diagnosed here. A stale
+holder file never blocks a free lock, even on a mounted Windows drive.
 
 - **The window first.** The server's first write asks the window. A window
   with nothing unsaved and nothing in progress hands the project over at

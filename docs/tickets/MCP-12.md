@@ -2,7 +2,7 @@
 
 - Issue: [#123](https://github.com/jakubiszon26/apiforge/issues/123)
 - Size: M · Owner review: 40 min · One ticket and one implementation PR.
-- State: Analysis and decisions D1–D3 approved by the owner on 2026-10-28; ready for SOL.
+- State: Implemented; QA in progress. Analysis and decisions D1–D3 approved by the owner on 2026-10-28.
 - Risk: MCP output compatibility; connection discovery changes by default (already decided); no project-format migration.
 - Analysis model: GPT-6 Astra · Implementation model: GPT-6.1 SOL, reasoning high.
 

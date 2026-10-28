@@ -55,9 +55,18 @@ enum Event {
 }
 
 enum Command {
-    Send { link: u64, message: Message },
-    Connect { link: u64, endpoint: Endpoint },
-    Close { link: u64 },
+    Send {
+        link: u64,
+        message: Message,
+    },
+    Connect {
+        link: u64,
+        endpoint: Endpoint,
+        owner_uid: Option<u32>,
+    },
+    Close {
+        link: u64,
+    },
 }
 
 /// The listener and the connections, on their own thread.
@@ -124,10 +133,14 @@ impl Channel {
         let _ = self.commands.send(Command::Send { link, message });
     }
 
-    fn connect(&mut self, endpoint: Endpoint) -> u64 {
+    fn connect(&mut self, endpoint: Endpoint, owner_uid: Option<u32>) -> u64 {
         let link = self.next;
         self.next += 1;
-        let _ = self.commands.send(Command::Connect { link, endpoint });
+        let _ = self.commands.send(Command::Connect {
+            link,
+            endpoint,
+            owner_uid,
+        });
         link
     }
 
@@ -187,8 +200,8 @@ async fn serve(
                         tell(Event::Closed { link });
                     }
                 }
-                Some(Command::Connect { link, endpoint }) => {
-                    match tokio::time::timeout(SEND, apiforge_channel::connect(&endpoint)).await {
+                Some(Command::Connect { link, endpoint, owner_uid }) => {
+                    match tokio::time::timeout(SEND, apiforge_channel::connect(&endpoint, owner_uid)).await {
                         Ok(Ok(connection)) => {
                             let reading = read(link, connection, &tell, &closed);
                             open.insert(link, reading);
@@ -665,7 +678,12 @@ impl FolderApp {
         else {
             return;
         };
-        let link = self.handover.channel.connect(endpoint);
+        let owner_uid = self
+            .holder
+            .as_ref()
+            .map(holder::Observed::holder)
+            .and_then(Holder::owner_uid);
+        let link = self.handover.channel.connect(endpoint, owner_uid);
         self.handover.connecting = Some(link);
         self.handover.released = false;
     }

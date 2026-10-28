@@ -2268,6 +2268,9 @@ mod mcp08b {
             let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
             config["environment"]["baseUrl"] = json!(api.base_url());
             fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+            // The shop's illustrative promotion scenario intentionally fails;
+            // this fixture tests a successful HTTP run and unchanged live consent.
+            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
             let mut harness = folder_harness(root, WIDE);
             await_endpoint(&mut harness, root, HolderRole::Window);
             let mut server = mcp12_agent(root, &temp, permitted);

@@ -60,10 +60,11 @@ pub enum Severity {
 /// Who holds the project's writer lock right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum Holder {
     None,
     AnotherProcess,
-    /// This server, for the agent session it keeps until `finish_editing`.
+    Window,
     AgentSession,
 }
 
@@ -104,7 +105,57 @@ pub struct LiveRequests {
     pub source: String,
 }
 
+// Nullable values are always serialized, including null. `required` on an
+// Option field would also remove null from its schema, so mark the keys here.
+fn require_holder_details(schema: &mut schemars::Schema) {
+    schema
+        .ensure_object()
+        .get_mut("required")
+        .and_then(Value::as_array_mut)
+        .expect("an overview has required fields")
+        .push(json!("holder_details"));
+}
+
+fn require_description_fields(schema: &mut schemars::Schema) {
+    schema
+        .ensure_object()
+        .insert("required".into(), json!(["role", "client", "since"]));
+}
+
+/// The public description shared with write refusals; excludes local routing data.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[schemars(transform = require_description_fields)]
+pub struct HolderDetails {
+    pub role: HolderKind,
+    pub client: Option<String>,
+    pub since: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HolderKind {
+    Window,
+    Agent,
+    Command,
+}
+
+impl HolderDetails {
+    fn from_holder(holder: &apiforge_storage::project::Holder) -> Option<Self> {
+        use apiforge_storage::project::HolderRole;
+        Some(Self {
+            role: match holder.role()? {
+                HolderRole::Window => HolderKind::Window,
+                HolderRole::Agent => HolderKind::Agent,
+                HolderRole::Command => HolderKind::Command,
+            },
+            client: holder.client().map(str::to_owned),
+            since: holder.since().map(str::to_owned),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[schemars(transform = require_holder_details)]
 pub struct ProjectOverview {
     pub name: String,
     pub base_url: String,
@@ -118,6 +169,10 @@ pub struct ProjectOverview {
     /// The project's head generation; it advances on every commit.
     pub generation: u64,
     pub holder: Holder,
+    /// Same description as a write refusal, or null for no readable holder.
+    pub holder_details: Option<HolderDetails>,
+    /// A syntactically valid window endpoint permits asking, not a grant.
+    pub hands_over_on_write: bool,
     pub live_requests: LiveRequests,
     /// Live runs an earlier process left unfinished in the project's run
     /// journal; `run` lists them under `interrupted`.
@@ -197,11 +252,22 @@ pub struct Printed {
 pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
     let session = open(folder)?;
     let manifest = session.manifest();
-    let holder = match session.store().has_live_writer() {
-        Ok(false) => Holder::None,
-        Ok(true) => Holder::AnotherProcess,
-        Err(error) => return Err(storage_error(apiforge_project::Error::Storage(error))),
+    let found = session
+        .store()
+        .holder()
+        .map_err(|error| storage_error(apiforge_project::Error::Storage(error)))?;
+    let holder = match found.as_ref().map(apiforge_storage::project::Holder::role) {
+        None => Holder::None,
+        Some(Some(apiforge_storage::project::HolderRole::Window)) => Holder::Window,
+        Some(_) => Holder::AnotherProcess,
     };
+    let holder_details = found.as_ref().and_then(HolderDetails::from_holder);
+    let hands_over_on_write = holder == Holder::Window
+        && found
+            .as_ref()
+            .and_then(apiforge_storage::project::Holder::endpoint)
+            .and_then(apiforge_channel::Endpoint::parse)
+            .is_some();
     // Another writer's journal may describe a run in progress; the server's
     // own session reads it through its store (`ApiforgeServer`).
     let interrupted_runs = match holder {
@@ -252,6 +318,8 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
             .collect(),
         generation: session.loaded_generation(),
         holder,
+        holder_details,
+        hands_over_on_write,
         live_requests: LiveRequests {
             allowed: false,
             source: "no --allow-live".into(),

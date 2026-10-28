@@ -61,6 +61,10 @@ checks, simulates and edits scenarios through API Forge's own project
 session — the same files and bytes the window writes — while the window stays
 open beside it.
 
+On Windows/WSL, run the window and MCP server on the same side; a Windows
+window with Linux MCP (or the reverse) is unsupported, including projects on
+`/mnt/<drive>/`.
+
 1. **Install** API Forge from [Releases](#install) (on Linux, the `.tar.gz`
    holds the `apiforge` command line; the AppImage is the window only).
 2. **Register the server** in the project folder:

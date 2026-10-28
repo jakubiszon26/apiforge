@@ -90,3 +90,39 @@ requests.
 - Exactly-once execution of external requests is not promised; a lost
   response has a way to learn the outcome (`request_id`, revision hashes,
   the journal) and nothing is retried on the server's own initiative.
+
+## MCP-12 amendment: descriptive overview and client discovery (2026-10-28)
+
+Approved decisions D1–D3 and verification are in [MCP-12](../tickets/MCP-12.md).
+The overview retains a string `holder` (`none`, `window`, `another_process`,
+`agent_session`), adds nullable `holder_details` (role/client/since) and
+`hands_over_on_write`. Only this server's active session is `agent_session`;
+a valid window endpoint permits asking without guaranteeing hand-over.
+Overview does not connect or interpret another holder's journal. The owner
+accepted the prerelease closed-enum extension; tools/list exposes its schema
+without repurposing the crate, protocol, language or local format versions.
+
+Listeners keep their existing locations and endpoints remain random names.
+Unix clients, including the window observing a server, discover existing
+sockets in order: absolute XDG_RUNTIME_DIR, `/run/user/<uid>`, temp_dir(),
+`/tmp`. Candidates are deduplicated and bounded by the Unix path limit. The uid
+comes from metadata of the same opened holder file that supplied its bytes;
+it remains in memory, never in the version-one JSON. Missing metadata fails
+conservatively. An endpoint directory must be a real directory, and its
+socket a real socket, both owned by that uid with no group/world access;
+symlinks and other node types are skipped. The shared `/tmp` base is allowed
+because the endpoint directory provides privacy. Discovery creates, removes
+and changes nothing. It selects the first valid socket; a failed connection
+does not retry another endpoint or replay a hand-over request. Filesystem
+checks narrow ordinary races, not malicious same-user activity. Windows
+retains its named pipe and existing access rules.
+
+A fixed candidate list cannot discover an arbitrary custom XDG or TMPDIR
+when its value is absent from the client. Same-side Windows/WSL execution is
+required. After a failed connection to a live window, Linux projects under
+`/mnt/<single ASCII letter>/…` receive a qualified same-side hint in the
+existing `held_by_window`, `wrote: false` refusal. Reads remain available;
+there is no close-window advice. A path and failed connection do not establish
+a Windows writer, and invisible cross-OS locks remain unsupported. Stale
+metadata never prevents acquiring a free OS lock. No project-format, channel
+message, live-consent or ownership rule changes.

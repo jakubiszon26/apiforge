@@ -150,9 +150,10 @@ impl Endpoint {
     /// this user. The base is the first of `$XDG_RUNTIME_DIR` (when
     /// absolute), the temporary directory and `/tmp` that keeps the socket
     /// path within [`MAX_SOCKET_PATH`] bytes: the system limits a socket path
-    /// to a little over a hundred bytes. Both ends compute it from their
-    /// environment, which processes of one user session share; the holder
-    /// file names only the endpoint, never a path.
+    /// to a little over a hundred bytes. This selects only the listening
+    /// address. Clients discover existing
+    /// sockets with the holder-file owner; the holder file names only the
+    /// endpoint, never a path.
     #[cfg(unix)]
     pub fn socket_path(&self) -> PathBuf {
         let socket = |directory: PathBuf| directory.join(&self.0).join("socket");
@@ -251,9 +252,75 @@ impl Writer {
     }
 }
 
-/// Connects to `endpoint`. Must be called inside a Tokio runtime.
-pub async fn connect(endpoint: &Endpoint) -> io::Result<Connection> {
-    platform::connect(endpoint).await.map(Connection::new)
+/// Connects to `endpoint` using the uid from the same opened holder file
+/// that supplied its name. Unix discovery fails without that metadata;
+/// Windows ignores it and uses its existing named pipe. Must run in Tokio.
+pub async fn connect(endpoint: &Endpoint, owner_uid: Option<u32>) -> io::Result<Connection> {
+    platform::connect(endpoint, owner_uid)
+        .await
+        .map(Connection::new)
+}
+
+/// Bounded client candidates, independent of the listener's address selection.
+#[cfg(unix)]
+fn client_socket_paths(
+    endpoint: &Endpoint,
+    uid: u32,
+    xdg: Option<PathBuf>,
+    temp: PathBuf,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for base in xdg.into_iter().chain([
+        PathBuf::from(format!("/run/user/{uid}")),
+        temp,
+        PathBuf::from("/tmp"),
+    ]) {
+        if !base.is_absolute() {
+            continue;
+        }
+        let path = base.join(endpoint.name()).join("socket");
+        if path.as_os_str().len() <= MAX_SOCKET_PATH && !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+/// Discovery is read-only. Choose one safe socket, and never replay a request
+/// against another candidate if connecting to that socket fails.
+#[cfg(unix)]
+fn select_socket(candidates: &[PathBuf], owner_uid: Option<u32>) -> io::Result<PathBuf> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let uid = owner_uid.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "the holder file has no owner metadata",
+        )
+    })?;
+    for path in candidates {
+        let Some(directory) = path.parent() else {
+            continue;
+        };
+        let (Ok(parent), Ok(socket)) = (
+            std::fs::symlink_metadata(directory),
+            std::fs::symlink_metadata(path),
+        ) else {
+            continue;
+        };
+        if parent.is_dir()
+            && socket.file_type().is_socket()
+            && parent.uid() == uid
+            && socket.uid() == uid
+            && parent.mode() & 0o077 == 0
+            && socket.mode() & 0o077 == 0
+        {
+            return Ok(path.clone());
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "no private socket for the holder",
+    ))
 }
 
 /// A listening endpoint. On Unix the socket and its directory are removed
@@ -335,8 +402,24 @@ mod platform {
         }
     }
 
-    pub(super) async fn connect(endpoint: &Endpoint) -> io::Result<UnixStream> {
-        UnixStream::connect(endpoint.socket_path()).await
+    pub(super) async fn connect(
+        endpoint: &Endpoint,
+        owner_uid: Option<u32>,
+    ) -> io::Result<UnixStream> {
+        let uid = owner_uid.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the holder file has no owner metadata",
+            )
+        })?;
+        let paths = super::client_socket_paths(
+            endpoint,
+            uid,
+            std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+            std::env::temp_dir(),
+        );
+        let socket = super::select_socket(&paths, owner_uid)?;
+        UnixStream::connect(socket).await
     }
 }
 
@@ -378,7 +461,10 @@ mod platform {
         }
     }
 
-    pub(super) async fn connect(endpoint: &Endpoint) -> io::Result<NamedPipeClient> {
+    pub(super) async fn connect(
+        endpoint: &Endpoint,
+        _owner_uid: Option<u32>,
+    ) -> io::Result<NamedPipeClient> {
         let name = endpoint.pipe_name();
         for _ in 0..40 {
             match ClientOptions::new().open(&name) {
@@ -395,6 +481,19 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn owner_uid(endpoint: &Endpoint) -> Option<u32> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Some(std::fs::metadata(endpoint.socket_path()).unwrap().uid())
+        }
+        #[cfg(windows)]
+        {
+            let _ = endpoint;
+            None
+        }
+    }
 
     #[test]
     fn every_message_round_trips_with_its_version() {
@@ -502,7 +601,10 @@ mod tests {
                 let end = reader.next().await.unwrap();
                 (first, second, end, listener)
             });
-            let (mut reader, mut writer) = connect(&endpoint).await.unwrap().split();
+            let (mut reader, mut writer) = connect(&endpoint, owner_uid(&endpoint))
+                .await
+                .unwrap()
+                .split();
             writer
                 .inner
                 .write_all(b"{\"version\":1,\"type\":\"nonsense\"}\r\n")
@@ -556,7 +658,10 @@ mod tests {
                 let (mut reader, _writer) = listener.accept().await.unwrap().split();
                 reader.next().await
             });
-            let (_reader, mut writer) = connect(&endpoint).await.unwrap().split();
+            let (_reader, mut writer) = connect(&endpoint, owner_uid(&endpoint))
+                .await
+                .unwrap()
+                .split();
             writer
                 .inner
                 .write_all(&vec![b'x'; MAX_LINE + 10])

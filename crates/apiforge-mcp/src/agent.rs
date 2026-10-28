@@ -30,7 +30,7 @@ use serde_json::json;
 use std::{
     collections::VecDeque,
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -741,11 +741,11 @@ impl AgentSession {
         probe: &ProjectStore,
         window: &Holder,
     ) -> Result<ProjectStore, ToolError> {
-        let connection = match hub.ask(endpoint, client) {
+        let connection = match hub.ask(endpoint, window.owner_uid(), client) {
             Answer::Granted(connection) => connection,
             Answer::Refused(reason) => return Err(refused(&reason, window)),
             Answer::Pending => return Err(pending(window)),
-            Answer::Unreachable => return Err(held(window)),
+            Answer::Unreachable => return Err(unreachable(window, probe.root())),
         };
         let deadline = Instant::now() + GRANTED_LOCK;
         loop {
@@ -1054,6 +1054,31 @@ fn description(holder: &Holder) -> serde_json::Value {
     })
 }
 
+/// A failed connection is evidence for a possible same-side mismatch only
+/// on a Linux Windows-drive mount, never proof of a Windows writer.
+fn unreachable(window: &Holder, root: &Path) -> ToolError {
+    let error = held(window);
+    #[cfg(target_os = "linux")]
+    {
+        let mut parts = root.components();
+        let mounted_drive = parts.next() == Some(std::path::Component::RootDir)
+            && parts.next().is_some_and(|part| part.as_os_str() == "mnt")
+            && parts.next().is_some_and(|part| {
+                let bytes = part.as_os_str().as_encoded_bytes();
+                bytes.len() == 1 && bytes[0].is_ascii_alphabetic()
+            })
+            && parts.next().is_some();
+        if mounted_drive {
+            let mut error = error;
+            error.message.push_str(". This project is on a Windows drive; if the window and MCP run on different sides of Windows/WSL, run both on the same side");
+            return error;
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = root;
+    error
+}
+
 /// The refusal of a write while another process holds the project: who and
 /// since when. Never advice to edit a file directly.
 fn held(holder: &Holder) -> ToolError {
@@ -1062,7 +1087,7 @@ fn held(holder: &Holder) -> ToolError {
         (Some(HolderRole::Window), _) => (
             ErrorCode::HeldByWindow,
             format!(
-                "Another API Forge window has held this project since {since} and saves it there; nothing was written. Ask the person to close the project in that window, then write again; reading works meanwhile"
+                "Another API Forge window has held this project since {since} and saves it there; nothing was written. The window could not be reached for hand-over; reading remains available"
             ),
         ),
         (Some(HolderRole::Command), client) => (

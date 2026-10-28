@@ -120,7 +120,12 @@ impl Hub {
 
     /// Asks the window listening on `endpoint` for the project and waits up
     /// to thirty seconds for its answer.
-    pub(crate) fn ask(&self, endpoint: &str, client: Option<String>) -> Answer {
+    pub(crate) fn ask(
+        &self,
+        endpoint: &str,
+        owner_uid: Option<u32>,
+        client: Option<String>,
+    ) -> Answer {
         let Some(endpoint) = Endpoint::parse(endpoint) else {
             eprintln!("apiforge mcp: channel: the holder names no valid endpoint");
             return Answer::Unreachable;
@@ -131,7 +136,7 @@ impl Hub {
         };
         self.handle.block_on(async move {
             let asked = tokio::time::timeout(ANSWER, async {
-                let mut connection = apiforge_channel::connect(&endpoint).await?;
+                let mut connection = apiforge_channel::connect(&endpoint, owner_uid).await?;
                 connection.writer.send(&request).await?;
                 loop {
                     match connection.reader.next().await? {
