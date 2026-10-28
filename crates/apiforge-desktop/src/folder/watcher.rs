@@ -44,6 +44,15 @@ pub struct Watcher {
     pub recovery_required: bool,
     /// The latest answer to who holds the project, until the window takes it.
     probe: Option<Option<Holder>>,
+    /// How long between two checks: [`POLL_INTERVAL`], longer in tests that
+    /// prove a change was followed without waiting for a check.
+    interval: Duration,
+    /// No check starts before this: the window has decided to hand the
+    /// project over and waits for the agent's first save (MCP-08b).
+    held_until: Option<Instant>,
+    /// When each check started, for tests of when the window reads.
+    #[cfg(test)]
+    pub started: Vec<Instant>,
 }
 
 impl Watcher {
@@ -60,7 +69,33 @@ impl Watcher {
             problem: None,
             recovery_required: false,
             probe: None,
+            interval: POLL_INTERVAL,
+            held_until: None,
+            #[cfg(test)]
+            started: Vec::new(),
         }
+    }
+
+    /// Checks every `interval` from now on instead of once a second: a test
+    /// seam (MCP-08b), so that only a rescan can explain a prompt follow.
+    #[cfg(test)]
+    pub fn set_interval(&mut self, interval: Duration) {
+        self.interval = interval;
+        self.due = Some(Instant::now() + interval);
+    }
+
+    /// Starts no check before `until`, whatever asks for one, until
+    /// [`Self::release_hold`]: a window handing the project over must not
+    /// read the files the agent's first commit replaces, which Windows can
+    /// refuse the commit (MCP-08b). The check in flight, if any, is the
+    /// caller's to wait for.
+    pub fn hold(&mut self, until: Instant) {
+        self.held_until = Some(until);
+    }
+
+    /// Checks may start again, at once if one is due.
+    pub fn release_hold(&mut self) {
+        self.held_until = None;
     }
 
     /// Checks again as soon as possible, for example after a file operation.
@@ -140,15 +175,28 @@ impl Watcher {
                 Err(error) => self.problem = Some(error.to_string()),
             }
         }
+        if let Some(until) = self.held_until {
+            if now < until {
+                return (
+                    outcome,
+                    until.saturating_duration_since(now).min(self.interval),
+                );
+            }
+            self.held_until = None;
+        }
         let due = self.due.unwrap_or(now);
         if self.running || now < due {
             return (
                 outcome,
-                due.saturating_duration_since(now).max(POLL_INTERVAL / 4),
+                due.saturating_duration_since(now)
+                    .max(POLL_INTERVAL / 4)
+                    .min(self.interval),
             );
         }
         self.running = true;
-        self.due = Some(now + POLL_INTERVAL);
+        self.due = Some(now + self.interval);
+        #[cfg(test)]
+        self.started.push(now);
         let check = session.external_check();
         let observed = session.is_read_only().then(|| session.store().clone());
         let sender = self.sender.clone();
@@ -166,7 +214,7 @@ impl Watcher {
                 }
             }
         });
-        (outcome, POLL_INTERVAL)
+        (outcome, self.interval.min(POLL_INTERVAL))
     }
 
     /// Checks the folder now and applies the result, for tests. A check
