@@ -388,8 +388,21 @@ live run repeated with a `request_id` this server has answered returns the
 recorded result with `replayed: true` and sends nothing; the same id for
 another document or other inputs is `invalid_inputs`. The server keeps the
 last 64 results; an older id it answered is `unknown_outcome`, never run
-again. A new server does not remember an id, and exactly-once is not
-promised.
+again. Exactly-once is not promised.
+
+**The record of request ids.** Before a live run with a `request_id` sends
+its first request, the id, the path and the time are written atomically to
+`.apiforge/local/agent-requests.json`, under the writer lock, as the journal
+is: machine-local, untracked, never part of the project's format. A new
+server that finds an id there answers `unknown_outcome` with the record's
+`path` and `started_at` and the journal's `interrupted` runs, and sends
+nothing; the model uses a new id to run again. The record keeps the 1 000
+most recent ids, the oldest dropped first, and an id is at most 256 bytes
+(`too_large`). A record that cannot be read (damaged, or written by a newer
+version) is never overwritten: every live run with a `request_id` is refused
+with `project_unreadable` naming the file until it is moved aside, because
+the server could not tell whether the id already ran; a live run without a
+`request_id` still works.
 
 #### The four ends of a live run
 
@@ -408,7 +421,8 @@ promised.
   empty; when it did not, its entry stays for the next `run`.
 - **Process killed**: nothing runs; the operating system releases the lock and
   the entry stays. The next `run` of a new server, or the window when it opens
-  the project, reports it as interrupted.
+  the project, reports it as interrupted; the same `request_id` on a new
+  server is `unknown_outcome`.
 
 ### Resources
 
