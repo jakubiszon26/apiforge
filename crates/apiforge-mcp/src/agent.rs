@@ -10,7 +10,8 @@
 //! response can be asked for again without a second revision.
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
-    executor, folder,
+    folder, requests,
+    secrets::{self, Secrets},
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
 use apiforge_project::{
@@ -157,13 +158,15 @@ pub struct Finished {
 /// wait for it.
 pub struct AgentSession {
     folder: PathBuf,
-    /// Where `APIFORGE_SECRET_<NAME>` is read from; the process environment
-    /// when `None`.
-    environment: Option<Vec<(OsString, OsString)>>,
+    /// Where the known secret values are read from, at each call.
+    secrets: Secrets,
     state: Mutex<State>,
     /// Whether the session holds the lock, readable while a write holds
     /// `state`: the overview never waits for a write.
     active: AtomicBool,
+    /// The session's store while it holds the lock, readable while a write
+    /// holds `state`, for the journal reads of the overview and `run`.
+    held: Mutex<Option<ProjectStore>>,
 }
 
 #[derive(Default)]
@@ -255,22 +258,24 @@ impl std::fmt::Debug for AgentSession {
 
 impl AgentSession {
     pub fn new(folder: PathBuf) -> Self {
-        Self {
-            folder,
-            environment: None,
-            state: Mutex::default(),
-            active: AtomicBool::new(false),
-        }
+        Self::with_secrets(folder, Secrets::default())
     }
 
     /// A session that reads `APIFORGE_SECRET_<NAME>` from `environment`
     /// instead of the process environment: a test seam.
     pub fn with_environment(folder: PathBuf, environment: Vec<(OsString, OsString)>) -> Self {
+        Self::with_secrets(folder, Secrets::with_environment(None, environment))
+    }
+
+    /// A session whose known secret values come from `secrets`: the
+    /// server's environment and its `--secrets` file.
+    pub fn with_secrets(folder: PathBuf, secrets: Secrets) -> Self {
         Self {
             folder,
-            environment: Some(environment),
+            secrets,
             state: Mutex::default(),
             active: AtomicBool::new(false),
+            held: Mutex::default(),
         }
     }
 
@@ -287,6 +292,31 @@ impl AgentSession {
     /// The session holds the writer lock.
     pub fn is_active(&self) -> bool {
         self.active.load(Ordering::Acquire)
+    }
+
+    /// The writer lock for a live run (MCP-06): the session's, taken now
+    /// when the project is free, refused with the holder otherwise. The
+    /// store knows the session's secrets.
+    pub(crate) fn writer(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
+        self.set_client(client);
+        let mut state = self.state();
+        self.store(&mut state)
+    }
+
+    /// The session's store while it holds the lock. Never waits for a
+    /// write.
+    pub(crate) fn held(&self) -> Option<ProjectStore> {
+        self.held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn set_held(&self, store: Option<ProjectStore>) {
+        *self
+            .held
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = store;
     }
 
     /// Replaces the text of a registered document, exactly, when it is the
@@ -415,6 +445,12 @@ impl AgentSession {
     /// window's Publish transaction, when it is the version the model names.
     pub fn publish(&self, arguments: &PublishArguments) -> Result<PublishResult, ToolError> {
         let path = folder::validate(&arguments.path)?;
+        // The rules of a live run's id (MCP-06): bounded, and never a known
+        // secret value.
+        if let Some(id) = &arguments.request_id {
+            requests::check_id(id)?;
+            secrets::refuse_in_text(id, &self.secrets.values()?)?;
+        }
         let mut state = self.state();
         if let Some(recorded) = state.answered.recorded(arguments)? {
             return Ok(recorded);
@@ -524,6 +560,7 @@ impl AgentSession {
         let mut state = self.state();
         state.recovery_required = false;
         let finished = state.store.take().is_some();
+        self.set_held(None);
         self.active.store(false, Ordering::Release);
         Finished { finished }
     }
@@ -547,11 +584,12 @@ impl AgentSession {
             None => {
                 let store = self.take_lock(state.client.clone())?;
                 state.store = Some(store.clone());
+                self.set_held(Some(store.clone()));
                 self.active.store(true, Ordering::Release);
                 store
             }
         };
-        store.set_known_secrets(self.secrets()?.into_iter().map(|(_, value)| value));
+        store.set_known_secrets(self.secrets.values()?);
         Ok(store)
     }
 
@@ -578,20 +616,11 @@ impl AgentSession {
         Err(held(&Holder::unknown()))
     }
 
-    fn secrets(&self) -> Result<Vec<(String, String)>, ToolError> {
-        match &self.environment {
-            Some(environment) => executor::secrets_from(None, environment.clone()),
-            None => executor::secrets(None),
-        }
-        .map(|found| found.into_iter().collect())
-        .map_err(|message| ToolError::new(ErrorCode::ProjectUnreadable, message))
-    }
-
     /// A text containing a known secret value is refused before anything
     /// else touches the project; the value is never repeated.
     fn refuse_secrets(&self, text: &str) -> Result<(), ToolError> {
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
-        probe.set_known_secrets(self.secrets()?.into_iter().map(|(_, value)| value));
+        probe.set_known_secrets(self.secrets.values()?);
         probe
             .validate_managed_payload(text.as_bytes())
             .map_err(|_| secret_in_text())

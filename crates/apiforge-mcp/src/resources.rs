@@ -50,6 +50,12 @@ pub fn list(folder: &Path) -> Result<Vec<Resource>, ToolError> {
 /// The text behind `uri`: the reference, or the saved bytes of a registered
 /// document as text.
 pub fn read(folder: &Path, uri: &str) -> Result<String, ToolError> {
+    read_with(folder, uri, &[])
+}
+
+/// As `read`; a saved source that contains one of `secrets` is withheld
+/// with `secret_in_source`.
+pub fn read_with(folder: &Path, uri: &str, secrets: &[String]) -> Result<String, ToolError> {
     if uri == REFERENCE_URI {
         return Ok(reference::TEXT.to_owned());
     }
@@ -65,7 +71,7 @@ pub fn read(folder: &Path, uri: &str) -> Result<String, ToolError> {
             "The resource path is not percent-encoded UTF-8",
         )
     })?;
-    let source = tools::read_source(folder, &path)?;
+    let source = tools::read_source_with(folder, &path, secrets)?;
     match source.unavailable.as_deref() {
         None => Ok(source.text),
         Some("too_large") => Err(ToolError::new(
