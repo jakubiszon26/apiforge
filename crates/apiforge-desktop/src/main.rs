@@ -591,6 +591,15 @@ mod tests {
         );
     }
 
+    /// REL-01 (#115), criterion 5: `--version` is an argument of its own, and
+    /// what it prints is the binary's name and the workspace version.
+    #[test]
+    fn version_is_an_argument_of_its_own() {
+        assert_eq!(format!("{:?}", parse(&["--version"])), "Ok(Version)");
+        assert!(parse(&["--version", "fixtures/workspace.json"]).is_err());
+        assert!(parse(&["--check", "x.json", "--version"]).is_err());
+    }
+
     fn screenshot(
         folder: Option<&str>,
         project: Option<&str>,
