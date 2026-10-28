@@ -75,12 +75,12 @@ impl ErrorCode {
     }
 }
 
-/// Whether a call changed the project: `false`, `true`, or `"unknown"` when
-/// a commit failed after its activation and the project needs recovery.
+/// Whether a call that could not do what was asked changed the project:
+/// `false`, or `"unknown"` when a commit failed after its activation and the
+/// project needs recovery. An error never answers `true`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wrote {
     No,
-    Yes,
     Unknown,
 }
 
@@ -88,7 +88,6 @@ impl Serialize for Wrote {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
             Self::No => serializer.serialize_bool(false),
-            Self::Yes => serializer.serialize_bool(true),
             Self::Unknown => serializer.serialize_str("unknown"),
         }
     }
@@ -101,8 +100,8 @@ impl JsonSchema for Wrote {
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "false, true, or \"unknown\" when a commit failed after its activation",
-            "oneOf": [{ "type": "boolean" }, { "const": "unknown" }]
+            "description": "false, or \"unknown\" when a commit failed after its activation",
+            "oneOf": [{ "const": false }, { "const": "unknown" }]
         })
     }
 }

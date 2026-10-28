@@ -21,7 +21,10 @@ use serde_json::json;
 use std::{
     ffi::OsString,
     path::PathBuf,
-    sync::{Mutex, MutexGuard},
+    sync::{
+        Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
@@ -104,6 +107,9 @@ pub struct AgentSession {
     /// when `None`.
     environment: Option<Vec<(OsString, OsString)>>,
     state: Mutex<State>,
+    /// Whether the session holds the lock, readable while a write holds
+    /// `state`: the overview never waits for a write.
+    active: AtomicBool,
 }
 
 #[derive(Default)]
@@ -132,6 +138,7 @@ impl AgentSession {
             folder,
             environment: None,
             state: Mutex::default(),
+            active: AtomicBool::new(false),
         }
     }
 
@@ -142,6 +149,7 @@ impl AgentSession {
             folder,
             environment: Some(environment),
             state: Mutex::default(),
+            active: AtomicBool::new(false),
         }
     }
 
@@ -157,7 +165,7 @@ impl AgentSession {
 
     /// The session holds the writer lock.
     pub fn is_active(&self) -> bool {
-        self.state().store.is_some()
+        self.active.load(Ordering::Acquire)
     }
 
     /// Replaces the text of a registered document, exactly, when it is the
@@ -216,7 +224,7 @@ impl AgentSession {
             .with_details(json!({ "diagnostics": diagnostics, "omitted": omitted })));
         }
         if let Err(error) = session.save(&id) {
-            return Err(commit_failed(&mut state, &store, error));
+            return Err(commit_failed(&mut state, &store, error, &path, false));
         }
         let after = read(&store, &watched)?;
         let changed = changed(&watched, &before, &after);
@@ -256,7 +264,7 @@ impl AgentSession {
         let id = match session.create_document_sealed(kind, path.as_str(), &arguments.text) {
             Ok(Ok(id)) => id,
             Ok(Err(check)) => return Err(refusal(&check, &arguments.text, &store, &path)),
-            Err(error) => return Err(commit_failed(&mut state, &store, error)),
+            Err(error) => return Err(commit_failed(&mut state, &store, error, &path, true)),
         };
         let after = read(&store, watched)?;
         let document = session.document(&id).ok_or_else(unknown_document)?;
@@ -286,9 +294,9 @@ impl AgentSession {
     pub fn finish_editing(&self) -> Finished {
         let mut state = self.state();
         state.recovery_required = false;
-        Finished {
-            finished: state.store.take().is_some(),
-        }
+        let finished = state.store.take().is_some();
+        self.active.store(false, Ordering::Release);
+        Finished { finished }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -310,6 +318,7 @@ impl AgentSession {
             None => {
                 let store = self.take_lock(state.client.clone())?;
                 state.store = Some(store.clone());
+                self.active.store(true, Ordering::Release);
                 store
             }
         };
@@ -445,6 +454,8 @@ fn commit_failed(
     state: &mut State,
     store: &ProjectStore,
     error: apiforge_project::Error,
+    source: &ProjectPath,
+    creating: bool,
 ) -> ToolError {
     if matches!(store.read(&[]), Err(ProjectError::RecoveryRequired)) {
         state.recovery_required = true;
@@ -456,9 +467,27 @@ fn commit_failed(
     }
     match error {
         apiforge_project::Error::Storage(ProjectError::Secret) => secret_in_text(),
+        // The storage's own expected-state check found a file changed on disk
+        // after the session read it: the document itself, or the checkpoint
+        // or the registry, which another program edited without the lock.
+        apiforge_project::Error::Storage(ProjectError::Conflict { path })
+            if path == store.root().join(source.as_str()) =>
+        {
+            if creating {
+                ToolError::new(
+                    ErrorCode::PathExists,
+                    "A file appeared at this path while the document was prepared; nothing was written",
+                )
+            } else {
+                ToolError::new(
+                    ErrorCode::StaleSource,
+                    "The document changed on disk while the write was prepared; nothing was written. Read it again and write with the new source_sha256",
+                )
+            }
+        }
         apiforge_project::Error::Storage(ProjectError::Conflict { .. }) => ToolError::new(
-            ErrorCode::StaleSource,
-            "A file changed on disk while the write was prepared; nothing was written. Read the document again and write with the new source_sha256",
+            ErrorCode::StaleProject,
+            "The project's checkpoint or registry changed on disk while the write was prepared; nothing was written. Check again and write with the new generation",
         ),
         error => load_error(error),
     }

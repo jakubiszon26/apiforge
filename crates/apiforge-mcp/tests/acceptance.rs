@@ -1828,8 +1828,7 @@ fn mcp04_criterion_1_write_source_saves_exactly_with_the_checkpoint() {
             .diagnostics
             .iter()
             .all(|d| d.severity == Severity::Warning),
-        "{:?}",
-        result.diagnostics
+        "only warnings"
     );
 
     // The checkpoint describes the saved text; every other record is kept.
@@ -2066,7 +2065,7 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
         let error = agent
             .create_document(&create_args(kind, path, text))
             .unwrap_err();
-        assert_eq!(error.code, code, "{path}: {}", error.message);
+        assert_eq!(error.code, code, "{path}");
         assert_eq!(error.wrote, Wrote::No, "{path}");
         assert!(!error.message.contains(path), "the path is not quoted");
         if code == ErrorCode::InvalidText {
@@ -2083,8 +2082,7 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
             .unwrap()
             .iter()
             .any(|d| d["severity"] == "error" && d["line"] == 2),
-        "{}",
-        error_text(&error)
+        "an error on line 2"
     );
 }
 
@@ -2224,7 +2222,7 @@ fn mcp04_criterion_6_a_failure_after_activation_is_recovery_required() {
         || agent.create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT)),
     )
     .unwrap_err();
-    assert_eq!(error.code, ErrorCode::RecoveryRequired, "{}", error.message);
+    assert_eq!(error.code, ErrorCode::RecoveryRequired);
     assert_eq!(error.wrote, Wrote::Unknown);
     assert_eq!(serde_json::to_value(&error).unwrap()["wrote"], "unknown");
     assert!(head_active(root));
@@ -2366,15 +2364,14 @@ fn mcp04_criterion_8_a_write_while_another_process_holds_the_project_is_refused(
                 .create_document(&create_args(Kind::Scenario, DRAFT, DRAFT_TEXT))
                 .unwrap_err(),
         ] {
-            assert_eq!(error.code, code, "{}", error.message);
+            assert_eq!(error.code, code, "{named}");
             assert_eq!(error.wrote, Wrote::No);
-            assert!(error.message.contains(named), "{}", error.message);
-            assert!(error.message.contains(&since), "{}", error.message);
+            assert!(error.message.contains(named), "names {named}");
+            assert!(error.message.contains(&since), "says since when");
             let lower = error.message.to_lowercase();
             assert!(
                 !lower.contains("directly") && !lower.contains("edit the file"),
-                "no advice to edit the file directly: {}",
-                error.message
+                "no advice to edit the file directly"
             );
             assert_eq!(error.details["holder"]["since"], since.as_str());
         }
@@ -2409,8 +2406,7 @@ fn mcp04_criterion_8_a_holder_without_a_description_is_held_by_other() {
     assert_eq!(error.code, ErrorCode::HeldByOther);
     assert!(
         error.message.contains("Another process"),
-        "{}",
-        error.message
+        "the generic wording"
     );
     assert!(!root.join(DRAFT).exists());
 }
@@ -2511,4 +2507,100 @@ fn mcp04_criterion_10_identities_survive_a_server_save() {
         sealed,
         "opening the project in the window changes no identity"
     );
+}
+
+// ----- MCP-04 review round 1 of #111 -----
+
+/// A new document under a folder that exists only in another letter case
+/// would create a second spelling of that folder: `path_exists`, checked
+/// and created alike, and nothing is written.
+#[test]
+fn mcp04_review_a_folder_in_another_letter_case_is_path_exists() {
+    let directory = checkout();
+    let root = directory.path();
+    let before = shared(root);
+    let check = tools::check_text(root, "Components/discount.afs", DISCOUNT_TEXT).unwrap();
+    assert_eq!(
+        check.problems.iter().map(|p| p.code).collect::<Vec<_>>(),
+        [ErrorCode::PathExists]
+    );
+    let error = agent(root)
+        .create_document(&create_args(
+            Kind::Component,
+            "Components/discount.afs",
+            DISCOUNT_TEXT,
+        ))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PathExists);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(shared(root), before);
+}
+
+/// The storage's own check finds a file changed on disk after the session
+/// read it (another program writing without the lock): the document itself
+/// is `stale_source`, a new document's path `path_exists`, the checkpoint
+/// `stale_project`. Nothing is written. The overview's question whether the
+/// session is active is answered during the write.
+#[test]
+fn mcp04_review_a_file_changed_during_the_commit_names_what_changed() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let agent = Arc::new(agent(&root));
+    let (text, hash, _) = read(&root, SCENARIO);
+    // The session starts with a write that changes nothing.
+    agent
+        .write_source(&write_args(SCENARIO, &text, &hash))
+        .unwrap();
+    let cases = [
+        (SCENARIO, ErrorCode::StaleSource, false),
+        (DISCOUNT, ErrorCode::PathExists, true),
+        (DIAGRAM, ErrorCode::StaleProject, false),
+    ];
+    for (changed, code, creating) in cases {
+        let target = root.join(changed);
+        let original = fs::read(&target).ok();
+        let during = agent.clone();
+        let error = faults::with_hook(
+            {
+                let target = target.clone();
+                let mut done = false;
+                move |event| {
+                    let in_staging = event
+                        .path
+                        .components()
+                        .any(|part| part.as_os_str() == "transactions");
+                    if in_staging && !done {
+                        done = true;
+                        assert!(
+                            during.is_active(),
+                            "answered while the write holds the session"
+                        );
+                        let mut bytes = fs::read(&target).unwrap_or_default();
+                        bytes.extend_from_slice(b"\n// written by another program\n");
+                        fs::write(&target, bytes).unwrap();
+                    }
+                    Ok(())
+                }
+            },
+            || {
+                if creating {
+                    agent.create_document(&create_args(Kind::Component, DISCOUNT, DISCOUNT_TEXT))
+                } else {
+                    agent
+                        .write_source(&write_args(SCENARIO, &commented(&text), &hash))
+                        .map(|_| unreachable!("the write must be refused"))
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, code, "{changed}");
+        assert_eq!(error.wrote, Wrote::No, "{changed}");
+        assert!(!head_active(&root), "{changed}: nothing activated");
+        match original {
+            Some(bytes) => fs::write(&target, bytes).unwrap(),
+            None => fs::remove_file(&target).unwrap(),
+        }
+    }
+    assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), text);
+    assert!(entry(&root, DISCOUNT).is_none());
 }
