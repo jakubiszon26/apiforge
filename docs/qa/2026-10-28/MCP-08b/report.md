@@ -192,6 +192,32 @@ directory deep enough to put the socket path over the system's limit left
 both ends without an endpoint. Over 100 bytes the temporary directory is
 used, by the same rule on both sides.
 
+## Review round 1
+
+`f804722` answers the automated review of #114 (cubic) and one Windows CI
+failure; the workspace suite passed again on Linux (1 258 passed, 0 failed,
+33 ignored). The release-binary captures were not retaken: nothing drawn
+changed.
+
+- **Windows CI, run 40660700539.** `a_clean_window_hands_over_and_shows_the_save_it_was_told_of`
+  got `recovery_required`: right after the grant the window's check read
+  the files the agent's first commit was replacing, and Windows refused the
+  replace after the commit's activation. The window now grants only with no
+  check in flight and postpones its next check; the agent's `saved` makes
+  it look. The same test had passed on Windows in the pull request's own
+  run. A check that meets a later commit is the observer's existing risk on
+  Windows (MCP-08a) and is not changed here.
+- A request retried after a stale release is answered only for the same
+  project, never after a newer request or for an agent that stopped
+  waiting; opening another project refuses a waiting request.
+- The server tells `released` before a waiting write can start a new
+  session, and only to the windows it lets go.
+- The socket base falls back to `/tmp` when the temporary directory is too
+  long as well.
+- Not changed: the Windows pipe's default access (restricting it needs
+  `unsafe`), and the window's channel thread sending one message at a time
+  (each bounded to two seconds, same-user peers).
+
 ## Windows
 
 From CI run 40656947002 of this branch at `47ed5e4` (windows-2022), the
