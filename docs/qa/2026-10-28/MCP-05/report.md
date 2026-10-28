@@ -3,7 +3,8 @@
 - Branch and commit: `feat/mcp-05-publish`. Acceptance tests `73aaab7`,
   criterion 3's fixture corrected in `5017ed6`; implementation `395cc28`;
   development guide `5c567ef`; the window's Publish compared through the
-  window `0a5df14`; main with MCP-06 merged and reconciled in `c10f7c2`.
+  window `0a5df14`; main with MCP-06 merged and reconciled in `c10f7c2`;
+  QA report `1e0589d`; review round 1 below.
 - Built with: `cargo build --release --locked -p apiforge-cli -p
   apiforge-desktop` at `c10f7c2` (release binaries `apiforge` and
   `apiforge-desktop`).
@@ -159,8 +160,8 @@ document's base revision is 3, no error notice is shown and no document is
 unsaved. In session 6 the release window opened beside a session that had
 just published: the bar says *qa via apiforge mcp · since 11:19 · editing
 is paused here; this window follows every change*
-([960 × 540](observing-published-960x540.png),
-[1600 × 1000](observing-published-1600x1000.png)).
+([960 × 540](observing-published-diagram-960x540.png),
+[1600 × 1000](observing-published-diagram-1600x1000.png)).
 
 ### Verification (criterion 9)
 
@@ -183,7 +184,28 @@ frame budgets were not run.
 
 ## Windows
 
-Pending: filled from this pull request's CI run (windows-2022).
+From CI run 40680488829 of this pull request at `1e0589d` (windows-2022),
+the code before review round 1:
+
+- `cargo test --workspace --all-targets --locked`: 1 270 passed, 0 failed,
+  31 ignored over 59 test binaries. All 16 MCP-05 tests passed on Windows:
+  the 9 library acceptance tests (criteria 1 to 7 and the request id's
+  rules), the 2 unit tests of the record, the 2 stdio sessions of the binary
+  (the consent and a repeated `request_id`; a window holding the project)
+  and the 2 headless window tests (criterion 8; the window's Publish
+  compared byte for byte), plus the tool list with `publish` in the 2026
+  and 2025 sessions.
+- The folder-project step passed. Its three captures at 960 × 540 have the
+  standard size; the three named 1600 × 1000 are 1024 × 768, because the
+  runner's display is smaller (a warning on the run, as the testing guide
+  describes). The Code capture at 960 × 540 shows the managed demo shop in
+  the runner's Polish locale, open with "No problems":
+  [windows-code-960x540.png](windows-code-960x540.png). Nothing on screen
+  changes in this ticket; the capture shows that the window still starts.
+- The stdio transcripts, the captures of the window beside a session and
+  the smoke list were not run on Windows by hand; the owner's Windows run is
+  pending. The fixes of review round 1 run on Windows in this pull
+  request's CI run for its head.
 
 ## Not verified
 
@@ -199,6 +221,10 @@ Pending: filled from this pull request's CI run (windows-2022).
 - A component renamed after publication (`HandleChanged`) and an existing
   revision file (`RevisionExists`): mapped to `invalid_text` and
   `path_exists`, not exercised by a test.
+- A registry or checkpoint that cannot be read back after a publication
+  committed (review round 1, first point): no seam fails that read alone;
+  the code path records the result and reports the paths the commit always
+  writes.
 - The hand-over from a window (MCP-08b): not in scope. Today a publication
   while the window holds the project is refused.
 
@@ -214,3 +240,31 @@ backend, Lavapipe), with empty scratch `XDG_DATA_HOME` and
 | 2 | Partial: `--screenshot … --folder <checkout> --mode diagram` at 960 × 540 and 1600 × 1000 opened the project with its scenario (scenario 8's captures); Code mode was not captured. |
 | 7 | Pass for the bytes of a publication: the server's and the window's are byte-identical (scenario 1). Ctrl+S in the window: not run, no window change. |
 | 3–6, 8–10 | Not run: no interface change. The workspace suite that covers them passes. |
+
+## Review round 1
+
+The automated review of PR #117 (cubic) found six points and CodeQL one
+cleartext-logging alert in the acceptance tests. All are fixed:
+
+- **A retry after a failed read-back would publish twice.** The result was
+  recorded under its `request_id` only after the registry and checkpoint
+  were read back; had that read failed after the commit, a retry would
+  have made a second revision. Nothing after the commit can fail now: the
+  result is recorded first, and `changed` falls back to the paths a
+  publication always writes.
+- **An unreadable component was `invalid_text`.** A component over 1 MiB is
+  `too_large` and one the session cannot read as source
+  `project_unreadable`, as for `write_source`. The working source is no
+  longer read by the storage before the session does, which had made the
+  oversized case `project_unreadable`. Test:
+  `mcp05_review_an_oversized_component_is_too_large`.
+- **The ids of dropped results grew without bound.** They are kept for the
+  next 1 024 dropped ids, after which an id is unknown again. Unit test:
+  `the_ids_of_dropped_results_are_bounded`.
+- **The Windows section was a placeholder.** It now cites the CI run.
+- **The transcript named captures that did not exist, and had trailing
+  spaces.** The captures carry the transcript's names; the trailing spaces
+  are gone.
+- **CodeQL `rust/cleartext-logging`** at the assertion that printed the
+  revision path in criterion 1's test (taint followed from the secret
+  values through the session): the assertion no longer formats a value.

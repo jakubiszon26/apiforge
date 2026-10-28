@@ -120,7 +120,7 @@
 -- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
 ## the response is taken as lost; the server ends
 -- EOF: exit code 0 after 0.003 s; stdout lines 3
--- stderr: 
+-- stderr:
 >> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1.0.0"}}}
 << {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na …
 >> {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
@@ -134,7 +134,7 @@
 << {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:4318/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\n …
 -- revisions: [["active_promotion", 1, "b07c465301bc"], ["product", 1, "eba04ff2905f"], ["add_to_cart", 1, "1cf5820dbbde"], ["product", 2, "eba04ff2905f"], ["product", 3, "eba04ff2905f"]]
 -- EOF: exit code 0 after 0.005 s; stdout lines 4
--- stderr: 
+-- stderr:
 ```
 #### Session 5: a window holds the project
 
@@ -167,8 +167,8 @@
 >> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
 << {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 2,\n  \"revision_path\": \".apiforge/revisions/get-product/2.afs …
 -- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
-## screenshot observing-published-diagram-960x540.png: exit 0 
-## screenshot observing-published-diagram-1600x1000.png: exit 0 
+## screenshot observing-published-diagram-960x540.png: exit 0
+## screenshot observing-published-diagram-1600x1000.png: exit 0
 -- EOF: exit code 0 after 0.003 s; stdout lines 3
--- stderr: 
+-- stderr:
 ```

@@ -334,7 +334,8 @@ saved project afresh under that lock.
   revision; nothing existing is overwritten. A different hash on disk is
   `stale_source` with the current `details.source_sha256`; a scenario is
   `not_a_component`; a component with errors `invalid_text` with the
-  diagnostics; an unreadable checkpoint `invalid_checkpoint`; a saved
+  diagnostics, one over 1 MiB `too_large`; an unreadable checkpoint
+  `invalid_checkpoint`; a saved
   component holding a known secret value `secret_in_source`. Canonical
   printing drops a comment that belongs to no statement, so such a
   component is `comments_would_be_lost` with `details.comments` (line,
@@ -343,7 +344,8 @@ saved project afresh under that lock.
 - A `publish` with a `request_id` this server has answered returns the
   recorded result with `replayed: true` and publishes nothing. The server
   keeps the last 64 in memory: the same id for another path or hash is
-  `invalid_inputs`, an id whose result was dropped is `unknown_outcome`.
+  `invalid_inputs`, and an id whose result was dropped is `unknown_outcome`
+  for the next 1 024 dropped ids, after which it is unknown again.
   Unlike a live run's, a publication's id is not written to
   `.apiforge/local/agent-requests.json`, so a restarted server knows none of
   them — `project_overview` lists every revision with its `source_sha256`,
