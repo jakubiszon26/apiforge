@@ -5,10 +5,10 @@
 use super::{DIAGRAM_PATH, EventKind, Origin, ProjectSession, declaration};
 use crate::{
     Error, Result,
-    analysis::{self, Analysis, AnalysisInput, AnalysisTicket},
+    analysis::{self, AnalysisInput, AnalysisTicket},
     document::DocumentSession,
 };
-use apiforge_script::Diagnostic;
+use apiforge_script::{Diagnostic, Document};
 use apiforge_storage::project::{
     DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, ProjectChange,
     ProjectError, ProjectPath, ProjectStore,
@@ -94,15 +94,15 @@ impl ProjectSession {
     }
 
     /// The check of a new document with the registry entry it would get,
-    /// `identity` being its document and entity ids, and the analysis of its
-    /// text as that document.
+    /// `identity` being its document and entity ids, and the model its text
+    /// lowers to as that document, when it is valid.
     fn check_entry(
         &self,
         kind: Option<DocumentKind>,
         path: &str,
         text: &str,
         (document_id, entity_id): (String, String),
-    ) -> Result<(NewDocumentCheck, Analysis, DocumentEntry)> {
+    ) -> Result<(NewDocumentCheck, Option<Document>, DocumentEntry)> {
         let mut problems = Vec::new();
         let valid_path = ProjectPath::working_source(path).ok();
         match &valid_path {
@@ -166,15 +166,16 @@ impl ProjectSession {
             placer: self.placer.clone(),
         }
         .run();
+        let model = analysis.model.map(|(model, _)| model);
         let check = NewDocumentCheck {
             kind: declared.map(|d| d.kind),
             handle,
             problems,
-            analysis_valid: analysis.is_valid(),
-            diagnostics: analysis.diagnostics.clone(),
+            analysis_valid: model.is_some(),
+            diagnostics: analysis.diagnostics,
             omitted_diagnostics: analysis.omitted_diagnostics,
         };
-        Ok((check, analysis, entry))
+        Ok((check, model, entry))
     }
 }
 
@@ -194,9 +195,9 @@ impl ProjectSession {
             return Err(Error::SourceTooLarge);
         }
         let identity = (self.new_document_id(), uuid::Uuid::new_v4().to_string());
-        let (check, analysis, entry) = self.check_entry(Some(kind), path, text, identity)?;
-        let model = match analysis.model {
-            Some((model, _)) if check.is_valid() => model,
+        let (check, model, entry) = self.check_entry(Some(kind), path, text, identity)?;
+        let model = match model {
+            Some(model) if check.is_valid() => model,
             _ => return Ok(Err(check)),
         };
         // The identities the window would seal at the first analysis of the
@@ -256,13 +257,14 @@ impl ProjectSession {
 }
 
 /// A file or directory is at `path` or at a path that differs from it only
-/// in letter case, or something other than a directory stands where one of
-/// its parent directories would be: either way a registration there would be
-/// refused. Each level is looked up in its parent directory alone, so the
-/// answer neither depends on the size of the project nor on the limits of a
-/// tree scan.
+/// in letter case, something other than a directory stands where one of its
+/// parent directories would be, or a parent directory exists only in another
+/// letter case: either way a registration there would be refused, the last
+/// because it would create a second spelling of that folder. Each level is
+/// looked up in its parent directory alone, so the answer neither depends on
+/// the size of the project nor on the limits of a tree scan.
 fn exists(store: &ProjectStore, path: &ProjectPath) -> Result<bool> {
-    let components: Vec<String> = path.as_str().split('/').map(str::to_lowercase).collect();
+    let components: Vec<&str> = path.as_str().split('/').collect();
     let Some((last, parents)) = components.split_last() else {
         return Ok(false);
     };
@@ -271,8 +273,12 @@ fn exists(store: &ProjectStore, path: &ProjectPath) -> Result<bool> {
     for component in parents {
         let mut next = Vec::new();
         for directory in &directories {
-            for (entry, is_directory) in matching(directory, component)? {
-                if !is_directory {
+            for (entry, is_directory) in matching(directory, &component.to_lowercase())? {
+                if !is_directory
+                    || entry
+                        .file_name()
+                        .is_some_and(|name| name != std::ffi::OsStr::new(component))
+                {
                     return Ok(true);
                 }
                 next.push(entry);
@@ -284,7 +290,7 @@ fn exists(store: &ProjectStore, path: &ProjectPath) -> Result<bool> {
         directories = next;
     }
     for directory in &directories {
-        if !matching(directory, last)?.is_empty() {
+        if !matching(directory, &last.to_lowercase())?.is_empty() {
             return Ok(true);
         }
     }
