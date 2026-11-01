@@ -78,6 +78,8 @@ impl Observed {
 /// formatted once when told, with the time an ended run ended.
 pub(super) struct AgentRun {
     running: bool,
+    /// The run sends live requests (MCP-09 reads it).
+    live: bool,
     text: String,
 }
 
@@ -93,12 +95,17 @@ impl AgentRun {
         let ended = chrono::Local::now().format("%H:%M").to_string();
         Self {
             running: state == RunState::Running,
+            live: mode == RunMode::Live,
             text: run_text(path, mode, state, step_count, failure, &ended),
         }
     }
 
     pub(super) fn is_running(&self) -> bool {
         self.running
+    }
+
+    pub(super) fn is_live(&self) -> bool {
+        self.live
     }
 }
 

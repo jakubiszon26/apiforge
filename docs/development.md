@@ -134,6 +134,14 @@ project step captures the migrated demo shop in Code, Diagram and Split at
 960 × 540 and 1600 × 1000 and uploads them as `qa-captures-<os>` for QA reports
 ([testing](process/testing.md#how-to-fetch-windows-captures-for-a-qa-report)).
 
+Linux acceptance tests also require `/run/user/<runner uid>` to exist and
+belong to the runner with private access. CI provisions it before the suite
+when absent; production discovery never creates it. The MCP-12 tests isolate
+window and server environments in subprocesses, with the window listening
+there and the server lacking XDG and using another TMPDIR. Windows runs the
+same handshake with the server environment cleared except PATH/SystemRoot
+(and the test helper's explicit control inputs).
+
 On Linux each probe gets a fresh 1920 × 1200 Xvfb display and Mesa's Lavapipe Vulkan
 driver; a missing driver fails the job instead of selecting another backend. On Windows
 the DX12 backend is used. Each probe is limited to 45 seconds and must exit
@@ -187,6 +195,38 @@ publish job refuses a tagged commit that is not on `main`. Then:
    creates the pre-release with notes generated from the merged pull
    requests, followed by the sums. It is the only job with write
    permission.
+
+Every package carries `licenses/THIRD-PARTY-NOTICES.md`
+([REL-03](tickets/REL-03.md)): each licence text once, with the crates it
+covers and their versions, and the fonts egui embeds. cargo-about 0.9.2
+generates it from [`about.toml`](../about.toml) and
+[`packaging/about.hbs`](../packaging/about.hbs), once in the release's first
+job, and every push generates it again on Linux in `rust.yml`; both download
+the prebuilt `x86_64-unknown-linux-musl` release and check it against the
+SHA-256 in the workflow. `release.py check-notices` then fails unless the file
+names every non-workspace crate that `cargo tree` lists for the two binaries on
+Linux and Windows, and the four egui fonts with their texts. The AppImage also
+carries `licenses/appimage-libraries/<library>.copyright`, Ubuntu's copyright
+file of each library it ships. To regenerate locally
+(`cargo install cargo-about --version =0.9.2 --locked --features cli`):
+
+```bash
+set -o pipefail
+cargo about generate --locked --workspace --fail -o THIRD-PARTY-NOTICES.md packaging/about.hbs
+for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+  cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
+    -p apiforge-desktop -p apiforge-cli
+done | python3 -I packaging/release.py check-notices THIRD-PARTY-NOTICES.md
+```
+
+A new dependency whose licence `about.toml` does not accept fails CI. A licence
+is added to `accepted` only once it is known to be compatible with
+GPL-3.0-or-later, in the place that decides which of a crate's alternatives is
+listed: a crate offering a choice is listed under the first accepted licence it
+offers. A crate whose licence files cargo-about cannot read gets a `clarify`
+entry with the files and their SHA-256, as `epaint_default_fonts` has. When a
+new version changes those files, cargo-about only warns `failed to validate`;
+both workflows fail on that warning until the entry is updated.
 
 A failed job publishes nothing; delete the tag, fix, and tag again. Changes to
 `packaging/` run `python3 -I packaging/test_release.py`, which the workflow
@@ -311,13 +351,13 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
 | `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
-| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `replayed` for a repeated `request_id`; with `full: true` the runner's JSON report instead of the steps |
+| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `journal_unreadable`, `replayed` (`true` for a repeated `request_id`); `replayed` and `journal_unreadable` are always sent, as is `may_have_reached_api` on every compact step, `false` included; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
 | `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote`, `changed`, `replayed` |
@@ -376,6 +416,22 @@ the process; a later write starts a new session. `project_overview` reports
 this server's own session as `holder: "agent_session"`. Each write reads the
 saved project afresh under that lock.
 
+`project_overview.holder` is a string: `none`, `window`, `another_process`,
+or `agent_session` for this server's active session only. `holder_details` is
+null for no holder or an unreadable description; otherwise it has the same
+`role`, `client` and `since` as write refusals. Foreign agents remain
+`another_process`. `hands_over_on_write` is true only when a live window
+advertises a syntactically valid endpoint. It means a write may request
+hand-over: overview never connects, takes the lock or reads a foreign journal,
+and cannot promise a grant from an unreachable, busy or dirty window. First
+live runs may also request hand-over, only with the existing live permission.
+
+MCP-12 extends the prerelease output schema's holder values with `window` and
+adds those two required fields; old typed clients with a closed holder enum
+may need updating. `tools/list` publishes the exact schema. The crate version
+still supplies `serverInfo.version` and `server_version`; transport protocol,
+language-reference and local holder/channel versions retain their purposes.
+
 - `write_source` saves only a text without errors (`invalid_text` with the
   diagnostics otherwise; warnings are saved) and only over the version the
   model names: a different hash on disk is `stale_source` with the current
@@ -424,7 +480,9 @@ saved project afresh under that lock.
   to hand the project over (below). A window with unsaved work keeps it: `handover_refused` with
   `details.reason` *the window has unsaved work*. A window that has not
   answered within 30 seconds is `handover_pending`, and a window without a
-  channel (an older build) is `held_by_window`. Another process, an agent or
+  channel (an older build), or one that could not be reached, is `held_by_window`.
+  The refusal keeps reading available and does not ask to close the window.
+  Another process, an agent or
   `apiforge apply`, is `held_by_other`. The message and `details.holder` name
   the holder and since when; nothing is written; the read tools still
   answer.
@@ -449,6 +507,29 @@ the owner accepted this risk on 2026-10-28, MCP-08b). Messages are
 newline-delimited JSON with `version: 1`; a line that is not one is ignored
 and logged on stderr (`apiforge mcp: channel: …` in the server,
 `apiforge: channel: …` in the window).
+
+On Unix a client checks existing candidates in order: absolute
+`XDG_RUNTIME_DIR`, `/run/user/<uid>`, `temp_dir()`, `/tmp`, deduplicated and
+bounded by the socket path limit. The uid comes from the metadata of the same
+opened holder file whose description was read, never an environment variable
+or serialized field. Both MCP hand-over and the desktop observer use this
+rule. Only an existing socket and its endpoint directory owned by that uid,
+with no group/world access and neither node a symlink, qualify. Discovery
+changes nothing on disk. It skips absent/unsafe candidates, selects the first
+valid socket and attempts that connection once; failure never replays the
+request against another candidate. Missing owner metadata fails conservatively.
+These checks narrow ordinary filesystem races; same-user malicious processes
+are outside that guarantee. Listening locations, holder JSON and Windows
+named-pipe behaviour are unchanged.
+
+This bounded list cannot find arbitrary custom XDG or temporary directories
+when their environment values are missing or different. Use a shared approved
+candidate (normally `/run/user/<uid>` on Linux); no filesystem search is made.
+On Windows/WSL both processes must run on the same side. A failed connection
+to a live window on Linux `/mnt/<single ASCII letter>/…` adds a qualified
+same-side hint; this path is evidence of a possible mismatch, not proof of
+Windows ownership. Invisible cross-OS locks cannot be diagnosed here. A stale
+holder file never blocks a free lock, even on a mounted Windows drive.
 
 - **The window first.** The server's first write asks the window. A window
   with nothing unsaved and nothing in progress hands the project over at
@@ -494,9 +575,27 @@ allowed, and the model cannot allow them: the person starts the server with
 `claude mcp add apiforge -- /path/to/apiforge mcp --allow-live`. Without it a
 live run is `live_disabled` (*live requests are not enabled on this server*)
 and sends nothing. The server keeps the current permission in one slot:
-the flag while no window is connected; MCP-09 lets a connected window's
-per-project setting decide instead (*live requests are off in this project's
-settings*), and the flag applies again when the window goes.
+the flag while no window is connected; otherwise the connected windows'
+per-project setting, the newest one heard, off while a connected window has
+not said one yet (MCP-09, *live requests are off in this project's
+settings*); the flag applies again when the last window goes.
+
+**The window's setting.** *Project settings → Agent → Allow the MCP agent to
+send live requests* is the person's, per project and computer: off by
+default, kept in `agent-consent.json` beside `preferences.json` in the user's
+configuration directory by the manifest id (never in the project folder),
+enabled even while the window observes, applied at once without a save, and
+shown as *Live allowed* in the header while on. The window says it over the
+control channel as soon as a connection opens and on every change; no tool,
+resource or server message sets it. A live run that would ask a window for
+the project hears that window's setting first: when it is off the run is
+`live_disabled` and the window keeps the project, as when the window says
+nothing within two seconds. The window reads the file again once a second,
+so a change made in another window is followed. The overview reports the flag
+until a window is connected, since it never connects to one. The server
+tells connected windows `run { mode: live }` when a live run starts and ends,
+so a box unticked meanwhile says *A live run is in progress; it will finish.
+No new one starts.*
 `project_overview.live_requests` says `allowed` and its `source`
 (`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
 settings`). The permission is checked immediately before the run starts,

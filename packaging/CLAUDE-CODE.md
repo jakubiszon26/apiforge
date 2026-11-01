@@ -27,9 +27,12 @@ Or check in a `.mcp.json` at the project root instead:
 Without `--folder` the server serves the directory Claude Code starts it in.
 Claude Code lists the tools as `mcp__apiforge__<tool>` in `/mcp`.
 
-The model cannot allow live requests: add `--allow-live` after `mcp` (in the
-`claude mcp add` command or in `"args"`) only when it may send real requests
-to the project's base URL. Secrets come from `APIFORGE_SECRET_<NAME>` in the
+The model cannot allow live requests. With the project open in the API Forge
+window, tick *Allow the MCP agent to send live requests* in *Project settings*
+(section *Agent*); the window decides while it is open, and `--allow-live`
+neither enables nor overrides it. Without a window, add `--allow-live` after
+`mcp` (in the `claude mcp add` command or in `"args"`) only when it may send
+real requests to the project's base URL. Secrets come from `APIFORGE_SECRET_<NAME>` in the
 server's environment (the `env` of the entry in `.mcp.json`) or from a
 `--secrets secrets.json` file, never from the model.
 
@@ -39,3 +42,7 @@ server.
 
 `apiforge --version` and `apiforge-desktop --version` print the version of
 each binary.
+
+On Windows/WSL, run the window and MCP server on the same side; a Windows
+window with Linux MCP (or the reverse) is unsupported, including projects on
+`/mnt/<drive>/`.
