@@ -126,10 +126,11 @@ alone still permits a normal write under a free OS lock.
 
 ## Windows
 
-CI is in progress for `07fd1e9`:
-[run 40753685913](https://github.com/jakubiszon26/apiforge/actions/runs/40753685913).
-Windows formatting and Clippy passed; workspace tests are running as of this
-report. Windows acceptance is pending that result. The actual-CLI test clears the MCP
+Windows CI passed on `ebefa2e` (push run
+[40754322377](https://github.com/jakubiszon26/apiforge/actions/runs/40754322377))
+and on the reviewed head `0b32f73`; see
+[Review round 2026-11-01](#review-round-2026-11-01). This is CI evidence on
+windows-2022, not a native Windows session. The actual-CLI test clears the MCP
 environment except PATH/SystemRoot; the desktop subprocess test adds only its
 explicit test-control inputs.
 
@@ -167,25 +168,36 @@ CLI `mcp` 24 passed, 1 spawned helper ignored. The CLI case needs
 full workspace test, conversion check, release build and native captures were
 not repeated: the changes touch the listener only for a relative temporary
 directory, the refusal text only before a connection attempt, and tests and
-documents otherwise. CI on the new head is the workspace evidence.
+documents otherwise. The workspace evidence for the fixed head is CI on
+`0b32f73`:
 
-The `pull_request` CI run on `ebefa2e`
-([run 41307273018](https://github.com/jakubiszon26/apiforge/actions/runs/41307273018))
-failed on Windows in `header_tests::a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary`
-(a hover tooltip), which MCP-12 does not touch; the `push` run on the same
-commit passed on Windows.
+- `pull_request` run
+  [41309806660](https://github.com/jakubiszon26/apiforge/actions/runs/41309806660):
+  ubuntu-24.04 and windows-2022 Build & Test passed (formatting, Clippy and
+  the whole workspace test suite).
+- `push` run
+  [41309802283](https://github.com/jakubiszon26/apiforge/actions/runs/41309802283):
+  ubuntu-24.04 passed. The first windows-2022 attempt failed in two desktop
+  interface tests that MCP-12 does not touch:
+  `mcp08b::take_back_sits_at_the_right_end_of_the_bar_under_run`, already
+  listed in #122, and
+  `header_tests::a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary`
+  (a hover tooltip). The second test also failed once on `ebefa2e` and passed
+  there on the other run. On the rerun of the failed job, windows-2022 passed.
+- CodeQL on the PR merge ref: no open alerts.
 
 ## Delivery
 
 The owner will test the branch before a pull request or merge. All product
 code is on `docs/mcp-12-analysis`; no merge was performed. After fetching
 origin, `origin/main` remains an ancestor of this branch, so it has no
-conflict with the current main at this check. CI completion remains visible
-on the linked run; it is not claimed as completed here.
+conflict with the current main at this check (rechecked 2026-11-01). CI on
+the reviewed head is recorded in the review round above.
 
 ## Not verified
 
-- Windows completion and native Windows captures: pending CI; no local Windows host.
+- Native Windows session and captures: no local Windows host; CI on
+  windows-2022 passed.
 - Actual mixed Windows/WSL locks/pipes: unsupported; the qualified diagnostic
   is tested with controlled paths, not presented as cross-OS prevention.
 - Arbitrary custom XDG/TMPDIR values missing from the other process cannot be
