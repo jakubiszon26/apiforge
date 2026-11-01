@@ -1,12 +1,13 @@
 # MCP-15: A live run from the command line asks the open window for the project
 
 - Size: M · Owner review: 30 min · Risk: `default`, `visible UI`
-- State: Analysis, decided (issue #182) · owner decision of 2026-11-01: the
+- State: Approved (issue #182) · owner decision of 2026-11-01: the
   command line asks the window over the control channel, as the server does,
   instead of refusing · decisions 1–6 taken 2026-11-01 on #182, all A ·
-  mock-up (a) and (b) still required before approval · after MCP-12 (#123,
-  PR #178: endpoint discovery, reused here)
-- Analysis model: Fable · Implementation model: —
+  mock-up (a) and (b) approved as a whole on 2026-11-01 on #182, captures in
+  [`docs/qa/2026-11-01/MCP-15/`](../qa/2026-11-01/MCP-15/) · after MCP-12
+  (#123, merged in #178: endpoint discovery, reused here)
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 - Analysis: this file; the mechanism is [MCP-00](MCP-00.md#hand-over-between-the-window-and-the-agent)
   and [ADR 0014](../decisions/0014-agent-sessions.md) decision 4
 
@@ -58,7 +59,14 @@ writer again — nothing closed, nothing reopened.
 
 ## Mock-up
 
-**Required before approval**, small: both views exist and are approved
+**Approved on 2026-11-01** as a whole (#182): (a)
+[`a-command-bar-code-960x540.png`](../qa/2026-11-01/MCP-15/a-command-bar-code-960x540.png),
+[`a-command-bar-code-1600x1000.png`](../qa/2026-11-01/MCP-15/a-command-bar-code-1600x1000.png)
+and (b) [`b-command-prompt-960x540.png`](../qa/2026-11-01/MCP-15/b-command-prompt-960x540.png),
+rendered from `mock/mcp-15-cli-handover` at `db71eec`. The request as written
+before approval:
+
+Required before approval, small: both views exist and are approved
 (M1, M2); only their words change for a command. Form 1 preferred — a
 `review_*` capture from a throwaway branch of (a) the bottom bar with
 `Holder::command("run --live")`, the *Observing* badge and no *Take back*,
