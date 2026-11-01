@@ -398,7 +398,9 @@ Three environment variables are test seams for this and are not set in use:
 `APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline,
 `APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run and
 `APIFORGE_MCP_TEST_CLEANUP_DELAY_MS` after every step once a run is
-stopping, so that its cleanup outlasts the end of stdin. Each is whole
+stopping, so that its cleanup outlasts the end of stdin; with the step
+delay and no cleanup delay a stopping run pauses 50 ms per step, so a
+cancellation is not outrun by its remaining steps. Each is whole
 milliseconds, capped at ten minutes; any other value stops the server with
 exit code 2.
 
@@ -545,6 +547,20 @@ holder file never blocks a free lock, even on a mounted Windows drive.
   *waiting for the agent's run to finish*), then ends the session; the
   window is the writer again within two seconds. The agent's next write asks
   again.
+- **The agent's runs** (MCP-10). The server tells every connected window
+  `run` when a run starts (`path`, `mode`, `state: running`) and when it
+  ends: `passed`, `failed` with the first step that did not pass (`step`,
+  numbered as `step_count` counts, and its `label`) or `cancelled`, each
+  with `step_count`. A window that connects during a run is told that it
+  runs. The bar shows it in place of the last change: *Agent: running
+  promotion-and-cart-price.afs (simulation)…*, then *Agent:
+  promotion-and-cart-price.afs passed · 18 steps · 12:58*, *… failed at
+  step 7 · Promotional price · 12:58* or *… cancelled · 12:58*; an ended
+  live run says *(live)* after the file's name. A commit after the run has
+  ended brings the last change back. The status is never cut at 960 × 540:
+  the holder's words shorten to *Claude Code · since 10:42*, whole on
+  hover. It goes when the session ends or the channel drops. The full
+  report stays in the agent's answer.
 - `finish_editing`, the end of stdin or the death of the server gives the
   project back the same way; a transaction the server left activated opens
   the window's recovery view. A window that closes while observing changes

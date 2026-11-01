@@ -1,9 +1,12 @@
 # MCP-10: The agent's run status in the bottom bar
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Backlog (issue #94) · MCP-00 decision 17 = A taken 2026-10-27 ·
-  mock-up M4 approved 2026-10-27 · after MCP-08b
-- Analysis model: Fable · Implementation model: —
+- State: awaiting acceptance (issue #94) · MCP-00 decision 17 = A taken
+  2026-10-27 · mock-up M4 approved 2026-10-27 · after MCP-08b
+- Analysis model: Fable · Implementation model: Claude Opus 5.5 (taken
+  under [autonomy](../process/autonomy.md): `ready:sol` names the smallest
+  model allowed)
+- QA: [report](../qa/2026-11-01/MCP-10/report.md)
 - Analysis: [MCP-00](MCP-00.md#live-preview-in-the-open-window)
 
 ## Goal
@@ -30,9 +33,12 @@ the bar in the running and the passed state at 960 × 540.
 
 ## Acceptance criteria
 
-1. The agent's `run` sends `run { path, mode, state: started }` and, at the
+1. The agent's `run` sends `run { path, mode, state: running }` and, at the
    end, `state: passed | failed { step, label } | cancelled`; the window shows
-   the line within a second of each message.
+   the line within a second of each message. (`running` is MCP-08b's existing
+   name, kept so that v0.1.0-rc.1 windows and servers still understand each
+   other; owner decision of 2026-11-01. The failing step's number counts every
+   step, a component's own included, as the step count does.)
 2. The line shows the mode (*simulation* / *live*).
 3. The status is never cut at 960 × 540 in Code, Diagram and Split: the
    holder text gives way; the bar does not move the explorer or the tabs.

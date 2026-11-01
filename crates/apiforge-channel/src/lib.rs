@@ -46,11 +46,24 @@ pub enum Message {
         /// The project paths the commit wrote.
         paths: Vec<String>,
     },
-    /// The holder's run started or ended.
+    /// The holder's run started or ended (MCP-10). An ended run says how
+    /// many steps it had and, when it failed, the first step that did not
+    /// pass. The fields are optional on the wire, so either side reads a
+    /// `run` of a build without them.
     Run {
         path: String,
         mode: RunMode,
         state: RunState,
+        /// Every step of the ended run, a component's own steps included.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_count: Option<u64>,
+        /// The first step that did not pass, numbered as `step_count`
+        /// counts, from 1.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<u64>,
+        /// That step's label, or its handle when it has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
     /// The holder let the project go; the window may take it back.
     Released,
@@ -525,6 +538,17 @@ mod tests {
                 path: "scenarios/main.afs".into(),
                 mode: RunMode::Simulation,
                 state: RunState::Running,
+                step_count: None,
+                step: None,
+                label: None,
+            },
+            Message::Run {
+                path: "scenarios/main.afs".into(),
+                mode: RunMode::Live,
+                state: RunState::Failed,
+                step_count: Some(18),
+                step: Some(7),
+                label: Some("Promotional price".into()),
             },
             Message::Released,
             Message::Permission { live: false },
@@ -564,6 +588,20 @@ mod tests {
         assert_eq!(
             decode(b"{\"version\":1,\"type\":\"released\",\"later\":true}"),
             Received::Message(Message::Released)
+        );
+        // A `run` of the build before MCP-10 reads, without its new fields.
+        assert_eq!(
+            decode(
+                b"{\"version\":1,\"type\":\"run\",\"path\":\"a.afs\",\"mode\":\"live\",\"state\":\"passed\"}"
+            ),
+            Received::Message(Message::Run {
+                path: "a.afs".into(),
+                mode: RunMode::Live,
+                state: RunState::Passed,
+                step_count: None,
+                step: None,
+                label: None,
+            })
         );
     }
 
