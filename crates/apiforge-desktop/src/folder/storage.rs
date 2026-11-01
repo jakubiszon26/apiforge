@@ -29,12 +29,24 @@ struct Active {
     started: Instant,
 }
 
+/// A test's fault hook, run around every job on the worker thread, where
+/// the storage's thread-local seam would not otherwise reach.
+#[cfg(test)]
+pub(super) type Fault = std::sync::Arc<
+    dyn Fn(&apiforge_storage::project::faults::Event) -> apiforge_storage::project::Result<()>
+        + Send
+        + Sync,
+>;
+
 pub(super) struct Storage {
     queue: VecDeque<Queued>,
     active: Option<Active>,
     sender: Sender<Work>,
     results: Receiver<Reply>,
     unavailable: bool,
+    /// For tests: the fault hook every later job runs under.
+    #[cfg(test)]
+    pub(super) fault: Option<Fault>,
 }
 
 impl Storage {
@@ -57,6 +69,8 @@ impl Storage {
             sender,
             results,
             unavailable: false,
+            #[cfg(test)]
+            fault: None,
         }
     }
 
@@ -106,6 +120,13 @@ impl Storage {
         work: Work,
         apply: Apply,
     ) {
+        #[cfg(test)]
+        let work: Work = match self.fault.clone() {
+            Some(fault) => Box::new(move || {
+                apiforge_storage::project::faults::with_hook(move |event| fault(event), work)
+            }),
+            None => work,
+        };
         self.active = Some(Active {
             label,
             blocks_edits,

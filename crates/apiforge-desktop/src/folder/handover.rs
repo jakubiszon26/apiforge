@@ -318,6 +318,12 @@ impl Handover {
         }
     }
 
+    /// For tests: a request waits for an answer.
+    #[cfg(test)]
+    pub(super) fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// The holder this window observes over a connection, so *Take back*
     /// can be offered.
     pub(super) fn is_linked(&self) -> bool {
