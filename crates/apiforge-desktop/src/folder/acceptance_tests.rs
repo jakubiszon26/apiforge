@@ -5310,6 +5310,14 @@ mod mcp16 {
         });
     }
 
+    /// The agent's first write hands the project over, and the window has
+    /// followed that commit before the agent writes again: two commits
+    /// read in one check would be followed as one.
+    fn observe(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) {
+        hand_over(harness, server, note);
+        await_bar(harness, "promotion-and-cart-price.afs saved");
+    }
+
     /// Clicks the tab of `name` in the tab strip: the explorer's row has the
     /// same name, lower in the window.
     fn click_tab(harness: &mut FolderHarness, name: &str) {
@@ -5331,7 +5339,7 @@ mod mcp16 {
         let mut harness = folder_harness(root, WIDE);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         assert!(read_only(&harness), "the window observes");
         assert!(pressed(&harness), "a hand-over starts following");
         drop(harness);
@@ -5477,7 +5485,7 @@ mod mcp16 {
         await_endpoint(&mut harness, root, HolderRole::Window);
         let scenario = id_of(&harness, SCENARIO);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         let text = format!(
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
@@ -5521,7 +5529,7 @@ mod mcp16 {
         settle(&mut harness);
         let scroll = scroll_of(&harness, &product);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
@@ -5637,7 +5645,7 @@ mod mcp16 {
         let mut harness = folder_harness(root, MINIMUM);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "200")]);
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
         let product = id_of(&harness, PRODUCT);
         await_active(&mut harness, returned, &product, "the component");
@@ -5681,7 +5689,7 @@ mod mcp16 {
         await_endpoint(&mut harness, root, HolderRole::Window);
         let scenario = id_of(&harness, SCENARIO);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness), "the toggle unpins");
         let place = |harness: &FolderHarness| {
@@ -5740,7 +5748,7 @@ mod mcp16 {
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         assert!(pressed(&harness));
 
         // What does not unpin.
@@ -5823,7 +5831,7 @@ mod mcp16 {
         let mut harness = folder_harness(root, WIDE);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         assert_eq!(
             harness.get_by_label(FOLLOW).accesskit_node().role(),
             egui::accesskit::Role::Button
@@ -5923,7 +5931,7 @@ mod mcp16 {
         let mut harness = folder_harness(root, MINIMUM);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "300")]);
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         await_bar(&mut harness, &format!("{AGENT} · since "));
 
         let id = server.start_call("run", json!({ "path": SCENARIO }));
@@ -5965,7 +5973,7 @@ mod mcp16 {
         let product = id_of(&harness, PRODUCT);
         let promotion = id_of(&harness, PROMOTION);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
         await_active(&mut harness, returned, &product, "the component");
         let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
@@ -5976,7 +5984,7 @@ mod mcp16 {
             "kept when the agent finishes"
         );
 
-        hand_over(&mut harness, &mut server, "Written again.");
+        observe(&mut harness, &mut server, "Written again.");
         let returned = agent_notes(
             &mut harness,
             &mut server,
@@ -6013,14 +6021,14 @@ mod mcp16 {
         await_endpoint(&mut harness, root, HolderRole::Window);
         let product = id_of(&harness, PRODUCT);
         let mut server = agent(root, "Claude Code");
-        hand_over(&mut harness, &mut server, "Written by the agent.");
+        observe(&mut harness, &mut server, "Written by the agent.");
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness));
         let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
         assert_eq!(structured(&finished)["finished"], true, "{finished}");
         await_writer(&mut harness);
 
-        hand_over(&mut harness, &mut server, "Written again.");
+        observe(&mut harness, &mut server, "Written again.");
         assert!(pressed(&harness), "a new observation follows");
         let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
         await_active(&mut harness, returned, &product, "the component");
