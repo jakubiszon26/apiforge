@@ -33,9 +33,12 @@ the bar in the running and the passed state at 960 × 540.
 
 ## Acceptance criteria
 
-1. The agent's `run` sends `run { path, mode, state: started }` and, at the
+1. The agent's `run` sends `run { path, mode, state: running }` and, at the
    end, `state: passed | failed { step, label } | cancelled`; the window shows
-   the line within a second of each message.
+   the line within a second of each message. (`running` is MCP-08b's existing
+   name, kept so that v0.1.0-rc.1 windows and servers still understand each
+   other; owner decision of 2026-11-01. The failing step's number counts every
+   step, a component's own included, as the step count does.)
 2. The line shows the mode (*simulation* / *live*).
 3. The status is never cut at 960 × 540 in Code, Diagram and Split: the
    holder text gives way; the bar does not move the explorer or the tabs.
