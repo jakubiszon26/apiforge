@@ -266,8 +266,11 @@ On `5680c20` (the merge of `origin/main` at `ce32afc`, MCP-09), all exit 0:
   passed, 0 failed, 39 ignored (`mod mcp09` and `mod mcp10` among them)
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 
-Earlier, on `c2d356c`: the same four commands passed (1 326 passed, 36
-ignored, on the second run; the first had one failure outside this change,
-`folder::tests::a_large_source_follows_the_caret_once_its_edit_is_analysed`,
-*storage did not become idle* within 15 s beside a release build, passing
-alone three times and in the second run).
+Earlier, on `c2d356c`: fmt, clippy and convert-v1 as above passed. The
+first `cargo test --workspace --all-targets --locked` stopped after one
+failure outside this change,
+`folder::tests::a_large_source_follows_the_caret_once_its_edit_is_analysed`
+(*storage did not become idle* within 15 s beside a release build; it
+passed alone three times). The second,
+`cargo test --workspace --all-targets --locked --no-fail-fast`, passed:
+1 326 passed, 36 ignored.
