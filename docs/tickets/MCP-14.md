@@ -1,7 +1,7 @@
 # MCP-14: `run`'s structured output matches its own output schema
 
 - Size: S · Owner review: 10 min · Risk: none (non-UI hotfix)
-- State: In progress (issue #181) · owner decision 2026-11-01: hotfix before
+- State: Awaiting acceptance (issue #181) · owner decision 2026-11-01: hotfix before
   other tickets, merge authorised on green CI
 - Analysis model: Claude Opus 5.5 (a bug with no product decision) ·
   Implementation model: Claude Opus 5.5

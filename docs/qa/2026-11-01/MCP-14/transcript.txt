@@ -1,0 +1,12 @@
+>> {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"qa","version":"1"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na…
+>> {"jsonrpc":"2.0","method":"notifications/initialized"}
+>> {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+<< {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"project_overview","description":"What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered…
+-- run outputSchema required: ["path","live","status","ended_by","generation","used","redacted","step_count","replayed","interrupted","journal_unreadable"]
+-- Step required: ["handle","status","phase","may_have_reached_api"]
+>> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run","arguments":{"path":"scenarios/promotion-and-cart-price.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": false,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generatio…
+-- status "passed" ended_by "completed" step_count 18 replayed false journal_unreadable false may_have_reached_api on steps[0] false and steps[0].steps[0] false
+-- VALID: the run result matches run's outputSchema
+## exit Some(0)
