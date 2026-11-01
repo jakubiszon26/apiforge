@@ -663,3 +663,18 @@ fn mcp07_an_unreadable_description_with_a_live_writer_is_an_unknown_holder() {
     drop(writer);
     assert_eq!(reader.holder().unwrap(), None);
 }
+
+#[cfg(unix)]
+#[test]
+fn mcp12_the_uid_is_read_from_holder_file_metadata_and_is_not_serialized() {
+    use std::os::unix::fs::MetadataExt;
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive_as(directory.path(), &Holder::window()).unwrap();
+    let path = directory.path().join(HOLDER);
+    let before = fs::read(&path).unwrap();
+    let found = writer.holder().unwrap().unwrap();
+    assert_eq!(found.owner_uid(), Some(fs::metadata(&path).unwrap().uid()));
+    assert_eq!(found.to_line().unwrap(), before);
+    assert_eq!(Holder::unknown().owner_uid(), None);
+    assert!(!String::from_utf8(before).unwrap().contains("uid"));
+}

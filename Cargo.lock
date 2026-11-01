@@ -200,6 +200,7 @@ dependencies = [
 name = "apiforge-cli"
 version = "0.1.0"
 dependencies = [
+ "apiforge-channel",
  "apiforge-core",
  "apiforge-demo-api",
  "apiforge-layout",
@@ -211,6 +212,7 @@ dependencies = [
  "jsonschema",
  "serde_json",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -252,6 +254,7 @@ version = "0.1.0"
 dependencies = [
  "apiforge-channel",
  "apiforge-core",
+ "apiforge-demo-api",
  "apiforge-layout",
  "apiforge-mcp",
  "apiforge-project",

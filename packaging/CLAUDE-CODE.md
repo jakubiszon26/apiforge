@@ -39,3 +39,7 @@ server.
 
 `apiforge --version` and `apiforge-desktop --version` print the version of
 each binary.
+
+On Windows/WSL, run the window and MCP server on the same side; a Windows
+window with Linux MCP (or the reverse) is unsupported, including projects on
+`/mnt/<drive>/`.
