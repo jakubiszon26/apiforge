@@ -102,7 +102,9 @@ Overview does not connect or interpret another holder's journal. The owner
 accepted the prerelease closed-enum extension; tools/list exposes its schema
 without repurposing the crate, protocol, language or local format versions.
 
-Listeners keep their existing locations and endpoints remain random names.
+Listeners keep their existing locations and endpoints remain random names;
+only a relative temporary directory, which no client searches, is now skipped
+by the listener as well (review of 2026-11-01), so it falls back to `/tmp`.
 Unix clients, including the window observing a server, discover existing
 sockets in order: absolute XDG_RUNTIME_DIR, `/run/user/<uid>`, temp_dir(),
 `/tmp`. Candidates are deduplicated and bounded by the Unix path limit. The uid

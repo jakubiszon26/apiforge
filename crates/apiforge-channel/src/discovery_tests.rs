@@ -150,3 +150,43 @@ fn mcp12_a_dead_first_valid_socket_does_not_retry_the_next() {
         io::ErrorKind::WouldBlock
     );
 }
+
+#[test]
+fn mcp12_the_listener_listens_only_where_clients_search() {
+    let endpoint = Endpoint::random();
+    let at = |base: &str| Path::new(base).join(endpoint.name()).join("socket");
+    // The absolute case is unchanged: XDG first, then the temporary directory.
+    assert_eq!(
+        listener_socket_path(&endpoint, Some("/xdg".into()), "/temp".into()),
+        at("/xdg")
+    );
+    assert_eq!(
+        listener_socket_path(&endpoint, None, "/temp".into()),
+        at("/temp")
+    );
+    let long = format!("/{}", "x".repeat(120));
+    assert_eq!(
+        listener_socket_path(&endpoint, Some(long.clone().into()), "/temp".into()),
+        at("/temp")
+    );
+    assert_eq!(
+        listener_socket_path(&endpoint, None, long.into()),
+        at("/tmp")
+    );
+    // A relative XDG or temporary directory is skipped on both sides.
+    for (xdg, temp, expected) in [
+        (Some("relative-xdg"), "/temp", at("/temp")),
+        (None, "relative-temp", at("/tmp")),
+        (Some("relative-xdg"), "relative-temp", at("/tmp")),
+        (Some("/xdg"), "relative-temp", at("/xdg")),
+    ] {
+        let listening = listener_socket_path(&endpoint, xdg.map(PathBuf::from), temp.into());
+        assert_eq!(listening, expected);
+        assert!(listening.is_absolute());
+        let searched = client_socket_paths(&endpoint, 123, xdg.map(PathBuf::from), temp.into());
+        assert!(
+            searched.contains(&listening),
+            "a client with the same environment searches the listening address"
+        );
+    }
+}

@@ -147,24 +147,21 @@ impl Endpoint {
     }
 
     /// Where the socket is: `<base>/<name>/socket`, the directory private to
-    /// this user. The base is the first of `$XDG_RUNTIME_DIR` (when
-    /// absolute), the temporary directory and `/tmp` that keeps the socket
-    /// path within [`MAX_SOCKET_PATH`] bytes: the system limits a socket path
-    /// to a little over a hundred bytes. This selects only the listening
-    /// address. Clients discover existing
+    /// this user. The base is the first of `$XDG_RUNTIME_DIR` and the
+    /// temporary directory that is absolute and keeps the socket path within
+    /// [`MAX_SOCKET_PATH`] bytes, else `/tmp`: the system limits a socket path
+    /// to a little over a hundred bytes. A relative base is skipped, as
+    /// clients skip it, so the listener is always in a place they search.
+    /// This selects only the listening address. Clients discover existing
     /// sockets with the holder-file owner; the holder file names only the
     /// endpoint, never a path.
     #[cfg(unix)]
     pub fn socket_path(&self) -> PathBuf {
-        let socket = |directory: PathBuf| directory.join(&self.0).join("socket");
-        std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .filter(|directory| directory.is_absolute())
-            .into_iter()
-            .chain([std::env::temp_dir()])
-            .map(socket)
-            .find(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
-            .unwrap_or_else(|| socket(PathBuf::from("/tmp")))
+        listener_socket_path(
+            self,
+            std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+            std::env::temp_dir(),
+        )
     }
 
     /// `\\.\pipe\<name>`.
@@ -259,6 +256,19 @@ pub async fn connect(endpoint: &Endpoint, owner_uid: Option<u32>) -> io::Result<
     platform::connect(endpoint, owner_uid)
         .await
         .map(Connection::new)
+}
+
+/// The listening address for these environment values; see
+/// [`Endpoint::socket_path`].
+#[cfg(unix)]
+fn listener_socket_path(endpoint: &Endpoint, xdg: Option<PathBuf>, temp: PathBuf) -> PathBuf {
+    let socket = |directory: PathBuf| directory.join(endpoint.name()).join("socket");
+    xdg.into_iter()
+        .chain([temp])
+        .filter(|directory| directory.is_absolute())
+        .map(socket)
+        .find(|path| path.as_os_str().len() <= MAX_SOCKET_PATH)
+        .unwrap_or_else(|| socket(PathBuf::from("/tmp")))
 }
 
 /// Bounded client candidates, independent of the listener's address selection.
