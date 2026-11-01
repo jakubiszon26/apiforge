@@ -5357,7 +5357,7 @@ mod mcp16 {
         let mut harness = folder_harness(root, size);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let scenario = id_of(&harness, SCENARIO);
-        assert_eq!(tabs(&harness), [scenario.clone()]);
+        assert_eq!(tabs(&harness), std::slice::from_ref(&scenario));
         choose(&mut harness, view);
         let shown = mode(&harness);
         let code = shown != Mode::Diagram;
@@ -5598,7 +5598,11 @@ mod mcp16 {
         await_until(&mut harness, Instant::now(), "the deletion", |harness| {
             source_of(harness, &product) == text
         });
-        assert_eq!(tabs(&harness), [scenario.clone()], "the tab closed");
+        assert_eq!(
+            tabs(&harness),
+            std::slice::from_ref(&scenario),
+            "the tab closed"
+        );
         assert_eq!(
             active(&harness).as_deref(),
             Some(scenario.as_str()),
@@ -5618,7 +5622,7 @@ mod mcp16 {
         owner.save_configuration().unwrap();
         app(&mut harness).watcher.rescan();
         await_bar(&mut harness, "project settings saved");
-        assert_eq!(tabs(&harness), [scenario.clone()]);
+        assert_eq!(tabs(&harness), std::slice::from_ref(&scenario));
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
         assert!(pressed(&harness));
         drop(harness);
