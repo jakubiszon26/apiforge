@@ -79,6 +79,13 @@ At `a66bfd7`, on Linux:
   passed, 0 failed, 34 ignored.
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`: passed.
 
+At the merge of `main` (`ed68261`, REL-03; no Rust or Cargo file changed by
+it), the CI's third-party notice check with cargo-about 0.9.2: `cargo about
+generate --frozen --workspace --fail` passed with no stale clarification,
+and `packaging/release.py check-notices` named all 332 crates. `jsonschema`
+and the crates it adds are dev-only and so not in the notices
+(`ignore-dev-dependencies`).
+
 ## Not verified
 
 - A real MCP client (Claude Code or another) against this branch: left to
