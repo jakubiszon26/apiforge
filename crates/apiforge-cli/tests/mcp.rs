@@ -1701,7 +1701,7 @@ fn mcp12_actual_cli_connects_with_a_filtered_environment() {
         );
         assert!(
             Path::new(&runtime).is_dir(),
-            "MCP-12 requires provisioned {runtime}"
+            "MCP-12 requires the runner's provisioned /run/user directory"
         );
         command.env("XDG_RUNTIME_DIR", runtime);
     }

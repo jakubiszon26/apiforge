@@ -3866,7 +3866,18 @@ fn mcp05_review_an_oversized_component_is_too_large() {
 fn mcp12_overview_describes_every_holder_without_writing_or_connecting() {
     let directory = checkout();
     let root = directory.path();
-    let endpoint = "apiforge-0123456789abcdef0123456789abcdef";
+    // A real listener on the advertised endpoint: a connection attempt by
+    // overview would be observable.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut listener = {
+        let _inside = runtime.enter();
+        apiforge_channel::Listener::bind().unwrap()
+    };
+    let endpoint = listener.endpoint().name().to_owned();
+    let endpoint = endpoint.as_str();
     let cases = [
         (
             LockHolder::window().with_endpoint(Some(endpoint.into())),
@@ -3944,20 +3955,24 @@ fn mcp12_overview_describes_every_holder_without_writing_or_connecting() {
         assert_eq!(all_bytes(root), before);
         drop(owner);
     }
+    let connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_millis(200), listener.accept()).await
+    });
+    assert!(connected.is_err(), "overview never connects to the window");
 }
 
-/// Includes local metadata: merely calling overview must not advertise a server.
-fn all_bytes(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
-    fn visit(root: &Path, here: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
+/// Includes local metadata and directories (as `None`): merely calling
+/// overview must not advertise a server or create a directory.
+fn all_bytes(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn visit(root: &Path, here: &Path, found: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
         for entry in fs::read_dir(here).unwrap() {
             let path = entry.unwrap().path();
+            let relative = path.strip_prefix(root).unwrap().to_owned();
             if path.is_dir() {
+                found.insert(relative, None);
                 visit(root, &path, found);
             } else if path.file_name().unwrap() != "project.lock" {
-                found.insert(
-                    path.strip_prefix(root).unwrap().to_owned(),
-                    fs::read(path).unwrap(),
-                );
+                found.insert(relative, Some(fs::read(path).unwrap()));
             }
         }
     }
@@ -3988,8 +4003,7 @@ fn mcp12_unreachable_windows_keep_reads_and_never_advise_closing() {
         assert_eq!(error.details["holder"]["role"], "window");
         assert!(
             !error.message.to_lowercase().contains("close"),
-            "{}",
-            error.message
+            "the refusal advises closing the window"
         );
         assert!(error.message.contains("reading"));
         assert_eq!(shared(root), before);
