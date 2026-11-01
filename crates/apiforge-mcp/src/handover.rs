@@ -198,7 +198,11 @@ impl Hub {
                 .map(|link| (link.id, link.writer.clone()))
                 .collect()
         };
-        let failed = self.send(writers, message);
+        self.let_go_of(self.send(writers, message));
+    }
+
+    /// Lets go of the windows that could not be told.
+    fn let_go_of(&self, failed: Vec<u64>) {
         if !failed.is_empty() {
             eprintln!("apiforge mcp: channel: a window could not be told and was let go");
             lock(&self.links).retain(|link| {
@@ -224,7 +228,7 @@ impl Hub {
                 .collect();
             (running, writers)
         };
-        self.send(writers, &running);
+        self.let_go_of(self.send(writers, &running));
     }
 
     /// The session ended: the windows connected now are told `released` and

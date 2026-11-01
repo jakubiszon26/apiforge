@@ -363,7 +363,7 @@ fn run_text(
     failure: Option<(u64, String)>,
     ended: &str,
 ) -> String {
-    let file = bounded(file_name(path), MAX_FILE_CHARS);
+    let file = bounded_file(file_name(path));
     let (mode, live) = match mode {
         RunMode::Simulation => ("simulation", ""),
         RunMode::Live => ("live", " (live)"),
@@ -383,6 +383,22 @@ fn run_text(
             None => format!("Agent: {file}{live} failed · {ended}"),
         },
         RunState::Cancelled => format!("Agent: {file}{live} cancelled · {ended}"),
+    }
+}
+
+/// A file name bounded as `bounded` does, its extension kept: the stem is
+/// cut, *a-very-long-…-name….afs*.
+fn bounded_file(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, extension))
+            if !stem.is_empty()
+                && extension.chars().count() < 8
+                && name.chars().count() > MAX_FILE_CHARS =>
+        {
+            let room = MAX_FILE_CHARS - extension.chars().count() - 1;
+            format!("{}.{}", bounded(stem, room), bounded(extension, 8))
+        }
+        _ => bounded(name, MAX_FILE_CHARS),
     }
 }
 
@@ -552,6 +568,15 @@ mod tests {
             )),
             "{failed:?}"
         );
+    }
+
+    #[test]
+    fn a_long_file_name_keeps_its_extension() {
+        let long = format!("scenarios/{}.afs", "a".repeat(80));
+        let shown = bounded_file(file_name(&long));
+        assert_eq!(shown.chars().count(), MAX_FILE_CHARS, "{shown:?}");
+        assert!(shown.ends_with("….afs"), "{shown:?}");
+        assert_eq!(bounded_file("promotion.afs"), "promotion.afs");
     }
 
     #[test]

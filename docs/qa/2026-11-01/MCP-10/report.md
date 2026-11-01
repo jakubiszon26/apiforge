@@ -1,8 +1,10 @@
 # MCP-10: The agent's run status in the bottom bar — QA report
 
 - Branch: `feat/mcp-10-run-status`. Captures are from the release binaries
-  of `c2d356c` (the implementation; later commits on the branch change
-  only this report and its captures).
+  of `c2d356c`, the implementation. Later commits are the review rounds
+  below; they change `apiforge-mcp` (`tools.rs`, `handover.rs`,
+  `server.rs`) and `holder.rs`, none of them what the demo shows (see
+  *Review rounds*).
 - Built with: `cargo build --release --locked` (Rust 1.99.0).
 - Compared against mock-up: M4 round 4,
   `docs/qa/2026-10-27/MCP-00/m4-run-running-960x540.png` and
@@ -19,7 +21,9 @@
   measured 319.2 of 320.1 px), so `+ 0.5` became `+ 1.0`; a cut label
   loses at least a character (about 5 px). No other assertion changed.
 
-## Review round 1 (cubic on `19b337a`)
+## Review rounds
+
+### Round 1 (cubic on `19b337a`)
 
 Fixed in the code: the end of a run is told even when the run panics or
 cannot start (a drop guard tells `failed`); the failing step is found by
@@ -30,8 +34,36 @@ as running; the status's bounds are 40 characters of file name and 30 of
 label, so the longest status still fits the bar at 960 × 540. Criterion
 1's window test now also times the cancelled line (under 2 s from the
 cancellation, which precedes the message by a step and the cleanup). The
-captures above are of `c2d356c`; none of these changes alters what the
-demo shows.
+captures are of `c2d356c`: for the demo's runs the failing step is the
+same under either rule (*Promotional price* fails, no step is blocked),
+the file name and the label are shorter than either bound, and the
+release QA made no *Take back*; so the captured bar is the bar the new
+build draws. The criterion tests ran again on the new build (all pass).
+
+### Round 2 (cubic on `9f801c5`)
+
+A window that cannot be told the re-sent run within two seconds is let go,
+as for every other message; a file name over the bound keeps its
+extension (*…name….afs*). Neither changes the demo's bar.
+
+Two test findings of that round. The criterion 1 channel test failed now
+and then under load with the cancelled run reported `failed`: the test
+seam that pauses each step stops pausing once the run is cancelled, so the
+rest of the simulation ran in a few milliseconds and ended before the
+executor looked at the cancellation; the run really ended `failed`, the
+agent got no answer (rmcp drops the answer of a cancelled request), and the
+window was told what happened. The seam now pauses a stopping run 50 ms
+after each step (longer than the executor's 20 ms poll) when no cleanup
+delay is set, so the runner is stopped before its next step; it changes
+only runs under the test seam, and the `apiforge-mcp` and `apiforge-cli`
+suites pass with it. No assertion changed; the `mod mcp10` tests then
+passed 20 times in a row with four to six in parallel. On
+Windows, one CI run of `9f801c5` failed criterion 3 because an agent's
+`write_source`, made while the window observed, answered
+`recovery_required` (the commit stopped after activation); the other CI
+run of the same commit passed. That is the commit beside an observing
+window on Windows, not the status line; it is reported to the owner in the
+pull request.
 
 ## Criteria and their evidence
 

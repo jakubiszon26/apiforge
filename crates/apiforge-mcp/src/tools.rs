@@ -37,6 +37,11 @@ use std::{
     time::Duration,
 };
 
+/// With the step-delay test seam, how long a stopping run pauses after each
+/// step: longer than the executor's poll, so the runner is told to stop
+/// before the next step.
+const STOPPING_PAUSE: Duration = Duration::from_millis(50);
+
 /// A failed step's label in a channel `run` message is cut to this many
 /// characters; the window shows fewer.
 const MAX_LABEL_CHARS: usize = 200;
@@ -977,7 +982,11 @@ pub(crate) fn execute(
         let stopping = token.clone();
         Arc::new(move || {
             let delay = if stopping.is_cancelled() {
-                cleanup_delay
+                // Without a cleanup seam a stopping run still pauses a
+                // moment: undelayed, its remaining steps could finish
+                // before the executor polls and stops the runner, and a
+                // cancelled run would end as if never cancelled.
+                cleanup_delay.or(step_delay.map(|_| STOPPING_PAUSE))
             } else {
                 step_delay
             };
@@ -1078,7 +1087,8 @@ impl Drop for Told<'_> {
     }
 }
 
-/// The `run` message a window is told when `report` has ended: how many
+/// The `run` message a window is told when `report` has ended, its state
+/// as the agent's answer gives it (`status`): how many
 /// steps it had and, when it failed, the first step that did not pass.
 fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
     let state = match report.status {
