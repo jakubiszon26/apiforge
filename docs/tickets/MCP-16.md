@@ -255,4 +255,8 @@ one, by the priority above, since the active one changes in place under
 the person's eyes with its lines marked (every saved document of a
 followed reload is marked, not only the one the window goes to). The code
 scrolls to the first changed line only when it is out of view, and then
-centres it; a change already in view moves nothing, as in `f1`.
+centres it; a change already in view moves nothing, as in `f1`. A reload
+that deleted the active document leaves the window on the tab closing
+chose, even beside another document's save (criterion 5); a deletion of
+another document does not stop a save beside it from being followed
+(review round 1).

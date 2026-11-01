@@ -13,15 +13,19 @@
   [f4](f4-following-split-960x540.png).
 - Analysis model: Fable. Implementation model: Claude Opus 5.5.
 - Acceptance tests first: commit `e0e9276`. Before the implementation all
-  fifteen `mcp16_criterion_*` tests and the three MCP-08a tests that now
+  fourteen `mcp16_criterion_*` tests and the three MCP-08a tests that now
   unpin first failed for the right reason: the bar had no *Follow the
-  agent* toggle, or the window never went to the agent's document. After
-  that commit no assertion changed. Criterion 2's last edit changes a
-  label instead of a timeout (the server refused the timeout, which
-  disagreed with the statement's `@config`); the review view waits for the
-  agent's save before it captures; three tab-list comparisons are written
-  with a slice, as clippy asks; and the tests wait until the window has
-  followed the hand-over's commit before the agent writes again (below).
+  agent* toggle, or the window never went to the agent's document. Later
+  test changes, none of which weakens what a criterion asserts: criterion
+  2's last edit changes a label instead of a timeout (the server refused
+  the timeout, which disagreed with the statement's `@config`); three
+  tab-list assertions are written with a slice, as clippy asks; the tests
+  wait until the window has followed the hand-over's commit before the
+  agent writes again (below); in review round 1 the two-second bound is
+  measured from the start of the agent's call instead of its answer, and
+  criterion 7 scrolls the code first, at 960 × 540, so that its scroll
+  check is not of an unscrolled view. The design-review view gained checks
+  of its own data and waits for the agent's save.
 
 ## Review of the first CI run
 
@@ -38,6 +42,28 @@ notes). The tests now wait for the hand-over's commit to be followed
 (`observe` in `mod mcp16`), as a person's window, drawn continuously,
 does; no assertion changed. With it the `mcp16`, `mcp10` and `mcp08a`
 tests passed three times in a row, four at a time.
+
+## Review round 1 (cubic on `e1b9a2c`)
+
+Fixed in the code: a reload that deletes a document no longer stops the
+window following a save beside it, unless the deleted document was the
+active one, where the window stays on the tab closing chose (criterion
+5); a disabled toggle never shows the pressed colours; following a change
+takes the keyboard from an editor that kept it from before observing, so
+its caret does not move the board's selection; the lines the code shows
+whole count a wrapped line only when all its rows are in view. Fixed in
+the documents: the development guide says a deleted document's tab closes
+with a notice; ADR 0014's amendment says the camera and the selection are
+kept in every case and only the active document and the code's scroll
+follow. Fixed in the tests: the bound and criterion 7's scroll (above);
+this report's count. Answered without a change: the backlog's capacity
+total (MCP-16 is charged to the UX line, stated beside it; the total's
+drift comes from rows outside this ticket) and criterion 4's zero scroll
+baseline (the demo's component fits the window; a scrolled baseline would
+test the tab switch's caret centring, which predates this ticket). The
+release captures are of `3fa5afb`: none of these changes alters what they
+show (no deletion, no disabled toggle, no focused editor, no wrapped
+line).
 
 ## Criteria and their evidence
 
@@ -244,6 +270,7 @@ On `3fa5afb`, all exit 0:
   passed, 0 failed, 40 ignored
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 
-The later commits change only `mod mcp16`'s setup and documents; on them
-fmt and clippy were run again and the `mcp16`, `mcp10` and `mcp08a` tests
-passed (see above), and CI runs the whole suite on both platforms.
+After review round 1: fmt and clippy pass again, and the `mcp16`,
+`mcp10`, `mcp08a`, `mcp08b`, code editor, follow and widget tests passed
+twice in a row, four at a time (80 tests); CI runs the whole suite on both
+platforms.
