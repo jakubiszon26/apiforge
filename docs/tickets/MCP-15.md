@@ -1,10 +1,11 @@
 # MCP-15: A live run from the command line asks the open window for the project
 
 - Size: M · Owner review: 30 min · Risk: `default`, `visible UI`
-- State: Analysis (issue #182) · owner decision of 2026-11-01: the command
-  line asks the window over the control channel, as the server does, instead
-  of refusing · decisions 1–6 below open · after MCP-12 (#123, PR #178:
-  endpoint discovery, reused here)
+- State: Analysis, decided (issue #182) · owner decision of 2026-11-01: the
+  command line asks the window over the control channel, as the server does,
+  instead of refusing · decisions 1–6 taken 2026-11-01 on #182, all A ·
+  mock-up (a) and (b) still required before approval · after MCP-12 (#123,
+  PR #178: endpoint discovery, reused here)
 - Analysis model: Fable · Implementation model: —
 - Analysis: this file; the mechanism is [MCP-00](MCP-00.md#hand-over-between-the-window-and-the-agent)
   and [ADR 0014](../decisions/0014-agent-sessions.md) decision 4
@@ -24,9 +25,9 @@ writer again — nothing closed, nothing reopened.
   line on stderr says *The open API Forge window handed the project over for
   this run*. With unsaved work in the window the command waits and says
   *The API Forge window has unsaved work and asks you what to do; answer
-  there* (decision 2). A refusal names the holder in the server's words:
+  there* (decision 2 A). A refusal names the holder in the server's words:
   *Claude Code via apiforge mcp has held this project since 10:42; nothing was
-  sent. Run again when it has finished editing* (an agent, decision 5);
+  sent. Run again when it has finished editing* (an agent, decision 5 A);
   *apiforge apply has held this project since 10:41; nothing was sent. Run
   again when it has finished* (another command); *The API Forge window has
   held this project since 10:40 and could not be asked; nothing was sent.
@@ -38,22 +39,22 @@ writer again — nothing closed, nothing reopened.
   reads *apiforge run --live · since 10:42 · editing is paused here; this
   window follows every change* — M1's wording for a command, with the
   subcommand as typed — and the *Observing* badge shows; *Take back* is not
-  offered (decision 1). With unsaved work, the MCP-08c prompt opens with the
-  heading *A command asks for this project* and the sentence *apiforge run
-  --live wants to send live requests from this project. Unsaved work here:*
-  above the same list and the same two buttons (decision 2).
+  offered (decision 1 A). With unsaved work, the MCP-08c prompt opens with
+  the heading *A command asks for this project* and the sentence *apiforge
+  run --live wants to send live requests from this project. Unsaved work
+  here:* above the same list and the same two buttons (decision 2 A).
 - Changed: the refusal texts above replace *The folder project is open in
   another writer session* for a live folder run. The window's `granted` path,
   bar and prompt accept a command as the asker, not only an agent.
 - Removed, hidden, migrated: nothing. Simulations (`run` without `--live`),
   `check`, `print` and the `--workspace` mode are untouched; `apply` keeps
-  today's refusal (decision 6).
+  today's refusal (decision 6 A).
 - Default behaviour that changes: a live folder run with a clean window open
   **runs** instead of refusing, and the window becomes an observer for the
   run's duration without a prompt (MCP-00 decision 11 applied to the person's
   own command). The person's `--live` is the live consent; the window's
-  per-project toggle (MCP-09) does not govern it (decision 3). The window is
-  the writer again at the command's end (decision 4).
+  per-project toggle (MCP-09) does not govern it (decision 3 A). The window
+  is the writer again at the command's end (decision 4 A).
 
 ## Mock-up
 
@@ -64,12 +65,35 @@ writer again — nothing closed, nothing reopened.
 in Code at 960 × 540 and 1600 × 1000; (b) the hand-over prompt with the
 command's heading and sentence and two unsaved items at 960 × 540. Form 2
 (the `m1-*`/`m2-*` captures annotated with the new strings) is acceptable.
-Posted to #182; the approved captures go under `docs/qa/<date>/MCP-15/`. If
-decision 2 = B, (b) is dropped.
+Posted to #182; the approved captures go under `docs/qa/<date>/MCP-15/`.
+Both (a) and (b) are needed: decision 2 = A keeps the prompt.
 
-## Decisions for the owner
+## Decisions
 
-A is recommended in each.
+Taken by the owner on 2026-11-01 on #182: **1–6 = A**, the recommended
+option in each. The rules the ticket now follows:
+
+1. While a command holds the project the window is an observer as for every
+   holder: the bar reads *apiforge run --live · since HH:MM · editing is
+   paused here; this window follows every change*; **no *Take back*** for a
+   command holder.
+2. With unsaved work the window shows the MCP-08c prompt naming the command;
+   *Save all and hand over* saves and the run proceeds; *Not now* or Escape
+   keeps the person editing and the command exits 1 with *The window kept
+   the project (you chose to keep editing); nothing was sent*. The command
+   waits as long as the prompt is open; Ctrl+C gives up with nothing sent.
+3. The person's own `--live` is the live consent. The MCP-09 toggle governs
+   the agent only; a `permission` message from the window is ignored by the
+   command.
+4. The window takes the project back at the command's end, every end: the
+   command releases the lock and sends `released`; a killed command is taken
+   back by the window's probe, with the interrupted-run notice as at start.
+5. An agent session holding the project is refused by name, exit 1, nothing
+   sent, no request to the agent's server.
+6. Scope is `run --live` only; `apply` keeps today's refusal and gets its own
+   S ticket if the owner wants it.
+
+The options as they were put, for the record (A recommended in each):
 
 1. **What the window shows while a command holds the project.** **A:** the
    observer state as for every holder (MCP-08a): the bar with M1's wording for
@@ -127,11 +151,11 @@ A is recommended in each.
 
 1. **Clean window first.** The window is open and clean on a project whose
    base URL is the local demo API; `apiforge run --folder … --scenario …
-   --live` hands over (the bar shows the command's wording of decision 1 and
-   no *Take back*, the badge reads *Observing*), the requests are sent and
-   journalled under `.apiforge/local/`, the report is printed, exit 0; within
-   two seconds of the command's exit the window is the writer again and a
-   save there succeeds without a conflict. Desktop interaction test in
+   --live` hands over (the bar shows the command's wording of decision 1 A
+   and no *Take back* at any point of the run, the badge reads *Observing*),
+   the requests are sent and journalled under `.apiforge/local/`, the report
+   is printed, exit 0; within two seconds of the command's exit the window is
+   the writer again and a save there succeeds without a conflict. Desktop interaction test in
    `folder/acceptance_tests.rs` (the command run through the spawned-helper
    path of MCP-08b); CLI test in `crates/apiforge-cli/tests/folder.rs`
    against a scripted window-role listener.
@@ -183,7 +207,8 @@ A is recommended in each.
 
 ## Not in scope
 
-`apply` asking the window (decision 6 A: a later S ticket); the `--workspace`
+`apply` asking the window (decision 6 A: a later S ticket, on the same
+client); the `--workspace`
 JSON mode; a SIGINT handler that cancels the run and runs its cleanup (today
 Ctrl+C kills the process and the window reports the interrupted run); the
 run status line in the bar (MCP-10; the messages are sent here); the
@@ -301,4 +326,6 @@ reads two captures — 30 minutes.
 
 Open pull requests on 2026-11-01: #178 (MCP-12, 40 min) and #179 (REL-03,
 10 min), two awaiting acceptance within 50 minutes; this draft is an analysis
-and starts no implementation until #178 is merged and the owner approves.
+and starts no implementation until #178 is merged and the owner approves the
+analysis with its mock-up. The six decisions were taken the same day; the
+mock-up is what approval still waits for.
