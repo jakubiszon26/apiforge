@@ -1,15 +1,15 @@
 # MCP-15: A live run from the command line asks the open window — QA report
 
-- Branch: `docs/mcp-15-cli-handover` (PR #184). Captures are from the
+- Branch: `docs/mcp-15-cli-handover`. Captures are from the
   release binaries of this branch: `apiforge-desktop` of `e9407b6` and
   `apiforge` of `c0f7ec0`. `c0f7ec0` is the same code plus the faster exit
-  found below. Later commits change no drawn view:
+  found below. Later commits did not change the captured views:
   - `6c9eadb` moved the reading of the secrets file from `run_live` into
     the CLI. The successful hand-over path is unchanged on screen and in
     the terminal. One failure now comes earlier: a secrets file that cannot
     be read is reported before an unregistered scenario. Either way no
     window is asked.
-  - Review round 1, below.
+  - The changes after the first review, below.
 - Built with: `cargo build --release --locked` (Rust 1.99.0).
 - Compared against the mock-up in this folder:
   (a) `a-command-bar-code-960x540.png` and `a-command-bar-code-1600x1000.png`,
@@ -241,8 +241,9 @@ request's checks. The ticket is not accepted for Windows on this report.
   always says *… has unsaved work and asks you what to do*, because the
   window does not say why it has not answered yet.
 - Ctrl+C at the terminal while the prompt is open, in the release binary.
-  Since review round 1 the prompt closes with the command; the test
-  `a_command_that_stops_waiting_closes_its_prompt` covers it.
+  The prompt now closes when the command's connection ends. The test
+  `a_command_that_stops_waiting_closes_its_prompt` covers the command
+  being killed; a terminal's Ctrl+C was not sent.
 - A wait beyond 30 s in the release binary. The CLI test of criterion 3
   covers it.
 - Criteria 6, 8 and 10 in the release binaries. Their tests drive the real
@@ -253,10 +254,7 @@ request's checks. The ticket is not accepted for Windows on this report.
   this project*. No test runs two builds.
 - Keyboard-only operation and a screen reader session.
 
-## Review round 1
-
-The automated review of #184 (cubic, 11 points) is answered on the pull
-request.
+## Changes after the first review
 
 Fixed:
 - A command killed while its prompt is open now closes the prompt (new test
@@ -274,7 +272,7 @@ Fixed:
   implemented names, and this report's statements about secrets and about
   criterion 3.
 
-Not changed, and why, on the pull request:
+Not changed:
 - The sprint capacity total. Additions made during the sprint are charged
   to the UX line, as the backlog says.
 - The waiting line's wording. It is the ticket's text, and is put to the
@@ -311,7 +309,7 @@ On `6c9eadb`, the head that carries the Windows and CodeQL fixes, all exit
   40 ignored
 - the fixture check
 
-On the review round 1 commit, all exit 0:
+On `aca7e14`, after these changes, all exit 0:
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
 - `cargo test --workspace --all-targets --locked`: 1 374 passed, 0 failed,
