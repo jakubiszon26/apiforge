@@ -12,7 +12,7 @@ use crate::{
     error::{ErrorCode, ToolError, Wrote},
     folder,
     handover::{Answer, Hub},
-    requests,
+    live, requests,
     secrets::{self, Secrets},
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
@@ -330,12 +330,35 @@ impl AgentSession {
     }
 
     /// The writer lock for a live run (MCP-06): the session's, taken now
-    /// when the project is free, refused with the holder otherwise. The
-    /// store knows the session's secrets.
+    /// when the project is free, refused with the holder otherwise. A
+    /// window that holds the project is asked only when its consent allows
+    /// the run (MCP-09). The store knows the session's secrets.
     pub(crate) fn writer(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
         self.set_client(client);
         let mut state = self.state();
-        self.store(&mut state)
+        self.store_for(&mut state, true)
+    }
+
+    /// The project is held by a window that names its channel, and this
+    /// session can ask it: its consent, not the start flag, decides a live
+    /// run (MCP-09).
+    pub(crate) fn window_decides(&self) -> bool {
+        if self.is_active() || self.hub.get().is_none() {
+            return false;
+        }
+        ProjectStore::open_read_only(&self.folder)
+            .ok()
+            .and_then(|probe| probe.holder().ok().flatten())
+            .is_some_and(|holder| {
+                holder.role() == Some(HolderRole::Window) && holder.endpoint().is_some()
+            })
+    }
+
+    /// Tells the connected windows `message`, when the server has a channel.
+    pub(crate) fn tell(&self, message: &Message) {
+        if let Some(hub) = self.hub.get() {
+            hub.broadcast(message);
+        }
     }
 
     /// The session's store while it holds the lock. Never waits for a
@@ -656,6 +679,11 @@ impl AgentSession {
 
     /// The writer lock of the session, taken at its first write.
     fn store(&self, state: &mut State) -> Result<ProjectStore, ToolError> {
+        self.store_for(state, false)
+    }
+
+    /// As [`Self::store`], for a `live` run when it is one.
+    fn store_for(&self, state: &mut State, live: bool) -> Result<ProjectStore, ToolError> {
         if state.recovery_required {
             return Err(ToolError::new(
                 ErrorCode::RecoveryRequired,
@@ -665,7 +693,7 @@ impl AgentSession {
         let store = match &state.store {
             Some(store) => store.clone(),
             None => {
-                let store = self.take_lock(state.client.clone())?;
+                let store = self.take_lock(state.client.clone(), live)?;
                 state.store = Some(store.clone());
                 self.set_held(Some(store.clone()));
                 self.active.store(true, Ordering::Release);
@@ -676,7 +704,7 @@ impl AgentSession {
         Ok(store)
     }
 
-    fn take_lock(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
+    fn take_lock(&self, client: Option<String>, live: bool) -> Result<ProjectStore, ToolError> {
         // A folder without a project gets no `.apiforge/local` from a write.
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
         let manifest = ProjectPath::new(MANIFEST_PATH).map_err(storage)?;
@@ -695,8 +723,8 @@ impl AgentSession {
             }
         }
         let hub = self.hub.get();
-        let holder = Holder::new(HolderRole::Agent, client.clone())
-            .with_endpoint(hub.and_then(Hub::endpoint));
+        let holder =
+            Holder::new(HolderRole::Agent, client).with_endpoint(hub.and_then(Hub::endpoint));
         // A holder that leaves between the refusal and the reading of its
         // description gets one more attempt.
         for _ in 0..2 {
@@ -709,14 +737,7 @@ impl AgentSession {
                         if found.role() == Some(HolderRole::Window)
                             && let (Some(hub), Some(endpoint)) = (hub, found.endpoint())
                         {
-                            return self.ask(
-                                hub,
-                                endpoint,
-                                client.clone(),
-                                &holder,
-                                &probe,
-                                &found,
-                            );
+                            return self.ask(hub, endpoint, live, &holder, &probe, &found);
                         }
                         return Err(held(&found));
                     }
@@ -736,13 +757,15 @@ impl AgentSession {
         &self,
         hub: &Arc<Hub>,
         endpoint: &str,
-        client: Option<String>,
+        live: bool,
         holder: &Holder,
         probe: &ProjectStore,
         window: &Holder,
     ) -> Result<ProjectStore, ToolError> {
-        let connection = match hub.ask(endpoint, window.owner_uid(), client) {
-            Answer::Granted(connection) => connection,
+        let client = holder.client().map(str::to_owned);
+        let (connection, consent) = match hub.ask(endpoint, window.owner_uid(), client, live) {
+            Answer::Granted(connection, consent) => (connection, consent),
+            Answer::LiveDisabled(permission) => return Err(live::refusal(permission)),
             Answer::Refused(reason) => return Err(refused(&reason, window)),
             Answer::Pending => return Err(pending(window)),
             Answer::Unreachable => return Err(not_reached(window, endpoint, probe.root())),
@@ -751,7 +774,7 @@ impl AgentSession {
         loop {
             match ProjectStore::open_exclusive_as(&self.folder, holder) {
                 Ok(store) => {
-                    hub.adopt(connection);
+                    hub.adopt(connection, consent);
                     return Ok(store);
                 }
                 Err(ProjectError::Locked) if Instant::now() < deadline => {

@@ -31,9 +31,9 @@ pub enum Permission {
     Window { live: bool },
 }
 
-/// The server's current permission, behind a `watch` channel: MCP-09's
-/// control channel writes `Window`, and its loss resets the slot to the flag.
-/// No tool writes it.
+/// The server's current permission, behind a `watch` channel: the control
+/// channel writes `Window` from what a connected window says, and the loss
+/// of every window resets the slot to the flag (MCP-09). No tool writes it.
 #[derive(Clone, Debug)]
 pub struct LivePermission {
     flag: bool,
@@ -52,8 +52,8 @@ impl LivePermission {
         *self.slot.borrow()
     }
 
-    /// A connected window's setting: the test seam MCP-09 wires to the
-    /// control channel's `permission { live }`.
+    /// A connected window's setting, from the control channel's
+    /// `permission { live }` (MCP-09).
     pub fn set_window(&self, live: bool) {
         self.slot.send_replace(Permission::Window { live });
     }
@@ -68,30 +68,48 @@ impl LivePermission {
         self.slot.subscribe()
     }
 
+    /// The start flag, which decides while no window is connected.
+    pub fn flag(&self) -> bool {
+        self.flag
+    }
+
     /// What `project_overview.live_requests` reports.
     pub fn describe(&self) -> LiveRequests {
-        let (allowed, source) = match self.current() {
-            Permission::Flag(true) => (true, "--allow-live"),
-            Permission::Flag(false) => (false, "no --allow-live"),
-            Permission::Window { live: true } => (true, "window setting"),
-            Permission::Window { live: false } => (false, "off in the project's settings"),
-        };
-        LiveRequests {
-            allowed,
-            source: source.to_owned(),
-        }
+        describe(self.current())
     }
 
     /// Refuses a live run unless the current permission allows it.
     pub(crate) fn check(&self) -> Result<(), ToolError> {
-        let message = match self.current() {
-            Permission::Flag(true) | Permission::Window { live: true } => return Ok(()),
-            Permission::Flag(false) => NOT_ENABLED,
-            Permission::Window { live: false } => OFF_IN_SETTINGS,
-        };
-        Err(ToolError::new(ErrorCode::LiveDisabled, message)
-            .with_details(json!({ "source": self.describe().source })))
+        match self.current() {
+            Permission::Flag(true) | Permission::Window { live: true } => Ok(()),
+            refused => Err(refusal(refused)),
+        }
     }
+}
+
+/// What `project_overview.live_requests` says of `permission`.
+fn describe(permission: Permission) -> LiveRequests {
+    let (allowed, source) = match permission {
+        Permission::Flag(true) => (true, "--allow-live"),
+        Permission::Flag(false) => (false, "no --allow-live"),
+        Permission::Window { live: true } => (true, "window setting"),
+        Permission::Window { live: false } => (false, "off in the project's settings"),
+    };
+    LiveRequests {
+        allowed,
+        source: source.to_owned(),
+    }
+}
+
+/// The refusal of a live run under `permission`: `live_disabled`, with the
+/// source of the decision.
+pub(crate) fn refusal(permission: Permission) -> ToolError {
+    let message = match permission {
+        Permission::Window { .. } => OFF_IN_SETTINGS,
+        Permission::Flag(_) => NOT_ENABLED,
+    };
+    ToolError::new(ErrorCode::LiveDisabled, message)
+        .with_details(json!({ "source": describe(permission).source }))
 }
 
 /// A live run an earlier process left unfinished, as `apiforge run` prints

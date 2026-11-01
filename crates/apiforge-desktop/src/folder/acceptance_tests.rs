@@ -4329,7 +4329,8 @@ mod mcp09 {
         let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "400")]);
         hand_over(&mut harness, &mut server, "The agent is connected.");
 
-        let run = server.start_call("run", json!({ "path": SCENARIO, "live": true }));
+        let start = json!({ "path": SCENARIO, "live": true });
+        let mut run = server.start_call("run", start.clone());
         // The run holds the server's run slot: a probe of a document that
         // does not exist is `run_in_progress` while it does.
         let deadline = Instant::now() + Duration::from_secs(15);
@@ -4343,10 +4344,16 @@ mod mcp09 {
             if probe["result"]["structuredContent"]["code"] == "run_in_progress" {
                 break;
             }
-            assert!(
-                server.poll(run).is_none(),
-                "the run ended before it was seen"
-            );
+            // A probe that came first held the slot for a moment, and the
+            // run was refused: start it again.
+            if let Some(ended) = server.poll(run) {
+                assert_eq!(
+                    tool_error(&ended)["code"],
+                    "run_in_progress",
+                    "the run ended before it was seen: {ended}"
+                );
+                run = server.start_call("run", start.clone());
+            }
             assert!(Instant::now() < deadline, "the run never started: {probe}");
             std::thread::sleep(Duration::from_millis(20));
         }

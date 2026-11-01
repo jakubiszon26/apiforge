@@ -8,6 +8,7 @@ mod buffers;
 mod canvas;
 mod capture;
 mod code;
+mod consent;
 mod dialogs;
 mod dnd;
 mod editor;

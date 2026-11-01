@@ -15,7 +15,7 @@ pub use assign_variable::AssignVariableDialog;
 pub use component::ComponentDialog;
 pub use environment::{EnvironmentDialog, SessionSecrets};
 pub use run_inputs::{RunInputs, RunInputsDialog};
-pub use settings::SettingsDialog;
+pub use settings::{AgentSection, SettingsDialog};
 
 use crate::icons::Icon;
 use crate::{theme, widgets};
@@ -128,6 +128,7 @@ pub(crate) struct Chrome<'a> {
     pub(crate) eyebrow: &'a str,
     pub(crate) title: &'a str,
     pub(crate) width: f32,
+    /// Empty for a dialog that applies nothing, which then has no button.
     pub(crate) apply_label: &'a str,
     /// A short note on the left of the footer.
     pub(crate) note: Option<&'a str>,
@@ -239,10 +240,12 @@ impl Chrome<'_> {
             }
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add_enabled(ready, widgets::primary_button(self.apply_label))
-                        .on_hover_text("Ctrl+Enter")
-                        .clicked()
+                    // A dialog with nothing to apply shows no apply button.
+                    if !self.apply_label.is_empty()
+                        && ui
+                            .add_enabled(ready, widgets::primary_button(self.apply_label))
+                            .on_hover_text("Ctrl+Enter")
+                            .clicked()
                     {
                         action = Action::Apply;
                     }

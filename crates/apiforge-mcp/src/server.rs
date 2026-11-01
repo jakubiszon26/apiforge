@@ -6,7 +6,7 @@ use crate::{
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
     handover::Hub,
-    live::{self, LivePermission},
+    live::{self, LivePermission, Permission},
     requests, resources,
     secrets::{self, Secrets},
     tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
@@ -221,7 +221,15 @@ impl ApiforgeServer {
         if let Some(recorded) = self.recorded(&arguments)? {
             return Ok(recorded);
         }
-        self.permission.check()?;
+        // While no window is connected the flag decides, unless a window
+        // holds the project: then its consent does, heard before it is
+        // asked for the project (MCP-09).
+        if let Err(refused) = self.permission.check()
+            && !(matches!(self.permission.current(), Permission::Flag(_))
+                && self.agent.window_decides())
+        {
+            return Err(refused);
+        }
         let _slot = self.runs.claim()?;
         let store = self.agent.writer(client)?;
         if let Some(id) = &arguments.request_id
@@ -265,14 +273,26 @@ impl ApiforgeServer {
             &self.journal_before,
             (journal.interrupted.clone(), journal.unreadable),
         );
-        let (mut report, before) = tools::execute(
+        // The windows learn that a live run is in progress, so the person who
+        // turns live off is told it will finish (MCP-09).
+        let told = LiveRunTold::start(&self.agent, &prepared_path);
+        let executed = tools::execute(
             prepared,
             arguments,
             Some(journal),
             &self.runs,
             cancel,
             self.cleanup_delay,
-        )?;
+        );
+        told.end(match &executed {
+            Ok((report, _)) => match report.status {
+                tools::Verdict::Passed => RunState::Passed,
+                tools::Verdict::Failed => RunState::Failed,
+                tools::Verdict::Cancelled => RunState::Cancelled,
+            },
+            Err(_) => RunState::Failed,
+        });
+        let (mut report, before) = executed?;
         report.interrupted = live::interrupted(&before.interrupted, values);
         report.journal_unreadable = before.unreadable;
         tools::bound(Ok(report))
@@ -780,6 +800,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// and the window is told `released`.
 fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> Arc<Hub> {
     let hub = Hub::new(handle);
+    hub.decide_live(server.permission.clone());
     server.agent.set_hub(hub.clone());
     let agent = server.agent.clone();
     let runs = server.runs.clone();
@@ -881,6 +902,50 @@ impl<R: AsyncRead + Unpin> AsyncRead for EndOfInput<R> {
             self.lost.cancel();
         }
         polled
+    }
+}
+
+/// Tells the connected windows that a live run started and how it ended:
+/// `running`, then the end state, or `failed` when it stopped otherwise.
+struct LiveRunTold<'a> {
+    agent: &'a AgentSession,
+    path: String,
+    ended: bool,
+}
+
+impl<'a> LiveRunTold<'a> {
+    fn start(agent: &'a AgentSession, path: &str) -> Self {
+        agent.tell(&Message::Run {
+            path: path.to_owned(),
+            mode: RunKind::Live,
+            state: RunState::Running,
+        });
+        Self {
+            agent,
+            path: path.to_owned(),
+            ended: false,
+        }
+    }
+
+    fn end(mut self, state: RunState) {
+        self.tell(state);
+    }
+
+    fn tell(&mut self, state: RunState) {
+        if !self.ended {
+            self.ended = true;
+            self.agent.tell(&Message::Run {
+                path: std::mem::take(&mut self.path),
+                mode: RunKind::Live,
+                state,
+            });
+        }
+    }
+}
+
+impl Drop for LiveRunTold<'_> {
+    fn drop(&mut self) {
+        self.tell(RunState::Failed);
     }
 }
 

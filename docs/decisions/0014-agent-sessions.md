@@ -128,3 +128,21 @@ there is no close-window advice. A path and failed connection do not establish
 a Windows writer, and invisible cross-OS locks remain unsupported. Stale
 metadata never prevents acquiring a free OS lock. No project-format, channel
 message, live-consent or ownership rule changes.
+
+## MCP-09 amendment: when a window's consent is heard (2026-11-01)
+
+Decision 6 stands; [MCP-09](../tickets/MCP-09.md) fixes when the server
+knows the window's consent. A window says `permission { live }` on every
+control-channel connection as soon as it opens, before anything else, and on
+every change; it never takes a `permission` from the other side. The newest
+consent among the windows connected to the server decides; when the last one
+goes, the start flag does. A live run that finds the project held by a window
+naming an endpoint hears that window's consent before it asks for the
+project: a window whose consent is off is not asked, keeps the project, and
+the run is `live_disabled` (*live requests are off in this project's
+settings*), whatever the flag; a window that says nothing within two seconds
+(an older build) leaves the decision to the flag. The overview still never
+connects, so before a window is connected it reports the flag. The server
+tells connected windows `run { mode: live }` when its live run starts and
+ends. The consent is kept in `agent-consent.json` beside the preferences, by
+the manifest id; the project file format is unchanged.

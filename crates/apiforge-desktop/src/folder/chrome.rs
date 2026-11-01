@@ -11,6 +11,7 @@ impl FolderApp {
         let name = session.manifest().name.clone();
         let read_only = session.is_read_only();
         let observing = self.observing();
+        let live_allowed = self.live_allowed();
         let unsaved = session
             .documents()
             .iter()
@@ -47,10 +48,12 @@ impl FolderApp {
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             // Keep room for the widest toolbar, a component's with Publish
-            // (635 px), and the read-only badge, on every tab so that the
-            // title keeps its width (KTLO-23 decision 6). A long project name
-            // must not paint into the Code tab at 960 px.
-            let reserved = 650.0 + if read_only { 80.0 } else { 0.0 };
+            // (635 px), and the read-only and live badges, on every tab so
+            // that the title keeps its width (KTLO-23 decision 6). A long
+            // project name must not paint into the Code tab at 960 px.
+            let reserved = 650.0
+                + if read_only { 80.0 } else { 0.0 }
+                + if live_allowed { 80.0 } else { 0.0 };
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
@@ -75,6 +78,18 @@ impl FolderApp {
                     RichText::new(if observing { "Observing" } else { "Read-only" })
                         .size(theme::FONT_META)
                         .color(theme::WARNING),
+                );
+            }
+            if live_allowed {
+                // The person's consent is never hidden while it holds
+                // (MCP-09, decision 15 A).
+                ui.label(
+                    RichText::new("Live allowed")
+                        .size(theme::FONT_META)
+                        .color(theme::WARNING),
+                )
+                .on_hover_text(
+                    "An MCP agent may send live requests in this project. Change it in Project settings.",
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
