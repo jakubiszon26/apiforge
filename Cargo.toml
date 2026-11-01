@@ -53,6 +53,9 @@ url = "=2.5.8"
 # MCP server over stdio (MCP-00): protocol revisions 2026-07-28 and 2025-11-25.
 rmcp = { version = "=3.8.0", default-features = false, features = ["server", "transport-io", "macros"] }
 schemars = "=1.2.2"
+# Tests only: the tools' structured output validated against their output
+# schemas (MCP-14). No remote or file references are resolved.
+jsonschema = { version = "=0.59.0", default-features = false }
 # Keep the tested egui release while the native editor is migrated.
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
 rfd = "=0.17.2"

@@ -632,8 +632,8 @@ pub struct Step {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actual: Option<Value>,
     /// The request was on its way when the step ended: the API may have
-    /// received it.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// received it. Always sent, `false` included: the output schema
+    /// requires it (MCP-14).
     pub may_have_reached_api: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
@@ -669,15 +669,14 @@ pub struct RunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     /// The recorded result of an earlier call with the same `request_id`;
-    /// nothing was sent for this one.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    /// nothing was sent for this one. Always sent, as is
+    /// `journal_unreadable`: the output schema requires both (MCP-14).
     pub replayed: bool,
     /// Live runs an earlier process left unfinished, from the project's run
     /// journal: the requests that may have changed the API.
     pub interrupted: Vec<crate::live::InterruptedRun>,
     /// The run journal could not be read; a live run preserved it as
     /// `journal.unreadable.json`.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub journal_unreadable: bool,
 }
 

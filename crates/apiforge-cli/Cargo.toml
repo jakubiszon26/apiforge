@@ -26,6 +26,8 @@ tokio.workspace = true
 tempfile.workspace = true
 # Live runs over stdio against the local demo API (MCP-06).
 apiforge-demo-api.workspace = true
+# Structured output checked against each tool's output schema (MCP-14).
+jsonschema.workspace = true
 
 [lints]
 workspace = true
