@@ -12,7 +12,19 @@
 //! request nobody answered and a window that cannot be reached become the
 //! write's result. Lines that are not messages are ignored and logged on
 //! stderr by kind, never quoted.
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Reader, Received, Writer};
+//!
+//! A window says the person's live consent as soon as a connection opens
+//! and again on every change (MCP-09). While any window is connected the
+//! windows decide live runs, the newest consent heard first, and a window
+//! that has not said one yet counts as off; with no window connected the
+//! start flag does. A live run that would ask a window for the project hears
+//! that consent first, and a window that says no, or nothing within two
+//! seconds, is not asked: it keeps the project. The flag never decides for a
+//! connected window.
+use crate::live::{LivePermission, Permission};
+use apiforge_channel::{
+    Connection, Endpoint, Listener, Message, Reader, Received, RunState, Writer,
+};
 use std::{
     io,
     sync::{
@@ -27,11 +39,18 @@ use tokio::{runtime::Handle, task::JoinHandle};
 const ANSWER: Duration = Duration::from_secs(30);
 /// How long one message may take to reach a window before it is dropped.
 const SEND: Duration = Duration::from_secs(2);
+/// How long a live run waits for a window's consent; a window says it as
+/// soon as the connection opens, and one that does not is taken as off.
+const CONSENT: Duration = Duration::from_secs(2);
 
 /// What a window answered when it was asked for the project.
 pub(crate) enum Answer {
-    /// The window let the project go; the connection stays to observe.
-    Granted(Connection),
+    /// The window let the project go; the connection stays to observe. The
+    /// consent it said on the way, if any.
+    Granted(Connection, Option<bool>),
+    /// A live run's request was not made: the window's consent is off, or
+    /// it said none in time.
+    LiveDisabled(Permission),
     Refused(String),
     /// Nobody answered in time; nothing was decided.
     Pending,
@@ -45,6 +64,9 @@ struct Link {
     id: u64,
     writer: Arc<tokio::sync::Mutex<Writer>>,
     reader: JoinHandle<()>,
+    /// The window's last consent, and when it was heard, for the newest;
+    /// `None` until it says one, which counts as off.
+    consent: Option<(u64, bool)>,
 }
 
 /// Every window connected to this server, and the server's endpoint.
@@ -52,8 +74,15 @@ pub struct Hub {
     handle: Handle,
     endpoint: Mutex<Option<Endpoint>>,
     links: Mutex<Vec<Link>>,
+    /// The `run` message of the run in progress, told to a window that
+    /// connects meanwhile (MCP-10). Changed only while `links` is locked.
+    running: Mutex<Option<Message>>,
     next: AtomicU64,
+    /// Orders the consents heard, so the newest decides.
+    heard: AtomicU64,
     take_back: OnceLock<TakeBack>,
+    /// The server's live permission slot, which the windows' consent sets.
+    permission: OnceLock<LivePermission>,
 }
 
 impl std::fmt::Debug for Hub {
@@ -81,9 +110,17 @@ impl Hub {
             handle,
             endpoint: Mutex::default(),
             links: Mutex::default(),
+            running: Mutex::default(),
             next: AtomicU64::new(1),
+            heard: AtomicU64::new(1),
             take_back: OnceLock::new(),
+            permission: OnceLock::new(),
         })
+    }
+
+    /// The slot the connected windows' consent decides (MCP-09).
+    pub fn decide_live(&self, permission: LivePermission) {
+        let _ = self.permission.set(permission);
     }
 
     /// What to do when a window asks for the project back. Called on the
@@ -119,8 +156,16 @@ impl Hub {
     }
 
     /// Asks the window listening on `endpoint` for the project and waits up
-    /// to thirty seconds for its answer.
-    pub(crate) fn ask(&self, endpoint: &str, client: Option<String>) -> Answer {
+    /// to thirty seconds for its answer. For a `live` run the window's
+    /// consent is heard first, and a window whose consent does not allow it
+    /// is not asked (MCP-09).
+    pub(crate) fn ask(
+        &self,
+        endpoint: &str,
+        owner_uid: Option<u32>,
+        client: Option<String>,
+        live: bool,
+    ) -> Answer {
         let Some(endpoint) = Endpoint::parse(endpoint) else {
             eprintln!("apiforge mcp: channel: the holder names no valid endpoint");
             return Answer::Unreachable;
@@ -131,13 +176,29 @@ impl Hub {
         };
         self.handle.block_on(async move {
             let asked = tokio::time::timeout(ANSWER, async {
-                let mut connection = apiforge_channel::connect(&endpoint).await?;
+                let mut connection = apiforge_channel::connect(&endpoint, owner_uid).await?;
+                let mut consent = None;
+                if live {
+                    consent = match tokio::time::timeout(CONSENT, consent_of(&mut connection)).await
+                    {
+                        Ok(heard) => heard?,
+                        Err(_) => None,
+                    };
+                    // A connected window decides; one that says nothing in
+                    // time has not allowed anything.
+                    if consent != Some(true) {
+                        return Ok(Answer::LiveDisabled(Permission::Window { live: false }));
+                    }
+                }
                 connection.writer.send(&request).await?;
                 loop {
                     match connection.reader.next().await? {
                         None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
                         Some(Received::Message(Message::Granted)) => {
-                            return Ok(Answer::Granted(connection));
+                            return Ok(Answer::Granted(connection, consent));
+                        }
+                        Some(Received::Message(Message::Permission { live })) => {
+                            consent = Some(live);
                         }
                         Some(Received::Message(Message::Refused { reason })) => {
                             return Ok(Answer::Refused(reason));
@@ -166,9 +227,9 @@ impl Hub {
     }
 
     /// Keeps the connection of a window that granted the project: it
-    /// observes from now on.
-    pub(crate) fn adopt(self: &Arc<Self>, connection: Connection) {
-        self.add(connection);
+    /// observes from now on, and its `consent` decides live runs.
+    pub(crate) fn adopt(self: &Arc<Self>, connection: Connection, consent: Option<bool>) {
+        self.add(connection, consent);
     }
 
     /// Tells the window that granted the project the server could not take
@@ -182,27 +243,60 @@ impl Hub {
     /// Tells every connected window `message`; a window that cannot be told
     /// within two seconds is let go.
     pub(crate) fn broadcast(&self, message: &Message) {
-        let writers: Vec<_> = lock(&self.links)
-            .iter()
-            .map(|link| (link.id, link.writer.clone()))
-            .collect();
-        let failed = self.send(writers, message);
+        let writers: Vec<_> = {
+            let links = lock(&self.links);
+            if let Message::Run { state, .. } = message {
+                *lock(&self.running) = (*state == RunState::Running).then(|| message.clone());
+            }
+            links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect()
+        };
+        self.let_go_of(self.send(writers, message));
+    }
+
+    /// Lets go of the windows that could not be told.
+    fn let_go_of(&self, failed: Vec<u64>) {
         if !failed.is_empty() {
             eprintln!("apiforge mcp: channel: a window could not be told and was let go");
-            lock(&self.links).retain(|link| {
+            let mut links = lock(&self.links);
+            links.retain(|link| {
                 let keep = !failed.contains(&link.id);
                 if !keep {
                     link.reader.abort();
                 }
                 keep
             });
+            self.decide(&links);
         }
+    }
+
+    /// Tells every connected window again the run in progress, if one is.
+    pub(crate) fn retell_running(&self) {
+        let (running, writers) = {
+            let links = lock(&self.links);
+            let Some(running) = lock(&self.running).clone() else {
+                return;
+            };
+            let writers: Vec<_> = links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect();
+            (running, writers)
+        };
+        self.let_go_of(self.send(writers, &running));
     }
 
     /// The session ended: the windows connected now are told `released` and
     /// let go; one that connects meanwhile stays, for the next session.
     pub(crate) fn release(&self) {
-        let links = std::mem::take(&mut *lock(&self.links));
+        let links = {
+            let mut connected = lock(&self.links);
+            let links = std::mem::take(&mut *connected);
+            self.decide(&connected);
+            links
+        };
         let writers = links
             .iter()
             .map(|link| (link.id, link.writer.clone()))
@@ -236,18 +330,68 @@ impl Hub {
         })
     }
 
-    fn add(self: &Arc<Self>, connection: Connection) {
+    fn add(self: &Arc<Self>, connection: Connection, consent: Option<bool>) {
         let (reader, writer) = connection.split();
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let writer = Arc::new(tokio::sync::Mutex::new(writer));
+        // Locked before the reader starts, so a consent it reads at once
+        // finds its link.
+        let mut links = lock(&self.links);
+        // A window that connects during a run hears that it runs before
+        // anything broadcast later, which waits for this writer.
+        if let Some(running) = lock(&self.running).clone()
+            && let Ok(mut told) = writer.clone().try_lock_owned()
+        {
+            self.handle.spawn(async move {
+                let _ = tokio::time::timeout(SEND, told.send(&running)).await;
+            });
+        }
         let task = self
             .handle
             .spawn(read(Arc::downgrade(self), id, reader, writer.clone()));
-        lock(&self.links).push(Link {
+        links.push(Link {
             id,
             writer,
             reader: task,
+            consent: consent.map(|live| (self.heard.fetch_add(1, Ordering::Relaxed), live)),
         });
+        self.decide(&links);
+    }
+
+    /// The window on link `id` said the person's consent.
+    fn consented(&self, id: u64, live: bool) {
+        let mut links = lock(&self.links);
+        if let Some(link) = links.iter_mut().find(|link| link.id == id) {
+            link.consent = Some((self.heard.fetch_add(1, Ordering::Relaxed), live));
+        }
+        self.decide(&links);
+    }
+
+    /// The window on link `id` is gone.
+    fn gone(&self, id: u64) {
+        let mut links = lock(&self.links);
+        links.retain(|link| link.id != id);
+        self.decide(&links);
+    }
+
+    /// Sets the live permission from the connected windows: the newest
+    /// consent among them, off while none has said one yet, and the start
+    /// flag only when no window is connected. Called with `links` locked, so
+    /// changes apply in order.
+    fn decide(&self, links: &[Link]) {
+        let Some(permission) = self.permission.get() else {
+            return;
+        };
+        if links.is_empty() {
+            permission.window_disconnected();
+        } else {
+            let live = links
+                .iter()
+                .filter_map(|link| link.consent)
+                .max()
+                .is_some_and(|(_, live)| live);
+            permission.set_window(live);
+        }
     }
 
     fn take_back(&self) {
@@ -262,7 +406,7 @@ async fn accept(hub: Weak<Hub>, mut listener: Listener) {
     loop {
         match listener.accept().await {
             Ok(connection) => match hub.upgrade() {
-                Some(hub) => hub.add(connection),
+                Some(hub) => hub.add(connection, None),
                 None => break,
             },
             Err(error) => {
@@ -294,8 +438,11 @@ async fn read(
                     hub.take_back();
                 }
             }
-            // The person's live consent belongs to MCP-09.
-            Ok(Some(Received::Message(Message::Permission { .. }))) => {}
+            Ok(Some(Received::Message(Message::Permission { live }))) => {
+                if let Some(hub) = hub.upgrade() {
+                    hub.consented(id, live);
+                }
+            }
             Ok(Some(Received::Message(Message::Request { .. }))) => {
                 // No hand-over between agents (MCP-00).
                 let refused = Message::Refused {
@@ -312,7 +459,23 @@ async fn read(
         }
     }
     if let Some(hub) = hub.upgrade() {
-        lock(&hub.links).retain(|link| link.id != id);
+        hub.gone(id);
+    }
+}
+
+/// The consent a window says when a connection opens; `None` when it says
+/// something else first, as a window older than MCP-09 does.
+async fn consent_of(connection: &mut Connection) -> io::Result<Option<bool>> {
+    loop {
+        match connection.reader.next().await? {
+            None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+            Some(Received::Message(Message::Permission { live })) => return Ok(Some(live)),
+            Some(Received::Message(message)) => {
+                ignored(kind(&message));
+                return Ok(None);
+            }
+            Some(Received::Ignored(why)) => ignored(why),
+        }
     }
 }
 

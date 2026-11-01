@@ -116,7 +116,7 @@ written contract, and a per-project toggle for live requests. Decision 5
 watches its committed changes live in the already open application
 (MCP-11).
 
-Capacity: the owner review minutes of the MCP tickets below sum to **305**;
+Capacity: the owner review minutes of the MCP tickets below sum to **345**;
 the interface findings carried from KTLO have their own line of **115**
 (UX-00 to UX-05) and start after MCP-11 (decision 18 = A);
 KTLO-31 adds 5. An addition made during the sprint is charged against the UX
@@ -168,6 +168,7 @@ criteria:
 | [#94](https://github.com/jakubiszon26/apiforge/issues/94) | MCP-10 The agent's run status in the bottom bar; [ticket](tickets/MCP-10.md); decision 17, mock-up M4; after MCP-08b | S · 15 min · `visible UI` |
 | [#183](https://github.com/jakubiszon26/apiforge/issues/183) | MCP-16 The observing window follows the agent's edits live; following can be unpinned in the bottom bar; [ticket](tickets/MCP-16.md); owner wish of 2026-11-01, decisions 1–7 taken 2026-11-01 (all A), mock-up pending; after MCP-10; charged to the UX line | M · 30 min · `visible UI`, `default` |
 | [#115](https://github.com/jakubiszon26/apiforge/issues/115) | REL-01 A GitHub release with an AppImage, a Windows ZIP and a Linux tar.gz; [ticket](tickets/REL-01.md); decisions 1–4 taken 2026-10-28; before MCP-11; charged to the UX line | M · 30 min · `visible UI` |
+| [#123](https://github.com/jakubiszon26/apiforge/issues/123) | MCP-12 Discover a window holder and hand over across different process environments; [ticket](tickets/MCP-12.md); D1–D3 approved 2026-10-28; after MCP-08b, MCP-06 | M · 40 min · MCP output compatibility, `default` |
 | [#95](https://github.com/jakubiszon26/apiforge/issues/95) | MCP-11 The whole workflow end to end with a real client — the sprint's acceptance; [ticket](tickets/MCP-11.md); after every MCP ticket | S · 30 min |
 | [#96](https://github.com/jakubiszon26/apiforge/issues/96) | KTLO-31 The `timing; run in release` ignore (`folder/tests.rs` frame budgets) names its ticket, or the test moves to the release-only verification step | S · 5 min |
 | [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) — merged in #70 | S · 15 min · `visible UI`, `default` |
@@ -181,8 +182,8 @@ criteria:
 Order and parallelism: MCP-01, MCP-02 and MCP-07 depend on nothing and may
 start together within the WIP cap; MCP-03 follows 01 and 02; MCP-04 follows
 03; MCP-08a follows 07; MCP-05 and MCP-06 follow 04; MCP-08b follows 08a and
-04; MCP-08c and MCP-10 follow 08b; MCP-09 follows 08b and 06; MCP-16
-follows MCP-10; MCP-11 closes.
+04; MCP-08c and MCP-10 follow 08b; MCP-09 and MCP-12 follow 08b and 06;
+MCP-16 follows MCP-10; MCP-11 closes, after MCP-12.
 
 ### Interface findings carried from KTLO — the UX line
 

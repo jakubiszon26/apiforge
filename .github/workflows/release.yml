@@ -24,7 +24,7 @@ jobs:
   version:
     name: Check the tag
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -43,6 +43,54 @@ jobs:
           version="$(python3 -I packaging/release.py version "$TAG")"
           echo "Tag $TAG releases version $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+
+      # REL-03 (#120): one THIRD-PARTY-NOTICES.md for every package, so the
+      # tar.gz, the ZIP and the AppImage carry the same bytes.
+      - name: Download cargo-about
+        shell: bash
+        env:
+          CARGO_ABOUT_URL: https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.2/cargo-about-0.9.2-x86_64-unknown-linux-musl.tar.gz
+          CARGO_ABOUT_SHA256: 9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af
+        run: |
+          tools="$RUNNER_TEMP/cargo-about"
+          mkdir -p "$tools"
+          curl -fsSL --retry 3 -o "$tools/cargo-about.tar.gz" "$CARGO_ABOUT_URL"
+          printf '%s  %s\n' "$CARGO_ABOUT_SHA256" "$tools/cargo-about.tar.gz" | sha256sum -c -
+          tar xzf "$tools/cargo-about.tar.gz" -C "$tools" --strip-components 1
+          echo "$tools" >> "$GITHUB_PATH"
+
+      - name: Generate and check the third-party notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo about --version
+          cargo fetch --locked
+          mkdir -p notices
+          cargo about generate --frozen --workspace --fail -o notices/THIRD-PARTY-NOTICES.md packaging/about.hbs \
+            2> "$RUNNER_TEMP/cargo-about.log" \
+            || { cat "$RUNNER_TEMP/cargo-about.log" >&2; exit 1; }
+          cat "$RUNNER_TEMP/cargo-about.log" >&2
+          # A stale clarify entry is only a warning to cargo-about.
+          if grep -q 'failed to validate' "$RUNNER_TEMP/cargo-about.log"; then
+            echo '::error::about.toml has a clarification that no longer matches its files.'
+            exit 1
+          fi
+          for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+            cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
+              -p apiforge-desktop -p apiforge-cli
+          done | python3 -I packaging/release.py check-notices notices/THIRD-PARTY-NOTICES.md
+
+      - name: Upload the third-party notices
+        uses: actions/upload-artifact@v4
+        with:
+          name: notices
+          path: notices/THIRD-PARTY-NOTICES.md
+          if-no-files-found: error
 
   build-linux:
     name: Build Linux packages
@@ -64,6 +112,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download the third-party notices
+        uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: notices
 
       # The package list of rust.yml, and desktop-file-validate.
       - name: Install Linux system dependencies
@@ -111,7 +165,7 @@ jobs:
           install -m 644 LICENSE README.md packaging/CLAUDE-CODE.md "$stage/"
           fonts=crates/apiforge-desktop/assets/fonts
           install -m 644 "$fonts/FONT-SOURCES.md" "$fonts/LICENSE-API-Forge-fonts.txt" \
-            "$fonts/LICENSE-DejaVu.txt" "$stage/licenses/"
+            "$fonts/LICENSE-DejaVu.txt" notices/THIRD-PARTY-NOTICES.md "$stage/licenses/"
           python3 -I packaging/release.py pack "$stage" "dist/$STEM.tar.gz"
           tar tzvf "dist/$STEM.tar.gz"
           python3 -I packaging/release.py check-archive "dist/$STEM.tar.gz" packaging/manifest-linux.txt
@@ -146,19 +200,24 @@ jobs:
         run: |
           appdir="$RUNNER_TEMP/AppDir"
           fonts=crates/apiforge-desktop/assets/fonts
-          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/licenses"
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/licenses/appimage-libraries"
           install -m 755 packaging/AppRun "$appdir/AppRun"
           install -m 755 target/release/apiforge-desktop "$appdir/usr/bin/"
           patchelf --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/apiforge-desktop"
           install -m 644 packaging/apiforge.desktop LICENSE "$appdir/"
           install -m 644 "$fonts/FONT-SOURCES.md" "$fonts/LICENSE-API-Forge-fonts.txt" \
-            "$fonts/LICENSE-DejaVu.txt" "$appdir/licenses/"
+            "$fonts/LICENSE-DejaVu.txt" notices/THIRD-PARTY-NOTICES.md "$appdir/licenses/"
           install -m 644 packaging/icon/apiforge-256.png "$appdir/apiforge.png"
           ln -s apiforge.png "$appdir/.DirIcon"
           for library in $(sed 's/#.*//' packaging/appimage-libraries.txt); do
             cp -L "/usr/lib/x86_64-linux-gnu/$library" "$appdir/usr/lib/"
             chmod 644 "$appdir/usr/lib/$library"
             patchelf --set-rpath '$ORIGIN' "$appdir/usr/lib/$library"
+            # REL-03: the copyright file of the Ubuntu package that ships it.
+            path="/usr/lib/x86_64-linux-gnu/$library"
+            package="$(dpkg -S "$path" | awk -F': ' -v p="$path" '$2 == p { sub(/:.*/, "", $1); print $1 }')"
+            install -m 644 "/usr/share/doc/$package/copyright" \
+              "$appdir/licenses/appimage-libraries/$library.copyright"
           done
           patchelf --print-rpath "$appdir/usr/bin/apiforge-desktop"
           desktop-file-validate "$appdir/apiforge.desktop"
@@ -192,6 +251,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download the third-party notices
+        uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: notices
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
@@ -213,7 +278,7 @@ jobs:
             'LICENSE', 'README.md', 'packaging/CLAUDE-CODE.md' $stage
           $fonts = 'crates/apiforge-desktop/assets/fonts'
           Copy-Item "$fonts/FONT-SOURCES.md", "$fonts/LICENSE-API-Forge-fonts.txt", `
-            "$fonts/LICENSE-DejaVu.txt" "$stage/licenses"
+            "$fonts/LICENSE-DejaVu.txt", 'notices/THIRD-PARTY-NOTICES.md' "$stage/licenses"
           python -I packaging/release.py pack $stage "dist/$env:STEM.zip"
           python -I packaging/release.py check-archive "dist/$env:STEM.zip" packaging/manifest-windows.txt
           Get-ChildItem dist | Format-Table Name, Length
@@ -260,6 +325,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download the third-party notices
+        uses: actions/download-artifact@v4
+        with:
+          name: notices
+          path: notices
+
       - name: Download the Linux packages
         uses: actions/download-artifact@v4
         with:
@@ -299,6 +370,20 @@ jobs:
               "dist/$APPIMAGE" --check fixtures/workspace.json
               packaging/appimage-window.sh "dist/$APPIMAGE" test-results/appimage-container.png
             '
+
+      # REL-03: the notices of the other packages, byte for byte, and the
+      # copyright file of each library the AppImage carries.
+      - name: Check the AppImage's licence files
+        run: |
+          extracted="$RUNNER_TEMP/licence-files"
+          mkdir -p "$extracted"
+          cd "$extracted"
+          "$GITHUB_WORKSPACE/dist/$APPIMAGE" --appimage-extract > /dev/null
+          ls -lR squashfs-root/licenses
+          cmp "$GITHUB_WORKSPACE/notices/THIRD-PARTY-NOTICES.md" squashfs-root/licenses/THIRD-PARTY-NOTICES.md
+          for library in $(sed 's/#.*//' "$GITHUB_WORKSPACE/packaging/appimage-libraries.txt"); do
+            test -s "squashfs-root/licenses/appimage-libraries/$library.copyright"
+          done
 
       - name: Validate the AppImage's desktop file
         run: |

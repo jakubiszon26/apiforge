@@ -1,5 +1,7 @@
 //! Project and scenario settings: names, description, error policy, scenario
-//! parameters and the project's data contracts.
+//! parameters and the project's data contracts; in a folder project also the
+//! person's consent to an MCP agent's live requests (MCP-09), which is not a
+//! setting of the project and applies at once.
 //!
 //! Unlike the reference editor, which applied every keystroke, the dialog edits a
 //! working copy and applies it as a whole, so an unparsable JSON field can never
@@ -72,6 +74,39 @@ impl SettingsChange {
             scenario.description = self.description;
             scenario.error_policy = self.error_policy;
             scenario.parameters = self.parameters;
+        }
+    }
+}
+
+/// The toggle's label: what the person allows.
+pub const AGENT_TOGGLE: &str = "Allow the MCP agent to send live requests";
+
+/// The *Agent* section: the person's consent in the open project and what
+/// applies now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentSection {
+    /// The box is ticked.
+    pub live: bool,
+    /// The agent's live run is in progress.
+    pub running: bool,
+    /// The project's base URL, which live requests go to.
+    pub base_url: String,
+}
+
+impl AgentSection {
+    /// The line under the toggle: what applies now (mock-up M3).
+    fn line(&self) -> String {
+        if self.live {
+            let base_url = self.base_url.trim();
+            if base_url.is_empty() {
+                "On — the agent may send real requests to the project's base URL.".to_owned()
+            } else {
+                format!("On — the agent may send real requests to {base_url}.")
+            }
+        } else if self.running {
+            "A live run is in progress; it will finish. No new one starts.".to_owned()
+        } else {
+            "Off — the agent can only simulate.".to_owned()
         }
     }
 }
@@ -165,9 +200,13 @@ pub struct SettingsDialog {
     focused: bool,
     project_only: bool,
     /// Shown for reading only: every control is disabled and nothing applies
-    /// (an observing folder window, MCP-08a).
+    /// (an observing folder window, MCP-08a), but the agent's toggle.
     read_only: bool,
     error: Option<String>,
+    /// A folder project's *Agent* section (MCP-09).
+    agent: Option<AgentSection>,
+    /// The toggle's new state, until the window takes it.
+    agent_change: Option<bool>,
 }
 
 impl SettingsDialog {
@@ -194,7 +233,28 @@ impl SettingsDialog {
             project_only: true,
             read_only: false,
             error: None,
+            agent: None,
+            agent_change: None,
         }
+    }
+
+    /// With the *Agent* section of a folder project (MCP-09).
+    pub fn with_agent(mut self, agent: AgentSection) -> Self {
+        self.agent = Some(agent);
+        self
+    }
+
+    /// Follows the window's consent and the agent's run while open.
+    pub fn set_agent(&mut self, agent: AgentSection) {
+        if self.agent.is_some() {
+            self.agent = Some(agent);
+        }
+    }
+
+    /// The toggle's new state once the person changed it; the window keeps
+    /// it at once.
+    pub fn take_agent_change(&mut self) -> Option<bool> {
+        self.agent_change.take()
     }
 
     /// Every control disabled; Cancel closes it.
@@ -297,7 +357,11 @@ impl SettingsDialog {
                 "Project and scenario"
             },
             width: 600.0,
-            apply_label: if self.project_only {
+            // Observing, nothing applies but the toggle, which needs no
+            // button (owner decision of 2026-10-27 on M3).
+            apply_label: if self.read_only {
+                ""
+            } else if self.project_only {
                 "Apply settings"
             } else {
                 "Save settings"
@@ -311,6 +375,9 @@ impl SettingsDialog {
             |ui, dialog| {
                 let enabled = !dialog.read_only;
                 ui.add_enabled_ui(enabled, |ui| dialog.body(ui));
+                if dialog.tab == Tab::Scenario {
+                    dialog.agent_section(ui);
+                }
             },
             |dialog| !dialog.read_only && dialog.problems().is_empty(),
         );
@@ -352,6 +419,28 @@ impl SettingsDialog {
             Tab::Scenario => self.scenario_tab(ui, &problems),
             Tab::Contracts => self.contracts_tab(ui, &problems),
         }
+    }
+
+    /// The person's consent, enabled even while observing (MCP-09).
+    fn agent_section(&mut self, ui: &mut Ui) {
+        let Some(agent) = &mut self.agent else {
+            return;
+        };
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("Agent")
+                .size(crate::theme::FONT_BODY)
+                .family(crate::theme::bold_family()),
+        );
+        ui.add_space(4.0);
+        let mut live = agent.live;
+        if ui.checkbox(&mut live, AGENT_TOGGLE).changed() {
+            agent.live = live;
+            self.agent_change = Some(live);
+        }
+        widgets::hint(ui, agent.line());
     }
 
     fn scenario_tab(&mut self, ui: &mut Ui, problems: &Problems) {

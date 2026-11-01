@@ -61,6 +61,10 @@ checks, simulates and edits scenarios through API Forge's own project
 session — the same files and bytes the window writes — while the window stays
 open beside it.
 
+On Windows/WSL, run the window and MCP server on the same side; a Windows
+window with Linux MCP (or the reverse) is unsupported, including projects on
+`/mnt/<drive>/`.
+
 1. **Install** API Forge from [Releases](#install) (on Linux, the `.tar.gz`
    holds the `apiforge` command line; the AppImage is the window only).
 2. **Register the server** in the project folder:
@@ -97,13 +101,16 @@ open beside it.
    first writes; *Take back* in the bottom bar returns it to you, and when
    the agent finishes the window takes the project back by itself.
 
-5. **Live requests stay yours.** A model cannot allow live requests: the
-   person starts the server with `--allow-live`. Secrets come from
+5. **Live requests stay yours.** A model cannot allow live requests. In the
+   open window, *Project settings → Agent* has *Allow the MCP agent to send
+   live requests*, off by default, remembered per project on this computer
+   and obeyed at once; the header shows *Live allowed* while it is on. While
+   the window is connected it decides; without a window the person starts
+   the server with `--allow-live`. Secrets come from
    `APIFORGE_SECRET_<NAME>` in the server's environment or a `--secrets`
    file, and no secret value leaves the server in any result, error or log.
 
-Coming in the next releases: a per-project switch for live requests in the
-window, a prompt to save and hand over when the window has unsaved work, and
+Coming in the next releases: a prompt to save and hand over when the window has unsaved work, and
 the agent's run status in the bottom bar. The full contract is in the
 [development guide](docs/development.md#mcp-server).
 
@@ -222,5 +229,8 @@ GPL-3.0-or-later © The API Forge contributors: the GNU General Public License,
 version 3 or any later version, in [LICENSE](LICENSE). The bundled fonts keep
 their own licences, in `licenses/` of each release archive and in
 [crates/apiforge-desktop/assets/fonts](crates/apiforge-desktop/assets/fonts).
+`licenses/THIRD-PARTY-NOTICES.md` in each package names every Rust crate
+compiled into the binaries and the fonts egui embeds, with their versions and
+licence texts.
 Contributions are signed off under the Developer Certificate of Origin; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
