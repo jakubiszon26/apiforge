@@ -143,7 +143,15 @@ impl FolderApp {
     }
 
     pub(super) fn save_all(&mut self) {
+        self.save_all_then(|_, _| {});
+    }
+
+    /// *Save all*, then `then` with whether every save it made succeeded.
+    /// Work it does not save — held drafts, unfinished inspector fields —
+    /// may remain either way.
+    pub(super) fn save_all_then(&mut self, then: impl FnOnce(&mut Self, bool) + 'static) {
         if self.session.is_none() {
+            then(self, false);
             return;
         }
         self.storage_project(
@@ -183,15 +191,25 @@ impl FolderApp {
                 }
                 Ok((saved, failures))
             },
-            |app, result| match result {
-                Ok((saved, failures)) if failures.is_empty() => {
-                    if saved > 0 {
-                        app.notify(format!("Saved {}.", count(saved, "file")), false);
+            move |app, result| {
+                let saved = match result {
+                    Ok((saved, failures)) if failures.is_empty() => {
+                        if saved > 0 {
+                            app.notify(format!("Saved {}.", count(saved, "file")), false);
+                        }
+                        app.touched();
+                        true
                     }
-                    app.touched();
-                }
-                Ok((_, failures)) => app.notify(failures.join("\n"), true),
-                Err(error) => app.notify(format!("Could not save the project: {error}"), true),
+                    Ok((_, failures)) => {
+                        app.notify(failures.join("\n"), true);
+                        false
+                    }
+                    Err(error) => {
+                        app.notify(format!("Could not save the project: {error}"), true);
+                        false
+                    }
+                };
+                then(app, saved);
             },
         );
     }
