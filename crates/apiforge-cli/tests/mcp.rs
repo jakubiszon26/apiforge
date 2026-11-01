@@ -26,13 +26,22 @@
 //! MCP-05 (#64) over real stdio: `publish` in the tool list with its
 //! annotations; the comment-loss refusal and the consent; a repeated
 //! `request_id` answered from the record; a window holding the project.
+//!
+//! MCP-14 (#181): every successful tool result read through `Server` is
+//! validated against the `outputSchema` its tool advertises in `tools/list`,
+//! so each session above checks it too; the `mcp14_` tests drive every kind
+//! of `run` result and every tool.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
     io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
-    sync::mpsc::{Receiver, channel},
+    sync::{
+        OnceLock,
+        mpsc::{Receiver, channel},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -77,6 +86,11 @@ struct Server {
     /// Every line written to stdout, in order.
     stdout: Vec<String>,
     stderr: thread::JoinHandle<String>,
+    /// The tool of each `tools/call` sent and not yet answered, by id.
+    calls: HashMap<Value, String>,
+    /// The tools whose successful results were validated against their
+    /// output schema (MCP-14).
+    validated: BTreeSet<String>,
 }
 
 impl Server {
@@ -123,10 +137,18 @@ impl Server {
             lines,
             stdout: Vec::new(),
             stderr,
+            calls: HashMap::new(),
+            validated: BTreeSet::new(),
         }
     }
 
     fn send(&mut self, message: &str) {
+        if let Ok(sent) = serde_json::from_str::<Value>(message)
+            && sent["method"] == "tools/call"
+            && let Some(name) = sent["params"]["name"].as_str()
+        {
+            self.calls.insert(sent["id"].clone(), name.to_owned());
+        }
         let stdin = self.stdin.as_mut().unwrap();
         stdin.write_all(message.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
@@ -152,6 +174,13 @@ impl Server {
             self.stdout.push(line.clone());
             let message: Value = serde_json::from_str(&line)
                 .unwrap_or_else(|_| panic!("stdout carried a non-JSON line: {line:?}"));
+            if let Some(name) = self.calls.remove(&message["id"])
+                && message["result"]["isError"] != true
+                && !message["result"].is_null()
+            {
+                assert_matches_output_schema(&name, &message["result"]["structuredContent"]);
+                self.validated.insert(name);
+            }
             if matches(&message) {
                 return message;
             }
@@ -179,6 +208,52 @@ impl Server {
         let stderr = self.stderr.join().unwrap();
         (status, elapsed, self.stdout, stderr)
     }
+}
+
+/// Each tool's `outputSchema` as `tools/list` advertises it over stdio, from
+/// a server started once per test binary for the purpose (MCP-14).
+fn output_schemas() -> &'static BTreeMap<String, Value> {
+    static SCHEMAS: OnceLock<BTreeMap<String, Value>> = OnceLock::new();
+    SCHEMAS.get_or_init(|| {
+        let directory = demo();
+        let root = directory.path();
+        let mut server = Server::spawn(Some(root), root);
+        initialize(&mut server);
+        let list = server.request(2, "tools/list", json!({}));
+        let schemas = list["result"]["tools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{list}"))
+            .iter()
+            .map(|tool| {
+                (
+                    tool["name"].as_str().unwrap().to_owned(),
+                    tool["outputSchema"].clone(),
+                )
+            })
+            .collect();
+        assert_clean_end(server);
+        schemas
+    })
+}
+
+/// `content`, a tool's structured result, is valid against the
+/// `outputSchema` that tool advertises: what an MCP client checks before it
+/// hands the result to the model.
+fn assert_matches_output_schema(tool: &str, content: &Value) {
+    let schema = output_schemas()
+        .get(tool)
+        .unwrap_or_else(|| panic!("{tool} is not in tools/list"));
+    let validator = jsonschema::validator_for(schema)
+        .unwrap_or_else(|error| panic!("{tool}'s outputSchema does not compile: {error}"));
+    let errors: Vec<String> = validator
+        .iter_errors(content)
+        .map(|error| format!("{error} at {:?}", error.instance_path().as_str()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "{tool}'s structured result does not match its outputSchema:\n{}\nresult: {content}",
+        errors.join("\n")
+    );
 }
 
 fn meta() -> Value {
@@ -1595,4 +1670,224 @@ fn mcp05_criterion_7_a_window_holding_the_project_refuses_publish_over_stdio() {
         manifest,
         "no revision was registered"
     );
+}
+
+// MCP-14 (#181) --------------------------------------------------------------
+
+/// Every step of a compact report, nested ones included.
+fn flattened(steps: &Value) -> Vec<&Value> {
+    let mut all = Vec::new();
+    for step in steps.as_array().unwrap() {
+        all.push(step);
+        if let Some(inner) = step.get("steps") {
+            all.extend(flattened(inner));
+        }
+    }
+    all
+}
+
+/// One `run` result checked against the advertised schema, with the flags
+/// MCP-14 sends as `false` present rather than omitted (criterion 3).
+fn assert_run_result(response: &Value) -> Value {
+    let report = structured(response).clone();
+    assert_matches_output_schema("run", &report);
+    for flag in ["live", "redacted", "replayed", "journal_unreadable"] {
+        assert!(report[flag].is_boolean(), "{flag} is sent: {report}");
+    }
+    if let Some(steps) = report.get("steps") {
+        for step in flattened(steps) {
+            assert!(
+                step["may_have_reached_api"].is_boolean(),
+                "may_have_reached_api is sent: {step}"
+            );
+        }
+    }
+    report
+}
+
+/// Criteria 1 and 3: simulated runs of every kind (passed with a
+/// component's steps nested, a component alone with its inputs, the full
+/// report, a failed verdict, an unreadable journal, past the deadline) match
+/// `run`'s advertised outputSchema, with every `false` sent.
+#[test]
+fn mcp14_criterion_1_simulated_run_results_match_the_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+
+    let passed = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
+    assert_eq!(passed["status"], "passed");
+    assert_eq!(passed["replayed"], false);
+    assert_eq!(passed["journal_unreadable"], false);
+    assert!(
+        passed["steps"][0]["steps"].is_array(),
+        "a component's steps nested: {passed}"
+    );
+    assert!(
+        flattened(&passed["steps"])
+            .iter()
+            .all(|step| step["may_have_reached_api"] == false)
+    );
+
+    let component = assert_run_result(&call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": PRODUCT, "inputs": { "id": 7 } }),
+    ));
+    assert_eq!(component["status"], "passed");
+
+    let full = assert_run_result(&call(
+        &mut server,
+        4,
+        "run",
+        json!({ "path": SCENARIO, "full": true }),
+    ));
+    assert!(full["report"].is_object(), "{full}");
+    assert!(full.get("steps").is_none(), "absent with full");
+
+    let scenario = root.join(SCENARIO);
+    let text = std::fs::read_to_string(&scenario).unwrap();
+    std::fs::write(
+        &scenario,
+        replaced(&text, "expected_price = 80 * 1", "expected_price = 81 * 1"),
+    )
+    .unwrap();
+    let failed = assert_run_result(&call(&mut server, 5, "run", json!({ "path": SCENARIO })));
+    assert_eq!(failed["status"], "failed");
+    let price = flattened(&failed["steps"])
+        .into_iter()
+        .find(|step| step["handle"] == "promotional_price")
+        .unwrap()
+        .clone();
+    assert_eq!(price["expected"], 81, "{price}");
+    std::fs::write(&scenario, &text).unwrap();
+
+    std::fs::create_dir_all(root.join(".apiforge/local")).unwrap();
+    std::fs::write(root.join(JOURNAL), b"not a journal").unwrap();
+    let unreadable = assert_run_result(&call(&mut server, 6, "run", json!({ "path": SCENARIO })));
+    assert_eq!(unreadable["journal_unreadable"], true, "{unreadable}");
+    assert_clean_end(server);
+
+    let mut server = Server::spawn_with(
+        Some(root),
+        root,
+        &[
+            ("APIFORGE_MCP_TEST_STEP_DELAY_MS", "200"),
+            ("APIFORGE_MCP_TEST_DEADLINE_MS", "300"),
+        ],
+    );
+    initialize(&mut server);
+    let cancelled = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["ended_by"], "timed_out");
+    assert_clean_end(server);
+}
+
+/// Criteria 1 and 3: live runs (passed, the recorded result of a repeated
+/// `request_id`, and a request on its way at the deadline) match `run`'s
+/// advertised outputSchema.
+#[test]
+fn mcp14_criterion_1_live_run_results_match_the_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let demo_api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", demo_api.base_url()));
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    let arguments = json!({ "path": SCENARIO, "live": true, "request_id": "mcp14-live" });
+    let live = assert_run_result(&call(&mut server, 2, "run", arguments.clone()));
+    assert_eq!(live["status"], "passed", "{}", live["error"]);
+    assert_eq!(live["live"], true);
+    assert_eq!(live["replayed"], false);
+    let replayed = assert_run_result(&call(&mut server, 3, "run", arguments));
+    assert_eq!(replayed["replayed"], true, "{replayed}");
+    assert_clean_end(server);
+
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn_live(
+        root,
+        &["--allow-live"],
+        &[("APIFORGE_MCP_TEST_DEADLINE_MS", "500")],
+    );
+    initialize(&mut server);
+    let timed_out = assert_run_result(&call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    ));
+    assert_eq!(timed_out["ended_by"], "timed_out", "{timed_out}");
+    let marked: Vec<_> = flattened(&timed_out["steps"])
+        .into_iter()
+        .filter(|step| step["may_have_reached_api"] == true)
+        .collect();
+    assert_eq!(marked.len(), 1, "{timed_out}");
+    assert_clean_end(server);
+}
+
+/// Criterion 2: a session in which every tool answers with a result, each
+/// result validated against the outputSchema of its tool from `tools/list`.
+#[test]
+fn mcp14_criterion_2_every_tool_result_matches_its_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    call(&mut server, 2, "project_overview", json!({}));
+    call(&mut server, 3, "language_reference", json!({}));
+    let (text, hash) = read(&mut server, 4, PRODUCT);
+    call(&mut server, 5, "check", json!({}));
+    call(&mut server, 6, "check", json!({ "path": PRODUCT }));
+    call(
+        &mut server,
+        7,
+        "check_text",
+        json!({ "path": PRODUCT, "text": text }),
+    );
+    call(
+        &mut server,
+        8,
+        "check_text",
+        json!({ "path": "scenarios/new.afs", "text": DRAFT_TEXT }),
+    );
+    call(&mut server, 9, "print", json!({ "path": PRODUCT }));
+    call(&mut server, 10, "run", json!({ "path": PRODUCT }));
+    let written = call(
+        &mut server,
+        11,
+        "write_source",
+        json!({ "path": PRODUCT, "text": commented(&text), "expected_source_sha256": hash }),
+    );
+    let hash = structured(&written)["source_sha256"].clone();
+    call(
+        &mut server,
+        12,
+        "create_document",
+        json!({ "kind": "scenario", "path": "scenarios/draft.afs", "text": DRAFT_TEXT }),
+    );
+    let published = call(
+        &mut server,
+        13,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash, "accept_comment_loss": true }),
+    );
+    assert_eq!(structured(&published)["wrote"], true, "{published}");
+    call(&mut server, 14, "finish_editing", json!({}));
+    assert_eq!(
+        server
+            .validated
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        {
+            let mut tools = TOOLS.to_vec();
+            tools.sort_unstable();
+            tools
+        },
+        "every tool answered with a result that was validated"
+    );
+    assert_clean_end(server);
 }
