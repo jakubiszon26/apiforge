@@ -2053,7 +2053,7 @@ mod mcp08b {
     }
 
     /// The full label of the node whose label contains `text`.
-    fn label_containing(harness: &FolderHarness, text: &str) -> String {
+    pub(super) fn label_containing(harness: &FolderHarness, text: &str) -> String {
         let node = harness.get_by_label_contains(text);
         let node = node.accesskit_node();
         node.label()
@@ -2098,7 +2098,7 @@ mod mcp08b {
     /// `/tmp`, when it would make a socket path over 100 bytes), or a named
     /// pipe.
     #[cfg(unix)]
-    fn address(endpoint: &str) -> PathBuf {
+    pub(super) fn address(endpoint: &str) -> PathBuf {
         let socket = |directory: PathBuf| directory.join(endpoint).join("socket");
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
@@ -2111,7 +2111,7 @@ mod mcp08b {
     }
 
     #[cfg(windows)]
-    fn address(endpoint: &str) -> PathBuf {
+    pub(super) fn address(endpoint: &str) -> PathBuf {
         PathBuf::from(format!(r"\\.\pipe\{endpoint}"))
     }
 
@@ -3630,5 +3630,592 @@ mod mcp05 {
             "the revision file"
         );
         assert_eq!(window, shared(server.path()), "every shared file");
+    }
+}
+
+// ----- MCP-10: the agent's run status in the bottom bar ----------------------
+
+mod mcp10 {
+    use super::mcp08b::{
+        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
+        holder, label_containing, read, read_only, write,
+    };
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_mcp::test_support::{StdioServer, structured};
+    use apiforge_storage::project::HolderRole;
+    use serde_json::{Value, json};
+    use std::{
+        io::{BufRead as _, BufReader},
+        path::{Path, PathBuf},
+        process::Command,
+        sync::mpsc::{Receiver, channel},
+    };
+
+    /// Tells [`server_process`] which folder to serve.
+    const FOLDER: &str = "APIFORGE_RUN_STATUS_TEST_FOLDER";
+    /// Tells [`server_process`] to start as `--allow-live` does.
+    const ALLOW_LIVE: &str = "APIFORGE_RUN_STATUS_TEST_ALLOW_LIVE";
+    const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
+    const FILE: &str = "promotion-and-cart-price.afs";
+    const BAR: &str = "Project holder";
+    const TAKE_BACK: &str = "Take back";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// Every status line starts so, and nothing else in the window does.
+    const STATUS: &str = "Agent: ";
+    /// The ticket's bound: the line shows within a second of each message.
+    const BOUND: Duration = Duration::from_secs(1);
+    /// What the bar must not move: the explorer and the tabs above it.
+    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run"];
+    const MODES: [&str; 3] = ["Code", "Diagram", "Split"];
+
+    fn running(mode: &str) -> String {
+        format!("Agent: running {FILE} ({mode})…")
+    }
+
+    /// The MCP server as a process of its own on real stdio, as in
+    /// `mod mcp08b`, optionally allowed to send live requests.
+    #[test]
+    #[ignore = "launched by the MCP-10 run status tests as the server process"]
+    fn server_process() {
+        let Some(folder) = std::env::var_os(FOLDER) else {
+            return;
+        };
+        let step_delay = std::env::var(STEP_DELAY)
+            .ok()
+            .and_then(|milliseconds| milliseconds.parse().ok())
+            .map(Duration::from_millis);
+        let settings = apiforge_mcp::ServerSettings {
+            run: apiforge_mcp::tools::RunSettings {
+                step_delay,
+                ..Default::default()
+            },
+            allow_live: std::env::var_os(ALLOW_LIVE).is_some(),
+            ..Default::default()
+        };
+        apiforge_mcp::serve_stdio_with(PathBuf::from(folder), settings).unwrap();
+    }
+
+    /// A server initialised by *Claude Code* whose runs pause `step_delay`
+    /// milliseconds after every step.
+    fn agent(root: &Path, step_delay: u64, live: bool) -> StdioServer {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "folder::tests::acceptance_tests::mcp10::server_process",
+                "--nocapture",
+                "--quiet",
+                "--test-threads=1",
+            ])
+            .env(FOLDER, root)
+            .env(STEP_DELAY, step_delay.to_string());
+        if live {
+            command.env(ALLOW_LIVE, "1");
+        }
+        let mut server = StdioServer::spawn(command);
+        server.initialize("Claude Code");
+        server
+    }
+
+    /// The agent writes the scenario with `note` added; a clean window
+    /// hands the project over and observes.
+    fn agent_writes(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) {
+        let (text, _) = read(server, SCENARIO);
+        let written = write(harness, server, SCENARIO, &commented(&text, note));
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        settle(harness);
+    }
+
+    /// The agent saves a version of the scenario whose *Promotional price*
+    /// comparison fails.
+    fn agent_breaks_the_price(harness: &mut FolderHarness, server: &mut StdioServer) {
+        let (text, _) = read(server, SCENARIO);
+        assert!(text.contains("expected_price = 80 * 1"), "{text}");
+        let broken = text.replacen("expected_price = 80 * 1", "expected_price = 81 * 1", 1);
+        let written = write(harness, server, SCENARIO, &broken);
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        settle(harness);
+    }
+
+    /// The first step that did not pass, numbered as `step_count` counts:
+    /// every step in order, a component's own steps included.
+    fn first_failure(steps: &[Value]) -> Option<(u64, String)> {
+        fn walk(steps: &[Value], seen: &mut u64) -> Option<(u64, String)> {
+            for step in steps {
+                *seen += 1;
+                if step["status"] == "failed" || step["status"] == "error" {
+                    let label = step["label"].as_str().or(step["handle"].as_str());
+                    return Some((*seen, label.unwrap().to_owned()));
+                }
+                if let Some(found) = step["steps"].as_array().and_then(|inner| walk(inner, seen)) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        walk(steps, &mut 0)
+    }
+
+    /// Connects to `endpoint` as a window does and hands over every line
+    /// it is told, as JSON.
+    fn observe(endpoint: &str) -> Receiver<Value> {
+        #[cfg(unix)]
+        let stream = std::os::unix::net::UnixStream::connect(address(endpoint)).unwrap();
+        #[cfg(windows)]
+        let stream = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(address(endpoint))
+            .unwrap();
+        let (sender, messages) = channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines() {
+                let Ok(line) = line else { break };
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                if sender.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        messages
+    }
+
+    /// The next message of type `kind`, the others passed over.
+    fn next(messages: &Receiver<Value>, kind: &str) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let message = messages
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("the window was told no {kind} message"));
+            if message["type"] == kind {
+                return message;
+            }
+        }
+    }
+
+    /// `label` is `prefix` followed by a time on the wall clock, `HH:MM`.
+    fn assert_clock(label: &str, prefix: &str) {
+        let time = label
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("{label:?} starts with {prefix:?}"));
+        let digits = time.char_indices().all(|(at, character)| {
+            (at == 2) == (character == ':') && (at == 2 || character.is_ascii_digit())
+        });
+        assert!(time.len() == 5 && digits, "{label:?} ends in HH:MM");
+    }
+
+    /// The width `text` takes in the bar's font when it is not cut.
+    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
+        let job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(
+                egui::FontId::proportional(theme::FONT_META),
+                egui::Color32::WHITE,
+            ),
+        );
+        harness
+            .ctx
+            .fonts_mut(|fonts| fonts.layout_job(job))
+            .size()
+            .x
+    }
+
+    /// Where the explorer and the tabs are; a mode without the explorer
+    /// (Diagram shows the library there) has none.
+    fn fixed_rects(harness: &FolderHarness) -> Vec<Option<egui::Rect>> {
+        FIXED
+            .iter()
+            .map(|label| harness.query_by_label(label).map(|node| node.rect()))
+            .collect()
+    }
+
+    /// Waits until the bar names the agent with its start time, as the
+    /// holder file gives it.
+    fn await_since(harness: &mut FolderHarness) {
+        await_until(harness, Instant::now(), "the holder's start", |harness| {
+            contains(harness, &format!("{AGENT} · since "))
+        });
+    }
+
+    /// Criterion 1: the server tells a connected window `run` with the
+    /// path, the mode and `running` when a run starts, and at its end
+    /// `passed`, `failed` with the step and its label, or `cancelled`.
+    #[test]
+    fn mcp10_criterion_1_the_server_tells_a_window_each_runs_start_and_end() {
+        let directory = shop();
+        let root = directory.path();
+        let mut server = agent(root, 100, false);
+        // The agent takes the project with no window open; a window then
+        // connects to the server's endpoint, as one opened meanwhile does.
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "First."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let endpoint = holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let messages = observe(&endpoint);
+        // The next commit is told to the window: it hears everything after.
+        let (text, hash) = read(&mut server, SCENARIO);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "Second."), "expected_source_sha256": hash }),
+        );
+        next(&messages, "saved");
+
+        let report = server.call("run", json!({ "path": SCENARIO }));
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "passed", "{report}");
+        assert_eq!(
+            next(&messages, "run"),
+            json!({ "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation", "state": "running" })
+        );
+        assert_eq!(
+            next(&messages, "run"),
+            json!({
+                "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation",
+                "state": "passed", "step_count": report["step_count"]
+            })
+        );
+
+        let (text, hash) = read(&mut server, SCENARIO);
+        let broken = text.replacen("expected_price = 80 * 1", "expected_price = 81 * 1", 1);
+        assert_ne!(broken, text);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": broken, "expected_source_sha256": hash }),
+        );
+        let report = server.call("run", json!({ "path": SCENARIO }));
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "failed", "{report}");
+        let (step, label) = first_failure(report["steps"].as_array().unwrap()).unwrap();
+        assert_eq!(label, "Promotional price", "{report}");
+        assert_eq!(next(&messages, "run")["state"], "running");
+        assert_eq!(
+            next(&messages, "run"),
+            json!({
+                "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation",
+                "state": "failed", "step": step, "label": label,
+                "step_count": report["step_count"]
+            })
+        );
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        assert_eq!(next(&messages, "run")["state"], "running");
+        server.send(
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": id }
+            })
+            .to_string(),
+        );
+        let ended = next(&messages, "run");
+        assert_eq!(ended["state"], "cancelled", "{ended}");
+        assert_eq!(ended["path"], SCENARIO);
+        assert_eq!(ended["mode"], "simulation");
+        drop(server);
+    }
+
+    /// Criterion 1: the observing window shows the line within a second of
+    /// each message: running, then passed, failed or cancelled with the
+    /// time the run ended.
+    #[test]
+    fn mcp10_criterion_1_the_window_shows_the_line_within_a_second_of_each_message() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 200, false);
+        agent_writes(&mut harness, &mut server, "Written by the agent.");
+        assert!(!contains(&harness, STATUS), "no run, no status");
+
+        let started = Instant::now();
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        let took = await_until(&mut harness, started, "the running line", |harness| {
+            has_label(harness, &running("simulation"))
+        });
+        assert!(took < BOUND, "running shown {took:?} after the run started");
+        let report = answer(&mut harness, &mut server, id);
+        let ended = Instant::now();
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "passed", "{report}");
+        let passed = format!("Agent: {FILE} passed · {} steps · ", report["step_count"]);
+        let took = await_until(&mut harness, ended, "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        assert!(took < BOUND, "passed shown {took:?} after the run ended");
+        assert_clock(&label_containing(&harness, &passed), &passed);
+        assert!(!has_label(&harness, &running("simulation")));
+
+        agent_breaks_the_price(&mut harness, &mut server);
+        let report = call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        let ended = Instant::now();
+        let report = structured(&report).clone();
+        let (step, label) = first_failure(report["steps"].as_array().unwrap()).unwrap();
+        let failed = format!("Agent: {FILE} failed at step {step} · {label} · ");
+        let took = await_until(&mut harness, ended, "the failed line", |harness| {
+            contains(harness, &failed)
+        });
+        assert!(took < BOUND, "failed shown {took:?} after the run ended");
+        assert_clock(&label_containing(&harness, &failed), &failed);
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        server.send(
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": id }
+            })
+            .to_string(),
+        );
+        let cancelled = format!("Agent: {FILE} cancelled · ");
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the cancelled line",
+            |harness| contains(harness, &cancelled),
+        );
+        assert_clock(&label_containing(&harness, &cancelled), &cancelled);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2: the line names the mode: *(simulation)* above, *(live)*
+    /// for a live run, while it runs and once it has ended.
+    #[test]
+    fn mcp10_criterion_2_a_live_run_says_live() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 300, true);
+        // The live run takes the project for the agent session itself: the
+        // clean window hands it over and observes.
+        let started = Instant::now();
+        let id = server.start_call("run", json!({ "path": SCENARIO, "live": true }));
+        await_until(&mut harness, started, "the live running line", |harness| {
+            has_label(harness, &running("live"))
+        });
+        assert!(read_only(&harness));
+        let report = answer(&mut harness, &mut server, id);
+        let report = structured(&report).clone();
+        assert_eq!(report["live"], true, "{report}");
+        let ended = format!(
+            "Agent: {FILE} (live) {} ",
+            report["status"].as_str().unwrap()
+        );
+        await_until(&mut harness, Instant::now(), "the live end", |harness| {
+            contains(harness, &ended)
+        });
+        assert!(!contains(&harness, "(simulation)"));
+        drop(harness);
+        drop(server);
+    }
+
+    /// The bar at 960 × 540 in every mode with `status` shown: the status
+    /// whole and inside the bar, the holder text shortened beside it, the
+    /// explorer and the tabs where they were before.
+    fn assert_status_fits(
+        harness: &mut FolderHarness,
+        status: &str,
+        before: &[Vec<Option<egui::Rect>>],
+    ) {
+        for (mode, before) in MODES.iter().zip(before) {
+            choose(harness, mode);
+            assert_within_window(harness, &[BAR, status, TAKE_BACK]);
+            let shown = harness.get_by_label(status).rect();
+            assert!(
+                harness.get_by_label(BAR).rect().contains_rect(shown),
+                "{mode}: {status:?} sits in the bar"
+            );
+            let whole = whole_width(harness, status);
+            assert!(
+                shown.width() + 0.5 >= whole,
+                "{mode}: {status:?} is cut: {} of {whole} px",
+                shown.width()
+            );
+            let holder = label_containing(harness, "Claude Code");
+            assert!(
+                holder.starts_with("Claude Code · since ") && !holder.contains(PAUSED),
+                "{mode}: the holder text gives way to the status: {holder:?}"
+            );
+            assert_disjoint(harness, &[holder.as_str(), status, TAKE_BACK]);
+            assert_eq!(
+                &fixed_rects(harness),
+                before,
+                "{mode}: the bar moved the explorer or the tabs"
+            );
+        }
+    }
+
+    /// Criterion 3: at 960 × 540 in Code, Diagram and Split the status is
+    /// never cut; the holder text is shortened instead; nothing above the
+    /// bar moves.
+    #[test]
+    fn mcp10_criterion_3_the_status_is_whole_at_960_by_540_and_the_holder_gives_way() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 300, false);
+        agent_writes(&mut harness, &mut server, "Written by the agent.");
+        await_since(&mut harness);
+        let before: Vec<Vec<Option<egui::Rect>>> = MODES
+            .iter()
+            .map(|mode| {
+                choose(&mut harness, mode);
+                fixed_rects(&harness)
+            })
+            .collect();
+        assert!(before[0][0].is_some(), "Code shows the explorer");
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        assert_status_fits(&mut harness, &running("simulation"), &before);
+
+        let report = answer(&mut harness, &mut server, id);
+        let passed = format!(
+            "Agent: {FILE} passed · {} steps · ",
+            structured(&report)["step_count"]
+        );
+        await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        let passed = label_containing(&harness, &passed);
+        assert_status_fits(&mut harness, &passed, &before);
+
+        agent_breaks_the_price(&mut harness, &mut server);
+        call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        await_until(&mut harness, Instant::now(), "the failed line", |harness| {
+            contains(harness, &format!("Agent: {FILE} failed at step "))
+        });
+        let failed = label_containing(&harness, &format!("Agent: {FILE} failed at step "));
+        assert_status_fits(&mut harness, &failed, &before);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 4: the status goes when the agent finishes, and when the
+    /// channel drops in the middle of a run.
+    #[test]
+    fn mcp10_criterion_4_the_status_goes_with_the_agent_and_with_the_channel() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 200, false);
+        agent_writes(&mut harness, &mut server, "First.");
+        let report = call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        let passed = format!(
+            "Agent: {FILE} passed · {} steps · ",
+            structured(&report)["step_count"]
+        );
+        await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+        assert_eq!(structured(&finished)["finished"], true, "{finished}");
+        await_until(&mut harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(!contains(&harness, STATUS), "the agent finished");
+
+        agent_writes(&mut harness, &mut server, "Second.");
+        assert!(read_only(&harness));
+        assert!(!contains(&harness, STATUS), "a new session starts clean");
+        server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        let dropped = Instant::now();
+        server.kill();
+        await_until(&mut harness, dropped, "the status gone", |harness| {
+            !contains(harness, STATUS)
+        });
+        await_until(&mut harness, dropped, "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(!contains(&harness, STATUS));
+        drop(harness);
+    }
+
+    /// The bar beside M4 round 4: running, passed and failed, at both
+    /// sizes.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp10_run_status() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, size);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let mut server = agent(root, 300, false);
+            agent_writes(&mut harness, &mut server, "Written by the agent.");
+            await_since(&mut harness);
+            let id = server.start_call("run", json!({ "path": SCENARIO }));
+            await_until(
+                &mut harness,
+                Instant::now(),
+                "the running line",
+                |harness| has_label(harness, &running("simulation")),
+            );
+            capture(&mut harness, &format!("mcp10-running-{suffix}"), None);
+            answer(&mut harness, &mut server, id);
+            await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+                contains(harness, &format!("Agent: {FILE} passed"))
+            });
+            capture(&mut harness, &format!("mcp10-passed-{suffix}"), None);
+            agent_breaks_the_price(&mut harness, &mut server);
+            call(
+                &mut harness,
+                &mut server,
+                "run",
+                json!({ "path": SCENARIO }),
+            );
+            await_until(&mut harness, Instant::now(), "the failed line", |harness| {
+                contains(harness, &format!("Agent: {FILE} failed"))
+            });
+            capture(&mut harness, &format!("mcp10-failed-{suffix}"), None);
+            drop(harness);
+            drop(server);
+        }
     }
 }
