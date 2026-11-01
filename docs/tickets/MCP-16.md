@@ -1,9 +1,9 @@
 # MCP-16: The observing window follows the agent's edits live; following can be unpinned in the bottom bar
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`
-- State: Analysis (issue #183) · decisions 1–7 pending · mock-up pending ·
-  after MCP-10 (#94) · an addition of 2026-11-01, charged to the UX
-  capacity line (30 min)
+- State: Analysis (issue #183) · decisions 1–7 taken 2026-11-01, all A ·
+  mock-up f1–f4 pending; approval follows it · after MCP-10 (#94) · an
+  addition of 2026-11-01, charged to the UX capacity line (30 min)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal
@@ -35,58 +35,40 @@ wants to stay where they are.
 - Default behaviour that changes: following is **on** whenever the window
   starts observing (decision 1). Today the window keeps the person's place.
 
-## Decisions for the owner
+## Decisions taken (2026-11-01, on #183, all the recommended option)
 
-A recommended in each; a paragraph at most.
-
-1. **Following on or off when observing starts.** **A:** on, every time the
-   window becomes the observer (hand-over or a window opened while the agent
-   holds the project); unpinning lasts until the person pins again or the
-   observing ends. Consequence: the person who handed the project over sees
-   the agent's first write land without a click. **B:** off; the person
-   presses *Follow* when they want it. Consequence of B: one click per
-   agent session, and the first change is easy to miss.
-2. **Where following takes the window.** **A:** to the document's tab —
-   opening it beside the active tab when it has none — in the view the
-   person is in; a mode is never switched for them. **B:** the same, but the
-   view switches to Code for a source change and to Diagram for a
-   layout-only change. Consequence of B: the view flips while the person
-   reads. **C:** only among the tabs already open; a change in a document
-   without a tab shows in the bar's last-change text only. Consequence of
-   C: a created document is never shown without a click.
-3. **What the view does with the change.** **A:** the code scrolls so the
-   first changed line is visible and the changed lines carry a mark in the
-   gutter until the agent's next commit to that document; in Diagram the
-   camera and the selection stay (the sealed layout is shown whole).
-   **B:** scroll only, no mark. **C:** neither; the tab is enough.
-   Consequence of C: a change below the fold is invisible until scrolled
-   to.
-4. **What pauses following.** **A:** the person's own navigation to another
-   document — a tab click, a file in the explorer, Ctrl+Tab, closing the
-   followed tab — unpins following, and the *Follow* toggle unpins or pins
-   it explicitly; pinning jumps to the agent's last change. Scrolling,
-   zooming, selecting a block or switching Code/Diagram/Split does not
-   unpin. Consequence: the window never fights a person who has gone
-   elsewhere. **B:** only the toggle unpins; the next commit brings the
-   person back to the agent's file wherever they clicked. Consequence of B:
-   a person reading another file is pulled away every few seconds.
-5. **The control.** **A:** a compact toggle button *Follow* with a pin icon
-   at the right end of the bar, left of *Take back*, pressed while
-   following; hover text *Follows the agent to every file it changes; click
-   to stay where you are* / *Click to follow the agent again*; accessible
-   name *Follow the agent* with its on/off state. **B:** a checkbox *Follow
-   the agent* in the same place. **C:** a text link *Unpin* / *Pin* inside
-   the status text. Consequence of C: no visible state, and it moves with
-   the text's length.
-6. **Tabs that following opened when the agent finishes.** **A:** kept —
-   they are the person's tabs now and a record of what the agent touched;
-   they close as any tab does. **B:** closed when the agent finishes unless
-   the person activated them. Consequence of B: tabs vanish on their own,
-   which nothing else in the window does.
-7. **Runs.** **A:** a run does not move the view; MCP-10's status line names
-   the file that runs. **B:** the start of a run also brings that document's
-   tab to the front. Consequence of B: an agent that edits one file and
-   runs another makes the window alternate between them.
+1. **Following is on every time the window becomes the observer** —
+   hand-over, or a window opened while the agent holds the project.
+   Unpinning lasts until the person pins again or the observing ends; the
+   next observation starts pinned again. (B, off until pinned by hand, was
+   declined: the first write is easy to miss.)
+2. **Following goes to the document's tab**, opening it beside the active
+   tab when it has none, **in the view the person is in**: Code, Diagram or
+   Split is never switched for them. (B, switching the view by the kind of
+   change, and C, following only among open tabs, were declined.)
+3. **The code scrolls so the first changed line is visible and the changed
+   lines carry a mark in the gutter** until the agent's next commit to that
+   document; in Diagram the camera and the selection stay and the sealed
+   layout is shown whole. (B, scroll only, and C, the tab only, were
+   declined.)
+4. **The person's own navigation to another document unpins following** —
+   a tab click, a file activated in the explorer, Ctrl+Tab, closing the
+   followed tab — and so does the toggle. Scrolling, zooming, selecting a
+   block or switching Code/Diagram/Split does not unpin. **Pinning again
+   jumps to the agent's last change at once.** (B, only the toggle unpins,
+   was declined: the window never fights a person who went elsewhere.)
+5. **The control is a compact toggle button *Follow* with a pin icon** at
+   the right end of the bar, left of *Take back*, pressed while following;
+   hover text *Follows the agent to every file it changes; click to stay
+   where you are* / *Click to follow the agent again*; accessible name
+   *Follow the agent* with its on/off state. (B, a checkbox, and C, a text
+   link in the status, were declined.)
+6. **Tabs that following opened are kept** when the agent finishes: they
+   are the person's tabs and a record of what the agent touched, closed as
+   any tab is. (B, closing them unless activated, was declined.)
+7. **A run does not move the view**; MCP-10's status line names the file
+   that runs. (B, the run's start bringing its tab to the front, was
+   declined: it would alternate between the edited and the run file.)
 
 Publish, create and delete follow one rule under decisions 2 and 3: a
 created document opens at its top with no marks; a published component's
@@ -98,7 +80,9 @@ commit of project settings alone moves nothing.
 
 Pending: review captures from the throwaway branch `mock/mcp-16-follow`
 (form 1 of [planning](../process/planning.md#mock-ups)), posted on #183.
-**Approval of the mock-up is required before implementation.** The capture
+**Approval of the mock-up is required before implementation**; the
+decisions above are taken, the mock-up is what the owner still approves.
+The capture
 of each state is a `review_*` test rendering static content; MCP-10's
 status is a placeholder string in the mock-up, since MCP-10 is still on its
 branch. The states, with their file names under
@@ -144,7 +128,7 @@ otherwise.
    another document of the commit; a commit of project settings alone
    changes no tab. Test: `mcp16_criterion_5_delete_and_settings_move_nothing`.
 6. A run (`run` message, started and ended) changes no tab and no scroll.
-   Test: `mcp16_criterion_6_a_run_moves_nothing` (decision 7 = A).
+   Test: `mcp16_criterion_6_a_run_moves_nothing`.
 7. Unpinned by the toggle: the next commits keep the active tab, the scroll,
    the camera and the selection as MCP-08a promises; the bar's last-change
    text still names the change. Test:
@@ -192,9 +176,10 @@ the code view's scroll meet in one feature; a state machine of two states);
 regression potential is MCP-08a's keeping-the-place, covered by criterion
 7 and MCP-08a's own tests; verification is three modes at two sizes with
 MCP-10's status. 30 owner minutes: a visible change the owner will want to
-use locally with a real agent. If decision 3 = A proves heavy in
-implementation, the gutter marks split off as MCP-16b and the ticket ships
-with scroll only; nothing else is split. Dependency: **after MCP-10** (#94,
+use locally with a real agent. The gutter marks (decision 3) are in scope;
+only as a contingency, should they prove heavy in implementation, they
+split off as MCP-16b and the ticket ships with scroll only, with the owner
+told at the time; nothing else is split. Dependency: **after MCP-10** (#94,
 on `feat/mcp-10-run-status`): the bar is shared and the 960 px rule of
 MCP-10 is extended here; the mock-up can be rendered now with a placeholder
 status, the implementation branches from `main` once MCP-10 is merged.
