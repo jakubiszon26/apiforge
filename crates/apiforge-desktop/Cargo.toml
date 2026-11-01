@@ -33,6 +33,7 @@ inspection = ["eframe/inspection"]
 workspace = true
 
 [dev-dependencies]
+apiforge-demo-api.workspace = true
 tempfile.workspace = true
 # The agent session of MCP-04 beside a window, a server spawned over stdio
 # (MCP-08b), and the storage's I/O fault seam.

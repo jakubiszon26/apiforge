@@ -30,7 +30,7 @@ use serde_json::json;
 use std::{
     collections::VecDeque,
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -741,11 +741,11 @@ impl AgentSession {
         probe: &ProjectStore,
         window: &Holder,
     ) -> Result<ProjectStore, ToolError> {
-        let connection = match hub.ask(endpoint, client) {
+        let connection = match hub.ask(endpoint, window.owner_uid(), client) {
             Answer::Granted(connection) => connection,
             Answer::Refused(reason) => return Err(refused(&reason, window)),
             Answer::Pending => return Err(pending(window)),
-            Answer::Unreachable => return Err(held(window)),
+            Answer::Unreachable => return Err(not_reached(window, endpoint, probe.root())),
         };
         let deadline = Instant::now() + GRANTED_LOCK;
         loop {
@@ -1054,6 +1054,45 @@ fn description(holder: &Holder) -> serde_json::Value {
     })
 }
 
+/// A window that was not reached. Only a valid endpoint whose discovery
+/// could run (the holder file's owner is known) was actually tried; a
+/// malformed endpoint or missing owner is the ordinary refusal, with no
+/// Windows/WSL hint.
+fn not_reached(window: &Holder, endpoint: &str, root: &Path) -> ToolError {
+    let tried = apiforge_channel::Endpoint::parse(endpoint).is_some()
+        && (cfg!(not(unix)) || window.owner_uid().is_some());
+    if tried {
+        unreachable(window, root)
+    } else {
+        held(window)
+    }
+}
+
+/// A failed connection is evidence for a possible same-side mismatch only
+/// on a Linux Windows-drive mount, never proof of a Windows writer.
+fn unreachable(window: &Holder, root: &Path) -> ToolError {
+    let error = held(window);
+    #[cfg(target_os = "linux")]
+    {
+        let mut parts = root.components();
+        let mounted_drive = parts.next() == Some(std::path::Component::RootDir)
+            && parts.next().is_some_and(|part| part.as_os_str() == "mnt")
+            && parts.next().is_some_and(|part| {
+                let bytes = part.as_os_str().as_encoded_bytes();
+                bytes.len() == 1 && bytes[0].is_ascii_alphabetic()
+            })
+            && parts.next().is_some();
+        if mounted_drive {
+            let mut error = error;
+            error.message.push_str(". This project is on a Windows drive; if the window and MCP run on different sides of Windows/WSL, run both on the same side");
+            return error;
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = root;
+    error
+}
+
 /// The refusal of a write while another process holds the project: who and
 /// since when. Never advice to edit a file directly.
 fn held(holder: &Holder) -> ToolError {
@@ -1062,7 +1101,7 @@ fn held(holder: &Holder) -> ToolError {
         (Some(HolderRole::Window), _) => (
             ErrorCode::HeldByWindow,
             format!(
-                "Another API Forge window has held this project since {since} and saves it there; nothing was written. Ask the person to close the project in that window, then write again; reading works meanwhile"
+                "Another API Forge window has held this project since {since} and saves it there; nothing was written. The window could not be reached for hand-over; reading remains available"
             ),
         ),
         (Some(HolderRole::Command), client) => (
@@ -1189,5 +1228,61 @@ mod tests {
                 .code,
             ErrorCode::UnknownOutcome
         );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod mcp12_diagnostics {
+    use super::*;
+
+    #[test]
+    fn only_unreachable_live_window_endpoints_on_windows_mounts_get_the_qualified_hint() {
+        let window = Holder::window()
+            .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into()));
+        for (path, hint) in [
+            ("/mnt/c/project", true),
+            ("/mnt/C/project", true),
+            ("/mnt/cat/project", false),
+            ("/mnt/1/project", false),
+            ("/mnt/c", false),
+            ("/home/project", false),
+        ] {
+            let error = unreachable(&window, Path::new(path));
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert_eq!(
+                error.message.contains("Windows/WSL"),
+                hint,
+                "{path}: {}",
+                error.message
+            );
+            if hint {
+                assert!(error.message.contains("if"));
+                assert!(error.message.contains("same side"));
+            }
+            assert!(error.message.contains("reading"));
+            assert!(
+                !held(&window).message.contains("Windows/WSL"),
+                "metadata alone is not a diagnosis"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_that_was_never_tried_gets_no_windows_hint() {
+        let root = Path::new("/mnt/c/project");
+        let valid = "apiforge-0123456789abcdef0123456789abcdef";
+        for endpoint in [valid, "apiforge-not-an-endpoint", "../socket"] {
+            // Without the holder file's owner, discovery cannot run.
+            let window = Holder::window().with_endpoint(Some(endpoint.into()));
+            let error = not_reached(&window, endpoint, root);
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert!(error.message.contains("reading"));
+            assert!(
+                !error.message.contains("Windows/WSL"),
+                "{endpoint}: no connection was attempted"
+            );
+        }
     }
 }
