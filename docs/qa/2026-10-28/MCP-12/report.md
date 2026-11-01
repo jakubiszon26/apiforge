@@ -139,6 +139,42 @@ Unix. The next run exposed an import in a Linux-only diagnostic test module;
 `07fd1e9` scopes the entire module to Linux. Neither changes assertions or
 product behaviour. No native Windows session was run locally.
 
+## Review round 2026-11-01
+
+Fixes by Claude Opus 5.5 for the cubic review and CodeQL alerts on
+`ebefa2e`. Nothing visible in the desktop window changed.
+
+| Finding | Resolution |
+| --- | --- |
+| P2 `apiforge-channel/src/lib.rs`: a relative `TMPDIR` made the listener bind a relative path that clients never search | Valid. The listener and clients now share one rule: a relative base is skipped on both sides, so the listener falls back to `/tmp`. The absolute case is unchanged (XDG, temporary directory, `/tmp`). New test `mcp12_the_listener_listens_only_where_clients_search`; ADR 0014 amendment notes the relative case. `4a2bae3` |
+| CodeQL `rust/cleartext-logging`, `apiforge-cli/tests/mcp.rs` (uid in an assert message) | Assertion kept; the message no longer contains the runtime path or uid. `add499b` |
+| CodeQL `rust/cleartext-logging`, `apiforge-mcp/tests/acceptance.rs` (refusal text in an assert message) | Assertion kept; the message is a fixed description. `add499b` |
+| P3 `tools.rs`: the schema comment misdescribed `required` | Valid; reworded: the keys are listed as required, their schema still allows null. `9094039` |
+| P3 `agent.rs`: the Windows/WSL hint could follow a malformed endpoint or a missing owner, before any connection | Valid. The hint is given only for a valid endpoint whose discovery could run; otherwise the ordinary `held_by_window` refusal. New unit test `a_window_that_was_never_tried_gets_no_windows_hint`. `9094039` |
+| P3 `acceptance.rs`: the no-change snapshot ignored directories | Valid; directories are recorded too. `add499b` |
+| P3 `acceptance.rs`: "without connecting" was not observable | Valid; the overview matrix now advertises a real bound listener and asserts that it accepted no connection. `add499b` |
+| P3 `docs/backlog.md`: MCP-12 missing from the order paragraph | Valid; MCP-12 follows 08b and 06, MCP-11 after it. `5493229` |
+| P3 `MCP-12.md`: `CLAUDE-CODE.md` path | Valid; both references read `packaging/CLAUDE-CODE.md`. `5493229` |
+| P3 `MCP-12.md`: the goal overstated environment independence | Valid; qualified to an endpoint in an approved candidate directory. `5493229` |
+
+Re-run on Linux after these fixes, all exit 0: `cargo fmt --all -- --check`;
+`cargo clippy --workspace --all-targets --locked -- -D warnings`;
+`cargo test --locked` for `apiforge-channel`, `apiforge-mcp`,
+`apiforge-storage` and the `apiforge-cli` `mcp` test target: channel 9 passed (the
+new test included); MCP 13 unit and 87 acceptance passed; storage 191 + 2 passed, 2 ignored;
+CLI `mcp` 24 passed, 1 spawned helper ignored. The CLI case needs
+`/run/user/<uid>`; it was provisioned locally as the CI step does. The
+full workspace test, conversion check, release build and native captures were
+not repeated: the changes touch the listener only for a relative temporary
+directory, the refusal text only before a connection attempt, and tests and
+documents otherwise. CI on the new head is the workspace evidence.
+
+The `pull_request` CI run on `ebefa2e`
+([run 41307273018](https://github.com/jakubiszon26/apiforge/actions/runs/41307273018))
+failed on Windows in `header_tests::a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary`
+(a hover tooltip), which MCP-12 does not touch; the `push` run on the same
+commit passed on Windows.
+
 ## Delivery
 
 The owner will test the branch before a pull request or merge. All product
