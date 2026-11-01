@@ -149,3 +149,22 @@ is connected it reports the flag. The server
 tells connected windows `run { mode: live }` when its live run starts and
 ends. The consent is kept in `agent-consent.json` beside the preferences, by
 the manifest id; the project file format is unchanged.
+
+## MCP-16 amendment: the observer follows the holder (2026-11-01)
+
+Decision 5's last sentence now holds only while following is unpinned;
+[MCP-16](../tickets/MCP-16.md) records the owner's decisions 1–7. An
+observing window follows every holder's commits by default: the reload's
+diff (`ExternalOutcome::followed`) names what changed, and the window goes
+to the document of the commit's main change (created, saved, published,
+laid out, in that order) in the view the person is in, shows a saved
+source's first changed line and marks its changed lines in the gutter
+until the holder's next commit to that document. The camera and the
+selected block are kept in both states. A commit that deletes a document,
+a commit of the settings alone and a run move nothing. The person's own
+navigation to another document unpins following, as does *Follow* in the
+bottom bar, which pins it again and goes to the last change. Following
+starts pinned with every observation and is never persisted. The changed
+lines are computed from the two committed texts in `apiforge-project`
+(`CommitChange::lines`); no channel message, protocol version, file format
+or persisted setting changes.

@@ -1,10 +1,11 @@
 # MCP-16: The observing window follows the agent's edits live; following can be unpinned in the bottom bar
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`
-- State: Analysis (issue #183) · decisions 1–7 taken 2026-11-01, all A ·
-  mock-up f1–f4 pending; approval follows it · after MCP-10 (#94) · an
-  addition of 2026-11-01, charged to the UX capacity line (30 min)
-- Analysis model: Fable · Implementation model: —
+- State: Implemented, awaiting acceptance (issue #183) · decisions 1–7
+  taken 2026-11-01, all A · mock-up f1–f4 approved by the owner on
+  2026-11-01 · after MCP-10 (#94, merged) · an addition of 2026-11-01,
+  charged to the UX capacity line (30 min)
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 
 ## Goal
 
@@ -78,11 +79,17 @@ commit of project settings alone moves nothing.
 
 ## Mock-up
 
-Pending: review captures from the throwaway branch `mock/mcp-16-follow`
-(form 1 of [planning](../process/planning.md#mock-ups)), posted on #183.
-**Approval of the mock-up is required before implementation**; the
-decisions above are taken, the mock-up is what the owner still approves.
-The capture
+Approved by the owner on 2026-11-01 (on #183), as a whole: review captures
+from the throwaway branch `mock/mcp-16-follow` at `f4bafb2` (form 1 of
+[planning](../process/planning.md#mock-ups)), copied to
+[`docs/qa/2026-11-01/MCP-16/`](../qa/2026-11-01/MCP-16/); the branch is not
+merged. The visual choices approved with it: *Follow* pressed has a soft
+accent fill, an accent border and an accent pin, and released looks like
+the bar's other buttons; 8 px between *Follow* and *Take back*, 16 px
+before the status; a changed line carries a 3 px accent bar at the
+gutter's right edge, clear of the diagnostic's dot and the number, and the
+text does not move; at 960 px the full holder text is cut with "…" and
+shown whole on hover. The capture
 of each state is a `review_*` test rendering static content; MCP-10's
 status is a placeholder string in the mock-up, since MCP-10 is still on its
 branch. The states, with their file names under

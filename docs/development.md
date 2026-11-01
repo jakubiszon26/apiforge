@@ -561,6 +561,17 @@ holder file never blocks a free lock, even on a mounted Windows drive.
   the holder's words shorten to *Claude Code · since 10:42*, whole on
   hover. It goes when the session ends or the channel drops. The full
   report stays in the agent's answer.
+- **Following the agent** (MCP-16). While the window observes, every
+  commit it follows brings it to the document the commit changed: a
+  created one opens at its top, a saved one shows its first changed line
+  with the changed lines marked in the gutter until the next commit to
+  it, a published component's tab comes to the front; the view (Code,
+  Diagram, Split), the camera and the selected block stay. A deletion,
+  the settings alone and a run move nothing. *Follow* in the bottom bar,
+  left of *Take back*, is pressed while following; a tab click, a file
+  opened from the explorer, Ctrl+Tab or closing the followed tab
+  releases it, and pressing it again goes to the last change. Every
+  observation starts pressed; tabs following opened stay.
 - `finish_editing`, the end of stdin or the death of the server gives the
   project back the same way; a transaction the server left activated opens
   the window's recovery view. A window that closes while observing changes
