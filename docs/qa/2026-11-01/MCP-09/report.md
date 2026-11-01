@@ -224,9 +224,10 @@ The owner's Windows run is pending as for the earlier tickets.
 
 ## Verification
 
-On `9de6233` (the branch with main merged, MCP-14 included), all exit 0:
+On `fa1660e` (review round 2, main with MCP-14 merged), all exit 0:
 `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets
 --locked -- -D warnings`; `cargo test --workspace --all-targets --locked`:
-1 346 passed, 0 failed, 37 ignored; `cargo run -p apiforge-convert-v1
---locked -- --fixtures --check`. The same four passed on `eda3f06` (1 343
-passed, 37 ignored).
+1 350 passed, 0 failed, 37 ignored; `cargo run -p apiforge-convert-v1
+--locked -- --fixtures --check`. Earlier: `57d199f` (round 1) 1 349 passed,
+`9de6233` 1 346, `eda3f06` 1 343, each with 37 ignored. The captures are
+from `f4c94bd`; nothing drawn changed after it.
