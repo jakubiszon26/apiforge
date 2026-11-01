@@ -649,6 +649,23 @@ impl FolderApp {
         self.notify(text, false);
     }
 
+    /// The lines the agent's last commit changed in `document_id`, counted
+    /// from one, as the code's gutter marks them (MCP-16): a test seam.
+    #[cfg(test)]
+    pub(crate) fn changed_lines(
+        &self,
+        _document_id: &str,
+    ) -> Option<std::ops::RangeInclusive<usize>> {
+        None
+    }
+
+    /// The document the code view drew last and the lines it showed whole,
+    /// counted from one (MCP-16): a test seam.
+    #[cfg(test)]
+    pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
+        None
+    }
+
     /// Keeps the person's per-project settings in `directory`, as
     /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
     #[cfg(test)]
