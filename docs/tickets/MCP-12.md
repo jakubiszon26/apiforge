@@ -9,7 +9,8 @@
 ## Goal
 
 An MCP client recognises that an open API Forge window can hand over the
-project and tries a write. The request reaches the window even when the MCP
+project and tries a write. When the window's endpoint is in one of the
+approved candidate directories, the request reaches it even when the MCP
 process lacks `XDG_RUNTIME_DIR`; failures explain what is unavailable.
 
 ## What the owner will see
@@ -124,7 +125,7 @@ code. Four PRs / 60 minutes remains the global WIP limit.
   with the server environment cleared except PATH/SystemRoot.
 - Mixed Windows window / Linux MCP in WSL is unsupported; both must run on the
   same side. Diagnose an observable mismatch and add one sentence to each of
-  README.md and CLAUDE-CODE.md.
+  README.md and packaging/CLAUDE-CODE.md.
 
 ### Evidence and reuse
 
@@ -220,7 +221,7 @@ reason before implementation. Existing passing regressions accompany new red tes
   environment setters. Linux CI must provision `/run/user/<runner uid>` if absent
   before the subprocess acceptance case; production must not create it. Failure
   to provision is explicit, not a silently skipped test.
-- **T6 — report and documentation:** review README.md, CLAUDE-CODE.md,
+- **T6 — report and documentation:** review README.md, packaging/CLAUDE-CODE.md,
   docs/development.md and ADR 0014 against the implemented contract. Run all four
   development-guide verification commands and relevant existing MCP-08b/09 tests.
   Record Linux and Windows results, exact tested build/environment and unverified

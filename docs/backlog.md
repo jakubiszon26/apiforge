@@ -181,7 +181,8 @@ criteria:
 Order and parallelism: MCP-01, MCP-02 and MCP-07 depend on nothing and may
 start together within the WIP cap; MCP-03 follows 01 and 02; MCP-04 follows
 03; MCP-08a follows 07; MCP-05 and MCP-06 follow 04; MCP-08b follows 08a and
-04; MCP-08c and MCP-10 follow 08b; MCP-09 follows 08b and 06; MCP-11 closes.
+04; MCP-08c and MCP-10 follow 08b; MCP-09 and MCP-12 follow 08b and 06;
+MCP-11 closes, after MCP-12.
 
 ### Interface findings carried from KTLO — the UX line
 
