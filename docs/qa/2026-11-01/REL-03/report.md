@@ -146,6 +146,10 @@ The workspace tests and the CI window probes cover the flows.
 
 - `python3 -I packaging/test_release.py`: 31 tests, OK.
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
-  --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`,
-  `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`: see the
-  pull request for the result on this machine and in CI.
+  --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`
+  (63 test binaries, none failed) and `cargo run -p apiforge-convert-v1
+  --locked -- --fixtures --check`: pass on this machine (Ubuntu 24.04,
+  Rust 1.99.0) on `97ac083`.
+- CI on the pull request: the Linux job's *Generate and check the
+  third-party notices*, *Upload the third-party notices* and *Test the
+  release checks (Linux)* pass with the prebuilt cargo-about.
