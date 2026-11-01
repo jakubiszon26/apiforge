@@ -630,7 +630,8 @@ mod mcp15 {
         );
     }
 
-    /// Every file under `root` with its bytes.
+    /// Every file under `root` with its bytes; the writer's lock file by
+    /// its length, since Windows cannot read a held lock file.
     fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
             for entry in fs::read_dir(directory).unwrap() {
@@ -638,10 +639,12 @@ mod mcp15 {
                 if path.is_dir() {
                     walk(root, &path, found);
                 } else {
-                    found.insert(
-                        path.strip_prefix(root).unwrap().to_owned(),
-                        fs::read(&path).unwrap(),
-                    );
+                    let bytes = if path.file_name() == Some("project.lock".as_ref()) {
+                        fs::metadata(&path).unwrap().len().to_le_bytes().to_vec()
+                    } else {
+                        fs::read(&path).unwrap()
+                    };
+                    found.insert(path.strip_prefix(root).unwrap().to_owned(), bytes);
                 }
             }
         }

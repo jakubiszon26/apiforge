@@ -23,6 +23,7 @@ use apiforge_channel::{Asker, Connection, Endpoint, Message, Received, RunMode, 
 use apiforge_core::{journal::JournalRun, run::RunStatus};
 use apiforge_project::{DocumentKind, ProjectSession};
 use apiforge_storage::project::{Holder, HolderRole, IdentityBase, ProjectError, ProjectStore};
+use indexmap::IndexMap;
 use std::{
     io,
     path::Path,
@@ -50,21 +51,22 @@ const PROGRAM: &str = "apiforge run";
 
 /// Runs the saved scenario `scenario` (a registered path or an entity ID) of
 /// the folder project at `folder` live, journalled, and returns what
-/// happened. `before` hears what an earlier run left unfinished and whether
-/// the journal was unreadable, before this run adds to it.
+/// happened. `secrets` are the session's secret values, which the caller
+/// has read (`executor::secrets`) before anything else, so secrets that
+/// cannot be read ask no window. `before` hears what an earlier run left
+/// unfinished and whether the journal was unreadable, before this run adds
+/// to it.
 pub fn run_live(
     folder: &Path,
     scenario: &str,
-    secrets: Option<&Path>,
+    secrets: IndexMap<String, String>,
     before: &mut dyn FnMut(&[JournalRun], bool),
 ) -> Result<RunOutcome, String> {
-    // A scenario that is not there, or secrets that cannot be read, ask no
-    // window for anything.
+    // A scenario that is not there asks no window for anything.
     select(
         &ProjectSession::open_saved_read_only(folder).map_err(|error| error.to_string())?,
         scenario,
     )?;
-    let secrets = executor::secrets(secrets)?;
     let mut hold = Hold::take(folder)?;
     let mut session = ProjectSession::from_store_saved(hold.store().clone())
         .map_err(|error| error.to_string())?;

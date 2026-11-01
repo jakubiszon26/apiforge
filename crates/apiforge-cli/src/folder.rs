@@ -125,11 +125,13 @@ pub(super) fn select(session: &ProjectSession, path: &str) -> Result<String, Str
 pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::RunStatus, String> {
     if args.live {
         // A live run takes the project, asking an open window for it
-        // (MCP-15); what an earlier run left unfinished is said first.
+        // (MCP-15); secrets that cannot be read stop it before that, and
+        // what an earlier run left unfinished is said first.
+        let secrets = apiforge_mcp::executor::secrets(args.secrets.as_deref())?;
         let outcome = apiforge_mcp::command::run_live(
             &args.path,
             &args.scenario,
-            args.secrets.as_deref(),
+            secrets,
             &mut super::run::report_journal,
         )?;
         return super::run::print_outcome(outcome, args.json);

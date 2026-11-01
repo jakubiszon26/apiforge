@@ -4559,12 +4559,16 @@ mod mcp15 {
         let Some(folder) = std::env::var_os(FOLDER) else {
             return;
         };
-        let outcome =
-            apiforge_mcp::command::run_live(Path::new(&folder), SCENARIO, None, &mut |runs, _| {
+        let outcome = apiforge_mcp::command::run_live(
+            Path::new(&folder),
+            SCENARIO,
+            Default::default(),
+            &mut |runs, _| {
                 for run in runs {
                     eprintln!("A live run of \"{}\" did not finish", run.scenario_name);
                 }
-            });
+            },
+        );
         let code = match outcome {
             Ok(outcome) => {
                 println!("{}", outcome.report.status.label());
