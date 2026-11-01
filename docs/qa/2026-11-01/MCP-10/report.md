@@ -1,7 +1,8 @@
 # MCP-10: The agent's run status in the bottom bar — QA report
 
 - Branch: `feat/mcp-10-run-status`. Captures are from the release binaries
-  of `c2d356c`, the implementation. Later commits are the review rounds
+  of `c2d356c`, the implementation, except the four `live-*` captures,
+  retaken on `5680c20` (the merge of MCP-09). Later commits are the review rounds
   below; they change `apiforge-mcp` (`tools.rs`, `handover.rs`,
   `server.rs`) and `holder.rs`, none of them what the demo shows (see
   *Review rounds*).
@@ -64,6 +65,16 @@ Windows, one CI run of `9f801c5` failed criterion 3 because an agent's
 run of the same commit passed. That is the commit beside an observing
 window on Windows, not the status line; it is reported to the owner in the
 pull request.
+
+### Merge of MCP-09 (`5680c20`)
+
+MCP-09 told the windows a live run's start and end from the server's live
+path; MCP-10 tells every run's start and end, the mode included. One
+broadcast per run is kept, MCP-10's: MCP-09's `LiveRunTold` is removed,
+and its *A live run is in progress; it will finish* notice reads the run
+status MCP-10 keeps (a run that is running and live). `mod mcp09` passes
+unchanged; MCP-10's live-run test now ticks the MCP-09 box first, since
+the open window decides live runs.
 
 ## Criteria and their evidence
 
@@ -144,24 +155,31 @@ component's own steps included, as the 18 of `step_count` do.
 
 ### Scenario 3 (criterion 2): live runs
 
-1. The agent restores the price and runs with `live: true` (the server
+Retaken on the merge of MCP-09 (`5680c20`), where the open window decides
+live runs: the person's consent for the demo shop was on (written in the
+scratch configuration directory as *Project settings* writes it), so the
+header shows *Observing · Live allowed*.
+
+1. The agent writes the scenario and runs it with `live: true` (the server
    started with `--allow-live`, the demo API listening).
-2. At 960 × 540 it runs live again with the price at 81 (after
-   Scenario 4).
+2. At 960 × 540 the agent writes `expected_price = 81 * 1` and runs it
+   live again.
 
 Expected: *Agent: running promotion-and-cart-price.afs (live)…*, then the
 end with *(live)* after the file's name.
 
-Observed: running live ([capture](live-running-1600x1000.png)); *Agent:
-promotion-and-cart-price.afs (live) passed · 18 steps · 14:52*
-([capture](live-ended-1600x1000.png)); at 960 × 540 *Agent:
-promotion-and-cart-price.afs (live) failed at step 15 · Promotional price ·
-14:52*, whole, the holder shortened ([capture](live-ended-960x540.png)).
+Observed: running live ([1600](live-running-1600x1000.png),
+[960](live-running-960x540.png)); *Agent: promotion-and-cart-price.afs
+(live) passed · 18 steps · 20:15* ([capture](live-ended-1600x1000.png));
+at 960 × 540 *Agent: promotion-and-cart-price.afs (live) failed at step 15
+· Promotional price · 20:16*, whole, the holder shortened to *Claude Code
+· since 20:15* ([capture](live-ended-960x540.png)).
 
 ### Scenario 4 (criterion 3): 960 × 540
 
 1. The window is resized to 960 × 540; the agent runs the scenario, breaks
-   the price and runs it again.
+   the price and runs it again (captures of `c2d356c`; MCP-09 draws nothing
+   new without the person's consent, and the bar is unchanged by it).
 
 Expected: the status whole; the holder text shortened to *Claude Code ·
 since HH:MM*; *Take back* at the right end; nothing above the bar moved.
@@ -240,14 +258,16 @@ window in Code (captures above); the bar tests of `mod mcp07` and
 
 ## Verification
 
-On `c2d356c`, all exit 0:
+On `5680c20` (the merge of `origin/main` at `ce32afc`, MCP-09), all exit 0:
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- `cargo test --workspace --all-targets --locked`: 1 326 passed, 0 failed,
-  36 ignored (the second run). The first run had one failure outside this
-  change, `folder::tests::a_large_source_follows_the_caret_once_its_edit_is_analysed`
-  (*storage did not become idle* within its 15 s, while a release build
-  ran beside it on three cores); it passed three times alone and in the
-  second full run.
+- `cargo test --workspace --all-targets --locked --no-fail-fast`: 1 361
+  passed, 0 failed, 39 ignored (`mod mcp09` and `mod mcp10` among them)
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
+
+Earlier, on `c2d356c`: the same four commands passed (1 326 passed, 36
+ignored, on the second run; the first had one failure outside this change,
+`folder::tests::a_large_source_follows_the_caret_once_its_edit_is_analysed`,
+*storage did not become idle* within 15 s beside a release build, passing
+alone three times and in the second run).
