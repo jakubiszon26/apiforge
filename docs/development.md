@@ -205,7 +205,7 @@ file of each library it ships. To regenerate locally
 ```bash
 cargo about generate --locked --workspace --fail -o THIRD-PARTY-NOTICES.md packaging/about.hbs
 for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
-  cargo tree -e normal --locked --prefix none --format '{p}' --target "$triple" \
+  cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
     -p apiforge-desktop -p apiforge-cli
 done | python3 -I packaging/release.py check-notices THIRD-PARTY-NOTICES.md
 ```

@@ -163,13 +163,15 @@ EGUI_FONTS = {
 # source, `(proc-macro)`, `(*)` for a repeat.
 _TREE_LINE = re.compile(r"(\S+) v(\S+)((?: \([^()]*\))*)")
 _LOCAL_PATH = re.compile(r"\((/|[A-Za-z]:[\\/])")
+# Colour codes, when cargo was told to colour its output anyway.
+_ESCAPES = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def tree_crates(tree):
     """The (name, version) of every crate in `cargo tree` output, except the
     workspace's own, which cargo marks with their local path."""
     crates = set()
-    for line in tree.splitlines():
+    for line in _ESCAPES.sub("", tree).splitlines():
         line = line.strip()
         if not line:
             continue
