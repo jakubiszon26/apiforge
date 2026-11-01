@@ -12,7 +12,9 @@
 //! request nobody answered and a window that cannot be reached become the
 //! write's result. Lines that are not messages are ignored and logged on
 //! stderr by kind, never quoted.
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Reader, Received, Writer};
+use apiforge_channel::{
+    Connection, Endpoint, Listener, Message, Reader, Received, RunState, Writer,
+};
 use std::{
     io,
     sync::{
@@ -52,6 +54,9 @@ pub struct Hub {
     handle: Handle,
     endpoint: Mutex<Option<Endpoint>>,
     links: Mutex<Vec<Link>>,
+    /// The `run` message of the run in progress, told to a window that
+    /// connects meanwhile (MCP-10). Changed only while `links` is locked.
+    running: Mutex<Option<Message>>,
     next: AtomicU64,
     take_back: OnceLock<TakeBack>,
 }
@@ -81,6 +86,7 @@ impl Hub {
             handle,
             endpoint: Mutex::default(),
             links: Mutex::default(),
+            running: Mutex::default(),
             next: AtomicU64::new(1),
             take_back: OnceLock::new(),
         })
@@ -182,10 +188,16 @@ impl Hub {
     /// Tells every connected window `message`; a window that cannot be told
     /// within two seconds is let go.
     pub(crate) fn broadcast(&self, message: &Message) {
-        let writers: Vec<_> = lock(&self.links)
-            .iter()
-            .map(|link| (link.id, link.writer.clone()))
-            .collect();
+        let writers: Vec<_> = {
+            let links = lock(&self.links);
+            if let Message::Run { state, .. } = message {
+                *lock(&self.running) = (*state == RunState::Running).then(|| message.clone());
+            }
+            links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect()
+        };
         let failed = self.send(writers, message);
         if !failed.is_empty() {
             eprintln!("apiforge mcp: channel: a window could not be told and was let go");
@@ -240,10 +252,20 @@ impl Hub {
         let (reader, writer) = connection.split();
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let writer = Arc::new(tokio::sync::Mutex::new(writer));
+        let mut links = lock(&self.links);
+        // A window that connects during a run hears that it runs before
+        // anything broadcast later, which waits for this writer.
+        if let Some(running) = lock(&self.running).clone()
+            && let Ok(mut told) = writer.clone().try_lock_owned()
+        {
+            self.handle.spawn(async move {
+                let _ = tokio::time::timeout(SEND, told.send(&running)).await;
+            });
+        }
         let task = self
             .handle
             .spawn(read(Arc::downgrade(self), id, reader, writer.clone()));
-        lock(&self.links).push(Link {
+        links.push(Link {
             id,
             writer,
             reader: task,

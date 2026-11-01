@@ -785,6 +785,13 @@ fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> A
     let runs = server.runs.clone();
     let running = server.running.clone();
     let told = Arc::downgrade(&hub);
+    // Each run's start and end, for the windows' status line (MCP-10).
+    let watching = Arc::downgrade(&hub);
+    server.runs.observe(move |message| {
+        if let Some(hub) = watching.upgrade() {
+            hub.broadcast(message);
+        }
+    });
     hub.on_take_back(move || {
         if runs.is_busy() {
             if let Some(hub) = told.upgrade() {
@@ -797,6 +804,9 @@ fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> A
                         RunKind::Simulation
                     },
                     state: RunState::Running,
+                    step_count: None,
+                    step: None,
+                    label: None,
                 });
             }
             while runs.is_busy() {

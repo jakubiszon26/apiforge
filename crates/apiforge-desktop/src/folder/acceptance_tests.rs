@@ -3809,7 +3809,9 @@ mod mcp10 {
         assert!(time.len() == 5 && digits, "{label:?} ends in HH:MM");
     }
 
-    /// The width `text` takes in the bar's font when it is not cut.
+    /// The width `text` takes in the bar's font when it is not cut. Laid
+    /// out in place, its glyphs snap to pixels, so a whole label may be up
+    /// to a pixel narrower; a cut one loses at least a character.
     fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
         let job = egui::text::LayoutJob::single_section(
             text.to_owned(),
@@ -3921,6 +3923,44 @@ mod mcp10 {
         assert_eq!(ended["state"], "cancelled", "{ended}");
         assert_eq!(ended["path"], SCENARIO);
         assert_eq!(ended["mode"], "simulation");
+        drop(server);
+    }
+
+    /// A window that connects while a run is going is told that it runs,
+    /// then how it ended, like the windows connected before it.
+    #[test]
+    fn a_window_that_connects_during_a_run_hears_that_it_runs() {
+        let directory = shop();
+        let root = directory.path();
+        let mut server = agent(root, 200, false);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "First."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let endpoint = holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let first = observe(&endpoint);
+        let (text, hash) = read(&mut server, SCENARIO);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "Second."), "expected_source_sha256": hash }),
+        );
+        next(&first, "saved");
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        assert_eq!(next(&first, "run")["state"], "running");
+
+        let late = observe(&endpoint);
+        let told = next(&late, "run");
+        assert_eq!(told["state"], "running", "{told}");
+        assert_eq!(told["path"], SCENARIO);
+        let report = server.wait(id);
+        let ended = next(&late, "run");
+        assert_eq!(ended["state"], "passed", "{ended}");
+        assert_eq!(ended["step_count"], structured(&report)["step_count"]);
+        assert_eq!(next(&first, "run"), ended);
         drop(server);
     }
 
@@ -4049,7 +4089,7 @@ mod mcp10 {
             );
             let whole = whole_width(harness, status);
             assert!(
-                shown.width() + 0.5 >= whole,
+                shown.width() + 1.0 >= whole,
                 "{mode}: {status:?} is cut: {} of {whole} px",
                 shown.width()
             );

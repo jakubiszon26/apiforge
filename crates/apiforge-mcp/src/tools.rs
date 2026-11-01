@@ -8,6 +8,7 @@ use crate::{
     positions::Lines,
     reference, secrets,
 };
+use apiforge_channel::{Message, RunMode as ChannelMode, RunState};
 use apiforge_core::journal::JournalRun;
 use apiforge_core::{
     format::Port,
@@ -30,11 +31,15 @@ use serde_json::{Map, Value, json};
 use std::{
     path::Path,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
+
+/// A failed step's label in a channel `run` message is cut to this many
+/// characters; the window shows fewer.
+const MAX_LABEL_CHARS: usize = 200;
 
 /// A result larger than this is refused with `result_too_large`, never cut.
 pub const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
@@ -632,10 +637,27 @@ impl Default for RunSettings {
 }
 
 /// One run at a time per server.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Runs {
     busy: Arc<AtomicBool>,
     settings: RunSettings,
+    /// Told each run's start and end, for the windows that follow the
+    /// server (MCP-10).
+    observer: Arc<OnceLock<RunObserver>>,
+}
+
+/// What a run tells the windows: a channel `run` message.
+pub type RunObserver = Arc<dyn Fn(&Message) + Send + Sync>;
+
+impl std::fmt::Debug for Runs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Runs")
+            .field("busy", &self.busy)
+            .field("settings", &self.settings)
+            .field("observed", &self.observer.get().is_some())
+            .finish()
+    }
 }
 
 impl Runs {
@@ -643,12 +665,25 @@ impl Runs {
         Self {
             busy: Arc::default(),
             settings,
+            observer: Arc::default(),
         }
     }
 
     /// A run is in progress.
     pub fn is_busy(&self) -> bool {
         self.busy.load(Ordering::Acquire)
+    }
+
+    /// Tells `observer` when each run starts and ends, from the thread that
+    /// runs it; the first observer stays.
+    pub fn observe(&self, observer: impl Fn(&Message) + Send + Sync + 'static) {
+        let _ = self.observer.set(Arc::new(observer));
+    }
+
+    fn tell(&self, message: &Message) {
+        if let Some(observer) = self.observer.get() {
+            observer(message);
+        }
     }
 }
 
@@ -951,15 +986,42 @@ pub(crate) fn execute(
             }
         })
     };
+    let mode = if live {
+        ChannelMode::Live
+    } else {
+        ChannelMode::Simulation
+    };
+    runs.tell(&Message::Run {
+        path: prepared.path.clone(),
+        mode,
+        state: RunState::Running,
+        step_count: None,
+        step: None,
+        label: None,
+    });
     let outcome = executor::execute_observed(
         prepared.request,
         journal,
         token,
         runs.settings.deadline,
         notify,
-    )
-    .map_err(|message| ToolError::new(ErrorCode::InvalidText, message))?;
+    );
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(message) => {
+            runs.tell(&Message::Run {
+                path: prepared.path.clone(),
+                mode,
+                state: RunState::Failed,
+                step_count: None,
+                step: None,
+                label: None,
+            });
+            return Err(ToolError::new(ErrorCode::InvalidText, message));
+        }
+    };
     let report = &outcome.report;
+    runs.tell(&ended(&prepared.path, mode, report));
     Ok((
         RunReport {
             path: prepared.path,
@@ -993,6 +1055,49 @@ pub(crate) fn execute(
             unreadable: outcome.journal_unreadable,
         },
     ))
+}
+
+/// The `run` message a window is told when `report` has ended: how many
+/// steps it had and, when it failed, the first step that did not pass.
+fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
+    let state = match report.status {
+        RunStatus::Passed => RunState::Passed,
+        RunStatus::Cancelled => RunState::Cancelled,
+        RunStatus::Failed | RunStatus::Running => RunState::Failed,
+    };
+    let failure = (state == RunState::Failed)
+        .then(|| first_failure(&report.steps, &mut 0))
+        .flatten();
+    Message::Run {
+        path: path.to_owned(),
+        mode,
+        state,
+        step_count: Some(count(&report.steps) as u64),
+        step: failure.as_ref().map(|(step, _)| *step),
+        label: failure.map(|(_, label)| label),
+    }
+}
+
+/// The first step that failed or stopped with an error, numbered as
+/// `count` counts, with its label (its handle when it has none) bounded so
+/// the message stays one short line.
+fn first_failure(steps: &[StepResult], seen: &mut u64) -> Option<(u64, String)> {
+    use apiforge_core::run::StepStatus as Status;
+    for step in steps {
+        *seen += 1;
+        if matches!(step.status, Status::Failed | Status::Error) {
+            let label = step.label.as_deref().unwrap_or(&step.handle);
+            return Some((*seen, label.chars().take(MAX_LABEL_CHARS).collect()));
+        }
+        if let Some(found) = step
+            .children
+            .as_deref()
+            .and_then(|children| first_failure(children, seen))
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Every step, nested ones included.

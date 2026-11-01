@@ -1,9 +1,11 @@
 # MCP-10: The agent's run status in the bottom bar
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Backlog (issue #94) · MCP-00 decision 17 = A taken 2026-10-27 ·
-  mock-up M4 approved 2026-10-27 · after MCP-08b
-- Analysis model: Fable · Implementation model: —
+- State: awaiting acceptance (issue #94) · MCP-00 decision 17 = A taken
+  2026-10-27 · mock-up M4 approved 2026-10-27 · after MCP-08b
+- Analysis model: Fable · Implementation model: Claude Opus 5.5 (taken
+  under [autonomy](../process/autonomy.md), `ready:sol`)
+- QA: [report](../qa/2026-11-01/MCP-10/report.md)
 - Analysis: [MCP-00](MCP-00.md#live-preview-in-the-open-window)
 
 ## Goal
