@@ -252,21 +252,32 @@ impl FolderApp {
     }
 }
 
+/// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp* for a
+/// client that gave no name. The client's name is its own choice: it is
+/// shown without control characters and cut to a bounded length.
+pub(super) fn agent_name(client: Option<&str>) -> String {
+    match client.map(shown_client) {
+        Some(client) => format!("{client} via apiforge mcp"),
+        None => "An agent via apiforge mcp".to_owned(),
+    }
+}
+
+fn shown_client(client: &str) -> String {
+    client
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_CLIENT_CHARS)
+        .collect()
+}
+
 /// *Claude Code via apiforge mcp · since 10:42 · editing is paused here; …*,
 /// with `doing` saying what the window does.
 pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
-    let client = holder.client().map(|client| {
-        client
-            .chars()
-            .filter(|character| !character.is_control())
-            .take(MAX_CLIENT_CHARS)
-            .collect::<String>()
-    });
+    let client = holder.client().map(shown_client);
     let who = match (holder.role(), client) {
         (None, _) => return format!("Another process · {doing}"),
         (Some(HolderRole::Window), _) => "Another API Forge window".to_owned(),
-        (Some(HolderRole::Agent), Some(client)) => format!("{client} via apiforge mcp"),
-        (Some(HolderRole::Agent), None) => "An agent via apiforge mcp".to_owned(),
+        (Some(HolderRole::Agent), client) => agent_name(client.as_deref()),
         (Some(HolderRole::Command), Some(command)) => format!("apiforge {command}"),
         (Some(HolderRole::Command), None) => "The apiforge command".to_owned(),
     };
@@ -305,6 +316,17 @@ mod tests {
             Some("23:59")
         );
         assert_eq!(wall_clock("yesterday", &utc), None);
+    }
+
+    /// The hand-over prompt names the agent as the bar does (MCP-08c).
+    #[test]
+    fn the_agents_name_is_bounded_and_on_one_line() {
+        let long = format!("Claude\nCode{}", "x".repeat(200));
+        let name = agent_name(Some(&long));
+        assert!(!name.contains('\n'), "{name:?}");
+        assert_eq!(name, format!("{} via apiforge mcp", shown_client(&long)),);
+        assert_eq!(shown_client(&long).chars().count(), MAX_CLIENT_CHARS);
+        assert_eq!(agent_name(None), "An agent via apiforge mcp");
     }
 
     #[test]
