@@ -15,7 +15,7 @@ pub use assign_variable::AssignVariableDialog;
 pub use component::ComponentDialog;
 pub use environment::{EnvironmentDialog, SessionSecrets};
 pub use run_inputs::{RunInputs, RunInputsDialog};
-pub use settings::SettingsDialog;
+pub use settings::{AgentSection, SettingsDialog};
 
 use crate::icons::Icon;
 use crate::{theme, widgets};
@@ -128,6 +128,7 @@ pub(crate) struct Chrome<'a> {
     pub(crate) eyebrow: &'a str,
     pub(crate) title: &'a str,
     pub(crate) width: f32,
+    /// Empty for a dialog that applies nothing, which then has no button.
     pub(crate) apply_label: &'a str,
     /// A short note on the left of the footer.
     pub(crate) note: Option<&'a str>,
@@ -239,10 +240,12 @@ impl Chrome<'_> {
             }
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add_enabled(ready, widgets::primary_button(self.apply_label))
-                        .on_hover_text("Ctrl+Enter")
-                        .clicked()
+                    // A dialog with nothing to apply shows no apply button.
+                    if !self.apply_label.is_empty()
+                        && ui
+                            .add_enabled(ready, widgets::primary_button(self.apply_label))
+                            .on_hover_text("Ctrl+Enter")
+                            .clicked()
                     {
                         action = Action::Apply;
                     }
@@ -261,7 +264,10 @@ impl Chrome<'_> {
             ctx.input_mut(|input| {
                 if input.consume_key(Modifiers::NONE, Key::Escape) {
                     action = Action::Cancel;
-                } else if ready && input.consume_key(Modifiers::COMMAND, Key::Enter) {
+                } else if ready
+                    && !self.apply_label.is_empty()
+                    && input.consume_key(Modifiers::COMMAND, Key::Enter)
+                {
                     action = Action::Apply;
                 }
             });
@@ -458,6 +464,28 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Ctrl+Enter applies only where the dialog shows an apply button
+    /// (MCP-09: observing settings have none).
+    #[test]
+    fn ctrl_enter_applies_only_with_an_apply_button() {
+        for (label, expected) in [("Apply", Action::Apply), ("", Action::None)] {
+            let ctx = egui::Context::default();
+            let mut action = Action::None;
+            test_support::press(&ctx, Key::Enter, Modifiers::COMMAND, |ctx| {
+                let chrome = Chrome {
+                    id: "ctrl-enter-test",
+                    eyebrow: "",
+                    title: "Test",
+                    width: 400.0,
+                    apply_label: label,
+                    note: None,
+                };
+                action = chrome.show(ctx, &mut (), |_, _| {}, |_| true);
+            });
+            assert_eq!(action, expected, "apply label {label:?}");
+        }
+    }
 
     #[test]
     fn names_are_checked_after_trimming() {

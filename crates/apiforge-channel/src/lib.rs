@@ -54,7 +54,8 @@ pub enum Message {
     },
     /// The holder let the project go; the window may take it back.
     Released,
-    /// The person's consent to live requests (MCP-09; defined, not acted on).
+    /// The person's consent to live requests (MCP-09): a window says it when
+    /// a connection opens and on every change; only a window sends it.
     Permission { live: bool },
     /// The person wants the project back.
     TakeBack,

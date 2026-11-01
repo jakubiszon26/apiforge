@@ -559,9 +559,27 @@ allowed, and the model cannot allow them: the person starts the server with
 `claude mcp add apiforge -- /path/to/apiforge mcp --allow-live`. Without it a
 live run is `live_disabled` (*live requests are not enabled on this server*)
 and sends nothing. The server keeps the current permission in one slot:
-the flag while no window is connected; MCP-09 lets a connected window's
-per-project setting decide instead (*live requests are off in this project's
-settings*), and the flag applies again when the window goes.
+the flag while no window is connected; otherwise the connected windows'
+per-project setting, the newest one heard, off while a connected window has
+not said one yet (MCP-09, *live requests are off in this project's
+settings*); the flag applies again when the last window goes.
+
+**The window's setting.** *Project settings → Agent → Allow the MCP agent to
+send live requests* is the person's, per project and computer: off by
+default, kept in `agent-consent.json` beside `preferences.json` in the user's
+configuration directory by the manifest id (never in the project folder),
+enabled even while the window observes, applied at once without a save, and
+shown as *Live allowed* in the header while on. The window says it over the
+control channel as soon as a connection opens and on every change; no tool,
+resource or server message sets it. A live run that would ask a window for
+the project hears that window's setting first: when it is off the run is
+`live_disabled` and the window keeps the project, as when the window says
+nothing within two seconds. The window reads the file again once a second,
+so a change made in another window is followed. The overview reports the flag
+until a window is connected, since it never connects to one. The server
+tells connected windows `run { mode: live }` when a live run starts and ends,
+so a box unticked meanwhile says *A live run is in progress; it will finish.
+No new one starts.*
 `project_overview.live_requests` says `allowed` and its `source`
 (`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
 settings`). The permission is checked immediately before the run starts,

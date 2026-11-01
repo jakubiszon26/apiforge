@@ -310,6 +310,9 @@ pub struct FolderApp {
     /// What the holder's last followed commit changed, with its time, for
     /// the bar (MCP-08a): *10:43 · promotion.afs saved*.
     last_change: Option<String>,
+    /// The person's consent to an agent's live requests, per project
+    /// (MCP-09).
+    consent: crate::consent::AgentConsent,
 }
 
 struct Clipboard {
@@ -458,6 +461,7 @@ impl FolderApp {
             handover: handover::Handover::new(Some(context.clone())),
             saved_settings: None,
             last_change: None,
+            consent: crate::consent::AgentConsent::load(),
         }
     }
 
@@ -522,6 +526,7 @@ impl FolderApp {
         self.reload_field_drafts();
         self.restore_text_tabs();
         self.remember_project();
+        self.say_consent();
         self.announce_endpoint();
     }
 
@@ -642,6 +647,14 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn debug_notify(&mut self, text: &str) {
         self.notify(text, false);
+    }
+
+    /// Keeps the person's per-project settings in `directory`, as
+    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
+    #[cfg(test)]
+    pub(crate) fn use_configuration_directory(&mut self, directory: &std::path::Path) {
+        self.consent = crate::consent::AgentConsent::in_configuration(directory);
+        self.say_consent();
     }
 
     // ----- Frame -----------------------------------------------------------------

@@ -14,12 +14,22 @@
 //! The listener and the connections live on one background thread with a
 //! current-thread runtime; the frame reads what they report, as it reads the
 //! watcher's results.
+//!
+//! The person's consent to the agent's live requests (MCP-09) is said on
+//! every connection as soon as it opens, from the channel's thread, and again
+//! on every change: a server learns it before it could start a live run. The
+//! window takes no consent from the other side.
 use super::*;
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Received, RunState, Writer};
+use apiforge_channel::{
+    Connection, Endpoint, Listener, Message, Received, RunMode, RunState, Writer,
+};
 use apiforge_storage::project::{Holder, HolderRole};
 use std::{
     collections::HashMap,
-    sync::mpsc::{self, Sender},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Sender},
+    },
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -68,6 +78,8 @@ enum Command {
     Close {
         link: u64,
     },
+    /// The person's consent changed: every connection is told.
+    Consent,
 }
 
 /// The listener and the connections, on their own thread.
@@ -76,6 +88,9 @@ pub(super) struct Channel {
     commands: UnboundedSender<Command>,
     events: Receiver<Event>,
     next: u64,
+    /// The person's consent to live requests in the open project, read by
+    /// the channel's thread when a connection opens.
+    consent: Arc<AtomicBool>,
 }
 
 impl Channel {
@@ -84,6 +99,7 @@ impl Channel {
     pub(super) fn start(repaint: Option<egui::Context>) -> Self {
         let (commands, receiver) = unbounded_channel();
         let (sender, events) = mpsc::channel();
+        let consent = Arc::new(AtomicBool::new(false));
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build();
@@ -104,10 +120,11 @@ impl Channel {
                         None
                     }
                 };
+                let said = consent.clone();
                 let spawned = std::thread::Builder::new()
                     .name("apiforge-channel".into())
                     .spawn(move || {
-                        runtime.block_on(serve(listener, receiver, sender, repaint));
+                        runtime.block_on(serve(listener, receiver, sender, repaint, said));
                     });
                 if spawned.is_err() {
                     eprintln!("apiforge: channel: cannot start its thread");
@@ -122,6 +139,15 @@ impl Channel {
             events,
             // Connections this window opens; accepted ones count from the top.
             next: 1,
+            consent,
+        }
+    }
+
+    /// The person's consent in the open project: every connection hears a
+    /// change at once, and a new one hears it when it opens.
+    pub(super) fn set_consent(&self, live: bool) {
+        if self.consent.swap(live, Ordering::AcqRel) != live {
+            let _ = self.commands.send(Command::Consent);
         }
     }
 
@@ -162,7 +188,11 @@ async fn serve(
     mut commands: UnboundedReceiver<Command>,
     events: Sender<Event>,
     repaint: Option<egui::Context>,
+    consent: Arc<AtomicBool>,
 ) {
+    let said = || Message::Permission {
+        live: consent.load(Ordering::Acquire),
+    };
     let tell = move |event: Event| {
         let _ = events.send(event);
         if let Some(context) = &repaint {
@@ -175,10 +205,17 @@ async fn serve(
     loop {
         tokio::select! {
             connection = accept(&mut listener) => match connection {
-                Ok(connection) => {
+                Ok(mut connection) => {
                     accepted += 1;
-                    let reading = read(accepted, connection, &tell, &closed);
-                    open.insert(accepted, reading);
+                    // Said before anything else, so a server that asks for a
+                    // live run hears the consent first.
+                    if matches!(
+                        tokio::time::timeout(SEND, connection.writer.send(&said())).await,
+                        Ok(Ok(()))
+                    ) {
+                        let reading = read(accepted, connection, &tell, &closed);
+                        open.insert(accepted, reading);
+                    }
                 }
                 Err(error) => {
                     eprintln!("apiforge: channel: a connection failed: {}", error.kind());
@@ -202,7 +239,13 @@ async fn serve(
                     }
                 }
                 Some(Command::Connect { link, endpoint, owner_uid }) => {
-                    match tokio::time::timeout(SEND, apiforge_channel::connect(&endpoint, owner_uid)).await {
+                    let connected = tokio::time::timeout(SEND, async {
+                        let mut connection = apiforge_channel::connect(&endpoint, owner_uid).await?;
+                        connection.writer.send(&said()).await?;
+                        Ok::<_, std::io::Error>(connection)
+                    })
+                    .await;
+                    match connected {
                         Ok(Ok(connection)) => {
                             let reading = read(link, connection, &tell, &closed);
                             open.insert(link, reading);
@@ -217,6 +260,24 @@ async fn serve(
                 Some(Command::Close { link }) => {
                     if let Some(connection) = open.remove(&link) {
                         connection.reader.abort();
+                    }
+                }
+                Some(Command::Consent) => {
+                    let message = said();
+                    let mut failed = Vec::new();
+                    for (link, connection) in &mut open {
+                        if !matches!(
+                            tokio::time::timeout(SEND, connection.writer.send(&message)).await,
+                            Ok(Ok(()))
+                        ) {
+                            failed.push(*link);
+                        }
+                    }
+                    for link in failed {
+                        if let Some(connection) = open.remove(&link) {
+                            connection.reader.abort();
+                            tell(Event::Closed { link });
+                        }
                     }
                 }
             },
@@ -294,6 +355,8 @@ pub(super) struct Handover {
     pub(super) taking_back: bool,
     /// The holder's run is in progress, as its last `run` message said.
     agent_running: bool,
+    /// That run sends live requests (MCP-09).
+    agent_live: bool,
     /// A request was refused for unsaved work: the bar says so until the
     /// work is saved.
     pub(super) refused: bool,
@@ -327,6 +390,7 @@ impl Handover {
             stale: false,
             taking_back: false,
             agent_running: false,
+            agent_live: false,
             refused: false,
             declined: None,
             saving: false,
@@ -375,6 +439,7 @@ impl Handover {
         self.granted_at = None;
         self.stale = true;
         self.agent_running = false;
+        self.agent_live = false;
         // The take-back asked for is answered. Should the agent hold the
         // project again before the window takes it, *Take back* is offered
         // anew rather than left waiting for an answer that has come.
@@ -384,6 +449,11 @@ impl Handover {
     /// The person waits for the agent's run to end before the take-back.
     pub(super) fn waits_for_run(&self) -> bool {
         self.taking_back && self.agent_running
+    }
+
+    /// The agent this window observes is sending live requests.
+    pub(super) fn agent_runs_live(&self) -> bool {
+        self.agent_running && self.agent_live
     }
 
     /// Another project is open: a request made to the previous one is
@@ -416,6 +486,7 @@ impl Handover {
         self.stale = false;
         self.taking_back = false;
         self.agent_running = false;
+        self.agent_live = false;
         self.failed_at = None;
     }
 }
@@ -429,6 +500,7 @@ impl FolderApp {
             self.follow_channel_event(event);
         }
         self.note_saved_settings();
+        self.say_consent();
         self.answer_request();
         self.connect_to_holder();
         if self
@@ -464,10 +536,14 @@ impl FolderApp {
                     self.watcher.release_hold();
                     self.watcher.rescan();
                 }
-                Message::Run { state, .. } => {
+                Message::Run { state, mode, .. } => {
                     handover.agent_running = state == RunState::Running;
+                    handover.agent_live = mode == RunMode::Live;
                 }
-                Message::Permission { .. } => {}
+                // The person's consent is said by this window, never heard.
+                Message::Permission { .. } => {
+                    eprintln!("apiforge: channel: ignored a message only a window sends");
+                }
                 Message::Request { .. }
                 | Message::Granted
                 | Message::Refused { .. }
