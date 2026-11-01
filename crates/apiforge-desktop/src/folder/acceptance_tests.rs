@@ -4507,3 +4507,105 @@ mod mcp09 {
         }
     }
 }
+
+// ----- MCP-15 mock-up: a live run from the command line holds the project ---
+
+/// Design review captures (a) and (b) of `docs/tickets/MCP-15.md`. The bar
+/// is today's, read from a holder file that names the command as MCP-15
+/// writes it; the prompt is MCP-08c's with the command's words, opened
+/// directly instead of by a request over the channel (throwaway).
+mod mcp15_mock {
+    use super::*;
+    use crate::testing::{MINIMUM, capture};
+    use apiforge_storage::project::{Holder, ProjectStore};
+    use chrono::TimeZone;
+    use handover_prompt::MOCK_COMMAND_ASKS;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "components/product.afs";
+
+    fn since(hour: u32, minute: u32) -> String {
+        chrono::Local
+            .with_ymd_and_hms(2026, 11, 1, hour, minute, 11)
+            .single()
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    }
+
+    fn document_at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    /// (a) The bar while `apiforge run --live` holds the project: the
+    /// command's wording, the *Observing* badge, no *Take back*.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_bar() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = crate::testing::shop_project();
+            let root = directory.path();
+            let holder = Holder::command("run --live").with_since(since(10, 42));
+            let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+            let mut harness = folder_harness(root, size);
+            assert!(folder(&harness).observing(), "the window observes");
+            choose(&mut harness, "Code");
+            assert!(has_label(
+                &harness,
+                "apiforge run --live · since 10:42 · editing is paused here; this window follows every change"
+            ));
+            assert!(has_label(&harness, "Observing"));
+            assert!(!has_label(&harness, "Take back"));
+            capture(&mut harness, &format!("a-command-bar-code-{suffix}"), None);
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// (b) The MCP-08c prompt when the command asks and two documents hold
+    /// unsaved text.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_prompt() {
+        let directory = crate::testing::shop_project();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        choose(&mut harness, "Code");
+        for (path, note) in [
+            (SCENARIO, ("80 * 1", "80 * 2")),
+            (PRODUCT, ("number = 123", "number = 124")),
+        ] {
+            let id = document_at(&harness, path);
+            let saved = fs::read_to_string(root.join(path)).unwrap();
+            assert!(saved.contains(note.0), "{path} holds {}", note.0);
+            // A typed value, which leaves no warning in *Problems*.
+            let text = saved.replacen(note.0, note.1, 1);
+            app(&mut harness)
+                .session
+                .as_mut()
+                .unwrap()
+                .edit_source(&id, &text, CODE)
+                .unwrap();
+        }
+        settle(&mut harness);
+        MOCK_COMMAND_ASKS.with(|command| command.set(true));
+        app(&mut harness).prompt = Some(Prompt::Handover {
+            client: Some("run --live".to_owned()),
+        });
+        settle(&mut harness);
+        assert!(has_label(&harness, "A command asks for this project"));
+        capture(&mut harness, "b-command-prompt-960x540", None);
+        MOCK_COMMAND_ASKS.with(|command| command.set(false));
+        drop(harness);
+    }
+}

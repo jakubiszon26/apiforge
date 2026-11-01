@@ -19,6 +19,16 @@ const HEADING: &str = "An agent asks to edit this project";
 const SAVE_ALL: &str = "Save all and hand over";
 const NOT_NOW: &str = "Not now";
 const EARLIER: &str = "unsaved work from an earlier session, to keep or discard";
+/// The heading when a command asks (MCP-15 decision 2 A, mock-up).
+const COMMAND_HEADING: &str = "A command asks for this project";
+
+#[cfg(test)]
+thread_local! {
+    /// The asker is a command, not an agent (MCP-15 mock-up: the role the
+    /// implementation carries in `Prompt::Handover`).
+    pub(super) static MOCK_COMMAND_ASKS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
 
 /// One line of the prompt: what is unsaved, and in what way.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,18 +179,35 @@ impl FolderApp {
         if !writable || unsaved.is_empty() {
             return None;
         }
-        let who = holder::agent_name(client.as_deref());
+        #[cfg(test)]
+        let command = MOCK_COMMAND_ASKS.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let command = false;
+        let (heading, sentence) = if command {
+            let name = match client.as_deref() {
+                Some(client) => format!("apiforge {client}"),
+                None => "The apiforge command".to_owned(),
+            };
+            (
+                COMMAND_HEADING,
+                format!("{name} wants to send live requests from this project. Unsaved work here:"),
+            )
+        } else {
+            let who = holder::agent_name(client.as_deref());
+            (
+                HEADING,
+                format!("{who} wants to edit this project. Unsaved work here:"),
+            )
+        };
         let (mut save, mut not_now) = (false, false);
         let list_height = context.content_rect().height() * 0.4;
         let response = dialogs::centered_modal(egui::Id::new("folder-handover"), context).show(
             context,
             |ui| {
                 ui.set_width(460.0);
-                ui.heading(HEADING);
+                ui.heading(heading);
                 ui.add_space(theme::SPACE_SM);
-                ui.label(format!(
-                    "{who} wants to edit this project. Unsaved work here:"
-                ));
+                ui.label(sentence);
                 ui.add_space(theme::SPACE_SM);
                 egui::ScrollArea::vertical()
                     .max_height(list_height)
