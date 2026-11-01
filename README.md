@@ -222,5 +222,7 @@ GPL-3.0-or-later © The API Forge contributors: the GNU General Public License,
 version 3 or any later version, in [LICENSE](LICENSE). The bundled fonts keep
 their own licences, in `licenses/` of each release archive and in
 [crates/apiforge-desktop/assets/fonts](crates/apiforge-desktop/assets/fonts).
+`licenses/THIRD-PARTY-NOTICES.md` in each package names every Rust crate and
+font compiled into the binaries, with its version and licence text.
 Contributions are signed off under the Developer Certificate of Origin; see
 [CONTRIBUTING.md](CONTRIBUTING.md).

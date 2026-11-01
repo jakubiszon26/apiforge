@@ -17,7 +17,7 @@
 
 | # | Criterion | How it is verified | Result |
 | --- | --- | --- | --- |
-| 1 | One pre-release, four assets, generated notes ending with the sums | The dry run | **Pending** |
+| 1 | One pre-release, four assets, generated notes ending with the sums | The dry run | Pass (Dry run) |
 | 2 | Asset names carry version and target, asserted before upload | `release.py check-assets` in publish; `test_release.py` (`Names`) | Tests pass; asset list **pending** |
 | 3 | Archives hold exactly the manifest's entries | `release.py check-archive` in both build jobs; `test_release.py`; Scenario 1 | Pass on Linux; Windows in the dry run |
 | 4 | `apiforge mcp` from the extracted archive: `initialize` 2025-11-25, ten tools, exit 0 at EOF | `packaging/mcp-smoke.py` in both build jobs | Pass locally from the extracted tar.gz; both runners in the dry run |
@@ -25,7 +25,7 @@
 | 6 | AppImage starts on a clean system; `desktop-file-validate` passes | Job `smoke-appimage` | Local equivalent passes (Scenarios 2–3); job **pending** |
 | 7 | Tag-only trigger; `contents: read`, write only in publish; tag must be on main | Blocks quoted below; actionlint clean | Pass by inspection; the refusal is not exercised |
 | 8 | A failed step publishes nothing; tests run before packaging | Job graph below | Pass by inspection |
-| 9 | Dry run `v0.1.0-rc.1` end to end | Coordinating session | **Pending** |
+| 9 | Dry run `v0.1.0-rc.1` end to end | Coordinating session | Pass (Dry run) |
 | 10 | Verification passes; `rust.yml` unchanged; Releases section in the guide; README points at Releases | Below | Pass |
 
 The acceptance commit failed for the right reasons before the
@@ -169,18 +169,36 @@ icon is unchanged.
 
 ## Dry run
 
-**Pending.** After acceptance, the coordinating session pushes
-`v0.1.0-rc.1` and records here:
+`v0.1.0-rc.1`, 2026-10-28, by the coordinating session: the tag on `main`
+at `26b3f83`, [release run 40711791222](https://github.com/jakubiszon26/apiforge/actions/runs/40711791222).
+Every job passed on the first attempt: Check the tag, Build Linux packages
+(`ubuntu-22.04`), Build the Windows package, Start the AppImage on a clean
+system (on the runner and in a bare `ubuntu:24.04` container), Publish the
+pre-release.
 
-- the run URL and each job's result;
-- `gh release view v0.1.0-rc.1 --json assets,body,isPrerelease`;
-- each asset's size and SHA-256;
-- the `appimage-window` captures from the runner and the container;
-- the `version` job's check line;
-- the AppImage run on the agent's Linux machine;
-- the ZIP's CI smoke.
+[The pre-release](https://github.com/jakubiszon26/apiforge/releases/tag/v0.1.0-rc.1)
+holds four assets, and its generated notes end with the sums:
 
-Then one quiz: delete the rc release and tag, and tag `v0.1.0`.
+| Asset | Bytes | SHA-256 |
+| --- | --- | --- |
+| `apiforge-desktop-v0.1.0-rc.1-x86_64.AppImage` | 14 424 568 | `9d4358e05193d855cd6fbc7985e202704382015e476f00b3bf17d310856dce96` |
+| `apiforge-v0.1.0-rc.1-x86_64-unknown-linux-gnu.tar.gz` | 18 772 900 | `df91d2da907884057fc2918e8aa28af41dc06f26752bdd08030f55f025489203` |
+| `apiforge-v0.1.0-rc.1-x86_64-pc-windows-msvc.zip` | 16 234 668 | `14f8b9e3f14ccc6e79a59e150669c2ae72c1a9002cb15793fe3ce82c119dd014` |
+| `SHA256SUMS.txt` | 344 | — |
+
+Checked on the coordinating session's Linux machine after download:
+`sha256sum -c` passes for all three; the AppImage
+(`APPIMAGE_EXTRACT_AND_RUN=1`) prints `apiforge-desktop 0.1.0`; the tar.gz
+holds one top-level directory with `apiforge`, `apiforge-desktop`,
+`README.md`, `CLAUDE-CODE.md`, `LICENSE` and `licenses/`; its
+`apiforge 0.1.0` passes `mcp-smoke.py` (`initialize` 2025-11-25, ten tools,
+exit 0 at EOF); the ZIP lists both `.exe`, `LICENSE`, `README.md`,
+`CLAUDE-CODE.md` and the font licences.
+
+Not done by hand: starting `apiforge-desktop.exe` on Windows (the CI smoke
+only). The rc release and tag were kept; `v0.1.0` waits for REL-02 and
+REL-03 (owner decision of 2026-10-28 on #115). Recorded here by the REL-03
+pull request, as #115 asked.
 
 ## Regression smoke list
 
