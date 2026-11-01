@@ -20,9 +20,7 @@
 //! on every change: a server learns it before it could start a live run. The
 //! window takes no consent from the other side.
 use super::*;
-use apiforge_channel::{
-    Asker, Connection, Endpoint, Listener, Message, Received, RunMode, RunState, Writer,
-};
+use apiforge_channel::{Asker, Connection, Endpoint, Listener, Message, Received, Writer};
 use apiforge_storage::project::{Holder, HolderRole};
 use std::{
     collections::HashMap,
@@ -363,10 +361,9 @@ pub(super) struct Handover {
     stale: bool,
     /// The person asked for the project back and waits for `released`.
     pub(super) taking_back: bool,
-    /// The holder's run is in progress, as its last `run` message said.
-    agent_running: bool,
-    /// That run sends live requests (MCP-09).
-    agent_live: bool,
+    /// The holder's run as its last `run` message said, for the bar's
+    /// status line (MCP-10); gone with the connection.
+    pub(super) run: Option<holder::AgentRun>,
     /// A request was refused for unsaved work: the bar says so until the
     /// work is saved.
     pub(super) refused: bool,
@@ -400,8 +397,7 @@ impl Handover {
             granted_at: None,
             stale: false,
             taking_back: false,
-            agent_running: false,
-            agent_live: false,
+            run: None,
             refused: false,
             declined: None,
             saving: false,
@@ -456,8 +452,7 @@ impl Handover {
         self.released = true;
         self.granted_at = None;
         self.stale = true;
-        self.agent_running = false;
-        self.agent_live = false;
+        self.run = None;
         // The take-back asked for is answered. Should the agent hold the
         // project again before the window takes it, *Take back* is offered
         // anew rather than left waiting for an answer that has come.
@@ -466,14 +461,18 @@ impl Handover {
 
     /// The person waits for the agent's run to end before the take-back.
     pub(super) fn waits_for_run(&self) -> bool {
-        self.taking_back && self.agent_running
+        self.taking_back && self.run.as_ref().is_some_and(holder::AgentRun::is_running)
     }
 
     /// The agent this window observes is sending live requests. A
     /// command's live run is the person's own and is not governed by the
     /// agent's setting (MCP-15 decision 3 A).
     pub(super) fn agent_runs_live(&self) -> bool {
-        self.agent_running && self.agent_live && self.linked != Some(HolderRole::Command)
+        self.linked != Some(HolderRole::Command)
+            && self
+                .run
+                .as_ref()
+                .is_some_and(|run| run.is_running() && run.is_live())
     }
 
     /// The window observes an agent over a connection, so *Take back* is
@@ -512,8 +511,7 @@ impl Handover {
         self.granted_at = None;
         self.stale = false;
         self.taking_back = false;
-        self.agent_running = false;
-        self.agent_live = false;
+        self.run = None;
         self.failed_at = None;
     }
 }
@@ -555,6 +553,11 @@ impl FolderApp {
                 Message::Saved { .. } => {
                     #[cfg(test)]
                     handover.first_saved.get_or_insert_with(Instant::now);
+                    // A commit after the run ended: its last change is the
+                    // news now, in place of the run's outcome.
+                    if handover.run.as_ref().is_some_and(|run| !run.is_running()) {
+                        handover.run = None;
+                    }
                     self.watcher.release_hold();
                     self.watcher.rescan();
                 }
@@ -563,9 +566,28 @@ impl FolderApp {
                     self.watcher.release_hold();
                     self.watcher.rescan();
                 }
-                Message::Run { state, mode, .. } => {
-                    handover.agent_running = state == RunState::Running;
-                    handover.agent_live = mode == RunMode::Live;
+                Message::Run {
+                    path,
+                    mode,
+                    state,
+                    step_count,
+                    step,
+                    label,
+                } => {
+                    // MCP-10's status line words an agent's run (*Agent:
+                    // running …*); a command's run is not shown there, and
+                    // the bar keeps mock-up (a) of MCP-15. Whether and how
+                    // a command's run is shown is the owner's to decide.
+                    if handover.linked == Some(HolderRole::Command) {
+                        return;
+                    }
+                    handover.run = Some(holder::AgentRun::new(
+                        &path,
+                        mode,
+                        state,
+                        step_count,
+                        step.zip(label),
+                    ));
                 }
                 // The person's consent is said by this window, never heard.
                 Message::Permission { .. } => {

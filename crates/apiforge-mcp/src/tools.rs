@@ -8,6 +8,7 @@ use crate::{
     positions::Lines,
     reference, secrets,
 };
+use apiforge_channel::{Message, RunMode as ChannelMode, RunState};
 use apiforge_core::journal::JournalRun;
 use apiforge_core::{
     format::Port,
@@ -30,11 +31,20 @@ use serde_json::{Map, Value, json};
 use std::{
     path::Path,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
+
+/// With the step-delay test seam, how long a stopping run pauses after each
+/// step: longer than the executor's poll, so the runner is told to stop
+/// before the next step.
+const STOPPING_PAUSE: Duration = Duration::from_millis(50);
+
+/// A failed step's label in a channel `run` message is cut to this many
+/// characters; the window shows fewer.
+const MAX_LABEL_CHARS: usize = 200;
 
 /// A result larger than this is refused with `result_too_large`, never cut.
 pub const MAX_RESULT_BYTES: usize = 2 * 1024 * 1024;
@@ -700,10 +710,27 @@ impl Default for RunSettings {
 }
 
 /// One run at a time per server.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Runs {
     busy: Arc<AtomicBool>,
     settings: RunSettings,
+    /// Told each run's start and end, for the windows that follow the
+    /// server (MCP-10).
+    observer: Arc<OnceLock<RunObserver>>,
+}
+
+/// What a run tells the windows: a channel `run` message.
+pub type RunObserver = Arc<dyn Fn(&Message) + Send + Sync>;
+
+impl std::fmt::Debug for Runs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Runs")
+            .field("busy", &self.busy)
+            .field("settings", &self.settings)
+            .field("observed", &self.observer.get().is_some())
+            .finish()
+    }
 }
 
 impl Runs {
@@ -711,12 +738,25 @@ impl Runs {
         Self {
             busy: Arc::default(),
             settings,
+            observer: Arc::default(),
         }
     }
 
     /// A run is in progress.
     pub fn is_busy(&self) -> bool {
         self.busy.load(Ordering::Acquire)
+    }
+
+    /// Tells `observer` when each run starts and ends, from the thread that
+    /// runs it; the first observer stays.
+    pub fn observe(&self, observer: impl Fn(&Message) + Send + Sync + 'static) {
+        let _ = self.observer.set(Arc::new(observer));
+    }
+
+    fn tell(&self, message: &Message) {
+        if let Some(observer) = self.observer.get() {
+            observer(message);
+        }
     }
 }
 
@@ -1010,7 +1050,11 @@ pub(crate) fn execute(
         let stopping = token.clone();
         Arc::new(move || {
             let delay = if stopping.is_cancelled() {
-                cleanup_delay
+                // Without a cleanup seam a stopping run still pauses a
+                // moment: undelayed, its remaining steps could finish
+                // before the executor polls and stops the runner, and a
+                // cancelled run would end as if never cancelled.
+                cleanup_delay.or(step_delay.map(|_| STOPPING_PAUSE))
             } else {
                 step_delay
             };
@@ -1019,6 +1063,12 @@ pub(crate) fn execute(
             }
         })
     };
+    let mode = if live {
+        ChannelMode::Live
+    } else {
+        ChannelMode::Simulation
+    };
+    let told = Told::start(runs, &prepared.path, mode);
     let outcome = executor::execute_observed(
         prepared.request,
         journal,
@@ -1026,8 +1076,11 @@ pub(crate) fn execute(
         runs.settings.deadline,
         notify,
     )
+    // A run that could not start ends `failed` for the windows when `told`
+    // is dropped, as one that panics does.
     .map_err(|message| ToolError::new(ErrorCode::InvalidText, message))?;
     let report = &outcome.report;
+    told.end(ended(&prepared.path, mode, report));
     Ok((
         RunReport {
             path: prepared.path,
@@ -1061,6 +1114,89 @@ pub(crate) fn execute(
             unreadable: outcome.journal_unreadable,
         },
     ))
+}
+
+/// A run the windows were told has started: told its end exactly once,
+/// `failed` with no step when it is dropped without one (an error or a
+/// panic), so no window keeps showing it as running.
+struct Told<'a> {
+    runs: &'a Runs,
+    unended: Option<Message>,
+}
+
+impl<'a> Told<'a> {
+    fn start(runs: &'a Runs, path: &str, mode: ChannelMode) -> Self {
+        let message = |state| Message::Run {
+            path: path.to_owned(),
+            mode,
+            state,
+            step_count: None,
+            step: None,
+            label: None,
+        };
+        runs.tell(&message(RunState::Running));
+        Self {
+            runs,
+            unended: Some(message(RunState::Failed)),
+        }
+    }
+
+    fn end(mut self, ended: Message) {
+        self.unended = None;
+        self.runs.tell(&ended);
+    }
+}
+
+impl Drop for Told<'_> {
+    fn drop(&mut self) {
+        if let Some(failed) = self.unended.take() {
+            self.runs.tell(&failed);
+        }
+    }
+}
+
+/// The `run` message a window is told when `report` has ended, its state
+/// as the agent's answer gives it (`status`): how many
+/// steps it had and, when it failed, the first step that did not pass.
+pub(crate) fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
+    let state = match report.status {
+        RunStatus::Passed => RunState::Passed,
+        RunStatus::Cancelled => RunState::Cancelled,
+        RunStatus::Failed | RunStatus::Running => RunState::Failed,
+    };
+    let failure = (state == RunState::Failed)
+        .then(|| first_failure(&report.steps, &mut 0))
+        .flatten();
+    Message::Run {
+        path: path.to_owned(),
+        mode,
+        state,
+        step_count: Some(count(&report.steps) as u64),
+        step: failure.as_ref().map(|(step, _)| *step),
+        label: failure.map(|(_, label)| label),
+    }
+}
+
+/// The first step that failed the run, by the engine's own rule (failed,
+/// an error, blocked or cancelled), numbered as
+/// `count` counts, with its label (its handle when it has none) bounded so
+/// the message stays one short line.
+fn first_failure(steps: &[StepResult], seen: &mut u64) -> Option<(u64, String)> {
+    for step in steps {
+        *seen += 1;
+        if step.status.fails_run() {
+            let label = step.label.as_deref().unwrap_or(&step.handle);
+            return Some((*seen, label.chars().take(MAX_LABEL_CHARS).collect()));
+        }
+        if let Some(found) = step
+            .children
+            .as_deref()
+            .and_then(|children| first_failure(children, seen))
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Every step, nested ones included.
@@ -1230,4 +1366,58 @@ pub fn bound<T: Serialize>(result: Result<T, ToolError>) -> Result<T, ToolError>
         .with_details(json!({ "bytes": size, "limit": MAX_RESULT_BYTES })));
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    fn observed() -> (Runs, Arc<Mutex<Vec<Message>>>) {
+        let runs = Runs::default();
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let sink = told.clone();
+        runs.observe(move |message| sink.lock().unwrap().push(message.clone()));
+        (runs, told)
+    }
+
+    fn state(message: &Message) -> RunState {
+        match message {
+            Message::Run { state, .. } => *state,
+            other => panic!("not a run message: {other:?}"),
+        }
+    }
+
+    /// A run told as started is told an end once: its own, or `failed`
+    /// when it ends by an error or a panic (MCP-10).
+    #[test]
+    fn a_started_run_is_always_told_an_end_once() {
+        let (runs, told) = observed();
+        Told::start(&runs, "a.afs", ChannelMode::Simulation).end(Message::Run {
+            path: "a.afs".into(),
+            mode: ChannelMode::Simulation,
+            state: RunState::Passed,
+            step_count: Some(3),
+            step: None,
+            label: None,
+        });
+        drop(Told::start(&runs, "b.afs", ChannelMode::Live));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _told = Told::start(&runs, "c.afs", ChannelMode::Simulation);
+            panic!("the run panicked");
+        }));
+        assert!(unwound.is_err());
+        let states: Vec<RunState> = told.lock().unwrap().iter().map(state).collect();
+        assert_eq!(
+            states,
+            [
+                RunState::Running,
+                RunState::Passed,
+                RunState::Running,
+                RunState::Failed,
+                RunState::Running,
+                RunState::Failed,
+            ]
+        );
+    }
 }

@@ -914,8 +914,12 @@ mod mcp15 {
     #[test]
     fn mcp15_criterion_10_the_messages_in_order() {
         let api = api();
-        for (scenario, code, state) in [(PASSES, 0, RunState::Passed), (FAILS, 1, RunState::Failed)]
-        {
+        // MCP-10: the end says how many steps ran and the first that did
+        // not pass: the assertion of `FAILS` (step 2, `ok`, no label).
+        for (scenario, code, state, failed) in [
+            (PASSES, 0, RunState::Passed, None),
+            (FAILS, 1, RunState::Failed, Some((2, "ok"))),
+        ] {
             let directory = shop(&api.base_url(), scenario);
             let root = directory.path();
             let window = Window::open(root, Some(Script::grant()));
@@ -934,11 +938,17 @@ mod mcp15 {
                         path: SCENARIO.into(),
                         mode: RunMode::Live,
                         state: RunState::Running,
+                        step_count: None,
+                        step: None,
+                        label: None,
                     },
                     Message::Run {
                         path: SCENARIO.into(),
                         mode: RunMode::Live,
                         state,
+                        step_count: Some(3),
+                        step: failed.map(|(step, _)| step),
+                        label: failed.map(|(_, label)| label.to_owned()),
                     },
                     Message::Released,
                 ],

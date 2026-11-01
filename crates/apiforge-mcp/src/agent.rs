@@ -354,13 +354,6 @@ impl AgentSession {
             })
     }
 
-    /// Tells the connected windows `message`, when the server has a channel.
-    pub(crate) fn tell(&self, message: &Message) {
-        if let Some(hub) = self.hub.get() {
-            hub.broadcast(message);
-        }
-    }
-
     /// The session's store while it holds the lock. Never waits for a
     /// write.
     pub(crate) fn held(&self) -> Option<ProjectStore> {

@@ -16,11 +16,12 @@
 //! the window's setting for the agent does not govern the command.
 use crate::{
     agent::{GRANTED_LOCK, agent_name, command_name, could_try, on_windows_drive},
-    executor::{self, CancellationToken, DEADLINE, EndedBy, RunOutcome},
+    executor::{self, CancellationToken, DEADLINE, RunOutcome},
     handover::{self, Reply},
+    tools,
 };
 use apiforge_channel::{Asker, Connection, Endpoint, Message, Received, RunMode, RunState, Writer};
-use apiforge_core::{journal::JournalRun, run::RunStatus};
+use apiforge_core::journal::JournalRun;
 use apiforge_project::{DocumentKind, ProjectSession};
 use apiforge_storage::project::{Holder, HolderRole, IdentityBase, ProjectError, ProjectStore};
 use indexmap::IndexMap;
@@ -94,20 +95,28 @@ pub fn run_live(
         previous_run: None,
         secrets,
     };
-    hold.tell_run(&path, RunState::Running);
+    hold.tell(&Message::Run {
+        path: path.clone(),
+        mode: RunMode::Live,
+        state: RunState::Running,
+        step_count: None,
+        step: None,
+        label: None,
+    });
     let outcome = executor::execute(request, Some(journal), CancellationToken::new(), DEADLINE);
-    hold.tell_run(
-        &path,
-        match &outcome {
-            Ok(outcome) if outcome.ended_by != EndedBy::Completed => RunState::Cancelled,
-            Ok(outcome) => match outcome.report.status {
-                RunStatus::Passed => RunState::Passed,
-                RunStatus::Cancelled => RunState::Cancelled,
-                RunStatus::Failed | RunStatus::Running => RunState::Failed,
-            },
-            Err(_) => RunState::Failed,
+    // How the run ended, as the server tells it (MCP-10): its steps and the
+    // first one that did not pass.
+    hold.tell(&match &outcome {
+        Ok(outcome) => tools::ended(&path, RunMode::Live, &outcome.report),
+        Err(_) => Message::Run {
+            path: path.clone(),
+            mode: RunMode::Live,
+            state: RunState::Failed,
+            step_count: None,
+            step: None,
+            label: None,
         },
-    );
+    });
     hold.release();
     outcome
 }
@@ -275,14 +284,10 @@ impl Hold {
         self.store.as_ref().expect("the command holds the project")
     }
 
-    /// Tells the window the run's `state`.
-    fn tell_run(&mut self, path: &str, state: RunState) {
+    /// Tells the window `message`, when one handed the project over.
+    fn tell(&mut self, message: &Message) {
         if let Some(link) = &mut self.link {
-            link.send(&Message::Run {
-                path: path.to_owned(),
-                mode: RunMode::Live,
-                state,
-            });
+            link.send(message);
         }
     }
 

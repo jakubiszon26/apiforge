@@ -11,7 +11,13 @@
 //! bar ends in *Take back*; while it waits for the agent's run to finish it
 //! says so; and a window that kept the project for unsaved work says why in
 //! the same bar.
+//!
+//! While the agent runs a scenario or a component, the bar says so in place
+//! of the last change, and then how the run ended (MCP-10, mock-up M4). The
+//! status is never cut at the minimum window: the holder's words give way to
+//! a shorter form first.
 use super::*;
+use apiforge_channel::{RunMode, RunState};
 use apiforge_storage::project::{Holder, HolderRole};
 
 /// The bar's height in the approved mock-up M1.
@@ -26,6 +32,13 @@ const REFUSED: &str = "An agent asked to edit this project; save your work first
 pub(super) const TAKE_BACK: &str = "Take back";
 /// A client names itself; a longer name is cut so the bar keeps its line.
 const MAX_CLIENT_CHARS: usize = 40;
+/// A failed step's label in the status line is cut to this many characters.
+/// With the file name's bound the longest status, about 115 characters
+/// (some 650 px), leaves the bar at 960 × 540 room for *Take back* and the
+/// holder's short form, so the status itself is never cut.
+const MAX_LABEL_CHARS: usize = 30;
+/// The file name in the status line is cut to this many characters.
+const MAX_FILE_CHARS: usize = 40;
 
 /// The holder and the bar's text, formatted once per description rather
 /// than on every frame.
@@ -34,21 +47,65 @@ pub(super) struct Observed {
     text: String,
     /// The same, while *Take back* waits for the agent's run.
     waiting: String,
+    /// The short form beside a run status that leaves no room for the
+    /// text: *Claude Code · since 10:42* (MCP-10).
+    short: String,
+    /// The short form while *Take back* waits for the agent's run.
+    short_waiting: String,
 }
 
 impl Observed {
     pub(super) fn new(holder: Holder) -> Self {
         let text = holder_text(&holder, PAUSED);
         let waiting = holder_text(&holder, WAITING);
+        let short = short_holder_text(&holder);
+        let short_waiting = format!("{short} · {WAITING}");
         Self {
             holder,
             text,
             waiting,
+            short,
+            short_waiting,
         }
     }
 
     pub(super) fn holder(&self) -> &Holder {
         &self.holder
+    }
+}
+
+/// The agent's run as the server last told it (MCP-10): its status line,
+/// formatted once when told, with the time an ended run ended.
+pub(super) struct AgentRun {
+    running: bool,
+    /// The run sends live requests (MCP-09 reads it).
+    live: bool,
+    text: String,
+}
+
+impl AgentRun {
+    /// `failure` is the first step that did not pass and its label.
+    pub(super) fn new(
+        path: &str,
+        mode: RunMode,
+        state: RunState,
+        step_count: Option<u64>,
+        failure: Option<(u64, String)>,
+    ) -> Self {
+        let ended = chrono::Local::now().format("%H:%M").to_string();
+        Self {
+            running: state == RunState::Running,
+            live: mode == RunMode::Live,
+            text: run_text(path, mode, state, step_count, failure, &ended),
+        }
+    }
+
+    pub(super) fn is_running(&self) -> bool {
+        self.running
+    }
+
+    pub(super) fn is_live(&self) -> bool {
+        self.live
     }
 }
 
@@ -171,19 +228,32 @@ impl FolderApp {
     /// kept it from an agent.
     pub(super) fn holder_bar(&mut self, ui: &mut egui::Ui) {
         let observing = self.observing();
-        let (text, last_change, take_back) = match self.holder.as_ref() {
-            Some(observed) if observing => (
-                if self.handover.waits_for_run() {
-                    observed.waiting.clone()
-                } else {
-                    observed.text.clone()
-                },
-                self.last_change.clone(),
-                self.handover
-                    .offers_take_back()
-                    .then_some(!self.handover.taking_back),
-            ),
-            _ if !observing && self.handover.refused => (REFUSED.to_owned(), None, None),
+        let (text, short, last_change, status, take_back) = match self.holder.as_ref() {
+            Some(observed) if observing => {
+                let waits = self.handover.waits_for_run();
+                // The agent's run, in place of the last change (MCP-10).
+                let status = self.handover.run.as_ref().map(|run| run.text.clone());
+                (
+                    if waits {
+                        observed.waiting.clone()
+                    } else {
+                        observed.text.clone()
+                    },
+                    Some(if waits {
+                        observed.short_waiting.clone()
+                    } else {
+                        observed.short.clone()
+                    }),
+                    status.is_none().then(|| self.last_change.clone()).flatten(),
+                    status,
+                    self.handover
+                        .offers_take_back()
+                        .then_some(!self.handover.taking_back),
+                )
+            }
+            _ if !observing && self.handover.refused => {
+                (REFUSED.to_owned(), None, None, None, None)
+            }
             _ => return,
         };
         let mut taken = false;
@@ -207,6 +277,24 @@ impl FolderApp {
                             .clicked();
                         ui.add_space(theme::SPACE_LG);
                     }
+                    // The run's status whole while the bar has room for it;
+                    // the holder gives way to it.
+                    let status_shown = status.is_some();
+                    if let Some(status) = status {
+                        let room = ui.available_width();
+                        ui.scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(status)
+                                        .size(theme::FONT_META)
+                                        .color(theme::MUTED),
+                                )
+                                .truncate(),
+                            );
+                        });
+                        ui.add_space(theme::SPACE_LG);
+                    }
                     if let Some(change) = last_change {
                         // At most half the bar: a long file name is cut,
                         // whole on hover, and the holder keeps its half.
@@ -225,14 +313,22 @@ impl FolderApp {
                         ui.add_space(theme::SPACE_LG);
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(
+                        // Beside a status the full text goes when it does
+                        // not fit, for its short form, whole on hover.
+                        let shortened = short.filter(|_| {
+                            status_shown && text_width(ui, &text) > ui.available_width()
+                        });
+                        let response = ui.add(
                             egui::Label::new(
-                                RichText::new(text)
+                                RichText::new(shortened.as_deref().unwrap_or(&text))
                                     .size(theme::FONT_META)
                                     .color(theme::WARNING),
                             )
                             .truncate(),
                         );
+                        if shortened.is_some() {
+                            response.on_hover_text(&text);
+                        }
                     });
                 });
             })
@@ -250,6 +346,81 @@ impl FolderApp {
             self.request_take_back();
         }
     }
+}
+
+/// The width `text` takes in the bar's font, uncut.
+fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+    let job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(theme::FONT_META), theme::WARNING),
+    );
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job)).size().x
+}
+
+/// The status line of the agent's run (MCP-10, mock-up M4): *Agent: running
+/// promotion.afs (simulation)…*, then *Agent: promotion.afs passed · 18
+/// steps · 12:58*, *… failed at step 7 · Promotional price · 12:58* or
+/// *… cancelled · 12:58*, `ended` being the time it ended. An ended live
+/// run says *(live)* after the file's name.
+fn run_text(
+    path: &str,
+    mode: RunMode,
+    state: RunState,
+    step_count: Option<u64>,
+    failure: Option<(u64, String)>,
+    ended: &str,
+) -> String {
+    let file = bounded_file(file_name(path));
+    let (mode, live) = match mode {
+        RunMode::Simulation => ("simulation", ""),
+        RunMode::Live => ("live", " (live)"),
+    };
+    match state {
+        RunState::Running => format!("Agent: running {file} ({mode})…"),
+        RunState::Passed => match step_count {
+            Some(1) => format!("Agent: {file}{live} passed · 1 step · {ended}"),
+            Some(count) => format!("Agent: {file}{live} passed · {count} steps · {ended}"),
+            None => format!("Agent: {file}{live} passed · {ended}"),
+        },
+        RunState::Failed => match failure {
+            Some((step, label)) => format!(
+                "Agent: {file}{live} failed at step {step} · {} · {ended}",
+                bounded(&label, MAX_LABEL_CHARS)
+            ),
+            None => format!("Agent: {file}{live} failed · {ended}"),
+        },
+        RunState::Cancelled => format!("Agent: {file}{live} cancelled · {ended}"),
+    }
+}
+
+/// A file name bounded as `bounded` does, its extension kept: the stem is
+/// cut, *a-very-long-…-name….afs*.
+fn bounded_file(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, extension))
+            if !stem.is_empty()
+                && extension.chars().count() < 8
+                && name.chars().count() > MAX_FILE_CHARS =>
+        {
+            let room = MAX_FILE_CHARS - extension.chars().count() - 1;
+            format!("{}.{}", bounded(stem, room), bounded(extension, 8))
+        }
+        _ => bounded(name, MAX_FILE_CHARS),
+    }
+}
+
+/// `text` on one line, cut to `limit` characters with an ellipsis.
+fn bounded(text: &str, limit: usize) -> String {
+    let mut shown: String = text
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(limit + 1)
+        .collect();
+    if shown.chars().count() > limit {
+        shown = shown.chars().take(limit - 1).collect();
+        shown.push('…');
+    }
+    shown
 }
 
 /// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp* for a
@@ -298,6 +469,27 @@ pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
     }
 }
 
+/// The holder in a few words, for a bar that also shows a run status:
+/// *Claude Code · since 10:42*.
+fn short_holder_text(holder: &Holder) -> String {
+    let client = holder.client().map(shown_client);
+    let who = match (holder.role(), client) {
+        (None, _) => return "Another process".to_owned(),
+        (Some(HolderRole::Window), _) => "Another API Forge window".to_owned(),
+        (Some(HolderRole::Agent), Some(client)) => client,
+        (Some(HolderRole::Agent), None) => "An agent".to_owned(),
+        (Some(HolderRole::Command), Some(command)) => format!("apiforge {command}"),
+        (Some(HolderRole::Command), None) => "The apiforge command".to_owned(),
+    };
+    match holder
+        .since()
+        .and_then(|since| wall_clock(since, &chrono::Local))
+    {
+        Some(time) => format!("{who} · since {time}"),
+        None => who,
+    }
+}
+
 /// `HH:MM` on the wall clock of `zone` for an RFC 3339 timestamp.
 fn wall_clock<Zone: chrono::TimeZone>(since: &str, zone: &Zone) -> Option<String>
 where
@@ -335,6 +527,92 @@ mod tests {
         assert_eq!(name, format!("{} via apiforge mcp", shown_client(&long)),);
         assert_eq!(shown_client(&long).chars().count(), MAX_CLIENT_CHARS);
         assert_eq!(agent_name(None), "An agent via apiforge mcp");
+    }
+
+    /// The status line in each state of the agent's run (MCP-10, M4).
+    #[test]
+    fn the_run_status_names_the_file_the_mode_and_the_end() {
+        let path = "scenarios/promotion.afs";
+        let at = "12:58";
+        let text = |mode, state, count, failure| run_text(path, mode, state, count, failure, at);
+        assert_eq!(
+            text(RunMode::Simulation, RunState::Running, None, None),
+            "Agent: running promotion.afs (simulation)…"
+        );
+        assert_eq!(
+            text(RunMode::Live, RunState::Running, None, None),
+            "Agent: running promotion.afs (live)…"
+        );
+        assert_eq!(
+            text(RunMode::Simulation, RunState::Passed, Some(18), None),
+            "Agent: promotion.afs passed · 18 steps · 12:58"
+        );
+        assert_eq!(
+            text(RunMode::Simulation, RunState::Passed, Some(1), None),
+            "Agent: promotion.afs passed · 1 step · 12:58"
+        );
+        assert_eq!(
+            text(
+                RunMode::Simulation,
+                RunState::Failed,
+                Some(18),
+                Some((7, "Promotional price".into()))
+            ),
+            "Agent: promotion.afs failed at step 7 · Promotional price · 12:58"
+        );
+        assert_eq!(
+            text(RunMode::Live, RunState::Failed, None, None),
+            "Agent: promotion.afs (live) failed · 12:58"
+        );
+        assert_eq!(
+            text(RunMode::Live, RunState::Cancelled, Some(3), None),
+            "Agent: promotion.afs (live) cancelled · 12:58"
+        );
+        let label = format!("Line\nbreak{}", "x".repeat(100));
+        let failed = text(
+            RunMode::Simulation,
+            RunState::Failed,
+            None,
+            Some((2, label)),
+        );
+        assert!(!failed.contains('\n'), "{failed:?}");
+        assert!(
+            failed.contains(&format!(
+                "· Linebreak{}… ·",
+                "x".repeat(MAX_LABEL_CHARS - 10)
+            )),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_file_name_keeps_its_extension() {
+        let long = format!("scenarios/{}.afs", "a".repeat(80));
+        let shown = bounded_file(file_name(&long));
+        assert_eq!(shown.chars().count(), MAX_FILE_CHARS, "{shown:?}");
+        assert!(shown.ends_with("….afs"), "{shown:?}");
+        assert_eq!(bounded_file("promotion.afs"), "promotion.afs");
+    }
+
+    #[test]
+    fn the_short_holder_text_keeps_who_and_since() {
+        let holder = Holder::new(HolderRole::Agent, Some("Claude Code".into()))
+            .with_since("2026-10-27T09:42:11Z");
+        let since = wall_clock("2026-10-27T09:42:11Z", &chrono::Local).unwrap();
+        assert_eq!(
+            short_holder_text(&holder),
+            format!("Claude Code · since {since}")
+        );
+        let observed = Observed::new(holder);
+        assert_eq!(
+            observed.short_waiting,
+            format!("{} · {WAITING}", observed.short)
+        );
+        assert_eq!(
+            short_holder_text(&Holder::new(HolderRole::Agent, None).with_since("-")),
+            "An agent"
+        );
+        assert_eq!(short_holder_text(&Holder::unknown()), "Another process");
     }
 
     #[test]

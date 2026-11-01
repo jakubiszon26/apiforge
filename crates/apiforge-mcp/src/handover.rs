@@ -22,7 +22,9 @@
 //! seconds, is not asked: it keeps the project. The flag never decides for a
 //! connected window.
 use crate::live::{LivePermission, Permission};
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Reader, Received, Writer};
+use apiforge_channel::{
+    Connection, Endpoint, Listener, Message, Reader, Received, RunState, Writer,
+};
 use std::{
     io,
     sync::{
@@ -74,6 +76,9 @@ pub struct Hub {
     handle: Handle,
     endpoint: Mutex<Option<Endpoint>>,
     links: Mutex<Vec<Link>>,
+    /// The `run` message of the run in progress, told to a window that
+    /// connects meanwhile (MCP-10). Changed only while `links` is locked.
+    running: Mutex<Option<Message>>,
     next: AtomicU64,
     /// Orders the consents heard, so the newest decides.
     heard: AtomicU64,
@@ -107,6 +112,7 @@ impl Hub {
             handle,
             endpoint: Mutex::default(),
             links: Mutex::default(),
+            running: Mutex::default(),
             next: AtomicU64::new(1),
             heard: AtomicU64::new(1),
             take_back: OnceLock::new(),
@@ -227,11 +233,21 @@ impl Hub {
     /// Tells every connected window `message`; a window that cannot be told
     /// within two seconds is let go.
     pub(crate) fn broadcast(&self, message: &Message) {
-        let writers: Vec<_> = lock(&self.links)
-            .iter()
-            .map(|link| (link.id, link.writer.clone()))
-            .collect();
-        let failed = self.send(writers, message);
+        let writers: Vec<_> = {
+            let links = lock(&self.links);
+            if let Message::Run { state, .. } = message {
+                *lock(&self.running) = (*state == RunState::Running).then(|| message.clone());
+            }
+            links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect()
+        };
+        self.let_go_of(self.send(writers, message));
+    }
+
+    /// Lets go of the windows that could not be told.
+    fn let_go_of(&self, failed: Vec<u64>) {
         if !failed.is_empty() {
             eprintln!("apiforge mcp: channel: a window could not be told and was let go");
             let mut links = lock(&self.links);
@@ -244,6 +260,22 @@ impl Hub {
             });
             self.decide(&links);
         }
+    }
+
+    /// Tells every connected window again the run in progress, if one is.
+    pub(crate) fn retell_running(&self) {
+        let (running, writers) = {
+            let links = lock(&self.links);
+            let Some(running) = lock(&self.running).clone() else {
+                return;
+            };
+            let writers: Vec<_> = links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect();
+            (running, writers)
+        };
+        self.let_go_of(self.send(writers, &running));
     }
 
     /// The session ended: the windows connected now are told `released` and
@@ -295,6 +327,15 @@ impl Hub {
         // Locked before the reader starts, so a consent it reads at once
         // finds its link.
         let mut links = lock(&self.links);
+        // A window that connects during a run hears that it runs before
+        // anything broadcast later, which waits for this writer.
+        if let Some(running) = lock(&self.running).clone()
+            && let Ok(mut told) = writer.clone().try_lock_owned()
+        {
+            self.handle.spawn(async move {
+                let _ = tokio::time::timeout(SEND, told.send(&running)).await;
+            });
+        }
         let task = self
             .handle
             .spawn(read(Arc::downgrade(self), id, reader, writer.clone()));
