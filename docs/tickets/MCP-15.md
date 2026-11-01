@@ -237,8 +237,13 @@ As the appendix proposed: `apiforge_mcp::command::run_live` holds the live
 folder run, called by the CLI and by the desktop's spawned helper; the
 asking is `handover::request_project`, shared with the server; the refusal
 wording sits beside the server's, sharing the agent's and the command's
-names. The command reads the project first and asks no window for a
-scenario that is not registered or secrets that cannot be read.
+names. The CLI reads the secrets file first and `run_live` reads the project
+before anything else, so neither a secrets file that cannot be read nor a
+scenario that is not registered asks a window. `run_live` takes the secret
+values and a callback for the journal's interrupted runs, and returns the
+`RunOutcome` the CLI prints. A command that stops waiting (Ctrl+C) while the
+prompt is open closes the prompt; an answer meant for a command that has
+gone is not kept for a later agent (review of #184).
 
 Two consequences of decisions 1–3 that the analysis did not spell out,
 reported here for the owner:
@@ -273,7 +278,10 @@ a hand-over between agents; MCP-09's toggle governing the command
   for `GRANTED_LOCK`, `refused`/`pending`/unreachable become the result, a
   third process that took the lock meanwhile is `held_by_other` and the
   window is told `released` (`Hub::decline`). The refusal wording lives in
-  `agent.rs::held`, `refused`, `pending`. **Extract** the asking into a public
+  `agent.rs::held`, `refused`, `pending`. *(Implemented as
+  `handover::request_project`, the request-and-answer loop without a
+  deadline of its own, the server bounding it to thirty seconds; see
+  *Implementation*.)* **Extract** the asking into a public
   function of `apiforge_mcp::handover` — `ask_window(endpoint, owner_uid,
   Request, deadline: Option<Duration>) -> Answer` on a given `Handle` — and
   the wording into `pub fn` texts that both the tool errors and the CLI's
@@ -296,7 +304,9 @@ a hand-over between agents; MCP-09's toggle governing the command
 acceptance tests cannot call it, and the MCP-08b tests run the server from an
 ignored helper test for the same reason. Move the live folder run's body
 into a library function — `apiforge_mcp::command::run_live(folder, scenario,
-secrets, json_sink)` returning the report — called by the CLI (which prints)
+secrets, json_sink)` returning the report *(implemented as `run_live(folder,
+scenario, secret values, journal callback) -> Result<RunOutcome, String>`; see
+*Implementation*)* — called by the CLI (which prints)
 and by a spawned helper test in `apiforge-desktop` (criteria 1, 2, 7). The
 CLI's own tests drive the real binary (`CARGO_BIN_EXE_apiforge`) against a
 scripted listener: `ProjectStore::open_exclusive_as(.., Holder::window()

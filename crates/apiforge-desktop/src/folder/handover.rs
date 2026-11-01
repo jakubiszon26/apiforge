@@ -420,6 +420,12 @@ impl Handover {
         self.pending.is_some()
     }
 
+    /// For tests: an answer waits for the next agent request.
+    #[cfg(test)]
+    pub(super) fn has_declined(&self) -> bool {
+        self.declined.is_some()
+    }
+
     /// The holder this window observes over a connection, so *Take back*
     /// can be offered.
     pub(super) fn is_linked(&self) -> bool {
@@ -592,12 +598,23 @@ impl FolderApp {
                     handover.connecting = None;
                     handover.failed_at = Some(Instant::now());
                 }
-                if handover
-                    .pending
-                    .as_ref()
-                    .is_some_and(|(pending, ..)| *pending == link)
+                if let Some((_, _, role)) =
+                    handover.pending.take_if(|(pending, ..)| *pending == link)
                 {
-                    handover.pending = None;
+                    // A command that stopped waiting (Ctrl+C) has gone for
+                    // good: its prompt goes with it. An agent asks again, and
+                    // its prompt stays for that (MCP-08c).
+                    if role == HolderRole::Command
+                        && matches!(
+                            self.prompt,
+                            Some(Prompt::Handover {
+                                role: HolderRole::Command,
+                                ..
+                            })
+                        )
+                    {
+                        self.prompt = None;
+                    }
                 }
                 if let Some((releasing, lost)) = &mut handover.releasing
                     && *releasing == link
@@ -644,11 +661,14 @@ impl FolderApp {
             return;
         }
         // With unsaved work the person decides (MCP-08c): an answer given
-        // to a request that stopped waiting is this one's, once.
+        // to an agent's request that stopped waiting is the next agent
+        // request's, once; a command is always asked itself (MCP-15).
         if session.has_unsaved_work() {
-            if let Some(reason) = self.handover.declined.take() {
+            if role == HolderRole::Agent
+                && let Some(reason) = self.handover.declined.take()
+            {
                 self.refuse(link, &reason);
-                self.handover.refused = role == HolderRole::Agent;
+                self.handover.refused = true;
             } else {
                 self.ask_person(client, role);
             }
@@ -669,14 +689,22 @@ impl FolderApp {
     }
 
     /// The person's answer that keeps the project here: the waiting request
-    /// hears `reason`, or, when none waits, the next one does. The bar says
-    /// why only to an agent `asker`, which asks again at its next write; a
-    /// command has its answer and ends (MCP-15).
+    /// hears `reason`; when none waits, the next agent request does. The
+    /// bar says why only to an agent, which asks again at its next write; a
+    /// command has its answer and ends, and an answer meant for a command
+    /// that has gone is nobody's (MCP-15). `asker` is who the prompt named;
+    /// the request waiting now decides.
     pub(super) fn answer_waiting(&mut self, reason: &str, asker: HolderRole) {
-        self.handover.refused = asker == HolderRole::Agent;
         match self.handover.pending.clone() {
-            Some((link, ..)) => self.refuse(link, reason),
-            None => self.handover.declined = Some(reason.to_owned()),
+            Some((link, _, role)) => {
+                self.handover.refused = role == HolderRole::Agent;
+                self.refuse(link, reason);
+            }
+            None if asker == HolderRole::Agent => {
+                self.handover.refused = true;
+                self.handover.declined = Some(reason.to_owned());
+            }
+            None => {}
         }
     }
 

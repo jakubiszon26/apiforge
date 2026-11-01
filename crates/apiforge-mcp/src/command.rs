@@ -470,6 +470,23 @@ mod tests {
         );
     }
 
+    /// A client's name is its own choice: a refusal prints it on one line,
+    /// without control characters, and bounded (review of #184).
+    #[test]
+    fn a_holders_name_cannot_break_the_terminal_line() {
+        let name = format!("Claude\u{1b}[2J\nCode{}", "x".repeat(200));
+        let text = held(&Holder::new(HolderRole::Agent, Some(name)), None);
+        assert!(!text.contains('\u{1b}') && !text.contains('\n'), "{text:?}");
+        let shown = text.split(" via apiforge mcp").next().unwrap();
+        assert_eq!(shown.chars().count(), 40, "{shown:?}");
+        assert!(shown.starts_with("Claude[2JCode"));
+        let text = held(&Holder::command("apply\r\nrm -rf"), None);
+        assert!(
+            text.starts_with("apiforge applyrm -rf has held"),
+            "{text:?}"
+        );
+    }
+
     #[test]
     fn the_person_keeping_the_project_is_said_in_their_words() {
         assert_eq!(

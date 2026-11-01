@@ -4893,6 +4893,45 @@ mod mcp15 {
         );
     }
 
+    /// A command killed while the prompt is open takes its prompt with it;
+    /// nothing is left to answer (review of #184).
+    #[test]
+    fn a_command_that_stops_waiting_closes_its_prompt() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let (scenario_text, _) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        let killed = running.kill();
+        await_until(&mut harness, killed, "the prompt closed", |harness| {
+            !has_label(harness, PROMPT)
+        });
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(source_of(&harness, &at(&harness, SCENARIO)), scenario_text);
+        assert!(!folder(&harness).handover.has_declined());
+    }
+
+    /// An answer given to a command that has gone is nobody's: the next
+    /// agent request is not refused with it (review of #184).
+    #[test]
+    fn an_answer_for_a_command_that_has_gone_is_not_kept_for_an_agent() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        leave_unsaved_code(&mut harness, root);
+        app(&mut harness).prompt = Some(Prompt::Handover {
+            client: Some("run --live".to_owned()),
+            role: HolderRole::Command,
+        });
+        settle(&mut harness);
+        choose(&mut harness, NOT_NOW);
+        assert!(!has_label(&harness, PROMPT));
+        assert!(!folder(&harness).handover.has_declined());
+        assert!(!contains(&harness, "An agent asked"));
+    }
+
     /// Criterion 7: a run that passes and one that fails both end with the
     /// window the writer within two seconds.
     #[test]

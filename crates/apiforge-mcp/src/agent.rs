@@ -1131,12 +1131,27 @@ pub(crate) fn could_try(window: &Holder, endpoint: &str) -> bool {
 /// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp*: an
 /// agent session in a refusal, as the server and the command word it.
 pub(crate) fn agent_name(client: Option<&str>) -> String {
-    format!("{} via apiforge mcp", client.unwrap_or("An agent"))
+    format!("{} via apiforge mcp", shown(client, "An agent"))
 }
 
 /// *apiforge apply*: a command in a refusal.
 pub(crate) fn command_name(client: Option<&str>) -> String {
-    format!("apiforge {}", client.unwrap_or("command"))
+    format!("apiforge {}", shown(client, "command"))
+}
+
+/// A client names itself in the holder file; a refusal shows the name on
+/// one line, without control characters, and cut to a bounded length, as
+/// the window's bar does.
+fn shown(client: Option<&str>, otherwise: &str) -> String {
+    const MAX_CLIENT_CHARS: usize = 40;
+    match client {
+        Some(client) => client
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(MAX_CLIENT_CHARS)
+            .collect(),
+        None => otherwise.to_owned(),
+    }
 }
 
 /// The refusal of a write while another process holds the project: who and

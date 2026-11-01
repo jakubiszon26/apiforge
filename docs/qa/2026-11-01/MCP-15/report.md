@@ -3,9 +3,13 @@
 - Branch: `docs/mcp-15-cli-handover` (PR #184). Captures are from the
   release binaries of this branch: `apiforge-desktop` of `e9407b6` and
   `apiforge` of `c0f7ec0`. `c0f7ec0` is the same code plus the faster exit
-  found below. `6c9eadb` then moved the reading of the secrets file from
-  `run_live` into the CLI. That changes nothing on screen or in the
-  terminal.
+  found below. Later commits change no drawn view:
+  - `6c9eadb` moved the reading of the secrets file from `run_live` into
+    the CLI. The successful hand-over path is unchanged on screen and in
+    the terminal. One failure now comes earlier: a secrets file that cannot
+    be read is reported before an unregistered scenario. Either way no
+    window is asked.
+  - Review round 1, below.
 - Built with: `cargo build --release --locked` (Rust 1.99.0).
 - Compared against the mock-up in this folder:
   (a) `a-command-bar-code-960x540.png` and `a-command-bar-code-1600x1000.png`,
@@ -33,7 +37,7 @@
 | --- | --- | --- | --- |
 | 1 | A clean window hands over. The bar shows the command, the badge says *Observing*, no *Take back*. The run sends and journals. The window is the writer again within 2 s, and a save succeeds | CLI `mcp15_criterion_1_…`; desktop `mcp15_criterion_1_a_clean_window_hands_over_and_takes_the_project_back` | Scenario 1 |
 | 2 | Unsaved work: the prompt names the command. *Save all and hand over* saves and the run proceeds. *Not now* exits 1 and sends nothing | desktop `mcp15_criterion_2_save_all_…`, `mcp15_criterion_2_not_now_…`; CLI `mcp15_a_window_that_keeps_the_project_sends_nothing` | Scenario 2 |
-| 3 | The command waits beyond 30 s and says so once | CLI `mcp15_criterion_3_…` (the window answers after 32 s) | Scenario 2 (the line after 2 s) |
+| 3 | The command waits beyond 30 s and says so once | CLI `mcp15_criterion_3_…` (the window answers after 32 s) | Not beyond 30 s: Scenario 2 shows only the line after 2 s (the answers came at about 10 s) |
 | 4 | `permission { live: false }` changes nothing | CLI `mcp15_criterion_4_…` | Scenarios 1–2 (the window's box stayed off) |
 | 5 | An agent session is refused by name, and its endpoint hears nothing | CLI `mcp15_criterion_5_…` | Scenario 4 |
 | 6 | The other holders are named. The Windows/WSL sentence appears only for an unreachable window on `/mnt/<drive>/` | CLI `mcp15_criterion_6_…`; the updated `a_live_folder_run_requires_its_project_lock_and_a_writable_journal`; unit tests in `apiforge_mcp::command` | — |
@@ -236,9 +240,11 @@ request's checks. The ticket is not accepted for Windows on this report.
   prompt, such as its own run or a dialog. After two seconds the command
   always says *… has unsaved work and asks you what to do*, because the
   window does not say why it has not answered yet.
-- Ctrl+C at the terminal while the prompt is open. The killed command
-  closes its connection, and the prompt stays until the person answers it,
-  as it does for an agent that stopped waiting (MCP-08c).
+- Ctrl+C at the terminal while the prompt is open, in the release binary.
+  Since review round 1 the prompt closes with the command; the test
+  `a_command_that_stops_waiting_closes_its_prompt` covers it.
+- A wait beyond 30 s in the release binary. The CLI test of criterion 3
+  covers it.
 - Criteria 6, 8 and 10 in the release binaries. Their tests drive the real
   `apiforge` binary.
 - The `/mnt/<drive>/` sentence on a real WSL mount; it is unit-tested only.
@@ -246,6 +252,35 @@ request's checks. The ticket is not accepted for Windows on this report.
   request as an agent's, so its prompt would say *An agent asks to edit
   this project*. No test runs two builds.
 - Keyboard-only operation and a screen reader session.
+
+## Review round 1
+
+The automated review of #184 (cubic, 11 points) is answered on the pull
+request.
+
+Fixed:
+- A command killed while its prompt is open now closes the prompt (new test
+  `a_command_that_stops_waiting_closes_its_prompt`).
+- An answer meant for a command that has gone is no longer kept for the
+  next agent request. A command is always asked itself, and never answered
+  with an agent's earlier choice (`an_answer_for_a_command_that_has_gone_is_not_kept_for_an_agent`).
+- The bar's refusal state follows the request that is waiting when *Save
+  all* finishes, not the prompt that started it.
+- A holder's client name in a refusal is printed on one line, without
+  control characters, and cut at 40 characters, as the window's bar does.
+  This applies to the server's refusals too. Unit test
+  `a_holders_name_cannot_break_the_terminal_line`.
+- The backlog's order line, the ticket appendix's pointers to the
+  implemented names, and this report's statements about secrets and about
+  criterion 3.
+
+Not changed, and why, on the pull request:
+- The sprint capacity total. Additions made during the sprint are charged
+  to the UX line, as the backlog says.
+- The waiting line's wording. It is the ticket's text, and is put to the
+  owner.
+
+Nothing drawn changed, and the captures were not retaken.
 
 ## Regression smoke list
 
@@ -273,5 +308,12 @@ On `6c9eadb`, the head that carries the Windows and CodeQL fixes, all exit
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
 - `cargo test --workspace --all-targets --locked`: 1 371 passed, 0 failed,
+  40 ignored
+- the fixture check
+
+On the review round 1 commit, all exit 0:
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`: 1 374 passed, 0 failed,
   40 ignored
 - the fixture check
