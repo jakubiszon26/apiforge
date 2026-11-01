@@ -16,8 +16,9 @@
   - The merge with MCP-10; see *MCP-10 in the bar*.
   - The waiting line is now *Waiting for the API Forge window to answer*
     (the owner's decision of 2026-11-01). Scenario 2's terminal lines are
-    from the `apiforge` binary with that line; the window was the same
-    build, and the captures did not change.
+    from the release `apiforge` binary of `79c9dfe`, which has that line.
+    The window in that run was still the `9549dc1` build, since the
+    desktop code did not change, and the captures did not change.
 - Built with: `cargo build --release --locked` (Rust 1.99.0).
 - Compared against the mock-up in this folder:
   (a) `a-command-bar-code-960x540.png` and `a-command-bar-code-1600x1000.png`,
