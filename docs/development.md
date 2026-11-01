@@ -356,10 +356,11 @@ waited for up to ten seconds. A live run is cancelled at once
 ([the four ends](#the-four-ends-of-a-live-run)).
 Three environment variables are test seams for this and are not set in use:
 `APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline,
-`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run (50 ms
-once it is stopping, so a cancellation is not outrun) and
+`APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run and
 `APIFORGE_MCP_TEST_CLEANUP_DELAY_MS` after every step once a run is
-stopping, so that its cleanup outlasts the end of stdin. Each is whole
+stopping, so that its cleanup outlasts the end of stdin; with the step
+delay and no cleanup delay a stopping run pauses 50 ms per step, so a
+cancellation is not outrun by its remaining steps. Each is whole
 milliseconds, capped at ten minutes; any other value stops the server with
 exit code 2.
 
