@@ -5271,7 +5271,8 @@ mod mcp16 {
     }
 
     /// The agent writes `path` with `note` added under its first line and
-    /// returns when the write returned.
+    /// returns when it started the write: the window steps while the
+    /// agent waits for the answer, and may follow before it comes.
     fn agent_notes(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
@@ -5279,13 +5280,14 @@ mod mcp16 {
         note: &str,
     ) -> Instant {
         let (text, _) = read(server, path);
+        let asked = Instant::now();
         let answer = write(harness, server, path, &commented(&text, note));
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
-        Instant::now()
+        asked
     }
 
     /// The window is at `document_id` within the ticket's bound of
-    /// `returned`, the moment the agent's write returned.
+    /// `returned`, the moment the agent started the write that commits.
     fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
         let took = await_until(harness, returned, what, |harness| {
             folder(harness).workbench.active() == Some(document_id)
@@ -5320,6 +5322,19 @@ mod mcp16 {
 
     /// Clicks the tab of `name` in the tab strip: the explorer's row has the
     /// same name, lower in the window.
+    /// Scrolls the code of `document_id` down with the mouse wheel.
+    fn scroll_code(harness: &mut FolderHarness, document_id: &str) {
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        harness.hover_at(code.left_top() + egui::vec2(120.0, 60.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -160.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(harness);
+    }
+
     fn click_tab(harness: &mut FolderHarness, name: &str) {
         harness
             .query_all_by_label(name)
@@ -5422,8 +5437,8 @@ mod mcp16 {
         assert_ne!(deep, padded);
         let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
-        let answer = write(&mut harness, &mut server, SCENARIO, &deep);
         let returned = Instant::now();
+        let answer = write(&mut harness, &mut server, SCENARIO, &deep);
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_active(&mut harness, returned, &scenario, "the scenario");
         await_until(&mut harness, Instant::now(), "the new text", |harness| {
@@ -5490,13 +5505,13 @@ mod mcp16 {
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
         );
+        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "create_document",
             json!({ "kind": "scenario", "path": ADDED, "text": text }),
         );
-        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_until(&mut harness, returned, "the new document", |harness| {
             is_registered(harness, ADDED)
@@ -5533,13 +5548,13 @@ mod mcp16 {
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
+        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "publish",
             json!({ "path": PRODUCT, "expected_source_sha256": hash }),
         );
-        let returned = Instant::now();
         assert_eq!(structured(&answer)["revision"], 2, "{answer}");
         await_active(&mut harness, returned, &product, "the published component");
         let revisions: Vec<u32> = folder(&harness)
@@ -5685,13 +5700,18 @@ mod mcp16 {
     fn mcp16_criterion_7_unpinned_keeps_the_place() {
         let directory = shop();
         let root = directory.path();
-        let mut harness = folder_harness(root, WIDE);
+        let mut harness = folder_harness(root, MINIMUM);
         await_endpoint(&mut harness, root, HolderRole::Window);
         let scenario = id_of(&harness, SCENARIO);
         let mut server = agent(root, "Claude Code");
         observe(&mut harness, &mut server, "Written by the agent.");
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness), "the toggle unpins");
+        scroll_code(&mut harness, &scenario);
+        assert!(
+            scroll_of(&harness, &scenario) > 0.0,
+            "the code was scrolled"
+        );
         let place = |harness: &FolderHarness| {
             (
                 tabs(harness),
@@ -5752,15 +5772,7 @@ mod mcp16 {
         assert!(pressed(&harness));
 
         // What does not unpin.
-        let code = harness.get_by_label(&editor(&harness, &scenario)).rect();
-        harness.hover_at(code.center());
-        harness.event(egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -120.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: egui::Modifiers::NONE,
-        });
-        settle(&mut harness);
+        scroll_code(&mut harness, &scenario);
         assert!(pressed(&harness), "scrolling the code");
         for (gesture, label) in [
             ("switching to Diagram", "Diagram"),
