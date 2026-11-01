@@ -18,11 +18,11 @@
 | # | Criterion | How it is verified | Result |
 | --- | --- | --- | --- |
 | 1 | One pre-release, four assets, generated notes ending with the sums | The dry run | Pass (Dry run) |
-| 2 | Asset names carry version and target, asserted before upload | `release.py check-assets` in publish; `test_release.py` (`Names`) | Tests pass; asset list **pending** |
+| 2 | Asset names carry version and target, asserted before upload | `release.py check-assets` in publish; `test_release.py` (`Names`) | Pass: the four assets of the dry run (Dry run) |
 | 3 | Archives hold exactly the manifest's entries | `release.py check-archive` in both build jobs; `test_release.py`; Scenario 1 | Pass on Linux; Windows in the dry run |
 | 4 | `apiforge mcp` from the extracted archive: `initialize` 2025-11-25, ten tools, exit 0 at EOF | `packaging/mcp-smoke.py` in both build jobs | Pass locally from the extracted tar.gz; both runners in the dry run |
 | 5 | `--version` prints `<name> <version>`; a mismatching tag stops the run before building | CLI acceptance test, desktop argument test, `tests/version.rs`; `release.py version` (`test_release.py`) | Pass |
-| 6 | AppImage starts on a clean system; `desktop-file-validate` passes | Job `smoke-appimage` | Local equivalent passes (Scenarios 2–3); job **pending** |
+| 6 | AppImage starts on a clean system; `desktop-file-validate` passes | Job `smoke-appimage` | Pass: the job passed in the dry run, on the runner and in the container (Dry run) |
 | 7 | Tag-only trigger; `contents: read`, write only in publish; tag must be on main | Blocks quoted below; actionlint clean | Pass by inspection; the refusal is not exercised |
 | 8 | A failed step publishes nothing; tests run before packaging | Job graph below | Pass by inspection |
 | 9 | Dry run `v0.1.0-rc.1` end to end | Coordinating session | Pass (Dry run) |

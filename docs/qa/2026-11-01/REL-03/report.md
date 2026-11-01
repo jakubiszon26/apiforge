@@ -73,7 +73,9 @@ Observed: as expected for step 1. For step 2, cargo-about only warns (`failed
 to validate all files specified in clarification`), exits 0 and falls back to
 the files it finds by itself, which miss `Hack-Regular.txt`. That is why
 `check-notices` also needs each font's licence text: the fallback file fails
-on `BITSTREAM VERA LICENSE`.
+on `BITSTREAM VERA LICENSE`. After review (#179), both workflows also fail on cargo-about's
+`failed to validate` warning. The same shell lines were run here with a
+stale checksum: `exit 1`.
 
 ### Scenario 4: the archive check needs the notices
 1. Stage the tar.gz as `release.yml` does, with empty binaries, without the
@@ -144,7 +146,7 @@ The workspace tests and the CI window probes cover the flows.
 
 ## Verification
 
-- `python3 -I packaging/test_release.py`: 31 tests, OK.
+- `python3 -I packaging/test_release.py`: 34 tests, OK (31 acceptance, three added in review).
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
   --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`
   (63 test binaries, none failed) and `cargo run -p apiforge-convert-v1

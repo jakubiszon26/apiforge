@@ -33,7 +33,7 @@ private = { ignore = true }
 # cargo-about does not read by itself. Hack-Regular.txt holds the MIT licence
 # of Hack and the Bitstream Vera licence of the glyphs it derives from; both
 # texts are reproduced. A new version with other files fails the checksums,
-# and then `release.py check-notices`, until this entry is updated.
+# which cargo-about only warns about; the workflows fail on that warning.
 [epaint_default_fonts.clarify]
 license = "(MIT OR Apache-2.0) AND MIT AND OFL-1.1 AND Ubuntu-font-1.0"
 

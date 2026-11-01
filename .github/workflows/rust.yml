@@ -82,7 +82,15 @@ jobs:
           cargo about --version
           cargo fetch --locked
           mkdir -p test-results
-          cargo about generate --frozen --workspace --fail -o test-results/THIRD-PARTY-NOTICES.md packaging/about.hbs
+          cargo about generate --frozen --workspace --fail -o test-results/THIRD-PARTY-NOTICES.md packaging/about.hbs \
+            2> "$RUNNER_TEMP/cargo-about.log" \
+            || { cat "$RUNNER_TEMP/cargo-about.log" >&2; exit 1; }
+          cat "$RUNNER_TEMP/cargo-about.log" >&2
+          # A stale clarify entry is only a warning to cargo-about.
+          if grep -q 'failed to validate' "$RUNNER_TEMP/cargo-about.log"; then
+            echo '::error::about.toml has a clarification that no longer matches its files.'
+            exit 1
+          fi
           for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
             cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
               -p apiforge-desktop -p apiforge-cli

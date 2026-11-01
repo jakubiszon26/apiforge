@@ -406,6 +406,20 @@ class AboutConfig(unittest.TestCase):
         self.assertEqual(re.findall(r'(?m)^path\s*=\s*"([^"]+)"', clarify), FONT_FILES)
         self.assertEqual(len(re.findall(r'(?m)^checksum\s*=\s*"[0-9a-f]{64}"', clarify)), len(FONT_FILES))
 
+    def test_each_font_file_has_its_own_licence_and_checksum(self):
+        # Review of #179: each `files` record binds a path to a licence and a
+        # checksum, not only the right numbers of each.
+        clarify = self.about.split("[epaint_default_fonts.clarify]", 1)[1]
+        records = clarify.split("[[epaint_default_fonts.clarify.files]]")[1:]
+        expected = dict(zip(FONT_FILES, ["MIT", "Ubuntu-font-1.0", "OFL-1.1", "MIT"]))
+        found = {}
+        for record in records:
+            fields = dict(re.findall(r'(?m)^(path|license|checksum)\s*=\s*"([^"]+)"', record))
+            self.assertRegex(fields.get("checksum", ""), r"^[0-9a-f]{64}$", record)
+            found[fields["path"]] = fields.get("license")
+        self.assertEqual(found, expected)
+        self.assertEqual(len(records), len(FONT_FILES))
+
     def test_the_template_lists_each_crate_with_its_version(self):
         template = read("packaging/about.hbs")
         self.assertIn("- {{crate.name}} {{crate.version}}", template)
@@ -470,6 +484,14 @@ class NoticeWorkflows(unittest.TestCase):
         windows = job(self.release, "build-windows")
         self.assertIn("THIRD-PARTY-NOTICES.md", step(windows, "Pack and check the ZIP"))
 
+    def test_a_stale_clarification_fails_the_generation(self):
+        # Review of #179: cargo-about only warns when a clarify checksum fails.
+        for workflow, job_name in [(self.rust, None), (self.release, "version")]:
+            text = workflow if job_name is None else job(workflow, job_name)
+            generation = step(text, "Generate and check the third-party notices")
+            self.assertIn("failed to validate", generation)
+            self.assertIn("exit 1", generation)
+
     def test_the_appimage_carries_and_proves_the_library_copyright_files(self):
         build = step(job(self.release, "build-linux"), "Build the AppImage")
         self.assertIn("licenses/appimage-libraries", build)
@@ -493,6 +515,12 @@ class NoticeManifestsAndDocs(unittest.TestCase):
     def test_six_libraries_have_their_copyright_file_named(self):
         libraries = [line.split("#", 1)[0].strip() for line in read(LIBRARIES).splitlines()]
         self.assertEqual(len([library for library in libraries if library]), 6)
+
+    def test_the_six_libraries_are_distinct(self):
+        # Review of #179: six entries, not one entry six times.
+        libraries = [line.split("#", 1)[0].strip() for line in read(LIBRARIES).splitlines()]
+        libraries = [library for library in libraries if library]
+        self.assertEqual(len(set(libraries)), 6)
 
     def test_the_readme_development_guide_and_font_sources_point_to_the_notices(self):
         licence = read("README.md").split("## License", 1)[1]
