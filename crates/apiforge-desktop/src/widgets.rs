@@ -462,7 +462,7 @@ impl Widget for ActionButton<'_> {
             }
             None => egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name),
         });
-        let pressed = self.pressed == Some(true);
+        let pressed = self.pressed == Some(true) && ui.is_enabled();
         if ui.is_rect_visible(rect) {
             // A disabled button must look disabled: it is painted here, so egui
             // does not fade it, and a full-strength accent reads as live.
@@ -510,7 +510,7 @@ impl Widget for ActionButton<'_> {
             } else {
                 theme::TEXT
             };
-            let icon_color = if pressed && enabled {
+            let icon_color = if pressed {
                 theme::ACCENT
             } else if !primary && self.style != ButtonStyle::Danger {
                 theme::MUTED

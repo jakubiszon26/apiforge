@@ -144,6 +144,9 @@ impl FolderApp {
         // block selected on the board does not take the code back to its
         // own statement.
         if let Some(at) = self.follow.take_reveal(document_id) {
+            // A caret the editor kept from before observing would take the
+            // board's selection to the changed line: it lets go.
+            ui.ctx().memory_mut(|memory| memory.surrender_focus(id));
             self.code.show_line(at.min(snapshot.text.len()));
             self.revealed = snapshot
                 .model

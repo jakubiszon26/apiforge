@@ -6,8 +6,9 @@
 //! in: a saved source shows its first changed line and marks the changed
 //! lines in the code's gutter until the holder's next commit to that
 //! document; a created document opens at its top; a published component's
-//! tab comes to the front. A deletion or a settings commit moves nothing,
-//! nor does a run. The person's own navigation to another document unpins
+//! tab comes to the front. Deletions and the settings are never followed,
+//! nor is a run; a commit that deleted the active document leaves the
+//! window on the tab closing chose. The person's own navigation to another document unpins
 //! following; *Follow* in the bottom bar pins it again and goes to the last
 //! change at once. Following starts pinned with every observation and ends
 //! with it; nothing of it is persisted.
@@ -116,16 +117,16 @@ impl FolderApp {
     }
 
     /// A commit the window followed. Its main change is the first of a
-    /// created, saved, published or laid-out document, in that order; a
-    /// commit that deletes a document moves nothing, so the tab closing
-    /// chose stays active (criterion 5), and neither does one of the
-    /// settings alone.
+    /// created, saved, published or laid-out document, in that order;
+    /// deletions and the settings are never followed. When the commit took
+    /// the active document away (`active_closed`), the window stays on the
+    /// tab closing chose (criterion 5).
     ///
     /// One reload can carry several commits that landed between two looks,
     /// and its diff no longer says which came last. Then a document other
     /// than the active one goes first: the active one changes in place,
     /// under the person's eyes, with its lines marked.
-    pub(super) fn follow_commit(&mut self, changes: &[CommitChange]) {
+    pub(super) fn follow_commit(&mut self, changes: &[CommitChange], active_closed: bool) {
         self.track_observing();
         if !self.follow.observing {
             return;
@@ -141,12 +142,6 @@ impl FolderApp {
                     self.follow.marks.insert(document_id.clone(), lines.clone());
                 }
             }
-        }
-        if changes
-            .iter()
-            .any(|change| change.kind == CommitChangeKind::Deleted)
-        {
-            return;
         }
         let active = self.workbench.active().map(str::to_owned);
         let Some(change) = changes
@@ -171,7 +166,7 @@ impl FolderApp {
                 .flatten(),
         };
         self.follow.last = Some(target.clone());
-        if self.follow.pinned {
+        if self.follow.pinned && !active_closed {
             self.go_to(target);
         }
     }

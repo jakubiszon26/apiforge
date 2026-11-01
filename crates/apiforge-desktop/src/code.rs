@@ -505,12 +505,20 @@ impl CodeEditor {
         // thirty thousand lines took a third of a second that way.
         let mut number = 1;
         let mut begins_a_line = true;
+        // The lines every visual row of which is inside the clip, and
+        // whether the current line's rows are so far.
         let mut whole: Option<(usize, usize)> = None;
-        for row in &output.galley.rows {
+        let mut line_whole = true;
+        let last_row = output.galley.rows.len().saturating_sub(1);
+        for (index, row) in output.galley.rows.iter().enumerate() {
             let top = output.galley_pos.y + row.min_y();
             if top > visible.bottom() {
                 break;
             }
+            if begins_a_line {
+                line_whole = top >= visible.top();
+            }
+            line_whole &= top + row_height <= visible.bottom();
             // A wrapped line keeps its number beside its first visual row
             // instead of repeating it under itself.
             if begins_a_line && top + row_height >= visible.top() {
@@ -538,9 +546,6 @@ impl CodeEditor {
                         theme::ACCENT,
                     );
                 }
-                if top >= visible.top() && top + row_height <= visible.bottom() {
-                    whole = Some((whole.map_or(number, |(first, _)| first), number));
-                }
                 if flagged {
                     painter.circle_filled(
                         pos2(rect.left() + 4.0, top + row_height * 0.5),
@@ -548,6 +553,9 @@ impl CodeEditor {
                         theme::DANGER,
                     );
                 }
+            }
+            if line_whole && (row.ends_with_newline || index == last_row) {
+                whole = Some((whole.map_or(number, |(first, _)| first), number));
             }
             begins_a_line = row.ends_with_newline;
             number += usize::from(row.ends_with_newline);

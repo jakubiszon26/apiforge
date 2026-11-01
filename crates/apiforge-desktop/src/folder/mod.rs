@@ -1057,6 +1057,8 @@ impl FolderApp {
             return;
         };
         let followed = !outcome.followed.is_empty();
+        // The active document went with the commit (MCP-16).
+        let mut active_closed = false;
         if outcome.project_reloaded {
             let gone: Vec<String> = self
                 .workbench
@@ -1085,6 +1087,10 @@ impl FolderApp {
                 })
                 .map(|change| file_name(&change.path).to_owned())
                 .collect();
+            active_closed = self
+                .workbench
+                .active()
+                .is_some_and(|active| gone.iter().any(|id| id == active));
             for document_id in gone {
                 self.close_tab(&document_id);
             }
@@ -1119,7 +1125,7 @@ impl FolderApp {
             self.last_change = describe_commit(&outcome.followed)
                 .map(|text| format!("{} · {text}", chrono::Local::now().format("%H:%M")));
             // To the document the holder changed, while following (MCP-16).
-            self.follow_commit(&outcome.followed);
+            self.follow_commit(&outcome.followed, active_closed);
         }
         let name = |id: &String| {
             self.session
