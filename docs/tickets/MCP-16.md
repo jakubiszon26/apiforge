@@ -246,3 +246,13 @@ the status and the buttons are never cut.
 server; the `mcp08a` tests that assert the active tab after a commit to
 another document press the toggle first. Design review views for the four
 states live in `testing::review` and are the mock-up's source.
+
+**Implementation notes (Claude Opus 5.5).** Two technical choices beyond
+the appendix. When one reload carries several commits that landed between
+two looks (the agent writes twice within a check), the diff no longer says
+which came last; the window then prefers a document other than the active
+one, by the priority above, since the active one changes in place under
+the person's eyes with its lines marked (every saved document of a
+followed reload is marked, not only the one the window goes to). The code
+scrolls to the first changed line only when it is out of view, and then
+centres it; a change already in view moves nothing, as in `f1`.
