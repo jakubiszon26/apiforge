@@ -252,6 +252,15 @@ impl FolderApp {
     }
 }
 
+/// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp* for a
+/// client that gave no name.
+pub(super) fn agent_name(client: Option<&str>) -> String {
+    match client {
+        Some(client) => format!("{client} via apiforge mcp"),
+        None => "An agent via apiforge mcp".to_owned(),
+    }
+}
+
 /// *Claude Code via apiforge mcp · since 10:42 · editing is paused here; …*,
 /// with `doing` saying what the window does.
 pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
@@ -265,8 +274,7 @@ pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
     let who = match (holder.role(), client) {
         (None, _) => return format!("Another process · {doing}"),
         (Some(HolderRole::Window), _) => "Another API Forge window".to_owned(),
-        (Some(HolderRole::Agent), Some(client)) => format!("{client} via apiforge mcp"),
-        (Some(HolderRole::Agent), None) => "An agent via apiforge mcp".to_owned(),
+        (Some(HolderRole::Agent), client) => agent_name(client.as_deref()),
         (Some(HolderRole::Command), Some(command)) => format!("apiforge {command}"),
         (Some(HolderRole::Command), None) => "The apiforge command".to_owned(),
     };

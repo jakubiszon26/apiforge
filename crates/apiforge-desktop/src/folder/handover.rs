@@ -3,8 +3,9 @@
 //! While the window holds the project it listens on an endpoint named in its
 //! holder file. An agent's server that wants to write connects and asks; a
 //! clean window lets the project go at once and observes over the same
-//! connection (decision 11 A), a window with unsaved work refuses and says
-//! so in the bar. While the window observes an agent it keeps one
+//! connection (decision 11 A), a window with unsaved work asks the person
+//! (MCP-08c, `handover_prompt`) and says so in the bar when they keep
+//! editing. While the window observes an agent it keeps one
 //! connection to it: a `saved` makes it look at the folder at once rather
 //! than at the next check, `released` lets it take the project back, and
 //! *Take back* asks for it. The once-a-second check stays the fallback, and
@@ -24,7 +25,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The reason the window gives when it keeps the project for unsaved work;
 /// the server words its refusal from it.
-const UNSAVED_WORK: &str = "the window has unsaved work";
+pub(super) const UNSAVED_WORK: &str = "the window has unsaved work";
 /// How long after a failed connection to the holder the window tries again.
 const RECONNECT: Duration = Duration::from_secs(1);
 /// How long one message may take to reach the other side.
@@ -283,6 +284,11 @@ pub(super) struct Handover {
     /// A request was refused for unsaved work: the bar says so until the
     /// work is saved.
     pub(super) refused: bool,
+    /// The person's answer in the hand-over prompt for a request that no
+    /// longer waits: the next request hears it once (MCP-08c).
+    declined: Option<String>,
+    /// *Save all and hand over* is saving: a request waits for it.
+    pub(super) saving: bool,
     /// For tests: when the window decided to hand the project over, whether
     /// a check was in flight when it granted, and when the agent first said
     /// it saved.
@@ -309,6 +315,8 @@ impl Handover {
             taking_back: false,
             agent_running: false,
             refused: false,
+            declined: None,
+            saving: false,
             #[cfg(test)]
             decided: None,
             #[cfg(test)]
@@ -407,15 +415,16 @@ impl FolderApp {
         for event in events {
             self.follow_channel_event(event);
         }
+        self.note_saved_settings();
         self.answer_request();
         self.connect_to_holder();
-        if self.handover.refused
-            && self
-                .session
-                .as_ref()
-                .is_none_or(|session| session.is_read_only() || !session.has_unsaved_work())
+        if self
+            .session
+            .as_ref()
+            .is_none_or(|session| session.is_read_only() || !session.has_unsaved_work())
         {
             self.handover.refused = false;
+            self.handover.declined = None;
         }
     }
 
@@ -498,7 +507,8 @@ impl FolderApp {
     }
 
     /// Answers the waiting request once the window can: a clean window
-    /// hands the project over, a window with unsaved work refuses. While
+    /// hands the project over, a window with unsaved work asks the person.
+    /// While
     /// storage work, a run, a dialog or a switch is in progress the request
     /// waits; the agent hears `handover_pending` after thirty seconds and
     /// the next request is answered at once.
@@ -506,7 +516,7 @@ impl FolderApp {
         let Some((link, client)) = self.handover.pending.clone() else {
             return;
         };
-        if self.handover.releasing.is_some() {
+        if self.handover.releasing.is_some() || self.handover.saving {
             return;
         }
         let Some(session) = self.session.as_ref() else {
@@ -523,9 +533,15 @@ impl FolderApp {
             self.refuse(link, "the window is closing");
             return;
         }
+        // With unsaved work the person decides (MCP-08c): an answer given
+        // to a request that stopped waiting is this one's, once.
         if session.has_unsaved_work() {
-            self.refuse(link, UNSAVED_WORK);
-            self.handover.refused = true;
+            if let Some(reason) = self.handover.declined.take() {
+                self.refuse(link, &reason);
+                self.handover.refused = true;
+            } else {
+                self.ask_person(client);
+            }
             return;
         }
         // A check in flight reads the files the agent is about to replace.
@@ -540,6 +556,16 @@ impl FolderApp {
             return;
         }
         self.release(link, client);
+    }
+
+    /// The person's answer that keeps the project here: the waiting request
+    /// hears `reason`, or, when none waits, the next one does.
+    pub(super) fn answer_waiting(&mut self, reason: &str) {
+        self.handover.refused = true;
+        match self.handover.pending.clone() {
+            Some((link, _)) => self.refuse(link, reason),
+            None => self.handover.declined = Some(reason.to_owned()),
+        }
     }
 
     fn refuse(&mut self, link: u64, reason: &str) {

@@ -2992,11 +2992,25 @@ mod mcp08c {
         }
     }
 
+    /// The document registered at `path`.
+    fn at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
     /// Unsaved text in the scenario and the component and an unsaved
     /// project name; returns the two texts.
     fn leave_unsaved_work(harness: &mut FolderHarness, root: &Path) -> (String, String) {
-        let scenario = only(harness, DocumentKind::Scenario);
-        let product = only(harness, DocumentKind::Component);
+        let scenario = at(harness, SCENARIO);
+        let product = at(harness, PRODUCT);
         let scenario_text = commented(
             &fs::read_to_string(root.join(SCENARIO)).unwrap(),
             "Typed by the person in the scenario.",

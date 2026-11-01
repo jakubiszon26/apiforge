@@ -19,6 +19,7 @@ mod dog;
 mod explorer;
 mod file_prompts;
 mod handover;
+mod handover_prompt;
 mod holder;
 mod navigation;
 mod opening;
@@ -162,6 +163,12 @@ enum Prompt {
         kind: DocumentKind,
         error: Option<String>,
     },
+    /// An agent asks for the project while this window has unsaved work
+    /// (MCP-08c); the list of that work is read from the session every
+    /// frame.
+    Handover {
+        client: Option<String>,
+    },
 }
 
 /// An `.afs` file in a folder without a project, offered for registration.
@@ -297,6 +304,9 @@ pub struct FolderApp {
     take_back: holder::TakeBack,
     /// The control channel to an agent's server (MCP-08b).
     handover: handover::Handover,
+    /// The configuration as last saved, so the hand-over prompt can say
+    /// which setting is unsaved (MCP-08c).
+    saved_settings: Option<Box<apiforge_project::ProjectManifest>>,
     /// What the holder's last followed commit changed, with its time, for
     /// the bar (MCP-08a): *10:43 · promotion.afs saved*.
     last_change: Option<String>,
@@ -446,6 +456,7 @@ impl FolderApp {
             holder: None,
             take_back: holder::TakeBack::default(),
             handover: handover::Handover::new(Some(context.clone())),
+            saved_settings: None,
             last_change: None,
         }
     }
