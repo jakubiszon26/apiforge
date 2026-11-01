@@ -644,6 +644,13 @@ impl FolderApp {
         self.notify(text, false);
     }
 
+    /// Keeps the person's per-project settings in `directory`, as
+    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
+    #[cfg(test)]
+    pub(crate) fn use_configuration_directory(&mut self, directory: &std::path::Path) {
+        let _ = directory;
+    }
+
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
