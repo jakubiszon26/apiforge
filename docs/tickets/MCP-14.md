@@ -3,8 +3,11 @@
 - Size: S · Owner review: 10 min · Risk: none (non-UI hotfix)
 - State: Awaiting acceptance (issue #181) · owner decision 2026-11-01: hotfix before
   other tickets, merge authorised on green CI
-- Analysis model: Claude Opus 5.5 (a bug with no product decision) ·
-  Implementation model: Claude Opus 5.5
+- Analysis model: Claude Opus 5.5, not Fable: recorded on #181 by the
+  coordinating session when the owner ordered the hotfix (2026-11-01), as
+  the model policy requires when Opus analyses; the analysis is the cause
+  above, a bug with no product decision · Implementation model: Claude
+  Opus 5.5
 
 ## Goal
 
@@ -24,7 +27,8 @@ every `run` result failed the client's validation.
 ## What the owner will see
 
 - Changed: `run` results always carry `replayed`, `journal_unreadable` and,
-  on every step, `may_have_reached_api`; a `false` is sent instead of
+  on every compact step, `may_have_reached_api` (with `full: true` the
+  runner's own report replaces the compact steps, as before); a `false` is sent instead of
   omitted. Names and meanings are unchanged (additive for clients).
 - Nothing in the window changes. Removed, hidden, migrated, defaults:
   nothing.
