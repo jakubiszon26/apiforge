@@ -105,8 +105,9 @@ pub struct LiveRequests {
     pub source: String,
 }
 
-// Nullable values are always serialized, including null. `required` on an
-// Option field would also remove null from its schema, so mark the keys here.
+// Nullable values are always serialized, including null. List these keys as
+// required in the schema so clients know they are always present; their schema
+// still allows null.
 fn require_holder_details(schema: &mut schemars::Schema) {
     schema
         .ensure_object()

@@ -745,7 +745,7 @@ impl AgentSession {
             Answer::Granted(connection) => connection,
             Answer::Refused(reason) => return Err(refused(&reason, window)),
             Answer::Pending => return Err(pending(window)),
-            Answer::Unreachable => return Err(unreachable(window, probe.root())),
+            Answer::Unreachable => return Err(not_reached(window, endpoint, probe.root())),
         };
         let deadline = Instant::now() + GRANTED_LOCK;
         loop {
@@ -1054,6 +1054,20 @@ fn description(holder: &Holder) -> serde_json::Value {
     })
 }
 
+/// A window that was not reached. Only a valid endpoint whose discovery
+/// could run (the holder file's owner is known) was actually tried; a
+/// malformed endpoint or missing owner is the ordinary refusal, with no
+/// Windows/WSL hint.
+fn not_reached(window: &Holder, endpoint: &str, root: &Path) -> ToolError {
+    let tried = apiforge_channel::Endpoint::parse(endpoint).is_some()
+        && (cfg!(not(unix)) || window.owner_uid().is_some());
+    if tried {
+        unreachable(window, root)
+    } else {
+        held(window)
+    }
+}
+
 /// A failed connection is evidence for a possible same-side mismatch only
 /// on a Linux Windows-drive mount, never proof of a Windows writer.
 fn unreachable(window: &Holder, root: &Path) -> ToolError {
@@ -1250,6 +1264,24 @@ mod mcp12_diagnostics {
             assert!(
                 !held(&window).message.contains("Windows/WSL"),
                 "metadata alone is not a diagnosis"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_that_was_never_tried_gets_no_windows_hint() {
+        let root = Path::new("/mnt/c/project");
+        let valid = "apiforge-0123456789abcdef0123456789abcdef";
+        for endpoint in [valid, "apiforge-not-an-endpoint", "../socket"] {
+            // Without the holder file's owner, discovery cannot run.
+            let window = Holder::window().with_endpoint(Some(endpoint.into()));
+            let error = not_reached(&window, endpoint, root);
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert!(error.message.contains("reading"));
+            assert!(
+                !error.message.contains("Windows/WSL"),
+                "{endpoint}: no connection was attempted"
             );
         }
     }
