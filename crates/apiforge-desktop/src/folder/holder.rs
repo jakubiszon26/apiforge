@@ -33,9 +33,12 @@ pub(super) const TAKE_BACK: &str = "Take back";
 /// A client names itself; a longer name is cut so the bar keeps its line.
 const MAX_CLIENT_CHARS: usize = 40;
 /// A failed step's label in the status line is cut to this many characters.
-const MAX_LABEL_CHARS: usize = 40;
+/// With the file name's bound the longest status, about 115 characters
+/// (some 650 px), leaves the bar at 960 × 540 room for *Take back* and the
+/// holder's short form, so the status itself is never cut.
+const MAX_LABEL_CHARS: usize = 30;
 /// The file name in the status line is cut to this many characters.
-const MAX_FILE_CHARS: usize = 60;
+const MAX_FILE_CHARS: usize = 40;
 
 /// The holder and the bar's text, formatted once per description rather
 /// than on every frame.

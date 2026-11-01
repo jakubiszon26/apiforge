@@ -11,7 +11,6 @@ use crate::{
     secrets::{self, Secrets},
     tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
 };
-use apiforge_channel::{Message, RunMode as RunKind, RunState};
 use apiforge_core::{journal::JournalRun, run::RunMode};
 use apiforge_project::ProjectSession;
 use apiforge_storage::{JournalStore, project::ProjectStore};
@@ -108,9 +107,6 @@ pub struct ApiforgeServer {
     folder: Arc<PathBuf>,
     runs: Runs,
     agent: Arc<AgentSession>,
-    /// The path of the run in progress and whether it is live, for a
-    /// window waiting for it.
-    running: Arc<Mutex<Option<(String, bool)>>>,
     permission: LivePermission,
     secrets: Secrets,
     cleanup_delay: Option<Duration>,
@@ -170,7 +166,6 @@ impl ApiforgeServer {
             client_lost: CancellationToken::new(),
             answered: Arc::default(),
             journal_before: Arc::default(),
-            running: Arc::default(),
             tool_router: Self::tool_router(),
         }
     }
@@ -523,17 +518,8 @@ impl ApiforgeServer {
         } else {
             (context.ct.clone(), None)
         };
-        let runs = self.runs.clone();
-        let running = self.running.clone();
         call("run", move || {
-            if !runs.is_busy() {
-                *lock(&running) = Some((arguments.path.clone(), arguments.live));
-            }
-            let report = server.run_for(arguments, cancel, client);
-            if !runs.is_busy() {
-                *lock(&running) = None;
-            }
-            let report = report?;
+            let report = server.run_for(arguments, cancel, client)?;
             match report.ended_by {
                 EndedBy::Completed => {}
                 EndedBy::Cancelled => eprintln!("apiforge mcp: run: cancelled"),
@@ -768,12 +754,6 @@ async fn call<T: Serialize + Send + 'static>(
     Ok(result)
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// The control channel for a server on `handle` (MCP-08b). A window's
 /// *Take back* waits for the run in progress, cleanup included, telling the
 /// window it waits; then the session ends after the write in flight, if any,
@@ -783,7 +763,6 @@ fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> A
     server.agent.set_hub(hub.clone());
     let agent = server.agent.clone();
     let runs = server.runs.clone();
-    let running = server.running.clone();
     let told = Arc::downgrade(&hub);
     // Each run's start and end, for the windows' status line (MCP-10).
     let watching = Arc::downgrade(&hub);
@@ -794,20 +773,10 @@ fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> A
     });
     hub.on_take_back(move || {
         if runs.is_busy() {
+            // The windows hear again that it runs, from the hub's own
+            // record, so a run that has just ended is never told anew.
             if let Some(hub) = told.upgrade() {
-                let (path, live) = lock(&running).clone().unwrap_or_default();
-                hub.broadcast(&Message::Run {
-                    path,
-                    mode: if live {
-                        RunKind::Live
-                    } else {
-                        RunKind::Simulation
-                    },
-                    state: RunState::Running,
-                    step_count: None,
-                    step: None,
-                    label: None,
-                });
+                hub.retell_running();
             }
             while runs.is_busy() {
                 std::thread::sleep(Duration::from_millis(20));

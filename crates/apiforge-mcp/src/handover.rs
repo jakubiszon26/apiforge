@@ -211,6 +211,22 @@ impl Hub {
         }
     }
 
+    /// Tells every connected window again the run in progress, if one is.
+    pub(crate) fn retell_running(&self) {
+        let (running, writers) = {
+            let links = lock(&self.links);
+            let Some(running) = lock(&self.running).clone() else {
+                return;
+            };
+            let writers: Vec<_> = links
+                .iter()
+                .map(|link| (link.id, link.writer.clone()))
+                .collect();
+            (running, writers)
+        };
+        self.send(writers, &running);
+    }
+
     /// The session ended: the windows connected now are told `released` and
     /// let go; one that connects meanwhile stays, for the next session.
     pub(crate) fn release(&self) {

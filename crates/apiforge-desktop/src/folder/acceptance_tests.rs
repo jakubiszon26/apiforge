@@ -4028,11 +4028,17 @@ mod mcp10 {
             .to_string(),
         );
         let cancelled = format!("Agent: {FILE} cancelled · ");
-        await_until(
+        let took = await_until(
             &mut harness,
             Instant::now(),
             "the cancelled line",
             |harness| contains(harness, &cancelled),
+        );
+        // Measured from the cancellation, not from the message: the run
+        // stops at its next step (200 ms here) and runs its cleanup first.
+        assert!(
+            took < 2 * BOUND,
+            "cancelled shown {took:?} after the cancellation"
         );
         assert_clock(&label_containing(&harness, &cancelled), &cancelled);
         drop(harness);

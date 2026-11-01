@@ -19,6 +19,20 @@
   measured 319.2 of 320.1 px), so `+ 0.5` became `+ 1.0`; a cut label
   loses at least a character (about 5 px). No other assertion changed.
 
+## Review round 1 (cubic on `19b337a`)
+
+Fixed in the code: the end of a run is told even when the run panics or
+cannot start (a drop guard tells `failed`); the failing step is found by
+the engine's own rule (`fails_run`: failed, error, blocked, cancelled); a
+*Take back* during a run re-tells the hub's record of the run in progress
+instead of composing one, so a run that has just ended is never told anew
+as running; the status's bounds are 40 characters of file name and 30 of
+label, so the longest status still fits the bar at 960 × 540. Criterion
+1's window test now also times the cancelled line (under 2 s from the
+cancellation, which precedes the message by a step and the cleanup). The
+captures above are of `c2d356c`; none of these changes alters what the
+demo shows.
+
 ## Criteria and their evidence
 
 | # | Criterion | Test (`folder/acceptance_tests.rs`, `mod mcp10`) | Release binary |
@@ -41,8 +55,10 @@ is asserted:
 ```
 
 The state that starts a run is `running`, the value MCP-08b's channel
-already sends; the ticket's `started` names the same moment (see the pull
-request's questions for the owner).
+already sends; the ticket's criterion 1 writes `started` for the same
+moment. Renaming it would make a window and a server of v0.1.0-rc.1 and of
+this build ignore each other's run messages, so it was kept; the owner may
+still prefer `started`.
 
 ## How the release binaries were driven
 
@@ -76,7 +92,7 @@ steps · HH:MM*.
 
 Observed: as expected. Before the run the bar shows the last change
 ([capture](observing-1600x1000.png)); running
-([capture](simulation-running-1600x1000.png)); passed, *18 steps · 14:52*,
+([capture](simulation-running-1600x1000.png)); passed, *18 steps · 14:51*,
 the run's `step_count` being 18 ([capture](simulation-ended-1600x1000.png)).
 At 1600 px the holder keeps its full text.
 
@@ -176,7 +192,7 @@ observing window. The ticket is not accepted for Windows on this report.
   drawn.
 - The hover text of the shortened holder: no pointer on this host.
 - A component run alone, a run that fails before its first step (*failed*
-  without a step), very long file names or labels (cut to 60 and 40
+  without a step), very long file names or labels (cut to 40 and 30
   characters): unit tests in `folder/holder.rs` only.
 - Double scale; a screen reader.
 - Mixed builds (a v0.1.0-rc.1 window with this server, or the reverse):

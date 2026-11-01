@@ -991,37 +991,19 @@ pub(crate) fn execute(
     } else {
         ChannelMode::Simulation
     };
-    runs.tell(&Message::Run {
-        path: prepared.path.clone(),
-        mode,
-        state: RunState::Running,
-        step_count: None,
-        step: None,
-        label: None,
-    });
+    let told = Told::start(runs, &prepared.path, mode);
     let outcome = executor::execute_observed(
         prepared.request,
         journal,
         token,
         runs.settings.deadline,
         notify,
-    );
-    let outcome = match outcome {
-        Ok(outcome) => outcome,
-        Err(message) => {
-            runs.tell(&Message::Run {
-                path: prepared.path.clone(),
-                mode,
-                state: RunState::Failed,
-                step_count: None,
-                step: None,
-                label: None,
-            });
-            return Err(ToolError::new(ErrorCode::InvalidText, message));
-        }
-    };
+    )
+    // A run that could not start ends `failed` for the windows when `told`
+    // is dropped, as one that panics does.
+    .map_err(|message| ToolError::new(ErrorCode::InvalidText, message))?;
     let report = &outcome.report;
-    runs.tell(&ended(&prepared.path, mode, report));
+    told.end(ended(&prepared.path, mode, report));
     Ok((
         RunReport {
             path: prepared.path,
@@ -1057,6 +1039,45 @@ pub(crate) fn execute(
     ))
 }
 
+/// A run the windows were told has started: told its end exactly once,
+/// `failed` with no step when it is dropped without one (an error or a
+/// panic), so no window keeps showing it as running.
+struct Told<'a> {
+    runs: &'a Runs,
+    unended: Option<Message>,
+}
+
+impl<'a> Told<'a> {
+    fn start(runs: &'a Runs, path: &str, mode: ChannelMode) -> Self {
+        let message = |state| Message::Run {
+            path: path.to_owned(),
+            mode,
+            state,
+            step_count: None,
+            step: None,
+            label: None,
+        };
+        runs.tell(&message(RunState::Running));
+        Self {
+            runs,
+            unended: Some(message(RunState::Failed)),
+        }
+    }
+
+    fn end(mut self, ended: Message) {
+        self.unended = None;
+        self.runs.tell(&ended);
+    }
+}
+
+impl Drop for Told<'_> {
+    fn drop(&mut self) {
+        if let Some(failed) = self.unended.take() {
+            self.runs.tell(&failed);
+        }
+    }
+}
+
 /// The `run` message a window is told when `report` has ended: how many
 /// steps it had and, when it failed, the first step that did not pass.
 fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
@@ -1078,14 +1099,14 @@ fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
     }
 }
 
-/// The first step that failed or stopped with an error, numbered as
+/// The first step that failed the run, by the engine's own rule (failed,
+/// an error, blocked or cancelled), numbered as
 /// `count` counts, with its label (its handle when it has none) bounded so
 /// the message stays one short line.
 fn first_failure(steps: &[StepResult], seen: &mut u64) -> Option<(u64, String)> {
-    use apiforge_core::run::StepStatus as Status;
     for step in steps {
         *seen += 1;
-        if matches!(step.status, Status::Failed | Status::Error) {
+        if step.status.fails_run() {
             let label = step.label.as_deref().unwrap_or(&step.handle);
             return Some((*seen, label.chars().take(MAX_LABEL_CHARS).collect()));
         }
@@ -1267,4 +1288,58 @@ pub fn bound<T: Serialize>(result: Result<T, ToolError>) -> Result<T, ToolError>
         .with_details(json!({ "bytes": size, "limit": MAX_RESULT_BYTES })));
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    fn observed() -> (Runs, Arc<Mutex<Vec<Message>>>) {
+        let runs = Runs::default();
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let sink = told.clone();
+        runs.observe(move |message| sink.lock().unwrap().push(message.clone()));
+        (runs, told)
+    }
+
+    fn state(message: &Message) -> RunState {
+        match message {
+            Message::Run { state, .. } => *state,
+            other => panic!("not a run message: {other:?}"),
+        }
+    }
+
+    /// A run told as started is told an end once: its own, or `failed`
+    /// when it ends by an error or a panic (MCP-10).
+    #[test]
+    fn a_started_run_is_always_told_an_end_once() {
+        let (runs, told) = observed();
+        Told::start(&runs, "a.afs", ChannelMode::Simulation).end(Message::Run {
+            path: "a.afs".into(),
+            mode: ChannelMode::Simulation,
+            state: RunState::Passed,
+            step_count: Some(3),
+            step: None,
+            label: None,
+        });
+        drop(Told::start(&runs, "b.afs", ChannelMode::Live));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _told = Told::start(&runs, "c.afs", ChannelMode::Simulation);
+            panic!("the run panicked");
+        }));
+        assert!(unwound.is_err());
+        let states: Vec<RunState> = told.lock().unwrap().iter().map(state).collect();
+        assert_eq!(
+            states,
+            [
+                RunState::Running,
+                RunState::Passed,
+                RunState::Running,
+                RunState::Failed,
+                RunState::Running,
+                RunState::Failed,
+            ]
+        );
+    }
 }
