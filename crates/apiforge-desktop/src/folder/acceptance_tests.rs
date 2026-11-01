@@ -3151,14 +3151,9 @@ mod mcp08c {
         await_prompt(&mut harness);
         choose(&mut harness, SAVE_ALL);
         let pending = answer(&mut harness, &mut server, id);
-        assert_ne!(
-            pending["result"]["structuredContent"]["code"], "handover_refused",
-            "{pending}"
-        );
-        assert_ne!(
-            pending["result"]["structuredContent"]["code"], "handover_pending",
-            "{pending}"
-        );
+        // The waiting write was based on the version before the person's
+        // save: granted the project, the server finds the disk changed.
+        assert_eq!(tool_error(&pending)["code"], "stale_source", "{pending}");
         assert_eq!(
             fs::read_to_string(root.join(SCENARIO)).unwrap(),
             scenario_text,
@@ -3352,6 +3347,55 @@ mod mcp08c {
         assert_eq!(reason(&answer(&mut harness, &mut server, id)), KEEP_EDITING);
         saved.assert_on_disk(root);
         assert!(folder(&harness).snapshot(&scenario).unwrap().held);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Beside criterion 4: *Save all and hand over* with a held draft saves
+    /// what a save can, keeps the project here, says so, and the agent hears
+    /// that unsaved work remains; the draft is still held for its decision
+    /// in its tab.
+    #[test]
+    fn save_all_with_a_held_draft_saves_the_rest_and_keeps_the_project() {
+        let directory = shop();
+        let root = directory.path();
+        hold_a_draft(root);
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let product = at(&harness, PRODUCT);
+        let product_text = commented(
+            &fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            "Typed by the person in the component.",
+        );
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&product, &product_text, CODE)
+            .unwrap();
+        settle(&mut harness);
+        let saved_scenario = fs::read(root.join(SCENARIO)).unwrap();
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        choose(&mut harness, SAVE_ALL);
+        let answer = answer(&mut harness, &mut server, id);
+        assert_eq!(reason(&answer), "the window has unsaved work");
+        settle(&mut harness);
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            product_text
+        );
+        assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved_scenario);
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert!(folder(&harness).snapshot(&scenario).unwrap().held);
+        let notice = folder(&harness)
+            .notice
+            .as_ref()
+            .expect("the window says why");
+        assert!(notice.text.contains("earlier session"), "{}", notice.text);
         drop(harness);
         drop(server);
     }

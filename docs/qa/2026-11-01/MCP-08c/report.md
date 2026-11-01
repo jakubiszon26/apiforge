@@ -24,7 +24,7 @@
 
 | # | Criterion | Test (`folder/acceptance_tests.rs`, `mod mcp08c`) | Release binary |
 | --- | --- | --- | --- |
-| 1 | Prompt lists two documents and the name; the agent waits 30 s, `handover_pending`, nothing written, the prompt stays | `mcp08c_criterion_1_the_prompt_lists_the_work_and_the_agent_hears_pending` | Scenario 1 |
+| 1 | Prompt lists two documents and the name; the agent waits 30 s, `handover_pending`, nothing written, the prompt stays | `mcp08c_criterion_1_the_prompt_lists_the_work_and_the_agent_hears_pending` | Scenario 1, the two documents only; the dirty name is harness-only (recovery keeps no unsaved settings) |
 | 2 | *Save all and hand over* saves every item, the window observes, the next call succeeds; a failed save keeps the project, shows the error, refuses with the reason | `mcp08c_criterion_2_save_all_saves_everything_and_hands_over`, `mcp08c_criterion_2_a_failed_save_keeps_the_project_and_refuses_with_the_reason` | not run (needs a click) |
 | 3 | *Not now*: nothing saved, the writer stays, the pending or next call is refused with *the person chose to keep editing*; after Ctrl+S the call is granted | `mcp08c_criterion_3_not_now_keeps_editing_and_ctrl_s_lets_the_next_call_in` | not run (needs a click) |
 | 4 | A held recovery draft is named; the prompt cannot decide it | `mcp08c_criterion_4_a_held_draft_is_named_and_not_decided_in_the_prompt` | not run |
@@ -150,13 +150,31 @@ The ticket is not accepted for Windows on this report.
   *environment* or *contracts* settings in the release binary: harness
   (held draft) or not at all (the others have no test; they share the code
   path of the listed items).
-- *Save all and hand over* when unsaved work remains that a save cannot
-  settle (a held draft, unfinished fields): the window saves what it can,
-  keeps the project, says so, and the agent hears *the window has unsaved
-  work*. This follows from "nothing declared saved" but no criterion names
-  it and no test covers it.
+- *Save all and hand over* with work a save cannot settle, in the release
+  binary. In the harness, `save_all_with_a_held_draft_saves_the_rest_and_keeps_the_project`
+  (no criterion names this case; added in review round 1) shows the window
+  saving the rest, keeping the project, saying *Saved. The project stays
+  here: unsaved work from an earlier session or unfinished fields still
+  wait for you.*, and the agent hearing *the window has unsaved work*. The
+  person decides a held draft where the window always offers it: the
+  banner above the document's text, *Keep unsaved work* or *Discard it*;
+  the agent's next write then meets a clean window, or the prompt again.
+  Unfinished inspector fields have no test here.
 - Windows, beyond the CI test run.
 - Screen reader reading of the prompt.
+
+## Review round 1
+
+The automated review of #180 (cubic) found five points, answered on the
+pull request. Fixed: the prompt now bounds the agent's name and strips
+control characters as the bar does (`agent_name`, with a unit test);
+criterion 2's test now asserts that the write that waited during *Save all*
+answers `stale_source` (it was based on the version before the person's
+save) instead of only "not a hand-over code" — a stronger form of the same
+check, made after the implementation; the held-draft case of *Save all*
+has a test; this report's criterion 1 row and the held-draft note; a doc
+comment of `save_all_then`. Nothing drawn changed; the captures were not
+retaken.
 
 ## Regression smoke list
 

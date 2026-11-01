@@ -146,7 +146,9 @@ impl FolderApp {
         self.save_all_then(|_, _| {});
     }
 
-    /// *Save all*, then `then` with whether everything was saved.
+    /// *Save all*, then `then` with whether every save it made succeeded.
+    /// Work it does not save — held drafts, unfinished inspector fields —
+    /// may remain either way.
     pub(super) fn save_all_then(&mut self, then: impl FnOnce(&mut Self, bool) + 'static) {
         if self.session.is_none() {
             then(self, false);
