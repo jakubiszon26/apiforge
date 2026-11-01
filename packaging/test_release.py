@@ -489,8 +489,10 @@ class NoticeWorkflows(unittest.TestCase):
         for workflow, job_name in [(self.rust, None), (self.release, "version")]:
             text = workflow if job_name is None else job(workflow, job_name)
             generation = step(text, "Generate and check the third-party notices")
-            self.assertIn("failed to validate", generation)
-            self.assertIn("exit 1", generation)
+            self.assertRegex(
+                generation,
+                r"if grep -q 'failed to validate' [^\n]*; then\n(?:[^\n]*\n)*?\s*exit 1\n\s*fi\n",
+            )
 
     def test_the_appimage_carries_and_proves_the_library_copyright_files(self):
         build = step(job(self.release, "build-linux"), "Build the AppImage")
