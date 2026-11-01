@@ -123,12 +123,19 @@ pub(super) fn select(session: &ProjectSession, path: &str) -> Result<String, Str
 }
 
 pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::RunStatus, String> {
-    let mut session = if args.live {
-        ProjectSession::open_saved_exclusive_as(&args.path, &Holder::command("run"))
-    } else {
-        ProjectSession::open_saved_read_only(&args.path)
+    if args.live {
+        // A live run takes the project, asking an open window for it
+        // (MCP-15); what an earlier run left unfinished is said first.
+        let outcome = apiforge_mcp::command::run_live(
+            &args.path,
+            &args.scenario,
+            args.secrets.as_deref(),
+            &mut super::run::report_journal,
+        )?;
+        return super::run::print_outcome(outcome, args.json);
     }
-    .map_err(|error| error.to_string())?;
+    let mut session =
+        ProjectSession::open_saved_read_only(&args.path).map_err(|error| error.to_string())?;
     let id = session
         .documents()
         .iter()
@@ -149,27 +156,15 @@ pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::
     project.scenarios.push(scenario.clone());
     let secrets = apiforge_mcp::executor::secrets(args.secrets.as_deref())?;
     session.store().set_known_secrets(secrets.values().cloned());
-    let journal = if args.live {
-        Some(
-            apiforge_storage::JournalStore::open_project(session.store().clone())
-                .map_err(|error| error.to_string())?,
-        )
-    } else {
-        None
-    };
     let request = apiforge_runner::RunRequest {
         project,
         scenario_id: scenario.id.clone(),
         target: apiforge_runner::RunTarget::Scenario,
-        mode: if args.live {
-            apiforge_core::run::RunMode::Live
-        } else {
-            apiforge_core::run::RunMode::Simulation
-        },
+        mode: apiforge_core::run::RunMode::Simulation,
         target_node_id: None,
         single_node_id: None,
         previous_run: None,
         secrets,
     };
-    super::run::execute_request(request, journal, args.json)
+    super::run::execute_request(request, None, args.json)
 }

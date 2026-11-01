@@ -163,11 +163,12 @@ enum Prompt {
         kind: DocumentKind,
         error: Option<String>,
     },
-    /// An agent asks for the project while this window has unsaved work
-    /// (MCP-08c); the list of that work is read from the session every
-    /// frame.
+    /// An agent, or a command (MCP-15), asks for the project while this
+    /// window has unsaved work (MCP-08c); the list of that work is read from
+    /// the session every frame.
     Handover {
         client: Option<String>,
+        role: apiforge_storage::project::HolderRole,
     },
 }
 

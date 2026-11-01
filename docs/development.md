@@ -279,7 +279,27 @@ calls must name `Handle@revision(...)`. `run` selects a scenario by registered p
 or entity ID, and supports `--live`, `--secrets` and `--json` as in JSON mode.
 Only the selected scenario and its exact dependencies enter its snapshot; another
 invalid scenario does not block it. Live runs require the writer lock and keep
-their journal under `.apiforge/local/`. Check, print and simulations use stable
+their journal under `.apiforge/local/`. With the project open in an API Forge
+window, a live run asks that window for it over the control channel, as the MCP
+server does (MCP-15, [The window and the agent](#the-window-and-the-agent)): a
+clean window hands it over at once and stderr says *The open API Forge window
+handed the project over for this run*; a window with unsaved work asks the person,
+and the command waits as long as that takes, saying once after two seconds *The
+API Forge window has unsaved work and asks you what to do; answer there* (Ctrl+C
+gives up with nothing sent). *Not now* ends it with exit code 1 and *The window
+kept the project (you chose to keep editing); nothing was sent*. The run sends and
+journals as without a window; at its end, whatever the end, the command lets the
+project go and the window is the writer again. Any other holder is refused by name
+with exit code 1 and nothing sent: an agent session (*Claude Code via apiforge mcp
+has held this project since 10:42; nothing was sent. Run again when it has finished
+editing*; its server is not asked), another command, a window without a channel or
+one that cannot be reached (*… could not be asked; nothing was sent. Close the
+project there or update API Forge, then run again*, with MCP-12's Windows/WSL
+sentence under `/mnt/<drive>/`). The person's `--live` is the live consent: the
+window's *Allow the MCP agent to send live requests* governs the agent only. While
+it holds the project the command names itself `run --live` in the holder file and
+listens on no endpoint. A simulation never asks a window and takes no lock;
+`apply` keeps refusing while another writer holds the project. Check, print and simulations use stable
 read-only loads without creating local metadata. All folder CLI commands ignore
 local recovery and last-valid cache, and fail on invalid saved definitions.
 
@@ -549,6 +569,22 @@ holder file never blocks a free lock, even on a mounted Windows drive.
   project back the same way; a transaction the server left activated opens
   the window's recovery view. A window that closes while observing changes
   nothing for the server, which logs the lost channel on stderr.
+- **A command asks too** (MCP-15). `apiforge run --folder … --live` sends
+  `request { client: "run --live", role: "command" }` (the `role` field is
+  optional; absent means an agent, so the server's request is unchanged) and
+  waits for the answer without a time limit. The window treats it as an
+  agent's request with the command's words: a clean window hands over at
+  once; with unsaved work the prompt reads *A command asks for this project*
+  and *apiforge run --live wants to send live requests from this project.
+  Unsaved work here:*. While the command holds the project the bar reads
+  *apiforge run --live · since 10:42 · editing is paused here; this window
+  follows every change*, the badge *Observing*, and *Take back* is not
+  offered: a live run is never cut mid-way, so the window waits for its end.
+  The command tells the window `run { mode: live, state }` when the run
+  starts and ends, then `released` once its lock is free; a killed command
+  is taken back by the window's check, which reports the interrupted run as
+  at start. The `permission` a window says is ignored by the command, and an
+  agent session is never asked for a command.
 
 ### Live requests
 

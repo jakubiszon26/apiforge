@@ -9,13 +9,20 @@
 //! is not: work a save cannot settle — unsaved work from an earlier session
 //! waiting to be kept or discarded, unfinished inspector fields — is listed
 //! and keeps the project here.
+//!
+//! A command that asks — `apiforge run --live` (MCP-15 decision 2 A) — gets
+//! the same prompt with its own heading and sentence: the same list, the
+//! same two buttons. *Not now* ends the command with nothing sent.
 use super::*;
+use apiforge_storage::project::HolderRole;
 
 /// The agent's reason when the person keeps editing.
 pub(super) const KEEP_EDITING: &str = "the person chose to keep editing";
 /// The agent's reason when *Save all* failed: no path, no error text.
 pub(super) const SAVE_FAILED: &str = "the window could not save the person's work";
 const HEADING: &str = "An agent asks to edit this project";
+/// The heading when a command asks (MCP-15, mock-up (b)).
+const COMMAND_HEADING: &str = "A command asks for this project";
 const SAVE_ALL: &str = "Save all and hand over";
 const NOT_NOW: &str = "Not now";
 const EARLIER: &str = "unsaved work from an earlier session, to keep or discard";
@@ -144,13 +151,19 @@ impl FolderApp {
         items
     }
 
-    /// An agent asks while there is unsaved work: the person is asked, now
-    /// or once the prompt open now is closed.
-    pub(super) fn ask_person(&mut self, client: Option<String>) {
+    /// An agent or a command asks while there is unsaved work: the person
+    /// is asked, now or once the prompt open now is closed.
+    pub(super) fn ask_person(&mut self, client: Option<String>, role: HolderRole) {
         match &mut self.prompt {
-            Some(Prompt::Handover { client: shown, .. }) => *shown = client,
+            Some(Prompt::Handover {
+                client: shown,
+                role: asker,
+            }) => {
+                *shown = client;
+                *asker = role;
+            }
             Some(_) => {}
-            None => self.prompt = Some(Prompt::Handover { client }),
+            None => self.prompt = Some(Prompt::Handover { client, role }),
         }
     }
 
@@ -158,6 +171,7 @@ impl FolderApp {
         &mut self,
         context: &egui::Context,
         client: Option<String>,
+        role: HolderRole,
     ) -> Option<Prompt> {
         // The list follows the session: work saved meanwhile leaves it, and
         // once nothing is unsaved the window hands over as a clean one does.
@@ -169,18 +183,31 @@ impl FolderApp {
         if !writable || unsaved.is_empty() {
             return None;
         }
-        let who = holder::agent_name(client.as_deref());
+        let (heading, sentence) = match role {
+            HolderRole::Command => (
+                COMMAND_HEADING,
+                format!(
+                    "{} wants to send live requests from this project. Unsaved work here:",
+                    holder::command_name(client.as_deref())
+                ),
+            ),
+            HolderRole::Agent | HolderRole::Window => (
+                HEADING,
+                format!(
+                    "{} wants to edit this project. Unsaved work here:",
+                    holder::agent_name(client.as_deref())
+                ),
+            ),
+        };
         let (mut save, mut not_now) = (false, false);
         let list_height = context.content_rect().height() * 0.4;
         let response = dialogs::centered_modal(egui::Id::new("folder-handover"), context).show(
             context,
             |ui| {
                 ui.set_width(460.0);
-                ui.heading(HEADING);
+                ui.heading(heading);
                 ui.add_space(theme::SPACE_SM);
-                ui.label(format!(
-                    "{who} wants to edit this project. Unsaved work here:"
-                ));
+                ui.label(sentence);
                 ui.add_space(theme::SPACE_SM);
                 egui::ScrollArea::vertical()
                     .max_height(list_height)
@@ -204,26 +231,26 @@ impl FolderApp {
             },
         );
         if save {
-            self.save_all_and_hand_over();
+            self.save_all_and_hand_over(role);
             return None;
         }
         if not_now || response.should_close() {
-            self.answer_waiting(KEEP_EDITING);
+            self.answer_waiting(KEEP_EDITING, role);
             return None;
         }
-        Some(Prompt::Handover { client })
+        Some(Prompt::Handover { client, role })
     }
 
     /// *Save all and hand over*: saves as *Save all* does; when everything
     /// is saved, the waiting request is answered as a clean window answers
     /// it. A failed save, or work a save cannot settle, keeps the project
     /// here and the agent hears why.
-    fn save_all_and_hand_over(&mut self) {
+    fn save_all_and_hand_over(&mut self, role: HolderRole) {
         self.handover.saving = true;
-        self.save_all_then(|app, saved| {
+        self.save_all_then(move |app, saved| {
             app.handover.saving = false;
             if !saved {
-                app.answer_waiting(SAVE_FAILED);
+                app.answer_waiting(SAVE_FAILED, role);
                 return;
             }
             if app
@@ -236,7 +263,7 @@ impl FolderApp {
                      or unfinished fields still wait for you.",
                     true,
                 );
-                app.answer_waiting(handover::UNSAVED_WORK);
+                app.answer_waiting(handover::UNSAVED_WORK, role);
             }
         });
     }

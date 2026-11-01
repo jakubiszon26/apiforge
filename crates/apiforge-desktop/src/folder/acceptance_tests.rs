@@ -4866,6 +4866,29 @@ mod mcp15 {
         assert!(!root.join(".apiforge/local/journal.json").exists());
     }
 
+    /// After *Not now* the bar does not say *An agent asked to edit this
+    /// project*: no agent asked, and the command has its answer and has
+    /// ended (MCP-15, the bar of MCP-08b is an agent's).
+    #[test]
+    fn not_now_for_a_command_leaves_no_agent_wording_in_the_bar() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        choose(&mut harness, NOT_NOW);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(1), "{}", ended.stderr);
+        settle(&mut harness);
+        assert!(!contains(&harness, "An agent asked"));
+        assert!(
+            !has_label(&harness, "Project holder"),
+            "no bar while writing"
+        );
+    }
+
     /// Criterion 7: a run that passes and one that fails both end with the
     /// window the writer within two seconds.
     #[test]
@@ -4925,5 +4948,79 @@ mod mcp15 {
             has_label(&harness, "Mark as handled"),
             "the interrupted run is reported"
         );
+    }
+
+    /// 10:42 on this machine's clock, as the holder file spells it.
+    fn since(hour: u32, minute: u32) -> String {
+        use chrono::TimeZone;
+        chrono::Local
+            .with_ymd_and_hms(2026, 11, 1, hour, minute, 11)
+            .single()
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    }
+
+    /// Design review beside mock-up (a): the bar while `apiforge run --live`
+    /// holds the project, in Code at 960 × 540 and 1600 × 1000.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_bar() {
+        use apiforge_storage::project::{Holder, ProjectStore};
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let root = directory.path();
+            let holder = Holder::command("run --live").with_since(since(10, 42));
+            let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+            let mut harness = folder_harness(root, size);
+            choose(&mut harness, "Code");
+            assert!(has_label(&harness, &format!("{COMMAND}10:42 · {PAUSED}")));
+            assert!(has_label(&harness, OBSERVING));
+            assert!(!has_label(&harness, TAKE_BACK));
+            crate::testing::capture(
+                &mut harness,
+                &format!("mcp15-command-bar-code-{suffix}"),
+                None,
+            );
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// Design review beside mock-up (b): the hand-over prompt when the
+    /// command asks and two documents hold unsaved text, at 960 × 540.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_prompt() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        choose(&mut harness, "Code");
+        // Typed values, which leave no warning in *Problems*, as in (b).
+        for (path, from, to) in [
+            (SCENARIO, "80 * 1", "80 * 2"),
+            (PRODUCT, "number = 123", "number = 124"),
+        ] {
+            let id = at(&harness, path);
+            let text = fs::read_to_string(root.join(path))
+                .unwrap()
+                .replacen(from, to, 1);
+            app(&mut harness)
+                .session
+                .as_mut()
+                .unwrap()
+                .edit_source(&id, &text, CODE)
+                .unwrap();
+        }
+        settle(&mut harness);
+        app(&mut harness).prompt = Some(Prompt::Handover {
+            client: Some("run --live".to_owned()),
+            role: HolderRole::Command,
+        });
+        settle(&mut harness);
+        assert!(has_label(&harness, PROMPT));
+        assert!(has_label(&harness, SENTENCE));
+        crate::testing::capture(&mut harness, "mcp15-command-prompt-960x540", None);
     }
 }

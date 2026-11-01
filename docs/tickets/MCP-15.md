@@ -1,7 +1,7 @@
 # MCP-15: A live run from the command line asks the open window for the project
 
 - Size: M · Owner review: 30 min · Risk: `default`, `visible UI`
-- State: Approved (issue #182) · owner decision of 2026-11-01: the
+- State: Implemented, awaiting acceptance (issue #182) · owner decision of 2026-11-01: the
   command line asks the window over the control channel, as the server does,
   instead of refusing · decisions 1–6 taken 2026-11-01 on #182, all A ·
   mock-up (a) and (b) approved as a whole on 2026-11-01 on #182, captures in
@@ -212,6 +212,44 @@ The options as they were put, for the record (A recommended in each):
     says what a live folder run does with a window open; the QA report
     compares the bar and the prompt against the approved captures; the
     verification commands of the development guide pass.
+
+## Implementation (2026-11-01)
+
+Claude Opus 5.5, on this branch after the acceptance commit. The criteria and
+their tests:
+
+| # | Test |
+| --- | --- |
+| 1 | CLI `mcp15_criterion_1_a_clean_window_hands_over_and_the_run_sends`; desktop `mcp15_criterion_1_a_clean_window_hands_over_and_takes_the_project_back` |
+| 2 | desktop `mcp15_criterion_2_save_all_saves_and_the_run_proceeds`, `mcp15_criterion_2_not_now_keeps_editing_and_sends_nothing`; CLI `mcp15_a_window_that_keeps_the_project_sends_nothing` |
+| 3 | CLI `mcp15_criterion_3_the_command_waits_for_the_windows_answer` (the scripted window answers after 32 s) |
+| 4 | CLI `mcp15_criterion_4_the_windows_live_toggle_does_not_govern_the_command` |
+| 5 | CLI `mcp15_criterion_5_an_agent_session_is_refused_by_name_and_not_asked` |
+| 6 | CLI `mcp15_criterion_6_other_holders_are_named`, the updated `a_live_folder_run_requires_its_project_lock_and_a_writable_journal`; unit tests of `apiforge_mcp::command` for the wording and the `/mnt/<drive>/` sentence |
+| 7 | desktop `mcp15_criterion_7_a_passed_and_a_failed_run_give_the_project_back`, `mcp15_criterion_7_a_killed_command_is_taken_back_with_its_interrupted_run` |
+| 8 | CLI `mcp15_criterion_8_the_window_closing_mid_run_changes_nothing` |
+| 9 | CLI `mcp15_criterion_9_a_simulation_never_asks` |
+| 10 | CLI `mcp15_criterion_10_the_messages_in_order` (passed and failed) |
+| 11 | the CLI tests above run on the `windows-2022` job; the QA report records the run |
+| 12 | *Folder commands* and *The window and the agent* in the development guide; ADR 0014's MCP-15 amendment; the QA report |
+
+As the appendix proposed: `apiforge_mcp::command::run_live` holds the live
+folder run, called by the CLI and by the desktop's spawned helper; the
+asking is `handover::request_project`, shared with the server; the refusal
+wording sits beside the server's, sharing the agent's and the command's
+names. The command reads the project first and asks no window for a
+scenario that is not registered or secrets that cannot be read.
+
+Two consequences of decisions 1–3 that the analysis did not spell out,
+reported here for the owner:
+
+- After *Not now* for a command the bottom bar does not show MCP-08b's *An
+  agent asked to edit this project; save your work first*: no agent asked,
+  and the command has its answer and has ended. An agent's refusal shows it
+  as before. Test `not_now_for_a_command_leaves_no_agent_wording_in_the_bar`.
+- MCP-09's *A live run is in progress; it will finish. No new one starts.*
+  under the agent's toggle is not shown for a command's live run, which the
+  toggle does not govern (decision 3 A).
 
 ## Not in scope
 
