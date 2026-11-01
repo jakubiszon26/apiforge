@@ -1,4 +1,4 @@
-"""The release workflow's checks and packing (REL-01, #115).
+"""The release workflow's checks and packing (REL-01, #115; REL-03, #120).
 
     python3 -I packaging/release.py version TAG [CARGO_TOML]
     python3 -I packaging/release.py names TAG
@@ -6,6 +6,7 @@
     python3 -I packaging/release.py check-archive ARCHIVE MANIFEST
     python3 -I packaging/release.py check-assets DIRECTORY TAG
     python3 -I packaging/release.py sums DIRECTORY TAG
+    cargo tree ... | python3 -I packaging/release.py check-notices NOTICES
 
 `version` fails unless TAG is `v` and the workspace version, optionally with
 `-rc.N`, and prints the version. `names` prints the four asset names.
@@ -13,7 +14,11 @@
 `check-archive` fails unless the archive holds exactly the files of MANIFEST
 below one top-level directory named like the archive. `check-assets` fails
 unless DIRECTORY holds exactly the four assets. `sums` writes SHA256SUMS.txt
-for the other three. Standard library only, for Linux and Windows runners.
+for the other three. `check-notices` reads on stdin the output of
+`cargo tree -e normal --locked --prefix none --format "{p}"` for each target
+and fails unless NOTICES names every non-workspace crate in it, with its
+version, and the egui default fonts with their licence texts. Standard
+library only, for Linux and Windows runners.
 """
 
 import hashlib
@@ -145,6 +150,59 @@ def check_archive(archive, manifest_path):
         raise ValueError(f"{os.path.basename(archive)}: " + "; ".join(problems))
 
 
+# The fonts `epaint_default_fonts` embeds, each with a line of the licence
+# text that about.toml's clarification puts in the notices.
+EGUI_FONTS = {
+    "Hack": "BITSTREAM VERA LICENSE",
+    "Ubuntu-Light": "UBUNTU FONT LICENCE Version 1.0",
+    "NotoEmoji": "SIL OPEN FONT LICENSE Version 1.1",
+    "emoji-icon-font": "Copyright (c) 2014 John Slegers",
+}
+
+# `name vVERSION`, then cargo's markers: a path or a URL for a non-registry
+# source, `(proc-macro)`, `(*)` for a repeat.
+_TREE_LINE = re.compile(r"(\S+) v(\S+)((?: \([^()]*\))*)")
+_LOCAL_PATH = re.compile(r"\((/|[A-Za-z]:[\\/])")
+# Colour codes, when cargo was told to colour its output anyway.
+_ESCAPES = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def tree_crates(tree):
+    """The (name, version) of every crate in `cargo tree` output, except the
+    workspace's own, which cargo marks with their local path."""
+    crates = set()
+    for line in _ESCAPES.sub("", tree).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        found = _TREE_LINE.fullmatch(line)
+        if not found:
+            raise ValueError(f"cannot read the cargo tree line {line!r}")
+        if not _LOCAL_PATH.search(found.group(3)):
+            crates.add((found.group(1), found.group(2)))
+    return crates
+
+
+def notice_crates(text):
+    """The (name, version) of every `- name version` line of the notices."""
+    return set(re.findall(r"(?m)^- (\S+) (\S+)$", text))
+
+
+def check_notices(text, tree):
+    crates = tree_crates(tree)
+    if not crates:
+        raise ValueError("cargo tree listed no crate outside the workspace")
+    problems = [f"{name} {version} is missing" for name, version in sorted(crates - notice_crates(text))]
+    for font, licence in EGUI_FONTS.items():
+        if not re.search(r"(?m)^- " + re.escape(font) + r" ", text):
+            problems.append(f"the egui font {font} is not listed")
+        if licence not in text:
+            problems.append(f"the licence text of the egui font {font} ({licence!r}) is missing")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return crates
+
+
 def main(arguments):
     command, rest = (arguments[0], arguments[1:]) if arguments else ("", [])
     if command == "version" and len(rest) in (1, 2):
@@ -164,6 +222,10 @@ def main(arguments):
     elif command == "check-assets" and len(rest) == 2:
         check_assets(*rest)
         print("\n".join(sorted(os.listdir(rest[0]))))
+    elif command == "check-notices" and len(rest) == 1:
+        with open(rest[0], encoding="utf-8") as file:
+            crates = check_notices(file.read(), sys.stdin.read())
+        print(f"{os.path.basename(rest[0])} names all {len(crates)} crates and the egui fonts")
     elif command == "sums" and len(rest) == 2:
         print(write_sums(*rest), end="")
     else:

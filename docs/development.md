@@ -188,6 +188,38 @@ publish job refuses a tagged commit that is not on `main`. Then:
    requests, followed by the sums. It is the only job with write
    permission.
 
+Every package carries `licenses/THIRD-PARTY-NOTICES.md`
+([REL-03](tickets/REL-03.md)): each licence text once, with the crates it
+covers and their versions, and the fonts egui embeds. cargo-about 0.9.2
+generates it from [`about.toml`](../about.toml) and
+[`packaging/about.hbs`](../packaging/about.hbs), once in the release's first
+job, and every push generates it again on Linux in `rust.yml`; both download
+the prebuilt `x86_64-unknown-linux-musl` release and check it against the
+SHA-256 in the workflow. `release.py check-notices` then fails unless the file
+names every non-workspace crate that `cargo tree` lists for the two binaries on
+Linux and Windows, and the four egui fonts with their texts. The AppImage also
+carries `licenses/appimage-libraries/<library>.copyright`, Ubuntu's copyright
+file of each library it ships. To regenerate locally
+(`cargo install cargo-about --version =0.9.2 --locked --features cli`):
+
+```bash
+set -o pipefail
+cargo about generate --locked --workspace --fail -o THIRD-PARTY-NOTICES.md packaging/about.hbs
+for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+  cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
+    -p apiforge-desktop -p apiforge-cli
+done | python3 -I packaging/release.py check-notices THIRD-PARTY-NOTICES.md
+```
+
+A new dependency whose licence `about.toml` does not accept fails CI. A licence
+is added to `accepted` only once it is known to be compatible with
+GPL-3.0-or-later, in the place that decides which of a crate's alternatives is
+listed: a crate offering a choice is listed under the first accepted licence it
+offers. A crate whose licence files cargo-about cannot read gets a `clarify`
+entry with the files and their SHA-256, as `epaint_default_fonts` has. When a
+new version changes those files, cargo-about only warns `failed to validate`;
+both workflows fail on that warning until the entry is updated.
+
 A failed job publishes nothing; delete the tag, fix, and tag again. Changes to
 `packaging/` run `python3 -I packaging/test_release.py`, which the workflow
 also runs first.
