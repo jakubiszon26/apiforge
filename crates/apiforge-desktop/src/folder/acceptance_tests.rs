@@ -5410,9 +5410,9 @@ mod mcp16 {
         }
 
         // The scenario again, its tab open but not active, far down.
-        let deep = padded.replacen("timeout 10s", "timeout 12s", 1);
+        let deep = padded.replacen("@label(\"Delete cart\")", "@label(\"Delete the cart\")", 1);
         assert_ne!(deep, padded);
-        let line = line_of(&deep, "timeout 12s");
+        let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
         let answer = write(&mut harness, &mut server, SCENARIO, &deep);
         let returned = Instant::now();
@@ -6062,8 +6062,16 @@ mod mcp16 {
                     "@label(\"Field present\")",
                     1,
                 );
+            assert_eq!(line_of(&changed, "Promotional total"), 12);
+            assert_eq!(line_of(&changed, "Field present"), 14);
             let answer = write(&mut harness, &mut server, SCENARIO, &changed);
             assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+            await_until(
+                &mut harness,
+                Instant::now(),
+                "the agent's save",
+                |harness| source_of(harness, &scenario) == changed,
+            );
             await_bar(&mut harness, &format!("{AGENT} · since "));
             match name {
                 "mcp16-f2-unpinned-code-960x540" => {

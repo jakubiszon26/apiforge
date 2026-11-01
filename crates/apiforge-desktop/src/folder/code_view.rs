@@ -140,6 +140,16 @@ impl FolderApp {
                 self.scroll_restore = Some(tab.scroll);
             }
         }
+        // The first line the holder changed, while following (MCP-16); the
+        // block selected on the board does not take the code back to its
+        // own statement.
+        if let Some(at) = self.follow.take_reveal(document_id) {
+            self.code.show_line(at.min(snapshot.text.len()));
+            self.revealed = snapshot
+                .model
+                .as_ref()
+                .and_then(|model| self.selected_handle(document_id, model));
+        }
         let project = self.context_project();
         let cleanup = self.cleanup(document_id);
         // Taken for this frame and put back after drawing: a model is replaced,
@@ -190,6 +200,7 @@ impl FolderApp {
                                 font_size: CODE_FONT,
                                 plain: false,
                                 interactive: !snapshot.paused,
+                                changed: self.follow.marks(document_id),
                             },
                         )
                     })
@@ -203,6 +214,13 @@ impl FolderApp {
         }
         let offset = output.state.offset.y.max(0.0);
         let outcome = output.inner;
+        #[cfg(test)]
+        {
+            self.lines_in_view = outcome
+                .lines_in_view
+                .clone()
+                .map(|lines| (document_id.to_owned(), lines));
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
@@ -283,19 +301,7 @@ impl FolderApp {
             self.revealed = Some(handle);
             return;
         }
-        let cleanup = self.cleanup(document_id);
-        let Some(handle) = self
-            .selections
-            .get(document_id)
-            .and_then(|selection| selection.first())
-            .and_then(|id| {
-                graph_of(model, cleanup)
-                    .nodes
-                    .iter()
-                    .find(|node| &node.id == id)
-            })
-            .map(|node| node.handle.clone())
-        else {
+        let Some(handle) = self.selected_handle(document_id, model) else {
             return;
         };
         if self.revealed.as_deref() == Some(handle.as_str()) {
@@ -305,6 +311,21 @@ impl FolderApp {
             self.code.reveal(range.start);
             self.revealed = Some(handle);
         }
+    }
+
+    /// The handle of the first block selected on the board of `document_id`.
+    fn selected_handle(&self, document_id: &str, model: &Document) -> Option<String> {
+        let cleanup = self.cleanup(document_id);
+        self.selections
+            .get(document_id)
+            .and_then(|selection| selection.first())
+            .and_then(|id| {
+                graph_of(model, cleanup)
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == id)
+            })
+            .map(|node| node.handle.clone())
     }
 
     /// The handle of the statement under the caret, found again only when the

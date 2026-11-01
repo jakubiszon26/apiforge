@@ -395,6 +395,7 @@ impl FolderApp {
         });
         match document {
             Some(document_id) => {
+                self.navigated_to(&document_id);
                 self.activate_tab(&document_id);
                 self.touched();
             }

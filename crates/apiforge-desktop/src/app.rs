@@ -898,6 +898,7 @@ impl App {
                         font_size: 13.0,
                         plain: false,
                         interactive: true,
+                        changed: None,
                     },
                 )
             })

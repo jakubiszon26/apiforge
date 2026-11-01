@@ -48,6 +48,9 @@ pub struct Context<'a> {
     /// Whether the text takes the keyboard and the pointer. An observing
     /// folder window shows code it cannot save, so it pauses typing (MCP-08a).
     pub interactive: bool,
+    /// Lines to mark as changed in the gutter, counted from zero: what an
+    /// agent's last commit changed, while the window follows it (MCP-16).
+    pub changed: Option<Range<usize>>,
 }
 
 impl Default for Context<'_> {
@@ -61,6 +64,7 @@ impl Default for Context<'_> {
             font_size: 13.0,
             plain: false,
             interactive: true,
+            changed: None,
         }
     }
 }
@@ -77,6 +81,9 @@ pub struct Outcome {
     /// The caret, as a byte offset, while the editor has the keyboard. The panel
     /// uses it to keep the board's selection in step with the text.
     pub cursor: Option<usize>,
+    /// The lines the gutter showed whole, counted from one; `None` without
+    /// a gutter or with no whole line in view.
+    pub lines_in_view: Option<std::ops::RangeInclusive<usize>>,
 }
 
 /// The editor's own state: what the popup is showing and what it is for.
@@ -103,6 +110,8 @@ pub struct Completions {
     /// the one that moves and the one scrolled to.
     pending_caret: Option<(usize, usize)>,
     prepared_scroll: Option<usize>,
+    /// The pending caret is scrolled to only when it is out of view.
+    gentle: bool,
 }
 
 #[derive(Clone)]
@@ -175,8 +184,11 @@ impl Completions {
                 .galley
                 .pos_from_cursor(egui::text::CCursor::new(index))
                 .translate(output.galley_pos.to_vec2());
-            ui.scroll_to_rect(rect.expand(8.0), Some(egui::Align::Center));
-            ui.ctx().request_repaint();
+            let gentle = std::mem::take(&mut self.gentle);
+            if !(gentle && ui.clip_rect().contains_rect(rect)) {
+                ui.scroll_to_rect(rect.expand(8.0), Some(egui::Align::Center));
+                ui.ctx().request_repaint();
+            }
         }
         if !output.response.has_focus() || !ui.is_enabled() {
             self.popup = None;
@@ -274,6 +286,7 @@ impl Completions {
                 apply(text, &chosen);
                 let caret = chosen.replace.start + chosen.caret;
                 self.pending_caret = Some((caret, caret));
+                self.gentle = false;
                 self.popup = None;
                 true
             }
@@ -330,12 +343,22 @@ impl CodeEditor {
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
         self.completions.pending_caret = Some((at, at));
+        self.completions.gentle = false;
+    }
+
+    /// Puts the caret at a byte offset on the next frame, as `reveal` does,
+    /// scrolling only when that line is out of view: the code an agent
+    /// changed stays where the person reads it (MCP-16).
+    pub fn show_line(&mut self, at: usize) {
+        self.completions.pending_caret = Some((at, at));
+        self.completions.gentle = true;
     }
 
     /// Selects a byte range on the next frame, keeping its direction: the caret
     /// is the end that moves.
     pub fn select(&mut self, anchor: usize, caret: usize) {
         self.completions.pending_caret = Some((anchor, caret));
+        self.completions.gentle = false;
     }
 
     /// Draws the editor and returns what the user did.
@@ -429,16 +452,21 @@ impl CodeEditor {
                     .min_size(vec2(0.0, to_bottom));
             }
             let output = edit.show(ui);
+            let mut lines_in_view = None;
             if let Some(gutter) = gutter {
                 self.keep_caret_clear_of_gutter(ui, &output, gutter_width);
-                self.paint_gutter(ui, gutter, text, &output, context);
+                lines_in_view = self.paint_gutter(ui, gutter, text, &output, context);
             }
-            outcome = Some(self.after_edit(ui, text, context, &output, Taken { keys, indent }, id));
+            let mut shown = self.after_edit(ui, text, context, &output, Taken { keys, indent }, id);
+            shown.lines_in_view = lines_in_view;
+            outcome = Some(shown);
         });
         outcome.expect("the editor is always drawn")
     }
 
-    /// Draws line numbers and a marker beside every line a diagnostic covers.
+    /// Draws line numbers, a marker beside every line a diagnostic covers
+    /// and a bar beside every changed line, and returns the lines it showed
+    /// whole.
     ///
     /// The y of each line comes from the galley, so a wrapped line keeps its
     /// number beside its first visual row instead of drifting out of step.
@@ -449,7 +477,7 @@ impl CodeEditor {
         text: &str,
         output: &egui::text_edit::TextEditOutput,
         context: &Context<'_>,
-    ) {
+    ) -> Option<std::ops::RangeInclusive<usize>> {
         // The gutter is as tall as the text, which a wrapped line makes taller
         // than the rectangle reserved for it; the panel's own clipping decides
         // what is visible.
@@ -477,6 +505,7 @@ impl CodeEditor {
         // thirty thousand lines took a third of a second that way.
         let mut number = 1;
         let mut begins_a_line = true;
+        let mut whole: Option<(usize, usize)> = None;
         for row in &output.galley.rows {
             let top = output.galley_pos.y + row.min_y();
             if top > visible.bottom() {
@@ -493,6 +522,25 @@ impl CodeEditor {
                     font.clone(),
                     if flagged { theme::DANGER } else { theme::MUTED },
                 );
+                // A changed line: an accent bar at the gutter's right edge,
+                // clear of the diagnostic's dot and the number (MCP-16).
+                if context
+                    .changed
+                    .as_ref()
+                    .is_some_and(|changed| changed.contains(&(number - 1)))
+                {
+                    painter.rect_filled(
+                        Rect::from_min_max(
+                            pos2(rect.right() - 4.0, top),
+                            pos2(rect.right() - 1.0, top + row_height),
+                        ),
+                        0.0,
+                        theme::ACCENT,
+                    );
+                }
+                if top >= visible.top() && top + row_height <= visible.bottom() {
+                    whole = Some((whole.map_or(number, |(first, _)| first), number));
+                }
                 if flagged {
                     painter.circle_filled(
                         pos2(rect.left() + 4.0, top + row_height * 0.5),
@@ -504,6 +552,7 @@ impl CodeEditor {
             begins_a_line = row.ends_with_newline;
             number += usize::from(row.ends_with_newline);
         }
+        whole.map(|(first, last)| first..=last)
     }
 
     /// Scrolls a moved caret into view with the gutter's width to its left.
@@ -564,6 +613,7 @@ impl CodeEditor {
             );
             if let Some(moved) = reindent(text, selection, deeper) {
                 self.completions.pending_caret = Some(moved);
+                self.completions.gentle = false;
                 ui.ctx().request_repaint();
                 changed = true;
             }
@@ -614,6 +664,7 @@ impl CodeEditor {
                 && let Some(caret) = auto_indent(text, cursor)
             {
                 self.completions.pending_caret = Some((caret, caret));
+                self.completions.gentle = false;
             }
         }
 
@@ -621,6 +672,7 @@ impl CodeEditor {
             cursor: response.has_focus().then_some(cursor).flatten(),
             response,
             changed,
+            lines_in_view: None,
         }
     }
 }

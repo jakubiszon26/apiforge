@@ -16,6 +16,10 @@
 //! of the last change, and then how the run ended (MCP-10, mock-up M4). The
 //! status is never cut at the minimum window: the holder's words give way to
 //! a shorter form first.
+//!
+//! While the window observes, *Follow* sits left of *Take back*, pressed
+//! while the window follows the holder to every document it changes
+//! (MCP-16, mock-up f1–f4).
 use super::*;
 use apiforge_channel::{RunMode, RunState};
 use apiforge_storage::project::{Holder, HolderRole};
@@ -34,8 +38,9 @@ pub(super) const TAKE_BACK: &str = "Take back";
 const MAX_CLIENT_CHARS: usize = 40;
 /// A failed step's label in the status line is cut to this many characters.
 /// With the file name's bound the longest status, about 115 characters
-/// (some 650 px), leaves the bar at 960 × 540 room for *Take back* and the
-/// holder's short form, so the status itself is never cut.
+/// (some 650 px), leaves the bar at 960 × 540 room for *Follow* and *Take
+/// back*, so the status itself is never cut; the holder's short form is
+/// then cut too, whole on hover.
 const MAX_LABEL_CHARS: usize = 30;
 /// The file name in the status line is cut to this many characters.
 const MAX_FILE_CHARS: usize = 40;
@@ -227,7 +232,9 @@ impl FolderApp {
     /// While the window holds the project the bar shows only to say why it
     /// kept it from an agent.
     pub(super) fn holder_bar(&mut self, ui: &mut egui::Ui) {
+        self.track_observing();
         let observing = self.observing();
+        let follow = self.follow.toggle().filter(|_| observing);
         let (text, short, last_change, status, take_back) = match self.holder.as_ref() {
             Some(observed) if observing => {
                 let waits = self.handover.waits_for_run();
@@ -257,6 +264,7 @@ impl FolderApp {
             _ => return,
         };
         let mut taken = false;
+        let mut toggled = false;
         let response = egui::Panel::bottom("folder-holder")
             .exact_size(BAR_HEIGHT)
             .resizable(false)
@@ -274,6 +282,28 @@ impl FolderApp {
                         // Disabled, greyed, while the agent finishes.
                         taken = ui
                             .add_enabled(enabled, widgets::action(Icon::Undo, TAKE_BACK).compact())
+                            .clicked();
+                        // *Follow* sits close to it, the status further off.
+                        ui.add_space(if follow.is_some() {
+                            theme::SPACE_SM
+                        } else {
+                            theme::SPACE_LG
+                        });
+                    }
+                    if let Some(pinned) = follow {
+                        // Pressed while following (MCP-16 decision 5).
+                        toggled = ui
+                            .add(
+                                widgets::action(Icon::Pin, follow::FOLLOW)
+                                    .compact()
+                                    .toggle(pinned)
+                                    .named(follow::FOLLOW_NAME),
+                            )
+                            .on_hover_text(if pinned {
+                                follow::PINNED_HINT
+                            } else {
+                                follow::RELEASED_HINT
+                            })
                             .clicked();
                         ui.add_space(theme::SPACE_LG);
                     }
@@ -344,6 +374,9 @@ impl FolderApp {
         });
         if taken {
             self.request_take_back();
+        }
+        if toggled {
+            self.toggle_follow();
         }
     }
 }

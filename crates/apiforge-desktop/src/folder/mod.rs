@@ -18,6 +18,7 @@ mod diagram;
 mod dog;
 mod explorer;
 mod file_prompts;
+mod follow;
 mod handover;
 mod handover_prompt;
 mod holder;
@@ -313,6 +314,11 @@ pub struct FolderApp {
     /// The person's consent to an agent's live requests, per project
     /// (MCP-09).
     consent: crate::consent::AgentConsent,
+    /// Following the holder's commits while observing (MCP-16).
+    follow: follow::Follow,
+    /// The document the code view drew last and the lines it showed whole.
+    #[cfg(test)]
+    lines_in_view: Option<(String, std::ops::RangeInclusive<usize>)>,
 }
 
 struct Clipboard {
@@ -462,6 +468,9 @@ impl FolderApp {
             saved_settings: None,
             last_change: None,
             consent: crate::consent::AgentConsent::load(),
+            follow: follow::Follow::default(),
+            #[cfg(test)]
+            lines_in_view: None,
         }
     }
 
@@ -654,16 +663,18 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn changed_lines(
         &self,
-        _document_id: &str,
+        document_id: &str,
     ) -> Option<std::ops::RangeInclusive<usize>> {
-        None
+        self.follow
+            .marks(document_id)
+            .map(|lines| lines.start + 1..=lines.end)
     }
 
     /// The document the code view drew last and the lines it showed whole,
     /// counted from one (MCP-16): a test seam.
     #[cfg(test)]
     pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
-        None
+        self.lines_in_view.clone()
     }
 
     /// Keeps the person's per-project settings in `directory`, as
@@ -713,6 +724,7 @@ impl FolderApp {
             self.follow_holder(probe);
         }
         self.follow_events();
+        self.track_observing();
         if let Some(changes) = outcome {
             self.storage_project(
                 "Checking external changes…",
@@ -1106,6 +1118,8 @@ impl FolderApp {
         if followed {
             self.last_change = describe_commit(&outcome.followed)
                 .map(|text| format!("{} · {text}", chrono::Local::now().format("%H:%M")));
+            // To the document the holder changed, while following (MCP-16).
+            self.follow_commit(&outcome.followed);
         }
         let name = |id: &String| {
             self.session
@@ -1162,6 +1176,7 @@ impl FolderApp {
         if self.library_room(context) && shortcut(Modifiers::COMMAND, Key::B) {
             self.toggle_library();
         }
+        let active = self.workbench.active().map(str::to_owned);
         if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab) {
             self.workbench.cycle(false);
             self.activation_generation += 1;
@@ -1170,6 +1185,10 @@ impl FolderApp {
             self.workbench.cycle(true);
             self.activation_generation += 1;
             self.touched();
+        }
+        // Another tab by the person's hand lets following go (MCP-16).
+        if self.workbench.active() != active.as_deref() {
+            self.unpin();
         }
         if shortcut(Modifiers::COMMAND, Key::W)
             && let Some(active) = self.workbench.active().map(str::to_owned)
@@ -1445,6 +1464,11 @@ impl FolderApp {
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
+        // Closing the tab following brought the person to lets it go
+        // (MCP-16 decision 4).
+        if self.workbench.active() == Some(document_id) {
+            self.unpin();
+        }
         let unsaved = match self.text_of(document_id) {
             Some(path) => self
                 .session
