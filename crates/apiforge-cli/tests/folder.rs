@@ -369,8 +369,9 @@ mod mcp15 {
     /// The refusal before MCP-15, which a live folder run no longer gives.
     const OLD: &str = "The folder project is open in another writer session";
     const HANDED_OVER: &str = "The open API Forge window handed the project over for this run";
-    const WAITING: &str =
-        "The API Forge window has unsaved work and asks you what to do; answer there";
+    /// The owner's decision of 2026-11-01 on #182: a neutral line, since
+    /// the window may be busy rather than asking the person.
+    const WAITING: &str = "Waiting for the API Forge window to answer";
     const KEPT: &str = "The window kept the project (you chose to keep editing); nothing was sent";
     /// The one line a lost channel leaves on stderr.
     const LOST: &str = "the window disconnected";

@@ -1,15 +1,23 @@
 # MCP-15: A live run from the command line asks the open window — QA report
 
-- Branch: `docs/mcp-15-cli-handover`. Captures are from the
-  release binaries of this branch: `apiforge-desktop` of `e9407b6` and
-  `apiforge` of `c0f7ec0`. `c0f7ec0` is the same code plus the faster exit
-  found below. Later commits did not change the captured views:
+- Branch: `docs/mcp-15-cli-handover`. Captures are from the release
+  binaries of `9549dc1`, the merge of `main` with MCP-10 (#186). All
+  scenarios were run again on that build, and every capture was retaken.
+  The first captures, of `e9407b6` and `c0f7ec0` (before MCP-10), showed
+  the same views. Notes on the code:
+  - `c0f7ec0` made the command exit as soon as it has said `released`; see
+    Scenario 1.
   - `6c9eadb` moved the reading of the secrets file from `run_live` into
     the CLI. The successful hand-over path is unchanged on screen and in
     the terminal. One failure now comes earlier: a secrets file that cannot
     be read is reported before an unregistered scenario. Either way no
     window is asked.
   - The changes after the first review, below.
+  - The merge with MCP-10; see *MCP-10 in the bar*.
+  - The waiting line is now *Waiting for the API Forge window to answer*
+    (the owner's decision of 2026-11-01). Scenario 2's terminal lines are
+    from the `apiforge` binary with that line; the window was the same
+    build, and the captures did not change.
 - Built with: `cargo build --release --locked` (Rust 1.99.0).
 - Compared against the mock-up in this folder:
   (a) `a-command-bar-code-960x540.png` and `a-command-bar-code-1600x1000.png`,
@@ -98,24 +106,24 @@ Expected:
 - The window is the writer again within two seconds of the command's exit.
 
 Observed: as expected.
-- The bar during the run, *apiforge run --live · since 21:28 · …*:
+- The bar during the run, *apiforge run --live · since 22:57 · …*:
   [1600 × 1000](release-bar-code-1600x1000.png),
   [960 × 540](release-bar-code-960x540.png).
 - The holder file during the run: `{"role":"command","client":"run
   --live","endpoint":null}`, with `journal.json` present.
-- The command ended 8.5 s after it started; the run made one 8 s `GET`.
+- The command ended 8.9 s and 8.6 s after it started; the run made one 8 s `GET`.
   Its stderr held only the hand-over line.
-- 0.46 s after the exit, the holder file was the window's again, with a new
+- 0.55 s and 0.60 s after the exit, the holder file was the window's again, with a new
   `since` and the window's endpoint. The journal was gone.
 - After the run the window is the writer, with no bar:
   [1600 × 1000](release-after-1600x1000.png).
 - *Allow the MCP agent to send live requests* stayed off (the default)
   throughout, and the command still sent (criterion 4).
 
-On the first run of this build, the command left about two seconds after
-the window had already taken the project back. Shutting down its channel
-runtime waited for work that was already over. `c0f7ec0` drops the runtime
-without waiting; the runs above are from that build.
+On the first release run (`e9407b6`), the command left about two seconds
+after the window had already taken the project back. Shutting down its
+channel runtime waited for work that was already over. `c0f7ec0` drops the
+runtime without waiting.
 
 ### Scenario 2 (criteria 2, 3): unsaved work, 960 × 540
 
@@ -139,9 +147,9 @@ Expected:
 
 Observed: as expected.
 - The prompt: [960 × 540](release-prompt-960x540.png).
-- *Not now*: exit 1 after 10.5 s. stderr was *The API Forge window has
-  unsaved work and asks you what to do; answer there*, then *The window kept
-  the project (you chose to keep editing); nothing was sent*. The API logged
+- *Not now*: exit 1 after 5.0 s. stderr was *Waiting for the API Forge
+  window to answer*, then *The window kept the project (you chose to keep
+  editing); nothing was sent*. The API logged
   no request. The window ([capture](release-not-now-960x540.png)) is the
   writer, both files still marked unsaved, no bar.
 - *Save all and hand over*: the window showed *Saved 2 files.* and observed
@@ -149,7 +157,7 @@ Observed: as expected.
   stderr had the waiting line and the hand-over line.
 - On disk the scenario has `80 * 2` and the component has `= 124`.
 - The API logged `GET /products/123`.
-- The window was the writer again 0.8 s after the command's exit.
+- The window was the writer again 0.7 s after the command's exit.
 
 ### Scenario 3 (criterion 7): the command killed mid-run, 1600 × 1000
 
@@ -177,8 +185,8 @@ Observed: as expected.
 3. Call `finish_editing`.
 
 Observed:
-- The command exited 1 after 0.43 s with *Claude Code via apiforge mcp has
-  held this project since 21:33; nothing was sent. Run again when it has
+- The command exited 1 after 0.48 s with *Claude Code via apiforge mcp has
+  held this project since 22:58; nothing was sent. Run again when it has
   finished editing*.
 - The server's stderr stayed empty: no connection reached its endpoint.
 - The window observed the agent throughout
@@ -194,6 +202,26 @@ Observed:
 - Every file in the folder except the held lock had the same SHA-256 before
   and after.
 
+### MCP-10 in the bar
+
+MCP-10 (merged as `153a51e`) shows an agent's run in the bar:
+- a status line at the right, *Agent: running promotion.afs (live)…*;
+- the holder's words shortened to *<client> · since HH:MM* when the status
+  needs the room.
+
+The first release run of the merge showed that line for the command too,
+as *Agent: running promotion-and-cart-price.afs (live)…*, which names an
+agent that is not there. The merge keeps a command's run out of that
+status line. The command's bar is therefore mock-up (a) as approved: its
+words in full and no status. The 960 × 540 and 1600 × 1000 captures above
+are from this build. The test
+`the_bar_of_a_running_command_keeps_its_words_and_no_agent_status` covers
+it.
+
+Whether a command's run should have a status line of its own, and in what
+words, is a question for the owner. The command still sends its `run`
+messages, with MCP-10's step count and first failing step.
+
 ### Against the mock-up
 
 | | Mock-up | This branch |
@@ -208,7 +236,8 @@ harness, as in earlier reports. The design-review views
 `review_mcp15_command_bar` and `review_mcp15_command_prompt` render the
 same views in the harness, and they match (a) and (b).
 
-Two things the mock-up does not show, both reported in the ticket:
+Two things the mock-up does not show, both approved by the owner on
+2026-11-01 and recorded in the ticket:
 - After *Not now* for a command, the bar does not show MCP-08b's *An agent
   asked to edit this project; save your work first*. No agent asked, and the
   command already has its answer and has ended. An agent's refusal still
@@ -237,9 +266,10 @@ request's checks. The ticket is not accepted for Windows on this report.
 - A save in the release window after the take-back. The desktop test of
   criterion 1 covers it.
 - The waiting line when the window is busy with something other than the
-  prompt, such as its own run or a dialog. After two seconds the command
-  always says *… has unsaved work and asks you what to do*, because the
-  window does not say why it has not answered yet.
+  prompt, such as its own run or a dialog. The line is neutral (*Waiting
+  for the API Forge window to answer*, the owner's decision of 2026-11-01),
+  so it holds in that case too; it was seen in the release binary with the
+  prompt only.
 - Ctrl+C at the terminal while the prompt is open, in the release binary.
   The prompt now closes when the command's connection ends. The test
   `a_command_that_stops_waiting_closes_its_prompt` covers the command
@@ -314,4 +344,12 @@ On `aca7e14`, after these changes, all exit 0:
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
 - `cargo test --workspace --all-targets --locked`: 1 374 passed, 0 failed,
   40 ignored
+- the fixture check
+
+After the merge with MCP-10 (`9549dc1`) and the owner's waiting line, all
+exit 0:
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`: 1 385 passed, 0 failed,
+  42 ignored
 - the fixture check

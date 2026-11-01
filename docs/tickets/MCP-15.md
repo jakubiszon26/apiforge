@@ -24,9 +24,12 @@ writer again — nothing closed, nothing reopened.
 
 - New, in the terminal: with a clean window open, the live run proceeds; one
   line on stderr says *The open API Forge window handed the project over for
-  this run*. With unsaved work in the window the command waits and says
-  *The API Forge window has unsaved work and asks you what to do; answer
-  there* (decision 2 A). A refusal names the holder in the server's words:
+  this run*. With unsaved work in the window the command waits and, after
+  two seconds, says *Waiting for the API Forge window to answer* (decision
+  2 A; the neutral wording is the owner's decision of 2026-11-01 on #182,
+  replacing *The API Forge window has unsaved work and asks you what to do;
+  answer there*, since the window may also be busy with its own run, a
+  dialog or recovery). A refusal names the holder in the server's words:
   *Claude Code via apiforge mcp has held this project since 10:42; nothing was
   sent. Run again when it has finished editing* (an agent, decision 5 A);
   *apiforge apply has held this project since 10:41; nothing was sent. Run
@@ -246,7 +249,7 @@ prompt is open closes the prompt; an answer meant for a command that has
 gone is not kept for a later agent (review of #184).
 
 Two consequences of decisions 1–3 that the analysis did not spell out,
-reported here for the owner:
+both approved by the owner on 2026-11-01 on #182:
 
 - After *Not now* for a command the bottom bar does not show MCP-08b's *An
   agent asked to edit this project; save your work first*: no agent asked,
@@ -255,6 +258,11 @@ reported here for the owner:
 - MCP-09's *A live run is in progress; it will finish. No new one starts.*
   under the agent's toggle is not shown for a command's live run, which the
   toggle does not govern (decision 3 A).
+- MCP-10, merged during this ticket, words its status line for an agent
+  (*Agent: running …*). A command's run is not put in that line, so the
+  command's bar stays mock-up (a). The command still sends its `run`
+  messages, with MCP-10's step fields. Whether a command's run gets a
+  status line of its own, and in what words, is for the owner to decide.
 
 ## Not in scope
 

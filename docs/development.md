@@ -284,8 +284,8 @@ window, a live run asks that window for it over the control channel, as the MCP
 server does (MCP-15, [The window and the agent](#the-window-and-the-agent)): a
 clean window hands it over at once and stderr says *The open API Forge window
 handed the project over for this run*; a window with unsaved work asks the person,
-and the command waits as long as that takes, saying once after two seconds *The
-API Forge window has unsaved work and asks you what to do; answer there* (Ctrl+C
+and the command waits as long as that takes, saying once after two seconds *Waiting
+for the API Forge window to answer* (Ctrl+C
 gives up with nothing sent, and the window's prompt closes). *Not now* ends it with exit code 1 and *The window
 kept the project (you chose to keep editing); nothing was sent*. The run sends and
 journals as without a window; at its end, whatever the end, the command lets the

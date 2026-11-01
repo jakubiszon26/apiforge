@@ -40,9 +40,10 @@ use std::{
 pub const CLIENT: &str = "run --live";
 /// Said once the window has handed the project over.
 pub const HANDED_OVER: &str = "The open API Forge window handed the project over for this run";
-/// Said once when the window has not answered within [`NOTICE`].
-pub const WAITING: &str =
-    "The API Forge window has unsaved work and asks you what to do; answer there";
+/// Said once when the window has not answered within [`NOTICE`]: neutral,
+/// since the window may be asking the person or busy with its own work
+/// (the owner's decision of 2026-11-01 on #182).
+pub const WAITING: &str = "Waiting for the API Forge window to answer";
 /// The reason a window gives when the person keeps editing (MCP-08c).
 const KEEP_EDITING: &str = "the person chose to keep editing";
 /// How long the command waits for the window's answer before it says so.
