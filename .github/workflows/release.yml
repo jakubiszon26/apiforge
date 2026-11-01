@@ -1,0 +1,375 @@
+name: Release
+
+# REL-01 (#115): a pushed `v*` tag builds the Linux and Windows packages,
+# starts the AppImage on a clean system and publishes one GitHub pre-release.
+# Nothing else starts this workflow; only the publish job may write, and it
+# runs only after every build and smoke job has succeeded.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# One release run per tag at a time; a second push of the same tag waits.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  version:
+    name: Check the tag
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test the release checks
+        run: python3 -I packaging/test_release.py
+
+      # The tag without `-rc.N` must be `v` and the workspace version, before
+      # anything is built.
+      - name: Compare the tag with the workspace version
+        id: version
+        shell: bash
+        run: |
+          version="$(python3 -I packaging/release.py version "$TAG")"
+          echo "Tag $TAG releases version $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    name: Build Linux packages
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      STEM: apiforge-${{ github.ref_name }}-x86_64-unknown-linux-gnu
+      APPIMAGE: apiforge-desktop-${{ github.ref_name }}-x86_64.AppImage
+      # Tagged releases only, never `continuous`; checked before use.
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+      RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The package list of rust.yml, and desktop-file-validate.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev \
+            libxkbcommon-x11-0 \
+            libwayland-dev \
+            libudev-dev \
+            libegl1-mesa-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            xvfb \
+            xauth \
+            mesa-vulkan-drivers \
+            libvulkan1 \
+            desktop-file-utils \
+            patchelf
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+
+      - name: Run workspace unit and integration tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p apiforge-desktop -p apiforge-cli
+
+      - name: Check the binaries' versions
+        run: |
+          test "$(target/release/apiforge --version)" = "apiforge $VERSION"
+          test "$(target/release/apiforge-desktop --version)" = "apiforge-desktop $VERSION"
+          ls -l target/release/apiforge target/release/apiforge-desktop
+
+      - name: Pack and check the tar.gz
+        run: |
+          stage="$RUNNER_TEMP/stage/$STEM"
+          mkdir -p "$stage/licenses" dist
+          install -m 755 target/release/apiforge target/release/apiforge-desktop "$stage/"
+          install -m 644 LICENSE README.md packaging/CLAUDE-CODE.md "$stage/"
+          fonts=crates/apiforge-desktop/assets/fonts
+          install -m 644 "$fonts/FONT-SOURCES.md" "$fonts/LICENSE-API-Forge-fonts.txt" \
+            "$fonts/LICENSE-DejaVu.txt" "$stage/licenses/"
+          python3 -I packaging/release.py pack "$stage" "dist/$STEM.tar.gz"
+          tar tzvf "dist/$STEM.tar.gz"
+          python3 -I packaging/release.py check-archive "dist/$STEM.tar.gz" packaging/manifest-linux.txt
+
+      # The MCP server as a person runs it: from the extracted archive.
+      - name: Smoke the MCP server from the extracted archive
+        run: |
+          extracted="$RUNNER_TEMP/extracted"
+          mkdir -p "$extracted"
+          tar xzf "dist/$STEM.tar.gz" -C "$extracted"
+          test "$("$extracted/$STEM/apiforge" --version)" = "apiforge $VERSION"
+          python3 -I packaging/mcp-smoke.py "$extracted/$STEM/apiforge" "$VERSION" \
+            crates/apiforge-cli/tests/mcp.rs
+
+      - name: Download appimagetool and the AppImage runtime
+        run: |
+          tools="$RUNNER_TEMP/appimage-tools"
+          mkdir -p "$tools"
+          curl -fsSL --retry 3 -o "$tools/appimagetool" "$APPIMAGETOOL_URL"
+          curl -fsSL --retry 3 -o "$tools/runtime-x86_64" "$RUNTIME_URL"
+          printf '%s  %s\n' "$APPIMAGETOOL_SHA256" "$tools/appimagetool" \
+            "$RUNTIME_SHA256" "$tools/runtime-x86_64" | sha256sum -c -
+          chmod +x "$tools/appimagetool"
+
+      # winit loads the X11 keyboard and cursor libraries of
+      # packaging/appimage-libraries.txt at run time, and a desktop may lack
+      # them; glibc, libX11, libxcb, Wayland, GL and Vulkan stay the host's, as
+      # in every AppImage. The binary and the libraries find usr/lib through
+      # their RUNPATH, so LD_LIBRARY_PATH is never set for the processes the
+      # window starts.
+      - name: Build the AppImage
+        run: |
+          appdir="$RUNNER_TEMP/AppDir"
+          fonts=crates/apiforge-desktop/assets/fonts
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/licenses"
+          install -m 755 packaging/AppRun "$appdir/AppRun"
+          install -m 755 target/release/apiforge-desktop "$appdir/usr/bin/"
+          patchelf --set-rpath '$ORIGIN/../lib' "$appdir/usr/bin/apiforge-desktop"
+          install -m 644 packaging/apiforge.desktop LICENSE "$appdir/"
+          install -m 644 "$fonts/FONT-SOURCES.md" "$fonts/LICENSE-API-Forge-fonts.txt" \
+            "$fonts/LICENSE-DejaVu.txt" "$appdir/licenses/"
+          install -m 644 packaging/icon/apiforge-256.png "$appdir/apiforge.png"
+          ln -s apiforge.png "$appdir/.DirIcon"
+          for library in $(sed 's/#.*//' packaging/appimage-libraries.txt); do
+            cp -L "/usr/lib/x86_64-linux-gnu/$library" "$appdir/usr/lib/"
+            chmod 644 "$appdir/usr/lib/$library"
+            patchelf --set-rpath '$ORIGIN' "$appdir/usr/lib/$library"
+          done
+          patchelf --print-rpath "$appdir/usr/bin/apiforge-desktop"
+          desktop-file-validate "$appdir/apiforge.desktop"
+          find "$appdir" -exec ls -ld {} +
+          ARCH=x86_64 "$RUNNER_TEMP/appimage-tools/appimagetool" --appimage-extract-and-run \
+            --no-appstream --runtime-file "$RUNNER_TEMP/appimage-tools/runtime-x86_64" \
+            "$appdir" "dist/$APPIMAGE"
+          chmod +x "dist/$APPIMAGE"
+          test "$("dist/$APPIMAGE" --appimage-extract-and-run --version)" = "apiforge-desktop $VERSION"
+          ls -l dist
+
+      - name: Upload the Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-linux
+          path: dist/*
+          if-no-files-found: error
+
+  build-windows:
+    name: Build the Windows package
+    needs: version
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      STEM: apiforge-${{ github.ref_name }}-x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+
+      - name: Run workspace unit and integration tests
+        run: cargo test --workspace --all-targets --locked
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p apiforge-desktop -p apiforge-cli
+
+      - name: Pack and check the ZIP
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $stage = Join-Path $env:RUNNER_TEMP "stage/$env:STEM"
+          New-Item -ItemType Directory -Force "$stage/licenses", 'dist' | Out-Null
+          Copy-Item 'target/release/apiforge.exe', 'target/release/apiforge-desktop.exe', `
+            'LICENSE', 'README.md', 'packaging/CLAUDE-CODE.md' $stage
+          $fonts = 'crates/apiforge-desktop/assets/fonts'
+          Copy-Item "$fonts/FONT-SOURCES.md", "$fonts/LICENSE-API-Forge-fonts.txt", `
+            "$fonts/LICENSE-DejaVu.txt" "$stage/licenses"
+          python -I packaging/release.py pack $stage "dist/$env:STEM.zip"
+          python -I packaging/release.py check-archive "dist/$env:STEM.zip" packaging/manifest-windows.txt
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Smoke the binaries from the extracted ZIP
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $extracted = Join-Path $env:RUNNER_TEMP 'extracted'
+          Expand-Archive "dist/$env:STEM.zip" -DestinationPath $extracted
+          $root = Join-Path $extracted $env:STEM
+          foreach ($name in @('apiforge', 'apiforge-desktop')) {
+            $line = & (Join-Path $root "$name.exe") --version
+            if ($line -ne "$name $env:VERSION") {
+              throw "$name.exe --version printed '$line', expected '$name $env:VERSION'."
+            }
+          }
+          & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
+          python -I packaging/mcp-smoke.py (Join-Path $root 'apiforge.exe') $env:VERSION `
+            crates/apiforge-cli/tests/mcp.rs
+
+      - name: Upload the Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows
+          path: dist/*
+          if-no-files-found: error
+
+  # The AppImage on a system that has none of the application's libraries:
+  # first on the runner with FUSE, then in a bare ubuntu:24.04 container, which
+  # unlike the runner image has no browser or toolkit that brings X libraries.
+  smoke-appimage:
+    name: Start the AppImage on a clean system
+    needs: [version, build-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      APPIMAGE: apiforge-desktop-${{ github.ref_name }}-x86_64.AppImage
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download the Linux packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-linux
+          path: dist
+
+      # The pinned runtime links libfuse statically and mounts through the
+      # fusermount3 helper of fuse3; libfuse2t64 is what older runtimes need.
+      - name: Install display infrastructure only
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfuse2t64 fuse3 xvfb mesa-vulkan-drivers libvulkan1
+
+      - name: Start the AppImage on the runner
+        timeout-minutes: 3
+        env:
+          WGPU_BACKEND: vulkan
+          WINIT_UNIX_BACKEND: x11
+        run: |
+          chmod +x "dist/$APPIMAGE"
+          test "$("dist/$APPIMAGE" --version)" = "apiforge-desktop $VERSION"
+          "dist/$APPIMAGE" --check fixtures/workspace.json
+          packaging/appimage-window.sh "dist/$APPIMAGE" test-results/appimage-runner.png
+
+      - name: Start the AppImage in a bare ubuntu:24.04 container
+        timeout-minutes: 8
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            -e APPIMAGE="$APPIMAGE" -e VERSION="$VERSION" \
+            -e APPIMAGE_EXTRACT_AND_RUN=1 -e WGPU_BACKEND=vulkan -e WINIT_UNIX_BACKEND=x11 \
+            ubuntu:24.04 bash -euo pipefail -c '
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                libfuse2t64 xvfb mesa-vulkan-drivers libvulkan1
+              test "$("dist/$APPIMAGE" --version)" = "apiforge-desktop $VERSION"
+              "dist/$APPIMAGE" --check fixtures/workspace.json
+              packaging/appimage-window.sh "dist/$APPIMAGE" test-results/appimage-container.png
+            '
+
+      - name: Validate the AppImage's desktop file
+        run: |
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/dist/$APPIMAGE" --appimage-extract apiforge.desktop
+          desktop-file-validate squashfs-root/apiforge.desktop
+
+      - name: Upload the AppImage captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-window
+          path: test-results/*.png
+          if-no-files-found: warn
+
+  publish:
+    name: Publish the pre-release
+    needs: [version, build-linux, build-windows, smoke-appimage]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a tag that is not on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG points at $GITHUB_SHA, which is not on main."
+            exit 1
+          fi
+
+      - name: Download the packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - name: Write and check the sums and the asset names
+        run: |
+          python3 -I packaging/release.py sums dist "$TAG"
+          python3 -I packaging/release.py check-assets dist "$TAG"
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          ls -l dist
+
+      - name: Write the release notes
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$TAG" --jq .body > "$RUNNER_TEMP/notes.md"
+          {
+            echo
+            echo '## SHA-256'
+            echo
+            echo '```text'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } >> "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Create the pre-release
+        run: |
+          gh release create "$TAG" dist/* --prerelease --verify-tag \
+            --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"

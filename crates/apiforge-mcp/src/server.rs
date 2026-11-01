@@ -2,7 +2,7 @@
 //! protocol messages only; the server's own lines go to stderr and never
 //! quote an argument.
 use crate::{
-    agent::{AgentSession, CreateDocumentArguments, WriteSourceArguments},
+    agent::{AgentSession, CreateDocumentArguments, PublishArguments, WriteSourceArguments},
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
     handover::Hub,
@@ -47,7 +47,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 /// The order `tools/list` returns: the overview and the reference first,
 /// then reading, checking, printing and running, then writing.
-const TOOL_ORDER: [&str; 10] = [
+const TOOL_ORDER: [&str; 11] = [
     "project_overview",
     "language_reference",
     "read_source",
@@ -57,13 +57,14 @@ const TOOL_ORDER: [&str; 10] = [
     "run",
     "write_source",
     "create_document",
+    "publish",
     "finish_editing",
 ];
 
 /// How long the end of stdin waits for a run's cleanup.
 const CLEANUP_WAIT: Duration = Duration::from_secs(10);
 
-const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text, and publish turns a saved component into its next revision: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -591,6 +592,31 @@ impl ApiforgeServer {
         call("create_document", move || {
             agent.set_client(client);
             agent.create_document(&arguments)
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Publishes the saved working component at `path` as its next immutable revision, exactly as Publish in the API Forge window: the revision file, its registry entry and checkpoint, and the working document's base revision advanced, in one transaction; a scenario can then call `handle@revision(…)`. Name the version you checked with `expected_source_sha256` (a different hash on disk is `stale_source`, nothing written). Publishing prints the component canonically: when that would drop comments that belong to no statement, the call is `comments_would_be_lost` with the comments listed, and only `accept_comment_loss: true` with the same hash publishes. A component with errors is `invalid_text`, a scenario `not_a_component`. Give a `request_id` to repeat the call safely after a lost response: this server then returns the recorded result and publishes nothing more; project_overview lists every revision with its source_sha256. Takes the project for this agent session as write_source does.",
+        output_schema = schema_for_output::<crate::agent::PublishResult>(),
+        annotations(
+            title = "Publish",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn publish(
+        &self,
+        Parameters(arguments): Parameters<PublishArguments>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let agent = self.agent.clone();
+        let client = context.client_info().map(|client| client.name);
+        call("publish", move || {
+            agent.set_client(client);
+            agent.publish(&arguments)
         })
         .await
     }

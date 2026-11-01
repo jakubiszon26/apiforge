@@ -3,11 +3,17 @@
 //! calls `finish_editing`, stdin ends or the process exits. Each write builds
 //! a fresh session over the saved project from that one store, checks the
 //! version the model names, validates before the first byte, and commits.
+//!
+//! `publish` (MCP-05) is the window's Publish on that session: the same
+//! transaction, the comment-loss question answered only for the hash the
+//! model names, and a `request_id` the server remembers so that a lost
+//! response can be asked for again without a second revision.
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
     folder,
     handover::{Answer, Hub},
-    secrets::Secrets,
+    requests,
+    secrets::{self, Secrets},
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
 use apiforge_channel::Message;
@@ -22,6 +28,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    collections::VecDeque,
     ffi::OsString,
     path::PathBuf,
     sync::{
@@ -68,6 +75,54 @@ pub struct CreateDocumentArguments {
     /// different, `stale_project`.
     #[serde(default)]
     pub expected_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct PublishArguments {
+    /// The working component's registered path, as `project_overview` lists
+    /// it.
+    pub path: String,
+    /// The `source_sha256` of the saved text you checked, as `read_source`
+    /// or `write_source` returned it. A different hash on disk is
+    /// `stale_source`.
+    pub expected_source_sha256: String,
+    /// Publish although canonical printing drops the comments that belong
+    /// to no statement, which `comments_would_be_lost` listed. Holds for
+    /// `expected_source_sha256` only, in this call only.
+    #[serde(default)]
+    pub accept_comment_loss: bool,
+    /// The project `generation` the component was checked at; when given
+    /// and different, `stale_project`.
+    #[serde(default)]
+    pub expected_generation: Option<u64>,
+    /// An id of your choosing for this publication. Repeated after a lost
+    /// response, this server returns the recorded result instead of
+    /// publishing again; a restarted server does not know it.
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct PublishResult {
+    /// The working component's registered path.
+    pub path: String,
+    /// The handle a scenario calls the revision by: `handle@revision(…)`.
+    pub handle: String,
+    /// The new revision's number: always the next unused one.
+    pub revision: u32,
+    /// Where the immutable revision was written.
+    pub revision_path: String,
+    /// SHA-256 of the revision's bytes, as `project_overview` lists it.
+    pub source_sha256: String,
+    /// The project's head generation after the publication.
+    pub generation: u64,
+    pub wrote: bool,
+    /// The project paths the commit wrote: the revision, the registry and
+    /// the checkpoint.
+    pub changed: Vec<String>,
+    /// The result recorded for this `request_id` earlier: nothing was
+    /// published by this call.
+    pub replayed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
@@ -139,6 +194,81 @@ struct State {
     /// A commit of this session failed after its activation: every later
     /// write is refused until the session ends and a writer recovers.
     recovery_required: bool,
+    /// The publications this server answered, by `request_id`. It outlives
+    /// the session's lock and ends with the process.
+    answered: Answered,
+}
+
+/// How many publications a server remembers by `request_id`.
+const ANSWERED: usize = 64;
+/// How many ids of dropped results a server remembers as answered. An id
+/// older than that is unknown again: the overview's revisions tell.
+const DROPPED: usize = 1024;
+
+/// The arguments a `request_id` answered: the path and the expected hash.
+type AnsweredCall = (String, String);
+
+/// The answered publications, oldest first, with the arguments each
+/// answered; and, oldest first, the ids whose result was dropped to keep the
+/// list short. Both are bounded.
+#[derive(Default)]
+struct Answered {
+    recent: VecDeque<(String, AnsweredCall, PublishResult)>,
+    dropped: VecDeque<String>,
+}
+
+impl Answered {
+    /// The recorded result of a publication with the same `request_id`. An
+    /// id that answered another publication is refused; one whose result is
+    /// no longer held is `unknown_outcome`, never published again.
+    fn recorded(&self, arguments: &PublishArguments) -> Result<Option<PublishResult>, ToolError> {
+        let Some(id) = arguments.request_id.as_ref() else {
+            return Ok(None);
+        };
+        if self.dropped.iter().any(|dropped| dropped == id) {
+            return Err(ToolError::new(
+                ErrorCode::UnknownOutcome,
+                "This server answered a publication with this request_id but no longer holds its result; nothing was written. project_overview lists every revision with its source_sha256",
+            ));
+        }
+        let Some((_, call, result)) = self.recent.iter().find(|(answered, _, _)| answered == id)
+        else {
+            return Ok(None);
+        };
+        if *call != call_of(arguments) {
+            return Err(ToolError::new(
+                ErrorCode::InvalidInputs,
+                "This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication",
+            )
+            .with_details(json!({ "path": call.0 })));
+        }
+        Ok(Some(PublishResult {
+            replayed: true,
+            ..result.clone()
+        }))
+    }
+
+    fn record(&mut self, id: &str, arguments: &PublishArguments, result: &PublishResult) {
+        self.recent.retain(|(answered, _, _)| answered != id);
+        self.dropped.retain(|dropped| dropped != id);
+        if self.recent.len() == ANSWERED
+            && let Some((dropped, _, _)) = self.recent.pop_front()
+        {
+            if self.dropped.len() == DROPPED {
+                self.dropped.pop_front();
+            }
+            self.dropped.push_back(dropped);
+        }
+        self.recent
+            .push_back((id.to_owned(), call_of(arguments), result.clone()));
+    }
+}
+
+fn call_of(arguments: &PublishArguments) -> AnsweredCall {
+    (
+        arguments.path.clone(),
+        arguments.expected_source_sha256.clone(),
+    )
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -346,6 +476,136 @@ impl AgentSession {
             diagnostics,
             omitted,
         })
+    }
+
+    /// Publishes the saved working component as its next revision, in the
+    /// window's Publish transaction, when it is the version the model names.
+    pub fn publish(&self, arguments: &PublishArguments) -> Result<PublishResult, ToolError> {
+        let path = folder::validate(&arguments.path)?;
+        // The rules of a live run's id (MCP-06): bounded, and never a known
+        // secret value.
+        if let Some(id) = &arguments.request_id {
+            requests::check_id(id)?;
+            secrets::refuse_in_text(id, &self.secrets.values()?)?;
+        }
+        let mut state = self.state();
+        if let Some(recorded) = state.answered.recorded(arguments)? {
+            return Ok(recorded);
+        }
+        let store = self.store(&mut state)?;
+        // The working source is not read: publishing never rewrites it, and a
+        // source over the limit is the session's `too_large`, not a storage
+        // failure. What a publication changes: the checkpoint and registry.
+        let watched = &watched(&path)?[1..];
+        let before = read(&store, watched)?;
+        let mut session = ProjectSession::from_store_saved(store.clone()).map_err(load_error)?;
+        expect_generation(&before, arguments.expected_generation)?;
+        let id = folder::select(&session, &arguments.path)?;
+        let document = session.document(&id).ok_or_else(unknown_document)?;
+        if document.entry().kind != DocumentKind::Component {
+            return Err(not_a_component());
+        }
+        match document.unavailable() {
+            None => {}
+            Some(Unavailable::TooLarge) => {
+                return Err(ToolError::new(
+                    ErrorCode::TooLarge,
+                    "The saved component exceeds the 1 MiB limit and cannot be published",
+                ));
+            }
+            Some(_) => {
+                return Err(ToolError::new(
+                    ErrorCode::ProjectUnreadable,
+                    "The saved component cannot be read as source; read_source says why",
+                ));
+            }
+        }
+        let saved = document.saved_sha256().map(str::to_owned);
+        if saved.as_deref() != Some(arguments.expected_source_sha256.as_str()) {
+            return Err(ToolError::new(
+                ErrorCode::StaleSource,
+                "The component changed on disk since the version you checked; nothing was published. Read it again, check it and publish with the new source_sha256",
+            )
+            .with_details(json!({ "source_sha256": saved })));
+        }
+        // The comments a refusal lists come from the saved text.
+        if store
+            .validate_managed_payload(document.text().as_bytes())
+            .is_err()
+        {
+            return Err(ToolError::new(
+                ErrorCode::SecretInSource,
+                "The saved component contains the value of a known secret; nothing was published and the value is not repeated. Name the secret instead: env.name",
+            ));
+        }
+        session.settle(&id).map_err(tools::storage_error)?;
+        let (document, valid) = folder::check_document(&session, &id)?;
+        if !valid {
+            let (diagnostics, omitted) = tools::diagnostics(document);
+            return Err(ToolError::new(
+                ErrorCode::InvalidText,
+                "The saved component has errors and was not published; fix the diagnostics, write it and publish again",
+            )
+            .with_details(json!({ "diagnostics": diagnostics, "omitted": omitted })));
+        }
+        let comments = unattached(document);
+        if !comments.is_empty() {
+            if !arguments.accept_comment_loss {
+                return Err(ToolError::new(
+                    ErrorCode::CommentsWouldBeLost,
+                    "Publishing prints the component canonically, which drops the comments that belong to no statement; nothing was published. Attach them to statements and write the component, or publish again with accept_comment_loss: true and the same expected_source_sha256",
+                )
+                .with_details(json!({ "comments": comments, "source_sha256": saved })));
+            }
+            // The decision binds to the source version just checked against
+            // the hash the model named, as the window's binds to the text
+            // the person reviewed.
+            session
+                .accept_comment_loss(&id)
+                .map_err(tools::storage_error)?;
+        }
+        let published = match session.publish(&id, Origin::SESSION) {
+            Ok(published) => published,
+            Err(error) => return Err(publish_failed(&mut state, &store, error, &path)),
+        };
+        // From here the revision exists: nothing may fail before the result
+        // is recorded, or a retry with the same request_id would publish a
+        // second revision.
+        let revision = session
+            .manifest()
+            .revisions
+            .iter()
+            .find(|entry| {
+                entry.component_id == published.component_id && entry.revision == published.revision
+            })
+            .cloned()
+            .expect("a publication registers the revision it wrote");
+        // The revision did not exist before: the transaction expected it
+        // missing. A publication always writes the registry and the
+        // checkpoint, which is what `changed` says if they cannot be read.
+        let mut changed = vec![revision.path.as_str().to_owned()];
+        match read(&store, watched) {
+            Ok(after) => changed.extend(self::changed(watched, &before, &after)),
+            Err(_) => changed.extend(watched.iter().map(|p| p.as_str().to_owned())),
+        }
+        let result = PublishResult {
+            path: path.as_str().to_owned(),
+            handle: revision.handle,
+            revision: published.revision,
+            revision_path: revision.path.as_str().to_owned(),
+            source_sha256: revision.source_hash,
+            generation: published.generation,
+            wrote: true,
+            changed,
+            replayed: false,
+        };
+        if let Some(id) = &arguments.request_id {
+            state.answered.record(id, arguments, &result);
+        }
+        // Connected windows hear of the revision before the tool answers,
+        // as of a save (MCP-08b).
+        self.saved(result.generation, &result.changed);
+        Ok(result)
     }
 
     /// Ends the session and releases the writer lock; connected windows are
@@ -649,6 +909,75 @@ fn commit_failed(
     }
 }
 
+fn not_a_component() -> ToolError {
+    ToolError::new(
+        ErrorCode::NotAComponent,
+        "Only a component can be published; this document is a scenario",
+    )
+}
+
+/// A publication the session refused or a commit that failed. The session's
+/// own refusals keep their meaning; storage failures are a write's.
+fn publish_failed(
+    state: &mut State,
+    store: &ProjectStore,
+    error: apiforge_project::Error,
+    source: &ProjectPath,
+) -> ToolError {
+    use apiforge_project::Error;
+    match error {
+        Error::NotAComponent => not_a_component(),
+        Error::HandleChanged { published } => ToolError::new(
+            ErrorCode::InvalidText,
+            format!(
+                "This component is published as {published}; a published component cannot be renamed, so nothing was published. Keep its handle"
+            ),
+        ),
+        Error::RevisionExists { revision, .. } => ToolError::new(
+            ErrorCode::PathExists,
+            format!(
+                "A file for revision {revision} already exists and is never overwritten; nothing was published"
+            ),
+        ),
+        Error::CommentsWouldBeLost { .. } => ToolError::new(
+            ErrorCode::CommentsWouldBeLost,
+            "Publishing would drop comments that belong to no statement; nothing was published",
+        ),
+        Error::InvalidModel | Error::InvalidRevision { .. } | Error::Unprintable => ToolError::new(
+            ErrorCode::InvalidText,
+            "The component cannot be printed as a valid revision; nothing was published. Check it and publish again",
+        ),
+        Error::RegistryChanged | Error::ExternalConflict => ToolError::new(
+            ErrorCode::StaleProject,
+            "The project changed on disk while the publication was prepared; nothing was published. Check again and publish with the new generation",
+        ),
+        error => commit_failed(state, store, error, source, false),
+    }
+}
+
+/// The comments of a settled document's text that canonical printing would
+/// drop, with their positions, in source order.
+fn unattached(document: &apiforge_project::DocumentSession) -> Vec<serde_json::Value> {
+    let found: Vec<_> = document
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message == apiforge_script::UNATTACHED_COMMENT)
+        .cloned()
+        .collect();
+    let (positioned, _) = tools::positioned(document.text(), &found, 0);
+    found
+        .iter()
+        .zip(positioned)
+        .map(|(diagnostic, position)| {
+            json!({
+                "line": position.line,
+                "column": position.column,
+                "text": document.text().get(diagnostic.range.clone()).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
 /// Why a new document was refused: its first registration problem, or the
 /// errors of its text.
 fn refusal(
@@ -756,4 +1085,109 @@ fn held(holder: &Holder) -> ToolError {
         ),
     };
     ToolError::new(code, message).with_details(json!({ "holder": description(holder) }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(path: &str, hash: &str, id: &str) -> PublishArguments {
+        PublishArguments {
+            path: path.into(),
+            expected_source_sha256: hash.into(),
+            accept_comment_loss: false,
+            expected_generation: None,
+            request_id: Some(id.into()),
+        }
+    }
+
+    fn result(revision: u32) -> PublishResult {
+        PublishResult {
+            path: "components/product.afs".into(),
+            handle: "product".into(),
+            revision,
+            revision_path: format!(".apiforge/revisions/product/{revision}.afs"),
+            source_sha256: "a".repeat(64),
+            generation: u64::from(revision),
+            wrote: true,
+            changed: Vec::new(),
+            replayed: false,
+        }
+    }
+
+    /// A `request_id` names one publication: the same id for another
+    /// document or another version is refused, never answered with a result
+    /// that does not belong to it.
+    #[test]
+    fn a_request_id_answers_only_the_publication_it_named() {
+        let mut answered = Answered::default();
+        let first = arguments("components/product.afs", "h1", "p-1");
+        answered.record("p-1", &first, &result(2));
+        let replayed = answered.recorded(&first).unwrap().unwrap();
+        assert!(replayed.replayed);
+        assert_eq!(replayed.revision, 2);
+        for other in [
+            arguments("components/other.afs", "h1", "p-1"),
+            arguments("components/product.afs", "h2", "p-1"),
+        ] {
+            let error = answered.recorded(&other).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInputs);
+        }
+        assert_eq!(
+            answered
+                .recorded(&arguments("components/product.afs", "h1", "p-2"))
+                .unwrap(),
+            None,
+            "an unknown id publishes"
+        );
+    }
+
+    /// The record is bounded; an id whose result was dropped is
+    /// `unknown_outcome`, never published a second time.
+    #[test]
+    fn a_dropped_request_id_is_unknown_outcome() {
+        let mut answered = Answered::default();
+        for index in 0..=ANSWERED {
+            let id = format!("p-{index}");
+            answered.record(&id, &arguments("c.afs", "h", &id), &result(2));
+        }
+        assert_eq!(answered.recent.len(), ANSWERED);
+        let error = answered
+            .recorded(&arguments("c.afs", "h", "p-0"))
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::UnknownOutcome);
+        assert!(
+            answered
+                .recorded(&arguments("c.afs", "h", "p-1"))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    /// The ids of dropped results are bounded too (review of #117): many
+    /// unique ids never grow the record past `ANSWERED + DROPPED`.
+    #[test]
+    fn the_ids_of_dropped_results_are_bounded() {
+        let mut answered = Answered::default();
+        let total = ANSWERED + DROPPED + 10;
+        for index in 0..total {
+            let id = format!("p-{index}");
+            answered.record(&id, &arguments("c.afs", "h", &id), &result(2));
+        }
+        assert_eq!(answered.recent.len(), ANSWERED);
+        assert_eq!(answered.dropped.len(), DROPPED);
+        // The oldest are forgotten; the newest dropped are still answered.
+        assert_eq!(
+            answered.recorded(&arguments("c.afs", "h", "p-0")).unwrap(),
+            None
+        );
+        let newest_dropped = format!("p-{}", total - ANSWERED - 1);
+        assert_eq!(
+            answered
+                .recorded(&arguments("c.afs", "h", &newest_dropped))
+                .unwrap_err()
+                .code,
+            ErrorCode::UnknownOutcome
+        );
+    }
 }

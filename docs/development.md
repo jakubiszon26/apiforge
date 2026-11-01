@@ -146,6 +146,70 @@ under X11 and `libxkbcommon-dev` does not pull in; the root `.gitattributes` kee
 every `.json` and `.afs` file at LF on checkout, so the byte-for-byte fixture check
 also passes on Windows.
 
+## Releases
+
+A release is a GitHub pre-release built by
+[`release.yml`](../.github/workflows/release.yml) from a pushed tag
+([REL-01](tickets/REL-01.md)). Nothing else starts that workflow. To release
+the workspace version, tag a commit that is on `main`:
+
+```bash
+git tag v0.1.0 origin/main && git push origin v0.1.0
+```
+
+A tag `v<version>-rc.<N>` releases the same version as a dry run. The workflow
+stops before building unless the tag, with any `-rc.N` suffix removed, equals
+`v` followed by the `version` of `[workspace.package]` in `Cargo.toml`; its
+publish job refuses a tagged commit that is not on `main`. Then:
+
+1. On `ubuntu-22.04` (glibc 2.35) and `windows-2022` it runs the workspace
+   tests, builds both binaries in release mode, packs
+   `apiforge-<tag>-x86_64-unknown-linux-gnu.tar.gz` and
+   `apiforge-<tag>-x86_64-pc-windows-msvc.zip`, compares each with
+   `packaging/manifest-linux.txt` or `manifest-windows.txt`, and runs
+   `packaging/mcp-smoke.py` against the `apiforge` binary of the extracted
+   archive: `initialize`, `tools/list` with the tools of
+   `crates/apiforge-cli/tests/mcp.rs`, exit 0 at EOF.
+2. On Linux it builds `apiforge-desktop-<tag>-x86_64.AppImage` from an
+   `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon,
+   `LICENSE`, the font licences and the libraries of
+   `packaging/appimage-libraries.txt`, which the binary finds through its
+   RUNPATH (`patchelf`); the AppImage does not set `LD_LIBRARY_PATH`.
+   Packed by appimagetool 1.9.1 with the type2 runtime 20251108; both are
+   downloaded by their release URLs and checked against the SHA-256 in the
+   workflow.
+3. On `ubuntu-24.04` it starts the AppImage with `--version`, `--check` and
+   `--screenshot` (`packaging/appimage-window.sh`), once on the runner and
+   once in a bare `ubuntu:24.04` container with only `libfuse2t64`, `xvfb`,
+   `mesa-vulkan-drivers` and `libvulkan1`, and validates its desktop file.
+4. Only when every job above has passed, the publish job writes
+   `SHA256SUMS.txt`, checks that the four asset names carry the tag, and
+   creates the pre-release with notes generated from the merged pull
+   requests, followed by the sums. It is the only job with write
+   permission.
+
+A failed job publishes nothing; delete the tag, fix, and tag again. Changes to
+`packaging/` run `python3 -I packaging/test_release.py`, which the workflow
+also runs first.
+
+The application icon is `packaging/icon/apiforge.svg`. Its PNGs are rendered
+once and committed, so no build needs an SVG renderer: resvg 0.48.1
+(`cargo install resvg --version =0.48.1 --locked`), with the bundled Adwaita
+Mono as its only font so that the result does not depend on the fonts
+installed:
+
+```bash
+for size in 16 32 48 64 128 256 512; do
+  resvg --skip-system-fonts \
+    --use-font-file crates/apiforge-desktop/assets/fonts/AdwaitaMono-Regular.ttf \
+    --monospace-family 'Adwaita Mono' -w "$size" -h "$size" \
+    packaging/icon/apiforge.svg "packaging/icon/apiforge-$size.png"
+done
+```
+
+The window carries the 256 px image on Linux; the AppImage uses it for its
+launcher entry.
+
 ## Running a scenario from the command line
 
 ```bash
@@ -243,7 +307,7 @@ Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
 Each tool names a document by its registered path; `check_text` and
 `create_document` also take the path a new document would have. A read tool
 opens the saved project read-only for each call and writes nothing, not even
-`.apiforge/local`; the three write tools work through the agent session below.
+`.apiforge/local`; the four write tools work through the agent session below.
 
 | Tool | Input | Result |
 | --- | --- | --- |
@@ -256,6 +320,7 @@ opens the saved project read-only for each call and writes nothing, not even
 | `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `replayed` for a repeated `request_id`; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
+| `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote`, `changed`, `replayed` |
 | `finish_editing` | — | `finished`: whether an agent session ended and released the project |
 
 `check_text` checks a proposed text without saving it, while `run` executes
@@ -299,8 +364,8 @@ exit code 2.
 
 ### The agent session
 
-The first call of `write_source` or `create_document` takes the project's
-writer lock for an agent session
+The first call of `write_source`, `create_document` or `publish` takes the
+project's writer lock for an agent session
 ([ADR 0014](decisions/0014-agent-sessions.md)): the holder file names role
 `agent` and the client's name from `initialize` or the request metadata, and
 a window opened meanwhile observes. The server keeps the lock across calls,
@@ -326,10 +391,35 @@ saved project afresh under that lock.
   `handle_exists`, `path_rejected` or `invalid_text` (a header of another
   kind, or errors, with the diagnostics). The source, its registry entry and
   its checkpoint commit in one transaction, one generation.
+- `publish` publishes the saved working component, never a text in the
+  call: the same transaction as *Publish* in the window writes
+  `.apiforge/revisions/<component id>/<n>.afs` with the next unused `n`, its
+  registry entry and checkpoint, and advances the working document's base
+  revision; nothing existing is overwritten. A different hash on disk is
+  `stale_source` with the current `details.source_sha256`; a scenario is
+  `not_a_component`; a component with errors `invalid_text` with the
+  diagnostics, one over 1 MiB `too_large`; an unreadable checkpoint
+  `invalid_checkpoint`; a saved
+  component holding a known secret value `secret_in_source`. Canonical
+  printing drops a comment that belongs to no statement, so such a
+  component is `comments_would_be_lost` with `details.comments` (line,
+  column, text) until the model calls again with `accept_comment_loss: true`
+  and the same hash; the consent holds for that call and that hash only.
+- A `publish` with a `request_id` this server has answered returns the
+  recorded result with `replayed: true` and publishes nothing. The server
+  keeps the last 64 in memory: the same id for another path or hash is
+  `invalid_inputs`, and an id whose result was dropped is `unknown_outcome`
+  for the next 1 024 dropped ids, after which it is unknown again.
+  Unlike a live run's, a publication's id is not written to
+  `.apiforge/local/agent-requests.json`, so a restarted server knows none of
+  them — `project_overview` lists every revision with its `source_sha256`,
+  which tells whether a lost publication happened. As for a live run, an id
+  is at most 256 bytes (`too_large`) and never a known secret value
+  (`secret_in_text`).
 - A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
   each call) is `secret_in_text`, the value never repeated.
-- While a window holds the project the write asks it to hand the project
-  over (below). A window with unsaved work keeps it: `handover_refused` with
+- While a window holds the project the write, `publish` included, asks it
+  to hand the project over (below). A window with unsaved work keeps it: `handover_refused` with
   `details.reason` *the window has unsaved work*. A window that has not
   answered within 30 seconds is `handover_pending`, and a window without a
   channel (an older build) is `held_by_window`. Another process, an agent or
@@ -484,7 +574,8 @@ unregistered path is `resource_not_found` with `data.code`
   not, since a live run sends requests and writes the journal: it is
   `destructiveHint: true`, `openWorldHint: true` and not idempotent;
   `write_source` is `destructiveHint: true` and `idempotentHint: true`,
-  `create_document` neither, `finish_editing` only idempotent. A result carries
+  `create_document` and `publish` neither, `finish_editing` only
+  idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
 - A call that could not do what was asked is `isError: true` with
   `structuredContent` `{ code, message, wrote, details }`. The codes form a
@@ -505,8 +596,11 @@ unregistered path is `resource_not_found` with `data.code`
   A live run adds `held_by_window`, `held_by_other` and `unknown_outcome`.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
   `handover_refused`, `handover_pending`, `held_by_other`, `secret_in_text`,
-  `path_exists`, `handle_exists` and `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
-  only for a commit that failed after its activation.
+  `path_exists`, `handle_exists` and `invalid_checkpoint`; `publish` also
+  `not_a_component`, `comments_would_be_lost`, `secret_in_source` and, for a
+  `request_id`, `invalid_inputs`, `too_large` and `unknown_outcome`; `wrote`
+  is `false` for a refusal and `"unknown"` only for a commit that failed
+  after its activation.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
   `.apiforge/diagram.json` or a Windows reserved name is `path_rejected`.

@@ -1,0 +1,7 @@
+#!/bin/sh
+# The AppImage's entry point (REL-01). The window finds the X11 keyboard and
+# cursor libraries of usr/lib through its own RUNPATH ($ORIGIN/../lib, set
+# when the AppImage is built), so nothing here changes the environment that
+# the processes it starts, such as a browser opened by xdg-open, inherit.
+here="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+exec "$here/usr/bin/apiforge-desktop" "$@"
