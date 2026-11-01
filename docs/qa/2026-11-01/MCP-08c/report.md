@@ -173,8 +173,14 @@ answers `stale_source` (it was based on the version before the person's
 save) instead of only "not a hand-over code" — a stronger form of the same
 check, made after the implementation; the held-draft case of *Save all*
 has a test; this report's criterion 1 row and the held-draft note; a doc
-comment of `save_all_then`. Nothing drawn changed; the captures were not
-retaken.
+comment of `save_all_then`. Nothing drawn changed; the captures (from
+`d245c9c`) were not retaken.
+
+Verification on `bb8b722` (review round 1), all exit 0: `cargo fmt --all --
+--check`; `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+`cargo test --workspace --all-targets --locked`: 1 318 passed, 0 failed,
+34 ignored (the two new tests); `cargo run -p apiforge-convert-v1 --locked
+-- --fixtures --check`.
 
 ## Regression smoke list
 
