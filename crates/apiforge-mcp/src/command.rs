@@ -361,7 +361,8 @@ impl Link {
         let reader = self.reader;
         let _ = self.runtime.block_on(reader);
         drop(self.writer);
-        self.runtime.shutdown_timeout(handover::SEND);
+        // Nothing is left on the runtime: the reader has ended.
+        self.runtime.shutdown_background();
     }
 }
 
