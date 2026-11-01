@@ -69,9 +69,12 @@ seconds, so that a live run is in progress long enough to be seen.
    `GET`), so the clean window hands the project over; read the overview.
 4. *Project → Project settings…*; tick the box; read the overview.
 
-Expected: before the hand-over the overview says `no --allow-live` (it
-never connects to a window); the live run is refused with *live requests
-are off in this project's settings* and the window keeps the project;
+Expected: before the hand-over the overview says `no --allow-live`: no
+window is connected to this server yet, and the overview never connects to
+the one that holds the project (MCP-12), so it reports the flag. The live
+run does connect to that window to hear its consent before asking for the
+project, so it is refused with *live requests are off in this project's
+settings* and the window keeps the project;
 after the hand-over the overview says `off in the project's settings`; the
 dialog opens while observing with only the toggle, *Close* and *Cancel*
 enabled, no footer note and no *Apply settings*; ticking shows *On — …*,
@@ -174,14 +177,35 @@ report.
 - The *Live allowed* badge with the window as the writer (not observing) in
   the release binary; the test covers both.
 - A window of an older build, which says no consent when a connection
-  opens: the server then waits two seconds and lets the flag decide. No
-  test runs two builds.
+  opens: the server waits two seconds and refuses the live run, as for a
+  window whose box is off. No test runs two builds.
 - Two windows on one project with different consents: the newest one heard
   decides; no test.
 - The design-review harness view `review_mcp09_live_toggle` was not
   rendered; the release captures above were compared with M3 instead.
 - Keyboard-only operation of the toggle and a screen reader session.
 - Windows, beyond the CI test run.
+
+## Review round 1
+
+The automated review of #189 (cubic, 13 points) and the first Windows CI run
+are answered on the pull request. Fixed: a connected window that has not
+said its consent counts as off, never as the start flag, on the server's
+slot and in a live run's question before the hand-over (new test
+`mcp09_a_window_that_has_not_said_its_consent_is_off`); the window reads
+`agent-consent.json` again once a second, so a change made in another
+window is followed; a file written by a newer version is never overwritten
+and a choice that cannot be written lasts for the window (unit tests in
+`consent.rs`); Ctrl+Enter applies nothing in a dialog without an apply
+button; criterion 1's folder snapshot lists the writer's lock file by its
+length (Windows cannot read a held lock file); the ticket cites the owner's
+decision of 2026-10-28 by date, without a link; ADR 0014, the development
+guide and this report say the above. Nothing drawn changed; the captures
+were not retaken. Verification of the round: `cargo fmt --all -- --check`;
+`cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo
+test --workspace --all-targets --locked`: 1 349 passed, 0 failed, 37
+ignored; `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`;
+all exit 0.
 
 ## Regression smoke list
 

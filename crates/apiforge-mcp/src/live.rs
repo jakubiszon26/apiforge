@@ -31,9 +31,10 @@ pub enum Permission {
     Window { live: bool },
 }
 
-/// The server's current permission, behind a `watch` channel: the control
-/// channel writes `Window` from what a connected window says, and the loss
-/// of every window resets the slot to the flag (MCP-09). No tool writes it.
+/// The server's current permission, behind a `watch` channel: while any
+/// window is connected over the control channel the slot is `Window`, the
+/// newest consent heard (off until one is), and when the last window goes
+/// it is the flag again (MCP-09). No tool writes it.
 #[derive(Clone, Debug)]
 pub struct LivePermission {
     flag: bool,

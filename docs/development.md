@@ -559,8 +559,9 @@ allowed, and the model cannot allow them: the person starts the server with
 `claude mcp add apiforge -- /path/to/apiforge mcp --allow-live`. Without it a
 live run is `live_disabled` (*live requests are not enabled on this server*)
 and sends nothing. The server keeps the current permission in one slot:
-the flag while no window is connected, and a connected window's per-project
-setting otherwise (MCP-09, *live requests are off in this project's
+the flag while no window is connected; otherwise the connected windows'
+per-project setting, the newest one heard, off while a connected window has
+not said one yet (MCP-09, *live requests are off in this project's
 settings*); the flag applies again when the last window goes.
 
 **The window's setting.** *Project settings → Agent → Allow the MCP agent to
@@ -572,8 +573,9 @@ shown as *Live allowed* in the header while on. The window says it over the
 control channel as soon as a connection opens and on every change; no tool,
 resource or server message sets it. A live run that would ask a window for
 the project hears that window's setting first: when it is off the run is
-`live_disabled` and the window keeps the project; when the window says
-nothing within two seconds the flag decides. The overview reports the flag
+`live_disabled` and the window keeps the project, as when the window says
+nothing within two seconds. The window reads the file again once a second,
+so a change made in another window is followed. The overview reports the flag
 until a window is connected, since it never connects to one. The server
 tells connected windows `run { mode: live }` when a live run starts and ends,
 so a box unticked meanwhile says *A live run is in progress; it will finish.

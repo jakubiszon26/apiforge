@@ -14,10 +14,13 @@
 //! stderr by kind, never quoted.
 //!
 //! A window says the person's live consent as soon as a connection opens
-//! and again on every change (MCP-09). The newest consent of a connected
-//! window decides live runs; with no window connected the start flag does.
-//! A live run that would ask a window for the project hears that consent
-//! first, and a window that says no is not asked: it keeps the project.
+//! and again on every change (MCP-09). While any window is connected the
+//! windows decide live runs, the newest consent heard first, and a window
+//! that has not said one yet counts as off; with no window connected the
+//! start flag does. A live run that would ask a window for the project hears
+//! that consent first, and a window that says no, or nothing within two
+//! seconds, is not asked: it keeps the project. The flag never decides for a
+//! connected window.
 use crate::live::{LivePermission, Permission};
 use apiforge_channel::{Connection, Endpoint, Listener, Message, Reader, Received, Writer};
 use std::{
@@ -34,8 +37,8 @@ use tokio::{runtime::Handle, task::JoinHandle};
 const ANSWER: Duration = Duration::from_secs(30);
 /// How long one message may take to reach a window before it is dropped.
 const SEND: Duration = Duration::from_secs(2);
-/// How long a live run waits for a window's consent before the start flag
-/// decides: a window says it as soon as the connection opens.
+/// How long a live run waits for a window's consent; a window says it as
+/// soon as the connection opens, and one that does not is taken as off.
 const CONSENT: Duration = Duration::from_secs(2);
 
 /// What a window answered when it was asked for the project.
@@ -43,8 +46,8 @@ pub(crate) enum Answer {
     /// The window let the project go; the connection stays to observe. The
     /// consent it said on the way, if any.
     Granted(Connection, Option<bool>),
-    /// A live run's request was not made: the window's consent, or the
-    /// start flag when the window said none, does not allow it.
+    /// A live run's request was not made: the window's consent is off, or
+    /// it said none in time.
     LiveDisabled(Permission),
     Refused(String),
     /// Nobody answered in time; nothing was decided.
@@ -59,7 +62,8 @@ struct Link {
     id: u64,
     writer: Arc<tokio::sync::Mutex<Writer>>,
     reader: JoinHandle<()>,
-    /// The window's last consent, and when it was heard, for the newest.
+    /// The window's last consent, and when it was heard, for the newest;
+    /// `None` until it says one, which counts as off.
     consent: Option<(u64, bool)>,
 }
 
@@ -164,7 +168,6 @@ impl Hub {
             client,
             pid: std::process::id(),
         };
-        let flag = self.permission.get().is_some_and(LivePermission::flag);
         self.handle.block_on(async move {
             let asked = tokio::time::timeout(ANSWER, async {
                 let mut connection = apiforge_channel::connect(&endpoint, owner_uid).await?;
@@ -175,15 +178,10 @@ impl Hub {
                         Ok(heard) => heard?,
                         Err(_) => None,
                     };
-                    let permission = match consent {
-                        Some(live) => Permission::Window { live },
-                        None => Permission::Flag(flag),
-                    };
-                    if matches!(
-                        permission,
-                        Permission::Window { live: false } | Permission::Flag(false)
-                    ) {
-                        return Ok(Answer::LiveDisabled(permission));
+                    // A connected window decides; one that says nothing in
+                    // time has not allowed anything.
+                    if consent != Some(true) {
+                        return Ok(Answer::LiveDisabled(Permission::Window { live: false }));
                     }
                 }
                 connection.writer.send(&request).await?;
@@ -336,15 +334,22 @@ impl Hub {
     }
 
     /// Sets the live permission from the connected windows: the newest
-    /// consent among them, or the start flag when none has said one. Called
-    /// with `links` locked, so changes apply in order.
+    /// consent among them, off while none has said one yet, and the start
+    /// flag only when no window is connected. Called with `links` locked, so
+    /// changes apply in order.
     fn decide(&self, links: &[Link]) {
         let Some(permission) = self.permission.get() else {
             return;
         };
-        match links.iter().filter_map(|link| link.consent).max() {
-            Some((_, live)) => permission.set_window(live),
-            None => permission.window_disconnected(),
+        if links.is_empty() {
+            permission.window_disconnected();
+        } else {
+            let live = links
+                .iter()
+                .filter_map(|link| link.consent)
+                .max()
+                .is_some_and(|(_, live)| live);
+            permission.set_window(live);
         }
     }
 

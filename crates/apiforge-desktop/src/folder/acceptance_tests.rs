@@ -1582,8 +1582,9 @@ mod mcp08a {
     }
 
     /// The carry-over from the review of #106: *Project settings* opens with
-    /// every control disabled and *Environment* with its public part
-    /// disabled while observing; neither leaves configuration behind that
+    /// the project's own controls disabled (since MCP-09 the agent's toggle
+    /// and *Cancel* stay enabled and *Apply settings* is hidden) and
+    /// *Environment* with its public part disabled while observing; neither leaves configuration behind that
     /// would stop the take-back.
     #[test]
     fn settings_open_disabled_while_observing_and_the_take_back_still_works() {
@@ -3986,7 +3987,9 @@ mod mcp09 {
         assert_eq!(report["ended_by"], "completed", "{result}");
     }
 
-    /// Every file under `root`, by relative path.
+    /// Every file under `root`, by relative path. The writer's lock file
+    /// is always empty and, on Windows, cannot be read while it is held: it
+    /// is listed by its length.
     fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
             for entry in fs::read_dir(directory).unwrap() {
@@ -3994,10 +3997,12 @@ mod mcp09 {
                 if path.is_dir() {
                     walk(root, &path, found);
                 } else if path.is_file() {
-                    found.insert(
-                        path.strip_prefix(root).unwrap().to_owned(),
-                        fs::read(&path).unwrap(),
-                    );
+                    let bytes = if path.ends_with(".apiforge/local/project.lock") {
+                        fs::metadata(&path).unwrap().len().to_le_bytes().to_vec()
+                    } else {
+                        fs::read(&path).unwrap()
+                    };
+                    found.insert(path.strip_prefix(root).unwrap().to_owned(), bytes);
                 }
             }
         }
@@ -4181,6 +4186,40 @@ mod mcp09 {
             json!({ "allowed": true, "source": "--allow-live" }),
         );
         assert_sent(&server.call("run", json!({ "path": SCENARIO, "live": true })));
+        let ended = server.close();
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+    }
+
+    /// Criterion 4, review of #189: a connection to the server that has not
+    /// said a consent yet counts as off, never as the flag; when it goes the
+    /// flag applies again.
+    #[test]
+    fn mcp09_a_window_that_has_not_said_its_consent_is_off() {
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut server = agent_with(root, "Claude Code", &[(ALLOW_LIVE, "1")]);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": super::mcp08b::commented(&text, "Mine."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let flag = json!({ "allowed": true, "source": "--allow-live" });
+        assert_eq!(live_requests(&mut server), flag);
+        let endpoint = super::mcp08b::holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let silent = connect(&endpoint).unwrap();
+        await_live_requests(
+            None,
+            &mut server,
+            Instant::now(),
+            json!({ "allowed": false, "source": "off in the project's settings" }),
+        );
+        let refused = server.call("run", json!({ "path": SCENARIO, "live": true }));
+        assert_refused_in_settings(&refused);
+        drop(silent);
+        await_live_requests(None, &mut server, Instant::now(), flag);
         let ended = server.close();
         assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
     }

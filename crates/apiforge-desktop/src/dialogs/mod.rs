@@ -264,7 +264,10 @@ impl Chrome<'_> {
             ctx.input_mut(|input| {
                 if input.consume_key(Modifiers::NONE, Key::Escape) {
                     action = Action::Cancel;
-                } else if ready && input.consume_key(Modifiers::COMMAND, Key::Enter) {
+                } else if ready
+                    && !self.apply_label.is_empty()
+                    && input.consume_key(Modifiers::COMMAND, Key::Enter)
+                {
                     action = Action::Apply;
                 }
             });

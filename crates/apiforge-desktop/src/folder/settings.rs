@@ -22,8 +22,10 @@ impl FolderApp {
     }
 
     /// The channel says the open project's consent to every server it is
-    /// connected to, and to each that connects; only a change is sent.
-    pub(super) fn say_consent(&self) {
+    /// connected to, and to each that connects; only a change is sent. A
+    /// change another window made is followed within a second.
+    pub(super) fn say_consent(&mut self) {
+        self.consent.follow();
         self.handover.channel.set_consent(self.live_allowed());
     }
 

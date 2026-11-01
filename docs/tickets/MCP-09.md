@@ -52,8 +52,8 @@ settings* with the *Agent* section in observer mode, and the header with the
    enabled; the footer *Apply changes, then use Save all…* and *Apply
    settings* are hidden (owner decision of 2026-10-27 on M3). A ticked box
    applies at once and needs no save. *Cancel* also stays enabled, as in M3,
-   and closes the dialog without changes (owner decision of 2026-10-28 on
-   [#93](https://github.com/jakubiszon26/apiforge/issues/93#issuecomment-6471532334)).
+   and closes the dialog without changes (owner decision of 2026-10-28,
+   recorded on #93).
 3. With the agent connected and the box off, `run(live: true)` is
    `live_disabled` with the settings message; ticking the box — no restart
    of the window or the server — makes the next `run(live: true)` send; the
