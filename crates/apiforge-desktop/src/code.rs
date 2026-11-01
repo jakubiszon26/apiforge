@@ -65,6 +65,14 @@ impl Default for Context<'_> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The lines the agent's last commit changed, counted from one, marked
+    /// in the gutter (MCP-16 mock-up: placeholder state for the review).
+    pub static MOCK_CHANGED: std::cell::Cell<Option<(usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+}
+
 /// What the editor did this frame.
 ///
 /// Going to a block's definition and renaming it are not here: both change what
@@ -471,6 +479,10 @@ impl CodeEditor {
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
         let marked = marked_lines(text, context.diagnostics);
+        #[cfg(test)]
+        let changed = MOCK_CHANGED.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let changed: Option<(usize, usize)> = None;
         // The galley's own rows are walked rather than the text's lines. Asking
         // the galley where a line begins scans the text up to it and then every
         // row before it, which a long scenario pays once per line and per frame:
@@ -493,6 +505,18 @@ impl CodeEditor {
                     font.clone(),
                     if flagged { theme::DANGER } else { theme::MUTED },
                 );
+                // A line the agent changed: an accent bar at the gutter's
+                // right edge, clear of the diagnostic's dot and the number.
+                if changed.is_some_and(|(first, last)| (first..=last).contains(&number)) {
+                    painter.rect_filled(
+                        Rect::from_min_max(
+                            pos2(rect.right() - 4.0, top),
+                            pos2(rect.right() - 1.0, top + row_height),
+                        ),
+                        0.0,
+                        theme::ACCENT,
+                    );
+                }
                 if flagged {
                     painter.circle_filled(
                         pos2(rect.left() + 4.0, top + row_height * 0.5),

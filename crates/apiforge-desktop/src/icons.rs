@@ -41,6 +41,8 @@ pub enum Icon {
     Code,
     Folder,
     File,
+    /// A push pin, for following the agent (MCP-16 mock-up).
+    Pin,
 }
 
 impl Icon {
@@ -278,6 +280,19 @@ impl Icon {
                     ],
                     stroke,
                 ));
+            }
+            Self::Pin => {
+                // Cap, body narrowing to a collar, and the needle.
+                line((8.0, 3.5), (16.0, 3.5));
+                path(&[
+                    (10.0, 3.5),
+                    (10.0, 9.5),
+                    (6.5, 14.0),
+                    (17.5, 14.0),
+                    (14.0, 9.5),
+                    (14.0, 3.5),
+                ]);
+                line((12.0, 14.0), (12.0, 21.0));
             }
             Self::File => {
                 path(&[

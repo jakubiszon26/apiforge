@@ -27,6 +27,28 @@ pub(super) const TAKE_BACK: &str = "Take back";
 /// A client names itself; a longer name is cut so the bar keeps its line.
 const MAX_CLIENT_CHARS: usize = 40;
 
+/// MCP-16's toggle in the bar (mock-up).
+pub(super) const FOLLOW: &str = "Follow";
+
+/// What the review views of MCP-16 put in the bar that `main` cannot show
+/// yet: MCP-10's run status (a placeholder string), the *Follow* toggle,
+/// and *Take back* without a server on the channel (throwaway mock-up).
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(super) struct MockBar {
+    pub status: Option<String>,
+    pub change: Option<String>,
+    pub short: Option<String>,
+    pub follow: Option<bool>,
+    pub take_back: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static MOCK_BAR: std::cell::RefCell<Option<MockBar>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// The holder and the bar's text, formatted once per description rather
 /// than on every frame.
 pub(super) struct Observed {
@@ -186,6 +208,30 @@ impl FolderApp {
             _ if !observing && self.handover.refused => (REFUSED.to_owned(), None, None),
             _ => return,
         };
+        #[cfg(test)]
+        let mock = MOCK_BAR.with(|mock| mock.borrow().clone());
+        #[cfg(not(test))]
+        let mock: Option<()> = None;
+        #[allow(unused_mut)]
+        let (mut last_change, mut take_back) = (last_change, take_back);
+        #[allow(unused_mut)]
+        let (mut status, mut short, mut follow): (
+            Option<String>,
+            Option<String>,
+            Option<bool>,
+        ) = (None, None, None);
+        #[cfg(test)]
+        if let Some(mock) = mock.filter(|_| observing) {
+            last_change = mock.change.or(last_change);
+            if mock.take_back {
+                take_back = Some(true);
+            }
+            status = mock.status;
+            short = mock.short;
+            follow = mock.follow;
+        }
+        #[cfg(not(test))]
+        let _ = mock;
         let mut taken = false;
         let response = egui::Panel::bottom("folder-holder")
             .exact_size(BAR_HEIGHT)
@@ -205,9 +251,41 @@ impl FolderApp {
                         taken = ui
                             .add_enabled(enabled, widgets::action(Icon::Undo, TAKE_BACK).compact())
                             .clicked();
+                        ui.add_space(if follow.is_some() {
+                            theme::SPACE_SM
+                        } else {
+                            theme::SPACE_LG
+                        });
+                    }
+                    if let Some(pressed) = follow {
+                        // MCP-16 decision 5: left of *Take back*, pressed
+                        // while following.
+                        ui.add(
+                            widgets::action(Icon::Pin, FOLLOW)
+                                .compact()
+                                .selected(pressed),
+                        )
+                        .on_hover_text(if pressed {
+                            "Follows the agent to every file it changes; click to stay where you are"
+                        } else {
+                            "Click to follow the agent again"
+                        });
                         ui.add_space(theme::SPACE_LG);
                     }
-                    if let Some(change) = last_change {
+                    // MCP-10's status whole; the holder gives way to it.
+                    let status_shown = status.is_some();
+                    if let Some(status) = status {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(status)
+                                    .size(theme::FONT_META)
+                                    .color(theme::MUTED),
+                            )
+                            .truncate(),
+                        );
+                        ui.add_space(theme::SPACE_LG);
+                    }
+                    if let Some(change) = last_change.filter(|_| !status_shown) {
                         // At most half the bar: a long file name is cut,
                         // whole on hover, and the holder keeps its half.
                         let room = ui.available_width() / 2.0;
@@ -225,14 +303,22 @@ impl FolderApp {
                         ui.add_space(theme::SPACE_LG);
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.add(
+                        // Beside a status the full text goes for its short
+                        // form when it does not fit (MCP-10), whole on hover.
+                        let shortened = short.filter(|_| {
+                            status_shown && text_width(ui, &text) > ui.available_width()
+                        });
+                        let response = ui.add(
                             egui::Label::new(
-                                RichText::new(text)
+                                RichText::new(shortened.as_deref().unwrap_or(&text))
                                     .size(theme::FONT_META)
                                     .color(theme::WARNING),
                             )
                             .truncate(),
                         );
+                        if shortened.is_some() {
+                            response.on_hover_text(&text);
+                        }
                     });
                 });
             })
@@ -250,6 +336,15 @@ impl FolderApp {
             self.request_take_back();
         }
     }
+}
+
+/// The width `text` takes in the bar's font, uncut.
+fn text_width(ui: &egui::Ui, text: &str) -> f32 {
+    let job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(theme::FONT_META), theme::WARNING),
+    );
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job)).size().x
 }
 
 /// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp* for a

@@ -4507,3 +4507,128 @@ mod mcp09 {
         }
     }
 }
+
+// ----- MCP-16 mock-up: the window follows the agent (throwaway) --------------
+
+/// Design review captures f1–f4 of `docs/tickets/MCP-16.md`. The bar's
+/// status (MCP-10, not merged), *Follow*, *Take back* without a server and
+/// the gutter marks are placeholder state; the observer itself is real: an
+/// agent's session holds the project.
+mod mcp16_mock {
+    use super::*;
+    use crate::testing::{MINIMUM, capture};
+    use apiforge_project::{FixedPlacer, Holder, HolderRole};
+    use chrono::TimeZone;
+    use holder::{MOCK_BAR, MockBar};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "components/product.afs";
+    const RUNNING: &str = "Agent: running promotion-and-cart-price.afs (simulation)…";
+    const PASSED: &str = "Agent: promotion-and-cart-price.afs passed · 18 steps · 12:58";
+    const SAVED: &str = "10:43 · promotion-and-cart-price.afs saved";
+
+    fn agent_holds(root: &std::path::Path) -> ProjectSession {
+        let since = chrono::Local
+            .with_ymd_and_hms(2026, 11, 1, 10, 42, 11)
+            .single()
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        let holder = Holder::new(HolderRole::Agent, Some("Claude Code".into())).with_since(since);
+        ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &holder).unwrap()
+    }
+
+    fn document_at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn bar(status: Option<&str>, change: Option<&str>, follow: bool) -> MockBar {
+        MockBar {
+            status: status.map(str::to_owned),
+            change: change.map(str::to_owned),
+            short: Some("Claude Code · since 10:42".to_owned()),
+            follow: Some(follow),
+            take_back: true,
+        }
+    }
+
+    fn show(harness: &mut FolderHarness, path: &str, mode: &str) {
+        let id = document_at(harness, path);
+        harness.state_mut().as_mut().unwrap().activate_tab(&id);
+        settle(harness);
+        choose(harness, mode);
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp16_follow() {
+        let states: [(
+            &str,
+            egui::Vec2,
+            &str,
+            &str,
+            MockBar,
+            Option<(usize, usize)>,
+        ); 4] = [
+            (
+                "f1-following-code-960x540",
+                MINIMUM,
+                "Code",
+                SCENARIO,
+                bar(Some(RUNNING), None, true),
+                Some((12, 14)),
+            ),
+            (
+                "f2-unpinned-code-960x540",
+                MINIMUM,
+                "Code",
+                PRODUCT,
+                bar(None, Some(SAVED), false),
+                None,
+            ),
+            (
+                "f3-following-diagram-1600x1000",
+                WIDE,
+                "Diagram",
+                SCENARIO,
+                bar(Some(PASSED), None, true),
+                None,
+            ),
+            (
+                "f4-following-split-960x540",
+                MINIMUM,
+                "Split",
+                SCENARIO,
+                bar(Some(RUNNING), None, true),
+                Some((12, 14)),
+            ),
+        ];
+        for (name, size, mode, path, mock, changed) in states {
+            let directory = crate::testing::shop_project();
+            let root = directory.path();
+            let owner = agent_holds(root);
+            MOCK_BAR.with(|bar| *bar.borrow_mut() = Some(mock));
+            crate::code::MOCK_CHANGED.with(|lines| lines.set(changed));
+            let mut harness = folder_harness(root, size);
+            assert!(folder(&harness).observing(), "{name}: the window observes");
+            // A second tab open beside the scenario, as following opens one.
+            show(&mut harness, PRODUCT, mode);
+            show(&mut harness, path, mode);
+            capture(&mut harness, name, None);
+            MOCK_BAR.with(|bar| *bar.borrow_mut() = None);
+            crate::code::MOCK_CHANGED.with(|lines| lines.set(None));
+            drop(harness);
+            drop(owner);
+        }
+    }
+}

@@ -366,6 +366,9 @@ pub struct ActionButton<'a> {
     icon_only: bool,
     style: ButtonStyle,
     compact: bool,
+    /// A toggle that is pressed (MCP-16 mock-up): soft accent fill, accent
+    /// border and icon.
+    selected: Option<bool>,
 }
 
 pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
@@ -375,6 +378,7 @@ pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
         icon_only: false,
         style: ButtonStyle::Secondary,
         compact: false,
+        selected: None,
     }
 }
 
@@ -401,6 +405,11 @@ impl ActionButton<'_> {
     }
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+    /// A toggle button, pressed or released, announced with its state.
+    pub fn selected(mut self, pressed: bool) -> Self {
+        self.selected = Some(pressed);
         self
     }
 }
@@ -435,9 +444,18 @@ impl Widget for ActionButton<'_> {
         };
         let width = natural_width.min(ui.available_width()).max(height);
         let (rect, response) = ui.allocate_at_least(vec2(width, height), Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label)
+        response.widget_info(|| match self.selected {
+            Some(pressed) => egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                pressed,
+                self.label,
+            ),
+            None => {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), self.label)
+            }
         });
+        let pressed = self.selected == Some(true);
         if ui.is_rect_visible(rect) {
             // A disabled button must look disabled: it is painted here, so egui
             // does not fade it, and a full-strength accent reads as live.
@@ -458,6 +476,8 @@ impl Widget for ActionButton<'_> {
                 } else {
                     theme::ACCENT
                 }
+            } else if pressed {
+                theme::ACCENT_SOFT
             } else if engaged {
                 theme::FIELD
             } else {
@@ -465,6 +485,8 @@ impl Widget for ActionButton<'_> {
             };
             let border = if enabled && response.has_focus() {
                 Stroke::new(1.5, theme::ACCENT)
+            } else if pressed {
+                Stroke::new(1.0, theme::ACCENT)
             } else if self.style == ButtonStyle::Secondary || (!enabled && primary) {
                 Stroke::new(1.0, theme::BORDER)
             } else {
@@ -481,7 +503,9 @@ impl Widget for ActionButton<'_> {
             } else {
                 theme::TEXT
             };
-            let icon_color = if !primary && self.style != ButtonStyle::Danger {
+            let icon_color = if pressed && enabled {
+                theme::ACCENT
+            } else if !primary && self.style != ButtonStyle::Danger {
                 theme::MUTED
             } else {
                 color
