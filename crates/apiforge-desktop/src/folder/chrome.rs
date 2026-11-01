@@ -51,9 +51,25 @@ impl FolderApp {
             // (635 px), and the read-only and live badges, on every tab so
             // that the title keeps its width (KTLO-23 decision 6). A long
             // project name must not paint into the Code tab at 960 px.
-            let reserved = 650.0
-                + if read_only { 80.0 } else { 0.0 }
-                + if live_allowed { 80.0 } else { 0.0 };
+            // The badges reserve what they measure, so *Observing* and
+            // *Live allowed* together still leave the name its room at 960 px
+            // (MCP-09, mock-up M3).
+            let badge = |ui: &egui::Ui, text: &str| {
+                let font = egui::FontId::proportional(theme::FONT_META);
+                ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(text.to_owned(), font, theme::WARNING)
+                        .size()
+                        .x
+                }) + ui.spacing().item_spacing.x
+            };
+            let mut reserved = 650.0;
+            if read_only {
+                reserved += badge(ui, if observing { "Observing" } else { "Read-only" });
+            }
+            if live_allowed {
+                reserved += badge(ui, "Live allowed");
+            }
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
