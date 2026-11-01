@@ -4507,3 +4507,423 @@ mod mcp09 {
         }
     }
 }
+
+// ----- MCP-15: a live run from the command line asks the open window ---------
+
+/// `apiforge run --folder … --live` with the project open in this window
+/// (MCP-15, #182). The command runs as a process of its own: this test
+/// executable running only [`mcp15::command_process`], which calls the
+/// library function the `apiforge` binary calls (the spawned-helper
+/// exception of the testing process). Its harness prints a line of its own
+/// on stdout, which the tests ignore.
+mod mcp15 {
+    use super::mcp08b::{PRODUCT, SCENARIO, await_endpoint, await_until, contains, read_only};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_storage::project::HolderRole;
+    use serde_json::{Value, json};
+    use std::{
+        io::Read as _,
+        path::Path,
+        process::{Child, Command, ExitStatus, Stdio},
+        thread::JoinHandle,
+    };
+
+    /// Tells [`command_process`] which folder to run.
+    const FOLDER: &str = "APIFORGE_MCP15_TEST_FOLDER";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// Decision 1 A: the bar names the command as typed.
+    const COMMAND: &str = "apiforge run --live · since ";
+    const TAKE_BACK: &str = "Take back";
+    const OBSERVING: &str = "Observing";
+    const PROMPT: &str = "A command asks for this project";
+    const SENTENCE: &str =
+        "apiforge run --live wants to send live requests from this project. Unsaved work here:";
+    const SAVE_ALL: &str = "Save all and hand over";
+    const NOT_NOW: &str = "Not now";
+    const HANDED_OVER: &str = "The open API Forge window handed the project over for this run";
+    const KEPT: &str = "The window kept the project (you chose to keep editing); nothing was sent";
+    /// The bound of criteria 1 and 7: the window is the writer this soon
+    /// after the command's end.
+    const BOUND: Duration = Duration::from_secs(2);
+    /// A scenario that passes against the demo API, with a cleanup.
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    /// The same against a product the demo API does not have.
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+
+    /// `apiforge run --folder <FOLDER> --scenario <SCENARIO> --live`, as the
+    /// binary runs it, with the binary's exit code.
+    #[test]
+    #[ignore = "launched by the MCP-15 tests as the apiforge run --live command"]
+    fn command_process() {
+        let Some(folder) = std::env::var_os(FOLDER) else {
+            return;
+        };
+        let outcome =
+            apiforge_mcp::command::run_live(Path::new(&folder), SCENARIO, None, &mut |runs, _| {
+                for run in runs {
+                    eprintln!("A live run of \"{}\" did not finish", run.scenario_name);
+                }
+            });
+        let code = match outcome {
+            Ok(outcome) => {
+                println!("{}", outcome.report.status.label());
+                i32::from(outcome.report.status != RunStatus::Passed)
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
+
+    /// The command, running.
+    struct Running {
+        child: Child,
+        stderr: Option<JoinHandle<String>>,
+    }
+
+    /// How the command ended.
+    struct Ended {
+        status: ExitStatus,
+        /// When the window first saw the process gone.
+        at: Instant,
+        stderr: String,
+    }
+
+    impl Running {
+        fn start(root: &Path) -> Self {
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "folder::tests::acceptance_tests::mcp15::command_process",
+                    "--nocapture",
+                    "--quiet",
+                    "--test-threads=1",
+                ])
+                .env(FOLDER, root)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut stderr = child.stderr.take().unwrap();
+            let stderr = std::thread::spawn(move || {
+                let mut text = String::new();
+                let _ = stderr.read_to_string(&mut text);
+                text
+            });
+            Self {
+                child,
+                stderr: Some(stderr),
+            }
+        }
+
+        /// Steps the window in real time until the command ends, calling
+        /// `frame` after every frame.
+        fn wait(
+            mut self,
+            harness: &mut FolderHarness,
+            mut frame: impl FnMut(&FolderHarness),
+        ) -> Ended {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let status = loop {
+                harness.step();
+                frame(harness);
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(Instant::now() < deadline, "the command never ended");
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            let at = Instant::now();
+            let stderr = self.stderr.take().unwrap().join().unwrap();
+            Ended { status, at, stderr }
+        }
+
+        /// Kills the command, as Ctrl+C does.
+        fn kill(mut self) -> Instant {
+            self.child.kill().unwrap();
+            self.child.wait().unwrap();
+            Instant::now()
+        }
+    }
+
+    impl Drop for Running {
+        /// A test that fails half-way leaves no command holding a project.
+        fn drop(&mut self) {
+            if self.child.try_wait().ok().flatten().is_none() {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+    }
+
+    /// The demo shop pointed at `base_url`, its scenario `scenario`.
+    fn live_shop(base_url: &str, scenario: &str) -> tempfile::TempDir {
+        let directory = shop();
+        let root = directory.path();
+        let manifest = root.join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!(base_url);
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        fs::write(root.join(SCENARIO), scenario).unwrap();
+        directory
+    }
+
+    fn api() -> apiforge_demo_api::DemoServerHandle {
+        apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap()
+    }
+
+    /// What the window showed while the command held the project.
+    #[derive(Default)]
+    struct Shown {
+        /// A frame showed the command's bar, the badge and the pause.
+        bar: bool,
+        /// A frame showed *Take back*.
+        take_back: bool,
+    }
+
+    impl Shown {
+        fn look(&mut self, harness: &FolderHarness) {
+            if folder(harness).observing() {
+                self.bar |= contains(harness, COMMAND)
+                    && contains(harness, PAUSED)
+                    && has_label(harness, OBSERVING);
+            }
+            self.take_back |= has_label(harness, TAKE_BACK);
+        }
+    }
+
+    /// The document registered at `path`.
+    fn at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    /// Unsaved text in the scenario and the component; returns both texts.
+    fn leave_unsaved_code(harness: &mut FolderHarness, root: &Path) -> (String, String) {
+        let scenario = at(harness, SCENARIO);
+        let product = at(harness, PRODUCT);
+        let scenario_text = format!(
+            "{}// typed by the person\n",
+            fs::read_to_string(root.join(SCENARIO)).unwrap()
+        );
+        let product_text = format!(
+            "{}// typed by the person\n",
+            fs::read_to_string(root.join(PRODUCT)).unwrap()
+        );
+        let session = app(harness).session.as_mut().unwrap();
+        session
+            .edit_source(&scenario, &scenario_text, CODE)
+            .unwrap();
+        session.edit_source(&product, &product_text, CODE).unwrap();
+        settle(harness);
+        (scenario_text, product_text)
+    }
+
+    /// Steps the window until the prompt shows.
+    fn await_prompt(harness: &mut FolderHarness, running: &mut Running) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !has_label(harness, PROMPT) {
+            assert!(
+                running.child.try_wait().unwrap().is_none(),
+                "the command ended before the window asked"
+            );
+            assert!(Instant::now() < deadline, "the window never asked");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Criterion 1: a clean window hands the project over at once; the bar
+    /// names the command, the badge says *Observing*, *Take back* is never
+    /// offered; the run passes; within two seconds of the command's exit
+    /// the window is the writer again and a save there succeeds.
+    #[test]
+    fn mcp15_criterion_1_a_clean_window_hands_over_and_takes_the_project_back() {
+        let api = api();
+        let directory = live_shop(&api.base_url(), PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut shown = Shown::default();
+        let ended = Running::start(root).wait(&mut harness, |harness| shown.look(harness));
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+        assert!(ended.stderr.contains(HANDED_OVER), "{}", ended.stderr);
+        assert!(shown.bar, "the window showed the command's bar");
+        assert!(!shown.take_back, "no Take back for a command");
+        let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(took <= BOUND, "the window was the writer after {took:?}");
+        assert!(!has_label(&harness, TAKE_BACK));
+        assert!(!root.join(".apiforge/local/journal.json").exists());
+
+        // A save after the take-back meets no conflict.
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// the window's own change\n");
+        settle(&mut harness);
+        choose(&mut harness, "Save");
+        let document = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap();
+        assert!(!document.is_dirty());
+        assert!(document.conflict().is_none());
+        assert!(
+            fs::read_to_string(root.join(SCENARIO))
+                .unwrap()
+                .contains("// the window's own change")
+        );
+    }
+
+    /// Criterion 2, *Save all and hand over*: the prompt names the command
+    /// and lists both documents; the person's work is saved, the run
+    /// proceeds and passes, and the window is the writer again.
+    #[test]
+    fn mcp15_criterion_2_save_all_saves_and_the_run_proceeds() {
+        let api = api();
+        let directory = live_shop(&api.base_url(), PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let (scenario_text, product_text) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        assert!(
+            has_label(&harness, SENTENCE),
+            "the prompt names the command"
+        );
+        for path in [SCENARIO, PRODUCT] {
+            let item = format!("{path} — unsaved code");
+            assert!(has_label(&harness, &item), "the prompt lists {item:?}");
+        }
+        choose(&mut harness, SAVE_ALL);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+        assert_eq!(
+            fs::read_to_string(root.join(SCENARIO)).unwrap(),
+            scenario_text
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            product_text
+        );
+        let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(took <= BOUND, "{took:?}");
+    }
+
+    /// Criterion 2, *Not now*: the command exits 1 with the person's choice
+    /// and sends nothing; the window stays the writer, the text untouched.
+    #[test]
+    fn mcp15_criterion_2_not_now_keeps_editing_and_sends_nothing() {
+        // An API that counts the connections it is offered.
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        silent.set_nonblocking(true).unwrap();
+        let directory = live_shop(
+            &format!("http://{}/demo", silent.local_addr().unwrap()),
+            PASSES,
+        );
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = (
+            fs::read(root.join(SCENARIO)).unwrap(),
+            fs::read(root.join(PRODUCT)).unwrap(),
+        );
+        let (scenario_text, product_text) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        choose(&mut harness, NOT_NOW);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(1), "{}", ended.stderr);
+        assert!(ended.stderr.contains(KEPT), "{}", ended.stderr);
+        assert!(silent.accept().is_err(), "nothing was sent");
+        settle(&mut harness);
+        assert!(!read_only(&harness), "the window stays the writer");
+        assert!(!has_label(&harness, PROMPT));
+        assert_eq!(source_of(&harness, &at(&harness, SCENARIO)), scenario_text);
+        assert_eq!(source_of(&harness, &at(&harness, PRODUCT)), product_text);
+        assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved.0);
+        assert_eq!(fs::read(root.join(PRODUCT)).unwrap(), saved.1);
+        assert!(!root.join(".apiforge/local/journal.json").exists());
+    }
+
+    /// Criterion 7: a run that passes and one that fails both end with the
+    /// window the writer within two seconds.
+    #[test]
+    fn mcp15_criterion_7_a_passed_and_a_failed_run_give_the_project_back() {
+        let api = api();
+        for (scenario, code) in [(PASSES, 0), (FAILS, 1)] {
+            let directory = live_shop(&api.base_url(), scenario);
+            let root = directory.path();
+            let mut harness = folder_harness(root, WIDE);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let ended = Running::start(root).wait(&mut harness, |_| {});
+            assert_eq!(ended.status.code(), Some(code), "{}", ended.stderr);
+            assert!(ended.stderr.contains(HANDED_OVER), "{}", ended.stderr);
+            let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+                !read_only(harness)
+            });
+            assert!(took <= BOUND, "{took:?}");
+            drop(harness);
+        }
+    }
+
+    /// Criterion 7: the command killed mid-run, its request on its way to
+    /// an API that never answers, leaves its journal entry; the window takes
+    /// the project back by its check and reports the interrupted run, as at
+    /// start.
+    #[test]
+    fn mcp15_criterion_7_a_killed_command_is_taken_back_with_its_interrupted_run() {
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let directory = live_shop(
+            &format!("http://{}/demo", silent.local_addr().unwrap()),
+            PASSES,
+        );
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let running = Running::start(root);
+        silent.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let _held = loop {
+            match silent.accept() {
+                Ok((stream, _)) => break stream,
+                Err(_) => {
+                    assert!(Instant::now() < deadline, "no request was sent");
+                    harness.step();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        assert!(read_only(&harness), "the window observes the run");
+        assert!(!has_label(&harness, "Mark as handled"));
+        let killed = running.kill();
+        await_until(&mut harness, killed, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(root.join(".apiforge/local/journal.json").exists());
+        assert!(
+            has_label(&harness, "Mark as handled"),
+            "the interrupted run is reported"
+        );
+    }
+}

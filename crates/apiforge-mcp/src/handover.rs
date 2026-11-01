@@ -167,6 +167,7 @@ impl Hub {
         let request = Message::Request {
             client,
             pid: std::process::id(),
+            role: None,
         };
         self.handle.block_on(async move {
             let asked = tokio::time::timeout(ANSWER, async {
