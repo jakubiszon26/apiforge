@@ -113,10 +113,12 @@ impl AgentConsent {
 
     fn reread(&mut self) {
         self.read_at = Some(Instant::now());
-        if let Some(path) = &self.path
-            && let Read::Entries(projects) = read(path)
-        {
-            self.projects = projects;
+        if let Some(path) = &self.path {
+            // A newer version's file is no consent for this build.
+            self.projects = match read(path) {
+                Read::Entries(projects) => projects,
+                Read::Newer => BTreeMap::new(),
+            };
         }
     }
 
@@ -279,11 +281,32 @@ mod tests {
         let mut first = AgentConsent::in_configuration(configuration.path());
         let mut second = AgentConsent::in_configuration(configuration.path());
         first.set("project-a", true);
-        second.reread();
-        assert!(second.live("project-a"));
+        second.follow();
+        assert!(!second.live("project-a"), "not read again within a second");
+        second.read_at = Instant::now().checked_sub(Duration::from_secs(2));
+        second.follow();
+        assert!(second.live("project-a"), "read again after a second");
         first.set("project-a", false);
-        second.reread();
+        second.read_at = Instant::now().checked_sub(Duration::from_secs(2));
+        second.follow();
         assert!(!second.live("project-a"));
+    }
+
+    #[test]
+    fn a_newer_file_written_meanwhile_is_no_consent() {
+        let configuration = tempfile::tempdir().unwrap();
+        let mut consent = AgentConsent::in_configuration(configuration.path());
+        let mut other = AgentConsent::in_configuration(configuration.path());
+        other.set("project-a", true);
+        consent.reread();
+        assert!(consent.live("project-a"));
+        std::fs::write(
+            path_in(configuration.path()),
+            br#"{"version": 2, "projects": {}}"#,
+        )
+        .unwrap();
+        consent.reread();
+        assert!(!consent.live("project-a"));
     }
 
     #[test]

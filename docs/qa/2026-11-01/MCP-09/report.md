@@ -183,6 +183,10 @@ report.
   decides; no test.
 - The design-review harness view `review_mcp09_live_toggle` was not
   rendered; the release captures above were compared with M3 instead.
+- The changes of review round 1 (below) in the release binary: the
+  once-a-second re-read of the consent file, the Ctrl+Enter guard, a silent
+  connection counting as off, and the newer-version file rules. They were
+  made after the captures and are covered by tests only.
 - Keyboard-only operation of the toggle and a screen reader session.
 - Windows, beyond the CI test run.
 
