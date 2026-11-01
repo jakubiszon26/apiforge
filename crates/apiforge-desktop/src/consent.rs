@@ -131,8 +131,12 @@ impl AgentConsent {
             live,
             changed_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         };
+        let mut newer = false;
         let written = self.path.as_deref().and_then(|path| match read(path) {
-            Read::Newer => None,
+            Read::Newer => {
+                newer = true;
+                None
+            }
             Read::Entries(mut projects) => {
                 projects.insert(project.to_owned(), entry.clone());
                 let stored = Stored {
@@ -150,6 +154,11 @@ impl AgentConsent {
                 self.unsaved.remove(project);
             }
             None => {
+                // A newer version's file is no consent for this build, as
+                // when it is read again.
+                if newer {
+                    self.projects.clear();
+                }
                 self.unsaved.insert(project.to_owned(), entry);
             }
         }
@@ -307,6 +316,12 @@ mod tests {
         .unwrap();
         consent.reread();
         assert!(!consent.live("project-a"));
+        other.set("project-b", true);
+        assert!(
+            !other.live("project-a"),
+            "a change reads the newer file as none"
+        );
+        assert!(other.live("project-b"), "the change lasts for the window");
     }
 
     #[test]

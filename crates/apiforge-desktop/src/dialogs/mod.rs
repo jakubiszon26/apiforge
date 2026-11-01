@@ -465,6 +465,28 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Ctrl+Enter applies only where the dialog shows an apply button
+    /// (MCP-09: observing settings have none).
+    #[test]
+    fn ctrl_enter_applies_only_with_an_apply_button() {
+        for (label, expected) in [("Apply", Action::Apply), ("", Action::None)] {
+            let ctx = egui::Context::default();
+            let mut action = Action::None;
+            test_support::press(&ctx, Key::Enter, Modifiers::COMMAND, |ctx| {
+                let chrome = Chrome {
+                    id: "ctrl-enter-test",
+                    eyebrow: "",
+                    title: "Test",
+                    width: 400.0,
+                    apply_label: label,
+                    note: None,
+                };
+                action = chrome.show(ctx, &mut (), |_, _| {}, |_| true);
+            });
+            assert_eq!(action, expected, "apply label {label:?}");
+        }
+    }
+
     #[test]
     fn names_are_checked_after_trimming() {
         let long = "x".repeat(201);
