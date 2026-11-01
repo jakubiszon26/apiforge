@@ -9,3 +9,4 @@ README.md
 licenses/FONT-SOURCES.md
 licenses/LICENSE-API-Forge-fonts.txt
 licenses/LICENSE-DejaVu.txt
+licenses/THIRD-PARTY-NOTICES.md

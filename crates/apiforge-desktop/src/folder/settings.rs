@@ -1,13 +1,54 @@
 //! Project configuration stays dirty until an explicit manifest/source save.
+//! The person's consent to the agent's live requests is not configuration:
+//! it applies at once and is kept outside the project (MCP-09).
 use super::*;
 
 impl FolderApp {
+    /// Whether the person allows an MCP agent's live requests in the open
+    /// project (MCP-09). Off for a project never set.
+    pub(super) fn live_allowed(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| self.consent.live(&session.manifest().id))
+    }
+
+    /// The person ticked or unticked the box: kept at once, and said to the
+    /// agent's server over the channel.
+    fn set_live_allowed(&mut self, live: bool) {
+        let Some(session) = &self.session else { return };
+        let project = session.manifest().id.clone();
+        self.consent.set(&project, live);
+        self.say_consent();
+    }
+
+    /// The channel says the open project's consent to every server it is
+    /// connected to, and to each that connects; only a change is sent. A
+    /// change another window made is followed within a second.
+    pub(super) fn say_consent(&mut self) {
+        self.consent.follow();
+        self.handover.channel.set_consent(self.live_allowed());
+    }
+
+    /// The *Agent* section of the open project's settings as it stands.
+    fn agent_section(&self) -> dialogs::AgentSection {
+        dialogs::AgentSection {
+            live: self.live_allowed(),
+            running: self.handover.agent_runs_live(),
+            base_url: self
+                .session
+                .as_ref()
+                .map(|session| session.manifest().environment.base_url.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     pub(super) fn open_project_settings(&mut self) {
         let Some(session) = &self.session else { return };
-        let dialog = dialogs::SettingsDialog::project(session.context());
-        // Observing, the settings are shown with every control disabled
-        // (MCP-08a; MCP-09 enables its own toggle); a read-only window that
-        // is not observing does not open them.
+        let dialog =
+            dialogs::SettingsDialog::project(session.context()).with_agent(self.agent_section());
+        // Observing, the settings are shown with every control disabled but
+        // the agent's toggle (MCP-08a, MCP-09); a read-only window that is
+        // not observing does not open them.
         let dialog = match (session.is_read_only(), self.observing()) {
             (false, _) => dialog,
             (true, true) => dialog.read_only(),
@@ -40,7 +81,13 @@ impl FolderApp {
             .as_ref()
             .is_some_and(ProjectSession::is_read_only);
         dialog.set_read_only(read_only);
-        match dialog.show(context) {
+        dialog.set_agent(self.agent_section());
+        let outcome = dialog.show(context);
+        // The toggle applies at once, whatever else the dialog does.
+        if let Some(live) = dialog.take_agent_change() {
+            self.set_live_allowed(live);
+        }
+        match outcome {
             dialogs::Outcome::Cancelled => return None,
             dialogs::Outcome::Applied(change) => {
                 let session = self.session.as_mut()?;

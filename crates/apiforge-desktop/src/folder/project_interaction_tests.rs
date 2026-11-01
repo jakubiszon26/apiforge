@@ -476,12 +476,8 @@ fn a_read_only_window_offers_only_session_secret_values() {
             .accesskit_node()
             .is_disabled()
     );
-    assert!(
-        harness
-            .get_by_label("Apply settings")
-            .accesskit_node()
-            .is_disabled()
-    );
+    // Hidden while observing since MCP-09 (owner decision on M3).
+    assert!(harness.query_by_label("Apply settings").is_none());
     choose(&mut harness, "Cancel");
     open_project_menu(&mut harness, "Test environment…");
     assert!(

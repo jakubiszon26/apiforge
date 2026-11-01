@@ -6,7 +6,7 @@ use crate::{
     error::{ErrorCode, ToolError},
     executor::{CancellationToken, EndedBy},
     handover::Hub,
-    live::{self, LivePermission},
+    live::{self, LivePermission, Permission},
     requests, resources,
     secrets::{self, Secrets},
     tools::{self, MAX_TEXT_BYTES, RunArguments, RunReport, RunSettings, Runs},
@@ -64,7 +64,7 @@ const TOOL_ORDER: [&str; 11] = [
 /// How long the end of stdin waits for a run's cleanup.
 const CLEANUP_WAIT: Duration = Duration::from_secs(10);
 
-const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text, and publish turns a saved component into its next revision: the first write takes the project for this agent session and keeps it, so the window only watches, until you call finish_editing. Call finish_editing when your edits are done.";
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text, and publish turns a saved component into its next revision: the first write requests hand-over from a reachable clean window and takes the project for this agent session until finish_editing. Unsaved work or an unreachable window can refuse; reading remains available. A foreign agent or command refuses with held_by_other. Live requests still need separate permission. Call finish_editing when your edits are done.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -221,7 +221,15 @@ impl ApiforgeServer {
         if let Some(recorded) = self.recorded(&arguments)? {
             return Ok(recorded);
         }
-        self.permission.check()?;
+        // While no window is connected the flag decides, unless a window
+        // holds the project: then its consent does, heard before it is
+        // asked for the project (MCP-09).
+        if let Err(refused) = self.permission.check()
+            && !(matches!(self.permission.current(), Permission::Flag(_))
+                && self.agent.window_decides())
+        {
+            return Err(refused);
+        }
         let _slot = self.runs.claim()?;
         let store = self.agent.writer(client)?;
         if let Some(id) = &arguments.request_id
@@ -265,14 +273,26 @@ impl ApiforgeServer {
             &self.journal_before,
             (journal.interrupted.clone(), journal.unreadable),
         );
-        let (mut report, before) = tools::execute(
+        // The windows learn that a live run is in progress, so the person who
+        // turns live off is told it will finish (MCP-09).
+        let told = LiveRunTold::start(&self.agent, &prepared_path);
+        let executed = tools::execute(
             prepared,
             arguments,
             Some(journal),
             &self.runs,
             cancel,
             self.cleanup_delay,
-        )?;
+        );
+        told.end(match &executed {
+            Ok((report, _)) => match report.status {
+                tools::Verdict::Passed => RunState::Passed,
+                tools::Verdict::Failed => RunState::Failed,
+                tools::Verdict::Cancelled => RunState::Cancelled,
+            },
+            Err(_) => RunState::Failed,
+        });
+        let (mut report, before) = executed?;
         report.interrupted = live::interrupted(&before.interrupted, values);
         report.journal_unreadable = before.unreadable;
         tools::bound(Ok(report))
@@ -410,7 +430,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project, whether live requests are allowed, and the version of the language reference. Reads the saved project; writes nothing.",
+        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project (holder: none, window, another_process or this server’s agent_session; holder_details: role/client/since or null), hands_over_on_write (a window advertises a valid endpoint: a write may request hand-over, without connecting during overview or promising a grant), whether live requests are allowed, and the version of the language reference. Reads the saved project; writes nothing.",
         output_schema = schema_for_output::<tools::ProjectOverview>(),
         annotations(title = "Project overview", read_only_hint = true)
     )]
@@ -490,7 +510,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "Runs the saved scenario or component at `path`: a simulation with the sample responses written in it, which sends nothing, or with `live: true` real requests to the project's API, only when the person allowed live requests (project_overview.live_requests; otherwise `live_disabled`). Returns `status` (passed, failed or cancelled; a failed verdict is a result, not an error), every step with handle, label, status, message and, for a failed comparison, expected and actual, a component's steps nested beneath it, the generation and source_sha256, and `interrupted`: live runs an earlier process left unfinished, with the requests that may have changed the API. A component runs alone with `inputs` by name, its defaults filling the rest. `full: true` returns the runner's complete JSON report instead of the steps. run executes the saved source; check_text checks a proposal. A live run records each request in the project's run journal before sending it and takes the project for this agent session as write_source does; while a window or another process holds the project it is refused (`held_by_window`, `held_by_other`). Known secret values are `[REDACTED]` in every report. Repeat a live run's `request_id` only to recover a lost answer: this server returns the recorded result and sends nothing. One run at a time; a cancelled request or the ten-minute deadline stops the run, its cleanup still runs, and a request on its way is marked `may_have_reached_api`.",
+        description = "Runs the saved scenario or component at `path`: a simulation with the sample responses written in it, which sends nothing, or with `live: true` real requests to the project's API, only when the person allowed live requests (project_overview.live_requests; otherwise `live_disabled`). Returns `status` (passed, failed or cancelled; a failed verdict is a result, not an error), every step with handle, label, status, message and, for a failed comparison, expected and actual, a component's steps nested beneath it, the generation and source_sha256, and `interrupted`: live runs an earlier process left unfinished, with the requests that may have changed the API. A component runs alone with `inputs` by name, its defaults filling the rest. `full: true` returns the runner's complete JSON report instead of the steps. run executes the saved source; check_text checks a proposal. A live run records each request in the project's run journal before sending it and takes the project for this agent session as write_source does; a reachable clean window can hand over on this first live run. A window with unsaved work refuses, an unreachable window returns `held_by_window` while reading remains available, and a foreign agent or command returns `held_by_other`. Hand-over never bypasses live permission (`live_disabled`). Known secret values are `[REDACTED]` in every report. Repeat a live run's `request_id` only to recover a lost answer: this server returns the recorded result and sends nothing. One run at a time; a cancelled request or the ten-minute deadline stops the run, its cleanup still runs, and a request on its way is marked `may_have_reached_api`.",
         output_schema = schema_for_output::<tools::RunReport>(),
         annotations(
             title = "Run",
@@ -780,6 +800,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// and the window is told `released`.
 fn connect_windows(server: &ApiforgeServer, handle: tokio::runtime::Handle) -> Arc<Hub> {
     let hub = Hub::new(handle);
+    hub.decide_live(server.permission.clone());
     server.agent.set_hub(hub.clone());
     let agent = server.agent.clone();
     let runs = server.runs.clone();
@@ -881,6 +902,50 @@ impl<R: AsyncRead + Unpin> AsyncRead for EndOfInput<R> {
             self.lost.cancel();
         }
         polled
+    }
+}
+
+/// Tells the connected windows that a live run started and how it ended:
+/// `running`, then the end state, or `failed` when it stopped otherwise.
+struct LiveRunTold<'a> {
+    agent: &'a AgentSession,
+    path: String,
+    ended: bool,
+}
+
+impl<'a> LiveRunTold<'a> {
+    fn start(agent: &'a AgentSession, path: &str) -> Self {
+        agent.tell(&Message::Run {
+            path: path.to_owned(),
+            mode: RunKind::Live,
+            state: RunState::Running,
+        });
+        Self {
+            agent,
+            path: path.to_owned(),
+            ended: false,
+        }
+    }
+
+    fn end(mut self, state: RunState) {
+        self.tell(state);
+    }
+
+    fn tell(&mut self, state: RunState) {
+        if !self.ended {
+            self.ended = true;
+            self.agent.tell(&Message::Run {
+                path: std::mem::take(&mut self.path),
+                mode: RunKind::Live,
+                state,
+            });
+        }
+    }
+}
+
+impl Drop for LiveRunTold<'_> {
+    fn drop(&mut self) {
+        self.tell(RunState::Failed);
     }
 }
 
