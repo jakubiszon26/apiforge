@@ -23,7 +23,7 @@ impl ProjectStore {
     /// Explicit export only. This is evidence for manual recovery, not a replay
     /// plan or a saved generation. No project file or original is modified.
     pub fn export_transaction_evidence(&self) -> Result<Vec<u8>> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let mut evidence = Evidence {
             format_version: 1,
             files: Vec::new(),

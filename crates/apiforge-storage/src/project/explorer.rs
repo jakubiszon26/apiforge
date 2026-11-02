@@ -93,18 +93,27 @@ impl ProjectStore {
     /// Lists the project tree. A transaction in progress, or one committed
     /// during the scan, returns `Busy`; the caller retries on its next poll.
     pub fn scan_tree(&self) -> Result<TreeScan> {
+        // A writer's scan waits for its worker like any other storage work,
+        // so it never reads a file the worker's transaction replaces or
+        // removes, which Windows refuses while the file is open (MCP-19).
+        // A read-only store's worker guards nothing another process does.
+        // On the worker's own thread the commit in progress is this one.
+        let own_commit = self.owner.holds_worker();
+        let _worker = (!self.is_read_only() && !own_commit).then(|| self.owner.lock_worker());
         let before = self.head()?;
         if before.active_transaction_id.is_some() {
-            // The scan does not wait for the writer lock. While this owner's
-            // worker holds it, the active transaction is a commit in progress;
-            // only one left behind with the lock free needs recovery. A
+            // Holding the worker, a writer sees no commit in progress: an
+            // active transaction was left behind and needs recovery. A
             // reader beside a living writer in another process sees that
             // writer's commit in progress (MCP-08a, planning decision 2).
-            // The worker is only asked, never held while the probe waits.
-            let own_commit = matches!(
-                self.owner.worker.try_lock(),
-                Err(std::sync::TryLockError::WouldBlock)
-            );
+            // A read-only worker is only asked, never held while the probe
+            // waits.
+            let own_commit = own_commit
+                || (self.is_read_only()
+                    && matches!(
+                        self.owner.worker.try_lock(),
+                        Err(std::sync::TryLockError::WouldBlock)
+                    ));
             return Err(
                 if own_commit
                     || self.head()?.active_transaction_id.is_none()

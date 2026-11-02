@@ -1,7 +1,7 @@
 # ADR 0011: Folder storage transactions and deliberate recovery
 
 - Status: accepted for Stage II; P1 storage implemented and fault-tested on Linux; native Windows durability unverified
-- Date: 2026-10-24
+- Date: 2026-10-24; amended 2026-11-02 (MCP-19, the replacement primitive on Windows)
 - Scope: `apiforge-storage`, folder loader, migration and run-journal integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
 - Related: [format](0010-folder-projects.md), [sessions](0012-project-sessions.md)
@@ -32,6 +32,32 @@ states and all targets of the operation. Atomic replacement uses a temporary fil
 on the target filesystem, file sync, replacement and directory sync where
 supported. A sync error is a failure, never acknowledged as saved. Preserve the
 Linux/Windows platform limitations already recorded in ADR 0008 until verified.
+
+Amended by MCP-19 (2026-11-02), the replacement primitive on Windows. A
+reader that only looks at a file is not a fault, so it must not fail a
+replacement. The synced temporary file is installed with the platform's
+rename (`std::fs::rename`), not `tempfile`'s `persist`, which on Windows is
+`MoveFileExW` alone and refuses to replace a file while any handle holds it
+open. On that refusal `std::fs::rename` renames with POSIX semantics
+(Windows 10 1607 or later, NTFS): a target held open by a handle that shares
+delete, as every Rust reader's does (API Forge windows, the MCP server,
+`apiforge` on the command line), is replaced, and that reader keeps the
+bytes it opened. A handle that does not share delete still refuses it, and
+a file removed while such a handle is open keeps its name, delete-pending,
+until the handle closes. On Windows only, therefore, a replacement is tried
+again every 20 ms while it fails with `ERROR_ACCESS_DENIED` or
+`ERROR_SHARING_VIOLATION`, and a directory removal while it fails with
+`ERROR_DIR_NOT_EMPTY` and the directory lists only names its own
+transaction removed, for at most one second. Past that bound the failure
+stands as before: a refusal before activation, recoverable intent after
+it. A program that holds a project file open for longer is a conflict the
+person sees. On Linux both are the same `rename(2)` and removal as before,
+with no wait. New files keep the no-clobber install. On file systems
+without POSIX rename (ReFS, some network shares) the bound applies to every
+open handle. Within one writer, the tree scan of the external-change check
+takes the worker like any other storage work, so it never reads a file the
+worker's transaction replaces or removes; a read-only store's scan does
+not, since its worker guards nothing another process does.
 
 Transaction fingerprints describe exact file bytes, including line endings. Do
 not normalise CRLF/LF when comparing expected/target states or checking staged

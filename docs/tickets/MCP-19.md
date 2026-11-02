@@ -4,9 +4,10 @@
   0011; regression potential bounded by the fault-injection suite and the
   Windows loop) · Owner review: 20 min · Risk: none visible; ADR 0011 is
   amended
-- State: Analysis (issue #191); no owner decision — nothing the person
-  sees changes except that the refusal stops happening
-- Analysis model: Fable · Implementation model: —
+- State: Implemented, awaiting acceptance (issue #191, PR #203); no owner
+  decision — nothing the person sees changes except that the refusal
+  stops happening. QA report: `docs/qa/2026-11-02/MCP-19/report.md`
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 
 ## Goal
 
