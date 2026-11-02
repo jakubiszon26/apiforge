@@ -6,7 +6,7 @@
   the flag; this file is the analysis it asked for. Implementation starts
   after REL-01 (#118) merges: it builds on `packaging/icon/`, `window_icon()`
   and `release.yml` of that pull request. Before `v0.1.0`.
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 - After REL-01 (#118)
 
 ## Goal
