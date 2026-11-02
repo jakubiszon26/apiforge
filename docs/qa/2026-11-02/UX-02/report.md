@@ -298,7 +298,8 @@ stops it. The menu is now a named closure, formatted by hand within
   --locked -- -D warnings` pass.
 - `mod ux02`, the accessibility, component-run and header tests, and
   MCP-08a's observing test pass: 51 tests.
-- The whole suite is CI's on this head.
+- The whole suite was left to CI, which runs it on Linux and Windows for
+  every push.
 
 ## Regression smoke list
 
