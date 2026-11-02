@@ -23,6 +23,25 @@ env:
     folder::tests::acceptance_tests::mcp10::mcp19_criterion_4_ten_agent_writes_beside_a_window_that_checks_continuously
 
 jobs:
+  # Criterion 1's evidence before the fix: CI's workspace run of the
+  # acceptance commit stopped at the first failing test binary (the
+  # desktop's), before the storage tests ran on Windows. This job runs
+  # them alone at that commit; it is expected to fail.
+  acceptance-before-fix:
+    name: Storage acceptance at d9165cf, before the fix (windows-2022)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d9165cf
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+      - name: Run the MCP-19 storage acceptance tests
+        run: cargo test -p apiforge-storage --lib --locked -- mcp19 --test-threads=1
+
   loop:
     name: Loop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
