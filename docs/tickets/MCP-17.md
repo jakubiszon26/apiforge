@@ -3,7 +3,8 @@
 - Size: S · Owner review: 10 min · Risk: MCP output compatibility (what a
   client reads on a refusal); no `format`, `migration`, `default`,
   `visible UI` or `removal`
-- State: Approved (issue #188) · decision 1 taken 2026-11-02: A, text only
+- State: Implemented, awaiting acceptance (issue #188) · decision 1 taken
+  2026-11-02: A, text only
 - Analysis model: Claude Fable 5.1 · Implementation model: Claude Opus 5.5
 
 ## Goal
@@ -125,6 +126,9 @@ the tool's `outputSchema`" and drops nothing else.
    `structuredContent` is present (the `isError != true` condition is
    removed), in every stdio session; `mcp17_criterion_2_every_refusal_passes_a_validating_client`
    drives at least one refusal of every tool and asserts each was seen.
+   (Implementation note: `language_reference` and `finish_editing` have no
+   refusal — they answer every call with a result — so the test drives the
+   nine tools that can refuse and asserts exactly those.)
 3. Successful results are unchanged: `structuredContent` and the same JSON
    as text, validated against the `outputSchema` (the MCP-14 tests
    `mcp14_criterion_*` pass unchanged).
