@@ -29,5 +29,10 @@ apiforge-demo-api.workspace = true
 # Structured output checked against each tool's output schema (MCP-14).
 jsonschema.workspace = true
 
+# REL-02: the icon and version strings of apiforge.exe; build.rs does nothing
+# on another target, and a Linux build never fetches this.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [lints]
 workspace = true

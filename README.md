@@ -97,8 +97,8 @@ window with Linux MCP (or the reverse) is unsupported, including projects on
 4. **Watch in the window.** While the agent holds the project, the open
    window observes: editing pauses there, the bottom bar names the agent, and
    every change the agent commits appears within two seconds, keeping your
-   place. A window with nothing unsaved hands the project over when the agent
-   first writes; *Take back* in the bottom bar returns it to you, and when
+   place. A window with nothing unsaved and nothing in progress hands the
+   project over when the agent first writes; *Take back* in the bottom bar returns it to you, and when
    the agent finishes the window takes the project back by itself.
 
 5. **Live requests stay yours.** A model cannot allow live requests. In the

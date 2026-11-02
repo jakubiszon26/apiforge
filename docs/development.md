@@ -247,8 +247,23 @@ for size in 16 32 48 64 128 256 512; do
 done
 ```
 
-The window carries the 256 px image on Linux; the AppImage uses it for its
-launcher entry.
+The window carries the 256 px image on Linux and Windows; the AppImage uses
+it for its launcher entry.
+
+On Windows, both `.exe` files carry the icon as a resource
+([REL-02](tickets/REL-02.md)), which Explorer and the taskbar show:
+`packaging/icon/apiforge.ico` holds the 16, 32, 48, 64, 128 and 256 px PNGs
+above, verbatim and in that order. It is committed, and rebuilt from the PNGs
+whenever they change with `python3 -I packaging/icon.py` (standard library
+only; `--check` compares instead of writing), which `test_release.py` also
+does in memory. The `build.rs` of `apiforge-desktop` and `apiforge-cli` embed
+it with `winresource`, a Windows-only build dependency, together with the
+product name, the file description and the workspace version as the file and
+product versions of Explorer's *Details* tab; it needs the Windows SDK's
+`rc.exe`, which the MSVC toolchain installs, and does nothing on Linux. Every
+Windows CI run extracts the icon of both release binaries, compares it with
+`apiforge-32.png` and captures the running window, as the artifact
+`windows-icon`.
 
 ## Running a scenario from the command line
 
