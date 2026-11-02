@@ -167,3 +167,25 @@ person's `--live` is the consent: decision 6's per-project setting governs
 the agent only, and a `permission` from the window is ignored by the
 command. A command never asks an agent session (decision 1) and does not
 listen; `apply` keeps refusing. The project file format is unchanged.
+
+## MCP-16 amendment: the observer follows the holder (2026-11-01)
+
+Decision 5's last sentence keeps the camera and the selected blocks in
+every case; the active document and the code's scroll stay only while
+following is unpinned. [MCP-16](../tickets/MCP-16.md) records the owner's
+decisions 1–7. An
+observing window follows every holder's commits by default: the reload's
+diff (`ExternalOutcome::followed`) names what changed, and the window goes
+to the document of the commit's main change (created, saved, published,
+laid out, in that order) in the view the person is in, shows a saved
+source's first changed line and marks its changed lines in the gutter
+until the holder's next commit to that document. A deleted document's
+tab closes as before, and when it was the active one the window stays on
+the tab closing chose; a commit of the settings alone and a run move
+nothing. The person's own
+navigation to another document unpins following, as does *Follow* in the
+bottom bar, which pins it again and goes to the last change. Following
+starts pinned with every observation and is never persisted. The changed
+lines are computed from the two committed texts in `apiforge-project`
+(`CommitChange::lines`); no channel message, protocol version, file format
+or persisted setting changes.

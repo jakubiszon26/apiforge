@@ -294,6 +294,7 @@ impl FolderApp {
         });
         self.tabs_offset = output.state.offset.x.max(0.0);
         if let Some(document_id) = activate {
+            self.navigated_to(&document_id);
             self.activate_tab(&document_id);
             self.followed_tab = Some(document_id);
             self.touched();

@@ -601,10 +601,14 @@ impl FolderApp {
                 self.touched();
             }
             Action::Open(document_id) => {
+                self.navigated_to(&document_id);
                 self.activate_tab(&document_id);
                 self.touched();
             }
-            Action::OpenText(path) => self.open_text(&path),
+            Action::OpenText(path) => {
+                self.navigated_to(&text_tab(&path));
+                self.open_text(&path);
+            }
             Action::Reveal(path) => reveal(&self.root.join(&path)),
             Action::Rename(path) => {
                 let name = file_name(&path).to_owned();

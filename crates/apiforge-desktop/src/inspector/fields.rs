@@ -237,6 +237,7 @@ pub fn template_field(
             font_size: 12.0,
             plain: false,
             interactive: true,
+            changed: None,
         },
         &output,
         keys,
@@ -773,6 +774,7 @@ pub fn request_body_editor(
                     font_size: 12.0,
                     plain: false,
                     interactive: true,
+                    changed: None,
                 },
             )
         })
