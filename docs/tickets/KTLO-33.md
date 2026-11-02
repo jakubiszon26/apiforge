@@ -10,7 +10,8 @@
 
 A red CI run means a regression, nothing else. Seven tests have failed at
 least once on a commit that passed on its other run or on a rerun, six of
-them on windows-2022 only (issue #122). Each gets its cause named from the
+them on windows-2022 only (issue #122; the seventh,
+`mcp08a::the_holders_save…`, joined on 2026-11-02 by the owner's decision). Each gets its cause named from the
 code and the CI logs, a fix that waits on the right condition or removes
 the race — never a sleep, never a looser assertion — and a loop of runs
 that proves it.
@@ -216,10 +217,40 @@ Fix. MCP-19 (#191): the replace primitive, and the scan serialised with
 the worker in the same process. This ticket only records the flake and
 runs the loop once MCP-19 is in.
 
-### 7. The flake the issue lists under 1, ubuntu, 2026-10-28
+### 7. `mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was` ✔ — product defect, MCP-19's (added 2026-11-02 by the owner's decision)
 
-The same cause as flake 1 (it is that run): the minute boundary falls on
-Linux as well. Nothing further.
+Run 41449932414 (windows, pull_request run of PR #199 at `04a11f2`; the
+push run of the same commit passed): `acceptance_tests.rs:1297`, the
+holder's `owner.save(&scenario)` returned `Storage(Io { path:
+"…\.apiforge\diagram.json", Os { code: 5, PermissionDenied, "Access is
+denied." } })`.
+
+Cause. The holder is a second `ProjectSession` in the test process that
+took the writer lock first (`mcp08a::holder`), as the MCP server's does;
+the window observes it. Its save is one transaction that replaces the
+scenario's `.afs` and the diagram checkpoint `.apiforge/diagram.json`
+through `project::io::atomic` → `NamedTempFile::persist` →
+`MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. The observing window's check
+thread, once a second and at once after a change, hashes the tree and
+reads the project with a stable read whose file list includes
+`.apiforge/diagram.json` (`load_locked`), and, as an observer, reads the
+checkpoint's state to see commits outside the sources
+(`external.rs::run`, `committed_outside_sources`). While that read holds
+the file open, the writer's `MoveFileExW` is refused with *Access is
+denied* (os error 5): the precise collision MCP-19 (#191) names — the
+observer's stable read against the writer's replace — on another file.
+On Linux the rename succeeds and the reader keeps the old bytes. Whether
+the refusal came before or after activation decides whether the window
+also showed recovery; the holder's error is the same either way, and the
+test's `unwrap` is right to fail on it: a save refused in front of the
+person.
+
+Fix. MCP-19, part 1 (the replace primitive), and nothing here: the test
+is unchanged, and the Windows loop of criterion 7 runs it after MCP-19
+merges. The fix stays in one place.
+
+The issue's first entry (the ubuntu push run of #118, 2026-10-28) is run
+40704347762, flake 1 above: the minute boundary falls on Linux as well.
 
 ## Decisions
 
@@ -267,13 +298,14 @@ Linux as well. Nothing further.
 5. Flake 5: `wait_for_journal` exits on the run's end and reports its
    result; a test with a server whose run is refused before any request
    fails within the run's own time with the refusal in the message.
-6. Flake 6: recorded here; its proof is criterion 7 after MCP-19 merges.
+6. Flakes 6 and 7: recorded here, no test changes; their proof is criterion
+   7 after MCP-19 merges.
 7. **The loop.** A `workflow_dispatch` workflow `flake-loop.yml` builds the
    test binaries once and runs a named test filter N times on a chosen
    runner (`ubuntu-24.04`, `windows-2022`), failing on the first failure
    and uploading the output. Each of the seven tests passes 20 of 20 on
    windows-2022 and 20 of 20 on ubuntu-24.04 with the fixes, and the run
-   ids are in the QA report. Flakes 4 and 6 are looped after MCP-19 merges
+   ids are in the QA report. Flakes 4, 6 and 7 are looped after MCP-19 merges
    or on a branch that carries both.
 8. No assertion of any of the seven tests is weakened; `git diff` of the
    assertions is quoted in the QA report.
@@ -282,7 +314,7 @@ Linux as well. Nothing further.
 ## Not in scope
 
 - The Windows replace and removal semantics and the scan beside the
-  worker: MCP-19 (#191), which this ticket's flakes 4 and 6 depend on.
+  worker: MCP-19 (#191), which this ticket's flakes 4, 6 and 7 depend on.
 - The watcher's once-a-second full hash of every source (its cost; a
   cheaper probe): backlog, *Later*.
 - `settle()` not waiting for a running watcher check: backlog, *Later*.
