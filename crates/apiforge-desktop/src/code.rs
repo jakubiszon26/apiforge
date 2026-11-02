@@ -489,7 +489,7 @@ impl CodeEditor {
         let band = Rect::from_x_y_ranges(rect.x_range(), visible.y_range());
         painter.rect_filled(band, 0.0, ui.visuals().panel_fill);
         // The box's coloured stroke used to be the only sign of keyboard focus.
-        if output.response.response.has_focus() {
+        if output.response.response.has_focus() && !crate::mock_ux00::get().no_focus_line {
             let x = band.right() - 1.0;
             painter.line_segment(
                 [pos2(x, band.top()), pos2(x, band.bottom())],

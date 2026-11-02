@@ -15,7 +15,7 @@ pub(super) struct Runs {
     pub handle: Option<RunHandle>,
     active: Option<PreparedRun>,
     reports: HashMap<String, (PreparedRun, RunResult)>,
-    panel: crate::report::ReportPanel,
+    pub(super) panel: crate::report::ReportPanel,
     journal: Option<Arc<JournalStore>>,
     pending_review: Option<JournalReview>,
     pub secrets: dialogs::SessionSecrets,
@@ -381,6 +381,8 @@ impl FolderApp {
             .session
             .as_ref()
             .is_none_or(|session| session.run_is_stale(&prepared));
+        // UX-01 mock-up: checks added from these results leave them usable.
+        let stale = stale && !crate::mock_ux00::get().checks_kept;
         let snapshot = self.snapshot(id);
         let policy = snapshot
             .as_ref()
@@ -465,6 +467,9 @@ impl FolderApp {
                 path,
                 value,
             } => {
+                if crate::mock_ux00::get().checks_kept {
+                    crate::mock_ux00::add_check(&node_id, &port, &path);
+                }
                 let cleanup = !graph_of(&model, false)
                     .nodes
                     .iter()

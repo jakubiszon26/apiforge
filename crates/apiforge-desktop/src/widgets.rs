@@ -371,6 +371,8 @@ pub struct ActionButton<'a> {
     pressed: Option<bool>,
     /// The accessible name, when it says more than the visible label.
     name: Option<&'a str>,
+    /// A primary button's fill instead of the accent (UX-00 mock-up).
+    fill: Option<egui::Color32>,
 }
 
 pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
@@ -382,6 +384,7 @@ pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
         compact: false,
         pressed: None,
         name: None,
+        fill: None,
     }
 }
 
@@ -408,6 +411,11 @@ impl ActionButton<'_> {
     }
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+    /// A primary button in another colour than the accent (UX-00 mock-up).
+    pub fn fill(mut self, colour: egui::Color32) -> Self {
+        self.fill = Some(colour);
         self
     }
     /// A toggle button, pressed or released.
@@ -474,6 +482,12 @@ impl Widget for ActionButton<'_> {
                     theme::FIELD
                 } else {
                     egui::Color32::TRANSPARENT
+                }
+            } else if primary && let Some(colour) = self.fill {
+                if engaged {
+                    colour.gamma_multiply(0.9)
+                } else {
+                    colour
                 }
             } else if primary {
                 if response.is_pointer_button_down_on() {

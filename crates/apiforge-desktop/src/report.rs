@@ -18,6 +18,9 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 
+/// UX-05 mock-up: the workspace left above the panel mid-drag.
+const MOCK_DRAG_GAP: f32 = 64.0;
+
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
 /// Requests from the report panel to the application.
@@ -176,6 +179,13 @@ impl ReportPanel {
         self.last_handle.unwrap()
     }
 
+    /// Sets the normal height, as dragging the edge would (UX-00 mock-up).
+    #[cfg(test)]
+    pub(crate) fn debug_set_height(&mut self, height: f32) {
+        self.height = height;
+        self.size_epoch = self.size_epoch.wrapping_add(1);
+    }
+
     /// Whether the open panel fills the window, so the caller draws nothing else.
     pub fn is_maximised(&self) -> bool {
         self.open && self.maximised
@@ -192,6 +202,9 @@ impl ReportPanel {
 
         let was_open = self.open;
         let maximised = self.is_maximised();
+        // UX-05 mock-up: the workspace the panel can be dragged over.
+        let drag = crate::mock_ux00::get().drag;
+        let workspace = ui.available_rect_before_wrap();
         let full = ui.available_height();
         let compact = ui.available_height() < 460.0;
         let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
@@ -203,14 +216,17 @@ impl ReportPanel {
         }
         .clamp(min_height, maximum);
         let collapsed_height = if compact { 44.0 } else { 48.0 };
+        let mid_drag = drag == crate::mock_ux00::Drag::Mid && was_open && !maximised;
         let panel_id = if maximised {
             egui::Id::new("report-maximised")
+        } else if mid_drag {
+            egui::Id::new("report-mock-mid-drag")
         } else if was_open {
             egui::Id::new(("report-expanded", compact, self.size_epoch))
         } else {
             egui::Id::new("report-collapsed")
         };
-        let response = egui::Panel::bottom(panel_id)
+        let panel = egui::Panel::bottom(panel_id)
             .resizable(self.open && !maximised)
             .default_size(if maximised {
                 full
@@ -225,7 +241,13 @@ impl ReportPanel {
                 min_height..=maximum
             } else {
                 collapsed_height..=collapsed_height
-            })
+            });
+        let panel = if mid_drag {
+            panel.exact_size(full - MOCK_DRAG_GAP)
+        } else {
+            panel
+        };
+        let response = panel
             .frame(
                 egui::Frame::new()
                     .fill(theme::WHITE)
@@ -342,6 +364,53 @@ impl ReportPanel {
                 ),
             );
         }
+        if drag != crate::mock_ux00::Drag::Off && was_open {
+            let top = response.response.rect.top();
+            let center = egui::pos2(response.response.rect.center().x, top + 8.0);
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("ux00-drag"),
+            ));
+            if mid_drag {
+                let zone =
+                    egui::Rect::from_min_max(workspace.min, egui::pos2(workspace.max.x, top))
+                        .shrink(4.0);
+                painter.rect(
+                    zone,
+                    6,
+                    theme::ACCENT_SOFT,
+                    Stroke::new(1.5, theme::ACCENT),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    zone.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Release to fill the workspace",
+                    egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
+                    theme::ACCENT,
+                );
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(center, egui::vec2(80.0, 14.0)),
+                    4.0,
+                    Stroke::new(1.5, theme::ACCENT),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            painter.line_segment(
+                [
+                    center - egui::vec2(18.0, 0.0),
+                    center + egui::vec2(18.0, 0.0),
+                ],
+                Stroke::new(
+                    2.0,
+                    if mid_drag {
+                        theme::ACCENT
+                    } else {
+                        theme::BORDER
+                    },
+                ),
+            );
+        }
         actions
     }
 
@@ -437,7 +506,16 @@ impl ReportPanel {
                     self.open = true;
                 }
                 ui.add_space(8.0);
-                if context.stale {
+                let checks = crate::mock_ux00::checks();
+                if crate::mock_ux00::get().checks_kept && checks > 0 {
+                    // UX-01 mock-up: a check added from these results does
+                    // not make them stale.
+                    ui.label(
+                        RichText::new(format!("{checks} checks added · they run on the next run"))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
+                } else if context.stale {
                     ui.label(
                         RichText::new("Graph changed · results from an earlier version")
                             .size(11.0)
@@ -821,7 +899,19 @@ impl ReportPanel {
             .on_hover_text(summary);
 
             if let Some((node_id, port)) = interactive {
-                if valid_path {
+                if valid_path
+                    && crate::mock_ux00::get().checks_kept
+                    && crate::mock_ux00::is_checked(node_id, port, &path_text)
+                {
+                    // UX-01 mock-up: the field this run already has a check for.
+                    let (icon, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::hover());
+                    Icon::Check.paint(ui.painter(), icon, theme::SUCCESS);
+                    ui.label(
+                        RichText::new("Check added")
+                            .size(theme::FONT_LABEL)
+                            .color(theme::SUCCESS),
+                    );
+                } else if valid_path {
                     let target_name = if path_text.is_empty() {
                         label
                     } else {
@@ -979,7 +1069,7 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
     ui.horizontal(|ui| {
         match run.mode {
             RunMode::Simulation => {
-                widgets::pill(ui, "SIMULATION", theme::LINK);
+                widgets::pill(ui, "SIMULATION", crate::mock_ux00::simulation_colour());
             }
             RunMode::Live => {
                 widgets::pill(ui, "LIVE API", theme::ACCENT);

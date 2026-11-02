@@ -438,6 +438,13 @@ impl FolderApp {
         if read_only && !self.observing() {
             status.push("Read-only".into());
         }
+        // UX-03 mock-up: the status is never red; or says the save state only.
+        let mock = crate::mock_ux00::get().status;
+        if mock == crate::mock_ux00::Status::SaveStateOnly {
+            status.truncate(1);
+        }
+        let red = snapshot.analysis == AnalysisState::Invalid
+            && mock == crate::mock_ux00::Status::Current;
         let expanded = self.problems_expanded;
         let mut toggle = false;
         ui.horizontal(|ui| {
@@ -456,11 +463,7 @@ impl FolderApp {
                 ui.label(
                     RichText::new(status.join("  ·  "))
                         .size(theme::FONT_LABEL)
-                        .color(if snapshot.analysis == AnalysisState::Invalid {
-                            theme::DANGER
-                        } else {
-                            theme::MUTED
-                        }),
+                        .color(if red { theme::DANGER } else { theme::MUTED }),
                 );
             });
         });

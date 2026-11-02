@@ -781,7 +781,11 @@ impl FolderApp {
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
         // Maximised run results leave no room for anything else (KTLO-19).
-        if self.report_maximised(active.as_deref()) {
+        // UX-05 mock-up: mid-drag, the strip of workspace left above the
+        // panel shows only the drop zone.
+        if self.report_maximised(active.as_deref())
+            || (crate::mock_ux00::get().drag == crate::mock_ux00::Drag::Mid && self.runs.panel.open)
+        {
             self.prompts(ui.ctx());
             self.protect(now);
             return;

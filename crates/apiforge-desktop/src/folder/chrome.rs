@@ -45,6 +45,17 @@ impl FolderApp {
                 .and_then(|active| active.strip_prefix(TEXT_TAB))
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
+        // UX-00 mock-up: the run mode on the button, the unsaved-code notice
+        // in the header.
+        let mock = crate::mock_ux00::get();
+        // Only while the run runs: *Cancel run* then takes the place of the
+        // run controls, which leaves the notice its room at 960 px.
+        let unsaved_run = mock.unsaved != crate::mock_ux00::Unsaved::Band
+            && self.runs.handle.is_some()
+            && self
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.text.starts_with(UNSAVED_RUN));
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             // Keep room for the widest toolbar, a component's with Publish
@@ -63,7 +74,26 @@ impl FolderApp {
                         .x
                 }) + ui.spacing().item_spacing.x
             };
+            let measure = |ui: &egui::Ui, text: &str, font: egui::FontId| {
+                ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(text.to_owned(), font, theme::TEXT)
+                        .size()
+                        .x
+                })
+            };
             let mut reserved = 650.0;
+            if mock.run_mode != crate::mock_ux00::RunMode::Off {
+                let bold = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+                reserved += measure(ui, run_label(mock.run_mode), bold.clone())
+                    - measure(ui, "Run", bold);
+                if mock.chevron_options {
+                    reserved -= measure(ui, "Run options", egui::FontId::proportional(theme::FONT_BODY))
+                        + 2.0 * ui.spacing().button_padding.x
+                        - theme::CONTROL_HEIGHT;
+                }
+            }
+
             if read_only {
                 reserved += badge(ui, if observing { "Observing" } else { "Read-only" });
             }
@@ -108,12 +138,85 @@ impl FolderApp {
                     "An MCP agent may send live requests in this project. Change it in Project settings.",
                 );
             }
+            if unsaved_run && mock.unsaved == crate::mock_ux00::Unsaved::BesideTitle {
+                unsaved_run_label(ui);
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.runs.handle.is_some() {
                     if ui.button("Cancel run").clicked()
                         && let Some(handle) = &self.runs.handle
                     {
                         handle.cancel();
+                    }
+                } else if let Some(id) = &run_document
+                    && mock.run_mode != crate::mock_ux00::RunMode::Off
+                {
+                    let run_button = |ui: &mut egui::Ui| {
+                        let live = mock.run_mode == crate::mock_ux00::RunMode::Live;
+                        let mut button =
+                            widgets::action(Icon::Play, run_label(mock.run_mode)).primary();
+                        if !live {
+                            button = button.fill(crate::mock_ux00::simulation_colour());
+                        }
+                        ui.add(button)
+                            .on_hover_text(if live {
+                                "Send the requests of the selected scenario or component to the API, including unsaved valid code"
+                            } else {
+                                "Simulate the selected scenario or component with sample responses, including unsaved valid code"
+                            })
+                            .clicked()
+                            .then_some(live)
+                    };
+                    let mut review = false;
+                    let mut menu = |ui: &mut egui::Ui| {
+                        widgets::caption(ui, "RUN MODE");
+                        let mut mode = mock.run_mode;
+                        ui.selectable_value(&mut mode, crate::mock_ux00::RunMode::Simulation, "Simulation");
+                        widgets::hint(ui, "Sample responses; no request is sent.");
+                        ui.add_space(theme::SPACE_SM);
+                        // Live requests are the holder's to send while this
+                        // window observes (MCP-08a).
+                        ui.add_enabled_ui(!observing, |ui| {
+                            ui.selectable_value(&mut mode, crate::mock_ux00::RunMode::Live, "Live")
+                                .on_disabled_hover_text(runs::LIVE_PAUSED);
+                        });
+                        widgets::hint(ui, "Requests go to the project's API.");
+                        ui.separator();
+                        widgets::hint(ui, "The Run button runs this mode until you change it.");
+                        if mode != mock.run_mode {
+                            crate::mock_ux00::set(crate::mock_ux00::Flags {
+                                run_mode: mode,
+                                ..mock
+                            });
+                        }
+                        ui.separator();
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            review = true;
+                        }
+                    };
+                    // Right to left: the chevron of a split button is at its
+                    // right, the text button at its left as on `main`.
+                    if mock.chevron_options {
+                        widgets::action_menu(
+                            ui,
+                            widgets::icon_button(Icon::ChevronDown, "Run options"),
+                            |ui| menu(ui),
+                        );
+                        ui.add_space(-ui.spacing().item_spacing.x + 2.0);
+                    }
+                    let run = run_button(ui);
+                    if !mock.chevron_options {
+                        ui.menu_button("Run options", |ui| {
+                            widgets::name_menu(ui, "Run options menu");
+                            menu(ui);
+                        });
+                    }
+                    if review {
+                        self.review_legacy_runs();
+                    }
+                    if let Some(live) = run {
+                        self.request_run(id, live);
                     }
                 } else if let Some(id) = &run_document {
                     if ui
@@ -150,6 +253,9 @@ impl FolderApp {
                             self.review_legacy_runs();
                         }
                     });
+                }
+                if unsaved_run && mock.unsaved == crate::mock_ux00::Unsaved::BesideRun {
+                    unsaved_run_label(ui);
                 }
                 if let Some((id, enabled)) = &publish
                     && ui
@@ -399,7 +505,12 @@ impl FolderApp {
         }
         self.registry_notice(ui);
         let mut dismiss = false;
-        if let Some(notice) = &self.notice {
+        let in_header = crate::mock_ux00::get().unsaved != crate::mock_ux00::Unsaved::Band;
+        if let Some(notice) = self
+            .notice
+            .as_ref()
+            .filter(|notice| !(in_header && notice.text.starts_with(UNSAVED_RUN)))
+        {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     if notice.error {
@@ -974,4 +1085,23 @@ fn tab_face(
         return Some(false);
     }
     None
+}
+
+/// UX-04 mock-up: the notice a run of unsaved code gives.
+const UNSAVED_RUN: &str = "Running unsaved code";
+
+fn run_label(mode: crate::mock_ux00::RunMode) -> &'static str {
+    match mode {
+        crate::mock_ux00::RunMode::Live => "Run live",
+        _ => "Run simulation",
+    }
+}
+
+fn unsaved_run_label(ui: &mut egui::Ui) {
+    ui.label(
+        RichText::new(UNSAVED_RUN)
+            .size(theme::FONT_LABEL)
+            .color(theme::MUTED),
+    )
+    .on_hover_text("The run uses the code in the editor, which is not saved yet.");
 }

@@ -31,6 +31,8 @@ mod report_tests;
 mod storage_tests;
 #[path = "tab_band_tests.rs"]
 mod tab_band_tests;
+#[path = "ux00_review.rs"]
+mod ux00_review;
 
 fn frame(app: &mut FolderApp, context: &egui::Context, events: Vec<egui::Event>) {
     let mut output = context.run_ui(
