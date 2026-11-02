@@ -150,6 +150,10 @@ struct Drag {
     height_before: f32,
     /// The panel's top is within [`DROP_SNAP`] of the workspace's top.
     snapped: bool,
+    /// The highest normal ceiling the drag has seen, which a release outside
+    /// the zone keeps to: a notice under the tab strip that comes and goes
+    /// during the drag (storage work) does not lower it for good.
+    ceiling: f32,
 }
 
 /// Computes the next report panel height for a keyboard resize key.
@@ -259,13 +263,13 @@ impl ReportPanel {
     /// the drag for the restore; released anywhere else, it keeps its height
     /// within the normal range. The epoch makes egui forget a height taken
     /// past that range.
-    fn release(&mut self, drag: Drag, compact: bool, min: f32, max: f32, height: f32) {
+    fn release(&mut self, drag: Drag, compact: bool, min: f32, height: f32) {
         self.drag = None;
         if drag.snapped {
             self.maximised = true;
             self.set_normal_height(compact, drag.height_before);
         } else {
-            self.set_normal_height(compact, height.clamp(min, max));
+            self.set_normal_height(compact, height.clamp(min, drag.ceiling.max(min)));
         }
         self.size_epoch = self.size_epoch.wrapping_add(1);
     }
@@ -311,6 +315,7 @@ impl ReportPanel {
             self.drag = Some(Drag {
                 height_before: self.normal_height(compact).clamp(min_height, maximum),
                 snapped: false,
+                ceiling: maximum,
             });
         }
         let lifted = (full - DROP_ZONE_MIN).max(maximum);
@@ -362,9 +367,22 @@ impl ReportPanel {
         let rect = response.response.rect;
         self.above_ceiling =
             !maximised && self.drag.is_some() && rect.top() < workspace.bottom() - maximum - 0.5;
-        // Maximised, the normal height is kept for the restore.
+        if self.above_ceiling {
+            // The caller draws nothing above the panel meanwhile; the strip
+            // shows the workspace's own background, not the window's.
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(workspace.min, egui::pos2(workspace.max.x, rect.top())),
+                0.0,
+                theme::BG,
+            );
+        }
         let actual_height = rect.height().clamp(min_height, ceiling);
-        if !maximised {
+        // The height to come back to is taken from the panel only while its
+        // edge is dragged; the grip, the keyboard and a release set it
+        // themselves. Taken every frame, a workspace that shrinks for a
+        // moment (a notice under the tab strip while storage work runs)
+        // shortened it for good. Maximised, it is kept for the restore.
+        if !maximised && (edge_held || edge_let_go) {
             self.set_normal_height(compact, actual_height);
         }
         // The grip: the panel's own handle, kept at the top of the maximised
@@ -417,6 +435,7 @@ impl ReportPanel {
                 self.drag = Some(Drag {
                     height_before: self.normal_height(compact).clamp(min_height, maximum),
                     snapped: false,
+                    ceiling: maximum,
                 });
                 self.maximised = false;
                 self.set_normal_height(compact, wanted.clamp(min_height, lifted));
@@ -463,6 +482,7 @@ impl ReportPanel {
             }
             if let Some(drag) = self.drag.as_mut() {
                 drag.snapped = rect.top() <= workspace.top() + DROP_SNAP;
+                drag.ceiling = drag.ceiling.max(maximum);
                 let held = handle.dragged() || edge_held;
                 let let_go = handle.drag_stopped() || edge_let_go;
                 if let_go || !held {
@@ -470,7 +490,7 @@ impl ReportPanel {
                     // A drag that ends without a release (the panel went
                     // away under it) maximises nothing.
                     drag.snapped &= let_go;
-                    self.release(drag, compact, min_height, maximum, actual_height);
+                    self.release(drag, compact, min_height, actual_height);
                     if drag.snapped {
                         // The grip moves to the top under a released pointer;
                         // the maximised panel is shown as the button leaves it.
