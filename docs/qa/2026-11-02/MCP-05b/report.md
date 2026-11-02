@@ -209,10 +209,11 @@ At the acceptance commit `d6e7dba`, the four `mcp05b_` tests and the stdio
 
 ## Review round 1 (head `e5cf13d`)
 
-- CodeQL `rust/cleartext-logging` (alerts 44 and 45): two `mcp05b_`
-  assertions formatted a tool error's message into their failure text.
-  Those assertions no longer format any error. This is the fix MCP-05
-  made in `bb698bd`.
+- CodeQL `rust/cleartext-logging` (alerts 44 and 45) flagged two sites
+  where a `mcp05b_` assertion formatted a tool error's message into its
+  failure text. In `47d1c5f`, all four `mcp05b_` assertions that formatted
+  a tool error (its message or `error_text`) stopped doing so. This is the
+  same kind of fix MCP-05 made in `bb698bd`.
 - cubic, the `publish` description: it now says that a replay needs the
   same path and hash, and that another path or hash is `invalid_inputs`.
 - cubic, a failed removal of an entry after a refusal: the guide now
@@ -224,3 +225,8 @@ At the acceptance commit `d6e7dba`, the four `mcp05b_` tests and the stdio
 
 After the round, `apiforge-mcp` and `apiforge-cli`: 181 passed, 1 ignored;
 fmt and clippy clean.
+
+The first CI run of `47d1c5f` failed on windows-2022 only, in
+`mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run` with
+`LiveDisabled`. That is the known Windows flake recorded on #122 (KTLO-33),
+and the same test passed on that head's other windows-2022 run.
