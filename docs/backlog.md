@@ -92,7 +92,12 @@ for additions; the MCP sprint has one. Exit criteria:
 | [#53](https://github.com/jakubiszon26/apiforge/issues/53) | KTLO-23a A component runs from its tab — runner, session and the Run button; [ticket](tickets/KTLO-23.md) | M · 45 min · `visible UI` |
 | [#54](https://github.com/jakubiszon26/apiforge/issues/54) | KTLO-23b A component runs from its tab — the Run inputs dialog; [ticket](tickets/KTLO-23b.md); after KTLO-23a | S · 20 min · `visible UI` |
 
-## Sprint: MCP (in progress since 2026-10-27)
+## Sprint: MCP (2026-10-27 to 2026-11-02, closed)
+
+Closed by the owner on 2026-11-02; the retrospective is owed. Tickets still
+open at the close — MCP-11 (#95), MCP-19 (#191, PR #203), MCP-20 (#192),
+REL-04 (#205, PR #206), KTLO-33 (#122, PR #204) and the issues of
+2026-11-02 (#207–#219) — are placed by the [UX-1 plan](sprints/ux-1.md).
 
 An MCP server: a model works on a project while the owner watches in the
 window that is already open. Analysed 2026-10-27 ([MCP-00](tickets/MCP-00.md))
@@ -205,6 +210,98 @@ They start after MCP-11 (MCP-00 decision 18 = A, 2026-10-27).
 | [#101](https://github.com/jakubiszon26/apiforge/issues/101) | UX-04 *Running unsaved code* moves to the window header | S · 15 min · `visible UI` |
 | [#102](https://github.com/jakubiszon26/apiforge/issues/102) | UX-05 Run results and Problems drag to the whole workspace | S · 20 min · `visible UI` |
 
+
+## Sprint: UX-1 (in progress since 2026-11-02)
+
+Usability and UX. The owner's words of 2026-11-02: the application's
+usability must get more time now; many issues exist, some from tests in
+real work, and those are solved first. The triage of every open interface
+issue, the duplicates, the waves and the owner's decisions are in
+[`docs/sprints/ux-1.md`](sprints/ux-1.md); the owner approved it the same
+day with waves 1–4 (decision 1 = C) and two changes to the proposal:
+*Save as component* is implemented (decision 17 = C, UX-30) and the
+component mock-up COMP-00 is the sprint's first, made in parallel with wave
+1, after the owner confirmed #174 from real work. LAY follows UX-1
+(decision 2 = A); MCP-11 was closed without a report (decision 3 = C).
+
+Capacity: **710** owner review minutes — wave 1 135, wave 2 230 (COMP-00,
+decided 2026-11-02, and its two input tickets), wave 3 180 (with the
+*Component settings* button and the clipboard ticket), wave 4 165 (WS-00,
+DIAG-00, RUN-00, MCP-20's mock-up, UX-30, UX-06). The tickets the remaining
+mock-ups produce are estimated on the mock-ups and added here then. The
+work-in-progress limit of four pull requests within 60 minutes is the order
+of work; the owner allows UX-1 to exceed it except for `L` tickets, which
+are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
+(#122); MCP-19 (#191) was merged on 2026-11-02. Exit criteria:
+
+- [ ] The five decided findings of UX-00 are accepted (UX-01..05,
+      #98–#102).
+- [ ] The critical real-work problems are accepted: the live toggle's
+      *Cancel* (#214), the first window fits the screen (#215), the three
+      misleading MCP fields (#208).
+- [ ] Every real-work editor and notice defect of 2026-11-02 is accepted
+      (#216, #217, #218, #193).
+- [ ] The verified automated defects without a design question are
+      accepted (wave 2) and the wave-3 tickets as decided.
+- [ ] The four shared mock-ups (COMP-00, WS-00, DIAG-00, RUN-00) and
+      MCP-20's are decided by the owner and their tickets estimated;
+      *Save as component* (UX-30) is accepted.
+- [ ] The UX-1 retrospective is written with the WIP measures KTLO-30 asked
+      for.
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#98](https://github.com/jakubiszon26/apiforge/issues/98) | UX-01 Several checks from one run; decided 2026-11-02 on UX-00's mock-up | M · 30 min · `visible UI` |
+| [#99](https://github.com/jakubiszon26/apiforge/issues/99) | UX-02 Run mode is a setting; *Run simulation* / *Run live*; *Run options* is a chevron; decided 2026-11-02 | S · 20 min · `visible UI`, `default` |
+| [#100](https://github.com/jakubiszon26/apiforge/issues/100) | UX-03 The focus line turns grey; error marks after a pause; decided 2026-11-02 | S · 10 min · `visible UI`, `removal` |
+| [#101](https://github.com/jakubiszon26/apiforge/issues/101) | UX-04 *Running unsaved code* in the header while the run runs (absorbs #152); decided 2026-11-02; after UX-02 | S · 15 min · `visible UI` |
+| [#102](https://github.com/jakubiszon26/apiforge/issues/102) | UX-05 Run results and Problems drag to the whole workspace; decided 2026-11-02; after UX-01 | S · 20 min · `visible UI` |
+| [#214](https://github.com/jakubiszon26/apiforge/issues/214) | UX-08 *Cancel* in Project settings leaves no live permission behind; the sentence states the reach (MCP-26, critical); decision 4 | S · 15 min · `visible UI`, `default` |
+| [#215](https://github.com/jakubiszon26/apiforge/issues/215) | UX-09 The first window fits the screen's work area (KTLO-38, critical); decision 5 | S · 15 min · `default` |
+| [#208](https://github.com/jakubiszon26/apiforge/issues/208) | UX-10 Three MCP result fields say what happened (MCP-22, critical); non-UI | S · 10 min |
+| [#239](https://github.com/jakubiszon26/apiforge/issues/239) | COMP-00 Component authoring in Diagram — one mock-up: inputs on the board, the Inspector, *Save as component*, *Publish* (#174 confirmed from real work, #161 (2), #172 (1, 2), #173, #170 (1), #165); decided 2026-11-02 on `mock/comp-00` at `5ea3b9c` (Q1 = C strip, Q2 = A, Q3 as captured + live edits, Q4 header button, Q5 both outcomes, Q6 = B, Q7 own ticket); the ticket file lands with UX-31 | S · 30 min plus the discussion · `visible UI` |
+| [#248](https://github.com/jakubiszon26/apiforge/issues/248) | UX-31 A component's INPUTS strip: pills, a ring on the reading steps, *+ Add input* (#174 real work; COMP-00 Q1 = C); after COMP-00 | M · 30 min · `visible UI` |
+| [#249](https://github.com/jakubiszon26/apiforge/issues/249) | UX-32 Inputs added and edited in the Inspector, live, with inline errors (#174, #172 (1, 2); COMP-00 Q2 = A, Q3); after UX-31 | M · 30 min · `visible UI` |
+| [#221](https://github.com/jakubiszon26/apiforge/issues/221) | UX-11 No completion in a comment; a click after a line's end focuses the editor (#216 KTLO-39, #217 KTLO-40); after UX-03 | S · 15 min |
+| [#222](https://github.com/jakubiszon26/apiforge/issues/222) | UX-12 Non-error notices clear; the error banner is per document (#218 KTLO-41, #175 (4)); decision 6 = A; after UX-04 | S · 10 min · `default` |
+| [#193](https://github.com/jakubiszon26/apiforge/issues/193) | UX-13 A tab keeps its scroll across switches; decision 7; after UX-11 | S · 15 min · `default` |
+| [#202](https://github.com/jakubiszon26/apiforge/issues/202) | UX-14 *Extract component* proposes *Required* unticked for an argument with a default (KTLO-36); decision 8 | S · 10 min · `visible UI`, `default` |
+| [#223](https://github.com/jakubiszon26/apiforge/issues/223) | UX-15 The unsaved dot survives a truncated tab name (with #176 (1)) | S · 10 min · `visible UI` |
+| [#224](https://github.com/jakubiszon26/apiforge/issues/224) | UX-16 Cleanup cards resolve references to Cleanup steps | S · 10 min |
+| [#225](https://github.com/jakubiszon26/apiforge/issues/225) | UX-17 *Tidy up* with one card or a chip selected tidies the board (with #168 (4)); decision 9 | S · 10 min · `default` |
+| [#226](https://github.com/jakubiszon26/apiforge/issues/226) | UX-18 The Inspector opening does not re-fit the board; the selected or new card stays visible (with #156 (1)) | M · 20 min · `default` |
+| [#227](https://github.com/jakubiszon26/apiforge/issues/227) | UX-19 Run results navigation: scroll to the selected row, selection on a failed run, collapsible component rows, breadcrumb; decisions 10, 11; mock-up; after UX-05 | M · 30 min · `visible UI`, `default` |
+| [#228](https://github.com/jakubiszon26/apiforge/issues/228) | UX-20 Gutter room for the dot, amber for warnings; a plain message for undo on invalid source (#153 (1)); the popup clears the Problems header (#170 (5)); after UX-13 | S · 10 min · `visible UI` |
+| [#229](https://github.com/jakubiszon26/apiforge/issues/229) | UX-21 *Export* in *Add step* inside components; *Start* not offered there; *No matching steps*; decision 12 | S · 15 min · `visible UI`, `removal` |
+| [#230](https://github.com/jakubiszon26/apiforge/issues/230) | UX-22 A component is not offered inside itself; *New component* lands in `components/`; decision 13; after UX-15 | S · 15 min · `default` |
+| [#231](https://github.com/jakubiszon26/apiforge/issues/231) | UX-23 The manifest is protected in the Explorer; a text file in Diagram offers *Show code*; decisions 14, 15; after UX-22 | S · 10 min · `visible UI`, `removal` |
+| [#232](https://github.com/jakubiszon26/apiforge/issues/232) | UX-24 *Update to revision N* succeeds when ports change; an update badge; defaults shown; mock-up for the badge; after UX-18 | M · 30 min · `visible UI` |
+| [#233](https://github.com/jakubiszon26/apiforge/issues/233) | UX-25 *Publish* disabled with *r1 · no changes* beside it; no banner flash; the stale-results rule; decision 16 = A, COMP-00 Q6 = B; after UX-04 | S · 15 min · `visible UI`, `default` |
+| [#234](https://github.com/jakubiszon26/apiforge/issues/234) | UX-26 Wording, plurals, hints, *Skipped* in the summary (with #156 (2)); after UX-19 | S · 10 min · `visible UI` |
+| [#235](https://github.com/jakubiszon26/apiforge/issues/235) | UX-27 Distinct accessible labels; after UX-26 | S · 10 min |
+| [#236](https://github.com/jakubiszon26/apiforge/issues/236) | UX-28 *Curves* removed until it draws curves; a saved preference falls back to *Steps* (#170); decision 18 = A; after UX-17 | S · 10 min · `removal`, `visible UI` |
+| [#147](https://github.com/jakubiszon26/apiforge/issues/147) | UX-07 A wider Inspector; one capture per size; after UX-24 | S · 15 min · `visible UI` |
+| [#237](https://github.com/jakubiszon26/apiforge/issues/237) | UX-29 Card controls clipped to the board (#172 (3)); after UX-18 | S · 10 min |
+| [#250](https://github.com/jakubiszon26/apiforge/issues/250) | UX-33 A *Component settings* button in the board header opens the component's settings (#161 (2); COMP-00 Q4, button not rendered, judged on QA captures); after UX-32 | S · 20 min · `visible UI` |
+| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · `decision-needed` |
+
+| [#240](https://github.com/jakubiszon26/apiforge/issues/240) | WS-00 The workspace — one mock-up: a shared left sidebar (UX-06 #146), what folds at 960 × 540 (#157), Split's four columns (#161 (4)); after UX-05 | S · 30 min plus the discussion · `visible UI`, `default` · `decision-needed` |
+| [#241](https://github.com/jakubiszon26/apiforge/issues/241) | DIAG-00 Card readability — one mock-up: detail by zoom, the failed state, descriptions beside blocks (DIAG-01 #144), readable checks (DIAG-02 #145), #161 (1), #170 (2) | S · 30 min plus the discussion · `visible UI`, `format` · `decision-needed` |
+| [#242](https://github.com/jakubiszon26/apiforge/issues/242) | RUN-00 Run inputs, settings and the JSON response view — one mock-up (#161 (3, 5), REP-04 #148); after UX-01, UX-02 | S · 30 min plus the discussion · `visible UI`, `default` · `decision-needed` |
+| [#192](https://github.com/jakubiszon26/apiforge/issues/192) | MCP-20 A command's live run shows its status in the observing window's bar; mock-up first | S · 15 min · `visible UI` |
+| [#238](https://github.com/jakubiszon26/apiforge/issues/238) | UX-30 *Save as component* in a folder project (#170 (1)); decision 17 = C; COMP-00 Q5: both outcomes offered, publish-and-call the default; after COMP-00 | M · 30 min · `visible UI` |
+| [#146](https://github.com/jakubiszon26/apiforge/issues/146) | UX-06 Shared left sidebar; the Explorer available in Split; estimated on WS-00 | M · 30 min · `visible UI`, `default` |
+
+Wave 1 is #98–#102, #214, #215, #208; wave 2 runs from COMP-00 to UX-20;
+wave 3 holds UX-21..UX-29, UX-07, UX-33 and UX-34; wave 4 holds the three remaining mock-ups,
+MCP-20, UX-30 and UX-06. The tickets a mock-up produces join this table
+with the estimate taken on the mock-up.
+
+Out of the sprint, with the reasons in the plan: LAY-01..06 and the routing
+findings (#167, #168 (1–3), #170 (4)); the functional gaps #125–#143 and
+#124; the MCP and language issues that are not critical (#207, #209, #210,
+#211, #212, #213); #219 (tooling, a Sonnet fix); #155 (parser); #158 (not
+reproduced); #116; #201 (docs, merge on green CI).
 
 ## Later
 

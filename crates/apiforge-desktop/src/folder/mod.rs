@@ -315,6 +315,8 @@ pub struct FolderApp {
     /// The person's consent to an agent's live requests, per project
     /// (MCP-09).
     consent: crate::consent::AgentConsent,
+    /// The run mode the header's Run button runs, per project (UX-02).
+    run_mode: crate::run_mode::RunModeStore,
     /// Following the holder's commits while observing (MCP-16).
     follow: follow::Follow,
     /// The document the code view drew last and the lines it showed whole.
@@ -469,6 +471,7 @@ impl FolderApp {
             saved_settings: None,
             last_change: None,
             consent: crate::consent::AgentConsent::load(),
+            run_mode: crate::run_mode::RunModeStore::load(),
             follow: follow::Follow::default(),
             #[cfg(test)]
             lines_in_view: None,
@@ -679,10 +682,12 @@ impl FolderApp {
     }
 
     /// Keeps the person's per-project settings in `directory`, as
-    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
+    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09,
+    /// UX-02).
     #[cfg(test)]
     pub(crate) fn use_configuration_directory(&mut self, directory: &std::path::Path) {
         self.consent = crate::consent::AgentConsent::in_configuration(directory);
+        self.run_mode = crate::run_mode::RunModeStore::in_configuration(directory);
         self.say_consent();
     }
 

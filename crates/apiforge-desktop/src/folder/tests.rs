@@ -564,11 +564,13 @@ fn long_project_names_do_not_overlap_header_actions_in_writable_or_read_only_win
     for (app, context) in [(&mut writer, &context), (&mut reader, &read_context)] {
         for size in [egui::vec2(960.0, 540.0), egui::vec2(1600.0, 1000.0)] {
             let mut titles = Vec::new();
+            // The chevron *Run options* paints no text (UX-02); its place
+            // is checked by `ux02_criterion_7_the_header_fits`.
             for (tab, actions) in [
-                (&scenario, &["Save", "Save all", "Run options", "Run"][..]),
+                (&scenario, &["Save", "Save all", "Run simulation"][..]),
                 (
                     &component,
-                    &["Save", "Save all", "Publish", "Run options", "Run"][..],
+                    &["Save", "Save all", "Publish", "Run simulation"][..],
                 ),
             ] {
                 app.workbench.open(tab);
@@ -1996,7 +1998,7 @@ fn folder_run_settles_unsaved_code_and_reports_in_every_mode_then_becomes_stale(
         .unwrap()
         .edit_source(&id, &edited, CODE)
         .unwrap();
-    let at = label_position(&mut app, &context, "Run");
+    let at = label_position(&mut app, &context, "Run simulation");
     click(&mut app, &context, at);
     finish_folder_run(&mut app);
     assert_eq!(
