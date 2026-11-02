@@ -371,7 +371,7 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
@@ -646,14 +646,17 @@ resource or server message sets it. A live run that would ask a window for
 the project hears that window's setting first: when it is off the run is
 `live_disabled` and the window keeps the project, as when the window says
 nothing within two seconds. The window reads the file again once a second,
-so a change made in another window is followed. The overview reports the flag
-until a window is connected, since it never connects to one. The server
+so a change made in another window is followed. The overview never connects
+to a window: until one is connected it reports the flag, except while a window
+holding the project names a valid endpoint, when it says that window decides when
+the live run starts (MCP-18). The server
 tells connected windows `run { mode: live }` when a live run starts and ends,
 so a box unticked meanwhile says *A live run is in progress; it will finish.
 No new one starts.*
 `project_overview.live_requests` says `allowed` and its `source`
 (`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
-settings`). The permission is checked immediately before the run starts,
+settings`); `allowed` is `null`, with `window setting, asked when the run
+starts`, while that window has yet to be asked. The permission is checked immediately before the run starts,
 under the writer lock; a change after that does not stop the run, whose
 cleanup must finish.
 

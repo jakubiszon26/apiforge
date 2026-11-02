@@ -109,10 +109,21 @@ pub struct RevisionSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[schemars(transform = require_allowed)]
 pub struct LiveRequests {
-    pub allowed: bool,
+    /// Whether a live run may send now; null while a window holding the
+    /// project decides when the run starts.
+    pub allowed: Option<bool>,
     /// Why live requests are allowed or not.
     pub source: String,
+}
+
+// `allowed` is always serialized, null included: required, as
+// `holder_details` is, while its schema admits null.
+fn require_allowed(schema: &mut schemars::Schema) {
+    schema
+        .ensure_object()
+        .insert("required".into(), json!(["allowed", "source"]));
 }
 
 // Nullable values are always serialized, including null. List these keys as
@@ -332,7 +343,7 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
         holder_details,
         hands_over_on_write,
         live_requests: LiveRequests {
-            allowed: false,
+            allowed: Some(false),
             source: "no --allow-live".into(),
         },
         interrupted_runs,

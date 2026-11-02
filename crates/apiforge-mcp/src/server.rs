@@ -63,7 +63,7 @@ const TOOL_ORDER: [&str; 11] = [
 /// How long the end of stdin waits for a run's cleanup.
 const CLEANUP_WAIT: Duration = Duration::from_secs(10);
 
-const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests). write_source and create_document save a checked text, and publish turns a saved component into its next revision: the first write requests hand-over from a reachable clean window and takes the project for this agent session until finish_editing. Unsaved work or an unreachable window can refuse; reading remains available. A foreign agent or command refuses with held_by_other. Live requests still need separate permission. Call finish_editing when your edits are done.";
+const INSTRUCTIONS: &str = "API Forge project tools. Every document is named by its registered path; call project_overview first and language_reference before writing .afs. check_text checks a proposed text without saving it; run simulates the saved scenario or component and sends nothing, unless you ask for live: true and the person allowed live requests (project_overview.live_requests; allowed is null while an API Forge window holding the project decides, asked when the live run starts). write_source and create_document save a checked text, and publish turns a saved component into its next revision: the first write requests hand-over from a reachable clean window and takes the project for this agent session until finish_editing. Unsaved work or an unreachable window can refuse; reading remains available. A foreign agent or command refuses with held_by_other. Live requests still need separate permission. Call finish_editing when your edits are done.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathArguments {
@@ -220,8 +220,7 @@ impl ApiforgeServer {
         // holds the project: then its consent does, heard before it is
         // asked for the project (MCP-09).
         if let Err(refused) = self.permission.check()
-            && !(matches!(self.permission.current(), Permission::Flag(_))
-                && self.agent.window_decides())
+            && !self.window_decides()
         {
             return Err(refused);
         }
@@ -237,6 +236,14 @@ impl ApiforgeServer {
             self.record(id, &arguments, &report);
         }
         Ok(report)
+    }
+
+    /// No window is connected, and a window holding the project names its
+    /// endpoint: its consent, heard when a live run starts, decides instead
+    /// of the flag (MCP-09). The overview asks the same, of a window whose
+    /// endpoint is valid (MCP-18).
+    fn window_decides(&self) -> bool {
+        matches!(self.permission.current(), Permission::Flag(_)) && self.agent.window_decides()
     }
 
     /// A live run on the agent session's `store`: journalled before each
@@ -378,7 +385,11 @@ impl ApiforgeServer {
             overview.holder = tools::Holder::AgentSession;
             overview.interrupted_runs = self.read_journal()?.0.len();
         }
-        overview.live_requests = self.permission.describe();
+        // Only a window the run can actually ask: `hands_over_on_write`
+        // parses the endpoint `window_decides` only finds present.
+        overview.live_requests = self
+            .permission
+            .describe(overview.hands_over_on_write && self.window_decides());
         Ok(overview)
     }
 
@@ -417,7 +428,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project (holder: none, window, another_process or this server’s agent_session; holder_details: role/client/since or null), hands_over_on_write (a window advertises a valid endpoint: a write may request hand-over, without connecting during overview or promising a grant), whether live requests are allowed, and the version of the language reference. Reads the saved project; writes nothing.",
+        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project (holder: none, window, another_process or this server’s agent_session; holder_details: role/client/since or null), hands_over_on_write (a window advertises a valid endpoint: a write may request hand-over, without connecting during overview or promising a grant), whether live requests are allowed (live_requests: allowed true or false with its source; null while a window holding the project decides, asked when a live run starts, since the overview never connects), and the version of the language reference. Reads the saved project; writes nothing.",
         output_schema = schema_for_output::<tools::ProjectOverview>(),
         annotations(title = "Project overview", read_only_hint = true)
     )]

@@ -20,6 +20,9 @@ use tokio::sync::watch;
 pub const NOT_ENABLED: &str = "live requests are not enabled on this server";
 /// The refusal while a connected window's setting is off.
 pub const OFF_IN_SETTINGS: &str = "live requests are off in this project's settings";
+/// The overview's source while a window holding the project decides when
+/// the run starts (MCP-18).
+pub const ASKED_AT_RUN: &str = "window setting, asked when the run starts";
 
 /// Who allows live requests right now. While a window is connected over the
 /// control channel it decides (MCP-09); otherwise the start flag does.
@@ -74,9 +77,18 @@ impl LivePermission {
         self.flag
     }
 
-    /// What `project_overview.live_requests` reports.
-    pub fn describe(&self) -> LiveRequests {
-        describe(self.current())
+    /// What `project_overview.live_requests` reports. `window_decides`:
+    /// a window holding the project names its endpoint, so while no window
+    /// is connected its consent, heard when a live run starts, decides
+    /// instead of the flag (MCP-09, MCP-18).
+    pub fn describe(&self, window_decides: bool) -> LiveRequests {
+        match self.current() {
+            Permission::Flag(_) if window_decides => LiveRequests {
+                allowed: None,
+                source: ASKED_AT_RUN.to_owned(),
+            },
+            current => describe(current),
+        }
     }
 
     /// Refuses a live run unless the current permission allows it.
@@ -97,7 +109,7 @@ fn describe(permission: Permission) -> LiveRequests {
         Permission::Window { live: false } => (false, "off in the project's settings"),
     };
     LiveRequests {
-        allowed,
+        allowed: Some(allowed),
         source: source.to_owned(),
     }
 }
