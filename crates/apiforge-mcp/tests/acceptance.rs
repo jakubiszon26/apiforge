@@ -18,6 +18,11 @@
 //! the window beside it (criterion 8) in
 //! `crates/apiforge-desktop/src/folder/acceptance_tests.rs`.
 //!
+//! MCP-05b (#121): a publication's `request_id` in MCP-06's record of
+//! request ids, answered by a restarted server, criteria 1 to 4 (the
+//! `mcp05b_` tests). Criterion 5's secret grep is over stdio in
+//! `crates/apiforge-cli/tests/mcp.rs`.
+//!
 //! MCP-06 (#65): live runs through `run(path, live: true)`, the permission
 //! slot, the run journal and the ends of a run, secrets (the `mcp06_`
 //! tests), against the demo API in this process or a loopback listener that
@@ -3726,8 +3731,9 @@ fn mcp05_criterion_5_what_cannot_be_published_is_refused() {
 }
 
 /// Criterion 6: a `request_id` the server has answered returns the recorded
-/// result and creates no revision; a fresh server does not remember it, and
-/// the overview's hashes tell what exists.
+/// result and creates no revision. Since MCP-05b a restarted server answers
+/// it from the record too: `mcp05b_criterion_1_…` replaces the part where a
+/// fresh server published again.
 #[test]
 fn mcp05_criterion_6_an_answered_request_id_returns_the_recorded_result() {
     let directory = checkout();
@@ -3756,17 +3762,6 @@ fn mcp05_criterion_6_an_answered_request_id_returns_the_recorded_result() {
     assert!(agent.finish_editing().finished);
     assert!(agent.publish(&arguments).unwrap().replayed);
     assert_eq!(shared(root), after_first);
-
-    // A fresh server does not remember it: the same call publishes again,
-    // and the overview's hashes are the way to tell.
-    let fresh = self::agent(root);
-    let second = fresh.publish(&arguments).unwrap();
-    assert!(!second.replayed);
-    assert_eq!(second.revision, first.revision + 1);
-    let listed = revisions(root, "product");
-    assert_eq!(listed.len(), 3);
-    assert_eq!(listed[1].2, first.source_sha256);
-    assert_eq!(listed[2].2, second.source_sha256);
 }
 
 /// Criterion 7: the agent-session rules of MCP-04 apply: refused with the
@@ -4030,4 +4025,400 @@ fn mcp12_stale_window_description_never_blocks_a_free_writer() {
         .unwrap();
     assert!(serde_json::to_value(created).unwrap()["wrote"] == true);
     assert!(tools::read_source(root, DRAFT).is_ok());
+}
+
+// ----- MCP-05b (#121): publish request ids survive a server restart -----
+
+const REQUESTS: &str = ".apiforge/local/agent-requests.json";
+
+fn publish_with_id(path: &str, expected: &str, id: &str) -> PublishArguments {
+    PublishArguments {
+        request_id: Some(id.into()),
+        ..publish_args(path, expected)
+    }
+}
+
+/// The record of request ids as JSON, if there is one.
+fn request_record(root: &Path) -> Option<Value> {
+    fs::read(root.join(REQUESTS))
+        .ok()
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+}
+
+/// The record's entries of `kind` for `id`.
+fn recorded(root: &Path, kind: &str, id: &str) -> Vec<Value> {
+    request_record(root).map_or_else(Vec::new, |record| {
+        record["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["kind"] == kind && entry["id"] == id)
+            .cloned()
+            .collect()
+    })
+}
+
+/// Criterion 1: a publication with a `request_id` on server A is answered
+/// from the record by a new server B for the same folder: the same
+/// revision, hash and generation, `replayed: true`, and the project's
+/// shared files byte-identical. The same id for another path or another
+/// hash is `invalid_inputs`, and nothing is written.
+#[test]
+fn mcp05b_criterion_1_a_new_server_replays_a_recorded_publication() {
+    let directory = checkout();
+    let root = directory.path();
+    let (_, hash, _) = read(root, PRODUCT);
+    let arguments = publish_with_id(PRODUCT, &hash, "publish-before-a-restart");
+
+    let earlier = agent(root);
+    let first = earlier.publish(&arguments).unwrap();
+    assert!(first.wrote);
+    assert!(!first.replayed);
+    assert_eq!(first.revision, 2);
+    // The result is in the record once the commit is done.
+    let entries = recorded(root, "publish", "publish-before-a-restart");
+    assert_eq!(entries.len(), 1, "{:?}", request_record(root));
+    assert_eq!(entries[0]["path"], PRODUCT);
+    assert_eq!(entries[0]["expectedSourceSha256"], hash.as_str());
+    assert!(entries[0]["startedAt"].is_string());
+    assert_eq!(entries[0]["result"]["revision"], 2);
+    assert_eq!(
+        entries[0]["result"]["source_sha256"],
+        first.source_sha256.as_str()
+    );
+    assert!(earlier.finish_editing().finished);
+    drop(earlier);
+    let after_first = shared(root);
+    let generation = head_generation(root);
+
+    // A restarted server: the recorded result, nothing published.
+    let server = agent(root);
+    let again = server.publish(&arguments).unwrap();
+    assert!(again.replayed, "the recorded result");
+    assert_eq!(
+        (
+            again.revision,
+            &again.source_sha256,
+            again.generation,
+            &again.revision_path,
+            &again.handle
+        ),
+        (
+            first.revision,
+            &first.source_sha256,
+            first.generation,
+            &first.revision_path,
+            &first.handle
+        )
+    );
+    assert_eq!(shared(root), after_first, "byte-identical");
+    assert_eq!(head_generation(root), generation);
+    assert_eq!(revisions(root, "product").len(), 2);
+
+    // The same id for another path or another hash names another call.
+    let (_, promotion_hash, _) = read(root, PROMOTION);
+    for other in [
+        publish_with_id(PROMOTION, &promotion_hash, "publish-before-a-restart"),
+        publish_with_id(PRODUCT, &"0".repeat(64), "publish-before-a-restart"),
+    ] {
+        let error = server.publish(&other).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInputs, "{other:?}");
+        assert_eq!(error.wrote, Wrote::No);
+        assert_eq!(error.details["path"], PRODUCT);
+        assert_eq!(shared(root), after_first, "nothing written");
+    }
+    assert_eq!(revisions(root, "product").len(), 2);
+    assert_eq!(revisions(root, "active_promotion").len(), 1);
+}
+
+/// Criterion 2: the entry is on disk before the transaction and gets its
+/// result after it. A new server that finds an entry without a result, as
+/// an earlier server leaves it when it stopped between the two, answers
+/// `unknown_outcome` with the entry's path, hash and start, and writes
+/// nothing. A commit that fails after its activation keeps the entry, so a
+/// retry is never a second revision; an entry that cannot be written is
+/// `project_unreadable` and nothing is published.
+#[test]
+fn mcp05b_criterion_2_a_publication_an_earlier_server_started_is_unknown_outcome() {
+    // An entry without a result, as server A would have left it.
+    let directory = checkout();
+    let root = directory.path();
+    let (_, hash, _) = read(root, PRODUCT);
+    fs::create_dir_all(root.join(".apiforge/local")).unwrap();
+    let left = serde_json::to_vec_pretty(&json!({
+        "version": 2,
+        "requests": [{
+            "kind": "publish",
+            "id": "lost-with-the-server",
+            "path": PRODUCT,
+            "expectedSourceSha256": hash,
+            "startedAt": "2026-10-28T10:00:00.000Z",
+        }],
+    }))
+    .unwrap();
+    fs::write(root.join(REQUESTS), &left).unwrap();
+    let before = shared(root);
+    let server = agent(root);
+    let error = server
+        .publish(&publish_with_id(PRODUCT, &hash, "lost-with-the-server"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownOutcome);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(error.details["path"], PRODUCT);
+    assert_eq!(error.details["expected_source_sha256"], hash.as_str());
+    assert_eq!(error.details["started_at"], "2026-10-28T10:00:00.000Z");
+    // The message is not formatted into the failure: CodeQL treats a
+    // tool error's message as possibly carrying a secret.
+    assert!(
+        error.message.contains("project_overview"),
+        "the message advises project_overview"
+    );
+    assert_eq!(shared(root), before, "nothing published");
+    assert_eq!(
+        fs::read(root.join(REQUESTS)).unwrap(),
+        left,
+        "nothing written"
+    );
+    assert_eq!(revisions(root, "product").len(), 1);
+
+    // A commit that fails after its activation keeps the entry without a
+    // result: the revision may exist, so a retry is unknown_outcome.
+    let directory = checkout();
+    let root = directory.path();
+    let (_, hash, _) = read(root, PRODUCT);
+    let earlier = agent(root);
+    let error = faults::with_hook(
+        |event| {
+            if event.boundary == Boundary::Replace
+                && event.phase == IoPhase::Before
+                && event.path.ends_with(DIAGRAM)
+            {
+                return Err(injected(&event.path, "on the checkpoint's install"));
+            }
+            Ok(())
+        },
+        || earlier.publish(&publish_with_id(PRODUCT, &hash, "failed-after-activation")),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::RecoveryRequired);
+    let entries = recorded(root, "publish", "failed-after-activation");
+    assert_eq!(entries.len(), 1, "the entry was written before the commit");
+    assert!(entries[0].get("result").is_none_or(Value::is_null));
+    assert!(earlier.finish_editing().finished);
+    drop(earlier);
+    let store = ProjectStore::open_exclusive(root).unwrap();
+    store.recover().unwrap();
+    drop(store);
+    let after_recovery = shared(root);
+    let error = agent(root)
+        .publish(&publish_with_id(PRODUCT, &hash, "failed-after-activation"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::UnknownOutcome);
+    assert_eq!(shared(root), after_recovery, "never a second revision");
+
+    // An entry that cannot be written: nothing is published. A record just
+    // under the size limit reads, but one more entry is over it.
+    let directory = checkout();
+    let root = directory.path();
+    let (_, hash, _) = read(root, PRODUCT);
+    fs::create_dir_all(root.join(".apiforge/local")).unwrap();
+    let limit = apiforge_storage::project::MAX_JSON_BYTES;
+    let padding = limit - 200;
+    let full = serde_json::to_vec(&json!({
+        "version": 2,
+        "requests": [{
+            "kind": "liveRun",
+            "id": "a-long-path",
+            "path": "p".repeat(padding),
+            "startedAt": "2026-10-28T10:00:00.000Z",
+        }],
+    }))
+    .unwrap();
+    assert!(full.len() <= limit, "the record itself is readable");
+    fs::write(root.join(REQUESTS), &full).unwrap();
+    let before = shared(root);
+    let error = agent(root)
+        .publish(&publish_with_id(PRODUCT, &hash, "cannot-be-recorded"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ProjectUnreadable);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(error.details["file"], REQUESTS);
+    assert_eq!(shared(root), before, "nothing published");
+    assert_eq!(fs::read(root.join(REQUESTS)).unwrap(), full);
+}
+
+/// Criterion 3: a refusal before the commit leaves no entry for the id, so
+/// the same id publishes once the cause is fixed: held by another, a stale
+/// hash, a scenario, a component over 1 MiB, one with errors, one that
+/// would lose a comment, and a commit that fails before its activation.
+#[test]
+fn mcp05b_criterion_3_a_refused_publication_leaves_no_entry() {
+    const ID: &str = "publish-once-fixed";
+    let directory = checkout();
+    let root = directory.path();
+    let (original, hash, _) = read(root, PRODUCT);
+    let agent = agent(root);
+    let no_entry = |what: &str| {
+        assert!(
+            recorded(root, "publish", ID).is_empty(),
+            "{what} left an entry: {:?}",
+            request_record(root)
+        );
+    };
+
+    let owner = ProjectStore::open_exclusive_as(root, &LockHolder::command("apply")).unwrap();
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &hash, ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::HeldByOther);
+    drop(owner);
+    no_entry("held_by_other");
+
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &"0".repeat(64), ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::StaleSource);
+    no_entry("stale_source");
+
+    let (_, scenario_hash, _) = read(root, SCENARIO);
+    let error = agent
+        .publish(&publish_with_id(SCENARIO, &scenario_hash, ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::NotAComponent);
+    no_entry("not_a_component");
+
+    fs::write(
+        root.join(PRODUCT),
+        "// padding\n".repeat(tools::MAX_TEXT_BYTES / 11 + 1),
+    )
+    .unwrap();
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &sha256(&root.join(PRODUCT)), ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::TooLarge);
+    no_entry("too_large");
+
+    fs::write(
+        root.join(PRODUCT),
+        original.replacen(" {\n", " {\n  broken = nosuch@1(id: 1)\n", 1),
+    )
+    .unwrap();
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &sha256(&root.join(PRODUCT)), ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidText);
+    no_entry("invalid_text");
+    fs::write(root.join(PRODUCT), &original).unwrap();
+
+    let (_, commented_hash) = with_loose_comment(root, &agent, PRODUCT);
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &commented_hash, ID))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::CommentsWouldBeLost);
+    no_entry("comments_would_be_lost");
+    let restored = agent
+        .write_source(&write_args(PRODUCT, &original, &commented_hash))
+        .unwrap();
+    assert_eq!(restored.source_sha256, hash);
+
+    let staged = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = staged.clone();
+    let error = faults::with_hook(
+        move |event| {
+            let in_staging = event
+                .path
+                .components()
+                .any(|part| part.as_os_str() == "transactions");
+            if in_staging
+                && event.boundary == Boundary::TemporaryCreate
+                && event.phase == IoPhase::Before
+            {
+                seen.set(seen.get() + 1);
+                if seen.get() == 2 {
+                    return Err(injected(&event.path, "between the staged files"));
+                }
+            }
+            Ok(())
+        },
+        || agent.publish(&publish_with_id(PRODUCT, &hash, ID)),
+    )
+    .unwrap_err();
+    assert_eq!(staged.get(), 2, "the fault was reached");
+    assert_ne!(error.code, ErrorCode::RecoveryRequired);
+    assert_eq!(error.wrote, Wrote::No);
+    assert!(!head_active(root));
+    no_entry("a commit that failed before its activation");
+    assert_eq!(revisions(root, "product").len(), 1);
+
+    // The cause fixed, the same id publishes, once.
+    let published = agent.publish(&publish_with_id(PRODUCT, &hash, ID)).unwrap();
+    assert!(published.wrote);
+    assert!(!published.replayed);
+    assert_eq!(published.revision, 2);
+    let entries = recorded(root, "publish", ID);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["result"]["revision"], 2);
+}
+
+/// Criterion 4: one set of rules with live runs. An unreadable record
+/// refuses `publish` with a `request_id`, naming the file, and publishes
+/// nothing, while `publish` without an id, simulations and reads still
+/// work. A version-1 record is read as live-run entries and rewritten as
+/// version 2 on the next write. The record keeps 1 000 entries across both
+/// kinds, the oldest dropped.
+#[test]
+fn mcp05b_criterion_4_an_unreadable_record_refuses_a_publish_with_an_id() {
+    let directory = checkout();
+    let root = directory.path();
+    let (_, hash, _) = read(root, PRODUCT);
+    fs::create_dir_all(root.join(".apiforge/local")).unwrap();
+    fs::write(root.join(REQUESTS), b"{ broken").unwrap();
+    let before = shared(root);
+    let agent = agent(root);
+    let error = agent
+        .publish(&publish_with_id(PRODUCT, &hash, "while-unreadable"))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ProjectUnreadable);
+    assert_eq!(error.wrote, Wrote::No);
+    assert_eq!(error.details["file"], REQUESTS);
+    assert!(
+        error.message.contains(REQUESTS),
+        "the message names the file"
+    );
+    assert_eq!(shared(root), before, "nothing published");
+    assert_eq!(fs::read(root.join(REQUESTS)).unwrap(), b"{ broken");
+    // Reads, simulations and a publication without an id still work.
+    assert!(tools::read_source(root, PRODUCT).is_ok());
+    assert_eq!(
+        simulate(root, &arguments(SCENARIO)).unwrap().status,
+        Verdict::Passed
+    );
+    let published = agent.publish(&publish_args(PRODUCT, &hash)).unwrap();
+    assert_eq!(published.revision, 2);
+    assert_eq!(fs::read(root.join(REQUESTS)).unwrap(), b"{ broken");
+
+    // A version-1 record: its entries are live runs, kept on the rewrite.
+    let started = |id: usize| json!({ "id": format!("live-{id}"), "path": SCENARIO, "startedAt": "2026-10-28T10:00:00.000Z" });
+    let full: Vec<Value> = (0..1000).map(started).collect();
+    fs::write(
+        root.join(REQUESTS),
+        serde_json::to_vec(&json!({ "version": 1, "requests": full })).unwrap(),
+    )
+    .unwrap();
+    let (_, hash, _) = read(root, PRODUCT);
+    let published = agent
+        .publish(&publish_with_id(PRODUCT, &hash, "after-version-1"))
+        .unwrap();
+    assert_eq!(published.revision, 3);
+    let record = request_record(root).unwrap();
+    assert_eq!(record["version"], 2);
+    let entries = record["requests"].as_array().unwrap();
+    assert_eq!(entries.len(), 1000, "1 000 kept across both kinds");
+    assert_eq!(entries[0]["kind"], "liveRun");
+    assert_eq!(entries[0]["id"], "live-1", "the oldest dropped");
+    assert_eq!(entries[998]["id"], "live-999");
+    assert_eq!(entries[998]["path"], SCENARIO);
+    assert_eq!(entries[999]["kind"], "publish");
+    assert_eq!(entries[999]["id"], "after-version-1");
+    assert_eq!(entries[999]["result"]["revision"], 3);
 }

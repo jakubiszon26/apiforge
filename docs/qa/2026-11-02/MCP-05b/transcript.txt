@@ -1,0 +1,196 @@
+#### Session 1: server A publishes with a request_id, then ends
+## fresh demo-shop checkout restart (prepare_project of the shop, without .apiforge/local)
+## start server A: apiforge mcp --folder <checkout>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1.0.0"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na …
+>> {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:4318/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\n …
+-- revisions: [["active_promotion", 1, "b07c465301bc"], ["product", 1, "eba04ff2905f"], ["add_to_cart", 1, "1cf5820dbbde"]]; generation 0
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "components/product.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"text\": \"component product \\\"Product\\\" {\\n  description \\\"Fetch a product by ID together with it …
+-- read_source components/product.afs: source_sha256 eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 2,\n  \"revision_path\": \".apiforge/revisions/get-product/2.afs …
+-- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
+## .apiforge/local/agent-requests.json:
+##   {
+##     "version": 2,
+##     "requests": [
+##       {
+##         "kind": "publish",
+##         "id": "qa-restart-1",
+##         "path": "components/product.afs",
+##         "expectedSourceSha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##         "startedAt": "2026-11-02T08:21:19.720Z",
+##         "result": {
+##           "path": "components/product.afs",
+##           "handle": "product",
+##           "revision": 2,
+##           "revision_path": ".apiforge/revisions/get-product/2.afs",
+##           "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##           "generation": 1,
+##           "wrote": true,
+##           "changed": [
+##             ".apiforge/revisions/get-product/2.afs",
+##             ".apiforge/diagram.json",
+##             "apiforge.project.json"
+##           ],
+##           "replayed": false
+##         }
+##       }
+##     ]
+##   }
+## end of stdin: exit 0, stderr ''
+
+#### Session 2: server B, a new process for the same folder, repeats the id
+## start server B: apiforge mcp --folder <checkout>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1.0.0"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na …
+>> {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 2,\n  \"revision_path\": \".apiforge/revisions/get-product/2.afs …
+-- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": true}
+## same revision, hash and generation as server A: True; replayed True
+## shared files byte-identical after the replay: True
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "000000000000000000000000000000000000000000000000000000000000000 …
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"invalid_inputs\",\n  \"message\": \"This request_id answered a publication of another document or another version; nothing was written. …
+-- publish: isError=True code=invalid_inputs wrote=false message='This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication'
+--   details: {"path": "components/product.afs"}
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "components/active-promotion.afs"}}}
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/active-promotion.afs\",\n  \"text\": \"component active_promotion \\\"Active promotion\\\" {\\n  description \\\"Check that  …
+-- read_source components/active-promotion.afs: source_sha256 b07c465301bc91eae964ab3f203a5119b3fa83ebc5a26c5d82b40ae58be8081d
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/active-promotion.afs", "expected_source_sha256": "b07c465301bc91eae964ab3f203a5119b3fa83ebc5a26c5d82b40a …
+<< {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"invalid_inputs\",\n  \"message\": \"This request_id answered a publication of another document or another version; nothing was written. …
+-- publish: isError=True code=invalid_inputs wrote=false message='This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication'
+--   details: {"path": "components/product.afs"}
+## shared files unchanged by the refusals: True
+>> {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:4318/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\n …
+-- revisions: [["active_promotion", 1, "b07c465301bc"], ["product", 1, "eba04ff2905f"], ["add_to_cart", 1, "1cf5820dbbde"], ["product", 2, "eba04ff2905f"]]; generation 1
+## end of stdin: exit 0, stderr 'apiforge mcp: publish: invalid_inputs\napiforge mcp: publish: invalid_inputs'
+
+#### Session 3: an entry without a result, as a server leaves it when it stops between the entry and the commit's result
+## fresh demo-shop checkout unknown (prepare_project of the shop, without .apiforge/local)
+## start server C: apiforge mcp --folder <checkout>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1.0.0"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na …
+>> {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "components/product.afs"}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"text\": \"component product \\\"Product\\\" {\\n  description \\\"Fetch a product by ID together with it …
+-- read_source components/product.afs: source_sha256 eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef
+## wrote the entry by hand (no result), as server A would have left it
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"unknown_outcome\",\n  \"message\": \"A publication with this request_id was started, by this server or an earlier apiforge mcp process, …
+-- publish: isError=True code=unknown_outcome wrote=false message='A publication with this request_id was started, by this server or an earlier apiforge mcp process, and how it ended was not recorded; nothing was published now. project_overview lists every revision with its source_sha256, which tells whether it was published. Use a new request_id to publish again'
+--   details: {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "started_at": "2026-11-02T09:00:00.000Z"}
+## shared files unchanged: True; record unchanged: True
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "project_overview", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"name\": \"Demo shop\",\n  \"base_url\": \"http://127.0.0.1:4318/demo/shop\",\n  \"variables\": [],\n  \"secret_names\": [],\n  \"contracts\": [\n …
+-- revisions: [["active_promotion", 1, "b07c465301bc"], ["product", 1, "eba04ff2905f"], ["add_to_cart", 1, "1cf5820dbbde"]]; generation 0
+## a refusal before the commit leaves no entry:
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "000000000000000000000000000000000000000000000000000000000000000 …
+<< {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"stale_source\",\n  \"message\": \"The component changed on disk since the version you checked; nothing was published. Read it again, ch …
+-- publish: isError=True code=stale_source wrote=false message='The component changed on disk since the version you checked; nothing was published. Read it again, check it and publish with the new source_sha256'
+--   details: {"source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef"}
+## qa-refused-first in the record: False
+>> {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 2,\n  \"revision_path\": \".apiforge/revisions/get-product/2.afs …
+-- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
+## .apiforge/local/agent-requests.json:
+##   {
+##     "version": 2,
+##     "requests": [
+##       {
+##         "kind": "publish",
+##         "id": "qa-lost",
+##         "path": "components/product.afs",
+##         "expectedSourceSha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##         "startedAt": "2026-11-02T09:00:00.000Z"
+##       },
+##       {
+##         "kind": "publish",
+##         "id": "qa-refused-first",
+##         "path": "components/product.afs",
+##         "expectedSourceSha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##         "startedAt": "2026-11-02T08:21:20.567Z",
+##         "result": {
+##           "path": "components/product.afs",
+##           "handle": "product",
+##           "revision": 2,
+##           "revision_path": ".apiforge/revisions/get-product/2.afs",
+##           "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##           "generation": 1,
+##           "wrote": true,
+##           "changed": [
+##             ".apiforge/revisions/get-product/2.afs",
+##             ".apiforge/diagram.json",
+##             "apiforge.project.json"
+##           ],
+##           "replayed": false
+##         }
+##       }
+##     ]
+##   }
+## end of stdin: exit 0, stderr 'apiforge mcp: publish: unknown_outcome\napiforge mcp: publish: stale_source'
+
+#### Session 4: an unreadable record, then a version-1 record
+## fresh demo-shop checkout unreadable (prepare_project of the shop, without .apiforge/local)
+## wrote '{ broken' to the record
+## start server D: apiforge mcp --folder <checkout>
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "qa", "version": "1.0.0"}}}
+<< {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"resources":{},"tools":{}},"serverInfo":{"name":"apiforge","version":"0.1.0"},"instructions":"API Forge project tools. Every document is na …
+>> {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "components/product.afs"}}}
+<< {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"text\": \"component product \\\"Product\\\" {\\n  description \\\"Fetch a product by ID together with it …
+-- read_source components/product.afs: source_sha256 eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"project_unreadable\",\n  \"message\": \"The record of request ids, .apiforge/local/agent-requests.json, cannot be read (not a record of …
+-- publish: isError=True code=project_unreadable wrote=false message='The record of request ids, .apiforge/local/agent-requests.json, cannot be read (not a record of request ids); nothing was sent or published. A live run or a publication with a request_id is refused until the file is moved aside, because this server could not tell whether the id already ran. Without a request_id both still work'
+--   details: {"file": ".apiforge/local/agent-requests.json"}
+## shared files unchanged: True; record still '{ broken'
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs"}}}
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"scenarios/promotion-and-cart-price.afs\",\n  \"live\": false,\n  \"status\": \"passed\",\n  \"ended_by\": \"completed\",\n  \"generatio …
+-- run (simulation): isError=False status=passed
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 2,\n  \"revision_path\": \".apiforge/revisions/get-product/2.afs …
+-- publish: {"path": "components/product.afs", "handle": "product", "revision": 2, "revision_path": ".apiforge/revisions/get-product/2.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 1, "wrote": true, "changed": [".apiforge/revisions/get-product/2.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
+## replaced the record with a version-1 record holding one live run
+>> {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "publish", "arguments": {"path": "components/product.afs", "expected_source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cde …
+<< {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":"{\n  \"path\": \"components/product.afs\",\n  \"handle\": \"product\",\n  \"revision\": 3,\n  \"revision_path\": \".apiforge/revisions/get-product/3.afs …
+-- publish: {"path": "components/product.afs", "handle": "product", "revision": 3, "revision_path": ".apiforge/revisions/get-product/3.afs", "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef", "generation": 2, "wrote": true, "changed": [".apiforge/revisions/get-product/3.afs", ".apiforge/diagram.json", "apiforge.project.json"], "replayed": false}
+## .apiforge/local/agent-requests.json:
+##   {
+##     "version": 2,
+##     "requests": [
+##       {
+##         "kind": "liveRun",
+##         "id": "qa-live-from-mcp-06",
+##         "path": "scenarios/promotion-and-cart-price.afs",
+##         "startedAt": "2026-10-28T10:00:00.000Z"
+##       },
+##       {
+##         "kind": "publish",
+##         "id": "qa-after-v1",
+##         "path": "components/product.afs",
+##         "expectedSourceSha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##         "startedAt": "2026-11-02T08:21:20.994Z",
+##         "result": {
+##           "path": "components/product.afs",
+##           "handle": "product",
+##           "revision": 3,
+##           "revision_path": ".apiforge/revisions/get-product/3.afs",
+##           "source_sha256": "eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef",
+##           "generation": 2,
+##           "wrote": true,
+##           "changed": [
+##             ".apiforge/revisions/get-product/3.afs",
+##             ".apiforge/diagram.json",
+##             "apiforge.project.json"
+##           ],
+##           "replayed": false
+##         }
+##       }
+##     ]
+##   }
+## end of stdin: exit 0, stderr 'apiforge mcp: publish: project_unreadable'

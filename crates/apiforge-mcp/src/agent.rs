@@ -6,8 +6,9 @@
 //!
 //! `publish` (MCP-05) is the window's Publish on that session: the same
 //! transaction, the comment-loss question answered only for the hash the
-//! model names, and a `request_id` the server remembers so that a lost
-//! response can be asked for again without a second revision.
+//! model names, and a `request_id` kept in the record of request ids
+//! (MCP-05b, `requests`) so that a lost response can be asked for again,
+//! of this server or of a restarted one, without a second revision.
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
     folder,
@@ -28,7 +29,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::VecDeque,
     ffi::OsString,
     path::{Path, PathBuf},
     sync::{
@@ -96,13 +96,13 @@ pub struct PublishArguments {
     #[serde(default)]
     pub expected_generation: Option<u64>,
     /// An id of your choosing for this publication. Repeated after a lost
-    /// response, this server returns the recorded result instead of
-    /// publishing again; a restarted server does not know it.
+    /// response, the server returns the recorded result instead of
+    /// publishing again, also after a restart.
     #[serde(default)]
     pub request_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PublishResult {
     /// The working component's registered path.
     pub path: String,
@@ -194,81 +194,6 @@ struct State {
     /// A commit of this session failed after its activation: every later
     /// write is refused until the session ends and a writer recovers.
     recovery_required: bool,
-    /// The publications this server answered, by `request_id`. It outlives
-    /// the session's lock and ends with the process.
-    answered: Answered,
-}
-
-/// How many publications a server remembers by `request_id`.
-const ANSWERED: usize = 64;
-/// How many ids of dropped results a server remembers as answered. An id
-/// older than that is unknown again: the overview's revisions tell.
-const DROPPED: usize = 1024;
-
-/// The arguments a `request_id` answered: the path and the expected hash.
-type AnsweredCall = (String, String);
-
-/// The answered publications, oldest first, with the arguments each
-/// answered; and, oldest first, the ids whose result was dropped to keep the
-/// list short. Both are bounded.
-#[derive(Default)]
-struct Answered {
-    recent: VecDeque<(String, AnsweredCall, PublishResult)>,
-    dropped: VecDeque<String>,
-}
-
-impl Answered {
-    /// The recorded result of a publication with the same `request_id`. An
-    /// id that answered another publication is refused; one whose result is
-    /// no longer held is `unknown_outcome`, never published again.
-    fn recorded(&self, arguments: &PublishArguments) -> Result<Option<PublishResult>, ToolError> {
-        let Some(id) = arguments.request_id.as_ref() else {
-            return Ok(None);
-        };
-        if self.dropped.iter().any(|dropped| dropped == id) {
-            return Err(ToolError::new(
-                ErrorCode::UnknownOutcome,
-                "This server answered a publication with this request_id but no longer holds its result; nothing was written. project_overview lists every revision with its source_sha256",
-            ));
-        }
-        let Some((_, call, result)) = self.recent.iter().find(|(answered, _, _)| answered == id)
-        else {
-            return Ok(None);
-        };
-        if *call != call_of(arguments) {
-            return Err(ToolError::new(
-                ErrorCode::InvalidInputs,
-                "This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication",
-            )
-            .with_details(json!({ "path": call.0 })));
-        }
-        Ok(Some(PublishResult {
-            replayed: true,
-            ..result.clone()
-        }))
-    }
-
-    fn record(&mut self, id: &str, arguments: &PublishArguments, result: &PublishResult) {
-        self.recent.retain(|(answered, _, _)| answered != id);
-        self.dropped.retain(|dropped| dropped != id);
-        if self.recent.len() == ANSWERED
-            && let Some((dropped, _, _)) = self.recent.pop_front()
-        {
-            if self.dropped.len() == DROPPED {
-                self.dropped.pop_front();
-            }
-            self.dropped.push_back(dropped);
-        }
-        self.recent
-            .push_back((id.to_owned(), call_of(arguments), result.clone()));
-    }
-}
-
-fn call_of(arguments: &PublishArguments) -> AnsweredCall {
-    (
-        arguments.path.clone(),
-        arguments.expected_source_sha256.clone(),
-    )
 }
 
 impl std::fmt::Debug for AgentSession {
@@ -505,10 +430,14 @@ impl AgentSession {
             secrets::refuse_in_text(id, &self.secrets.values()?)?;
         }
         let mut state = self.state();
-        if let Some(recorded) = state.answered.recorded(arguments)? {
-            return Ok(recorded);
-        }
         let store = self.store(&mut state)?;
+        // A publication this id named, recorded by this server or an earlier
+        // one (MCP-05b): its result, never a second revision.
+        if let Some(request) = &arguments.request_id
+            && let Some(recorded) = requests::find_publish(&store, request)?
+        {
+            return replay(recorded, &path, arguments);
+        }
         // The working source is not read: publishing never rewrites it, and a
         // source over the limit is the session's `too_large`, not a storage
         // failure. What a publication changes: the checkpoint and registry.
@@ -580,13 +509,36 @@ impl AgentSession {
                 .accept_comment_loss(&id)
                 .map_err(tools::storage_error)?;
         }
+        // The id is on disk before the transaction starts, as a live run's
+        // is before its first request: a server that stops before it
+        // records the result leaves an entry a new server answers with
+        // `unknown_outcome`, never a second revision.
+        if let Some(request) = &arguments.request_id {
+            requests::record_publish_started(
+                &store,
+                request,
+                path.as_str(),
+                &arguments.expected_source_sha256,
+            )?;
+        }
         let published = match session.publish(&id, Origin::SESSION) {
             Ok(published) => published,
-            Err(error) => return Err(publish_failed(&mut state, &store, error, &path)),
+            Err(error) => {
+                let error = publish_failed(&mut state, &store, error, &path);
+                // Refused before its activation, nothing was published and
+                // the id may publish once the cause is fixed. After it, the
+                // revision may exist: the entry stays. An entry that cannot
+                // be removed stays too, which only costs a new id.
+                if let Some(request) = &arguments.request_id
+                    && error.wrote != Wrote::Unknown
+                {
+                    let _ = requests::forget_publish(&store, request);
+                }
+                return Err(error);
+            }
         };
         // From here the revision exists: nothing may fail before the result
-        // is recorded, or a retry with the same request_id would publish a
-        // second revision.
+        // is recorded.
         let revision = session
             .manifest()
             .revisions
@@ -615,8 +567,16 @@ impl AgentSession {
             changed,
             replayed: false,
         };
-        if let Some(id) = &arguments.request_id {
-            state.answered.record(id, arguments, &result);
+        if let Some(request) = &arguments.request_id {
+            // A result the record cannot take leaves the entry without one:
+            // a retry is then `unknown_outcome`. The revision exists, so the
+            // call still answers with it.
+            let _ = requests::record_publish_result(
+                &store,
+                request,
+                &arguments.expected_source_sha256,
+                &result,
+            );
         }
         // Connected windows hear of the revision before the tool answers,
         // as of a save (MCP-08b).
@@ -925,6 +885,41 @@ fn commit_failed(
     }
 }
 
+/// The answer to a publication the record holds for its `request_id`: its
+/// result for the same path and hash, `invalid_inputs` for another call,
+/// `unknown_outcome` when the server that started it did not record how it
+/// ended. Nothing is written.
+fn replay(
+    recorded: requests::Publication,
+    path: &ProjectPath,
+    arguments: &PublishArguments,
+) -> Result<PublishResult, ToolError> {
+    let Some(result) = recorded.result else {
+        return Err(ToolError::new(
+            ErrorCode::UnknownOutcome,
+            "A publication with this request_id was started, by this server or an earlier apiforge mcp process, and how it ended was not recorded; nothing was published now. project_overview lists every revision with its source_sha256, which tells whether it was published. Use a new request_id to publish again",
+        )
+        .with_details(json!({
+            "path": recorded.path,
+            "expected_source_sha256": recorded.expected_source_sha256,
+            "started_at": recorded.started_at,
+        })));
+    };
+    if recorded.path != path.as_str()
+        || recorded.expected_source_sha256 != arguments.expected_source_sha256
+    {
+        return Err(ToolError::new(
+            ErrorCode::InvalidInputs,
+            "This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication",
+        )
+        .with_details(json!({ "path": recorded.path })));
+    }
+    Ok(PublishResult {
+        replayed: true,
+        ..result
+    })
+}
+
 fn not_a_component() -> ToolError {
     ToolError::new(
         ErrorCode::NotAComponent,
@@ -1178,111 +1173,6 @@ fn held(holder: &Holder) -> ToolError {
         ),
     };
     ToolError::new(code, message).with_details(json!({ "holder": description(holder) }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn arguments(path: &str, hash: &str, id: &str) -> PublishArguments {
-        PublishArguments {
-            path: path.into(),
-            expected_source_sha256: hash.into(),
-            accept_comment_loss: false,
-            expected_generation: None,
-            request_id: Some(id.into()),
-        }
-    }
-
-    fn result(revision: u32) -> PublishResult {
-        PublishResult {
-            path: "components/product.afs".into(),
-            handle: "product".into(),
-            revision,
-            revision_path: format!(".apiforge/revisions/product/{revision}.afs"),
-            source_sha256: "a".repeat(64),
-            generation: u64::from(revision),
-            wrote: true,
-            changed: Vec::new(),
-            replayed: false,
-        }
-    }
-
-    /// A `request_id` names one publication: the same id for another
-    /// document or another version is refused, never answered with a result
-    /// that does not belong to it.
-    #[test]
-    fn a_request_id_answers_only_the_publication_it_named() {
-        let mut answered = Answered::default();
-        let first = arguments("components/product.afs", "h1", "p-1");
-        answered.record("p-1", &first, &result(2));
-        let replayed = answered.recorded(&first).unwrap().unwrap();
-        assert!(replayed.replayed);
-        assert_eq!(replayed.revision, 2);
-        for other in [
-            arguments("components/other.afs", "h1", "p-1"),
-            arguments("components/product.afs", "h2", "p-1"),
-        ] {
-            let error = answered.recorded(&other).unwrap_err();
-            assert_eq!(error.code, ErrorCode::InvalidInputs);
-        }
-        assert_eq!(
-            answered
-                .recorded(&arguments("components/product.afs", "h1", "p-2"))
-                .unwrap(),
-            None,
-            "an unknown id publishes"
-        );
-    }
-
-    /// The record is bounded; an id whose result was dropped is
-    /// `unknown_outcome`, never published a second time.
-    #[test]
-    fn a_dropped_request_id_is_unknown_outcome() {
-        let mut answered = Answered::default();
-        for index in 0..=ANSWERED {
-            let id = format!("p-{index}");
-            answered.record(&id, &arguments("c.afs", "h", &id), &result(2));
-        }
-        assert_eq!(answered.recent.len(), ANSWERED);
-        let error = answered
-            .recorded(&arguments("c.afs", "h", "p-0"))
-            .unwrap_err();
-        assert_eq!(error.code, ErrorCode::UnknownOutcome);
-        assert!(
-            answered
-                .recorded(&arguments("c.afs", "h", "p-1"))
-                .unwrap()
-                .is_some()
-        );
-    }
-
-    /// The ids of dropped results are bounded too (review of #117): many
-    /// unique ids never grow the record past `ANSWERED + DROPPED`.
-    #[test]
-    fn the_ids_of_dropped_results_are_bounded() {
-        let mut answered = Answered::default();
-        let total = ANSWERED + DROPPED + 10;
-        for index in 0..total {
-            let id = format!("p-{index}");
-            answered.record(&id, &arguments("c.afs", "h", &id), &result(2));
-        }
-        assert_eq!(answered.recent.len(), ANSWERED);
-        assert_eq!(answered.dropped.len(), DROPPED);
-        // The oldest are forgotten; the newest dropped are still answered.
-        assert_eq!(
-            answered.recorded(&arguments("c.afs", "h", "p-0")).unwrap(),
-            None
-        );
-        let newest_dropped = format!("p-{}", total - ANSWERED - 1);
-        assert_eq!(
-            answered
-                .recorded(&arguments("c.afs", "h", &newest_dropped))
-                .unwrap_err()
-                .code,
-            ErrorCode::UnknownOutcome
-        );
-    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
