@@ -134,8 +134,10 @@ jobs:
           cargo run --locked -p apiforge-cli -- fmt --check fixtures/scripts/lookup.afs
           cargo run --locked -p apiforge-cli -- check --workspace fixtures/workspace.json
 
-      - name: Build release desktop binary
-        run: cargo build --release --package apiforge-desktop --locked
+      # Both binaries, as release.yml builds them: REL-02 checks the icon
+      # resource of each .exe below.
+      - name: Build release binaries
+        run: cargo build --release --locked -p apiforge-desktop -p apiforge-cli
 
       - name: Validate workspace using the native release binary
         shell: bash
@@ -660,6 +662,127 @@ jobs:
               Write-Host "captured: $capture (${width}x${height})"
             }
           }
+
+      # REL-02 (#119): the icon and version strings each release .exe carries
+      # as a Windows resource, read back the way Explorer reads them, and the
+      # running window with its icon in the title bar and on the taskbar. The
+      # extracted icons and the desktop capture are the artifact windows-icon.
+      # The window opens the demo shop that the step above migrated.
+      - name: Show the application icon (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        env:
+          WGPU_BACKEND: dx12
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          $out = 'test-results/icon'
+          New-Item -ItemType Directory -Force $out | Out-Null
+
+          # 1. Each .exe: the version resource, then its associated icon at
+          # the shell's 32 x 32, against the PNG the .ico was built from.
+          $source = [System.Drawing.Bitmap]::new((Resolve-Path 'packaging/icon/apiforge-32.png').Path)
+          $binaries = @(
+            @{ Name = 'apiforge'; Exe = 'target/release/apiforge.exe'; Description = 'API Forge command line' }
+            @{ Name = 'apiforge-desktop'; Exe = 'target/release/apiforge-desktop.exe'; Description = 'API Forge' }
+          )
+          foreach ($binary in $binaries) {
+            $name = $binary.Name
+            $exe = (Resolve-Path $binary.Exe).Path
+            $info = (Get-Item $exe).VersionInfo
+            $version = (& $exe --version) -replace "^$([regex]::Escape($name)) ", ''
+            Write-Host ("{0}.exe: ProductName '{1}', FileDescription '{2}', ProductVersion '{3}', FileVersion '{4}'" -f `
+              $name, $info.ProductName, $info.FileDescription, $info.ProductVersion, $info.FileVersion)
+            if ($info.ProductName -ne 'API Forge' -or $info.FileDescription -ne $binary.Description -or
+                $info.ProductVersion -ne $version -or $info.FileVersion -ne $version) {
+              throw "$name.exe carries the wrong version resource."
+            }
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+            $bitmap = $icon.ToBitmap()
+            $bitmap.Save((Join-Path $out "$name-exe-icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+            if ($bitmap.Width -ne 32 -or $bitmap.Height -ne 32) {
+              throw "The icon of $name.exe is $($bitmap.Width) x $($bitmap.Height), not 32 x 32."
+            }
+            if ($bitmap.GetPixel(0, 0).A -ne 0) {
+              throw "The icon of $name.exe has an opaque corner."
+            }
+            if ($bitmap.GetPixel(16, 16).A -ne 255) {
+              throw "The icon of $name.exe has a transparent centre."
+            }
+            # Not Windows' generic program icon: the pixels of apiforge-32.png,
+            # colour compared where both are mostly opaque.
+            $worst = 0
+            for ($y = 0; $y -lt 32; $y++) {
+              for ($x = 0; $x -lt 32; $x++) {
+                $a = $bitmap.GetPixel($x, $y)
+                $b = $source.GetPixel($x, $y)
+                $differences = @([math]::Abs($a.A - $b.A))
+                if ($a.A -ge 128 -and $b.A -ge 128) {
+                  $differences += [math]::Abs($a.R - $b.R), [math]::Abs($a.G - $b.G), [math]::Abs($a.B - $b.B)
+                }
+                $worst = [math]::Max($worst, ($differences | Measure-Object -Maximum).Maximum)
+              }
+            }
+            Write-Host "$name.exe: icon 32 x 32, largest channel difference from apiforge-32.png $worst"
+            if ($worst -gt 8) {
+              throw "The icon of $name.exe differs from packaging/icon/apiforge-32.png by up to $worst."
+            }
+          }
+
+          # 2. The window: started like a person would, captured with the
+          # whole desktop once it is on screen, then ended.
+          $shop = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'apiforge/projects/shop'
+          if (-not (Test-Path (Join-Path $shop 'apiforge.project.json') -PathType Leaf)) {
+            throw "$shop holds no project; the folder project step migrates it."
+          }
+          $process = Start-Process -FilePath 'target/release/apiforge-desktop.exe' `
+            -ArgumentList @('--folder', $shop) -NoNewWindow -PassThru
+          $null = $process.Handle
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            while ($process.MainWindowHandle -eq [IntPtr]::Zero) {
+              if ($process.HasExited) {
+                throw "apiforge-desktop.exe exited with code $($process.ExitCode) before its window opened."
+              }
+              if ((Get-Date) -gt $deadline) {
+                throw 'The window did not open within 45 seconds.'
+              }
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+            }
+            # A few frames, so the capture shows the drawn window; it must
+            # still be open when the capture is taken and after it.
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited -or $process.MainWindowHandle -eq [IntPtr]::Zero) {
+              throw 'The window closed before it was captured.'
+            }
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $desktop = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($desktop)
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $graphics.Dispose()
+            $desktop.Save((Join-Path $out 'desktop-window.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+            if ($process.HasExited) {
+              throw "apiforge-desktop.exe exited with code $($process.ExitCode) while it was captured."
+            }
+            Write-Host "captured: $out/desktop-window.png ($($bounds.Width) x $($bounds.Height)), window '$($process.MainWindowTitle)'"
+          } finally {
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+            }
+            $null = $process.WaitForExit(15000)
+          }
+
+      - name: Upload the application icon (Windows)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-icon
+          path: test-results/icon/
+          if-no-files-found: warn
 
       - name: Upload native window captures
         if: always()

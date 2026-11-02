@@ -1,5 +1,6 @@
 """REL-01 (#115): the release workflow's checks, criteria 2, 3 and 5.
 REL-03 (#120): the third-party notices, criteria 1 to 6.
+REL-02 (#119): the application icon on Windows, criteria 1 to 6.
 
     python3 -I packaging/test_release.py
 
@@ -9,11 +10,13 @@ sums. These tests run it on small temporary trees; the release workflow runs
 them before it builds anything.
 """
 
+import ast
 import hashlib
 import importlib.util
 import io
 import os
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -535,6 +538,170 @@ class NoticeManifestsAndDocs(unittest.TestCase):
         self.assertIsNotNone(version)
         self.assertIn("cargo-about " + version.group(1), releases)
         self.assertIn("THIRD-PARTY-NOTICES.md", read("crates/apiforge-desktop/assets/fonts/FONT-SOURCES.md"))
+
+
+# REL-02 (#119): the sizes of the Windows icon, in the order of criterion 1.
+ICON_SIZES = [16, 32, 48, 64, 128, 256]
+ICON = "packaging/icon/apiforge.ico"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+BUILD_SCRIPTS = {
+    # crate directory: (binary, FileDescription)
+    "crates/apiforge-desktop": ("apiforge-desktop", "API Forge"),
+    "crates/apiforge-cli": ("apiforge", "API Forge command line"),
+}
+
+
+def read_bytes(relative):
+    with open(os.path.join(ROOT, *relative.split("/")), "rb") as file:
+        return file.read()
+
+
+def load_icon_module():
+    path = os.path.join(HERE, "icon.py")
+    spec = importlib.util.spec_from_file_location("icon", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def toml_section(text, header):
+    """The lines of the TOML table HEADER, up to the next table."""
+    found = re.search(r"^" + re.escape(header) + r"\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    return None if found is None else found.group(1)
+
+
+class IconFile(unittest.TestCase):
+    """Criterion 1: the .ico is the six PNG renders, and cannot drift from them."""
+
+    def test_the_ico_is_built_from_the_pngs(self):
+        icon = load_icon_module()
+        pngs = [os.path.join(HERE, "icon", f"apiforge-{size}.png") for size in ICON_SIZES]
+        self.assertEqual(icon.build(pngs), read_bytes(ICON))
+
+    def test_the_ico_holds_the_six_pngs_in_order_and_verbatim(self):
+        # Read with the format itself, not with icon.py, so a fault in the
+        # builder cannot hide in its own output.
+        data = read_bytes(ICON)
+        reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+        self.assertEqual((reserved, kind, count), (0, 1, len(ICON_SIZES)))
+        for index, size in enumerate(ICON_SIZES):
+            width, height, colours, zero, planes, bits, length, offset = struct.unpack_from(
+                "<BBBBHHII", data, 6 + 16 * index
+            )
+            expected = 0 if size == 256 else size
+            self.assertEqual((width, height, colours, zero), (expected, expected, 0, 0), size)
+            self.assertEqual((planes, bits), (1, 32), size)
+            png = read_bytes(f"packaging/icon/apiforge-{size}.png")
+            self.assertEqual(data[offset : offset + length], png, size)
+            self.assertTrue(png.startswith(PNG_SIGNATURE), size)
+            self.assertEqual(struct.unpack(">II", png[16:24]), (size, size), size)
+        last = struct.unpack_from("<II", data, 6 + 16 * (len(ICON_SIZES) - 1) + 8)
+        self.assertEqual(sum(last), len(data), "nothing follows the last image")
+
+    def test_the_builder_uses_the_standard_library_only(self):
+        tree = ast.parse(read("packaging/icon.py"))
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                modules.add(node.module.split(".")[0])
+        self.assertTrue(modules)
+        self.assertLessEqual(modules, set(sys.stdlib_module_names))
+
+
+class WindowsResource(unittest.TestCase):
+    """Criteria 2 and 5: both binaries carry the icon and the version strings,
+    through a build script that does nothing on another target."""
+
+    def test_each_binary_has_a_build_script_with_the_icon_and_the_version_strings(self):
+        for crate, (binary, description) in BUILD_SCRIPTS.items():
+            script = read(f"{crate}/build.rs")
+            self.assertIn("winresource::WindowsResource::new()", script, crate)
+            self.assertIn('"../../packaging/icon/apiforge.ico"', script, crate)
+            self.assertIn('.set("ProductName", "API Forge")', script, crate)
+            self.assertIn(f'.set("FileDescription", "{description}")', script, crate)
+            for field in ["FileVersion", "ProductVersion"]:
+                self.assertRegex(script, r'\.set\("' + field + r'", &?version\)', crate)
+            self.assertIn('env::var("CARGO_PKG_VERSION")', script, crate)
+            self.assertIn(f'.compile_for("{binary}")', script, crate)
+            # Only a Windows build runs the resource compiler.
+            self.assertIn('CARGO_CFG_TARGET_OS', script, crate)
+            self.assertIn("#[cfg(windows)]", script, crate)
+
+    def test_winresource_is_a_windows_only_build_dependency_pinned_by_the_lock(self):
+        root = read("Cargo.toml")
+        pinned = re.search(r'^winresource = \{ version = "=(\d+\.\d+\.\d+)"', root, re.M)
+        self.assertIsNotNone(pinned, "the workspace pins winresource")
+        for crate in BUILD_SCRIPTS:
+            manifest = read(f"{crate}/Cargo.toml")
+            section = toml_section(manifest, "[target.'cfg(windows)'.build-dependencies]")
+            self.assertIsNotNone(section, crate)
+            self.assertIn("winresource.workspace = true", section, crate)
+            self.assertEqual(manifest.count("winresource"), 1, crate)
+        lock = read("Cargo.lock")
+        self.assertIn(f'name = "winresource"\nversion = "{pinned.group(1)}"', lock)
+
+
+class IconWorkflows(unittest.TestCase):
+    """Criteria 2, 3 and 4 in rust.yml and release.yml."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_windows_ci_builds_both_release_binaries(self):
+        build = step(self.rust, "Build release binaries")
+        self.assertIn("cargo build --release --locked -p apiforge-desktop -p apiforge-cli", build)
+
+    def test_every_windows_run_extracts_the_icon_of_both_exes(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("runner.os == 'Windows'", icon)
+        self.assertIn("[System.Drawing.Icon]::ExtractAssociatedIcon", icon)
+        for name in ["apiforge.exe", "apiforge-desktop.exe"]:
+            self.assertIn(name, icon)
+        # 32 x 32, a transparent corner, an opaque centre, the source's pixels.
+        self.assertIn("$bitmap.Width -ne 32 -or $bitmap.Height -ne 32", icon)
+        self.assertIn("GetPixel(0, 0).A", icon)
+        self.assertIn("GetPixel(16, 16).A", icon)
+        self.assertIn("packaging/icon/apiforge-32.png", icon)
+        self.assertIn("VersionInfo", icon)
+
+    def test_every_windows_run_captures_the_window_with_its_icon(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("'--folder'", icon)
+        self.assertIn("MainWindowHandle", icon)
+        self.assertIn("CopyFromScreen", icon)
+        self.assertIn("taskkill.exe", icon)
+        upload = step(self.rust, "Upload the application icon (Windows)")
+        self.assertIn("runner.os == 'Windows'", upload)
+        self.assertIn("name: windows-icon", upload)
+        self.assertIn("test-results/icon/", upload)
+
+    def test_the_release_checks_the_product_version_of_both_exes(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        self.assertIn(".VersionInfo.ProductVersion", smoke)
+        self.assertRegex(smoke, r"-ne \$env:VERSION")
+
+
+class WindowIconSource(unittest.TestCase):
+    """Criterion 3: the window takes the icon on every platform."""
+
+    def test_the_icon_is_not_gated_on_linux(self):
+        main = read("crates/apiforge-desktop/src/main.rs")
+        self.assertIn(".with_icon(Arc::new(window_icon()))", main)
+        self.assertNotRegex(main, r'#\[cfg\(target_os = "linux"\)\]\s*\n[^\n]*with_icon')
+        self.assertNotRegex(main, r"allow\(dead_code\)\]\s*\nfn window_icon")
+
+
+class IconDocs(unittest.TestCase):
+    """Criterion 6: the development guide says where the .ico comes from."""
+
+    def test_the_releases_section_says_how_to_rebuild_the_ico(self):
+        releases = read("docs/development.md").split("## Releases", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("packaging/icon/apiforge.ico", releases)
+        self.assertIn("python3 -I packaging/icon.py", releases)
+        self.assertIn("winresource", releases)
 
 
 if __name__ == "__main__":

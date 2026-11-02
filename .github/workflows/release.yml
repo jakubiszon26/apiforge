@@ -295,6 +295,11 @@ jobs:
             if ($line -ne "$name $env:VERSION") {
               throw "$name.exe --version printed '$line', expected '$name $env:VERSION'."
             }
+            # REL-02: the version Explorer shows, from the .exe's resource.
+            $product = (Get-Item (Join-Path $root "$name.exe")).VersionInfo.ProductVersion
+            if ($product -ne $env:VERSION) {
+              throw "$name.exe carries ProductVersion '$product', expected '$env:VERSION'."
+            }
           }
           & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
           python -I packaging/mcp-smoke.py (Join-Path $root 'apiforge.exe') $env:VERSION `

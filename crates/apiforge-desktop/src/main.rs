@@ -480,13 +480,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
         _ => DEFAULT_WINDOW_SIZE,
     };
     let observed = Arc::clone(&completed);
-    let viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("API Forge")
-        .with_app_id("apiforge");
-    // REL-01: the application icon, which X11 window managers show for the
-    // window; Wayland takes it from the desktop file named by the app ID.
-    #[cfg(target_os = "linux")]
-    let viewport = viewport.with_icon(Arc::new(window_icon()));
+    let viewport = window_viewport();
     // The stop window has one size and is centred, like a dialog; it grows
     // into the workspace window if the person opens the previous workspace.
     let stopped = matches!(opening, Opening::Stopped(_));
@@ -563,9 +557,20 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
 /// The application icon at 256 px, rendered from packaging/icon/apiforge.svg.
 const ICON_PNG: &[u8] = include_bytes!("../../../packaging/icon/apiforge-256.png");
 
+/// The title, app ID and icon every API Forge window starts with.
+///
+/// The icon is the one X11 window managers and Windows show in the title bar,
+/// the taskbar and Alt+Tab (REL-01, REL-02); Wayland takes it from the
+/// desktop file named by the app ID instead.
+fn window_viewport() -> eframe::egui::ViewportBuilder {
+    eframe::egui::ViewportBuilder::default()
+        .with_title("API Forge")
+        .with_app_id("apiforge")
+        .with_icon(Arc::new(window_icon()))
+}
+
 /// The application icon for the window. The image is part of the binary and
 /// a test decodes it, so a failure here is a defect of the build.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn window_icon() -> eframe::egui::IconData {
     eframe::icon_data::from_png_bytes(ICON_PNG).expect("the bundled icon is a valid PNG")
 }
@@ -584,6 +589,14 @@ mod tests {
         assert_eq!(icon.rgba[3], 0, "the corner is transparent");
         let centre = (128 * 256 + 128) * 4;
         assert_eq!(icon.rgba[centre + 3], 255, "the centre is opaque");
+    }
+
+    /// REL-02: the window takes that icon on every platform, Windows included.
+    #[test]
+    fn the_window_carries_the_application_icon_on_every_platform() {
+        let viewport = window_viewport();
+        let icon = viewport.icon.expect("the window has an icon");
+        assert_eq!(*icon, window_icon());
     }
 
     fn parse(args: &[&str]) -> Result<Arguments, &'static str> {
