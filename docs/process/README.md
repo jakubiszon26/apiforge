@@ -104,7 +104,7 @@ the ticket before implementation.
 | `risk:format`, `risk:migration`, `risk:default`, `risk:visible-ui`, `risk:removal` | The [risk flags](estimation.md#risk-flags) |
 | `decision-needed` | Waits for an owner decision named in the issue |
 | `awaiting-acceptance` | A pull request is open and waits for the owner |
-| `ready:sol`, `ready:sonnet` | Approved, decided and bounded: that model may take the ticket unattended ([autonomy](autonomy.md)) |
+| `ready:sol`, `ready:opus`, `ready:sonnet` | Approved, decided and bounded: that model may take the ticket unattended ([autonomy](autonomy.md)) |
 | `process` | Changes the process itself |
 
 A pull request says `Closes #<issue>` so that the merge closes the ticket.

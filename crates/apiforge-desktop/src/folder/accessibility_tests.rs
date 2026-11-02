@@ -80,7 +80,7 @@ fn unnamed_in(
 
 /// Draws `app` settled at both window sizes and asserts that every control
 /// it exposes has a name.
-fn assert_named(screen: &str, app: &mut FolderApp, context: &egui::Context) {
+pub(super) fn assert_named(screen: &str, app: &mut FolderApp, context: &egui::Context) {
     wait_storage(app, context);
     for size in [egui::vec2(960.0, 540.0), egui::vec2(1600.0, 1000.0)] {
         for _ in 0..3 {
@@ -232,7 +232,11 @@ fn the_add_step_popup_names_every_control() {
 }
 
 /// The names of the controls Tab visits from the current focus, in order.
-fn tab_order(app: &mut FolderApp, context: &egui::Context, presses: usize) -> Vec<String> {
+pub(super) fn tab_order(
+    app: &mut FolderApp,
+    context: &egui::Context,
+    presses: usize,
+) -> Vec<String> {
     context.enable_accesskit();
     let mut visited = Vec::new();
     for _ in 0..presses {
@@ -294,7 +298,7 @@ fn tab_visits_the_window_in_reading_order_with_named_stops() {
     );
     let expected = [
         "Project",
-        "Run",
+        "Run simulation",
         "Code",
         "promotion-and-cart-price.afs",
         "New",
@@ -341,7 +345,7 @@ fn project_dialogs_keep_tab_inside_and_escape_cancels_them() {
                 "{dialog}: {visited:#?}"
             );
         }
-        for outside in ["Run", "Code", "Project files"] {
+        for outside in ["Run simulation", "Run live", "Code", "Project files"] {
             assert!(
                 !visited.iter().any(|visit| visit == outside),
                 "{dialog}: {visited:#?}"
@@ -378,7 +382,7 @@ fn tab_indents_in_the_editor_and_escape_then_tab_leaves_it() {
 
 /// Tabs to the control named `name` and presses Space on it, as a keyboard
 /// user opens a menu.
-fn open_by_keyboard(app: &mut FolderApp, context: &egui::Context, name: &str) {
+pub(super) fn open_by_keyboard(app: &mut FolderApp, context: &egui::Context, name: &str) {
     context.memory_mut(|memory| memory.surrender_focus(memory.focused().unwrap_or(egui::Id::NULL)));
     for _ in 0..40 {
         if tab_order(app, context, 1)[0] == name {
@@ -396,7 +400,7 @@ fn menus_opened_from_the_keyboard_are_named_and_reachable() {
     let (context, mut app) = open(directory.path());
     for (button, menu, first) in [
         ("Project", "Project menu", "Open Folder…"),
-        ("Run options", "Run options menu", "Run live requests"),
+        ("Run options", "Run options menu", "Simulation"),
         ("New", "New menu", "New scenario"),
     ] {
         open_by_keyboard(&mut app, &context, button);

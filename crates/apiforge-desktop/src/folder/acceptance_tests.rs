@@ -113,6 +113,21 @@ fn reported_blocks(report: &RunResult) -> Vec<String> {
         .collect()
 }
 
+/// The width `text` takes at `size` when it is not cut. Laid out in place,
+/// its glyphs snap to pixels, so a whole label may be up to a pixel
+/// narrower; a cut one loses at least a character.
+fn whole_width(harness: &FolderHarness, text: &str, size: f32) -> f32 {
+    let job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(size), egui::Color32::WHITE),
+    );
+    harness
+        .ctx
+        .fonts_mut(|fonts| fonts.layout_job(job))
+        .size()
+        .x
+}
+
 /// P7g over P3 over P4 over P6b over P6d over P1: managed startup migrates a
 /// legacy workspace, and from then on the migrated project behaves like any
 /// other — it is edited, saved, published from, run, closed and reopened, and
@@ -181,7 +196,7 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
     // Run the saved scenario and keep its report for the restart.
     app(&mut harness).activate_tab(&scenario);
     settle(&mut harness);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     let report = finish_run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed);
     assert!(folder(&harness).fresh_run(&scenario).is_some());
@@ -237,7 +252,7 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
     // identity the earlier session reported is the identity it reopens with.
     app(&mut harness).activate_tab(&scenario);
     settle(&mut harness);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     let again = finish_run(&mut harness);
     assert_eq!(again.status, report.status);
     assert_eq!(reported_blocks(&again), reported_blocks(&report));
@@ -1163,8 +1178,9 @@ mod mcp08a {
 
     /// Criterion 1: while another process holds the project, the window
     /// observes. The code view takes no keystroke, the board no drop, wire or
-    /// move, the inspector and the explorer's commands are disabled; *Run*
-    /// still simulates; *Run live requests* is disabled.
+    /// move, the inspector and the explorer's commands are disabled; *Run
+    /// simulation* still simulates; *Live* (UX-02; before it, *Run live
+    /// requests*) is disabled.
     #[test]
     fn observing_pauses_every_edit_and_still_simulates() {
         let directory = shop();
@@ -1252,12 +1268,12 @@ mod mcp08a {
 
         choose(&mut harness, "Run options");
         assert!(
-            disabled(&harness, "Run live requests"),
+            disabled(&harness, "Live"),
             "no live request is sent from an observing window"
         );
         harness.key_press(Key::Escape);
         settle(&mut harness);
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         let report = finish_run(&mut harness);
         assert!(!report.steps.is_empty(), "the simulation still runs");
     }
@@ -3074,7 +3090,8 @@ mod mcp08b {
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
                 let take = harness.get_by_label(TAKE_BACK).rect();
-                let run = harness.get_by_label("Run").rect();
+                // UX-02: the run controls end with the chevron.
+                let run = harness.get_by_label("Run options").rect();
                 assert!(
                     (take.right() - run.right()).abs() <= 1.0,
                     "{mode} at {size:?}: Take back ends at {}, Run at {}",
@@ -3998,7 +4015,7 @@ mod mcp09 {
     /// Every file under `root`, by relative path. The writer's lock file
     /// is always empty and, on Windows, cannot be read while it is held: it
     /// is listed by its length.
-    fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    pub(super) fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
             for entry in fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
@@ -4019,7 +4036,7 @@ mod mcp09 {
         found
     }
 
-    fn manifest_id(root: &Path) -> String {
+    pub(super) fn manifest_id(root: &Path) -> String {
         let bytes = fs::read(root.join("apiforge.project.json")).unwrap();
         apiforge_project::ProjectManifest::from_bytes(&bytes)
             .unwrap()
@@ -4028,7 +4045,7 @@ mod mcp09 {
 
     /// A second session in this process holds the project as an agent's
     /// would, so the window observes it (MCP-07, MCP-08a).
-    fn agent_holds(root: &Path) -> ProjectSession {
+    pub(super) fn agent_holds(root: &Path) -> ProjectSession {
         let holder = Holder::new(HolderRole::Agent, Some("Claude Code".into()));
         ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &holder).unwrap()
     }
@@ -5147,7 +5164,7 @@ mod mcp10 {
     /// The ticket's bound: the line shows within a second of each message.
     const BOUND: Duration = Duration::from_secs(1);
     /// What the bar must not move: the explorer and the tabs above it.
-    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run"];
+    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run simulation"];
     const MODES: [&str; 3] = ["Code", "Diagram", "Split"];
 
     fn running(mode: &str) -> String {
@@ -5288,24 +5305,6 @@ mod mcp10 {
             (at == 2) == (character == ':') && (at == 2 || character.is_ascii_digit())
         });
         assert!(time.len() == 5 && digits, "{label:?} ends in HH:MM");
-    }
-
-    /// The width `text` takes in the bar's font when it is not cut. Laid
-    /// out in place, its glyphs snap to pixels, so a whole label may be up
-    /// to a pixel narrower; a cut one loses at least a character.
-    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
-        let job = egui::text::LayoutJob::single_section(
-            text.to_owned(),
-            egui::TextFormat::simple(
-                egui::FontId::proportional(theme::FONT_META),
-                egui::Color32::WHITE,
-            ),
-        );
-        harness
-            .ctx
-            .fonts_mut(|fonts| fonts.layout_job(job))
-            .size()
-            .x
     }
 
     /// Where the explorer and the tabs are; a mode without the explorer
@@ -5578,7 +5577,7 @@ mod mcp10 {
                 harness.get_by_label(BAR).rect().contains_rect(shown),
                 "{mode}: {status:?} sits in the bar"
             );
-            let whole = whole_width(harness, status);
+            let whole = whole_width(harness, status, theme::FONT_META);
             assert!(
                 shown.width() + 1.0 >= whole,
                 "{mode}: {status:?} is cut: {} of {whole} px",
@@ -6542,23 +6541,6 @@ mod mcp16 {
         drop(server);
     }
 
-    /// The width `text` takes in the bar's font when it is not cut (as in
-    /// `mod mcp10`).
-    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
-        let job = egui::text::LayoutJob::single_section(
-            text.to_owned(),
-            egui::TextFormat::simple(
-                egui::FontId::proportional(theme::FONT_META),
-                egui::Color32::WHITE,
-            ),
-        );
-        harness
-            .ctx
-            .fonts_mut(|fonts| fonts.layout_job(job))
-            .size()
-            .x
-    }
-
     /// In every mode: the bar inside the window; `status`, *Follow* and
     /// *Take back* whole, disjoint and in this order; the holder text
     /// beside them.
@@ -6570,7 +6552,7 @@ mod mcp16 {
             assert_disjoint(harness, &[holder.as_str(), status, FOLLOW, TAKE_BACK]);
             let rect = |label| harness.get_by_label(label).rect();
             let shown = rect(status);
-            let whole = whole_width(harness, status);
+            let whole = whole_width(harness, status, theme::FONT_META);
             assert!(
                 shown.width() + 1.0 >= whole,
                 "{view}: {status:?} is cut: {} of {whole} px",
@@ -6910,5 +6892,1106 @@ mod mcp19 {
         assert_eq!(app.watcher.problem, None);
         assert!(app.workbench.tabs().iter().all(|tab| tab.document_id != id));
         assert!(!root.join(FOLDER).exists());
+    }
+}
+
+/// UX-01: several checks from one run (docs/tickets/UX-01.md). *Check* on a
+/// field in Run results adds its check at once and the results stay usable;
+/// the panel's bar counts the checks that wait for the next run, any other
+/// change makes the results stale as before, and the model's undo takes a
+/// check back. The demo shop in Split at 960 × 540 unless said otherwise.
+mod ux01 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui_kittest::kittest::NodeT;
+
+    const STEP: &str = "Add to cart · Passed";
+    const ONE: &str = "1 check added · it runs on the next run";
+    const TWO: &str = "2 checks added · they run on the next run";
+    const STALE: &str = "Graph changed · results from an earlier version";
+    const ADDED: &str = "Check added";
+    const CHECK: &str = "Check";
+    const TO_VARIABLE: &str = "To variable";
+    const MAXIMISE: &str = "Maximise run results";
+    const RESTORE: &str = "Restore run results";
+    const POLICY: &str = "When a step fails";
+
+    /// The demo shop at `size` in Split with its scenario active.
+    fn window(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        choose(&mut harness, "Split");
+        (project, harness, scenario)
+    }
+
+    /// Runs the active tab with the header's run button.
+    fn run(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run simulation");
+        finish_run(harness)
+    }
+
+    /// Chooses a step in the list of Run results, as a click on its row.
+    fn select_step(harness: &mut FolderHarness, step: &str) {
+        harness.get_by_label_contains(step).scroll_to_me();
+        settle(harness);
+        harness.get_by_label_contains(step).click();
+        settle(harness);
+    }
+
+    /// The window after one simulation of the scenario, its Run results
+    /// maximised on *Add to cart*.
+    fn after_a_run(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String, RunResult) {
+        let (project, mut harness, scenario) = window(size);
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        assert!(has_label(&harness, "productId"), "Add to cart's outputs");
+        (project, harness, scenario, report)
+    }
+
+    /// The controls on the row of `field` in the shown value tree: those of
+    /// `names` whose centre is level with the field's label.
+    fn on_row(harness: &FolderHarness, field: &str, names: &[&str]) -> Vec<String> {
+        let y = harness.get_by_label(field).rect().center().y;
+        names
+            .iter()
+            .filter(|name| {
+                harness
+                    .query_all_by_label(name)
+                    .any(|node| (node.rect().center().y - y).abs() < 8.0)
+            })
+            .map(|name| (*name).to_owned())
+            .collect()
+    }
+
+    /// What the row of `field` offers: *Check added*, or *Check* and *To
+    /// variable*.
+    fn row(harness: &FolderHarness, field: &str) -> Vec<String> {
+        on_row(harness, field, &[ADDED, CHECK, TO_VARIABLE])
+    }
+
+    fn offers_check(harness: &FolderHarness, field: &str) {
+        assert_eq!(
+            row(harness, field),
+            [CHECK, TO_VARIABLE],
+            "the {field} row offers Check and To variable"
+        );
+    }
+
+    fn reads_added(harness: &FolderHarness, field: &str) {
+        assert_eq!(
+            row(harness, field),
+            [ADDED],
+            "the {field} row reads Check added, with neither Check nor To variable"
+        );
+    }
+
+    /// Clicks the *Check* on the row of `field`: the *Check* nearest the
+    /// field's label, as the mock-up's helper does.
+    fn check(harness: &mut FolderHarness, field: &str) {
+        crate::testing::check_field(harness, field);
+    }
+
+    /// The colour `text` is painted in this frame, when it is painted.
+    fn colour_of(harness: &FolderHarness, text: &str) -> Option<egui::Color32> {
+        fn find(shape: &egui::epaint::Shape, text: &str) -> Option<egui::Color32> {
+            match shape {
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().find_map(|shape| find(shape, text))
+                }
+                egui::epaint::Shape::Text(shape) if shape.galley.job.text == text => shape
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|section| section.format.color),
+                _ => None,
+            }
+        }
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|clipped| find(&clipped.shape, text))
+    }
+
+    /// The bar's text, which is one of the count, the stale text or none.
+    fn bar(harness: &FolderHarness) -> Option<&'static str> {
+        let shown: Vec<_> = [ONE, TWO, STALE]
+            .into_iter()
+            .filter(|text| has_label(harness, text))
+            .collect();
+        assert!(shown.len() <= 1, "one text at a time: {shown:?}");
+        shown.first().copied()
+    }
+
+    fn nodes(harness: &FolderHarness, document_id: &str) -> usize {
+        let model = folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(document_id)
+            .unwrap()
+            .model()
+            .cloned()
+            .expect("a valid model");
+        graph_of(&model, false).nodes.len()
+    }
+
+    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+        !harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// No field offers *Check* or *To variable*, as on stale results today:
+    /// their row shows the value only.
+    fn no_check_offered(harness: &FolderHarness) {
+        assert!(has_label(harness, "productId"), "the outputs are shown");
+        assert_eq!(harness.query_all_by_label(CHECK).count(), 0, "no Check");
+        assert_eq!(harness.query_all_by_label(TO_VARIABLE).count(), 0);
+    }
+
+    /// Ctrl+Z outside the code editor: the model's undo, the gesture that
+    /// undoes a block added from the library. `redo` presses Ctrl+Shift+Z.
+    fn model_history(harness: &mut FolderHarness, redo: bool) {
+        let modifiers = if redo {
+            Modifiers::COMMAND | Modifiers::SHIFT
+        } else {
+            Modifiers::COMMAND
+        };
+        harness.key_press_modifiers(modifiers, Key::Z);
+        settle(harness);
+    }
+
+    /// Criterion 1: *Check* on `productId` adds a check card and the panel
+    /// stays usable: one more field assertion in the source, *Add to cart*'s
+    /// Outputs still shown, the row reads *Check added* and offers neither
+    /// *Check* nor *To variable*; *Check* on `total` adds a second card
+    /// without a run, and its row reads *Check added* too.
+    #[test]
+    fn ux01_criterion_1_two_checks_from_one_run() {
+        let (_project, mut harness, scenario, report) = after_a_run(MINIMUM);
+        let before = nodes(&harness, &scenario);
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+
+        check(&mut harness, "productId");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check card");
+        assert!(
+            source_of(&harness, &scenario).contains("add_to_cart.productId == 123"),
+            "the source gains the field's assertion:\n{}",
+            source_of(&harness, &scenario)
+        );
+        assert!(
+            has_label(&harness, "Outputs  1"),
+            "the panel still shows Add to cart's Outputs"
+        );
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+        offers_check(&harness, "quantity");
+
+        check(&mut harness, "total");
+        assert_eq!(nodes(&harness, &scenario), before + 2, "a second card");
+        assert!(source_of(&harness, &scenario).contains("add_to_cart.total == 80"));
+        assert!(folder(&harness).runs.handle.is_none(), "without a run");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+        reads_added(&harness, "productId");
+        reads_added(&harness, "total");
+        offers_check(&harness, "id");
+        offers_check(&harness, "quantity");
+    }
+
+    /// Criterion 2 (first half): with only checks added since the run, the
+    /// bar counts them in grey and *Graph changed* is absent.
+    #[test]
+    fn ux01_criterion_2_the_bar_counts_the_checks() {
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        check(&mut harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE));
+        assert_eq!(colour_of(&harness, ONE), Some(theme::MUTED), "in grey");
+        check(&mut harness, "total");
+        assert_eq!(bar(&harness), Some(TWO));
+        assert_eq!(colour_of(&harness, TWO), Some(theme::MUTED), "in grey");
+        assert!(enabled(&harness, POLICY), "the error policy stays usable");
+        assert!(enabled(&harness, "Export"), "Export stays usable");
+    }
+
+    /// Criterion 2 (second half): after a check, any other change — typing a
+    /// space into the code, a block added with the board's *Add step*, the
+    /// other error policy — makes the bar read *Graph changed* in amber, the
+    /// count is gone and no field offers *Check*, as on stale results today.
+    ///
+    /// Moving a block is not such a change: it moves the card, not the
+    /// source, and keeps fresh results fresh today, so it keeps the count.
+    #[test]
+    fn ux01_criterion_2_another_change_makes_the_results_stale() {
+        fn stale(harness: &mut FolderHarness, change: &str) {
+            assert_eq!(bar(harness), Some(STALE), "after {change}");
+            assert_eq!(
+                colour_of(harness, STALE),
+                Some(theme::WARNING),
+                "amber after {change}"
+            );
+            if has_label(harness, MAXIMISE) {
+                choose(harness, MAXIMISE);
+            }
+            no_check_offered(harness);
+            assert!(!enabled(harness, POLICY), "{change}: the policy is locked");
+        }
+
+        // Typing a space into the code.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE));
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &scenario);
+        type_into(&mut harness, &editor, " ");
+        stale(&mut harness, "typing a space into the code");
+
+        // A block added with the board's Add step.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        choose(&mut harness, RESTORE);
+        let before = nodes(&harness, &scenario);
+        choose(&mut harness, "Add step");
+        choose(&mut harness, "A = B");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "a block is added");
+        stale(&mut harness, "a block added on the board");
+
+        // The other error policy.
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert!(enabled(&harness, POLICY));
+        choose(&mut harness, POLICY);
+        choose(&mut harness, "Stop on error");
+        stale(&mut harness, "choosing the other error policy");
+
+        // Moving a block keeps the count, as it keeps fresh results fresh.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        choose(&mut harness, RESTORE);
+        move_card(&mut harness, &scenario, "Expected price (Value)");
+        assert_eq!(bar(&harness), None, "a move keeps fresh results fresh");
+        assert!(folder(&harness).fresh_run(&scenario).is_some());
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        check(&mut harness, "productId");
+        choose(&mut harness, RESTORE);
+        move_card(&mut harness, &scenario, "Expected price (Value)");
+        assert_eq!(bar(&harness), Some(ONE), "a move keeps the count");
+    }
+
+    /// Drags the card named `card` on the board by (120, 80) and asserts it
+    /// moved.
+    fn move_card(harness: &mut FolderHarness, scenario: &str, card: &str) {
+        let position = |harness: &FolderHarness| {
+            let model = folder(harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .document(scenario)
+                .unwrap()
+                .model()
+                .cloned()
+                .unwrap();
+            graph_of(&model, false)
+                .nodes
+                .iter()
+                .find(|node| node.id == "expected")
+                .unwrap()
+                .position
+                .clone()
+        };
+        let before = position(harness);
+        let start = harness.get_by_label(card).rect().center();
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + egui::vec2(5.0, 3.0) * step as f32);
+            harness.step();
+        }
+        harness.drop_at(start + egui::vec2(40.0, 24.0));
+        harness.hover_at(egui::pos2(480.0, 3.0));
+        settle(harness);
+        assert_ne!(position(harness), before, "the card moved");
+    }
+
+    /// Criterion 3: the model's undo (Ctrl+Z outside the code editor) takes
+    /// the last check back like any edit: after two checks one undo gives
+    /// *1 check added* and `total` offers *Check* again, a second gives a
+    /// fresh report with no bar text; redo brings *1 check added* back.
+    #[test]
+    fn ux01_criterion_3_undo_takes_a_check_back() {
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        let before = nodes(&harness, &scenario);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        assert_eq!(bar(&harness), Some(TWO));
+
+        model_history(&mut harness, false);
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check undone");
+        assert_eq!(bar(&harness), Some(ONE));
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+
+        model_history(&mut harness, false);
+        assert_eq!(nodes(&harness, &scenario), before, "both undone");
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        assert!(folder(&harness).fresh_run(&scenario).is_some(), "fresh");
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+
+        model_history(&mut harness, true);
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one redone");
+        assert_eq!(bar(&harness), Some(ONE));
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+    }
+
+    /// Criterion 5: the next run runs the checks: two more passed steps, no
+    /// bar text, and every field offers *Check* again.
+    #[test]
+    fn ux01_criterion_5_the_next_run_runs_the_checks() {
+        let (_project, mut harness, _scenario, first) = after_a_run(MINIMUM);
+        let passed = |report: &RunResult| {
+            report
+                .steps
+                .iter()
+                .filter(|step| step.status == apiforge_core::run::StepStatus::Passed)
+                .count()
+        };
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        let next = run(&mut harness);
+        assert_eq!(next.status, RunStatus::Passed, "{:?}", next.error);
+        assert_eq!(passed(&next), passed(&first) + 2, "the two checks ran");
+        assert_eq!(bar(&harness), None, "a new count starts");
+        if has_label(&harness, MAXIMISE) {
+            choose(&mut harness, MAXIMISE);
+        }
+        select_step(&mut harness, STEP);
+        for field in ["id", "productId", "quantity", "total"] {
+            offers_check(&harness, field);
+        }
+    }
+
+    /// Criterion 6: the board and the code keep the run's marks while only
+    /// checks were added, and lose them after another change.
+    #[test]
+    fn ux01_criterion_6_the_board_keeps_the_run() {
+        let (_project, mut harness, scenario, report) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert_eq!(
+            folder(&harness).fresh_run(&scenario).map(|run| run.id),
+            Some(report.id),
+            "the cards keep the run's pass marks after a check"
+        );
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &scenario);
+        type_into(&mut harness, &editor, " ");
+        assert!(
+            folder(&harness).fresh_run(&scenario).is_none(),
+            "the marks are gone after another change"
+        );
+    }
+
+    /// Criterion 7: a component's own run (KTLO-23) counts its checks the
+    /// same way: *Fetch product*'s `name` and `price` checked from one run,
+    /// the count, undo, and an edit of the code making the results stale.
+    #[test]
+    fn ux01_criterion_7_a_component_run_counts_its_checks() {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        let component = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == "components/product.afs")
+            .unwrap()
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        choose(&mut harness, "Split");
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, "Fetch product · Passed");
+        let before = nodes(&harness, &component);
+        offers_check(&harness, "name");
+
+        check(&mut harness, "name");
+        assert_eq!(nodes(&harness, &component), before + 1);
+        reads_added(&harness, "name");
+        assert_eq!(bar(&harness), Some(ONE));
+        check(&mut harness, "price");
+        reads_added(&harness, "price");
+        assert_eq!(bar(&harness), Some(TWO));
+        assert!(folder(&harness).fresh_run(&component).is_some());
+
+        model_history(&mut harness, false);
+        assert_eq!(bar(&harness), Some(ONE));
+        offers_check(&harness, "price");
+
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &component);
+        type_into(&mut harness, &editor, " ");
+        assert_eq!(bar(&harness), Some(STALE));
+        assert!(folder(&harness).fresh_run(&component).is_none());
+    }
+
+    /// Criterion 8: the bar fits. *Run results*, the status pill, the count,
+    /// *Maximise* / *Restore run results* and the policy combo are within the
+    /// window and disjoint at 960 × 540 maximised and restored, and at
+    /// 1600 × 1000 at the panel's tallest normal height; a *Check added* row
+    /// stays within the window where the rows show. At 960 × 540 restored the
+    /// rows are below the panel's scrolled area, as in the mock-up, and an
+    /// accessibility node keeps a row's place there without painting it.
+    #[test]
+    fn ux01_criterion_8_the_bar_fits() {
+        fn fits(harness: &FolderHarness, toggle: &str, rows: bool, at: &str) {
+            let labels = ["Run results", "PASSED", TWO, toggle, POLICY];
+            assert_within_window(harness, &labels);
+            assert_disjoint(harness, &labels);
+            if !rows {
+                return;
+            }
+            let added: Vec<_> = harness.query_all_by_label(ADDED).collect();
+            assert!(!added.is_empty(), "{at}: rows shown");
+            let window = harness.ctx.content_rect();
+            for node in added {
+                assert!(
+                    window.contains_rect(node.rect()),
+                    "{at}: a Check added row at {:?} reaches past the panel",
+                    node.rect()
+                );
+            }
+        }
+
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        fits(&harness, RESTORE, true, "960 × 540 maximised");
+        choose(&mut harness, RESTORE);
+        fits(&harness, MAXIMISE, false, "960 × 540 restored");
+
+        let (_project, mut harness, _scenario, _) = after_a_run(WIDE);
+        choose(&mut harness, RESTORE);
+        // The panel at its tallest normal height, from its edge's keyboard.
+        harness.get_by_label("Resize run report").focus();
+        harness.step();
+        harness.key_press(Key::End);
+        settle(&mut harness);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        fits(
+            &harness,
+            MAXIMISE,
+            true,
+            "1600 × 1000 at the tallest normal height",
+        );
+        assert!(
+            harness.query_all_by_label(ADDED).count() == 2,
+            "both rows show at the tallest normal height"
+        );
+    }
+}
+
+// ----- UX-02: the run mode is a setting ---------------------------------------
+
+/// UX-02 (#99): the window keeps a run mode per person and per project, the
+/// header's one Run button runs it and says which, and *Run options* is a
+/// chevron at the button's right (docs/tickets/UX-02.md). Every test uses
+/// the demo shop and a configuration directory of its own.
+mod ux02 {
+    use super::super::accessibility_tests::{open_by_keyboard, tab_order};
+    use super::mcp08b::{agent, await_endpoint, await_until, contains, hand_over, read_only};
+    use super::mcp09::{agent_holds, files, manifest_id, set_box, window};
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_core::run::RunMode;
+    use apiforge_storage::project::HolderRole;
+    use egui_kittest::kittest::NodeT;
+    use serde_json::{Value, json};
+    use std::{
+        io::{Read as _, Write as _},
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
+
+    const SIMULATE: &str = "Run simulation";
+    const LIVE: &str = "Run live";
+    const OPTIONS: &str = "Run options";
+    const MENU: &str = "Run options menu";
+    const CAPTION: &str = "RUN MODE";
+    const SIMULATION_ITEM: &str = "Simulation";
+    const LIVE_ITEM: &str = "Live";
+    const SIMULATION_HINT: &str = "Sample responses; no request is sent.";
+    const LIVE_HINT: &str = "Requests go to the project's API.";
+    const LINE: &str = "The Run button runs this mode until you change it.";
+    const REVIEW: &str = "Review legacy runs";
+    const ONE_OFF: &str = "Run live requests";
+    const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
+    const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
+    const BADGE: &str = "Live allowed";
+    const BADGE_HOVER: &str =
+        "An MCP agent may send live requests in this project. Change it in Project settings.";
+    const TAKE_BACK: &str = "Take back";
+    /// The demo shop's name, as the header shows it.
+    const NAME: &str = "Demo shop";
+
+    fn mode_file(configuration: &Path) -> PathBuf {
+        configuration.join("apiforge").join("run-mode.json")
+    }
+
+    fn consent_file(configuration: &Path) -> PathBuf {
+        configuration.join("apiforge").join("agent-consent.json")
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// Opens the chevron's menu.
+    fn open_options(harness: &mut FolderHarness) {
+        choose(harness, OPTIONS);
+        assert!(has_label(harness, MENU), "the chevron opens {MENU}");
+    }
+
+    fn close_options(harness: &mut FolderHarness) {
+        if has_label(harness, MENU) {
+            harness.key_press(Key::Escape);
+            settle(harness);
+        }
+        assert!(!has_label(harness, MENU), "the menu closed");
+    }
+
+    /// Chooses `item`, *Simulation* or *Live*, in the chevron's menu.
+    fn choose_mode(harness: &mut FolderHarness, item: &str) {
+        open_options(harness);
+        choose(harness, item);
+        close_options(harness);
+    }
+
+    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
+        harness.get_by_label(label).hover();
+        settle(harness);
+        harness.run_steps(60);
+        contains(harness, text)
+    }
+
+    /// The project name in the header (the explorer may name it too).
+    fn title(harness: &FolderHarness) -> egui::Rect {
+        harness
+            .query_all_by_label(NAME)
+            .map(|node| node.rect())
+            .find(|rect| rect.top() < 40.0)
+            .expect("the project name in the header")
+    }
+
+    /// A loopback API that records each request line and answers every
+    /// request with a product.
+    fn api() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let lines = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let lines = Arc::clone(&lines);
+                std::thread::spawn(move || {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    lines
+                        .lock()
+                        .unwrap()
+                        .push(text.lines().next().unwrap_or_default().to_owned());
+                    let body = r#"{"id":123,"name":"Live","price":10}"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                });
+            }
+        });
+        (base, seen)
+    }
+
+    /// The demo shop with its base URL at `base`.
+    fn shop_at(base: &str) -> tempfile::TempDir {
+        let directory = shop();
+        let manifest = directory.path().join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!(base);
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        directory
+    }
+
+    /// Criterion 1: a project never set shows *Run simulation*; after
+    /// *Live* is chosen, *Run live*; after *Simulation*, *Run simulation*
+    /// again. The hover text names the mode.
+    #[test]
+    fn ux02_criterion_1_the_button_reads_its_mode() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+        assert!(has_label(&harness, SIMULATE), "a project never set");
+        assert!(!has_label(&harness, LIVE));
+        assert!(!has_label(&harness, "Run"), "no bare Run");
+        assert!(hover_shows(&mut harness, SIMULATE, SIMULATE_HOVER));
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE), "Live chosen");
+        assert!(!has_label(&harness, SIMULATE));
+        assert!(hover_shows(&mut harness, LIVE, LIVE_HOVER));
+
+        choose_mode(&mut harness, SIMULATION_ITEM);
+        assert!(has_label(&harness, SIMULATE), "Simulation chosen again");
+        assert!(!has_label(&harness, LIVE));
+    }
+
+    /// Criterion 1: one violet, `112 · 76 · 182`, fills *Run simulation*
+    /// and colours the SIMULATION badge; *Run live* keeps the accent. The
+    /// colour on screen is the QA captures' (ADR 0013, decision 8).
+    #[test]
+    fn ux02_criterion_1_simulation_is_one_violet() {
+        assert_eq!(theme::SIMULATION, egui::Color32::from_rgb(112, 76, 182));
+        assert_eq!(
+            super::super::chrome::run_button(false).primary_fill(),
+            theme::SIMULATION,
+            "Run simulation"
+        );
+        assert_eq!(
+            super::super::chrome::run_button(true).primary_fill(),
+            theme::ACCENT,
+            "Run live"
+        );
+        assert_eq!(
+            crate::report::mode_pill(RunMode::Simulation),
+            ("SIMULATION", theme::SIMULATION)
+        );
+        assert_eq!(
+            crate::report::mode_pill(RunMode::Live),
+            ("LIVE API", theme::ACCENT)
+        );
+    }
+
+    /// Criterion 2: the chevron *Run options* sits at the right of the Run
+    /// button and opens the menu: the caption, *Simulation* and *Live* with
+    /// their hints, the line, *Review legacy runs*; no *Run live requests*;
+    /// on a scenario's and on a component's tab.
+    #[test]
+    fn ux02_criterion_2_the_chevron_opens_the_menu() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        let component = only(&harness, DocumentKind::Component);
+        for tab in [only(&harness, DocumentKind::Scenario), component] {
+            app(&mut harness).activate_tab(&tab);
+            settle(&mut harness);
+            let run = harness.get_by_label(SIMULATE).rect();
+            let chevron = harness
+                .get_by_role_and_label(egui::accesskit::Role::Button, OPTIONS)
+                .rect();
+            assert!(
+                chevron.left() >= run.right() && chevron.left() - run.right() <= 4.0,
+                "the chevron at the button's right: {run:?}, {chevron:?}"
+            );
+            assert!(
+                (chevron.center().y - run.center().y).abs() <= 1.0,
+                "on the button's row"
+            );
+            open_options(&mut harness);
+            for label in [
+                CAPTION,
+                SIMULATION_ITEM,
+                SIMULATION_HINT,
+                LIVE_ITEM,
+                LIVE_HINT,
+                LINE,
+                REVIEW,
+            ] {
+                assert!(has_label(&harness, label), "{label} in the menu");
+            }
+            assert!(!contains(&harness, ONE_OFF), "{ONE_OFF} is nowhere");
+            let order: Vec<f32> = [CAPTION, SIMULATION_ITEM, LIVE_ITEM, LINE, REVIEW]
+                .iter()
+                .map(|label| harness.get_by_label(label).rect().top())
+                .collect();
+            assert!(order.is_sorted(), "top to bottom: {order:?}");
+            close_options(&mut harness);
+        }
+    }
+
+    /// Criterion 2: the owner's "a little more left margin": *Simulation*
+    /// and *Live* start at least 8 px right of the RUN MODE caption.
+    #[test]
+    fn ux02_criterion_2_the_mode_items_are_indented() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        for size in [MINIMUM, WIDE] {
+            let mut harness = window(directory.path(), size, configuration.path());
+            open_options(&mut harness);
+            let caption = harness.get_by_label(CAPTION).rect().left();
+            for item in [SIMULATION_ITEM, LIVE_ITEM] {
+                let left = harness.get_by_label(item).rect().left();
+                assert!(
+                    left >= caption + 8.0,
+                    "{item} at {left}, the caption at {caption}"
+                );
+            }
+            close_options(&mut harness);
+        }
+    }
+
+    /// Criterion 2: on a scenario's tab at 960 × 540, with *Live allowed*
+    /// beside it and *Run simulation*, the widest label, the project name is
+    /// whole.
+    #[test]
+    fn ux02_criterion_2_the_project_name_is_whole_at_960() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        set_box(&mut harness, true);
+        assert!(has_label(&harness, BADGE));
+        assert!(has_label(&harness, SIMULATE));
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            let width = title(&harness).width();
+            let whole = whole_width(&harness, NAME, theme::FONT_BODY);
+            assert!(
+                width + 1.0 >= whole,
+                "{mode}: the name is {width} px wide, whole it is {whole} px"
+            );
+        }
+    }
+
+    /// Criterion 3: the mode is kept in `apiforge/run-mode.json` in the
+    /// configuration directory by the manifest id; a second window on the
+    /// project starts with it, a window on another project in Simulation;
+    /// the project folder is byte-identical.
+    #[test]
+    fn ux02_criterion_3_the_mode_is_kept_per_project_and_the_project_is_untouched() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let other = tempfile::tempdir().unwrap();
+        apiforge_project::prepare_project(other.path(), &apiforge_core::demos::tickets_project())
+            .unwrap();
+        assert_ne!(manifest_id(root), manifest_id(other.path()));
+
+        let mut harness = window(root, WIDE, configuration.path());
+        let before = files(root);
+        assert!(has_label(&harness, SIMULATE), "a project never set");
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+        settle(&mut harness);
+        assert_eq!(files(root), before, "the project folder is byte-identical");
+        drop(harness);
+
+        let stored: Value =
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap();
+        assert_eq!(stored["version"], 1, "{stored}");
+        let entry = &stored["projects"][manifest_id(root)];
+        assert_eq!(entry["mode"], "live", "{stored}");
+        assert!(entry["changedAt"].is_string(), "{stored}");
+        assert!(
+            stored["projects"].get(manifest_id(other.path())).is_none(),
+            "{stored}"
+        );
+
+        let harness = window(root, WIDE, configuration.path());
+        assert!(has_label(&harness, LIVE), "a second window starts live");
+        drop(harness);
+        let harness = window(other.path(), WIDE, configuration.path());
+        assert!(
+            has_label(&harness, SIMULATE),
+            "another project starts in Simulation"
+        );
+        drop(harness);
+    }
+
+    /// Criterion 4: *Run simulation* gives a simulation and sends nothing to
+    /// the project's API; *Run live* gives a live report and the API
+    /// receives the requests.
+    #[test]
+    fn ux02_criterion_4_the_button_runs_the_chosen_mode() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (base, requests) = api();
+        let directory = shop_at(&base);
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+
+        choose(&mut harness, SIMULATE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Simulation);
+        assert!(!report.steps.is_empty());
+        assert!(
+            requests.lock().unwrap().is_empty(),
+            "a simulation sends nothing: {:?}",
+            requests.lock().unwrap()
+        );
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        choose(&mut harness, LIVE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Live);
+        assert!(
+            !requests.lock().unwrap().is_empty(),
+            "a live run sends the requests"
+        );
+    }
+
+    /// Criterion 4: while the window observes, the button reads and runs
+    /// *Run simulation* whatever the stored mode, *Live* is disabled with
+    /// MCP-08a's reason, the stored mode is kept, and *Run live* is back
+    /// after *Take back*.
+    #[test]
+    fn ux02_criterion_4_observing_runs_a_simulation() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (base, requests) = api();
+        let directory = shop_at(&base);
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "Written by the agent.");
+        assert!(read_only(&harness), "the window observes");
+        assert!(
+            has_label(&harness, SIMULATE),
+            "observing reads Run simulation"
+        );
+        assert!(!has_label(&harness, LIVE));
+        open_options(&mut harness);
+        assert!(disabled(&harness, LIVE_ITEM), "Live is disabled");
+        assert!(hover_shows(&mut harness, LIVE_ITEM, runs::LIVE_PAUSED));
+        close_options(&mut harness);
+
+        choose(&mut harness, SIMULATE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Simulation, "observing simulates");
+        assert!(requests.lock().unwrap().is_empty(), "nothing was sent");
+        let stored: Value =
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap();
+        assert_eq!(
+            stored["projects"][manifest_id(root)]["mode"],
+            "live",
+            "the stored mode is kept"
+        );
+
+        choose(&mut harness, TAKE_BACK);
+        await_until(&mut harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(has_label(&harness, LIVE), "Run live is back");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Review round 1 of #244: while the window observes, *Simulation* is
+    /// the mode shown, and clicking it is still the person's choice: the
+    /// stored *Live* becomes Simulation. Opening and closing the menu
+    /// writes nothing.
+    #[test]
+    fn choosing_simulation_while_observing_replaces_a_stored_live() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let harness = {
+            let mut harness = window(root, WIDE, configuration.path());
+            choose_mode(&mut harness, LIVE_ITEM);
+            harness
+        };
+        drop(harness);
+        let stored = || -> Value {
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap()
+        };
+        let owner = agent_holds(root);
+        let mut harness = window(root, WIDE, configuration.path());
+        assert!(has_label(&harness, "Observing"));
+        assert!(has_label(&harness, SIMULATE));
+        let before = fs::read(mode_file(configuration.path())).unwrap();
+        open_options(&mut harness);
+        close_options(&mut harness);
+        assert_eq!(
+            fs::read(mode_file(configuration.path())).unwrap(),
+            before,
+            "opening the menu writes nothing"
+        );
+        choose_mode(&mut harness, SIMULATION_ITEM);
+        assert_eq!(
+            stored()["projects"][manifest_id(root)]["mode"],
+            "simulation",
+            "the click is kept"
+        );
+        drop(harness);
+        drop(owner);
+        let harness = window(root, WIDE, configuration.path());
+        assert!(
+            has_label(&harness, SIMULATE),
+            "Simulation after the holder left"
+        );
+        assert!(!has_label(&harness, LIVE));
+    }
+
+    /// Criterion 5: MCP-09's *Live allowed* badge keeps its text and hover
+    /// beside *Run live*, and the run mode and the agent's consent are two
+    /// files that never change each other.
+    #[test]
+    fn ux02_criterion_5_live_allowed_is_unchanged() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = window(root, MINIMUM, configuration.path());
+        set_box(&mut harness, true);
+        let consent = fs::read(consent_file(configuration.path())).unwrap();
+        assert!(!mode_file(configuration.path()).exists(), "no mode yet");
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+        assert!(has_label(&harness, BADGE), "the badge beside Run live");
+        assert!(hover_shows(&mut harness, BADGE, BADGE_HOVER));
+        assert_disjoint(&harness, &[BADGE, LIVE, OPTIONS]);
+        assert!(
+            harness.get_by_label(BADGE).rect().right() < harness.get_by_label(LIVE).rect().left()
+        );
+        assert_eq!(
+            fs::read(consent_file(configuration.path())).unwrap(),
+            consent,
+            "choosing a mode leaves the consent alone"
+        );
+        let mode = fs::read(mode_file(configuration.path())).unwrap();
+        set_box(&mut harness, false);
+        assert!(!has_label(&harness, BADGE));
+        assert!(
+            has_label(&harness, LIVE),
+            "the consent leaves the mode alone"
+        );
+        assert_eq!(fs::read(mode_file(configuration.path())).unwrap(), mode);
+    }
+
+    /// Criterion 7: the header fits at both windows, in every mode, with
+    /// *Live allowed*, in either run mode, on a scenario's and on a
+    /// component's tab.
+    #[test]
+    fn ux02_criterion_7_the_header_fits() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        for size in [MINIMUM, WIDE] {
+            let mut harness = window(directory.path(), size, configuration.path());
+            set_box(&mut harness, true);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            let component = only(&harness, DocumentKind::Component);
+            for (item, run) in [(SIMULATION_ITEM, SIMULATE), (LIVE_ITEM, LIVE)] {
+                choose_mode(&mut harness, item);
+                for tab in [&scenario, &component] {
+                    app(&mut harness).activate_tab(tab);
+                    settle(&mut harness);
+                    for mode in ["Code", "Diagram", "Split"] {
+                        choose(&mut harness, mode);
+                        let mut labels = vec![
+                            "Project", BADGE, "Code", "Diagram", "Split", "Save", "Save all",
+                            OPTIONS, run,
+                        ];
+                        if tab == &component {
+                            labels.push("Publish");
+                        }
+                        let what = format!("{run}, {mode}, {tab} at {size:?}");
+                        assert_within_window(&harness, &labels);
+                        assert_disjoint(&harness, &labels);
+                        let title = title(&harness);
+                        assert!(
+                            harness.ctx.content_rect().contains_rect(title),
+                            "{what}: the name"
+                        );
+                        for label in &labels {
+                            assert!(
+                                !title.intersects(harness.get_by_label(label).rect()),
+                                "{what}: the name overlaps {label}"
+                            );
+                        }
+                    }
+                }
+            }
+            drop(harness);
+        }
+    }
+
+    /// Criterion 8: a tab that cannot run, a text file or none, keeps the
+    /// *Runs* menu with *Review legacy runs*, whatever the mode.
+    #[test]
+    fn ux02_criterion_8_the_runs_menu_is_unchanged() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+        choose_mode(&mut harness, LIVE_ITEM);
+        app(&mut harness).open_text("README.md");
+        settle(&mut harness);
+        for case in ["a text file", "no tab"] {
+            if case == "no tab" {
+                let tabs: Vec<String> = folder(&harness)
+                    .workbench
+                    .tabs()
+                    .iter()
+                    .map(|tab| tab.document_id.clone())
+                    .collect();
+                for tab in tabs {
+                    app(&mut harness).close_tab(&tab);
+                }
+                settle(&mut harness);
+                assert!(folder(&harness).workbench.active().is_none(), "no tab");
+            }
+            for absent in [SIMULATE, LIVE, OPTIONS] {
+                assert!(!has_label(&harness, absent), "{case}: no {absent}");
+            }
+            choose(&mut harness, "Runs");
+            assert!(has_label(&harness, "Runs menu"), "{case}");
+            assert!(has_label(&harness, REVIEW), "{case}");
+            assert!(!has_label(&harness, LIVE_ITEM), "{case}: no mode");
+            harness.key_press(Key::Escape);
+            settle(&mut harness);
+        }
+    }
+
+    /// Criterion 9: Tab reaches the Run button, then the chevron, between
+    /// *Project* and *Code*; the chevron is a button named *Run options*
+    /// whose menu, opened from the keyboard, is named and reaches the modes.
+    #[test]
+    fn ux02_criterion_9_the_controls_are_accessible() {
+        let directory = shop();
+        let (context, mut app) = open(directory.path());
+        let visited = tab_order(&mut app, &context, 23);
+        let mut at = 0;
+        for name in ["Project", SIMULATE, OPTIONS, "Code"] {
+            at += visited[at..]
+                .iter()
+                .position(|visit| visit == name)
+                .unwrap_or_else(|| panic!("{name} after {at} in {visited:#?}"));
+        }
+        open_by_keyboard(&mut app, &context, OPTIONS);
+        let visited = tab_order(&mut app, &context, 3);
+        assert_eq!(visited[0], MENU, "{visited:?}");
+        assert!(
+            visited.iter().any(|name| name == SIMULATION_ITEM),
+            "{visited:?}"
+        );
+        frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
     }
 }

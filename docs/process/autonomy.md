@@ -15,7 +15,8 @@ below holds; an agent that finds one does not hold stops and escalates.
 
 | Label | Every item holds |
 | --- | --- |
-| `ready:sol` | The analysis is approved by the owner and the ticket file says so. Every owner decision the ticket needs is taken and recorded. The acceptance criteria are numbered and each names its test or its QA step. The mock-up, if the ticket has one, is approved as a whole. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format`, `migration` or `removal` flag. |
+| `ready:sol` | The analysis is approved by the owner and the ticket file, or the issue when the ticket has none, says so. Every owner decision the ticket needs is taken and recorded. The acceptance criteria are numbered and each names its test or its QA step. The mock-up, if the ticket has one, is approved as a whole. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format`, `migration` or `removal` flag. |
+| `ready:opus` | Everything `ready:sol` requires except the prohibition on `removal`: a `removal` flag, a permission or consent control, or an `M` with an interplay the planning model names (a camera, a wording shared with another ticket, an approved mock-up to match) may be present. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format` or `migration` flag. Opus 5.5 or newer takes it unattended and escalates on the same conditions as any other model. Introduced for the UX-1 sprint (2026-11-02) |
 | `ready:sonnet` | Everything above, and: size `S`, no risk flag at all, one file or one well-named unit touched, the change spelled out in the ticket to the level of what the code does, no judgement left to make. A typo, a wording, a constant, a test rename. |
 
 A ticket with `decision-needed`, with an open question in its analysis, or
