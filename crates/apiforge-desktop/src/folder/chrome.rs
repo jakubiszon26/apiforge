@@ -51,6 +51,7 @@ impl FolderApp {
                 .and_then(|active| active.strip_prefix(TEXT_TAB))
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
+        let running = self.running_label(active);
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             // Keep room for the widest toolbar, a component's with Publish
@@ -141,11 +142,24 @@ impl FolderApp {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // The width the row takes left of the run controls, measured
+                // as it is drawn: the *Running …* label gets what is left
+                // (UX-04). *Cancel run* is narrower than the Run button and
+                // its chevron, so the title's reservation above holds.
+                let rest_id = egui::Id::new("folder-header-rest");
+                let rest = ui
+                    .ctx()
+                    .data(|data| data.get_temp::<f32>(rest_id))
+                    .unwrap_or(0.0);
                 if self.runs.handle.is_some() {
                     if ui.button("Cancel run").clicked()
                         && let Some(handle) = &self.runs.handle
                     {
                         handle.cancel();
+                    }
+                    if let Some((text, hover)) = &running {
+                        let room = ui.available_width() - rest;
+                        running_label(ui, text, *hover, room);
                     }
                 } else if let Some(id) = &run_document {
                     // Right to left, the chevron is the rightmost: its place
@@ -218,6 +232,9 @@ impl FolderApp {
                         }
                     });
                 }
+                // Measured between left edges: the available width stops at
+                // zero when the row is too wide, an edge does not.
+                let before_rest = ui.min_rect().left();
                 if let Some((id, enabled)) = &publish
                     && ui
                         .add_enabled(*enabled, egui::Button::new("Publish"))
@@ -257,6 +274,16 @@ impl FolderApp {
                     .on_hover_text("Ctrl+E switches Code and Diagram");
                 if self.workbench.mode != before {
                     self.touched();
+                }
+                let measured = before_rest - ui.min_rect().left();
+                if (measured - rest).abs() > 0.5 {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(rest_id, measured));
+                    // A label laid out with the old width would overlap or
+                    // cut short; this pass is drawn again with the new one.
+                    if running.is_some() {
+                        ui.ctx().request_discard("UX-04: the header's row changed width");
+                    }
                 }
             });
         });
@@ -1048,10 +1075,50 @@ const OPTIONS: &str = "Run options";
 const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
 const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
 
-/// The header's *Running …* label while a run runs (UX-04). Stub of the
-/// acceptance commit: the implementation gives it its colour and size.
+/// The text of the header's *Running …* label: grey, at the label size
+/// (UX-04, decided on the UX-00 mock-up).
 pub(super) fn running_text(text: &str) -> RichText {
     RichText::new(text)
+        .size(theme::FONT_LABEL)
+        .color(theme::MUTED)
+}
+
+/// The header's *Running …* label just left of *Cancel run* (UX-04). It
+/// takes at most `room`; a longer text, a long file name on a narrow
+/// window, is cut with an ellipsis and its hover starts with the whole text.
+fn running_label(ui: &mut egui::Ui, text: &str, hover: Option<&str>, room: f32) {
+    let whole = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                text.to_owned(),
+                egui::FontId::proportional(theme::FONT_LABEL),
+                theme::MUTED,
+            )
+            .size()
+            .x
+    });
+    let room = room.max(0.0);
+    let label = ui
+        .allocate_ui_with_layout(
+            egui::vec2(room, theme::CONTROL_HEIGHT),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.add(
+                    egui::Label::new(running_text(text))
+                        .truncate()
+                        .show_tooltip_when_elided(false),
+                )
+            },
+        )
+        .inner;
+    let hover = match (whole > room, hover) {
+        (true, Some(hover)) => Some(format!("{text}\n{hover}")),
+        (true, None) => Some(text.to_owned()),
+        (false, hover) => hover.map(str::to_owned),
+    };
+    if let Some(hover) = hover {
+        label.on_hover_text(hover);
+    }
 }
 
 fn run_label(live: bool) -> &'static str {

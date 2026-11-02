@@ -8400,6 +8400,41 @@ mod ux04 {
         }
     }
 
+    /// The width rule of the implementation: at 960 × 540 on a component's
+    /// tab, where *Publish* also stands, the label naming the file is cut to
+    /// the room the row leaves, and its hover gives the whole text with the
+    /// sentence of an unsaved run.
+    #[test]
+    fn a_cut_label_gives_its_whole_text_on_hover() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        set_box(&mut harness, true);
+        let component = only(&harness, DocumentKind::Component);
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        let named = format!("Running unsaved {FILE}");
+        let (shown, label) = running(&harness).expect("the label");
+        assert_eq!(shown, named, "its name is the whole text");
+        let whole = whole_width(&harness, &named, theme::FONT_LABEL);
+        assert!(label.width() + 1.0 < whole, "cut: {label:?}, whole {whole}");
+        let publish = harness.get_by_label("Publish").rect();
+        assert!(publish.right() <= label.left(), "clear of Publish");
+        harness.get_by_label(&named).hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert_eq!(
+            harness.query_all_by_label_contains(&named).count(),
+            2,
+            "the label and its hover, the whole text"
+        );
+        assert!(contains(&harness, UNSAVED_HOVER), "and the sentence");
+        cancel(&mut harness);
+    }
+
     /// Criterion 6: the label is a label for assistive technology, named by
     /// its text, and Tab never stops on it.
     #[test]
