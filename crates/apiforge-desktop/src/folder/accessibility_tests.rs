@@ -298,7 +298,7 @@ fn tab_visits_the_window_in_reading_order_with_named_stops() {
     );
     let expected = [
         "Project",
-        "Run",
+        "Run simulation",
         "Code",
         "promotion-and-cart-price.afs",
         "New",
@@ -345,7 +345,7 @@ fn project_dialogs_keep_tab_inside_and_escape_cancels_them() {
                 "{dialog}: {visited:#?}"
             );
         }
-        for outside in ["Run", "Code", "Project files"] {
+        for outside in ["Run simulation", "Code", "Project files"] {
             assert!(
                 !visited.iter().any(|visit| visit == outside),
                 "{dialog}: {visited:#?}"
@@ -400,7 +400,7 @@ fn menus_opened_from_the_keyboard_are_named_and_reachable() {
     let (context, mut app) = open(directory.path());
     for (button, menu, first) in [
         ("Project", "Project menu", "Open Folder…"),
-        ("Run options", "Run options menu", "Run live requests"),
+        ("Run options", "Run options menu", "Simulation"),
         ("New", "New menu", "New scenario"),
     ] {
         open_by_keyboard(&mut app, &context, button);

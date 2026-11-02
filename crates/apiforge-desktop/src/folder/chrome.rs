@@ -9,8 +9,13 @@ impl FolderApp {
             return;
         };
         let name = session.manifest().name.clone();
+        let project = session.manifest().id.clone();
         let read_only = session.is_read_only();
         let observing = self.observing();
+        // The Run button runs the project's mode (UX-02). Live requests are
+        // the holder's to send while this window observes (MCP-08a): the
+        // button then simulates, and the stored mode waits for the take-back.
+        let live = self.run_mode.mode(&project) == RunMode::Live && !observing;
         let live_allowed = self.live_allowed();
         let unsaved = session
             .documents()
@@ -63,7 +68,33 @@ impl FolderApp {
                         .x
                 }) + ui.spacing().item_spacing.x
             };
-            let mut reserved = 650.0;
+            // The toolbar's 650 px were measured with *Run* and the text
+            // button *Run options*. The mode's label is wider, as much as
+            // the wider of the two whatever the mode, so the title does not
+            // move when the mode changes; the chevron gives back what the
+            // text button took beyond its own width (UX-02).
+            let text_width = |ui: &egui::Ui, text: &str, font: egui::FontId| {
+                ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(text.to_owned(), font, theme::TEXT)
+                        .size()
+                        .x
+                })
+            };
+            let bold = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+            let mut reserved = 650.0
+                + text_width(ui, run_label(false), bold.clone()).max(text_width(
+                    ui,
+                    run_label(true),
+                    bold.clone(),
+                ))
+                - text_width(ui, "Run", bold)
+                - (text_width(
+                    ui,
+                    OPTIONS,
+                    egui::FontId::proportional(theme::FONT_BODY),
+                ) + 2.0 * ui.spacing().button_padding.x
+                    - theme::CONTROL_HEIGHT);
             if read_only {
                 reserved += badge(ui, if observing { "Observing" } else { "Read-only" });
             }
@@ -116,32 +147,58 @@ impl FolderApp {
                         handle.cancel();
                     }
                 } else if let Some(id) = &run_document {
-                    if ui
-                        .add(run_button(false))
-                        .on_hover_text(
-                            "Simulate the selected scenario or component, including unsaved valid code",
-                        )
-                        .clicked()
-                    {
-                        self.request_run(id, false);
+                    // Right to left, the chevron is the rightmost: its place
+                    // is taken first and the button put in it after *Run
+                    // simulation*, which Tab therefore reaches first.
+                    let (_, chevron) = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
+                    ui.add_space(2.0 - ui.spacing().item_spacing.x);
+                    let run = ui
+                        .add(run_button(live))
+                        .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
+                        .clicked();
+                    let shown = if live {
+                        RunMode::Live
+                    } else {
+                        RunMode::Simulation
+                    };
+                    let mut chosen = shown;
+                    let mut review = false;
+                    widgets::action_menu_at(
+                        ui,
+                        chevron,
+                        widgets::icon_button(Icon::ChevronDown, OPTIONS),
+                        |ui| {
+                            widgets::caption(ui, "RUN MODE");
+                            mode_item(ui, &mut chosen, RunMode::Simulation, "Simulation", true);
+                            widgets::hint(ui, "Sample responses; no request is sent.");
+                            ui.add_space(theme::SPACE_SM);
+                            // Live requests are the holder's to send while
+                            // this window observes (MCP-08a).
+                            mode_item(ui, &mut chosen, RunMode::Live, "Live", !observing);
+                            widgets::hint(ui, "Requests go to the project's API.");
+                            ui.separator();
+                            widgets::hint(
+                                ui,
+                                "The Run button runs this mode until you change it.",
+                            );
+                            ui.separator();
+                            if ui.button("Review legacy runs").clicked() {
+                                ui.close();
+                                review = true;
+                            }
+                        },
+                    );
+                    // The mode shown is chosen again: nothing is written, so
+                    // a Live kept while observing stays (UX-02).
+                    if chosen != shown {
+                        self.run_mode.set(&project, chosen);
                     }
-                    ui.menu_button("Run options", |ui| {
-                        widgets::name_menu(ui, "Run options menu");
-                        // Live requests are the holder's to send while this
-                        // window observes (MCP-08a; MCP-09 asks the person).
-                        if ui
-                            .add_enabled(!observing, egui::Button::new("Run live requests"))
-                            .on_disabled_hover_text(runs::LIVE_PAUSED)
-                            .clicked()
-                        {
-                            ui.close();
-                            self.request_run(id, true);
-                        }
-                        if ui.button("Review legacy runs").clicked() {
-                            ui.close();
-                            self.review_legacy_runs();
-                        }
-                    });
+                    if review {
+                        self.review_legacy_runs();
+                    }
+                    if run {
+                        self.request_run(id, live);
+                    }
                 } else {
                     ui.menu_button("Runs", |ui| {
                         widgets::name_menu(ui, "Runs menu");
@@ -976,7 +1033,38 @@ fn tab_face(
     None
 }
 
-/// The header's Run button for the window's run mode (UX-02).
-pub(super) fn run_button(_live: bool) -> widgets::ActionButton<'static> {
-    widgets::action(Icon::Play, "Run").primary()
+use crate::run_mode::RunMode;
+
+/// The chevron at the right of the Run button, and its menu's name.
+const OPTIONS: &str = "Run options";
+const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
+const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
+
+fn run_label(live: bool) -> &'static str {
+    if live { "Run live" } else { "Run simulation" }
+}
+
+/// The header's Run button: *Run simulation* in the violet that also marks a
+/// simulation in Run results, or *Run live* in the accent (UX-02).
+pub(super) fn run_button(live: bool) -> widgets::ActionButton<'static> {
+    let button = widgets::action(Icon::Play, run_label(live)).primary();
+    if live {
+        button
+    } else {
+        button.fill(theme::SIMULATION)
+    }
+}
+
+/// A run mode in the *Run options* menu, 8 px further in than the RUN MODE
+/// caption (the owner's addition to the UX-00 mock-up); its highlight still
+/// reaches the menu's right edge.
+fn mode_item(ui: &mut egui::Ui, chosen: &mut RunMode, mode: RunMode, label: &str, enabled: bool) {
+    let mut rect = ui.available_rect_before_wrap();
+    rect.min.x += theme::SPACE_SM;
+    let mut item = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    item.add_enabled_ui(enabled, |ui| {
+        ui.selectable_value(chosen, mode, label)
+            .on_disabled_hover_text(runs::LIVE_PAUSED);
+    });
+    ui.advance_cursor_after_rect(item.min_rect());
 }

@@ -22,7 +22,6 @@ mod navigator;
 mod persistence;
 mod preferences;
 mod report;
-#[cfg(test)]
 mod run_mode;
 mod shapes;
 mod stop;

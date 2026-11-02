@@ -181,7 +181,7 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
     // Run the saved scenario and keep its report for the restart.
     app(&mut harness).activate_tab(&scenario);
     settle(&mut harness);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     let report = finish_run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed);
     assert!(folder(&harness).fresh_run(&scenario).is_some());
@@ -237,7 +237,7 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
     // identity the earlier session reported is the identity it reopens with.
     app(&mut harness).activate_tab(&scenario);
     settle(&mut harness);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     let again = finish_run(&mut harness);
     assert_eq!(again.status, report.status);
     assert_eq!(reported_blocks(&again), reported_blocks(&report));
@@ -1163,8 +1163,9 @@ mod mcp08a {
 
     /// Criterion 1: while another process holds the project, the window
     /// observes. The code view takes no keystroke, the board no drop, wire or
-    /// move, the inspector and the explorer's commands are disabled; *Run*
-    /// still simulates; *Run live requests* is disabled.
+    /// move, the inspector and the explorer's commands are disabled; *Run
+    /// simulation* still simulates; *Live* (UX-02; before it, *Run live
+    /// requests*) is disabled.
     #[test]
     fn observing_pauses_every_edit_and_still_simulates() {
         let directory = shop();
@@ -1252,12 +1253,12 @@ mod mcp08a {
 
         choose(&mut harness, "Run options");
         assert!(
-            disabled(&harness, "Run live requests"),
+            disabled(&harness, "Live"),
             "no live request is sent from an observing window"
         );
         harness.key_press(Key::Escape);
         settle(&mut harness);
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         let report = finish_run(&mut harness);
         assert!(!report.steps.is_empty(), "the simulation still runs");
     }
@@ -3074,7 +3075,8 @@ mod mcp08b {
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
                 let take = harness.get_by_label(TAKE_BACK).rect();
-                let run = harness.get_by_label("Run").rect();
+                // UX-02: the run controls end with the chevron.
+                let run = harness.get_by_label("Run options").rect();
                 assert!(
                     (take.right() - run.right()).abs() <= 1.0,
                     "{mode} at {size:?}: Take back ends at {}, Run at {}",
@@ -5147,7 +5149,7 @@ mod mcp10 {
     /// The ticket's bound: the line shows within a second of each message.
     const BOUND: Duration = Duration::from_secs(1);
     /// What the bar must not move: the explorer and the tabs above it.
-    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run"];
+    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run simulation"];
     const MODES: [&str; 3] = ["Code", "Diagram", "Split"];
 
     fn running(mode: &str) -> String {

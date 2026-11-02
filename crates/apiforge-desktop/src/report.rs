@@ -975,10 +975,11 @@ fn empty_state(ui: &mut Ui) {
     });
 }
 
-/// The badge that says how a run ran.
+/// The badge that says how a run ran. A simulation shares its violet with
+/// *Run simulation* (UX-02).
 pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
     match mode {
-        RunMode::Simulation => ("SIMULATION", theme::LINK),
+        RunMode::Simulation => ("SIMULATION", theme::SIMULATION),
         RunMode::Live => ("LIVE API", theme::ACCENT),
     }
 }
