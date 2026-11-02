@@ -1403,8 +1403,10 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
 
 /// Criterion 10: with a secret in the environment and another in the
 /// `--secrets` file, a session of every tool — reads, checks, runs, refused
-/// writes with the value inside `text` — never returns a value: not in a
-/// result, not on stderr, not in the journal written mid-run.
+/// writes with the value inside `text`, a publication with a `request_id`
+/// (MCP-05b criterion 5) — never returns a value: not in a result, not on
+/// stderr, not in the journal written mid-run, not in the record of request
+/// ids.
 #[test]
 fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     let directory = demo();
@@ -1427,6 +1429,7 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     server.request(2, "tools/list", json!({}));
     let text = std::fs::read_to_string(root.join(SCENARIO)).unwrap();
     let hash = read(&mut server, 3, SCENARIO).1;
+    let product_hash = read(&mut server, 4, PRODUCT).1;
     let leaked = |value: &str| text.replacen(" {\n", &format!(" {{\n  // {value}\n"), 1);
     let mut id = 4;
     let mut next = || {
@@ -1484,10 +1487,23 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
             json!({ "kind": "scenario", "path": "scenarios/leak.afs", "text": format!("scenario \"Leak\" {{\n  // {FILE_TOKEN}\n}}\n") }),
         ),
         ("run", json!({ "path": SCENARIO, "request_id": TOKEN })),
+        (
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": product_hash, "request_id": TOKEN }),
+        ),
     ] {
         let response = call(&mut server, next(), name, arguments);
         tool_error(&response, "secret_in_text");
     }
+    // A publication with a request_id is recorded (MCP-05b), and the record
+    // is grepped below with the journal.
+    let published = call(
+        &mut server,
+        next(),
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": product_hash, "request_id": "publish-without-a-secret" }),
+    );
+    assert_eq!(structured(&published)["revision"], 2);
     let listed = server.request(next(), "resources/list", json!({}));
     assert!(listed["result"]["resources"].is_array());
     let read = server.request(
@@ -1531,6 +1547,12 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     assert_eq!(structured(&finished)["finished"], true);
     let (status, _, stdout, stderr) = server.close();
     assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    let requests = std::fs::read_to_string(root.join(".apiforge/local/agent-requests.json"))
+        .expect("the record of request ids holds the publication");
+    assert!(
+        requests.contains("\"publish-without-a-secret\""),
+        "{requests}"
+    );
     for value in [TOKEN, FILE_TOKEN] {
         for line in &stdout {
             assert!(!line.contains(value), "a result carried a secret value");
@@ -1539,6 +1561,10 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
         assert!(
             !journalled.contains(value),
             "the journal holds a secret value"
+        );
+        assert!(
+            !requests.contains(value),
+            "the record of request ids holds a secret value"
         );
     }
     assert!(!root.join("scenarios/leak.afs").exists());
