@@ -3998,7 +3998,7 @@ mod mcp09 {
     /// Every file under `root`, by relative path. The writer's lock file
     /// is always empty and, on Windows, cannot be read while it is held: it
     /// is listed by its length.
-    fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    pub(super) fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
         fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
             for entry in fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
@@ -4019,7 +4019,7 @@ mod mcp09 {
         found
     }
 
-    fn manifest_id(root: &Path) -> String {
+    pub(super) fn manifest_id(root: &Path) -> String {
         let bytes = fs::read(root.join("apiforge.project.json")).unwrap();
         apiforge_project::ProjectManifest::from_bytes(&bytes)
             .unwrap()
@@ -6910,5 +6910,565 @@ mod mcp19 {
         assert_eq!(app.watcher.problem, None);
         assert!(app.workbench.tabs().iter().all(|tab| tab.document_id != id));
         assert!(!root.join(FOLDER).exists());
+    }
+}
+
+// ----- UX-02: the run mode is a setting ---------------------------------------
+
+/// UX-02 (#99): the window keeps a run mode per person and per project, the
+/// header's one Run button runs it and says which, and *Run options* is a
+/// chevron at the button's right (docs/tickets/UX-02.md). Every test uses
+/// the demo shop and a configuration directory of its own.
+mod ux02 {
+    use super::super::accessibility_tests::{open_by_keyboard, tab_order};
+    use super::mcp08b::{agent, await_endpoint, await_until, contains, hand_over, read_only};
+    use super::mcp09::{files, manifest_id, set_box, window};
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_core::run::RunMode;
+    use apiforge_storage::project::HolderRole;
+    use egui_kittest::kittest::NodeT;
+    use serde_json::{Value, json};
+    use std::{
+        io::{Read as _, Write as _},
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
+
+    const SIMULATE: &str = "Run simulation";
+    const LIVE: &str = "Run live";
+    const OPTIONS: &str = "Run options";
+    const MENU: &str = "Run options menu";
+    const CAPTION: &str = "RUN MODE";
+    const SIMULATION_ITEM: &str = "Simulation";
+    const LIVE_ITEM: &str = "Live";
+    const SIMULATION_HINT: &str = "Sample responses; no request is sent.";
+    const LIVE_HINT: &str = "Requests go to the project's API.";
+    const LINE: &str = "The Run button runs this mode until you change it.";
+    const REVIEW: &str = "Review legacy runs";
+    const ONE_OFF: &str = "Run live requests";
+    const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
+    const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
+    const BADGE: &str = "Live allowed";
+    const BADGE_HOVER: &str =
+        "An MCP agent may send live requests in this project. Change it in Project settings.";
+    const TAKE_BACK: &str = "Take back";
+    /// The demo shop's name, as the header shows it.
+    const NAME: &str = "Demo shop";
+
+    fn mode_file(configuration: &Path) -> PathBuf {
+        configuration.join("apiforge").join("run-mode.json")
+    }
+
+    fn consent_file(configuration: &Path) -> PathBuf {
+        configuration.join("apiforge").join("agent-consent.json")
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// Opens the chevron's menu.
+    fn open_options(harness: &mut FolderHarness) {
+        choose(harness, OPTIONS);
+        assert!(has_label(harness, MENU), "the chevron opens {MENU}");
+    }
+
+    fn close_options(harness: &mut FolderHarness) {
+        if has_label(harness, MENU) {
+            harness.key_press(Key::Escape);
+            settle(harness);
+        }
+        assert!(!has_label(harness, MENU), "the menu closed");
+    }
+
+    /// Chooses `item`, *Simulation* or *Live*, in the chevron's menu.
+    fn choose_mode(harness: &mut FolderHarness, item: &str) {
+        open_options(harness);
+        choose(harness, item);
+        close_options(harness);
+    }
+
+    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
+        harness.get_by_label(label).hover();
+        settle(harness);
+        harness.run_steps(60);
+        contains(harness, text)
+    }
+
+    /// The project name in the header (the explorer may name it too).
+    fn title(harness: &FolderHarness) -> egui::Rect {
+        harness
+            .query_all_by_label(NAME)
+            .map(|node| node.rect())
+            .find(|rect| rect.top() < 40.0)
+            .expect("the project name in the header")
+    }
+
+    /// The width `text` takes in the header's font when it is not cut. Laid
+    /// out in place its glyphs snap to pixels, so a whole label may be up to
+    /// a pixel narrower; a cut one loses at least a character.
+    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
+        let job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(
+                egui::FontId::proportional(theme::FONT_BODY),
+                egui::Color32::WHITE,
+            ),
+        );
+        harness
+            .ctx
+            .fonts_mut(|fonts| fonts.layout_job(job))
+            .size()
+            .x
+    }
+
+    /// A loopback API that records each request line and answers every
+    /// request with a product.
+    fn api() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let lines = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let lines = Arc::clone(&lines);
+                std::thread::spawn(move || {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    let text = String::from_utf8_lossy(&buffer[..read]).into_owned();
+                    lines
+                        .lock()
+                        .unwrap()
+                        .push(text.lines().next().unwrap_or_default().to_owned());
+                    let body = r#"{"id":123,"name":"Live","price":10}"#;
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                });
+            }
+        });
+        (base, seen)
+    }
+
+    /// The demo shop with its base URL at `base`.
+    fn shop_at(base: &str) -> tempfile::TempDir {
+        let directory = shop();
+        let manifest = directory.path().join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!(base);
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        directory
+    }
+
+    /// Criterion 1: a project never set shows *Run simulation*; after
+    /// *Live* is chosen, *Run live*; after *Simulation*, *Run simulation*
+    /// again. The hover text names the mode.
+    #[test]
+    fn ux02_criterion_1_the_button_reads_its_mode() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+        assert!(has_label(&harness, SIMULATE), "a project never set");
+        assert!(!has_label(&harness, LIVE));
+        assert!(!has_label(&harness, "Run"), "no bare Run");
+        assert!(hover_shows(&mut harness, SIMULATE, SIMULATE_HOVER));
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE), "Live chosen");
+        assert!(!has_label(&harness, SIMULATE));
+        assert!(hover_shows(&mut harness, LIVE, LIVE_HOVER));
+
+        choose_mode(&mut harness, SIMULATION_ITEM);
+        assert!(has_label(&harness, SIMULATE), "Simulation chosen again");
+        assert!(!has_label(&harness, LIVE));
+    }
+
+    /// Criterion 1: one violet, `112 · 76 · 182`, fills *Run simulation*
+    /// and colours the SIMULATION badge; *Run live* keeps the accent. The
+    /// colour on screen is the QA captures' (ADR 0013, decision 8).
+    #[test]
+    fn ux02_criterion_1_simulation_is_one_violet() {
+        assert_eq!(theme::SIMULATION, egui::Color32::from_rgb(112, 76, 182));
+        assert_eq!(
+            super::super::chrome::run_button(false).primary_fill(),
+            theme::SIMULATION,
+            "Run simulation"
+        );
+        assert_eq!(
+            super::super::chrome::run_button(true).primary_fill(),
+            theme::ACCENT,
+            "Run live"
+        );
+        assert_eq!(
+            crate::report::mode_pill(RunMode::Simulation),
+            ("SIMULATION", theme::SIMULATION)
+        );
+        assert_eq!(
+            crate::report::mode_pill(RunMode::Live),
+            ("LIVE API", theme::ACCENT)
+        );
+    }
+
+    /// Criterion 2: the chevron *Run options* sits at the right of the Run
+    /// button and opens the menu: the caption, *Simulation* and *Live* with
+    /// their hints, the line, *Review legacy runs*; no *Run live requests*;
+    /// on a scenario's and on a component's tab.
+    #[test]
+    fn ux02_criterion_2_the_chevron_opens_the_menu() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        let component = only(&harness, DocumentKind::Component);
+        for tab in [only(&harness, DocumentKind::Scenario), component] {
+            app(&mut harness).activate_tab(&tab);
+            settle(&mut harness);
+            let run = harness.get_by_label(SIMULATE).rect();
+            let chevron = harness
+                .get_by_role_and_label(egui::accesskit::Role::Button, OPTIONS)
+                .rect();
+            assert!(
+                chevron.left() >= run.right() && chevron.left() - run.right() <= 4.0,
+                "the chevron at the button's right: {run:?}, {chevron:?}"
+            );
+            assert!(
+                (chevron.center().y - run.center().y).abs() <= 1.0,
+                "on the button's row"
+            );
+            open_options(&mut harness);
+            for label in [
+                CAPTION,
+                SIMULATION_ITEM,
+                SIMULATION_HINT,
+                LIVE_ITEM,
+                LIVE_HINT,
+                LINE,
+                REVIEW,
+            ] {
+                assert!(has_label(&harness, label), "{label} in the menu");
+            }
+            assert!(!contains(&harness, ONE_OFF), "{ONE_OFF} is nowhere");
+            let order: Vec<f32> = [CAPTION, SIMULATION_ITEM, LIVE_ITEM, LINE, REVIEW]
+                .iter()
+                .map(|label| harness.get_by_label(label).rect().top())
+                .collect();
+            assert!(order.is_sorted(), "top to bottom: {order:?}");
+            close_options(&mut harness);
+        }
+    }
+
+    /// Criterion 2: the owner's "a little more left margin": *Simulation*
+    /// and *Live* start at least 8 px right of the RUN MODE caption.
+    #[test]
+    fn ux02_criterion_2_the_mode_items_are_indented() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        for size in [MINIMUM, WIDE] {
+            let mut harness = window(directory.path(), size, configuration.path());
+            open_options(&mut harness);
+            let caption = harness.get_by_label(CAPTION).rect().left();
+            for item in [SIMULATION_ITEM, LIVE_ITEM] {
+                let left = harness.get_by_label(item).rect().left();
+                assert!(
+                    left >= caption + 8.0,
+                    "{item} at {left}, the caption at {caption}"
+                );
+            }
+            close_options(&mut harness);
+        }
+    }
+
+    /// Criterion 2: on a scenario's tab at 960 × 540, with *Live allowed*
+    /// beside it and *Run simulation*, the widest label, the project name is
+    /// whole.
+    #[test]
+    fn ux02_criterion_2_the_project_name_is_whole_at_960() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        set_box(&mut harness, true);
+        assert!(has_label(&harness, BADGE));
+        assert!(has_label(&harness, SIMULATE));
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            let width = title(&harness).width();
+            let whole = whole_width(&harness, NAME);
+            assert!(
+                width + 1.0 >= whole,
+                "{mode}: the name is {width} px wide, whole it is {whole} px"
+            );
+        }
+    }
+
+    /// Criterion 3: the mode is kept in `apiforge/run-mode.json` in the
+    /// configuration directory by the manifest id; a second window on the
+    /// project starts with it, a window on another project in Simulation;
+    /// the project folder is byte-identical.
+    #[test]
+    fn ux02_criterion_3_the_mode_is_kept_per_project_and_the_project_is_untouched() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let other = tempfile::tempdir().unwrap();
+        apiforge_project::prepare_project(other.path(), &apiforge_core::demos::tickets_project())
+            .unwrap();
+        assert_ne!(manifest_id(root), manifest_id(other.path()));
+
+        let mut harness = window(root, WIDE, configuration.path());
+        let before = files(root);
+        assert!(has_label(&harness, SIMULATE), "a project never set");
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+        settle(&mut harness);
+        assert_eq!(files(root), before, "the project folder is byte-identical");
+        drop(harness);
+
+        let stored: Value =
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap();
+        assert_eq!(stored["version"], 1, "{stored}");
+        let entry = &stored["projects"][manifest_id(root)];
+        assert_eq!(entry["mode"], "live", "{stored}");
+        assert!(entry["changedAt"].is_string(), "{stored}");
+        assert!(
+            stored["projects"].get(manifest_id(other.path())).is_none(),
+            "{stored}"
+        );
+
+        let harness = window(root, WIDE, configuration.path());
+        assert!(has_label(&harness, LIVE), "a second window starts live");
+        drop(harness);
+        let harness = window(other.path(), WIDE, configuration.path());
+        assert!(
+            has_label(&harness, SIMULATE),
+            "another project starts in Simulation"
+        );
+        drop(harness);
+    }
+
+    /// Criterion 4: *Run simulation* gives a simulation and sends nothing to
+    /// the project's API; *Run live* gives a live report and the API
+    /// receives the requests.
+    #[test]
+    fn ux02_criterion_4_the_button_runs_the_chosen_mode() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (base, requests) = api();
+        let directory = shop_at(&base);
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+
+        choose(&mut harness, SIMULATE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Simulation);
+        assert!(!report.steps.is_empty());
+        assert!(
+            requests.lock().unwrap().is_empty(),
+            "a simulation sends nothing: {:?}",
+            requests.lock().unwrap()
+        );
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        choose(&mut harness, LIVE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Live);
+        assert!(
+            !requests.lock().unwrap().is_empty(),
+            "a live run sends the requests"
+        );
+    }
+
+    /// Criterion 4: while the window observes, the button reads and runs
+    /// *Run simulation* whatever the stored mode, *Live* is disabled with
+    /// MCP-08a's reason, the stored mode is kept, and *Run live* is back
+    /// after *Take back*.
+    #[test]
+    fn ux02_criterion_4_observing_runs_a_simulation() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (base, requests) = api();
+        let directory = shop_at(&base);
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "Written by the agent.");
+        assert!(read_only(&harness), "the window observes");
+        assert!(
+            has_label(&harness, SIMULATE),
+            "observing reads Run simulation"
+        );
+        assert!(!has_label(&harness, LIVE));
+        open_options(&mut harness);
+        assert!(disabled(&harness, LIVE_ITEM), "Live is disabled");
+        assert!(hover_shows(&mut harness, LIVE_ITEM, runs::LIVE_PAUSED));
+        close_options(&mut harness);
+
+        choose(&mut harness, SIMULATE);
+        let report = finish_run(&mut harness);
+        assert_eq!(report.mode, RunMode::Simulation, "observing simulates");
+        assert!(requests.lock().unwrap().is_empty(), "nothing was sent");
+        let stored: Value =
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap();
+        assert_eq!(
+            stored["projects"][manifest_id(root)]["mode"],
+            "live",
+            "the stored mode is kept"
+        );
+
+        choose(&mut harness, TAKE_BACK);
+        await_until(&mut harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(has_label(&harness, LIVE), "Run live is back");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 5: MCP-09's *Live allowed* badge keeps its text and hover
+    /// beside *Run live*, and the run mode and the agent's consent are two
+    /// files that never change each other.
+    #[test]
+    fn ux02_criterion_5_live_allowed_is_unchanged() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = window(root, MINIMUM, configuration.path());
+        set_box(&mut harness, true);
+        let consent = fs::read(consent_file(configuration.path())).unwrap();
+        assert!(!mode_file(configuration.path()).exists(), "no mode yet");
+
+        choose_mode(&mut harness, LIVE_ITEM);
+        assert!(has_label(&harness, LIVE));
+        assert!(has_label(&harness, BADGE), "the badge beside Run live");
+        assert!(hover_shows(&mut harness, BADGE, BADGE_HOVER));
+        assert_disjoint(&harness, &[BADGE, LIVE, OPTIONS]);
+        assert!(
+            harness.get_by_label(BADGE).rect().right() < harness.get_by_label(LIVE).rect().left()
+        );
+        assert_eq!(
+            fs::read(consent_file(configuration.path())).unwrap(),
+            consent,
+            "choosing a mode leaves the consent alone"
+        );
+        let mode = fs::read(mode_file(configuration.path())).unwrap();
+        set_box(&mut harness, false);
+        assert!(!has_label(&harness, BADGE));
+        assert!(
+            has_label(&harness, LIVE),
+            "the consent leaves the mode alone"
+        );
+        assert_eq!(fs::read(mode_file(configuration.path())).unwrap(), mode);
+    }
+
+    /// Criterion 7: the header fits at both windows, in every mode, with
+    /// *Live allowed*, in either run mode, on a scenario's and on a
+    /// component's tab.
+    #[test]
+    fn ux02_criterion_7_the_header_fits() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        for size in [MINIMUM, WIDE] {
+            let mut harness = window(directory.path(), size, configuration.path());
+            set_box(&mut harness, true);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            let component = only(&harness, DocumentKind::Component);
+            for (item, run) in [(SIMULATION_ITEM, SIMULATE), (LIVE_ITEM, LIVE)] {
+                choose_mode(&mut harness, item);
+                for tab in [&scenario, &component] {
+                    app(&mut harness).activate_tab(tab);
+                    settle(&mut harness);
+                    for mode in ["Code", "Diagram", "Split"] {
+                        choose(&mut harness, mode);
+                        let mut labels = vec![
+                            "Project", BADGE, "Code", "Diagram", "Split", "Save", "Save all",
+                            OPTIONS, run,
+                        ];
+                        if tab == &component {
+                            labels.push("Publish");
+                        }
+                        let what = format!("{run}, {mode}, {tab} at {size:?}");
+                        assert_within_window(&harness, &labels);
+                        assert_disjoint(&harness, &labels);
+                        let title = title(&harness);
+                        assert!(
+                            harness.ctx.content_rect().contains_rect(title),
+                            "{what}: the name"
+                        );
+                        for label in &labels {
+                            assert!(
+                                !title.intersects(harness.get_by_label(label).rect()),
+                                "{what}: the name overlaps {label}"
+                            );
+                        }
+                    }
+                }
+            }
+            drop(harness);
+        }
+    }
+
+    /// Criterion 8: a tab that cannot run, a text file or none, keeps the
+    /// *Runs* menu with *Review legacy runs*, whatever the mode.
+    #[test]
+    fn ux02_criterion_8_the_runs_menu_is_unchanged() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
+        let mut harness = window(directory.path(), WIDE, configuration.path());
+        choose_mode(&mut harness, LIVE_ITEM);
+        app(&mut harness).open_text("README.md");
+        settle(&mut harness);
+        for case in ["a text file", "no tab"] {
+            if case == "no tab" {
+                let tabs: Vec<String> = folder(&harness)
+                    .workbench
+                    .tabs()
+                    .iter()
+                    .map(|tab| tab.document_id.clone())
+                    .collect();
+                for tab in tabs {
+                    app(&mut harness).close_tab(&tab);
+                }
+                settle(&mut harness);
+                assert!(folder(&harness).workbench.active().is_none(), "no tab");
+            }
+            for absent in [SIMULATE, LIVE, OPTIONS] {
+                assert!(!has_label(&harness, absent), "{case}: no {absent}");
+            }
+            choose(&mut harness, "Runs");
+            assert!(has_label(&harness, "Runs menu"), "{case}");
+            assert!(has_label(&harness, REVIEW), "{case}");
+            assert!(!has_label(&harness, LIVE_ITEM), "{case}: no mode");
+            harness.key_press(Key::Escape);
+            settle(&mut harness);
+        }
+    }
+
+    /// Criterion 9: Tab reaches the Run button, then the chevron, between
+    /// *Project* and *Code*; the chevron is a button named *Run options*
+    /// whose menu, opened from the keyboard, is named and reaches the modes.
+    #[test]
+    fn ux02_criterion_9_the_controls_are_accessible() {
+        let directory = shop();
+        let (context, mut app) = open(directory.path());
+        let visited = tab_order(&mut app, &context, 23);
+        let mut at = 0;
+        for name in ["Project", SIMULATE, OPTIONS, "Code"] {
+            at += visited[at..]
+                .iter()
+                .position(|visit| visit == name)
+                .unwrap_or_else(|| panic!("{name} after {at} in {visited:#?}"));
+        }
+        open_by_keyboard(&mut app, &context, OPTIONS);
+        let visited = tab_order(&mut app, &context, 3);
+        assert_eq!(visited[0], MENU, "{visited:?}");
+        assert!(
+            visited.iter().any(|name| name == SIMULATION_ITEM),
+            "{visited:?}"
+        );
+        frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
     }
 }

@@ -417,6 +417,13 @@ impl ActionButton<'_> {
     }
 }
 
+impl ActionButton<'_> {
+    /// A primary button's fill at rest.
+    pub fn primary_fill(&self) -> egui::Color32 {
+        theme::ACCENT
+    }
+}
+
 impl<'a> ActionButton<'a> {
     /// Names the button for assistive technology instead of its label.
     pub fn named(mut self, name: &'a str) -> Self {
@@ -481,7 +488,7 @@ impl Widget for ActionButton<'_> {
                 } else if response.hovered() {
                     theme::ACCENT_HOVER
                 } else {
-                    theme::ACCENT
+                    self.primary_fill()
                 }
             } else if pressed {
                 theme::ACCENT_SOFT

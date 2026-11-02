@@ -975,16 +975,18 @@ fn empty_state(ui: &mut Ui) {
     });
 }
 
+/// The badge that says how a run ran.
+pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
+    match mode {
+        RunMode::Simulation => ("SIMULATION", theme::LINK),
+        RunMode::Live => ("LIVE API", theme::ACCENT),
+    }
+}
+
 fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
-        match run.mode {
-            RunMode::Simulation => {
-                widgets::pill(ui, "SIMULATION", theme::LINK);
-            }
-            RunMode::Live => {
-                widgets::pill(ui, "LIVE API", theme::ACCENT);
-            }
-        }
+        let (text, colour) = mode_pill(run.mode);
+        widgets::pill(ui, text, colour);
         let started = short_time(&run.started_at);
         let timing = total_duration_ms(run)
             .map(|ms| format!("{started} · {ms} ms"))

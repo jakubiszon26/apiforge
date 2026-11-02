@@ -117,7 +117,7 @@ impl FolderApp {
                     }
                 } else if let Some(id) = &run_document {
                     if ui
-                        .add(widgets::action(Icon::Play, "Run").primary())
+                        .add(run_button(false))
                         .on_hover_text(
                             "Simulate the selected scenario or component, including unsaved valid code",
                         )
@@ -974,4 +974,9 @@ fn tab_face(
         return Some(false);
     }
     None
+}
+
+/// The header's Run button for the window's run mode (UX-02).
+pub(super) fn run_button(_live: bool) -> widgets::ActionButton<'static> {
+    widgets::action(Icon::Play, "Run").primary()
 }
