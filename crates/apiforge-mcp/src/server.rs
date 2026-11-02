@@ -738,8 +738,10 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// Runs a tool on the blocking pool: storage reads and runs must not stall
-/// the transport. The result is `structuredContent` and its pretty JSON
-/// text; a result or an error over 2 MiB becomes `result_too_large`.
+/// the transport. A result is `structuredContent` and its pretty JSON text;
+/// a refusal is `isError` with the error's pretty JSON as its only text and
+/// no `structuredContent`, which the tool's `outputSchema` does not describe
+/// (MCP-17). A result or an error over 2 MiB becomes `result_too_large`.
 async fn call<T: Serialize + Send + 'static>(
     name: &'static str,
     work: impl FnOnce() -> Result<T, ToolError> + Send + 'static,
@@ -757,11 +759,10 @@ async fn call<T: Serialize + Send + 'static>(
     let value = value.map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-    let mut result = if is_error {
-        CallToolResult::structured_error(value)
-    } else {
-        CallToolResult::structured(value)
-    };
+    if is_error {
+        return Ok(CallToolResult::error(vec![ContentBlock::text(text)]));
+    }
+    let mut result = CallToolResult::structured(value);
     result.content = vec![ContentBlock::text(text)];
     Ok(result)
 }
