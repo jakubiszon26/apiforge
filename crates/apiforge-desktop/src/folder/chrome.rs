@@ -157,12 +157,16 @@ impl FolderApp {
                         .add(run_button(live))
                         .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
                         .clicked();
+                    let stored = self.run_mode.mode(&project);
+                    // The menu shows the mode the button runs; a click on
+                    // an item is the person's choice even when it is the
+                    // one shown, as *Simulation* is while observing.
                     let shown = if live {
                         RunMode::Live
                     } else {
                         RunMode::Simulation
                     };
-                    let mut chosen = shown;
+                    let mut chosen = None;
                     let mut review = false;
                     widgets::action_menu_at(
                         ui,
@@ -170,12 +174,12 @@ impl FolderApp {
                         widgets::icon_button(Icon::ChevronDown, OPTIONS),
                         |ui| {
                             widgets::caption(ui, "RUN MODE");
-                            mode_item(ui, &mut chosen, RunMode::Simulation, "Simulation", true);
+                            mode_item(ui, shown, &mut chosen, RunMode::Simulation, "Simulation", true);
                             widgets::hint(ui, "Sample responses; no request is sent.");
                             ui.add_space(theme::SPACE_SM);
                             // Live requests are the holder's to send while
                             // this window observes (MCP-08a).
-                            mode_item(ui, &mut chosen, RunMode::Live, "Live", !observing);
+                            mode_item(ui, shown, &mut chosen, RunMode::Live, "Live", !observing);
                             widgets::hint(ui, "Requests go to the project's API.");
                             ui.separator();
                             widgets::hint(
@@ -189,10 +193,10 @@ impl FolderApp {
                             }
                         },
                     );
-                    // The mode shown is chosen again: nothing is written, so
-                    // a Live kept while observing stays (UX-02).
-                    if chosen != shown {
-                        self.run_mode.set(&project, chosen);
+                    // Opening the menu writes nothing: a *Live* kept while
+                    // observing stays until another mode is chosen (UX-02).
+                    if let Some(mode) = chosen.filter(|mode| *mode != stored) {
+                        self.run_mode.set(&project, mode);
                     }
                     if review {
                         self.review_legacy_runs();
@@ -1054,16 +1058,29 @@ pub(super) fn run_button(live: bool) -> widgets::ActionButton<'static> {
     }
 }
 
-/// A run mode in the *Run options* menu, 8 px further in than the RUN MODE
-/// caption (the owner's addition to the UX-00 mock-up); its highlight still
-/// reaches the menu's right edge.
-fn mode_item(ui: &mut egui::Ui, chosen: &mut RunMode, mode: RunMode, label: &str, enabled: bool) {
+/// A run mode in the *Run options* menu, selected when it is `shown`, 8 px
+/// further in than the RUN MODE caption (the owner's addition to the UX-00
+/// mock-up); its highlight still reaches the menu's right edge. A click puts
+/// `mode` in `chosen`.
+fn mode_item(
+    ui: &mut egui::Ui,
+    shown: RunMode,
+    chosen: &mut Option<RunMode>,
+    mode: RunMode,
+    label: &str,
+    enabled: bool,
+) {
     let mut rect = ui.available_rect_before_wrap();
     rect.min.x += theme::SPACE_SM;
     let mut item = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     item.add_enabled_ui(enabled, |ui| {
-        ui.selectable_value(chosen, mode, label)
-            .on_disabled_hover_text(runs::LIVE_PAUSED);
+        if ui
+            .selectable_label(shown == mode, label)
+            .on_disabled_hover_text(runs::LIVE_PAUSED)
+            .clicked()
+        {
+            *chosen = Some(mode);
+        }
     });
     ui.advance_cursor_after_rect(item.min_rect());
 }

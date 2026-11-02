@@ -41,7 +41,8 @@ follows. It is written in Rust with [egui](https://github.com/emilk/egui).
   *Run simulation* uses the sample responses written into the scenario and
   sends nothing; *Run live* sends real requests to the project's base URL.
   The mode is chosen in *Run options*, the chevron beside the button, and
-  kept per project until it is changed. A live run is journalled, so
+  kept for that project on this computer, for this person, until it is
+  changed; a clone elsewhere starts in Simulation. A live run is journalled, so
   a run interrupted by a crash is reported at the next start, and a cleanup
   phase runs after errors and cancellation too.
 - **Run results with checks.** Every step's inputs, outputs, request and

@@ -113,6 +113,21 @@ fn reported_blocks(report: &RunResult) -> Vec<String> {
         .collect()
 }
 
+/// The width `text` takes at `size` when it is not cut. Laid out in place,
+/// its glyphs snap to pixels, so a whole label may be up to a pixel
+/// narrower; a cut one loses at least a character.
+fn whole_width(harness: &FolderHarness, text: &str, size: f32) -> f32 {
+    let job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(size), egui::Color32::WHITE),
+    );
+    harness
+        .ctx
+        .fonts_mut(|fonts| fonts.layout_job(job))
+        .size()
+        .x
+}
+
 /// P7g over P3 over P4 over P6b over P6d over P1: managed startup migrates a
 /// legacy workspace, and from then on the migrated project behaves like any
 /// other — it is edited, saved, published from, run, closed and reopened, and
@@ -4030,7 +4045,7 @@ mod mcp09 {
 
     /// A second session in this process holds the project as an agent's
     /// would, so the window observes it (MCP-07, MCP-08a).
-    fn agent_holds(root: &Path) -> ProjectSession {
+    pub(super) fn agent_holds(root: &Path) -> ProjectSession {
         let holder = Holder::new(HolderRole::Agent, Some("Claude Code".into()));
         ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &holder).unwrap()
     }
@@ -5292,24 +5307,6 @@ mod mcp10 {
         assert!(time.len() == 5 && digits, "{label:?} ends in HH:MM");
     }
 
-    /// The width `text` takes in the bar's font when it is not cut. Laid
-    /// out in place, its glyphs snap to pixels, so a whole label may be up
-    /// to a pixel narrower; a cut one loses at least a character.
-    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
-        let job = egui::text::LayoutJob::single_section(
-            text.to_owned(),
-            egui::TextFormat::simple(
-                egui::FontId::proportional(theme::FONT_META),
-                egui::Color32::WHITE,
-            ),
-        );
-        harness
-            .ctx
-            .fonts_mut(|fonts| fonts.layout_job(job))
-            .size()
-            .x
-    }
-
     /// Where the explorer and the tabs are; a mode without the explorer
     /// (Diagram shows the library there) has none.
     fn fixed_rects(harness: &FolderHarness) -> Vec<Option<egui::Rect>> {
@@ -5580,7 +5577,7 @@ mod mcp10 {
                 harness.get_by_label(BAR).rect().contains_rect(shown),
                 "{mode}: {status:?} sits in the bar"
             );
-            let whole = whole_width(harness, status);
+            let whole = whole_width(harness, status, theme::FONT_META);
             assert!(
                 shown.width() + 1.0 >= whole,
                 "{mode}: {status:?} is cut: {} of {whole} px",
@@ -6544,23 +6541,6 @@ mod mcp16 {
         drop(server);
     }
 
-    /// The width `text` takes in the bar's font when it is not cut (as in
-    /// `mod mcp10`).
-    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
-        let job = egui::text::LayoutJob::single_section(
-            text.to_owned(),
-            egui::TextFormat::simple(
-                egui::FontId::proportional(theme::FONT_META),
-                egui::Color32::WHITE,
-            ),
-        );
-        harness
-            .ctx
-            .fonts_mut(|fonts| fonts.layout_job(job))
-            .size()
-            .x
-    }
-
     /// In every mode: the bar inside the window; `status`, *Follow* and
     /// *Take back* whole, disjoint and in this order; the holder text
     /// beside them.
@@ -6572,7 +6552,7 @@ mod mcp16 {
             assert_disjoint(harness, &[holder.as_str(), status, FOLLOW, TAKE_BACK]);
             let rect = |label| harness.get_by_label(label).rect();
             let shown = rect(status);
-            let whole = whole_width(harness, status);
+            let whole = whole_width(harness, status, theme::FONT_META);
             assert!(
                 shown.width() + 1.0 >= whole,
                 "{view}: {status:?} is cut: {} of {whole} px",
@@ -6924,7 +6904,7 @@ mod mcp19 {
 mod ux02 {
     use super::super::accessibility_tests::{open_by_keyboard, tab_order};
     use super::mcp08b::{agent, await_endpoint, await_until, contains, hand_over, read_only};
-    use super::mcp09::{files, manifest_id, set_box, window};
+    use super::mcp09::{agent_holds, files, manifest_id, set_box, window};
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
     use apiforge_core::run::RunMode;
@@ -7006,24 +6986,6 @@ mod ux02 {
             .map(|node| node.rect())
             .find(|rect| rect.top() < 40.0)
             .expect("the project name in the header")
-    }
-
-    /// The width `text` takes in the header's font when it is not cut. Laid
-    /// out in place its glyphs snap to pixels, so a whole label may be up to
-    /// a pixel narrower; a cut one loses at least a character.
-    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
-        let job = egui::text::LayoutJob::single_section(
-            text.to_owned(),
-            egui::TextFormat::simple(
-                egui::FontId::proportional(theme::FONT_BODY),
-                egui::Color32::WHITE,
-            ),
-        );
-        harness
-            .ctx
-            .fonts_mut(|fonts| fonts.layout_job(job))
-            .size()
-            .x
     }
 
     /// A loopback API that records each request line and answers every
@@ -7197,7 +7159,7 @@ mod ux02 {
         for mode in ["Code", "Diagram", "Split"] {
             choose(&mut harness, mode);
             let width = title(&harness).width();
-            let whole = whole_width(&harness, NAME);
+            let whole = whole_width(&harness, NAME, theme::FONT_BODY);
             assert!(
                 width + 1.0 >= whole,
                 "{mode}: the name is {width} px wide, whole it is {whole} px"
@@ -7327,6 +7289,52 @@ mod ux02 {
         assert!(has_label(&harness, LIVE), "Run live is back");
         drop(harness);
         drop(server);
+    }
+
+    /// Review round 1 of #244: while the window observes, *Simulation* is
+    /// the mode shown, and clicking it is still the person's choice: the
+    /// stored *Live* becomes Simulation. Opening and closing the menu
+    /// writes nothing.
+    #[test]
+    fn choosing_simulation_while_observing_replaces_a_stored_live() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let harness = {
+            let mut harness = window(root, WIDE, configuration.path());
+            choose_mode(&mut harness, LIVE_ITEM);
+            harness
+        };
+        drop(harness);
+        let stored = || -> Value {
+            serde_json::from_slice(&fs::read(mode_file(configuration.path())).unwrap()).unwrap()
+        };
+        let owner = agent_holds(root);
+        let mut harness = window(root, WIDE, configuration.path());
+        assert!(has_label(&harness, "Observing"));
+        assert!(has_label(&harness, SIMULATE));
+        let before = fs::read(mode_file(configuration.path())).unwrap();
+        open_options(&mut harness);
+        close_options(&mut harness);
+        assert_eq!(
+            fs::read(mode_file(configuration.path())).unwrap(),
+            before,
+            "opening the menu writes nothing"
+        );
+        choose_mode(&mut harness, SIMULATION_ITEM);
+        assert_eq!(
+            stored()["projects"][manifest_id(root)]["mode"],
+            "simulation",
+            "the click is kept"
+        );
+        drop(harness);
+        drop(owner);
+        let harness = window(root, WIDE, configuration.path());
+        assert!(
+            has_label(&harness, SIMULATE),
+            "Simulation after the holder left"
+        );
+        assert!(!has_label(&harness, LIVE));
     }
 
     /// Criterion 5: MCP-09's *Live allowed* badge keeps its text and hover

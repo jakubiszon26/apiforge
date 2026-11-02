@@ -345,7 +345,7 @@ fn project_dialogs_keep_tab_inside_and_escape_cancels_them() {
                 "{dialog}: {visited:#?}"
             );
         }
-        for outside in ["Run simulation", "Code", "Project files"] {
+        for outside in ["Run simulation", "Run live", "Code", "Project files"] {
             assert!(
                 !visited.iter().any(|visit| visit == outside),
                 "{dialog}: {visited:#?}"

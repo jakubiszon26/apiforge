@@ -104,43 +104,34 @@ impl RunModeStore {
 
     /// The person's choice for `project`, kept at once. The file is read
     /// again first and only this project's entry replaced; a file written
-    /// by a newer version is left alone, and a choice that cannot be written
-    /// lasts for this window.
+    /// by a newer version is left alone, a file that would grow past what
+    /// a read accepts is not written, and a choice that cannot be written
+    /// lasts for this window. Only this project's mode changes here: the
+    /// other projects keep what this window read at its start.
     pub fn set(&mut self, project: &str, mode: RunMode) {
         let entry = Entry {
             mode,
             changed_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         };
-        let mut newer = false;
-        let written = self.path.as_deref().and_then(|path| match read(path) {
-            Read::Newer => {
-                newer = true;
-                None
-            }
+        let written = self.path.as_deref().is_some_and(|path| match read(path) {
+            Read::Newer => false,
             Read::Entries(mut projects) => {
                 projects.insert(project.to_owned(), entry.clone());
                 let stored = Stored {
                     version: VERSION,
                     projects,
                 };
-                let bytes = serde_json::to_vec_pretty(&stored).ok()?;
-                apiforge_storage::write_atomic(path, &bytes).ok()?;
-                Some(stored.projects)
+                serde_json::to_vec_pretty(&stored)
+                    .ok()
+                    .filter(|bytes| bytes.len() as u64 <= MAX_BYTES)
+                    .is_some_and(|bytes| apiforge_storage::write_atomic(path, &bytes).is_ok())
             }
         });
-        match written {
-            Some(projects) => {
-                self.projects = projects;
-                self.unsaved.remove(project);
-            }
-            None => {
-                // A newer version's file is Simulation for this build, as
-                // when it is read.
-                if newer {
-                    self.projects.clear();
-                }
-                self.unsaved.insert(project.to_owned(), entry);
-            }
+        if written {
+            self.projects.insert(project.to_owned(), entry);
+            self.unsaved.remove(project);
+        } else {
+            self.unsaved.insert(project.to_owned(), entry);
         }
     }
 }
@@ -322,6 +313,66 @@ mod tests {
         assert_eq!(
             RunModeStore::at(None).mode("project-a"),
             RunMode::Simulation
+        );
+    }
+
+    #[test]
+    fn a_write_changes_only_its_own_project_in_this_window() {
+        let configuration = tempfile::tempdir().unwrap();
+        let mut window = RunModeStore::in_configuration(configuration.path());
+        let mut other = RunModeStore::in_configuration(configuration.path());
+        other.set("project-b", RunMode::Live);
+        window.set("project-a", RunMode::Live);
+        assert_eq!(
+            window.mode("project-b"),
+            RunMode::Simulation,
+            "this window keeps what it read at its start"
+        );
+        let reread = RunModeStore::in_configuration(configuration.path());
+        assert_eq!(reread.mode("project-a"), RunMode::Live);
+        assert_eq!(
+            reread.mode("project-b"),
+            RunMode::Live,
+            "the file keeps both"
+        );
+    }
+
+    #[test]
+    fn a_write_that_would_be_oversized_is_not_written() {
+        let configuration = tempfile::tempdir().unwrap();
+        let path = path_in(configuration.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // Entries that leave less room than one more long one takes.
+        let entry = Entry {
+            mode: RunMode::Live,
+            changed_at: "2026-11-02T10:00:00Z".into(),
+        };
+        let file = |count: usize| {
+            let projects = (0..count)
+                .map(|index| (format!("{index:0>1000}"), entry.clone()))
+                .collect();
+            serde_json::to_vec_pretty(&Stored {
+                version: VERSION,
+                projects,
+            })
+            .unwrap()
+        };
+        let one = file(1).len() as u64;
+        let each = file(2).len() as u64 - one;
+        let bytes = file(((MAX_BYTES - 2048 - one) / each) as usize + 1);
+        assert!(bytes.len() as u64 > MAX_BYTES - 4096);
+        assert!(bytes.len() as u64 <= MAX_BYTES);
+        std::fs::write(&path, &bytes).unwrap();
+        let mut store = RunModeStore::in_configuration(configuration.path());
+        assert_eq!(store.mode(&format!("{:0>1000}", 0)), RunMode::Live, "read");
+        let long = "x".repeat(4096);
+        store.set(&long, RunMode::Live);
+        assert_eq!(store.mode(&long), RunMode::Live, "kept for the window");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "not written");
+        assert_eq!(
+            RunModeStore::in_configuration(configuration.path()).mode(&format!("{:0>1000}", 0)),
+            RunMode::Live,
+            "the file is still read"
         );
     }
 }

@@ -197,12 +197,14 @@ Observed: as expected.
 | Component's tab | *Publish*, *Run simulation*, chevron (`ux02-component-tab-960x540`) | the same |
 
 Other visible differences:
-- The release window's content starts 8 px further right than the harness
-  renders, at both sizes. *Project* is at x = 16 rather than 24, and the
-  run controls end 8 px nearer the window's edge. The design-review
-  harness of this branch matches the mock-up's pixels. The difference is
-  between the native frame and the harness, and it was there before this
-  ticket.
+- The harness, which made the mock-up, draws the window inside an 8 px
+  transparent border. The release window has no such border, so its
+  content sits 8 px nearer each edge. At 960 px, *Project*'s border is at
+  x = 16 rather than 24, and the run controls end at x = 944 rather than
+  936: the button at 775–909 against the mock-up's 767–901. The
+  design-review harness of this branch matches the mock-up's pixels. The
+  difference is between the native frame and the harness, and it was there
+  before this ticket.
 - The release captures show the band *Running saved code.* under the tabs.
   The mock-up's review view had cleared it. It is today's notice, which
   UX-04 moves into the header.
@@ -247,6 +249,43 @@ this report.
   test covers it.
 - `review_ux02_run_mode` was rendered once during the work, at both sizes,
   and its captures were compared with the mock-up; they are not committed.
+
+## Review round 1
+
+The automated review of #244 (cubic, ten points on `07b5ce1`) is answered
+on the pull request.
+
+Fixed:
+- While observing, *Simulation* is the mode the menu shows, and clicking it
+  was dropped, so a stored *Live* came back after *Take back*. An item's
+  click is now the person's choice and is written when it differs from the
+  stored mode; opening the menu still writes nothing. New test:
+  `choosing_simulation_while_observing_replaces_a_stored_live`.
+- `RunModeStore::set` replaced the window's whole cache with the file it had
+  read again, so another window's change to another project showed up
+  here. Now only the project being set changes, as the module says. A file
+  that would grow past the 1 MiB a read accepts is not written; the choice
+  lasts for the window. New unit tests:
+  `a_write_changes_only_its_own_project_in_this_window` and
+  `a_write_that_would_be_oversized_is_not_written`.
+- The dialog Tab test also checks that *Run live* is outside a dialog.
+- The three copies of `whole_width` in `mod mcp10`, `mod mcp16` and
+  `mod ux02` are one helper that takes the font size.
+- The README says the mode is kept for the project on this computer.
+- This report gives the harness's margin the right way round.
+- The ticket's appendix describes the header as built.
+
+Answered without a change: the ticket's link to the sprint plan
+(`docs/sprints/ux-1.md`) resolves when #220, which adds the plan, is merged.
+
+Nothing drawn changed, so the captures were not retaken.
+
+Verification of the round, all exiting 0:
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`: 1 442 passed, 0 failed,
+  44 ignored
+- `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 
 ## Regression smoke list
 
