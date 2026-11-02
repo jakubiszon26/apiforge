@@ -259,7 +259,8 @@ them without writing internal identities or layout:
 - Component inputs support `@required(true|false)` and `@exposed(true|false)`;
   `@optional` and `@hidden` remain the short forms for false.
   Amended 2026-10-28 ([KTLO-32](../tickets/KTLO-32.md), the owner's decision
-  on #62): an input with neither attribute and no default is required: the
+  on #62): an input with no `@required`/`@optional` attribute (`@exposed`
+  and `@hidden` do not count) and no default is required: the
   Run inputs dialog and the MCP `run` tool ask for it, the runner fails the
   step that lacks it, and a call on the board marks it. An input with a
   default receives it when left out. The attribute stays absent from the

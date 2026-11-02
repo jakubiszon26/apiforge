@@ -804,11 +804,14 @@ fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
 /// KTLO-32: editing a component keeps a public argument declared neither
 /// required nor optional, and without a default, required — the draft's
 /// *Required* box starts ticked, so saving does not make it optional — while
-/// `@optional` and a default keep their reading.
+/// `@optional` and a default keep their reading, used by a block or not.
 #[test]
 fn an_undeclared_public_argument_stays_required_when_the_component_is_edited() {
     let graph = Graph {
-        nodes: vec![request("one", &[("id", Binding::parameter("recordId"))])],
+        nodes: vec![
+            request("one", &[("id", Binding::parameter("recordId"))]),
+            request("two", &[("id", Binding::parameter("page"))]),
+        ],
         edges: vec![],
         proxies: Vec::new(),
     };
@@ -846,7 +849,7 @@ fn an_undeclared_public_argument_stays_required_when_the_component_is_edited() {
     assert!(required("recordId"), "a used argument");
     assert!(required("note"), "an argument kept without a use");
     assert!(!required("extra"));
-    assert!(!required("page"));
+    assert!(!required("page"), "a used argument with a default");
     let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
     let saved = |name: &str| {
         result

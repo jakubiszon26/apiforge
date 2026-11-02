@@ -36,8 +36,10 @@ an undeclared input **with** a default is not marked required, so its row on
 a call stays *Optional* as before; the runner gives it the default either way.
 The same notes record a second change: *Edit component* now starts an
 undeclared public argument's *Required* box ticked, so saving no longer
-turns it optional (test
-`an_undeclared_public_argument_stays_required_when_the_component_is_edited`).
+turns it optional, and one with a default unticked, so saving no longer
+makes it required (test
+`an_undeclared_public_argument_stays_required_when_the_component_is_edited`;
+review round 1, after the captures: it changes no flow captured here).
 
 ## How the release binaries were driven
 

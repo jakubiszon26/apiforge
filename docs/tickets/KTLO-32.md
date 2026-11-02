@@ -96,7 +96,8 @@ ports are untouched by construction (criterion 1).
 
 ## Technical appendix
 
-- Callers of `is_required()` today: `engine.rs:109` (component run alone,
+- Callers of `is_required()` at the time of the analysis (`component_run`
+  now calls `is_required_input()`; see *Implementation notes*): `engine.rs:109` (component run alone,
   changes), `engine.rs:799` (every step's ports; unchanged, but receives the
   normalised component ports), `canvas/layout.rs:303,619` and
   `inspector/binding.rs:155,174` (follow through `input_ports`),
@@ -119,6 +120,9 @@ ports are untouched by construction (criterion 1).
 - *Edit component* (`edit/component.rs`, `initialize_inputs`) read an
   undeclared public argument as not required and saved `required: false`,
   which under the new rule would have turned a required input optional on
-  save. It now starts the *Required* box from `is_required_input()`;
+  save. It now starts the *Required* box from `is_required_input()` for
+  every existing public argument, so one with a default also stays optional
+  (before, an undeclared one with a default bound to a block was saved as
+  `required: true`);
   regression test
   `an_undeclared_public_argument_stays_required_when_the_component_is_edited`.

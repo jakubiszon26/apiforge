@@ -349,7 +349,7 @@ async fn ktlo23_a_live_component_run_is_journalled_under_its_name() {
 }
 
 /// KTLO-32: the shop with a component `notes` whose only input `note` is a
-/// string declared as `declare` says (`required` absent, `false` or `true`)
+/// string whose `required` is absent, `false` or `true` as `required` says,
 /// with `default`, whose export returns `param.note`, and a scenario `calls`
 /// whose one step calls `notes@1` with `arguments` as its inputs.
 fn notes(required: Option<bool>, default: Option<Value>, arguments: Value) -> Project {

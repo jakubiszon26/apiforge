@@ -267,13 +267,11 @@ pub fn initialize_inputs(
                         .and_then(|public| public.exposed)
                         .or(port.exposed)
                         .unwrap_or(true),
-                    // A public argument keeps its declaration; one declared
-                    // neither way without a default is required (KTLO-32).
+                    // A public argument keeps its declaration, read as a call
+                    // reads it (KTLO-32): one with a default stays optional.
                     required: match public {
-                        Some(public) if public.required.is_some() || public.default().is_none() => {
-                            public.is_required_input()
-                        }
-                        _ => leaf_port.required.unwrap_or(true),
+                        Some(public) => public.is_required_input(),
+                        None => leaf_port.required.unwrap_or(true),
                     },
                     // An argument takes the whole parameter; each use keeps its field.
                     original: match original {
