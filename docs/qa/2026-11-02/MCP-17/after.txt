@@ -1,0 +1,29 @@
+>> {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mcp17-qa", "version": "1"}}}
+>> {"jsonrpc": "2.0", "method": "notifications/initialized"}
+>> {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+<< tools/list: 11 tools
+>> {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "read_source", "arguments": {"path": "../x.afs"}}}
+<< {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"path_rejected\",\n  \"message\": \"Invalid project-relative path.\",\n  \"wrote\": false,\n  \"details\": {}\n}"}],"isError":true}}
+-- read_source: isError=True, structuredContent absent, content blocks=1 (text)
+-- text JSON keys: ['code', 'details', 'message', 'wrote']; code='path_rejected', wrote=False
+-- nothing for a validating client to check against read_source's outputSchema
+>> {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "run", "arguments": {"path": "scenarios/promotion-and-cart-price.afs", "live": true}}}
+<< {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"live_disabled\",\n  \"message\": \"live requests are not enabled on this server\",\n  \"wrote\": false,\n  \"details\": {\n    \"source\": \"no --allow-live\"\n  }\n}"}],"isError":true}}
+-- run: isError=True, structuredContent absent, content blocks=1 (text)
+-- text JSON keys: ['code', 'details', 'message', 'wrote']; code='live_disabled', wrote=False
+-- nothing for a validating client to check against run's outputSchema
+>> {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "write_source", "arguments": {"path": "components/product.afs", "text": "component product {\n}\n", "expected_source_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}}}
+<< {"jsonrpc":"2.0","id":5,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"stale_source\",\n  \"message\": \"The document changed on disk since the version you read; nothing was written. Read it again, merge your change and write with the new source_sha256\",\n  \"wrote\": false,\n  \"details\": {\n    \"source_sha256\": \"eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef\"\n  }\n}"}],"isError":true}}
+-- write_source: isError=True, structuredContent absent, content blocks=1 (text)
+-- text JSON keys: ['code', 'details', 'message', 'wrote']; code='stale_source', wrote=False
+-- nothing for a validating client to check against write_source's outputSchema
+>> {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "check", "arguments": {"path": "components/missing.afs"}}}
+<< {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":"{\n  \"code\": \"unknown_document\",\n  \"message\": \"No registered document has this path\",\n  \"wrote\": false,\n  \"details\": {\n    \"registered_paths\": [\n      \"scenarios/promotion-and-cart-price.afs\",\n      \"components/add-to-cart.afs\",\n      \"components/product.afs\",\n      \"components/active-promotion.afs\"\n    ]\n  }\n}"}],"isError":true}}
+-- check: isError=True, structuredContent absent, content blocks=1 (text)
+-- text JSON keys: ['code', 'details', 'message', 'wrote']; code='unknown_document', wrote=False
+-- nothing for a validating client to check against check's outputSchema
+>> {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "check", "arguments": {}}}
+<< {"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\n  \"generation\": 0,\n  \"valid\": true,\n  \"documents\": [\n    {\n      \"path\": \"scenarios/promotion-and-cart-price.afs\",\n      \"source_sha256\": \"fb9612f8f143258b92c96162bb3f945d74101b9294a7d4defd2b2d71693cdb16\",\n      \"valid\": true,\n      \"unavailable\": null,\n      \"diagnostics\": [],\n      \"omitted\": 0\n    },\n    {\n      \"path\": \"components/add-to-cart.afs\",\n      \"source_sha256\": \"1cf5820dbbdecbeaf1d0dc59d9a8f5e35e82f2cb5dcaea72cf6e372204b66e13\",\n      \"valid\": true,\n      \"unavailable\": null,\n      \"diagnostics\": [],\n      \"omitted\": 0\n    },\n    {\n      \"path\": \"components/product.afs\",\n      \"source_sha256\": \"eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef\",\n      \"valid\": true,\n      \"unavailable\": null,\n      \"diagnostics\": [],\n      \"omitted\": 0\n    },\n    {\n      \"path\": \"components/active-promotion.afs\",\n      \"source_sha256\": \"b07c465301bc91eae964ab3f203a5119b3fa83ebc5a26c5d82b40ae58be8081d\",\n      \"valid\": true,\n      \"unavailable\": null,\n      \"diagnostics\": [],\n      \"omitted\": 0\n    }\n  ]\n}"}],"structuredContent":{"generation":0,"valid":true,"documents":[{"path":"scenarios/promotion-and-cart-price.afs","source_sha256":"fb9612f8f143258b92c96162bb3f945d74101b9294a7d4defd2b2d71693cdb16","valid":true,"unavailable":null,"diagnostics":[],"omitted":0},{"path":"components/add-to-cart.afs","source_sha256":"1cf5820dbbdecbeaf1d0dc59d9a8f5e35e82f2cb5dcaea72cf6e372204b66e13","valid":true,"unavailable":null,"diagnostics":[],"omitted":0},{"path":"components/product.afs","source_sha256":"eba04ff2905ff3d655393752a159701cb261aca977c76eb5b941b41b7f54cdef","valid":true,"unavailable":null,"diagnostics":[],"omitted":0},{"path":"components/active-promotion.afs","source_sha256":"b07c465301bc91eae964ab3f203a5119b3fa83ebc5a26c5d82b40ae58be8081d","valid":true,"unavailable":null,"diagnostics":[],"omitted":0}]},"isError":false}}
+-- check: isError=False, structuredContent present, content blocks=1 (text)
+-- structuredContent equals the text JSON: True; required by check's outputSchema and missing: none
+-- exit code 0 ; stderr: apiforge mcp: read_source: path_rejected | apiforge mcp: run: live_disabled | apiforge mcp: write_source: stale_source | apiforge mcp: check: unknown_document

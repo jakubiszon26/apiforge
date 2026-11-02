@@ -1272,6 +1272,8 @@ mod mcp08a {
         let directory = shop();
         let mut owner = holder(directory.path());
         let mut harness = folder_harness(directory.path(), WIDE);
+        // Following unpinned: the place kept is MCP-08a's (MCP-16 criterion 7).
+        choose(&mut harness, "Follow the agent");
         let scenario = only(&harness, DocumentKind::Scenario);
         choose(&mut harness, "Diagram");
         choose(&mut harness, "Expected price (Value)");
@@ -1331,6 +1333,8 @@ mod mcp08a {
         let directory = shop();
         let mut owner = holder(directory.path());
         let mut harness = folder_harness(directory.path(), WIDE);
+        // Following unpinned: the place kept is MCP-08a's (MCP-16 criterion 7).
+        choose(&mut harness, "Follow the agent");
         let active = folder(&harness).workbench.active().map(str::to_owned);
         owner
             .create_document(
@@ -1375,6 +1379,8 @@ mod mcp08a {
         let directory = shop();
         let mut owner = holder(directory.path());
         let mut harness = folder_harness(directory.path(), WIDE);
+        // Following unpinned: the place kept is MCP-08a's (MCP-16 criterion 7).
+        choose(&mut harness, "Follow the agent");
         let scenario = only(&harness, DocumentKind::Scenario);
         let component = owner
             .documents()
@@ -1582,8 +1588,9 @@ mod mcp08a {
     }
 
     /// The carry-over from the review of #106: *Project settings* opens with
-    /// every control disabled and *Environment* with its public part
-    /// disabled while observing; neither leaves configuration behind that
+    /// the project's own controls disabled (since MCP-09 the agent's toggle
+    /// and *Cancel* stay enabled and *Apply settings* is hidden) and
+    /// *Environment* with its public part disabled while observing; neither leaves configuration behind that
     /// would stop the take-back.
     #[test]
     fn settings_open_disabled_while_observing_and_the_take_back_still_works() {
@@ -1593,7 +1600,8 @@ mod mcp08a {
         open_project_menu(&mut harness, "Project settings…");
         assert!(has_label(&harness, "Project name"), "the dialog opens");
         assert!(disabled(&harness, "Project name"));
-        assert!(disabled(&harness, "Apply settings"));
+        // Hidden while observing since MCP-09 (owner decision on M3).
+        assert!(!has_label(&harness, "Apply settings"));
         choose(&mut harness, "Cancel");
         open_project_menu(&mut harness, "Test environment…");
         assert!(
@@ -1852,7 +1860,7 @@ mod mcp04 {
 mod mcp08b {
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
-    use apiforge_mcp::test_support::{StdioServer, structured, tool_error};
+    use apiforge_mcp::test_support::{StdioServer, refusal, structured, tool_error};
     use apiforge_storage::project::{Holder, HolderRole, ProjectStore};
     use egui_kittest::kittest::NodeT;
     use serde_json::{Value, json};
@@ -1862,21 +1870,22 @@ mod mcp08b {
         process::Command,
     };
 
-    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    pub(super) const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    pub(super) const PRODUCT: &str = "components/product.afs";
     /// Tells [`server_process`] which folder to serve.
     const FOLDER: &str = "APIFORGE_HANDOVER_TEST_FOLDER";
     const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
     const BAR: &str = "Project holder";
     const PAUSED: &str = "editing is paused here; this window follows every change";
-    const REFUSED: &str = "An agent asked to edit this project; save your work first";
+    pub(super) const REFUSED: &str = "An agent asked to edit this project; save your work first";
     const WAITING: &str = "waiting for the agent's run to finish";
     const TAKE_BACK: &str = "Take back";
-    const AGENT: &str = "Claude Code via apiforge mcp";
+    pub(super) const AGENT: &str = "Claude Code via apiforge mcp";
     /// The ticket's bound: a commit shown, or the project back, this soon.
     const BOUND: Duration = Duration::from_secs(2);
     /// So long that a window following a commit sooner did not wait for a
     /// check: it was told.
-    const NO_POLL: Duration = Duration::from_secs(600);
+    pub(super) const NO_POLL: Duration = Duration::from_secs(600);
 
     /// The MCP server as a process of its own: this test executable running
     /// only this test, which serves `apiforge mcp` on its stdio, as the
@@ -1894,6 +1903,7 @@ mod mcp08b {
             .and_then(|milliseconds| milliseconds.parse().ok())
             .map(Duration::from_millis);
         let settings = apiforge_mcp::ServerSettings {
+            allow_live: std::env::var("APIFORGE_MCP12_ALLOW_LIVE").as_deref() == Ok("1"),
             run: apiforge_mcp::tools::RunSettings {
                 step_delay,
                 ..Default::default()
@@ -1920,11 +1930,11 @@ mod mcp08b {
     }
 
     /// A server initialised by the client `client`.
-    fn agent(root: &Path, client: &str) -> StdioServer {
+    pub(super) fn agent(root: &Path, client: &str) -> StdioServer {
         agent_with(root, client, &[])
     }
 
-    fn agent_with(root: &Path, client: &str, envs: &[(&str, &str)]) -> StdioServer {
+    pub(super) fn agent_with(root: &Path, client: &str, envs: &[(&str, &str)]) -> StdioServer {
         let mut server = spawn(root, envs);
         server.initialize(client);
         server
@@ -1932,7 +1942,7 @@ mod mcp08b {
 
     /// Answers request `id` while the window keeps drawing frames, as the
     /// person's window does while the agent waits.
-    fn answer(harness: &mut FolderHarness, server: &mut StdioServer, id: u64) -> Value {
+    pub(super) fn answer(harness: &mut FolderHarness, server: &mut StdioServer, id: u64) -> Value {
         let deadline = Instant::now() + Duration::from_secs(45);
         loop {
             if let Some(answer) = server.poll(id) {
@@ -1944,7 +1954,7 @@ mod mcp08b {
         }
     }
 
-    fn call(
+    pub(super) fn call(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
         tool: &str,
@@ -1955,7 +1965,7 @@ mod mcp08b {
     }
 
     /// The saved text of `path` and its hash, as the model reads them.
-    fn read(server: &mut StdioServer, path: &str) -> (String, String) {
+    pub(super) fn read(server: &mut StdioServer, path: &str) -> (String, String) {
         let read = server.call("read_source", json!({ "path": path }));
         let read = structured(&read);
         (
@@ -1964,12 +1974,12 @@ mod mcp08b {
         )
     }
 
-    fn commented(text: &str, note: &str) -> String {
+    pub(super) fn commented(text: &str, note: &str) -> String {
         text.replacen(" {\n", &format!(" {{\n  // {note}\n"), 1)
     }
 
     /// The model's `write_source` of `text` over the version it just read.
-    fn write(
+    pub(super) fn write(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
         path: &str,
@@ -1993,7 +2003,7 @@ mod mcp08b {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let probe = call(harness, server, "run", json!({ "path": "missing.afs" }));
-            if probe["result"]["structuredContent"]["code"] == "run_in_progress" {
+            if refusal(&probe).is_some_and(|error| error["code"] == "run_in_progress") {
                 return run;
             }
             assert!(
@@ -2011,7 +2021,11 @@ mod mcp08b {
     }
 
     /// A write that hands the project to the agent: the window was clean.
-    fn hand_over(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) -> String {
+    pub(super) fn hand_over(
+        harness: &mut FolderHarness,
+        server: &mut StdioServer,
+        note: &str,
+    ) -> String {
         let (text, _) = read(server, SCENARIO);
         let written = commented(&text, note);
         let answer = write(harness, server, SCENARIO, &written);
@@ -2022,7 +2036,7 @@ mod mcp08b {
 
     /// Steps the window in real time until `done` holds, and returns how
     /// long that took after `since`.
-    fn await_until(
+    pub(super) fn await_until(
         harness: &mut FolderHarness,
         since: Instant,
         what: &str,
@@ -2039,7 +2053,7 @@ mod mcp08b {
         took
     }
 
-    fn read_only(harness: &FolderHarness) -> bool {
+    pub(super) fn read_only(harness: &FolderHarness) -> bool {
         folder(harness).session.as_ref().unwrap().is_read_only()
     }
 
@@ -2047,12 +2061,12 @@ mod mcp08b {
         harness.get_by_label(label).accesskit_node().is_disabled()
     }
 
-    fn contains(harness: &FolderHarness, text: &str) -> bool {
+    pub(super) fn contains(harness: &FolderHarness, text: &str) -> bool {
         harness.query_by_label_contains(text).is_some()
     }
 
     /// The full label of the node whose label contains `text`.
-    fn label_containing(harness: &FolderHarness, text: &str) -> String {
+    pub(super) fn label_containing(harness: &FolderHarness, text: &str) -> String {
         let node = harness.get_by_label_contains(text);
         let node = node.accesskit_node();
         node.label()
@@ -2061,7 +2075,7 @@ mod mcp08b {
     }
 
     /// Who holds the project, as a reader finds out.
-    fn holder(root: &Path) -> Option<Holder> {
+    pub(super) fn holder(root: &Path) -> Option<Holder> {
         ProjectStore::open_read_only(root)
             .unwrap()
             .holder()
@@ -2070,7 +2084,11 @@ mod mcp08b {
 
     /// Steps the window until the holder file names an endpoint with the
     /// role `role`, and returns it.
-    fn await_endpoint(harness: &mut FolderHarness, root: &Path, role: HolderRole) -> String {
+    pub(super) fn await_endpoint(
+        harness: &mut FolderHarness,
+        root: &Path,
+        role: HolderRole,
+    ) -> String {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(holder) = holder(root)
@@ -2093,7 +2111,7 @@ mod mcp08b {
     /// `/tmp`, when it would make a socket path over 100 bytes), or a named
     /// pipe.
     #[cfg(unix)]
-    fn address(endpoint: &str) -> PathBuf {
+    pub(super) fn address(endpoint: &str) -> PathBuf {
         let socket = |directory: PathBuf| directory.join(endpoint).join("socket");
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
@@ -2106,18 +2124,18 @@ mod mcp08b {
     }
 
     #[cfg(windows)]
-    fn address(endpoint: &str) -> PathBuf {
+    pub(super) fn address(endpoint: &str) -> PathBuf {
         PathBuf::from(format!(r"\\.\pipe\{endpoint}"))
     }
 
     /// A raw connection to `endpoint`, as a client of the channel opens it.
     #[cfg(unix)]
-    fn connect(endpoint: &str) -> std::io::Result<impl std::io::Write> {
+    pub(super) fn connect(endpoint: &str) -> std::io::Result<impl std::io::Write> {
         std::os::unix::net::UnixStream::connect(address(endpoint))
     }
 
     #[cfg(windows)]
-    fn connect(endpoint: &str) -> std::io::Result<impl std::io::Write> {
+    pub(super) fn connect(endpoint: &str) -> std::io::Result<impl std::io::Write> {
         fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -2136,6 +2154,199 @@ mod mcp08b {
                 .all(|character| character.is_ascii_hexdigit() && !character.is_uppercase()),
             "{endpoint:?}"
         );
+    }
+
+    // MCP-12 isolates complete processes instead of changing global environment.
+    #[test]
+    fn mcp12_different_environments_handover_and_observation() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "folder::tests::acceptance_tests::mcp08b::mcp12_window_process",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("APIFORGE_MCP12_TEMP", temp.path());
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let runtime = PathBuf::from(format!(
+                "/run/user/{}",
+                fs::metadata(temp.path()).unwrap().uid()
+            ));
+            assert!(
+                runtime.is_dir(),
+                "MCP-12 requires provisioning {} before tests",
+                runtime.display()
+            );
+            command.env("XDG_RUNTIME_DIR", runtime);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "launched by MCP-12 with an isolated window environment"]
+    fn mcp12_window_process() {
+        let Some(temp) = std::env::var_os("APIFORGE_MCP12_TEMP").map(PathBuf::from) else {
+            return;
+        };
+        // First write from a server whose runtime and temporary base differ.
+        for eof in [false, true] {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, WIDE);
+            let endpoint = await_endpoint(&mut harness, root, HolderRole::Window);
+            #[cfg(target_os = "linux")]
+            assert!(address(&endpoint).starts_with("/run/user"));
+            #[cfg(not(target_os = "linux"))]
+            let _ = endpoint;
+            let mut server = mcp12_agent(root, &temp, false);
+            let overview = server.call("project_overview", json!({}));
+            assert_eq!(structured(&overview)["holder"], "window");
+            assert_eq!(structured(&overview)["hands_over_on_write"], true);
+            let created = call(
+                &mut harness,
+                &mut server,
+                "create_document",
+                json!({
+                    "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+                }),
+            );
+            assert_eq!(structured(&created)["wrote"], true, "{created}");
+            await_until(&mut harness, Instant::now(), "the new saved source", |h| {
+                folder(h)
+                    .session
+                    .as_ref()
+                    .unwrap()
+                    .documents()
+                    .iter()
+                    .any(|d| d.entry().path.as_str() == "scenarios/mcp12.afs")
+            });
+            assert!(read_only(&harness));
+            if eof {
+                let ended = server.close();
+                assert!(ended.status.success(), "{}", ended.stderr);
+            } else {
+                let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+                assert_eq!(structured(&finished)["finished"], true);
+            }
+            await_until(&mut harness, Instant::now(), "window ownership", |h| {
+                !read_only(h)
+            });
+        }
+        // Reverse direction: server listens in /tmp, later window has XDG.
+        let directory = shop();
+        let root = directory.path();
+        let mut server = mcp12_agent(root, Path::new("/tmp"), false);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let result = server.call("write_source", json!({"path": SCENARIO, "text": commented(&text, "Before window."), "expected_source_sha256": hash}));
+        assert_eq!(structured(&result)["wrote"], true);
+        let mut harness = folder_harness(root, WIDE);
+        app(&mut harness).watcher.set_interval(NO_POLL);
+        await_until(&mut harness, Instant::now(), "observer connection", |h| {
+            has_label(h, TAKE_BACK)
+        });
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let written = commented(&text, "After window.");
+        let result = write(&mut harness, &mut server, SCENARIO, &written);
+        assert_eq!(structured(&result)["wrote"], true);
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "save event without polling",
+            |h| source_of(h, &scenario) == written,
+        );
+        let ended = server.close();
+        assert!(ended.status.success());
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "window ownership after EOF",
+            |h| !read_only(h),
+        );
+        drop(harness);
+        // A permitted first live call also requests hand-over. Permission-off
+        // remains live_disabled and leaves ownership in the window. Since
+        // MCP-09 the open window's box decides, not the start flag.
+        for permitted in [false, true] {
+            let directory = shop();
+            let root = directory.path();
+            let api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+            let manifest = root.join("apiforge.project.json");
+            let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+            config["environment"]["baseUrl"] = json!(api.base_url());
+            fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+            // The shop's illustrative promotion scenario intentionally fails;
+            // this fixture tests a successful HTTP run and unchanged live consent.
+            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
+            let mut harness = folder_harness(root, WIDE);
+            if permitted {
+                super::mcp09::set_box(&mut harness, true);
+            }
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let mut server = mcp12_agent(root, &temp, permitted);
+            let result = call(
+                &mut harness,
+                &mut server,
+                "run",
+                json!({"path": SCENARIO, "live": true}),
+            );
+            if permitted {
+                assert_eq!(structured(&result)["status"], "passed", "{result}");
+                assert!(read_only(&harness));
+                call(&mut harness, &mut server, "finish_editing", json!({}));
+                await_until(
+                    &mut harness,
+                    Instant::now(),
+                    "ownership after live run",
+                    |h| !read_only(h),
+                );
+            } else {
+                assert_eq!(tool_error(&result)["code"], "live_disabled");
+                assert!(!read_only(&harness));
+            }
+        }
+    }
+
+    fn mcp12_agent(root: &Path, temp: &Path, allow_live: bool) -> StdioServer {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--ignored",
+            "--exact",
+            "folder::tests::acceptance_tests::mcp08b::server_process",
+            "--nocapture",
+            "--quiet",
+            "--test-threads=1",
+        ]);
+        #[cfg(windows)]
+        {
+            command.env_clear();
+            for name in ["PATH", "SystemRoot"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        #[cfg(unix)]
+        command.env_remove("XDG_RUNTIME_DIR").env("TMPDIR", temp);
+        #[cfg(windows)]
+        let _ = temp;
+        command.env(FOLDER, root).env(
+            "APIFORGE_MCP12_ALLOW_LIVE",
+            if allow_live { "1" } else { "0" },
+        );
+        let mut server = StdioServer::spawn(command);
+        server.initialize("MCP-12 client");
+        server
     }
 
     /// Criterion 1: the window that holds the project listens and names its
@@ -2278,9 +2489,27 @@ mod mcp08b {
         drop(server);
     }
 
-    /// Criterion 3: with unsaved work the window refuses; the write is
-    /// `handover_refused` with the reason; the window says so in the bar;
-    /// nothing is written and the person's text is untouched.
+    /// The write `id` waits on the hand-over prompt (MCP-08c); the person
+    /// answers *Not now* and the write is refused.
+    pub(super) fn keep_editing(
+        harness: &mut FolderHarness,
+        server: &mut StdioServer,
+        id: u64,
+    ) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !has_label(harness, super::mcp08c::PROMPT) {
+            assert!(Instant::now() < deadline, "the window never asked");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        choose(harness, super::mcp08c::NOT_NOW);
+        answer(harness, server, id)
+    }
+
+    /// Criterion 3, as MCP-08c changed it: with unsaved work the window
+    /// asks the person, who keeps editing; the write is `handover_refused`
+    /// with the reason; the window says so in the bar; nothing is written
+    /// and the person's text is untouched.
     #[test]
     fn unsaved_work_refuses_the_hand_over_and_keeps_the_text() {
         let directory = shop();
@@ -2295,16 +2524,16 @@ mod mcp08b {
         let saved = fs::read_to_string(root.join(SCENARIO)).unwrap();
 
         let mut server = agent(root, "Claude Code");
-        let answer = write(
-            &mut harness,
-            &mut server,
-            SCENARIO,
-            &commented(&saved, "Written by the agent."),
+        let (_, hash) = read(&mut server, SCENARIO);
+        let id = server.start_call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&saved, "Written by the agent."), "expected_source_sha256": hash }),
         );
+        let answer = keep_editing(&mut harness, &mut server, id);
         let error = tool_error(&answer);
         assert_eq!(error["code"], "handover_refused", "{answer}");
         assert_eq!(error["wrote"], false);
-        assert_eq!(error["details"]["reason"], "the window has unsaved work");
+        assert_eq!(error["details"]["reason"], super::mcp08c::KEEP_EDITING);
         settle(&mut harness);
         assert!(contains(&harness, REFUSED), "the window says why");
         assert!(!read_only(&harness), "the window keeps the project");
@@ -2469,7 +2698,9 @@ mod mcp08b {
         harness.get_by_label(TAKE_BACK).click();
         let answer = answer(&mut harness, &mut server, write);
         let on_disk = fs::read_to_string(root.join(SCENARIO)).unwrap();
-        match answer["result"]["structuredContent"]["wrote"].as_bool() {
+        // A refusal carries its error object as text (MCP-17).
+        let outcome = refusal(&answer).unwrap_or_else(|| structured(&answer).clone());
+        match outcome["wrote"].as_bool() {
             Some(true) => assert_eq!(on_disk, second),
             Some(false) => assert_eq!(on_disk, first),
             None => panic!("wrote is true or false, never half: {answer}"),
@@ -2737,6 +2968,99 @@ mod mcp08b {
     /// The bar while the agent holds the project (mock-up M1, round 4):
     /// *Take back* at its right end, its right edge on *Run*'s, inside the
     /// window and clear of the texts, in every mode at both sizes.
+    /// The revisions of the product component the window's session lists.
+    fn product_revisions(harness: &FolderHarness) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// MCP-05 beside MCP-08b: a publication while a clean window holds the
+    /// project asks it, as a write does; the window hands the project over
+    /// and lists the new revision it was told of, without a check of its
+    /// own.
+    #[test]
+    fn a_publication_asks_the_window_and_the_revision_is_shown() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        app(&mut harness).watcher.set_interval(NO_POLL);
+        assert_eq!(product_revisions(&harness), [1]);
+
+        let mut server = agent(root, "Claude Code");
+        let (_, hash) = read(&mut server, PRODUCT);
+        let answer = call(
+            &mut harness,
+            &mut server,
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+        );
+        let returned = Instant::now();
+        let published = structured(&answer);
+        assert_eq!(published["wrote"], true, "{answer}");
+        assert_eq!(published["revision"], 2);
+        let took = await_until(&mut harness, returned, "the new revision", |harness| {
+            product_revisions(harness) == [1, 2]
+        });
+        assert!(
+            took < BOUND,
+            "shown {took:?} after the publication returned"
+        );
+        assert!(read_only(&harness), "the window let the project go");
+        assert!(contains(&harness, &format!("{AGENT} · ")));
+        assert_eq!(
+            holder(root).and_then(|holder| holder.role()),
+            Some(HolderRole::Agent)
+        );
+        drop(harness);
+        drop(server);
+    }
+
+    /// MCP-05 beside MCP-08b: unsaved work in the window refuses the
+    /// hand-over a publication asks for once the person keeps editing
+    /// (MCP-08c); nothing is published.
+    #[test]
+    fn unsaved_work_refuses_a_publication_and_nothing_is_published() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// typed by the person\n");
+        let registry = fs::read(root.join("apiforge.project.json")).unwrap();
+
+        let mut server = agent(root, "Claude Code");
+        let (_, hash) = read(&mut server, PRODUCT);
+        let id = server.start_call(
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+        );
+        let answer = keep_editing(&mut harness, &mut server, id);
+        let error = tool_error(&answer);
+        assert_eq!(error["code"], "handover_refused", "{answer}");
+        assert_eq!(error["wrote"], false);
+        settle(&mut harness);
+        assert!(contains(&harness, REFUSED), "the window says why");
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(
+            fs::read(root.join("apiforge.project.json")).unwrap(),
+            registry,
+            "no revision was registered"
+        );
+        assert_eq!(product_revisions(&harness), [1]);
+        drop(harness);
+        drop(server);
+    }
+
     #[test]
     fn take_back_sits_at_the_right_end_of_the_bar_under_run() {
         for size in [MINIMUM, WIDE] {
@@ -2803,15 +3127,3598 @@ mod mcp08b {
             let scenario = only(&harness, DocumentKind::Scenario);
             let label = editor(&harness, &scenario);
             type_into(&mut harness, &label, "// typed by the person\n");
-            let (text, _) = read(&mut server, SCENARIO);
-            write(
-                &mut harness,
-                &mut server,
-                SCENARIO,
-                &commented(&text, "Refused."),
+            let (text, hash) = read(&mut server, SCENARIO);
+            let id = server.start_call(
+                "write_source",
+                json!({ "path": SCENARIO, "text": commented(&text, "Refused."), "expected_source_sha256": hash }),
             );
+            keep_editing(&mut harness, &mut server, id);
             settle(&mut harness);
             capture(&mut harness, &format!("mcp08b-refused-{suffix}"), None);
+            drop(harness);
+            drop(server);
+        }
+    }
+}
+
+// ----- MCP-08c: the hand-over prompt when the window has unsaved work --------
+
+mod mcp08c {
+    use super::mcp08b::{
+        AGENT, PRODUCT, REFUSED, SCENARIO, agent, answer, await_endpoint, await_until, commented,
+        contains, holder, read, read_only,
+    };
+    use super::*;
+    use crate::testing::{MINIMUM, assert_within_window};
+    use apiforge_mcp::test_support::{StdioServer, structured, tool_error};
+    use apiforge_storage::project::{
+        HolderRole, ProjectError,
+        faults::{Boundary, Phase},
+    };
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    use serde_json::{Value, json};
+    use std::{path::Path, sync::Arc};
+
+    pub(super) const PROMPT: &str = "An agent asks to edit this project";
+    pub(super) const SAVE_ALL: &str = "Save all and hand over";
+    pub(super) const NOT_NOW: &str = "Not now";
+    /// The reason the agent hears when the person keeps editing.
+    pub(super) const KEEP_EDITING: &str = "the person chose to keep editing";
+    /// The reason the agent hears when *Save all* failed.
+    const SAVE_FAILED: &str = "the window could not save the person's work";
+    const NAME: &str = "Demo shop, renamed";
+
+    fn unsaved_code(path: &str) -> String {
+        format!("{path} — unsaved code")
+    }
+
+    /// What the window reads before the agent asks: the saved scenario,
+    /// component and manifest.
+    struct Saved {
+        scenario: Vec<u8>,
+        product: Vec<u8>,
+        manifest: Vec<u8>,
+    }
+
+    impl Saved {
+        fn read(root: &Path) -> Self {
+            Self {
+                scenario: fs::read(root.join(SCENARIO)).unwrap(),
+                product: fs::read(root.join(PRODUCT)).unwrap(),
+                manifest: fs::read(root.join("apiforge.project.json")).unwrap(),
+            }
+        }
+
+        fn assert_on_disk(&self, root: &Path) {
+            assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), self.scenario);
+            assert_eq!(fs::read(root.join(PRODUCT)).unwrap(), self.product);
+            assert_eq!(
+                fs::read(root.join("apiforge.project.json")).unwrap(),
+                self.manifest
+            );
+        }
+    }
+
+    /// The document registered at `path`.
+    fn at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    /// Unsaved text in the scenario and the component and an unsaved
+    /// project name; returns the two texts.
+    fn leave_unsaved_work(harness: &mut FolderHarness, root: &Path) -> (String, String) {
+        let scenario = at(harness, SCENARIO);
+        let product = at(harness, PRODUCT);
+        let scenario_text = commented(
+            &fs::read_to_string(root.join(SCENARIO)).unwrap(),
+            "Typed by the person in the scenario.",
+        );
+        let product_text = commented(
+            &fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            "Typed by the person in the component.",
+        );
+        let session = app(harness).session.as_mut().unwrap();
+        session
+            .edit_source(&scenario, &scenario_text, CODE)
+            .unwrap();
+        session.edit_source(&product, &product_text, CODE).unwrap();
+        session
+            .edit_configuration(|manifest| manifest.name = NAME.into(), DIAGRAM)
+            .unwrap();
+        settle(harness);
+        (scenario_text, product_text)
+    }
+
+    /// The agent's `write_source` of the scenario over the version it read,
+    /// started and not yet answered.
+    fn start_write(server: &mut StdioServer, note: &str) -> u64 {
+        let (text, hash) = read(server, SCENARIO);
+        server.start_call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, note), "expected_source_sha256": hash }),
+        )
+    }
+
+    /// The agent's write of the scenario, answered.
+    fn write_now(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) -> Value {
+        let id = start_write(server, note);
+        answer(harness, server, id)
+    }
+
+    /// Steps the window until it shows the prompt.
+    fn await_prompt(harness: &mut FolderHarness) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !has_label(harness, PROMPT) {
+            assert!(Instant::now() < deadline, "the window never asked");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// The buttons inside the prompt: between its heading and *Not now*.
+    fn prompt_buttons(harness: &FolderHarness) -> Vec<String> {
+        let heading = harness.get_by_label(PROMPT).rect();
+        let last = harness.get_by_label(NOT_NOW).rect();
+        harness
+            .query_all_by_role(Role::Button)
+            .filter(|node| {
+                let rect = node.rect();
+                rect.top() >= heading.top()
+                    && rect.bottom() <= last.bottom() + 1.0
+                    && rect.left() >= heading.left() - 24.0
+                    && rect.right() <= last.right() + 1.0
+            })
+            .filter_map(|node| node.accesskit_node().label())
+            .collect()
+    }
+
+    fn reason(answer: &Value) -> Value {
+        let error = tool_error(answer);
+        assert_eq!(error["code"], "handover_refused", "{answer}");
+        assert_eq!(error["wrote"], false, "{answer}");
+        error["details"]["reason"].clone()
+    }
+
+    /// Criterion 1: unsaved text in two documents and a dirty project name;
+    /// the agent's write opens the prompt listing all three, waits up to
+    /// thirty seconds, then returns `handover_pending` with nothing
+    /// written; the prompt stays.
+    #[test]
+    fn mcp08c_criterion_1_the_prompt_lists_the_work_and_the_agent_hears_pending() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = Saved::read(root);
+        leave_unsaved_work(&mut harness, root);
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        let asked = Instant::now();
+        await_prompt(&mut harness);
+        assert!(
+            contains(&harness, &format!("{AGENT} wants to edit this project")),
+            "the prompt names the agent"
+        );
+        for item in [
+            unsaved_code(SCENARIO),
+            unsaved_code(PRODUCT),
+            "Project settings — name".to_owned(),
+        ] {
+            assert!(has_label(&harness, &item), "the prompt lists {item:?}");
+        }
+        assert!(has_label(&harness, SAVE_ALL));
+        assert!(has_label(&harness, NOT_NOW));
+
+        let answer = answer(&mut harness, &mut server, id);
+        let waited = asked.elapsed();
+        let error = tool_error(&answer);
+        assert_eq!(error["code"], "handover_pending", "{answer}");
+        assert_eq!(error["wrote"], false);
+        assert!(
+            waited >= Duration::from_secs(25) && waited < Duration::from_secs(40),
+            "the agent waited {waited:?}"
+        );
+        saved.assert_on_disk(root);
+        settle(&mut harness);
+        assert!(has_label(&harness, PROMPT), "the prompt stays");
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(
+            holder(root).and_then(|holder| holder.role()),
+            Some(HolderRole::Window)
+        );
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2: *Save all and hand over* saves every listed item —
+    /// the bytes on disk are the unsaved texts and the manifest carries the
+    /// new name — the window becomes the observer, and the agent's next
+    /// call succeeds.
+    #[test]
+    fn mcp08c_criterion_2_save_all_saves_everything_and_hands_over() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let (scenario_text, product_text) = leave_unsaved_work(&mut harness, root);
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written over an older version.");
+        await_prompt(&mut harness);
+        choose(&mut harness, SAVE_ALL);
+        let pending = answer(&mut harness, &mut server, id);
+        // The waiting write was based on the version before the person's
+        // save: granted the project, the server finds the disk changed.
+        assert_eq!(tool_error(&pending)["code"], "stale_source", "{pending}");
+        assert_eq!(
+            fs::read_to_string(root.join(SCENARIO)).unwrap(),
+            scenario_text,
+            "the person's text is saved, not written over"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            product_text
+        );
+        assert_eq!(saved_name(root), NAME);
+        await_until(&mut harness, Instant::now(), "the observer", read_only);
+        assert!(!has_label(&harness, PROMPT));
+        assert!(contains(&harness, &format!("{AGENT} · ")));
+
+        let next = write_now(&mut harness, &mut server, "Written by the agent.");
+        assert_eq!(structured(&next)["wrote"], true, "{next}");
+        assert_eq!(
+            holder(root).and_then(|holder| holder.role()),
+            Some(HolderRole::Agent)
+        );
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2, the failing save: a save that fails at the storage
+    /// keeps the window the writer, shows the error, and the agent is
+    /// refused with the reason.
+    #[test]
+    fn mcp08c_criterion_2_a_failed_save_keeps_the_project_and_refuses_with_the_reason() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = Saved::read(root);
+        let (scenario_text, _) = leave_unsaved_work(&mut harness, root);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).storage.fault = Some(Arc::new(|event| {
+            if event.boundary == Boundary::Replace
+                && event.phase == Phase::Before
+                && event.path.ends_with(SCENARIO)
+            {
+                return Err(ProjectError::Io {
+                    path: event.path.clone(),
+                    source: std::io::Error::other("injected on the scenario's save"),
+                });
+            }
+            Ok(())
+        }));
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        choose(&mut harness, SAVE_ALL);
+        let answer = answer(&mut harness, &mut server, id);
+        assert_eq!(reason(&answer), SAVE_FAILED);
+        settle(&mut harness);
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(
+            holder(root).and_then(|holder| holder.role()),
+            Some(HolderRole::Window)
+        );
+        let notice = folder(&harness)
+            .notice
+            .as_ref()
+            .expect("the error is shown");
+        assert!(notice.error, "{}", notice.text);
+        assert!(
+            notice.text.contains("promotion-and-cart-price.afs"),
+            "{}",
+            notice.text
+        );
+        assert!(contains(&harness, "promotion-and-cart-price.afs:"));
+        assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved.scenario);
+        assert_eq!(source_of(&harness, &scenario), scenario_text);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 3: *Not now* saves nothing and keeps the window the
+    /// writer; the pending call, and the next one after a call that stopped
+    /// waiting, is `handover_refused` with *the person chose to keep
+    /// editing*; after a later Ctrl+S the agent's call is granted.
+    #[test]
+    fn mcp08c_criterion_3_not_now_keeps_editing_and_ctrl_s_lets_the_next_call_in() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = Saved::read(root);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// typed by the person\n");
+        let typed = source_of(&harness, &scenario);
+
+        // The pending call.
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        choose(&mut harness, NOT_NOW);
+        let refused = answer(&mut harness, &mut server, id);
+        assert_eq!(reason(&refused), KEEP_EDITING);
+        assert!(!has_label(&harness, PROMPT));
+        saved.assert_on_disk(root);
+        assert!(!read_only(&harness));
+        assert_eq!(source_of(&harness, &scenario), typed);
+        assert!(contains(&harness, REFUSED), "the bar says why");
+
+        // The next call: the agent stopped waiting before the answer.
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        assert!(folder(&harness).handover.has_pending());
+        drop(server);
+        let _unanswered = id;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while folder(&harness).handover.has_pending() {
+            assert!(Instant::now() < deadline, "the request never ended");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(has_label(&harness, PROMPT), "the prompt stays");
+        choose(&mut harness, NOT_NOW);
+        let mut server = agent(root, "Claude Code");
+        let next = write_now(&mut harness, &mut server, "Written by the agent.");
+        assert_eq!(reason(&next), KEEP_EDITING);
+        saved.assert_on_disk(root);
+
+        // Ctrl+S, then the agent's call is granted.
+        harness.get_by_label(&label).focus();
+        harness.step();
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+        settle(&mut harness);
+        assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), typed);
+        let granted = write_now(&mut harness, &mut server, "Written by the agent.");
+        assert_eq!(structured(&granted)["wrote"], true, "{granted}");
+        settle(&mut harness);
+        assert!(read_only(&harness), "the window observes");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Unsaved work of an earlier session, held for a decision because the
+    /// file changed since: the window that opens next holds the draft.
+    fn hold_a_draft(root: &Path) -> String {
+        let saved = fs::read_to_string(root.join(SCENARIO)).unwrap();
+        let draft = commented(&saved, "From an earlier session.");
+        {
+            let mut harness = folder_harness(root, WIDE);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            let session = app(&mut harness).session.as_mut().unwrap();
+            session.edit_source(&scenario, &draft, CODE).unwrap();
+            session.save_recovery().unwrap();
+        }
+        fs::write(root.join(SCENARIO), format!("// changed outside\n{saved}")).unwrap();
+        draft
+    }
+
+    /// Criterion 4: a held recovery draft counts as unsaved work and is
+    /// named in the prompt; the prompt offers no way to decide it.
+    #[test]
+    fn mcp08c_criterion_4_a_held_draft_is_named_and_not_decided_in_the_prompt() {
+        let directory = shop();
+        let root = directory.path();
+        hold_a_draft(root);
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        assert!(
+            folder(&harness).snapshot(&scenario).unwrap().held,
+            "the draft is held for a decision"
+        );
+        let saved = Saved::read(root);
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        assert!(
+            has_label(
+                &harness,
+                &format!("{SCENARIO} — unsaved work from an earlier session, to keep or discard")
+            ),
+            "the prompt names the held draft"
+        );
+        let mut buttons = prompt_buttons(&harness);
+        buttons.sort();
+        assert_eq!(
+            buttons,
+            [NOT_NOW, SAVE_ALL],
+            "nothing decides the draft here"
+        );
+        choose(&mut harness, NOT_NOW);
+        assert_eq!(reason(&answer(&mut harness, &mut server, id)), KEEP_EDITING);
+        saved.assert_on_disk(root);
+        assert!(folder(&harness).snapshot(&scenario).unwrap().held);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Beside criterion 4: *Save all and hand over* with a held draft saves
+    /// what a save can, keeps the project here, says so, and the agent hears
+    /// that unsaved work remains; the draft is still held for its decision
+    /// in its tab.
+    #[test]
+    fn save_all_with_a_held_draft_saves_the_rest_and_keeps_the_project() {
+        let directory = shop();
+        let root = directory.path();
+        hold_a_draft(root);
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let product = at(&harness, PRODUCT);
+        let product_text = commented(
+            &fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            "Typed by the person in the component.",
+        );
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&product, &product_text, CODE)
+            .unwrap();
+        settle(&mut harness);
+        let saved_scenario = fs::read(root.join(SCENARIO)).unwrap();
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        choose(&mut harness, SAVE_ALL);
+        let answer = answer(&mut harness, &mut server, id);
+        assert_eq!(reason(&answer), "the window has unsaved work");
+        settle(&mut harness);
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            product_text
+        );
+        assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved_scenario);
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert!(folder(&harness).snapshot(&scenario).unwrap().held);
+        let notice = folder(&harness)
+            .notice
+            .as_ref()
+            .expect("the window says why");
+        assert!(notice.text.contains("earlier session"), "{}", notice.text);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 5: at 960 × 540 the prompt stays inside the window, and
+    /// Escape is *Not now*.
+    #[test]
+    fn mcp08c_criterion_5_the_prompt_fits_960_by_540_and_escape_is_not_now() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = Saved::read(root);
+        leave_unsaved_work(&mut harness, root);
+
+        let mut server = agent(root, "Claude Code");
+        let id = start_write(&mut server, "Written by the agent.");
+        await_prompt(&mut harness);
+        let scenario_item = unsaved_code(SCENARIO);
+        let product_item = unsaved_code(PRODUCT);
+        assert_within_window(
+            &harness,
+            &[
+                PROMPT,
+                scenario_item.as_str(),
+                product_item.as_str(),
+                "Project settings — name",
+                SAVE_ALL,
+                NOT_NOW,
+            ],
+        );
+        harness.key_press(Key::Escape);
+        settle(&mut harness);
+        assert!(!has_label(&harness, PROMPT), "Escape closes the prompt");
+        assert_eq!(reason(&answer(&mut harness, &mut server, id)), KEEP_EDITING);
+        saved.assert_on_disk(root);
+        assert!(!read_only(&harness));
+        drop(harness);
+        drop(server);
+    }
+
+    /// The prompt beside M2, at both sizes: two unsaved documents and the
+    /// project name.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp08c_handover_prompt() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, size);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            leave_unsaved_work(&mut harness, root);
+            let mut server = agent(root, "Claude Code");
+            let id = start_write(&mut server, "Written by the agent.");
+            await_prompt(&mut harness);
+            capture(&mut harness, &format!("mcp08c-prompt-{suffix}"), None);
+            choose(&mut harness, NOT_NOW);
+            answer(&mut harness, &mut server, id);
+            drop(harness);
+            drop(server);
+        }
+    }
+}
+
+// ----- MCP-05: the window beside a publication from the server ---------------
+
+mod mcp05 {
+    use super::*;
+    use crate::testing::shop_project;
+    use apiforge_mcp::agent::{AgentSession, PublishArguments};
+    use apiforge_storage::project::FileState;
+
+    const PRODUCT: &str = "components/product.afs";
+
+    fn sha256(bytes: &[u8]) -> String {
+        match FileState::of(bytes) {
+            FileState::File { sha256, .. } => sha256,
+            _ => unreachable!(),
+        }
+    }
+
+    /// The revisions of the product component the window's session lists.
+    fn listed(harness: &FolderHarness) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// Criterion 8: the window, open read-only beside the server, lists the
+    /// revision the server published after its project reload: the
+    /// registry changed and nothing is unsaved.
+    #[test]
+    fn a_read_only_window_lists_the_revision_the_server_published() {
+        let project = shop_project();
+        let root = project.path();
+        let agent = AgentSession::with_environment(root.to_owned(), Vec::new());
+        let saved = fs::read(root.join(PRODUCT)).unwrap();
+        let arguments = PublishArguments {
+            path: PRODUCT.into(),
+            expected_source_sha256: sha256(&saved),
+            accept_comment_loss: false,
+            expected_generation: None,
+            request_id: None,
+        };
+        // The window opens while the agent session holds the project: the
+        // first publication takes the lock, the second is the one followed.
+        agent.publish(&arguments).unwrap();
+        assert!(agent.is_active());
+        let mut harness = folder_harness(root, WIDE);
+        assert!(folder(&harness).session.as_ref().unwrap().is_read_only());
+        assert_eq!(listed(&harness), [1, 2]);
+
+        let published = agent.publish(&arguments).unwrap();
+        assert_eq!(published.revision, 3);
+        follow_disk(&mut harness);
+        assert_eq!(listed(&harness), [1, 2, 3], "the new revision is listed");
+        let app = folder(&harness);
+        assert!(
+            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            "no conflict is reported"
+        );
+        let session = app.session.as_ref().unwrap();
+        let product = session
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap();
+        assert_eq!(product.entry().base_revision, Some(3));
+        assert!(
+            session
+                .documents()
+                .iter()
+                .all(|document| !document.is_dirty() && !document.is_layout_dirty()),
+            "nothing is unsaved"
+        );
+        drop(harness);
+        drop(agent);
+    }
+
+    /// The project as Git sees it: every file outside `.apiforge/local`.
+    fn shared(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fn walk(
+            root: &std::path::Path,
+            at: &std::path::Path,
+            files: &mut std::collections::BTreeMap<String, Vec<u8>>,
+        ) {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap();
+                if relative == std::path::Path::new(".apiforge").join("local") {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk(root, &path, files);
+                } else {
+                    files.insert(
+                        relative.to_string_lossy().replace('\\', "/"),
+                        fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        let mut files = std::collections::BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+
+    /// Criterion 1's "the same transaction as the window's Publish", through
+    /// the window: *Publish* pressed in the component's header in one copy
+    /// of the project and `publish` from the server in another leave the
+    /// same files with the same bytes.
+    #[test]
+    fn the_windows_publish_and_the_servers_write_the_same_bytes() {
+        let window = shop_project();
+        let server = tempfile::tempdir().unwrap();
+        for (relative, bytes) in shared(window.path()) {
+            let target = server.path().join(&relative);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, bytes).unwrap();
+        }
+        assert_eq!(shared(server.path()), shared(window.path()));
+
+        let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
+        let saved = fs::read(server.path().join(PRODUCT)).unwrap();
+        let published = agent
+            .publish(&PublishArguments {
+                path: PRODUCT.into(),
+                expected_source_sha256: sha256(&saved),
+                accept_comment_loss: false,
+                expected_generation: None,
+                request_id: None,
+            })
+            .unwrap();
+        assert_eq!(published.revision, 2);
+        drop(agent);
+
+        let mut harness = folder_harness(window.path(), WIDE);
+        let product = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == PRODUCT)
+            .unwrap()
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        choose(&mut harness, "Publish");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while listed(&harness) != [1, 2] {
+            assert!(Instant::now() < deadline, "the window never published");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        drop(harness);
+
+        let window = shared(window.path());
+        assert_eq!(
+            window.get(&published.revision_path),
+            shared(server.path()).get(&published.revision_path),
+            "the revision file"
+        );
+        assert_eq!(window, shared(server.path()), "every shared file");
+    }
+}
+
+// ----- MCP-09: the live toggle — the person allows the agent's live requests ---
+
+mod mcp09 {
+    use super::mcp08b::{
+        PRODUCT, SCENARIO, agent, agent_with, answer, await_endpoint, await_until, call, connect,
+        contains, hand_over, read, read_only, write,
+    };
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_mcp::test_support::{StdioServer, refusal, structured, tool_error};
+    use apiforge_project::{FixedPlacer, Holder, HolderRole};
+    use egui_kittest::kittest::NodeT;
+    use serde_json::{Value, json};
+    use std::{
+        collections::BTreeMap,
+        io::Write as _,
+        path::{Path, PathBuf},
+    };
+
+    pub(super) const TOGGLE: &str = "Allow the MCP agent to send live requests";
+    const OFF: &str = "Off — the agent can only simulate.";
+    const ON: &str = "On — the agent may send real requests to ";
+    const IN_PROGRESS: &str = "A live run is in progress; it will finish. No new one starts.";
+    const BADGE: &str = "Live allowed";
+    const NOTE: &str = "Apply changes, then use Save all to save the project settings.";
+    const SETTINGS_OFF: &str = "live requests are off in this project's settings";
+    const ALLOW_LIVE: &str = "APIFORGE_MCP12_ALLOW_LIVE";
+    const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
+    /// Criterion 3's bound: the agent sees a change this soon.
+    const SEEN: Duration = Duration::from_secs(1);
+    /// A scenario that passes against the demo API, with a cleanup.
+    const LIVE: &str = "scenario \"MCP-09 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+
+    /// Where the application keeps its preferences: the test's own
+    /// configuration directory, as `XDG_CONFIG_HOME` names it.
+    fn consent_file(configuration: &Path) -> PathBuf {
+        configuration.join("apiforge").join("agent-consent.json")
+    }
+
+    /// The window over `root`, its preferences in `configuration`.
+    pub(super) fn window(root: &Path, size: egui::Vec2, configuration: &Path) -> FolderHarness {
+        let mut harness = folder_harness(root, size);
+        app(&mut harness).use_configuration_directory(configuration);
+        settle(&mut harness);
+        harness
+    }
+
+    /// The demo shop pointed at a demo API of its own, its scenario one
+    /// that passes live and has a cleanup.
+    fn live_shop() -> (tempfile::TempDir, apiforge_demo_api::DemoServerHandle) {
+        let directory = shop();
+        let root = directory.path();
+        let api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+        let manifest = root.join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!(api.base_url());
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        fs::write(root.join(SCENARIO), LIVE).unwrap();
+        (directory, api)
+    }
+
+    fn toggle(harness: &FolderHarness) -> bool {
+        harness.get_by_label(TOGGLE).accesskit_node().toggled()
+            == Some(egui::accesskit::Toggled::True)
+    }
+
+    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+        !harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    fn open_settings(harness: &mut FolderHarness) {
+        open_project_menu(harness, "Project settings…");
+        assert!(has_label(harness, TOGGLE), "the dialog has the toggle");
+    }
+
+    fn close_settings(harness: &mut FolderHarness) {
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "Close")
+            .click();
+        settle(harness);
+        assert!(!has_label(harness, TOGGLE), "the dialog closed");
+    }
+
+    /// Sets the box through *Project settings* and closes the dialog.
+    pub(super) fn set_box(harness: &mut FolderHarness, live: bool) {
+        open_settings(harness);
+        if toggle(harness) != live {
+            choose(harness, TOGGLE);
+        }
+        assert_eq!(toggle(harness), live);
+        close_settings(harness);
+    }
+
+    /// The box as *Project settings* shows it.
+    fn box_ticked(harness: &mut FolderHarness) -> bool {
+        open_settings(harness);
+        let ticked = toggle(harness);
+        close_settings(harness);
+        ticked
+    }
+
+    fn live_run(harness: &mut FolderHarness, server: &mut StdioServer) -> Value {
+        call(
+            harness,
+            server,
+            "run",
+            json!({ "path": SCENARIO, "live": true }),
+        )
+    }
+
+    fn live_requests(server: &mut StdioServer) -> Value {
+        let overview = server.call("project_overview", json!({}));
+        structured(&overview)["live_requests"].clone()
+    }
+
+    /// Steps the window until the agent's overview reports `expected`, and
+    /// returns how long that took after `since`.
+    fn await_live_requests(
+        harness: Option<&mut FolderHarness>,
+        server: &mut StdioServer,
+        since: Instant,
+        expected: Value,
+    ) -> Duration {
+        let mut harness = harness;
+        let deadline = since + Duration::from_secs(10);
+        loop {
+            let seen = live_requests(server);
+            if seen == expected {
+                return since.elapsed();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the overview still says {seen}, not {expected}"
+            );
+            if let Some(harness) = harness.as_deref_mut() {
+                harness.step();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn assert_refused_in_settings(result: &Value) {
+        let error = tool_error(result);
+        assert_eq!(error["code"], "live_disabled", "{result}");
+        assert_eq!(error["message"], SETTINGS_OFF, "{result}");
+    }
+
+    fn assert_sent(result: &Value) {
+        let report = structured(result);
+        assert_eq!(report["live"], true, "{result}");
+        assert_eq!(report["status"], "passed", "{result}");
+        assert_eq!(report["ended_by"], "completed", "{result}");
+    }
+
+    /// Every file under `root`, by relative path. The writer's lock file
+    /// is always empty and, on Windows, cannot be read while it is held: it
+    /// is listed by its length.
+    fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<PathBuf, Vec<u8>>) {
+            for entry in fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(root, &path, found);
+                } else if path.is_file() {
+                    let bytes = if path.ends_with(".apiforge/local/project.lock") {
+                        fs::metadata(&path).unwrap().len().to_le_bytes().to_vec()
+                    } else {
+                        fs::read(&path).unwrap()
+                    };
+                    found.insert(path.strip_prefix(root).unwrap().to_owned(), bytes);
+                }
+            }
+        }
+        let mut found = BTreeMap::new();
+        walk(root, root, &mut found);
+        found
+    }
+
+    fn manifest_id(root: &Path) -> String {
+        let bytes = fs::read(root.join("apiforge.project.json")).unwrap();
+        apiforge_project::ProjectManifest::from_bytes(&bytes)
+            .unwrap()
+            .id
+    }
+
+    /// A second session in this process holds the project as an agent's
+    /// would, so the window observes it (MCP-07, MCP-08a).
+    fn agent_holds(root: &Path) -> ProjectSession {
+        let holder = Holder::new(HolderRole::Agent, Some("Claude Code".into()));
+        ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &holder).unwrap()
+    }
+
+    /// Criterion 1: off for a project never set; ticked, it is ticked again
+    /// when the window reopens; another project is unaffected; the setting
+    /// is kept in the preferences directory by the manifest id, and nothing
+    /// under the project folder changes.
+    #[test]
+    fn mcp09_criterion_1_the_box_is_remembered_per_project_outside_the_folder() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let other = tempfile::tempdir().unwrap();
+        apiforge_project::prepare_project(other.path(), &apiforge_core::demos::tickets_project())
+            .unwrap();
+        assert_ne!(manifest_id(root), manifest_id(other.path()));
+
+        let mut harness = window(root, WIDE, configuration.path());
+        let before = files(root);
+        assert!(!box_ticked(&mut harness), "off for a project never set");
+        set_box(&mut harness, true);
+        settle(&mut harness);
+        assert_eq!(files(root), before, "the project folder is byte-identical");
+        drop(harness);
+
+        let stored: Value =
+            serde_json::from_slice(&fs::read(consent_file(configuration.path())).unwrap()).unwrap();
+        assert_eq!(stored["version"], 1, "{stored}");
+        let id = manifest_id(root);
+        let entry = &stored["projects"][&id];
+        assert_eq!(entry["live"], true, "{stored}");
+        assert!(entry["changedAt"].is_string(), "{stored}");
+        assert!(
+            stored["projects"].get(manifest_id(other.path())).is_none(),
+            "{stored}"
+        );
+
+        let mut harness = window(root, WIDE, configuration.path());
+        assert!(box_ticked(&mut harness), "ticked again after reopening");
+        drop(harness);
+        let mut harness = window(other.path(), WIDE, configuration.path());
+        assert!(!box_ticked(&mut harness), "another project is unaffected");
+        drop(harness);
+    }
+
+    /// Criterion 2: *Project settings* opens while observing with only the
+    /// toggle, *Close* and *Cancel* enabled (owner decision of 2026-10-28);
+    /// the footer note and *Apply settings* are hidden; the box applies at
+    /// once with nothing to save.
+    #[test]
+    fn mcp09_criterion_2_settings_open_while_observing_and_the_box_applies_at_once() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let owner = agent_holds(root);
+        let mut harness = window(root, WIDE, configuration.path());
+        assert!(has_label(&harness, "Observing"));
+
+        open_settings(&mut harness);
+        assert!(!enabled(&harness, "Project name"));
+        assert!(!enabled(&harness, "Data contracts"));
+        assert!(enabled(&harness, TOGGLE));
+        assert!(enabled(&harness, "Cancel"));
+        assert!(
+            !harness
+                .get_by_role_and_label(egui::accesskit::Role::Button, "Close")
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert!(!has_label(&harness, "Apply settings"), "Apply is hidden");
+        assert!(!contains(&harness, NOTE), "the footer note is hidden");
+        assert!(contains(&harness, OFF));
+
+        choose(&mut harness, TOGGLE);
+        assert!(toggle(&harness));
+        assert!(contains(&harness, ON), "the line says what applies now");
+        assert!(
+            has_label(&harness, BADGE),
+            "applied while the dialog is open"
+        );
+        let stored = fs::read_to_string(consent_file(configuration.path())).unwrap();
+        assert!(stored.contains(&manifest_id(root)), "{stored}");
+        choose(&mut harness, "Cancel");
+        assert!(has_label(&harness, BADGE), "Cancel keeps what applied");
+        assert!(
+            !folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .is_manifest_dirty(),
+            "nothing to save"
+        );
+        drop(harness);
+        drop(owner);
+    }
+
+    /// Criterion 3: with the agent connected and the box off a live run is
+    /// refused with the settings message; ticking the box, with nothing
+    /// restarted, shows in the agent's overview within a second and the next
+    /// live run sends.
+    #[test]
+    fn mcp09_criterion_3_ticking_the_box_lets_the_next_live_run_send() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+        assert!(read_only(&harness));
+
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+        assert_eq!(
+            live_requests(&mut server),
+            json!({ "allowed": false, "source": "off in the project's settings" })
+        );
+
+        open_settings(&mut harness);
+        harness.get_by_label(TOGGLE).click();
+        let changed = Instant::now();
+        let took = await_live_requests(
+            Some(&mut harness),
+            &mut server,
+            changed,
+            json!({ "allowed": true, "source": "window setting" }),
+        );
+        assert!(took < SEEN, "the agent saw the change after {took:?}");
+        close_settings(&mut harness);
+        assert_sent(&live_run(&mut harness, &mut server));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 4: a server started with `--allow-live` is refused while
+    /// the window is connected with the box off, also before the hand-over,
+    /// and the window keeps the project then; once the window closes the
+    /// flag applies again.
+    #[test]
+    fn mcp09_criterion_4_the_flag_neither_enables_nor_overrides_an_open_window() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent_with(root, "Claude Code", &[(ALLOW_LIVE, "1")]);
+
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+        assert!(!read_only(&harness), "the window keeps the project");
+
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+        assert_eq!(
+            live_requests(&mut server),
+            json!({ "allowed": false, "source": "off in the project's settings" })
+        );
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+
+        drop(harness);
+        await_live_requests(
+            None,
+            &mut server,
+            Instant::now(),
+            json!({ "allowed": true, "source": "--allow-live" }),
+        );
+        assert_sent(&server.call("run", json!({ "path": SCENARIO, "live": true })));
+        let ended = server.close();
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+    }
+
+    /// Criterion 4, review of #189: a connection to the server that has not
+    /// said a consent yet counts as off, never as the flag; when it goes the
+    /// flag applies again.
+    #[test]
+    fn mcp09_a_window_that_has_not_said_its_consent_is_off() {
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut server = agent_with(root, "Claude Code", &[(ALLOW_LIVE, "1")]);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": super::mcp08b::commented(&text, "Mine."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let flag = json!({ "allowed": true, "source": "--allow-live" });
+        assert_eq!(live_requests(&mut server), flag);
+        let endpoint = super::mcp08b::holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let silent = connect(&endpoint).unwrap();
+        await_live_requests(
+            None,
+            &mut server,
+            Instant::now(),
+            json!({ "allowed": false, "source": "off in the project's settings" }),
+        );
+        let refused = server.call("run", json!({ "path": SCENARIO, "live": true }));
+        assert_refused_in_settings(&refused);
+        drop(silent);
+        await_live_requests(None, &mut server, Instant::now(), flag);
+        let ended = server.close();
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+    }
+
+    /// Criterion 5: a server started without `--allow-live` sends while the
+    /// window is connected with the box on; its first live run asks for the
+    /// project like a write.
+    #[test]
+    fn mcp09_criterion_5_the_box_allows_a_server_started_without_the_flag() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        set_box(&mut harness, true);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+
+        assert_sent(&live_run(&mut harness, &mut server));
+        assert!(read_only(&harness), "the window handed the project over");
+        assert_eq!(
+            live_requests(&mut server),
+            json!({ "allowed": true, "source": "window setting" })
+        );
+        assert_sent(&live_run(&mut harness, &mut server));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 6: no tool and no resource changes the setting, and the
+    /// window takes no consent from the other side of the channel.
+    #[test]
+    fn mcp09_criterion_6_no_tool_resource_or_message_changes_the_setting() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        set_box(&mut harness, true);
+        let file = consent_file(configuration.path());
+        let stored = fs::read(&file).unwrap();
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+        let slot = json!({ "allowed": true, "source": "window setting" });
+        assert_eq!(live_requests(&mut server), slot);
+
+        let unchanged = |harness: &mut FolderHarness, server: &mut StdioServer, what: &str| {
+            settle(harness);
+            assert_eq!(fs::read(&file).unwrap(), stored, "{what} changed the file");
+            assert!(has_label(harness, BADGE), "{what} changed the window's box");
+            assert_eq!(live_requests(server), slot, "{what} changed the slot");
+        };
+        let (text, _) = read(&mut server, SCENARIO);
+        let calls = [
+            ("project_overview", json!({})),
+            ("language_reference", json!({})),
+            ("read_source", json!({ "path": SCENARIO })),
+            ("check", json!({})),
+            ("check_text", json!({ "path": SCENARIO, "text": text })),
+            ("print", json!({ "path": SCENARIO })),
+            ("run", json!({ "path": SCENARIO })),
+            ("run", json!({ "path": SCENARIO, "live": true })),
+            (
+                "create_document",
+                json!({ "kind": "scenario", "path": "scenarios/mcp09.afs", "text": "scenario \"MCP-09\" {\n}\n" }),
+            ),
+        ];
+        for (tool, arguments) in calls {
+            let result = call(&mut harness, &mut server, tool, arguments);
+            assert!(
+                result["result"]["isError"] != true,
+                "{tool} failed: {result}"
+            );
+            unchanged(&mut harness, &mut server, tool);
+        }
+        let written = write(
+            &mut harness,
+            &mut server,
+            SCENARIO,
+            &super::mcp08b::commented(&text, "Written again."),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        unchanged(&mut harness, &mut server, "write_source");
+        let (_, product) = read(&mut server, PRODUCT);
+        let published = call(
+            &mut harness,
+            &mut server,
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": product }),
+        );
+        assert_eq!(structured(&published)["wrote"], true, "{published}");
+        unchanged(&mut harness, &mut server, "publish");
+        let listed = server.request("resources/list", json!({}));
+        let uri = listed["result"]["resources"][0]["uri"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        unchanged(&mut harness, &mut server, "resources/list");
+        let resource = server.request("resources/read", json!({ "uri": uri }));
+        assert!(resource["result"].is_object(), "{resource}");
+        unchanged(&mut harness, &mut server, "resources/read");
+
+        let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+        assert_eq!(structured(&finished)["finished"], true);
+        await_until(&mut harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert_eq!(
+            fs::read(&file).unwrap(),
+            stored,
+            "finish_editing changed the file"
+        );
+        assert!(has_label(&harness, BADGE));
+
+        // A `permission` sent to the window, as a server would send it, is
+        // not the person's: the window ignores it.
+        let endpoint = await_endpoint(&mut harness, root, HolderRole::Window);
+        {
+            let mut stream = connect(&endpoint).unwrap();
+            stream
+                .write_all(b"{\"version\":1,\"type\":\"permission\",\"live\":false}\n")
+                .unwrap();
+        }
+        for _ in 0..20 {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(&mut harness);
+        assert!(has_label(&harness, BADGE), "the window ignored it");
+        assert!(box_ticked(&mut harness));
+        assert_eq!(fs::read(&file).unwrap(), stored);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 7: unticking during a live run lets it finish, cleanup
+    /// included; the dialog says so; the agent's result is complete; the
+    /// next live run is refused.
+    #[test]
+    fn mcp09_criterion_7_unticking_during_a_live_run_lets_it_finish() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        set_box(&mut harness, true);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "400")]);
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+
+        let start = json!({ "path": SCENARIO, "live": true });
+        let mut run = server.start_call("run", start.clone());
+        // The run holds the server's run slot: a probe of a document that
+        // does not exist is `run_in_progress` while it does.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let probe = call(
+                &mut harness,
+                &mut server,
+                "run",
+                json!({ "path": "missing.afs" }),
+            );
+            if refusal(&probe).is_some_and(|error| error["code"] == "run_in_progress") {
+                break;
+            }
+            // A probe that came first held the slot for a moment, and the
+            // run was refused: start it again.
+            if let Some(ended) = server.poll(run) {
+                assert_eq!(
+                    tool_error(&ended)["code"],
+                    "run_in_progress",
+                    "the run ended before it was seen: {ended}"
+                );
+                run = server.start_call("run", start.clone());
+            }
+            assert!(Instant::now() < deadline, "the run never started: {probe}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        open_settings(&mut harness);
+        choose(&mut harness, TOGGLE);
+        assert!(!toggle(&harness));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the in-progress line",
+            |harness| contains(harness, IN_PROGRESS),
+        );
+
+        let report = answer(&mut harness, &mut server, run);
+        let report = structured(&report);
+        assert_eq!(report["live"], true, "{report}");
+        assert_eq!(report["ended_by"], "completed", "{report}");
+        assert_eq!(report["status"], "passed", "{report}");
+        let steps = report["steps"].as_array().unwrap();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step["phase"] == "cleanup" && step["status"] == "passed"),
+            "the cleanup ran: {report}"
+        );
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the line after the run",
+            |harness| contains(harness, OFF),
+        );
+        assert!(!contains(&harness, IN_PROGRESS));
+        close_settings(&mut harness);
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 8: the *Live allowed* badge in Code, Diagram and Split at
+    /// 960 × 540 while the box is ticked, and never otherwise; beside
+    /// *Observing* on a component's tab, which has *Publish*, it keeps clear
+    /// of the mode tabs and the toolbar.
+    #[test]
+    fn mcp09_criterion_8_the_badge_shows_in_every_mode_while_ticked() {
+        for observing in [false, true] {
+            let configuration = tempfile::tempdir().unwrap();
+            let directory = shop();
+            let root = directory.path();
+            let owner = observing.then(|| agent_holds(root));
+            let mut harness = window(root, MINIMUM, configuration.path());
+            assert_eq!(has_label(&harness, "Observing"), observing);
+            let component = only(&harness, DocumentKind::Component);
+            for mode in ["Code", "Diagram", "Split"] {
+                choose(&mut harness, mode);
+                assert!(!has_label(&harness, BADGE), "{mode}: no badge while off");
+            }
+            set_box(&mut harness, true);
+            for tab in [only(&harness, DocumentKind::Scenario), component.clone()] {
+                app(&mut harness).activate_tab(&tab);
+                settle(&mut harness);
+                for mode in ["Code", "Diagram", "Split"] {
+                    choose(&mut harness, mode);
+                    assert!(has_label(&harness, BADGE), "{mode}: the badge");
+                    assert_within_window(&harness, &[BADGE]);
+                    let mut labels = vec![BADGE, "Code", "Diagram", "Split", "Run options"];
+                    if observing {
+                        labels.push("Observing");
+                    }
+                    if tab == component {
+                        labels.push("Publish");
+                    }
+                    assert_disjoint(&harness, &labels);
+                }
+            }
+            set_box(&mut harness, false);
+            for mode in ["Code", "Diagram", "Split"] {
+                choose(&mut harness, mode);
+                assert!(!has_label(&harness, BADGE), "{mode}: gone when unticked");
+            }
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// The dialog and the badge beside the approved captures
+    /// `docs/qa/2026-10-27/MCP-00/m3-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp09_live_toggle() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let configuration = tempfile::tempdir().unwrap();
+            let directory = shop();
+            let root = directory.path();
+            let owner = agent_holds(root);
+            let mut harness = window(root, size, configuration.path());
+            open_settings(&mut harness);
+            capture(&mut harness, &format!("mcp09-settings-off-{suffix}"), None);
+            choose(&mut harness, TOGGLE);
+            capture(&mut harness, &format!("mcp09-settings-on-{suffix}"), None);
+            close_settings(&mut harness);
+            for mode in ["Code", "Diagram", "Split"] {
+                choose(&mut harness, mode);
+                capture(
+                    &mut harness,
+                    &format!("mcp09-header-{}-{suffix}", mode.to_lowercase()),
+                    None,
+                );
+            }
+            drop(harness);
+            drop(owner);
+        }
+    }
+}
+
+// ----- MCP-15: a live run from the command line asks the open window ---------
+
+/// `apiforge run --folder … --live` with the project open in this window
+/// (MCP-15, #182). The command runs as a process of its own: this test
+/// executable running only [`mcp15::command_process`], which calls the
+/// library function the `apiforge` binary calls (the spawned-helper
+/// exception of the testing process). Its harness prints a line of its own
+/// on stdout, which the tests ignore.
+mod mcp15 {
+    use super::mcp08b::{PRODUCT, SCENARIO, await_endpoint, await_until, contains, read_only};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_storage::project::HolderRole;
+    use serde_json::{Value, json};
+    use std::{
+        io::Read as _,
+        path::Path,
+        process::{Child, Command, ExitStatus, Stdio},
+        thread::JoinHandle,
+    };
+
+    /// Tells [`command_process`] which folder to run.
+    const FOLDER: &str = "APIFORGE_MCP15_TEST_FOLDER";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// Decision 1 A: the bar names the command as typed.
+    const COMMAND: &str = "apiforge run --live · since ";
+    const TAKE_BACK: &str = "Take back";
+    const OBSERVING: &str = "Observing";
+    const PROMPT: &str = "A command asks for this project";
+    const SENTENCE: &str =
+        "apiforge run --live wants to send live requests from this project. Unsaved work here:";
+    const SAVE_ALL: &str = "Save all and hand over";
+    const NOT_NOW: &str = "Not now";
+    const HANDED_OVER: &str = "The open API Forge window handed the project over for this run";
+    const KEPT: &str = "The window kept the project (you chose to keep editing); nothing was sent";
+    /// The bound of criteria 1 and 7: the window is the writer this soon
+    /// after the command's end.
+    const BOUND: Duration = Duration::from_secs(2);
+    /// A scenario that passes against the demo API, with a cleanup.
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    /// The same against a product the demo API does not have.
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+
+    /// `apiforge run --folder <FOLDER> --scenario <SCENARIO> --live`, as the
+    /// binary runs it, with the binary's exit code.
+    #[test]
+    #[ignore = "launched by the MCP-15 tests as the apiforge run --live command"]
+    fn command_process() {
+        let Some(folder) = std::env::var_os(FOLDER) else {
+            return;
+        };
+        let outcome = apiforge_mcp::command::run_live(
+            Path::new(&folder),
+            SCENARIO,
+            Default::default(),
+            &mut |runs, _| {
+                for run in runs {
+                    eprintln!("A live run of \"{}\" did not finish", run.scenario_name);
+                }
+            },
+        );
+        let code = match outcome {
+            Ok(outcome) => {
+                println!("{}", outcome.report.status.label());
+                i32::from(outcome.report.status != RunStatus::Passed)
+            }
+            Err(message) => {
+                eprintln!("{message}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
+
+    /// The command, running.
+    struct Running {
+        child: Child,
+        stderr: Option<JoinHandle<String>>,
+    }
+
+    /// How the command ended.
+    struct Ended {
+        status: ExitStatus,
+        /// When the window first saw the process gone.
+        at: Instant,
+        stderr: String,
+    }
+
+    impl Running {
+        fn start(root: &Path) -> Self {
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "folder::tests::acceptance_tests::mcp15::command_process",
+                    "--nocapture",
+                    "--quiet",
+                    "--test-threads=1",
+                ])
+                .env(FOLDER, root)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut stderr = child.stderr.take().unwrap();
+            let stderr = std::thread::spawn(move || {
+                let mut text = String::new();
+                let _ = stderr.read_to_string(&mut text);
+                text
+            });
+            Self {
+                child,
+                stderr: Some(stderr),
+            }
+        }
+
+        /// Steps the window in real time until the command ends, calling
+        /// `frame` after every frame.
+        fn wait(
+            mut self,
+            harness: &mut FolderHarness,
+            mut frame: impl FnMut(&FolderHarness),
+        ) -> Ended {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let status = loop {
+                harness.step();
+                frame(harness);
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(Instant::now() < deadline, "the command never ended");
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            let at = Instant::now();
+            let stderr = self.stderr.take().unwrap().join().unwrap();
+            Ended { status, at, stderr }
+        }
+
+        /// Kills the command, as Ctrl+C does.
+        fn kill(mut self) -> Instant {
+            self.child.kill().unwrap();
+            self.child.wait().unwrap();
+            Instant::now()
+        }
+    }
+
+    impl Drop for Running {
+        /// A test that fails half-way leaves no command holding a project.
+        fn drop(&mut self) {
+            if self.child.try_wait().ok().flatten().is_none() {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+    }
+
+    /// The demo shop pointed at `base_url`, its scenario `scenario`.
+    fn live_shop(base_url: &str, scenario: &str) -> tempfile::TempDir {
+        let directory = shop();
+        let root = directory.path();
+        let manifest = root.join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!(base_url);
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        fs::write(root.join(SCENARIO), scenario).unwrap();
+        directory
+    }
+
+    fn api() -> apiforge_demo_api::DemoServerHandle {
+        apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap()
+    }
+
+    /// What the window showed while the command held the project.
+    #[derive(Default)]
+    struct Shown {
+        /// A frame showed the command's bar, the badge and the pause.
+        bar: bool,
+        /// A frame showed *Take back*.
+        take_back: bool,
+    }
+
+    impl Shown {
+        fn look(&mut self, harness: &FolderHarness) {
+            if folder(harness).observing() {
+                self.bar |= contains(harness, COMMAND)
+                    && contains(harness, PAUSED)
+                    && has_label(harness, OBSERVING);
+            }
+            self.take_back |= has_label(harness, TAKE_BACK);
+        }
+    }
+
+    /// The document registered at `path`.
+    fn at(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    /// Unsaved text in the scenario and the component; returns both texts.
+    fn leave_unsaved_code(harness: &mut FolderHarness, root: &Path) -> (String, String) {
+        let scenario = at(harness, SCENARIO);
+        let product = at(harness, PRODUCT);
+        let scenario_text = format!(
+            "{}// typed by the person\n",
+            fs::read_to_string(root.join(SCENARIO)).unwrap()
+        );
+        let product_text = format!(
+            "{}// typed by the person\n",
+            fs::read_to_string(root.join(PRODUCT)).unwrap()
+        );
+        let session = app(harness).session.as_mut().unwrap();
+        session
+            .edit_source(&scenario, &scenario_text, CODE)
+            .unwrap();
+        session.edit_source(&product, &product_text, CODE).unwrap();
+        settle(harness);
+        (scenario_text, product_text)
+    }
+
+    /// Steps the window until the prompt shows.
+    fn await_prompt(harness: &mut FolderHarness, running: &mut Running) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !has_label(harness, PROMPT) {
+            assert!(
+                running.child.try_wait().unwrap().is_none(),
+                "the command ended before the window asked"
+            );
+            assert!(Instant::now() < deadline, "the window never asked");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Criterion 1: a clean window hands the project over at once; the bar
+    /// names the command, the badge says *Observing*, *Take back* is never
+    /// offered; the run passes; within two seconds of the command's exit
+    /// the window is the writer again and a save there succeeds.
+    #[test]
+    fn mcp15_criterion_1_a_clean_window_hands_over_and_takes_the_project_back() {
+        let api = api();
+        let directory = live_shop(&api.base_url(), PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut shown = Shown::default();
+        let ended = Running::start(root).wait(&mut harness, |harness| shown.look(harness));
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+        assert!(ended.stderr.contains(HANDED_OVER), "{}", ended.stderr);
+        assert!(shown.bar, "the window showed the command's bar");
+        assert!(!shown.take_back, "no Take back for a command");
+        let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(took <= BOUND, "the window was the writer after {took:?}");
+        assert!(!has_label(&harness, TAKE_BACK));
+        assert!(!root.join(".apiforge/local/journal.json").exists());
+
+        // A save after the take-back meets no conflict.
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, "// the window's own change\n");
+        settle(&mut harness);
+        choose(&mut harness, "Save");
+        let document = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(&scenario)
+            .unwrap();
+        assert!(!document.is_dirty());
+        assert!(document.conflict().is_none());
+        assert!(
+            fs::read_to_string(root.join(SCENARIO))
+                .unwrap()
+                .contains("// the window's own change")
+        );
+    }
+
+    /// Criterion 2, *Save all and hand over*: the prompt names the command
+    /// and lists both documents; the person's work is saved, the run
+    /// proceeds and passes, and the window is the writer again.
+    #[test]
+    fn mcp15_criterion_2_save_all_saves_and_the_run_proceeds() {
+        let api = api();
+        let directory = live_shop(&api.base_url(), PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let (scenario_text, product_text) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        assert!(
+            has_label(&harness, SENTENCE),
+            "the prompt names the command"
+        );
+        for path in [SCENARIO, PRODUCT] {
+            let item = format!("{path} — unsaved code");
+            assert!(has_label(&harness, &item), "the prompt lists {item:?}");
+        }
+        choose(&mut harness, SAVE_ALL);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(0), "{}", ended.stderr);
+        assert_eq!(
+            fs::read_to_string(root.join(SCENARIO)).unwrap(),
+            scenario_text
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            product_text
+        );
+        let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(took <= BOUND, "{took:?}");
+    }
+
+    /// Criterion 2, *Not now*: the command exits 1 with the person's choice
+    /// and sends nothing; the window stays the writer, the text untouched.
+    #[test]
+    fn mcp15_criterion_2_not_now_keeps_editing_and_sends_nothing() {
+        // An API that counts the connections it is offered.
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        silent.set_nonblocking(true).unwrap();
+        let directory = live_shop(
+            &format!("http://{}/demo", silent.local_addr().unwrap()),
+            PASSES,
+        );
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let saved = (
+            fs::read(root.join(SCENARIO)).unwrap(),
+            fs::read(root.join(PRODUCT)).unwrap(),
+        );
+        let (scenario_text, product_text) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        choose(&mut harness, NOT_NOW);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(1), "{}", ended.stderr);
+        assert!(ended.stderr.contains(KEPT), "{}", ended.stderr);
+        assert!(silent.accept().is_err(), "nothing was sent");
+        settle(&mut harness);
+        assert!(!read_only(&harness), "the window stays the writer");
+        assert!(!has_label(&harness, PROMPT));
+        assert_eq!(source_of(&harness, &at(&harness, SCENARIO)), scenario_text);
+        assert_eq!(source_of(&harness, &at(&harness, PRODUCT)), product_text);
+        assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved.0);
+        assert_eq!(fs::read(root.join(PRODUCT)).unwrap(), saved.1);
+        assert!(!root.join(".apiforge/local/journal.json").exists());
+    }
+
+    /// After *Not now* the bar does not say *An agent asked to edit this
+    /// project*: no agent asked, and the command has its answer and has
+    /// ended (MCP-15, the bar of MCP-08b is an agent's).
+    #[test]
+    fn not_now_for_a_command_leaves_no_agent_wording_in_the_bar() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        choose(&mut harness, NOT_NOW);
+        let ended = running.wait(&mut harness, |_| {});
+        assert_eq!(ended.status.code(), Some(1), "{}", ended.stderr);
+        settle(&mut harness);
+        assert!(!contains(&harness, "An agent asked"));
+        assert!(
+            !has_label(&harness, "Project holder"),
+            "no bar while writing"
+        );
+    }
+
+    /// While the command's live run is in progress the bar keeps mock-up
+    /// (a): the command's words in full, and no status line worded for an
+    /// agent (MCP-10's *Agent: running …* is an agent's).
+    #[test]
+    fn the_bar_of_a_running_command_keeps_its_words_and_no_agent_status() {
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        silent.set_nonblocking(true).unwrap();
+        let directory = live_shop(
+            &format!("http://{}/demo", silent.local_addr().unwrap()),
+            PASSES,
+        );
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let running = Running::start(root);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let _held = loop {
+            match silent.accept() {
+                Ok((stream, _)) => break stream,
+                Err(_) => {
+                    assert!(Instant::now() < deadline, "no request was sent");
+                    harness.step();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        // The run has started and told the window so.
+        for _ in 0..40 {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(read_only(&harness));
+        assert!(contains(&harness, COMMAND) && contains(&harness, PAUSED));
+        assert!(!contains(&harness, "Agent:"));
+        assert!(!has_label(&harness, TAKE_BACK));
+        running.kill();
+    }
+
+    /// A command killed while the prompt is open takes its prompt with it;
+    /// nothing is left to answer (review of #184).
+    #[test]
+    fn a_command_that_stops_waiting_closes_its_prompt() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let (scenario_text, _) = leave_unsaved_code(&mut harness, root);
+        let mut running = Running::start(root);
+        await_prompt(&mut harness, &mut running);
+        let killed = running.kill();
+        await_until(&mut harness, killed, "the prompt closed", |harness| {
+            !has_label(harness, PROMPT)
+        });
+        assert!(!read_only(&harness), "the window keeps the project");
+        assert_eq!(source_of(&harness, &at(&harness, SCENARIO)), scenario_text);
+        assert!(!folder(&harness).handover.has_declined());
+    }
+
+    /// An answer given to a command that has gone is nobody's: the next
+    /// agent request is not refused with it (review of #184).
+    #[test]
+    fn an_answer_for_a_command_that_has_gone_is_not_kept_for_an_agent() {
+        let directory = live_shop("http://127.0.0.1:9/demo", PASSES);
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        leave_unsaved_code(&mut harness, root);
+        app(&mut harness).prompt = Some(Prompt::Handover {
+            client: Some("run --live".to_owned()),
+            role: HolderRole::Command,
+        });
+        settle(&mut harness);
+        choose(&mut harness, NOT_NOW);
+        assert!(!has_label(&harness, PROMPT));
+        assert!(!folder(&harness).handover.has_declined());
+        assert!(!contains(&harness, "An agent asked"));
+    }
+
+    /// Criterion 7: a run that passes and one that fails both end with the
+    /// window the writer within two seconds.
+    #[test]
+    fn mcp15_criterion_7_a_passed_and_a_failed_run_give_the_project_back() {
+        let api = api();
+        for (scenario, code) in [(PASSES, 0), (FAILS, 1)] {
+            let directory = live_shop(&api.base_url(), scenario);
+            let root = directory.path();
+            let mut harness = folder_harness(root, WIDE);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let ended = Running::start(root).wait(&mut harness, |_| {});
+            assert_eq!(ended.status.code(), Some(code), "{}", ended.stderr);
+            assert!(ended.stderr.contains(HANDED_OVER), "{}", ended.stderr);
+            let took = await_until(&mut harness, ended.at, "the writer", |harness| {
+                !read_only(harness)
+            });
+            assert!(took <= BOUND, "{took:?}");
+            drop(harness);
+        }
+    }
+
+    /// Criterion 7: the command killed mid-run, its request on its way to
+    /// an API that never answers, leaves its journal entry; the window takes
+    /// the project back by its check and reports the interrupted run, as at
+    /// start.
+    #[test]
+    fn mcp15_criterion_7_a_killed_command_is_taken_back_with_its_interrupted_run() {
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let directory = live_shop(
+            &format!("http://{}/demo", silent.local_addr().unwrap()),
+            PASSES,
+        );
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let running = Running::start(root);
+        silent.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let _held = loop {
+            match silent.accept() {
+                Ok((stream, _)) => break stream,
+                Err(_) => {
+                    assert!(Instant::now() < deadline, "no request was sent");
+                    harness.step();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        assert!(read_only(&harness), "the window observes the run");
+        assert!(!has_label(&harness, "Mark as handled"));
+        let killed = running.kill();
+        await_until(&mut harness, killed, "the writer", |harness| {
+            !read_only(harness)
+        });
+        assert!(root.join(".apiforge/local/journal.json").exists());
+        assert!(
+            has_label(&harness, "Mark as handled"),
+            "the interrupted run is reported"
+        );
+    }
+
+    /// 10:42 on this machine's clock, as the holder file spells it.
+    fn since(hour: u32, minute: u32) -> String {
+        use chrono::TimeZone;
+        chrono::Local
+            .with_ymd_and_hms(2026, 11, 1, hour, minute, 11)
+            .single()
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string()
+    }
+
+    /// Design review beside mock-up (a): the bar while `apiforge run --live`
+    /// holds the project, in Code at 960 × 540 and 1600 × 1000.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_bar() {
+        use apiforge_storage::project::{Holder, ProjectStore};
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let root = directory.path();
+            let holder = Holder::command("run --live").with_since(since(10, 42));
+            let owner = ProjectStore::open_exclusive_as(root, &holder).unwrap();
+            let mut harness = folder_harness(root, size);
+            choose(&mut harness, "Code");
+            assert!(has_label(&harness, &format!("{COMMAND}10:42 · {PAUSED}")));
+            assert!(has_label(&harness, OBSERVING));
+            assert!(!has_label(&harness, TAKE_BACK));
+            crate::testing::capture(
+                &mut harness,
+                &format!("mcp15-command-bar-code-{suffix}"),
+                None,
+            );
+            drop(harness);
+            drop(owner);
+        }
+    }
+
+    /// Design review beside mock-up (b): the hand-over prompt when the
+    /// command asks and two documents hold unsaved text, at 960 × 540.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp15_command_prompt() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        choose(&mut harness, "Code");
+        // Typed values, which leave no warning in *Problems*, as in (b).
+        for (path, from, to) in [
+            (SCENARIO, "80 * 1", "80 * 2"),
+            (PRODUCT, "number = 123", "number = 124"),
+        ] {
+            let id = at(&harness, path);
+            let text = fs::read_to_string(root.join(path))
+                .unwrap()
+                .replacen(from, to, 1);
+            app(&mut harness)
+                .session
+                .as_mut()
+                .unwrap()
+                .edit_source(&id, &text, CODE)
+                .unwrap();
+        }
+        settle(&mut harness);
+        app(&mut harness).prompt = Some(Prompt::Handover {
+            client: Some("run --live".to_owned()),
+            role: HolderRole::Command,
+        });
+        settle(&mut harness);
+        assert!(has_label(&harness, PROMPT));
+        assert!(has_label(&harness, SENTENCE));
+        crate::testing::capture(&mut harness, "mcp15-command-prompt-960x540", None);
+    }
+}
+
+// ----- MCP-10: the agent's run status in the bottom bar ----------------------
+
+mod mcp10 {
+    use super::mcp08b::{
+        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
+        holder, label_containing, read, read_only, write,
+    };
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_mcp::test_support::{StdioServer, structured};
+    use apiforge_storage::project::HolderRole;
+    use serde_json::{Value, json};
+    use std::{
+        io::{BufRead as _, BufReader},
+        path::{Path, PathBuf},
+        process::Command,
+        sync::mpsc::{Receiver, channel},
+    };
+
+    /// Tells [`server_process`] which folder to serve.
+    const FOLDER: &str = "APIFORGE_RUN_STATUS_TEST_FOLDER";
+    /// Tells [`server_process`] to start as `--allow-live` does.
+    const ALLOW_LIVE: &str = "APIFORGE_RUN_STATUS_TEST_ALLOW_LIVE";
+    const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
+    const FILE: &str = "promotion-and-cart-price.afs";
+    const BAR: &str = "Project holder";
+    const TAKE_BACK: &str = "Take back";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    /// Every status line starts so, and nothing else in the window does.
+    const STATUS: &str = "Agent: ";
+    /// The ticket's bound: the line shows within a second of each message.
+    const BOUND: Duration = Duration::from_secs(1);
+    /// What the bar must not move: the explorer and the tabs above it.
+    const FIXED: [&str; 5] = ["EXPLORER", "Code", "Diagram", "Split", "Run"];
+    const MODES: [&str; 3] = ["Code", "Diagram", "Split"];
+
+    fn running(mode: &str) -> String {
+        format!("Agent: running {FILE} ({mode})…")
+    }
+
+    /// The MCP server as a process of its own on real stdio, as in
+    /// `mod mcp08b`, optionally allowed to send live requests.
+    #[test]
+    #[ignore = "launched by the MCP-10 run status tests as the server process"]
+    fn server_process() {
+        let Some(folder) = std::env::var_os(FOLDER) else {
+            return;
+        };
+        let step_delay = std::env::var(STEP_DELAY)
+            .ok()
+            .and_then(|milliseconds| milliseconds.parse().ok())
+            .map(Duration::from_millis);
+        let settings = apiforge_mcp::ServerSettings {
+            run: apiforge_mcp::tools::RunSettings {
+                step_delay,
+                ..Default::default()
+            },
+            allow_live: std::env::var_os(ALLOW_LIVE).is_some(),
+            ..Default::default()
+        };
+        apiforge_mcp::serve_stdio_with(PathBuf::from(folder), settings).unwrap();
+    }
+
+    /// A server initialised by *Claude Code* whose runs pause `step_delay`
+    /// milliseconds after every step.
+    fn agent(root: &Path, step_delay: u64, live: bool) -> StdioServer {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "folder::tests::acceptance_tests::mcp10::server_process",
+                "--nocapture",
+                "--quiet",
+                "--test-threads=1",
+            ])
+            .env(FOLDER, root)
+            .env(STEP_DELAY, step_delay.to_string());
+        if live {
+            command.env(ALLOW_LIVE, "1");
+        }
+        let mut server = StdioServer::spawn(command);
+        server.initialize("Claude Code");
+        server
+    }
+
+    /// The agent writes the scenario with `note` added; a clean window
+    /// hands the project over and observes.
+    fn agent_writes(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) {
+        let (text, _) = read(server, SCENARIO);
+        let written = write(harness, server, SCENARIO, &commented(&text, note));
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        settle(harness);
+    }
+
+    /// The agent saves a version of the scenario whose *Promotional price*
+    /// comparison fails.
+    fn agent_breaks_the_price(harness: &mut FolderHarness, server: &mut StdioServer) {
+        let (text, _) = read(server, SCENARIO);
+        assert!(text.contains("expected_price = 80 * 1"), "{text}");
+        let broken = text.replacen("expected_price = 80 * 1", "expected_price = 81 * 1", 1);
+        let written = write(harness, server, SCENARIO, &broken);
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        settle(harness);
+    }
+
+    /// The first step that did not pass, numbered as `step_count` counts:
+    /// every step in order, a component's own steps included.
+    fn first_failure(steps: &[Value]) -> Option<(u64, String)> {
+        fn walk(steps: &[Value], seen: &mut u64) -> Option<(u64, String)> {
+            for step in steps {
+                *seen += 1;
+                if step["status"] == "failed" || step["status"] == "error" {
+                    let label = step["label"].as_str().or(step["handle"].as_str());
+                    return Some((*seen, label.unwrap().to_owned()));
+                }
+                if let Some(found) = step["steps"].as_array().and_then(|inner| walk(inner, seen)) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        walk(steps, &mut 0)
+    }
+
+    /// Connects to `endpoint` as a window does and hands over every line
+    /// it is told, as JSON.
+    fn observe(endpoint: &str) -> Receiver<Value> {
+        #[cfg(unix)]
+        let stream = std::os::unix::net::UnixStream::connect(address(endpoint)).unwrap();
+        #[cfg(windows)]
+        let stream = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(address(endpoint))
+            .unwrap();
+        let (sender, messages) = channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stream).lines() {
+                let Ok(line) = line else { break };
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                if sender.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        messages
+    }
+
+    /// The next message of type `kind`, the others passed over.
+    fn next(messages: &Receiver<Value>, kind: &str) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let message = messages
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("the window was told no {kind} message"));
+            if message["type"] == kind {
+                return message;
+            }
+        }
+    }
+
+    /// `label` is `prefix` followed by a time on the wall clock, `HH:MM`.
+    fn assert_clock(label: &str, prefix: &str) {
+        let time = label
+            .strip_prefix(prefix)
+            .unwrap_or_else(|| panic!("{label:?} starts with {prefix:?}"));
+        let digits = time.char_indices().all(|(at, character)| {
+            (at == 2) == (character == ':') && (at == 2 || character.is_ascii_digit())
+        });
+        assert!(time.len() == 5 && digits, "{label:?} ends in HH:MM");
+    }
+
+    /// The width `text` takes in the bar's font when it is not cut. Laid
+    /// out in place, its glyphs snap to pixels, so a whole label may be up
+    /// to a pixel narrower; a cut one loses at least a character.
+    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
+        let job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(
+                egui::FontId::proportional(theme::FONT_META),
+                egui::Color32::WHITE,
+            ),
+        );
+        harness
+            .ctx
+            .fonts_mut(|fonts| fonts.layout_job(job))
+            .size()
+            .x
+    }
+
+    /// Where the explorer and the tabs are; a mode without the explorer
+    /// (Diagram shows the library there) has none.
+    fn fixed_rects(harness: &FolderHarness) -> Vec<Option<egui::Rect>> {
+        FIXED
+            .iter()
+            .map(|label| harness.query_by_label(label).map(|node| node.rect()))
+            .collect()
+    }
+
+    /// Waits until the bar names the agent with its start time, as the
+    /// holder file gives it.
+    fn await_since(harness: &mut FolderHarness) {
+        await_until(harness, Instant::now(), "the holder's start", |harness| {
+            contains(harness, &format!("{AGENT} · since "))
+        });
+    }
+
+    /// Criterion 1: the server tells a connected window `run` with the
+    /// path, the mode and `running` when a run starts, and at its end
+    /// `passed`, `failed` with the step and its label, or `cancelled`.
+    #[test]
+    fn mcp10_criterion_1_the_server_tells_a_window_each_runs_start_and_end() {
+        let directory = shop();
+        let root = directory.path();
+        let mut server = agent(root, 100, false);
+        // The agent takes the project with no window open; a window then
+        // connects to the server's endpoint, as one opened meanwhile does.
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "First."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let endpoint = holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let messages = observe(&endpoint);
+        // The next commit is told to the window: it hears everything after.
+        let (text, hash) = read(&mut server, SCENARIO);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "Second."), "expected_source_sha256": hash }),
+        );
+        next(&messages, "saved");
+
+        let report = server.call("run", json!({ "path": SCENARIO }));
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "passed", "{report}");
+        assert_eq!(
+            next(&messages, "run"),
+            json!({ "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation", "state": "running" })
+        );
+        assert_eq!(
+            next(&messages, "run"),
+            json!({
+                "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation",
+                "state": "passed", "step_count": report["step_count"]
+            })
+        );
+
+        let (text, hash) = read(&mut server, SCENARIO);
+        let broken = text.replacen("expected_price = 80 * 1", "expected_price = 81 * 1", 1);
+        assert_ne!(broken, text);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": broken, "expected_source_sha256": hash }),
+        );
+        let report = server.call("run", json!({ "path": SCENARIO }));
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "failed", "{report}");
+        let (step, label) = first_failure(report["steps"].as_array().unwrap()).unwrap();
+        assert_eq!(label, "Promotional price", "{report}");
+        assert_eq!(next(&messages, "run")["state"], "running");
+        assert_eq!(
+            next(&messages, "run"),
+            json!({
+                "version": 1, "type": "run", "path": SCENARIO, "mode": "simulation",
+                "state": "failed", "step": step, "label": label,
+                "step_count": report["step_count"]
+            })
+        );
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        assert_eq!(next(&messages, "run")["state"], "running");
+        server.send(
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": id }
+            })
+            .to_string(),
+        );
+        let ended = next(&messages, "run");
+        assert_eq!(ended["state"], "cancelled", "{ended}");
+        assert_eq!(ended["path"], SCENARIO);
+        assert_eq!(ended["mode"], "simulation");
+        drop(server);
+    }
+
+    /// A window that connects while a run is going is told that it runs,
+    /// then how it ended, like the windows connected before it.
+    #[test]
+    fn a_window_that_connects_during_a_run_hears_that_it_runs() {
+        let directory = shop();
+        let root = directory.path();
+        let mut server = agent(root, 200, false);
+        let (text, hash) = read(&mut server, SCENARIO);
+        let written = server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "First."), "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&written)["wrote"], true, "{written}");
+        let endpoint = holder(root)
+            .and_then(|holder| holder.endpoint().map(str::to_owned))
+            .expect("the server names its endpoint");
+        let first = observe(&endpoint);
+        let (text, hash) = read(&mut server, SCENARIO);
+        server.call(
+            "write_source",
+            json!({ "path": SCENARIO, "text": commented(&text, "Second."), "expected_source_sha256": hash }),
+        );
+        next(&first, "saved");
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        assert_eq!(next(&first, "run")["state"], "running");
+
+        let late = observe(&endpoint);
+        let told = next(&late, "run");
+        assert_eq!(told["state"], "running", "{told}");
+        assert_eq!(told["path"], SCENARIO);
+        let report = server.wait(id);
+        let ended = next(&late, "run");
+        assert_eq!(ended["state"], "passed", "{ended}");
+        assert_eq!(ended["step_count"], structured(&report)["step_count"]);
+        assert_eq!(next(&first, "run"), ended);
+        drop(server);
+    }
+
+    /// Criterion 1: the observing window shows the line within a second of
+    /// each message: running, then passed, failed or cancelled with the
+    /// time the run ended.
+    #[test]
+    fn mcp10_criterion_1_the_window_shows_the_line_within_a_second_of_each_message() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 200, false);
+        agent_writes(&mut harness, &mut server, "Written by the agent.");
+        assert!(!contains(&harness, STATUS), "no run, no status");
+
+        let started = Instant::now();
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        let took = await_until(&mut harness, started, "the running line", |harness| {
+            has_label(harness, &running("simulation"))
+        });
+        assert!(took < BOUND, "running shown {took:?} after the run started");
+        let report = answer(&mut harness, &mut server, id);
+        let ended = Instant::now();
+        let report = structured(&report).clone();
+        assert_eq!(report["status"], "passed", "{report}");
+        let passed = format!("Agent: {FILE} passed · {} steps · ", report["step_count"]);
+        let took = await_until(&mut harness, ended, "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        assert!(took < BOUND, "passed shown {took:?} after the run ended");
+        assert_clock(&label_containing(&harness, &passed), &passed);
+        assert!(!has_label(&harness, &running("simulation")));
+
+        agent_breaks_the_price(&mut harness, &mut server);
+        let report = call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        let ended = Instant::now();
+        let report = structured(&report).clone();
+        let (step, label) = first_failure(report["steps"].as_array().unwrap()).unwrap();
+        let failed = format!("Agent: {FILE} failed at step {step} · {label} · ");
+        let took = await_until(&mut harness, ended, "the failed line", |harness| {
+            contains(harness, &failed)
+        });
+        assert!(took < BOUND, "failed shown {took:?} after the run ended");
+        assert_clock(&label_containing(&harness, &failed), &failed);
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        server.send(
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": { "requestId": id }
+            })
+            .to_string(),
+        );
+        let cancelled = format!("Agent: {FILE} cancelled · ");
+        let took = await_until(
+            &mut harness,
+            Instant::now(),
+            "the cancelled line",
+            |harness| contains(harness, &cancelled),
+        );
+        // Measured from the cancellation, not from the message: the run
+        // stops at its next step (200 ms here) and runs its cleanup first.
+        assert!(
+            took < 2 * BOUND,
+            "cancelled shown {took:?} after the cancellation"
+        );
+        assert_clock(&label_containing(&harness, &cancelled), &cancelled);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2: the line names the mode: *(simulation)* above, *(live)*
+    /// for a live run, while it runs and once it has ended.
+    #[test]
+    fn mcp10_criterion_2_a_live_run_says_live() {
+        let directory = shop();
+        let root = directory.path();
+        // Since MCP-09 the open window decides live runs: the person
+        // allows them in *Project settings* first.
+        let configuration = tempfile::tempdir().unwrap();
+        let mut harness = super::mcp09::window(root, WIDE, configuration.path());
+        super::mcp09::set_box(&mut harness, true);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 300, true);
+        // The live run takes the project for the agent session itself: the
+        // clean window hands it over and observes.
+        let started = Instant::now();
+        let id = server.start_call("run", json!({ "path": SCENARIO, "live": true }));
+        await_until(&mut harness, started, "the live running line", |harness| {
+            has_label(harness, &running("live"))
+        });
+        assert!(read_only(&harness));
+        let report = answer(&mut harness, &mut server, id);
+        let report = structured(&report).clone();
+        assert_eq!(report["live"], true, "{report}");
+        let ended = format!(
+            "Agent: {FILE} (live) {} ",
+            report["status"].as_str().unwrap()
+        );
+        await_until(&mut harness, Instant::now(), "the live end", |harness| {
+            contains(harness, &ended)
+        });
+        assert!(!contains(&harness, "(simulation)"));
+        drop(harness);
+        drop(server);
+    }
+
+    /// The bar at 960 × 540 in every mode with `status` shown: the status
+    /// whole and inside the bar, the holder text shortened beside it, the
+    /// explorer and the tabs where they were before.
+    fn assert_status_fits(
+        harness: &mut FolderHarness,
+        status: &str,
+        before: &[Vec<Option<egui::Rect>>],
+    ) {
+        for (mode, before) in MODES.iter().zip(before) {
+            choose(harness, mode);
+            assert_within_window(harness, &[BAR, status, TAKE_BACK]);
+            let shown = harness.get_by_label(status).rect();
+            assert!(
+                harness.get_by_label(BAR).rect().contains_rect(shown),
+                "{mode}: {status:?} sits in the bar"
+            );
+            let whole = whole_width(harness, status);
+            assert!(
+                shown.width() + 1.0 >= whole,
+                "{mode}: {status:?} is cut: {} of {whole} px",
+                shown.width()
+            );
+            let holder = label_containing(harness, "Claude Code");
+            assert!(
+                holder.starts_with("Claude Code · since ") && !holder.contains(PAUSED),
+                "{mode}: the holder text gives way to the status: {holder:?}"
+            );
+            assert_disjoint(harness, &[holder.as_str(), status, TAKE_BACK]);
+            assert_eq!(
+                &fixed_rects(harness),
+                before,
+                "{mode}: the bar moved the explorer or the tabs"
+            );
+        }
+    }
+
+    /// Criterion 3: at 960 × 540 in Code, Diagram and Split the status is
+    /// never cut; the holder text is shortened instead; nothing above the
+    /// bar moves.
+    #[test]
+    fn mcp10_criterion_3_the_status_is_whole_at_960_by_540_and_the_holder_gives_way() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 300, false);
+        agent_writes(&mut harness, &mut server, "Written by the agent.");
+        await_since(&mut harness);
+        let before: Vec<Vec<Option<egui::Rect>>> = MODES
+            .iter()
+            .map(|mode| {
+                choose(&mut harness, mode);
+                fixed_rects(&harness)
+            })
+            .collect();
+        assert!(before[0][0].is_some(), "Code shows the explorer");
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        assert_status_fits(&mut harness, &running("simulation"), &before);
+
+        let report = answer(&mut harness, &mut server, id);
+        let passed = format!(
+            "Agent: {FILE} passed · {} steps · ",
+            structured(&report)["step_count"]
+        );
+        await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        let passed = label_containing(&harness, &passed);
+        assert_status_fits(&mut harness, &passed, &before);
+
+        agent_breaks_the_price(&mut harness, &mut server);
+        call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        await_until(&mut harness, Instant::now(), "the failed line", |harness| {
+            contains(harness, &format!("Agent: {FILE} failed at step "))
+        });
+        let failed = label_containing(&harness, &format!("Agent: {FILE} failed at step "));
+        assert_status_fits(&mut harness, &failed, &before);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 4: the status goes when the agent finishes, and when the
+    /// channel drops in the middle of a run.
+    #[test]
+    fn mcp10_criterion_4_the_status_goes_with_the_agent_and_with_the_channel() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 200, false);
+        agent_writes(&mut harness, &mut server, "First.");
+        let report = call(
+            &mut harness,
+            &mut server,
+            "run",
+            json!({ "path": SCENARIO }),
+        );
+        let passed = format!(
+            "Agent: {FILE} passed · {} steps · ",
+            structured(&report)["step_count"]
+        );
+        await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+            contains(harness, &passed)
+        });
+        let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+        assert_eq!(structured(&finished)["finished"], true, "{finished}");
+        await_until(&mut harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(!contains(&harness, STATUS), "the agent finished");
+
+        agent_writes(&mut harness, &mut server, "Second.");
+        assert!(read_only(&harness));
+        assert!(!contains(&harness, STATUS), "a new session starts clean");
+        server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, &running("simulation")),
+        );
+        let dropped = Instant::now();
+        server.kill();
+        await_until(&mut harness, dropped, "the status gone", |harness| {
+            !contains(harness, STATUS)
+        });
+        await_until(&mut harness, dropped, "the take-back", |harness| {
+            !read_only(harness)
+        });
+        assert!(!contains(&harness, STATUS));
+        drop(harness);
+    }
+
+    /// The bar beside M4 round 4: running, passed and failed, at both
+    /// sizes.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp10_run_status() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, size);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let mut server = agent(root, 300, false);
+            agent_writes(&mut harness, &mut server, "Written by the agent.");
+            await_since(&mut harness);
+            let id = server.start_call("run", json!({ "path": SCENARIO }));
+            await_until(
+                &mut harness,
+                Instant::now(),
+                "the running line",
+                |harness| has_label(harness, &running("simulation")),
+            );
+            capture(&mut harness, &format!("mcp10-running-{suffix}"), None);
+            answer(&mut harness, &mut server, id);
+            await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+                contains(harness, &format!("Agent: {FILE} passed"))
+            });
+            capture(&mut harness, &format!("mcp10-passed-{suffix}"), None);
+            agent_breaks_the_price(&mut harness, &mut server);
+            call(
+                &mut harness,
+                &mut server,
+                "run",
+                json!({ "path": SCENARIO }),
+            );
+            await_until(&mut harness, Instant::now(), "the failed line", |harness| {
+                contains(harness, &format!("Agent: {FILE} failed"))
+            });
+            capture(&mut harness, &format!("mcp10-failed-{suffix}"), None);
+            drop(harness);
+            drop(server);
+        }
+    }
+}
+
+// ----- MCP-16: the observing window follows the agent's edits ----------------
+
+mod mcp16 {
+    use super::mcp08b::{
+        AGENT, NO_POLL, PRODUCT, SCENARIO, agent, agent_with, answer, await_endpoint, await_until,
+        call, commented, contains, hand_over, label_containing, read, read_only, write,
+    };
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use apiforge_mcp::test_support::{StdioServer, structured};
+    use apiforge_project::{FixedPlacer, Holder, HolderRole};
+    use egui::accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+    use serde_json::json;
+    use std::ops::RangeInclusive;
+
+    /// The toggle's accessible name; it reads *Follow* on screen.
+    const FOLLOW: &str = "Follow the agent";
+    const PINNED_HINT: &str =
+        "Follows the agent to every file it changes; click to stay where you are";
+    const RELEASED_HINT: &str = "Click to follow the agent again";
+    const TAKE_BACK: &str = "Take back";
+    const BAR: &str = "Project holder";
+    const PAUSED: &str = "editing is paused here; this window follows every change";
+    const PROMOTION: &str = "components/active-promotion.afs";
+    const ADDED: &str = "scenarios/added-by-agent.afs";
+    const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
+    /// The ticket's bound: the window is at the agent's document this soon.
+    const BOUND: Duration = Duration::from_secs(2);
+    /// The holder's own edits in the tests whose holder is in this process.
+    const HOLDER: Origin = Origin(91);
+    const MODES: [&str; 3] = ["Code", "Diagram", "Split"];
+
+    fn id_of(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn is_registered(harness: &FolderHarness, path: &str) -> bool {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .any(|document| document.entry().path.as_str() == path)
+    }
+
+    fn active(harness: &FolderHarness) -> Option<String> {
+        folder(harness).workbench.active().map(str::to_owned)
+    }
+
+    fn tabs(harness: &FolderHarness) -> Vec<String> {
+        folder(harness)
+            .workbench
+            .tabs()
+            .iter()
+            .map(|tab| tab.document_id.clone())
+            .collect()
+    }
+
+    fn scroll_of(harness: &FolderHarness, document_id: &str) -> f32 {
+        folder(harness)
+            .workbench
+            .tabs()
+            .iter()
+            .find(|tab| tab.document_id == document_id)
+            .unwrap_or_else(|| panic!("{document_id} has a tab"))
+            .scroll
+    }
+
+    fn mode(harness: &FolderHarness) -> Mode {
+        folder(harness).workbench.mode
+    }
+
+    /// *Follow* is pressed. Panics when the bar has no toggle.
+    fn pressed(harness: &FolderHarness) -> bool {
+        let toggle = harness.get_by_label(FOLLOW);
+        match toggle.accesskit_node().toggled() {
+            Some(Toggled::True) => true,
+            Some(Toggled::False) => false,
+            other => panic!("{FOLLOW} is a toggle, announced {other:?}"),
+        }
+    }
+
+    fn marks(harness: &FolderHarness, document_id: &str) -> Option<RangeInclusive<usize>> {
+        folder(harness).changed_lines(document_id)
+    }
+
+    fn in_view(harness: &FolderHarness) -> Option<(String, RangeInclusive<usize>)> {
+        folder(harness).code_lines_in_view()
+    }
+
+    /// The line, counted from one, of the first line of `text` holding
+    /// `needle`.
+    fn line_of(text: &str, needle: &str) -> usize {
+        text.lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} is in the text"))
+            + 1
+    }
+
+    /// `text` with `count` comment lines after its first line.
+    fn padded(text: &str, count: usize) -> String {
+        let (first, rest) = text.split_once('\n').unwrap();
+        let pad: String = (1..=count)
+            .map(|line| format!("  // Note {line} of the agent.\n"))
+            .collect();
+        format!("{first}\n{pad}{rest}")
+    }
+
+    /// The agent writes `path` with `note` added under its first line and
+    /// returns when it started the write: the window steps while the
+    /// agent waits for the answer, and may follow before it comes.
+    fn agent_notes(
+        harness: &mut FolderHarness,
+        server: &mut StdioServer,
+        path: &str,
+        note: &str,
+    ) -> Instant {
+        let (text, _) = read(server, path);
+        let asked = Instant::now();
+        let answer = write(harness, server, path, &commented(&text, note));
+        assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+        asked
+    }
+
+    /// The window is at `document_id` within the ticket's bound of
+    /// `returned`, the moment the agent started the write that commits.
+    fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
+        let took = await_until(harness, returned, what, |harness| {
+            folder(harness).workbench.active() == Some(document_id)
+        });
+        assert!(
+            took < BOUND,
+            "{what}: at the document {took:?} after the write"
+        );
+    }
+
+    /// The window becomes the writer again.
+    fn await_writer(harness: &mut FolderHarness) {
+        await_until(harness, Instant::now(), "the take-back", |harness| {
+            !read_only(harness)
+        });
+    }
+
+    /// Steps until the bar's text names `what`.
+    fn await_bar(harness: &mut FolderHarness, what: &str) {
+        await_until(harness, Instant::now(), what, |harness| {
+            contains(harness, what)
+        });
+    }
+
+    /// The agent's first write hands the project over, and the window has
+    /// followed that commit before the agent writes again: two commits
+    /// read in one check would be followed as one.
+    fn observe(harness: &mut FolderHarness, server: &mut StdioServer, note: &str) {
+        hand_over(harness, server, note);
+        await_bar(harness, "promotion-and-cart-price.afs saved");
+    }
+
+    /// Scrolls the code of `document_id` down with the mouse wheel.
+    fn scroll_code(harness: &mut FolderHarness, document_id: &str) {
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        harness.hover_at(code.left_top() + egui::vec2(120.0, 60.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -160.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(harness);
+    }
+
+    /// Clicks the tab of `name` in the tab strip: the explorer's row has the
+    /// same name, lower in the window.
+    fn click_tab(harness: &mut FolderHarness, name: &str) {
+        harness
+            .query_all_by_label(name)
+            .min_by(|left, right| left.rect().top().total_cmp(&right.rect().top()))
+            .unwrap_or_else(|| panic!("{name} is shown"))
+            .click();
+        settle(harness);
+    }
+
+    /// Criterion 1: *Follow* is pressed when the window becomes the
+    /// observer by a hand-over, and in a window opened while the agent
+    /// holds the project.
+    #[test]
+    fn mcp16_criterion_1_following_is_on_when_observing_starts() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        assert!(read_only(&harness), "the window observes");
+        assert!(pressed(&harness), "a hand-over starts following");
+        drop(harness);
+
+        let mut harness = folder_harness(root, WIDE);
+        assert!(read_only(&harness), "opened while the agent holds it");
+        await_until(&mut harness, Instant::now(), "the connection", |harness| {
+            has_label(harness, TAKE_BACK)
+        });
+        assert!(pressed(&harness), "a window opened meanwhile follows");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2, in `mode`: a saved document whose tab is not active,
+    /// and one with no tab, are followed within two seconds in the view the
+    /// person is in; the code shows the first changed line and marks the
+    /// changed lines until the agent's next commit to that document; the
+    /// board keeps its camera and its selected block.
+    fn a_saved_document_is_followed(view: &str, size: egui::Vec2) {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, size);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = id_of(&harness, SCENARIO);
+        assert_eq!(tabs(&harness), std::slice::from_ref(&scenario));
+        choose(&mut harness, view);
+        let shown = mode(&harness);
+        let code = shown != Mode::Diagram;
+
+        // The hand-over: the agent's first write pads the scenario.
+        let mut server = agent(root, "Claude Code");
+        let (text, _) = read(&mut server, SCENARIO);
+        let padded = padded(&text, 40);
+        let answer = write(&mut harness, &mut server, SCENARIO, &padded);
+        assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+        await_until(&mut harness, Instant::now(), "the padding", |harness| {
+            source_of(harness, &scenario) == padded
+        });
+        assert!(pressed(&harness));
+        assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
+        if code {
+            assert_eq!(marks(&harness, &scenario), Some(2..=41));
+        }
+        // The person reads the board: a block selected, the camera moved.
+        let mut place = None;
+        if !code {
+            choose(&mut harness, "Expected price (Value)");
+            choose(&mut harness, "Zoom in");
+            place = Some((
+                folder(&harness).canvases[&scenario].camera(),
+                folder(&harness).selections.get(&scenario).cloned(),
+            ));
+            assert!(place.as_ref().is_some_and(|(camera, selection)| {
+                camera.is_some() && selection.as_ref().is_some_and(|ids| !ids.is_empty())
+            }));
+            assert!(pressed(&harness), "selecting and zooming keep following");
+        }
+
+        // A component with no tab: opened beside the active tab.
+        let returned = agent_notes(
+            &mut harness,
+            &mut server,
+            PROMOTION,
+            "Changed by the agent.",
+        );
+        let promotion = id_of(&harness, PROMOTION);
+        await_active(&mut harness, returned, &promotion, "the component");
+        assert_eq!(tabs(&harness), [scenario.clone(), promotion.clone()]);
+        assert_eq!(mode(&harness), shown, "the view is the person's");
+        if code {
+            assert_eq!(marks(&harness, &promotion), Some(2..=2));
+            let (document, lines) = in_view(&harness).expect("the code is drawn");
+            assert_eq!(document, promotion);
+            assert!(lines.contains(&2), "line 2 in view: {lines:?}");
+        }
+
+        // The scenario again, its tab open but not active, far down.
+        let deep = padded.replacen("@label(\"Delete cart\")", "@label(\"Delete the cart\")", 1);
+        assert_ne!(deep, padded);
+        let line = line_of(&deep, "Delete the cart");
+        assert!(line > 50, "line {line} is out of view at first");
+        let returned = Instant::now();
+        let answer = write(&mut harness, &mut server, SCENARIO, &deep);
+        assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+        await_active(&mut harness, returned, &scenario, "the scenario");
+        await_until(&mut harness, Instant::now(), "the new text", |harness| {
+            source_of(harness, &scenario) == deep
+        });
+        assert_eq!(tabs(&harness), [scenario.clone(), promotion.clone()]);
+        assert_eq!(mode(&harness), shown, "the view is the person's");
+        if code {
+            assert_eq!(
+                marks(&harness, &scenario),
+                Some(line..=line),
+                "the earlier marks went with this commit"
+            );
+            assert_eq!(
+                marks(&harness, &promotion),
+                Some(2..=2),
+                "another document's marks stay until its next commit"
+            );
+            let (document, lines) = in_view(&harness).expect("the code is drawn");
+            assert_eq!(document, scenario);
+            assert!(lines.contains(&line), "line {line} in view: {lines:?}");
+        } else {
+            assert_eq!(
+                Some((
+                    folder(&harness).canvases[&scenario].camera(),
+                    folder(&harness).selections.get(&scenario).cloned(),
+                )),
+                place,
+                "the board keeps its camera and its selected block"
+            );
+        }
+        assert!(pressed(&harness));
+        drop(harness);
+        drop(server);
+    }
+
+    #[test]
+    fn mcp16_criterion_2_a_saved_document_is_followed_in_code() {
+        a_saved_document_is_followed("Code", MINIMUM);
+    }
+
+    #[test]
+    fn mcp16_criterion_2_a_saved_document_is_followed_in_diagram() {
+        a_saved_document_is_followed("Diagram", WIDE);
+    }
+
+    #[test]
+    fn mcp16_criterion_2_a_saved_document_is_followed_in_split() {
+        a_saved_document_is_followed("Split", MINIMUM);
+    }
+
+    /// Criterion 3: a document the agent creates is open and active within
+    /// two seconds, at its top, with no marks.
+    #[test]
+    fn mcp16_criterion_3_a_created_document_is_followed() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = id_of(&harness, SCENARIO);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        let text = format!(
+            "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
+            "  // A line of the new scenario.\n".repeat(40)
+        );
+        let returned = Instant::now();
+        let answer = call(
+            &mut harness,
+            &mut server,
+            "create_document",
+            json!({ "kind": "scenario", "path": ADDED, "text": text }),
+        );
+        assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+        await_until(&mut harness, returned, "the new document", |harness| {
+            is_registered(harness, ADDED)
+        });
+        let added = id_of(&harness, ADDED);
+        await_active(&mut harness, returned, &added, "the created document");
+        assert_eq!(tabs(&harness), [scenario, added.clone()]);
+        let (document, lines) = in_view(&harness).expect("the code is drawn");
+        assert_eq!(document, added);
+        assert_eq!(*lines.start(), 1, "at its top: {lines:?}");
+        assert_eq!(marks(&harness, &added), None, "a new document has no marks");
+        assert!(pressed(&harness));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 4: a component the agent publishes comes to the front
+    /// with its new revision; its code keeps its scroll.
+    #[test]
+    fn mcp16_criterion_4_a_publication_is_followed() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        let scroll = scroll_of(&harness, &product);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
+
+        let (_, hash) = read(&mut server, PRODUCT);
+        let returned = Instant::now();
+        let answer = call(
+            &mut harness,
+            &mut server,
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+        );
+        assert_eq!(structured(&answer)["revision"], 2, "{answer}");
+        await_active(&mut harness, returned, &product, "the published component");
+        let revisions: Vec<u32> = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .map(|revision| revision.revision)
+            .collect();
+        assert_eq!(revisions, [1, 2], "the new revision is shown");
+        assert_eq!(tabs(&harness), [scenario, product.clone()]);
+        assert_eq!(scroll_of(&harness, &product), scroll, "no scroll");
+        assert_eq!(marks(&harness, &product), None);
+        drop(harness);
+        drop(server);
+    }
+
+    /// The agent, as a second session in this process holding the lock,
+    /// for criterion 5: the MCP server has no tool that deletes a document
+    /// or changes the settings, and every holder's commit is followed alike.
+    fn holder(root: &std::path::Path) -> ProjectSession {
+        let agent = Holder::new(HolderRole::Agent, Some("Claude Code".into()));
+        ProjectSession::open_with_as(root, Arc::new(FixedPlacer), &agent).unwrap()
+    }
+
+    /// Criterion 5: deleting the followed document closes its tab with
+    /// MCP-08a's notice and the active tab is the one closing chooses, not
+    /// another document of the same commit; a commit of the settings alone
+    /// moves nothing.
+    #[test]
+    fn mcp16_criterion_5_delete_and_settings_move_nothing() {
+        let directory = shop();
+        let root = directory.path();
+        let mut owner = holder(root);
+        let mut harness = folder_harness(root, WIDE);
+        app(&mut harness).watcher.set_interval(NO_POLL);
+        assert!(pressed(&harness), "following is on");
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        let extra = owner
+            .create_document(
+                DocumentKind::Scenario,
+                "scenarios/short-lived.afs",
+                "scenario \"Short lived\" {\n  total = 2\n}\n",
+            )
+            .unwrap();
+        let committed = Instant::now();
+        app(&mut harness).watcher.rescan();
+        await_active(&mut harness, committed, &extra, "the created document");
+        assert_eq!(tabs(&harness), [scenario.clone(), extra.clone()]);
+
+        // One reload: the followed document deleted, another one saved.
+        let preview = owner
+            .preview_delete(&["scenarios/short-lived.afs"])
+            .unwrap();
+        owner.delete(&preview, HOLDER).unwrap();
+        let text = commented(owner.document(&product).unwrap().text(), "Saved too.");
+        owner.edit_source(&product, &text, HOLDER).unwrap();
+        owner.save(&product).unwrap();
+        app(&mut harness).watcher.rescan();
+        await_until(&mut harness, Instant::now(), "the deletion", |harness| {
+            source_of(harness, &product) == text
+        });
+        assert_eq!(
+            tabs(&harness),
+            std::slice::from_ref(&scenario),
+            "the tab closed"
+        );
+        assert_eq!(
+            active(&harness).as_deref(),
+            Some(scenario.as_str()),
+            "the tab closing chose, not the product saved beside the deletion"
+        );
+        let notice = folder(&harness)
+            .notice
+            .as_ref()
+            .map(|notice| notice.text.clone())
+            .unwrap_or_default();
+        assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
+
+        // The settings alone.
+        owner
+            .edit_configuration(|manifest| manifest.name = "Renamed shop".into(), HOLDER)
+            .unwrap();
+        owner.save_configuration().unwrap();
+        app(&mut harness).watcher.rescan();
+        await_bar(&mut harness, "project settings saved");
+        assert_eq!(tabs(&harness), std::slice::from_ref(&scenario));
+        assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
+        assert!(pressed(&harness));
+        drop(harness);
+        drop(owner);
+    }
+
+    /// Criterion 6: the agent's run changes no tab and no scroll.
+    #[test]
+    fn mcp16_criterion_6_a_run_moves_nothing() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "200")]);
+        observe(&mut harness, &mut server, "Written by the agent.");
+        let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        let product = id_of(&harness, PRODUCT);
+        await_active(&mut harness, returned, &product, "the component");
+        let place = |harness: &FolderHarness| {
+            (
+                tabs(harness),
+                active(harness),
+                scroll_of(harness, &product),
+                in_view(harness),
+            )
+        };
+        let before = place(&harness);
+        assert!(pressed(&harness));
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| contains(harness, "Agent: running "),
+        );
+        assert_eq!(place(&harness), before, "the run's start moves nothing");
+        answer(&mut harness, &mut server, id);
+        await_until(&mut harness, Instant::now(), "the passed line", |harness| {
+            contains(harness, " passed · ")
+        });
+        assert_eq!(place(&harness), before, "the run's end moves nothing");
+        assert!(pressed(&harness));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 7: unpinned by the toggle, the agent's commits keep the
+    /// active tab, the scroll, the camera and the selection; the bar still
+    /// names each change.
+    #[test]
+    fn mcp16_criterion_7_unpinned_keeps_the_place() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = id_of(&harness, SCENARIO);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        choose(&mut harness, FOLLOW);
+        assert!(!pressed(&harness), "the toggle unpins");
+        scroll_code(&mut harness, &scenario);
+        assert!(
+            scroll_of(&harness, &scenario) > 0.0,
+            "the code was scrolled"
+        );
+        let place = |harness: &FolderHarness| {
+            (
+                tabs(harness),
+                active(harness),
+                scroll_of(harness, &scenario),
+            )
+        };
+        let before = place(&harness);
+
+        agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        await_bar(&mut harness, "product.afs saved");
+        assert_eq!(place(&harness), before, "Code keeps the place");
+
+        choose(&mut harness, "Diagram");
+        choose(&mut harness, "Expected price (Value)");
+        choose(&mut harness, "Zoom in");
+        let board = |harness: &FolderHarness| {
+            (
+                folder(harness).canvases[&scenario].camera(),
+                folder(harness).selections.get(&scenario).cloned(),
+            )
+        };
+        let seen = board(&harness);
+        agent_notes(
+            &mut harness,
+            &mut server,
+            PROMOTION,
+            "Changed by the agent.",
+        );
+        await_bar(&mut harness, "active-promotion.afs saved");
+        assert_eq!(place(&harness), before, "Diagram keeps the tab");
+        assert_eq!(board(&harness), seen, "the camera and the selection stay");
+        assert_eq!(mode(&harness), Mode::Diagram);
+        assert!(!pressed(&harness), "still unpinned");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 8: a tab click, a file activated in the explorer, Ctrl+Tab
+    /// and closing the followed tab each unpin; scrolling, zooming,
+    /// selecting a block and switching the mode do not. *Follow* pins again
+    /// and goes to the document of the agent's last commit at once.
+    #[test]
+    fn mcp16_criterion_8_navigation_unpins_and_follow_pins() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        let promotion = id_of(&harness, PROMOTION);
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        assert!(pressed(&harness));
+
+        // What does not unpin.
+        scroll_code(&mut harness, &scenario);
+        assert!(pressed(&harness), "scrolling the code");
+        for (gesture, label) in [
+            ("switching to Diagram", "Diagram"),
+            ("zooming", "Zoom in"),
+            ("selecting a block", "Expected price (Value)"),
+            ("switching to Split", "Split"),
+            ("switching to Code", "Code"),
+        ] {
+            choose(&mut harness, label);
+            assert!(pressed(&harness), "{gesture}");
+        }
+        assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
+
+        // A tab click.
+        click_tab(&mut harness, "product.afs");
+        assert_eq!(active(&harness).as_deref(), Some(product.as_str()));
+        assert!(!pressed(&harness), "a tab click unpins");
+        choose(&mut harness, FOLLOW);
+        assert!(pressed(&harness));
+        assert_eq!(
+            active(&harness).as_deref(),
+            Some(scenario.as_str()),
+            "Follow goes to the agent's last change at once"
+        );
+
+        // A file activated in the explorer; the agent goes on meanwhile.
+        choose(&mut harness, "active-promotion.afs");
+        assert_eq!(active(&harness).as_deref(), Some(promotion.as_str()));
+        assert!(!pressed(&harness), "the explorer unpins");
+        agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        await_bar(&mut harness, "product.afs saved");
+        assert_eq!(
+            active(&harness).as_deref(),
+            Some(promotion.as_str()),
+            "unpinned, the window stays"
+        );
+        choose(&mut harness, FOLLOW);
+        assert!(pressed(&harness));
+        assert_eq!(active(&harness).as_deref(), Some(product.as_str()));
+
+        // Ctrl+Tab.
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Tab);
+        settle(&mut harness);
+        assert_ne!(active(&harness).as_deref(), Some(product.as_str()));
+        assert!(!pressed(&harness), "Ctrl+Tab unpins");
+        choose(&mut harness, FOLLOW);
+        assert!(pressed(&harness));
+        assert_eq!(active(&harness).as_deref(), Some(product.as_str()));
+
+        // Closing the followed tab.
+        choose(&mut harness, "Close product.afs");
+        assert!(!tabs(&harness).contains(&product));
+        assert!(!pressed(&harness), "closing the followed tab unpins");
+        choose(&mut harness, FOLLOW);
+        assert!(pressed(&harness));
+        assert_eq!(active(&harness).as_deref(), Some(product.as_str()));
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 9: the toggle is named *Follow the agent* with its on/off
+    /// state, Tab reaches it in the bar, Space works it, and it carries the
+    /// hover text of decision 5 in both states.
+    #[test]
+    fn mcp16_criterion_9_the_toggle_is_accessible() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        assert_eq!(
+            harness.get_by_label(FOLLOW).accesskit_node().role(),
+            egui::accesskit::Role::Button
+        );
+        assert!(pressed(&harness));
+        let bar = harness.get_by_label(BAR).rect();
+        assert!(bar.contains_rect(harness.get_by_label(FOLLOW).rect()));
+
+        let mut reached = false;
+        for _ in 0..120 {
+            harness.key_press(Key::Tab);
+            harness.step();
+            if harness.get_by_label(FOLLOW).accesskit_node().is_focused() {
+                reached = true;
+                break;
+            }
+        }
+        assert!(reached, "Tab reaches the toggle");
+        harness.key_press(Key::Space);
+        settle(&mut harness);
+        assert!(!pressed(&harness), "Space releases it");
+        harness.key_press(Key::Space);
+        settle(&mut harness);
+        assert!(pressed(&harness), "Space presses it again");
+
+        harness.get_by_label(FOLLOW).hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert!(has_label(&harness, PINNED_HINT), "the pressed hover text");
+        choose(&mut harness, FOLLOW);
+        assert!(!pressed(&harness));
+        harness.get_by_label(FOLLOW).hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert!(
+            has_label(&harness, RELEASED_HINT),
+            "the released hover text"
+        );
+        drop(harness);
+        drop(server);
+    }
+
+    /// The width `text` takes in the bar's font when it is not cut (as in
+    /// `mod mcp10`).
+    fn whole_width(harness: &FolderHarness, text: &str) -> f32 {
+        let job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(
+                egui::FontId::proportional(theme::FONT_META),
+                egui::Color32::WHITE,
+            ),
+        );
+        harness
+            .ctx
+            .fonts_mut(|fonts| fonts.layout_job(job))
+            .size()
+            .x
+    }
+
+    /// In every mode: the bar inside the window; `status`, *Follow* and
+    /// *Take back* whole, disjoint and in this order; the holder text
+    /// beside them.
+    fn assert_bar_fits(harness: &mut FolderHarness, status: &str) {
+        for view in MODES {
+            choose(harness, view);
+            assert_within_window(harness, &[BAR, status, FOLLOW, TAKE_BACK]);
+            let holder = label_containing(harness, "Claude Code");
+            assert_disjoint(harness, &[holder.as_str(), status, FOLLOW, TAKE_BACK]);
+            let rect = |label| harness.get_by_label(label).rect();
+            let shown = rect(status);
+            let whole = whole_width(harness, status);
+            assert!(
+                shown.width() + 1.0 >= whole,
+                "{view}: {status:?} is cut: {} of {whole} px",
+                shown.width()
+            );
+            assert!(
+                shown.right() <= rect(FOLLOW).left()
+                    && rect(FOLLOW).right() <= rect(TAKE_BACK).left(),
+                "{view}: the status, Follow, Take back, in this order"
+            );
+            let bar = rect(BAR);
+            for label in [status, FOLLOW, TAKE_BACK] {
+                assert!(bar.contains_rect(rect(label)), "{view}: {label} in the bar");
+            }
+        }
+    }
+
+    /// Criterion 10: at 960 × 540 in Code, Diagram and Split, with MCP-10's
+    /// status and with the last change, *Follow*, *Take back* and the text
+    /// beside them are whole and disjoint inside the window; the holder
+    /// text gives way.
+    #[test]
+    fn mcp16_criterion_10_the_bar_fits_at_the_minimum() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, MINIMUM);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "300")]);
+        observe(&mut harness, &mut server, "Written by the agent.");
+        await_bar(&mut harness, &format!("{AGENT} · since "));
+
+        let id = server.start_call("run", json!({ "path": SCENARIO }));
+        let running = "Agent: running promotion-and-cart-price.afs (simulation)…";
+        await_until(
+            &mut harness,
+            Instant::now(),
+            "the running line",
+            |harness| has_label(harness, running),
+        );
+        assert_bar_fits(&mut harness, running);
+        let holder = label_containing(&harness, "Claude Code");
+        assert!(
+            !holder.contains(PAUSED),
+            "the holder text gives way: {holder:?}"
+        );
+        answer(&mut harness, &mut server, id);
+        await_bar(&mut harness, " passed · ");
+        let passed = label_containing(&harness, " passed · ");
+        assert_bar_fits(&mut harness, &passed);
+
+        choose(&mut harness, FOLLOW);
+        agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        await_bar(&mut harness, "product.afs saved");
+        let saved = label_containing(&harness, "product.afs saved");
+        assert_bar_fits(&mut harness, &saved);
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 11: tabs that following opened stay when the agent
+    /// finishes and after *Take back*, and their documents are editable.
+    #[test]
+    fn mcp16_criterion_11_followed_tabs_stay() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let product = id_of(&harness, PRODUCT);
+        let promotion = id_of(&harness, PROMOTION);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        await_active(&mut harness, returned, &product, "the component");
+        let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+        assert_eq!(structured(&finished)["finished"], true, "{finished}");
+        await_writer(&mut harness);
+        assert!(
+            tabs(&harness).contains(&product),
+            "kept when the agent finishes"
+        );
+
+        observe(&mut harness, &mut server, "Written again.");
+        let returned = agent_notes(
+            &mut harness,
+            &mut server,
+            PROMOTION,
+            "Changed by the agent.",
+        );
+        await_active(&mut harness, returned, &promotion, "the other component");
+        choose(&mut harness, TAKE_BACK);
+        await_writer(&mut harness);
+        let open = tabs(&harness);
+        assert!(
+            open.contains(&product) && open.contains(&promotion),
+            "kept after Take back: {open:?}"
+        );
+        for document in [&promotion, &product] {
+            app(&mut harness).activate_tab(document);
+            settle(&mut harness);
+            let before = source_of(&harness, document);
+            let label = editor(&harness, document);
+            type_into(&mut harness, &label, "// typed\n");
+            assert_ne!(source_of(&harness, document), before, "editable");
+        }
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 12: the next agent session starts following again after
+    /// the person unpinned it in the previous one.
+    #[test]
+    fn mcp16_criterion_12_following_resets_per_observation() {
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let product = id_of(&harness, PRODUCT);
+        let mut server = agent(root, "Claude Code");
+        observe(&mut harness, &mut server, "Written by the agent.");
+        choose(&mut harness, FOLLOW);
+        assert!(!pressed(&harness));
+        let finished = call(&mut harness, &mut server, "finish_editing", json!({}));
+        assert_eq!(structured(&finished)["finished"], true, "{finished}");
+        await_writer(&mut harness);
+
+        observe(&mut harness, &mut server, "Written again.");
+        assert!(pressed(&harness), "a new observation follows");
+        let returned = agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");
+        await_active(&mut harness, returned, &product, "the component");
+        drop(harness);
+        drop(server);
+    }
+
+    /// The four states of the mock-up f1–f4 with a real agent: following
+    /// in Code with lines 12–14 changed and a run going, unpinned on another
+    /// tab, following in Diagram after a passed run, following in Split.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_mcp16_follow() {
+        use crate::testing::capture;
+        let states = [
+            ("mcp16-f1-following-code-960x540", MINIMUM, "Code"),
+            ("mcp16-f2-unpinned-code-960x540", MINIMUM, "Code"),
+            ("mcp16-f3-following-diagram-1600x1000", WIDE, "Diagram"),
+            ("mcp16-f4-following-split-960x540", MINIMUM, "Split"),
+        ];
+        for (name, size, view) in states {
+            let directory = shop();
+            let root = directory.path();
+            let mut harness = folder_harness(root, size);
+            await_endpoint(&mut harness, root, HolderRole::Window);
+            let scenario = id_of(&harness, SCENARIO);
+            let product = id_of(&harness, PRODUCT);
+            app(&mut harness).activate_tab(&product);
+            settle(&mut harness);
+            app(&mut harness).activate_tab(&scenario);
+            choose(&mut harness, view);
+            let mut server = agent_with(root, "Claude Code", &[(STEP_DELAY, "400")]);
+            let (text, _) = read(&mut server, SCENARIO);
+            let changed = text
+                .replacen(
+                    "@label(\"Promotional price\")",
+                    "@label(\"Promotional total\")",
+                    1,
+                )
+                .replacen("within 0.005", "within 0.01", 1)
+                .replacen(
+                    "@label(\"Field inna_nazwa\")",
+                    "@label(\"Field present\")",
+                    1,
+                );
+            assert_eq!(line_of(&changed, "Promotional total"), 12);
+            assert_eq!(line_of(&changed, "Field present"), 14);
+            let answer = write(&mut harness, &mut server, SCENARIO, &changed);
+            assert_eq!(structured(&answer)["wrote"], true, "{answer}");
+            await_until(
+                &mut harness,
+                Instant::now(),
+                "the agent's save",
+                |harness| source_of(harness, &scenario) == changed,
+            );
+            await_bar(&mut harness, &format!("{AGENT} · since "));
+            match name {
+                "mcp16-f2-unpinned-code-960x540" => {
+                    choose(&mut harness, FOLLOW);
+                    click_tab(&mut harness, "product.afs");
+                }
+                "mcp16-f3-following-diagram-1600x1000" => {
+                    call(
+                        &mut harness,
+                        &mut server,
+                        "run",
+                        json!({ "path": SCENARIO }),
+                    );
+                    await_bar(&mut harness, " passed · ");
+                }
+                _ => {
+                    server.start_call("run", json!({ "path": SCENARIO }));
+                    await_bar(&mut harness, "Agent: running ");
+                }
+            }
+            harness.hover_at(egui::pos2(1.0, 1.0));
+            settle(&mut harness);
+            capture(&mut harness, name, None);
             drop(harness);
             drop(server);
         }

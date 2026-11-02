@@ -47,9 +47,11 @@ Not applicable: no interface change.
    session's own message (`invalid_text`, `not_a_component`,
    `invalid_checkpoint`) and write nothing.
 6. `request_id`: a second `publish` with a `request_id` the server has
-   already answered returns the recorded result and creates no revision; a
-   fresh server does not remember it (the overview's hashes are the way to
-   tell).
+   already answered returns the recorded result and creates no revision.
+   Amended by [MCP-05b](MCP-05b.md) (owner decision of 2026-10-28 on #121):
+   the id is kept in `.apiforge/local/agent-requests.json`, so a restarted
+   server answers it from the record too, or with `unknown_outcome` when the
+   earlier server did not record how the publication ended.
 7. The agent-session rules of MCP-04 apply: refused with the holder while a
    window or another process holds the project; the lock stays with the
    session afterwards.

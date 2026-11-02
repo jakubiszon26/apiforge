@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=API Forge
+Comment=Visual REST API regression tests
+Exec=apiforge-desktop
+Icon=apiforge
+Terminal=false
+Categories=Development;
+StartupWMClass=apiforge

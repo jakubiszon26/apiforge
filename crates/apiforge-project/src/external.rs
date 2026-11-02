@@ -9,7 +9,7 @@ use apiforge_storage::project::{
     FileState, Holder, MANIFEST_PATH, MAX_SOURCE_BYTES, ProjectChange, ProjectError,
     ProjectManifest, ProjectPath, ProjectStore, TreeScan,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 
 /// Why a document's unsaved work cannot follow the disk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +82,9 @@ pub struct CommitChange {
     /// The document concerned; `None` for the project's settings.
     pub document_id: Option<String>,
     pub kind: CommitChangeKind,
+    /// For a saved source, the lines of the new text that differ from the
+    /// old, counted from zero (MCP-16); `None` for any other change.
+    pub lines: Option<Range<usize>>,
 }
 
 /// What an observer's check did about the holder's commit.
@@ -456,11 +459,12 @@ impl ProjectSession {
     /// first, then registrations, sources and layouts, then settings.
     fn commit_changes(&self, before: &Self) -> Vec<CommitChange> {
         let mut followed = Vec::new();
-        let mut change = |path: &ProjectPath, id: &str, kind| {
+        let mut change = |path: &ProjectPath, id: &str, kind, lines| {
             followed.push(CommitChange {
                 path: path.as_str().to_owned(),
                 document_id: Some(id.to_owned()),
                 kind,
+                lines,
             })
         };
         for revision in &self.manifest.revisions {
@@ -474,11 +478,13 @@ impl ProjectSession {
                         &document.entry.path,
                         &document.entry.document_id,
                         CommitChangeKind::Published,
+                        None,
                     ),
                     None => change(
                         &revision.path,
                         &revision.component_id,
                         CommitChangeKind::Published,
+                        None,
                     ),
                 }
             }
@@ -499,14 +505,19 @@ impl ProjectSession {
         for document in &self.documents {
             let id = &document.entry.document_id;
             match before.document(id) {
-                None => change(&document.entry.path, id, CommitChangeKind::Added),
+                None => change(&document.entry.path, id, CommitChangeKind::Added, None),
                 Some(old)
                     if old.saved != document.saved || old.entry.path != document.entry.path =>
                 {
-                    change(&document.entry.path, id, CommitChangeKind::Saved)
+                    change(
+                        &document.entry.path,
+                        id,
+                        CommitChangeKind::Saved,
+                        changed_lines(old.text(), document.text()),
+                    )
                 }
                 Some(_) if record(before, id) != record(self, id) => {
-                    change(&document.entry.path, id, CommitChangeKind::Layout)
+                    change(&document.entry.path, id, CommitChangeKind::Layout, None)
                 }
                 Some(_) => {}
             }
@@ -517,6 +528,7 @@ impl ProjectSession {
                     &document.entry.path,
                     &document.entry.document_id,
                     CommitChangeKind::Deleted,
+                    None,
                 );
             }
         }
@@ -530,6 +542,7 @@ impl ProjectSession {
                 path: MANIFEST_PATH.to_owned(),
                 document_id: None,
                 kind: CommitChangeKind::Settings,
+                lines: None,
             });
         }
         followed.sort_by_key(|change| change.kind as u8);
@@ -832,5 +845,65 @@ impl ProjectSession {
             let _ = self.save_recovery();
         }
         Ok(ids)
+    }
+}
+
+/// The lines of `after` that differ from `before`, counted from zero:
+/// whatever lies between the lines the two texts share at their start and
+/// at their end (MCP-16). A removal marks the line now where the removed
+/// lines were; an unchanged text marks nothing. One pass over each text.
+fn changed_lines(before: &str, after: &str) -> Option<Range<usize>> {
+    if before == after {
+        return None;
+    }
+    let old: Vec<&str> = before.split_inclusive('\n').collect();
+    let new: Vec<&str> = after.split_inclusive('\n').collect();
+    let start = old
+        .iter()
+        .zip(&new)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let room = old.len().min(new.len()) - start;
+    let shared_end = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(room)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let end = new.len() - shared_end;
+    if end > start {
+        Some(start..end)
+    } else {
+        let at = start.min(new.len().saturating_sub(1));
+        Some(at..at + 1)
+    }
+}
+
+#[cfg(test)]
+mod changed_lines_tests {
+    use super::changed_lines;
+
+    #[test]
+    fn the_changed_lines_are_between_the_shared_start_and_end() {
+        let before = "a\nb\nc\nd\n";
+        assert_eq!(changed_lines(before, before), None);
+        assert_eq!(changed_lines(before, "a\nB\nc\nd\n"), Some(1..2));
+        assert_eq!(changed_lines(before, "a\nB\nC\nd\n"), Some(1..3));
+        assert_eq!(changed_lines(before, "a\nb\nx\ny\nc\nd\n"), Some(2..4));
+        assert_eq!(changed_lines(before, "a\nd\n"), Some(1..2), "a removal");
+        assert_eq!(
+            changed_lines(before, "a\nb\nc\n"),
+            Some(2..3),
+            "the end removed"
+        );
+        assert_eq!(changed_lines(before, "a\nb\nc\nd\ne\n"), Some(4..5));
+        assert_eq!(changed_lines(before, ""), Some(0..1));
+        assert_eq!(changed_lines("a\na\n", "a\na\na\n"), Some(2..3));
+        assert_eq!(
+            changed_lines("x", "x\ny"),
+            Some(0..2),
+            "a line that gained its end"
+        );
     }
 }

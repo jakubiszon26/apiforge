@@ -1,0 +1,49 @@
+== Scenario 1: a window holds the project and names its endpoint; nothing has connected
+-- window: holds the project; holder.json = {"version":1,"program":"apiforge","role":"window","client":null,"since":"2026-11-02T10:18:36Z","endpoint":"apiforge-d070fe876af14636852e64dd6c3029f4"}
+-- start: apiforge mcp --folder <demo shop>
+<< initialize: instructions, the live sentence: ...unless you ask for live: true and the person allowed live requests (project_overview.live_requests; allowed is null while an API Forge window holding the project decides, asked when the live run starts).
+>> {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+<< tools/list: project_overview outputSchema live_requests = {"type":"object","properties":{"allowed":{"description":"Whether a live run may send now; null while a window holding the\nproject decides when the run starts.","type":["boolean","null"]},"source":{"description":"Why live requests are allowed or not.","type":"string"}},"required":["allowed","source"]}
+<< tools/list: project_overview description, from "whether live requests": whether live requests are allowed (live_requests: allowed true or false with its source; null while a window holding the project decides, asked when a live run starts, since the overview never connects), and the version of the language reference. Reads the saved project; writes nothing.
+>> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="window" holder_details.role="window" hands_over_on_write=true live_requests={"allowed":null,"source":"window setting, asked when the run starts"}
+-- end of stdin: exit Some(0) after 10 ms
+-- window: connections accepted during the session: 0
+-- project folder byte-identical: true
+-- window: closed, and its channel with it
+-- window: holds the project; holder.json = {"version":1,"program":"apiforge","role":"window","client":null,"since":"2026-11-02T10:18:37Z","endpoint":"apiforge-55484322ae204d929de92e110f1ee8f7"}
+-- start: apiforge mcp --folder <demo shop> --allow-live
+>> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="window" holder_details.role="window" hands_over_on_write=true live_requests={"allowed":null,"source":"window setting, asked when the run starts"}
+-- end of stdin: exit Some(0) after 10 ms
+-- window: connections accepted during the session: 0
+-- project folder byte-identical: true
+-- window: closed, and its channel with it
+
+== Scenario 2: the window grants the first write and says permission { live: true }; then it closes
+-- start: apiforge mcp --folder <demo shop>
+>> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="window" holder_details.role="window" hands_over_on_write=true live_requests={"allowed":null,"source":"window setting, asked when the run starts"}
+>> {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_document","arguments":{"kind":"scenario","path":"scenarios/mcp18.afs","text":"scenario \"MCP-18\" {\n}\n"}}}
+-- window: accepted a connection
+-- window: said permission { live: true }
+-- window: heard Request { client: Some("mcp18-qa"), pid: 701251, role: None }
+-- window: let the project go and said granted
+<< create_document: wrote=true
+>> {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="agent_session" holder_details.role="agent" hands_over_on_write=false live_requests={"allowed":true,"source":"window setting"}
+apiforge mcp: channel: a window disconnected
+-- window: closed, and its channel with it
+>> {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="agent_session" holder_details.role="agent" hands_over_on_write=false live_requests={"allowed":false,"source":"no --allow-live"}
+-- end of stdin: exit Some(0) after 10 ms
+
+== Scenario 3: no holder
+-- start: apiforge mcp --folder <demo shop>
+>> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="none" holder_details.role=null hands_over_on_write=false live_requests={"allowed":false,"source":"no --allow-live"}
+-- end of stdin: exit Some(0) after 10 ms
+-- start: apiforge mcp --folder <demo shop> --allow-live
+>> {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project_overview","arguments":{}}}
+<< project_overview: holder="none" holder_details.role=null hands_over_on_write=false live_requests={"allowed":true,"source":"--allow-live"}
+-- end of stdin: exit Some(0) after 10 ms

@@ -318,3 +318,26 @@ fn the_window_and_the_cli_execute_the_same_snapshot_of_a_saved_project() {
     assert_eq!(mine.scenario_id, theirs.scenario_id);
     assert_eq!(comparable(&mine), comparable(&theirs));
 }
+
+/// REL-01 (#115), criterion 5: `apiforge --version` prints the binary's name
+/// and the workspace version, which the release workflow compares with the tag.
+#[test]
+fn rel_01_version_prints_the_name_and_the_workspace_version() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert_eq!(
+        stdout(&output),
+        format!("apiforge {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
+
+    // Like --help, it is an argument of its own.
+    let extra = std::process::Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .args(["--version", "fixtures/workspace.json"])
+        .output()
+        .unwrap();
+    assert_eq!(extra.status.code(), Some(2), "{extra:?}");
+    assert!(extra.stdout.is_empty(), "{extra:?}");
+}

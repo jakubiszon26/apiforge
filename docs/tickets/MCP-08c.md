@@ -3,7 +3,7 @@
 - Size: S · Owner review: 15 min · Risk: `visible UI`
 - State: Backlog (issue #92) · MCP-00 decision 13 = A taken 2026-10-27 ·
   mock-up M2 approved 2026-10-27 · after MCP-08b
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 - Analysis: [MCP-00](MCP-00.md)
 
 ## Goal

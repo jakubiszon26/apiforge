@@ -134,6 +134,14 @@ project step captures the migrated demo shop in Code, Diagram and Split at
 960 × 540 and 1600 × 1000 and uploads them as `qa-captures-<os>` for QA reports
 ([testing](process/testing.md#how-to-fetch-windows-captures-for-a-qa-report)).
 
+Linux acceptance tests also require `/run/user/<runner uid>` to exist and
+belong to the runner with private access. CI provisions it before the suite
+when absent; production discovery never creates it. The MCP-12 tests isolate
+window and server environments in subprocesses, with the window listening
+there and the server lacking XDG and using another TMPDIR. Windows runs the
+same handshake with the server environment cleared except PATH/SystemRoot
+(and the test helper's explicit control inputs).
+
 On Linux each probe gets a fresh 1920 × 1200 Xvfb display and Mesa's Lavapipe Vulkan
 driver; a missing driver fails the job instead of selecting another backend. On Windows
 the DX12 backend is used. Each probe is limited to 45 seconds and must exit
@@ -145,6 +153,102 @@ The Linux probe needs the runtime library `libxkbcommon-x11-0`, which winit load
 under X11 and `libxkbcommon-dev` does not pull in; the root `.gitattributes` keeps
 every `.json` and `.afs` file at LF on checkout, so the byte-for-byte fixture check
 also passes on Windows.
+
+## Releases
+
+A release is a GitHub pre-release built by
+[`release.yml`](../.github/workflows/release.yml) from a pushed tag
+([REL-01](tickets/REL-01.md)). Nothing else starts that workflow. To release
+the workspace version, tag a commit that is on `main`:
+
+```bash
+git tag v0.1.0 origin/main && git push origin v0.1.0
+```
+
+A tag `v<version>-rc.<N>` releases the same version as a dry run. The workflow
+stops before building unless the tag, with any `-rc.N` suffix removed, equals
+`v` followed by the `version` of `[workspace.package]` in `Cargo.toml`; its
+publish job refuses a tagged commit that is not on `main`. Then:
+
+1. On `ubuntu-22.04` (glibc 2.35) and `windows-2022` it runs the workspace
+   tests, builds both binaries in release mode, packs
+   `apiforge-<tag>-x86_64-unknown-linux-gnu.tar.gz` and
+   `apiforge-<tag>-x86_64-pc-windows-msvc.zip`, compares each with
+   `packaging/manifest-linux.txt` or `manifest-windows.txt`, and runs
+   `packaging/mcp-smoke.py` against the `apiforge` binary of the extracted
+   archive: `initialize`, `tools/list` with the tools of
+   `crates/apiforge-cli/tests/mcp.rs`, exit 0 at EOF.
+2. On Linux it builds `apiforge-desktop-<tag>-x86_64.AppImage` from an
+   `AppDir` with `packaging/AppRun`, `packaging/apiforge.desktop`, the icon,
+   `LICENSE`, the font licences and the libraries of
+   `packaging/appimage-libraries.txt`, which the binary finds through its
+   RUNPATH (`patchelf`); the AppImage does not set `LD_LIBRARY_PATH`.
+   Packed by appimagetool 1.9.1 with the type2 runtime 20251108; both are
+   downloaded by their release URLs and checked against the SHA-256 in the
+   workflow.
+3. On `ubuntu-24.04` it starts the AppImage with `--version`, `--check` and
+   `--screenshot` (`packaging/appimage-window.sh`), once on the runner and
+   once in a bare `ubuntu:24.04` container with only `libfuse2t64`, `xvfb`,
+   `mesa-vulkan-drivers` and `libvulkan1`, and validates its desktop file.
+4. Only when every job above has passed, the publish job writes
+   `SHA256SUMS.txt`, checks that the four asset names carry the tag, and
+   creates the pre-release with notes generated from the merged pull
+   requests, followed by the sums. It is the only job with write
+   permission.
+
+Every package carries `licenses/THIRD-PARTY-NOTICES.md`
+([REL-03](tickets/REL-03.md)): each licence text once, with the crates it
+covers and their versions, and the fonts egui embeds. cargo-about 0.9.2
+generates it from [`about.toml`](../about.toml) and
+[`packaging/about.hbs`](../packaging/about.hbs), once in the release's first
+job, and every push generates it again on Linux in `rust.yml`; both download
+the prebuilt `x86_64-unknown-linux-musl` release and check it against the
+SHA-256 in the workflow. `release.py check-notices` then fails unless the file
+names every non-workspace crate that `cargo tree` lists for the two binaries on
+Linux and Windows, and the four egui fonts with their texts. The AppImage also
+carries `licenses/appimage-libraries/<library>.copyright`, Ubuntu's copyright
+file of each library it ships. To regenerate locally
+(`cargo install cargo-about --version =0.9.2 --locked --features cli`):
+
+```bash
+set -o pipefail
+cargo about generate --locked --workspace --fail -o THIRD-PARTY-NOTICES.md packaging/about.hbs
+for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+  cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
+    -p apiforge-desktop -p apiforge-cli
+done | python3 -I packaging/release.py check-notices THIRD-PARTY-NOTICES.md
+```
+
+A new dependency whose licence `about.toml` does not accept fails CI. A licence
+is added to `accepted` only once it is known to be compatible with
+GPL-3.0-or-later, in the place that decides which of a crate's alternatives is
+listed: a crate offering a choice is listed under the first accepted licence it
+offers. A crate whose licence files cargo-about cannot read gets a `clarify`
+entry with the files and their SHA-256, as `epaint_default_fonts` has. When a
+new version changes those files, cargo-about only warns `failed to validate`;
+both workflows fail on that warning until the entry is updated.
+
+A failed job publishes nothing; delete the tag, fix, and tag again. Changes to
+`packaging/` run `python3 -I packaging/test_release.py`, which the workflow
+also runs first.
+
+The application icon is `packaging/icon/apiforge.svg`. Its PNGs are rendered
+once and committed, so no build needs an SVG renderer: resvg 0.48.1
+(`cargo install resvg --version =0.48.1 --locked`), with the bundled Adwaita
+Mono as its only font so that the result does not depend on the fonts
+installed:
+
+```bash
+for size in 16 32 48 64 128 256 512; do
+  resvg --skip-system-fonts \
+    --use-font-file crates/apiforge-desktop/assets/fonts/AdwaitaMono-Regular.ttf \
+    --monospace-family 'Adwaita Mono' -w "$size" -h "$size" \
+    packaging/icon/apiforge.svg "packaging/icon/apiforge-$size.png"
+done
+```
+
+The window carries the 256 px image on Linux; the AppImage uses it for its
+launcher entry.
 
 ## Running a scenario from the command line
 
@@ -175,7 +279,27 @@ calls must name `Handle@revision(...)`. `run` selects a scenario by registered p
 or entity ID, and supports `--live`, `--secrets` and `--json` as in JSON mode.
 Only the selected scenario and its exact dependencies enter its snapshot; another
 invalid scenario does not block it. Live runs require the writer lock and keep
-their journal under `.apiforge/local/`. Check, print and simulations use stable
+their journal under `.apiforge/local/`. With the project open in an API Forge
+window, a live run asks that window for it over the control channel, as the MCP
+server does (MCP-15, [The window and the agent](#the-window-and-the-agent)): a
+clean window hands it over at once and stderr says *The open API Forge window
+handed the project over for this run*; a window with unsaved work asks the person,
+and the command waits as long as that takes, saying once after two seconds *Waiting
+for the API Forge window to answer* (Ctrl+C
+gives up with nothing sent, and the window's prompt closes). *Not now* ends it with exit code 1 and *The window
+kept the project (you chose to keep editing); nothing was sent*. The run sends and
+journals as without a window; at its end, whatever the end, the command lets the
+project go and the window is the writer again. Any other holder is refused by name
+with exit code 1 and nothing sent: an agent session (*Claude Code via apiforge mcp
+has held this project since 10:42; nothing was sent. Run again when it has finished
+editing*; its server is not asked), another command, a window without a channel or
+one that cannot be reached (*… could not be asked; nothing was sent. Close the
+project there or update API Forge, then run again*, with MCP-12's Windows/WSL
+sentence under `/mnt/<drive>/`). The person's `--live` is the live consent: the
+window's *Allow the MCP agent to send live requests* governs the agent only. While
+it holds the project the command names itself `run --live` in the holder file and
+listens on no endpoint. A simulation never asks a window and takes no lock;
+`apply` keeps refusing while another writer holds the project. Check, print and simulations use stable
 read-only loads without creating local metadata. All folder CLI commands ignore
 local recovery and last-valid cache, and fail on invalid saved definitions.
 
@@ -243,19 +367,20 @@ Claude Code shows the tools as `mcp__apiforge__<tool>` in `/mcp`.
 Each tool names a document by its registered path; `check_text` and
 `create_document` also take the path a new document would have. A read tool
 opens the saved project read-only for each call and writes nothing, not even
-`.apiforge/local`; the three write tools work through the agent session below.
+`.apiforge/local`; the four write tools work through the agent session below.
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `live_requests` (`allowed` and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
 | `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
-| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `replayed` for a repeated `request_id`; with `full: true` the runner's JSON report instead of the steps |
+| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `journal_unreadable`, `replayed` (`true` for a repeated `request_id`); `replayed` and `journal_unreadable` are always sent, as is `may_have_reached_api` on every compact step, `false` included; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
+| `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote`, `changed`, `replayed` |
 | `finish_editing` | — | `finished`: whether an agent session ended and released the project |
 
 `check_text` checks a proposed text without saving it, while `run` executes
@@ -293,14 +418,16 @@ Three environment variables are test seams for this and are not set in use:
 `APIFORGE_MCP_TEST_DEADLINE_MS` shortens the deadline,
 `APIFORGE_MCP_TEST_STEP_DELAY_MS` pauses after every step of a run and
 `APIFORGE_MCP_TEST_CLEANUP_DELAY_MS` after every step once a run is
-stopping, so that its cleanup outlasts the end of stdin. Each is whole
+stopping, so that its cleanup outlasts the end of stdin; with the step
+delay and no cleanup delay a stopping run pauses 50 ms per step, so a
+cancellation is not outrun by its remaining steps. Each is whole
 milliseconds, capped at ten minutes; any other value stops the server with
 exit code 2.
 
 ### The agent session
 
-The first call of `write_source` or `create_document` takes the project's
-writer lock for an agent session
+The first call of `write_source`, `create_document` or `publish` takes the
+project's writer lock for an agent session
 ([ADR 0014](decisions/0014-agent-sessions.md)): the holder file names role
 `agent` and the client's name from `initialize` or the request metadata, and
 a window opened meanwhile observes. The server keeps the lock across calls,
@@ -308,6 +435,22 @@ however long the pause, until `finish_editing`, the end of stdin or the end of
 the process; a later write starts a new session. `project_overview` reports
 this server's own session as `holder: "agent_session"`. Each write reads the
 saved project afresh under that lock.
+
+`project_overview.holder` is a string: `none`, `window`, `another_process`,
+or `agent_session` for this server's active session only. `holder_details` is
+null for no holder or an unreadable description; otherwise it has the same
+`role`, `client` and `since` as write refusals. Foreign agents remain
+`another_process`. `hands_over_on_write` is true only when a live window
+advertises a syntactically valid endpoint. It means a write may request
+hand-over: overview never connects, takes the lock or reads a foreign journal,
+and cannot promise a grant from an unreachable, busy or dirty window. First
+live runs may also request hand-over, only with the existing live permission.
+
+MCP-12 extends the prerelease output schema's holder values with `window` and
+adds those two required fields; old typed clients with a closed holder enum
+may need updating. `tools/list` publishes the exact schema. The crate version
+still supplies `serverInfo.version` and `server_version`; transport protocol,
+language-reference and local holder/channel versions retain their purposes.
 
 - `write_source` saves only a text without errors (`invalid_text` with the
   diagnostics otherwise; warnings are saved) and only over the version the
@@ -326,13 +469,47 @@ saved project afresh under that lock.
   `handle_exists`, `path_rejected` or `invalid_text` (a header of another
   kind, or errors, with the diagnostics). The source, its registry entry and
   its checkpoint commit in one transaction, one generation.
+- `publish` publishes the saved working component, never a text in the
+  call: the same transaction as *Publish* in the window writes
+  `.apiforge/revisions/<component id>/<n>.afs` with the next unused `n`, its
+  registry entry and checkpoint, and advances the working document's base
+  revision; nothing existing is overwritten. A different hash on disk is
+  `stale_source` with the current `details.source_sha256`; a scenario is
+  `not_a_component`; a component with errors `invalid_text` with the
+  diagnostics, one over 1 MiB `too_large`; an unreadable checkpoint
+  `invalid_checkpoint`; a saved
+  component holding a known secret value `secret_in_source`. Canonical
+  printing drops a comment that belongs to no statement, so such a
+  component is `comments_would_be_lost` with `details.comments` (line,
+  column, text) until the model calls again with `accept_comment_loss: true`
+  and the same hash; the consent holds for that call and that hash only.
+- A `publish` with a `request_id` is answered from the record of request
+  ids (below), by this server or by one started later for the same folder:
+  an id that published returns the recorded result with `replayed: true`
+  and publishes nothing; the same id for another path or hash is
+  `invalid_inputs`. The id is written to the record, with the path, the
+  expected hash and the time, before the transaction starts, and the result
+  right after the commit; a server that finds an entry without a result (an
+  earlier one stopped between the two, or its commit failed after the
+  activation) answers `unknown_outcome` with the entry's `path`,
+  `expected_source_sha256` and `started_at`, and writes nothing —
+  `project_overview` lists every revision with its `source_sha256`, which
+  tells whether that publication happened. A refusal before the commit
+  leaves no entry, so the same id publishes once the cause is fixed (should
+  the record fail to be rewritten at that moment, the entry stays and the id
+  answers `unknown_outcome`, never a second revision). As for
+  a live run, an id is at most 256 bytes (`too_large`) and never a known
+  secret value (`secret_in_text`); a replay takes the project for the agent
+  session, as a publication does.
 - A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
   each call) is `secret_in_text`, the value never repeated.
-- While a window holds the project the write asks it to hand the project
-  over (below). A window with unsaved work keeps it: `handover_refused` with
+- While a window holds the project the write, `publish` included, asks it
+  to hand the project over (below). A window with unsaved work keeps it: `handover_refused` with
   `details.reason` *the window has unsaved work*. A window that has not
   answered within 30 seconds is `handover_pending`, and a window without a
-  channel (an older build) is `held_by_window`. Another process, an agent or
+  channel (an older build), or one that could not be reached, is `held_by_window`.
+  The refusal keeps reading available and does not ask to close the window.
+  Another process, an agent or
   `apiforge apply`, is `held_by_other`. The message and `details.holder` name
   the holder and since when; nothing is written; the read tools still
   answer.
@@ -358,6 +535,29 @@ newline-delimited JSON with `version: 1`; a line that is not one is ignored
 and logged on stderr (`apiforge mcp: channel: …` in the server,
 `apiforge: channel: …` in the window).
 
+On Unix a client checks existing candidates in order: absolute
+`XDG_RUNTIME_DIR`, `/run/user/<uid>`, `temp_dir()`, `/tmp`, deduplicated and
+bounded by the socket path limit. The uid comes from the metadata of the same
+opened holder file whose description was read, never an environment variable
+or serialized field. Both MCP hand-over and the desktop observer use this
+rule. Only an existing socket and its endpoint directory owned by that uid,
+with no group/world access and neither node a symlink, qualify. Discovery
+changes nothing on disk. It skips absent/unsafe candidates, selects the first
+valid socket and attempts that connection once; failure never replays the
+request against another candidate. Missing owner metadata fails conservatively.
+These checks narrow ordinary filesystem races; same-user malicious processes
+are outside that guarantee. Listening locations, holder JSON and Windows
+named-pipe behaviour are unchanged.
+
+This bounded list cannot find arbitrary custom XDG or temporary directories
+when their environment values are missing or different. Use a shared approved
+candidate (normally `/run/user/<uid>` on Linux); no filesystem search is made.
+On Windows/WSL both processes must run on the same side. A failed connection
+to a live window on Linux `/mnt/<single ASCII letter>/…` adds a qualified
+same-side hint; this path is evidence of a possible mismatch, not proof of
+Windows ownership. Invisible cross-OS locks cannot be diagnosed here. A stale
+holder file never blocks a free lock, even on a mounted Windows drive.
+
 - **The window first.** The server's first write asks the window. A window
   with nothing unsaved and nothing in progress hands the project over at
   once, rereads it read-only where the person was, and observes; the write
@@ -374,10 +574,52 @@ and logged on stderr (`apiforge mcp: channel: …` in the server,
   *waiting for the agent's run to finish*), then ends the session; the
   window is the writer again within two seconds. The agent's next write asks
   again.
+- **The agent's runs** (MCP-10). The server tells every connected window
+  `run` when a run starts (`path`, `mode`, `state: running`) and when it
+  ends: `passed`, `failed` with the first step that did not pass (`step`,
+  numbered as `step_count` counts, and its `label`) or `cancelled`, each
+  with `step_count`. A window that connects during a run is told that it
+  runs. The bar shows it in place of the last change: *Agent: running
+  promotion-and-cart-price.afs (simulation)…*, then *Agent:
+  promotion-and-cart-price.afs passed · 18 steps · 12:58*, *… failed at
+  step 7 · Promotional price · 12:58* or *… cancelled · 12:58*; an ended
+  live run says *(live)* after the file's name. A commit after the run has
+  ended brings the last change back. The status is never cut at 960 × 540:
+  the holder's words shorten to *Claude Code · since 10:42*, whole on
+  hover. It goes when the session ends or the channel drops. The full
+  report stays in the agent's answer.
+- **Following the agent** (MCP-16). While the window observes, every commit
+  it follows brings it to the document the commit changed: a created one
+  opens at its top, a saved one shows its first changed line with the
+  changed lines marked in the gutter until the next commit to it, a
+  published component's tab comes to the front; the view (Code, Diagram,
+  Split), the camera and the selected block stay. A deleted document's tab
+  closes with a notice and the window stays where closing left it; the
+  settings alone and a run move nothing. *Follow* in the bottom bar, left of
+  *Take back*, is pressed while following; a tab click, a file opened from
+  the explorer, Ctrl+Tab or closing the followed tab releases it, and
+  pressing it again goes to the last change. Every observation starts
+  pressed; tabs following opened stay.
 - `finish_editing`, the end of stdin or the death of the server gives the
   project back the same way; a transaction the server left activated opens
   the window's recovery view. A window that closes while observing changes
   nothing for the server, which logs the lost channel on stderr.
+- **A command asks too** (MCP-15). `apiforge run --folder … --live` sends
+  `request { client: "run --live", role: "command" }` (the `role` field is
+  optional; absent means an agent, so the server's request is unchanged) and
+  waits for the answer without a time limit. The window treats it as an
+  agent's request with the command's words: a clean window hands over at
+  once; with unsaved work the prompt reads *A command asks for this project*
+  and *apiforge run --live wants to send live requests from this project.
+  Unsaved work here:*. While the command holds the project the bar reads
+  *apiforge run --live · since 10:42 · editing is paused here; this window
+  follows every change*, the badge *Observing*, and *Take back* is not
+  offered: a live run is never cut mid-way, so the window waits for its end.
+  The command tells the window `run { mode: live, state }` when the run
+  starts and ends, then `released` once its lock is free; a killed command
+  is taken back by the window's check, which reports the interrupted run as
+  at start. The `permission` a window says is ignored by the command, and an
+  agent session is never asked for a command.
 
 ### Live requests
 
@@ -388,12 +630,33 @@ allowed, and the model cannot allow them: the person starts the server with
 `claude mcp add apiforge -- /path/to/apiforge mcp --allow-live`. Without it a
 live run is `live_disabled` (*live requests are not enabled on this server*)
 and sends nothing. The server keeps the current permission in one slot:
-the flag while no window is connected; MCP-09 lets a connected window's
-per-project setting decide instead (*live requests are off in this project's
-settings*), and the flag applies again when the window goes.
+the flag while no window is connected; otherwise the connected windows'
+per-project setting, the newest one heard, off while a connected window has
+not said one yet (MCP-09, *live requests are off in this project's
+settings*); the flag applies again when the last window goes.
+
+**The window's setting.** *Project settings → Agent → Allow the MCP agent to
+send live requests* is the person's, per project and computer: off by
+default, kept in `agent-consent.json` beside `preferences.json` in the user's
+configuration directory by the manifest id (never in the project folder),
+enabled even while the window observes, applied at once without a save, and
+shown as *Live allowed* in the header while on. The window says it over the
+control channel as soon as a connection opens and on every change; no tool,
+resource or server message sets it. A live run that would ask a window for
+the project hears that window's setting first: when it is off the run is
+`live_disabled` and the window keeps the project, as when the window says
+nothing within two seconds. The window reads the file again once a second,
+so a change made in another window is followed. The overview never connects
+to a window: until one is connected it reports the flag, except while a window
+holding the project names a valid endpoint, when it says that window decides when
+the live run starts (MCP-18). The server
+tells connected windows `run { mode: live }` when a live run starts and ends,
+so a box unticked meanwhile says *A live run is in progress; it will finish.
+No new one starts.*
 `project_overview.live_requests` says `allowed` and its `source`
 (`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
-settings`). The permission is checked immediately before the run starts,
+settings`); `allowed` is `null`, with `window setting, asked when the run
+starts`, while that window has yet to be asked. The permission is checked immediately before the run starts,
 under the writer lock; a change after that does not stop the run, whose
 cleanup must finish.
 
@@ -437,13 +700,20 @@ its first request, the id, the path and the time are written atomically to
 is: machine-local, untracked, never part of the project's format. A new
 server that finds an id there answers `unknown_outcome` with the record's
 `path` and `started_at` and the journal's `interrupted` runs, and sends
-nothing; the model uses a new id to run again. The record keeps the 1 000
-most recent ids, the oldest dropped first, and an id is at most 256 bytes
-(`too_large`). A record that cannot be read (damaged, or written by a newer
-version) is never overwritten: every live run with a `request_id` is refused
-with `project_unreadable` naming the file until it is moved aside, because
-the server could not tell whether the id already ran; a live run without a
-`request_id` still works.
+nothing; the model uses a new id to run again. A `publish` with a
+`request_id` is recorded in the same file (MCP-05b), with its result once
+the commit is done, so a restarted server replays it (above); a live run's
+result stays in the server's memory only. Every entry has a `kind`,
+`liveRun` or `publish`, and the same id may name one of each. The record
+keeps the 1 000 most recent entries of both kinds, the oldest dropped
+first, and an id is at most 256 bytes (`too_large`); it holds ids, paths,
+hashes, times and a publication's result, never a secret value. A record
+that cannot be read (damaged, or written by a newer version) is never
+overwritten: every live run and every `publish` with a `request_id` is
+refused with `project_unreadable` naming the file until it is moved aside,
+because the server could not tell whether the id already ran; without a
+`request_id` both still work. A record written before MCP-05b (version 1,
+live runs only) is read, and written as version 2 on the next change.
 
 #### The four ends of a live run
 
@@ -484,11 +754,15 @@ unregistered path is `resource_not_found` with `data.code`
   not, since a live run sends requests and writes the journal: it is
   `destructiveHint: true`, `openWorldHint: true` and not idempotent;
   `write_source` is `destructiveHint: true` and `idempotentHint: true`,
-  `create_document` neither, `finish_editing` only idempotent. A result carries
+  `create_document` and `publish` neither, `finish_editing` only
+  idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
-- A call that could not do what was asked is `isError: true` with
-  `structuredContent` `{ code, message, wrote, details }`. The codes form a
-  fixed list: `not_a_project`, `project_unreadable`, `unknown_document`,
+- A call that could not do what was asked is `isError: true` with one text
+  block in `content` holding the pretty JSON `{ code, message, wrote,
+  details }`, and no `structuredContent`: each tool's `outputSchema`
+  describes its result only, and a client that validates whatever
+  `structuredContent` it receives would reject an error object there
+  (MCP-17). The codes form a fixed list: `not_a_project`, `project_unreadable`, `unknown_document`,
   `invalid_text`, `invalid_inputs`, `not_a_component`,
   `invalid_checkpoint`, `stale_source`, `stale_project`, `held_by_window`,
   `handover_pending`, `handover_refused`, `held_by_other`, `live_disabled`,
@@ -505,8 +779,11 @@ unregistered path is `resource_not_found` with `data.code`
   A live run adds `held_by_window`, `held_by_other` and `unknown_outcome`.
   The write tools add `stale_source`, `stale_project`, `held_by_window`,
   `handover_refused`, `handover_pending`, `held_by_other`, `secret_in_text`,
-  `path_exists`, `handle_exists` and `invalid_checkpoint`; `wrote` is `false` for a refusal and `"unknown"`
-  only for a commit that failed after its activation.
+  `path_exists`, `handle_exists` and `invalid_checkpoint`; `publish` also
+  `not_a_component`, `comments_would_be_lost`, `secret_in_source` and, for a
+  `request_id`, `invalid_inputs`, `too_large` and `unknown_outcome`; `wrote`
+  is `false` for a refusal and `"unknown"` only for a commit that failed
+  after its activation.
 - A path argument must pass `ProjectPath::working_source`: relative, portable,
   outside `.apiforge`, ending in `.afs`. `../x.afs`, an absolute path,
   `.apiforge/diagram.json` or a Windows reserved name is `path_rejected`.

@@ -18,7 +18,9 @@ mod diagram;
 mod dog;
 mod explorer;
 mod file_prompts;
+mod follow;
 mod handover;
+mod handover_prompt;
 mod holder;
 mod navigation;
 mod opening;
@@ -162,6 +164,13 @@ enum Prompt {
         kind: DocumentKind,
         error: Option<String>,
     },
+    /// An agent, or a command (MCP-15), asks for the project while this
+    /// window has unsaved work (MCP-08c); the list of that work is read from
+    /// the session every frame.
+    Handover {
+        client: Option<String>,
+        role: apiforge_storage::project::HolderRole,
+    },
 }
 
 /// An `.afs` file in a folder without a project, offered for registration.
@@ -297,9 +306,20 @@ pub struct FolderApp {
     take_back: holder::TakeBack,
     /// The control channel to an agent's server (MCP-08b).
     handover: handover::Handover,
+    /// The configuration as last saved, so the hand-over prompt can say
+    /// which setting is unsaved (MCP-08c).
+    saved_settings: Option<Box<apiforge_project::ProjectManifest>>,
     /// What the holder's last followed commit changed, with its time, for
     /// the bar (MCP-08a): *10:43 · promotion.afs saved*.
     last_change: Option<String>,
+    /// The person's consent to an agent's live requests, per project
+    /// (MCP-09).
+    consent: crate::consent::AgentConsent,
+    /// Following the holder's commits while observing (MCP-16).
+    follow: follow::Follow,
+    /// The document the code view drew last and the lines it showed whole.
+    #[cfg(test)]
+    lines_in_view: Option<(String, std::ops::RangeInclusive<usize>)>,
 }
 
 struct Clipboard {
@@ -446,7 +466,12 @@ impl FolderApp {
             holder: None,
             take_back: holder::TakeBack::default(),
             handover: handover::Handover::new(Some(context.clone())),
+            saved_settings: None,
             last_change: None,
+            consent: crate::consent::AgentConsent::load(),
+            follow: follow::Follow::default(),
+            #[cfg(test)]
+            lines_in_view: None,
         }
     }
 
@@ -511,6 +536,7 @@ impl FolderApp {
         self.reload_field_drafts();
         self.restore_text_tabs();
         self.remember_project();
+        self.say_consent();
         self.announce_endpoint();
     }
 
@@ -633,6 +659,33 @@ impl FolderApp {
         self.notify(text, false);
     }
 
+    /// The lines the agent's last commit changed in `document_id`, counted
+    /// from one, as the code's gutter marks them (MCP-16): a test seam.
+    #[cfg(test)]
+    pub(crate) fn changed_lines(
+        &self,
+        document_id: &str,
+    ) -> Option<std::ops::RangeInclusive<usize>> {
+        self.follow
+            .marks(document_id)
+            .map(|lines| lines.start + 1..=lines.end)
+    }
+
+    /// The document the code view drew last and the lines it showed whole,
+    /// counted from one (MCP-16): a test seam.
+    #[cfg(test)]
+    pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
+        self.lines_in_view.clone()
+    }
+
+    /// Keeps the person's per-project settings in `directory`, as
+    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
+    #[cfg(test)]
+    pub(crate) fn use_configuration_directory(&mut self, directory: &std::path::Path) {
+        self.consent = crate::consent::AgentConsent::in_configuration(directory);
+        self.say_consent();
+    }
+
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
@@ -672,6 +725,7 @@ impl FolderApp {
             self.follow_holder(probe);
         }
         self.follow_events();
+        self.track_observing();
         if let Some(changes) = outcome {
             self.storage_project(
                 "Checking external changes…",
@@ -1004,6 +1058,8 @@ impl FolderApp {
             return;
         };
         let followed = !outcome.followed.is_empty();
+        // The active document went with the commit (MCP-16).
+        let mut active_closed = false;
         if outcome.project_reloaded {
             let gone: Vec<String> = self
                 .workbench
@@ -1032,6 +1088,10 @@ impl FolderApp {
                 })
                 .map(|change| file_name(&change.path).to_owned())
                 .collect();
+            active_closed = self
+                .workbench
+                .active()
+                .is_some_and(|active| gone.iter().any(|id| id == active));
             for document_id in gone {
                 self.close_tab(&document_id);
             }
@@ -1065,6 +1125,8 @@ impl FolderApp {
         if followed {
             self.last_change = describe_commit(&outcome.followed)
                 .map(|text| format!("{} · {text}", chrono::Local::now().format("%H:%M")));
+            // To the document the holder changed, while following (MCP-16).
+            self.follow_commit(&outcome.followed, active_closed);
         }
         let name = |id: &String| {
             self.session
@@ -1121,6 +1183,7 @@ impl FolderApp {
         if self.library_room(context) && shortcut(Modifiers::COMMAND, Key::B) {
             self.toggle_library();
         }
+        let active = self.workbench.active().map(str::to_owned);
         if shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab) {
             self.workbench.cycle(false);
             self.activation_generation += 1;
@@ -1129,6 +1192,10 @@ impl FolderApp {
             self.workbench.cycle(true);
             self.activation_generation += 1;
             self.touched();
+        }
+        // Another tab by the person's hand lets following go (MCP-16).
+        if self.workbench.active() != active.as_deref() {
+            self.unpin();
         }
         if shortcut(Modifiers::COMMAND, Key::W)
             && let Some(active) = self.workbench.active().map(str::to_owned)
@@ -1404,6 +1471,11 @@ impl FolderApp {
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
+        // Closing the tab following brought the person to lets it go
+        // (MCP-16 decision 4).
+        if self.workbench.active() == Some(document_id) {
+            self.unpin();
+        }
         let unsaved = match self.text_of(document_id) {
             Some(path) => self
                 .session

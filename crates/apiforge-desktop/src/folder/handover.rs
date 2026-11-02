@@ -3,8 +3,9 @@
 //! While the window holds the project it listens on an endpoint named in its
 //! holder file. An agent's server that wants to write connects and asks; a
 //! clean window lets the project go at once and observes over the same
-//! connection (decision 11 A), a window with unsaved work refuses and says
-//! so in the bar. While the window observes an agent it keeps one
+//! connection (decision 11 A), a window with unsaved work asks the person
+//! (MCP-08c, `handover_prompt`) and says so in the bar when they keep
+//! editing. While the window observes an agent it keeps one
 //! connection to it: a `saved` makes it look at the folder at once rather
 //! than at the next check, `released` lets it take the project back, and
 //! *Take back* asks for it. The once-a-second check stays the fallback, and
@@ -13,18 +14,26 @@
 //! The listener and the connections live on one background thread with a
 //! current-thread runtime; the frame reads what they report, as it reads the
 //! watcher's results.
+//!
+//! The person's consent to the agent's live requests (MCP-09) is said on
+//! every connection as soon as it opens, from the channel's thread, and again
+//! on every change: a server learns it before it could start a live run. The
+//! window takes no consent from the other side.
 use super::*;
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Received, RunState, Writer};
+use apiforge_channel::{Asker, Connection, Endpoint, Listener, Message, Received, Writer};
 use apiforge_storage::project::{Holder, HolderRole};
 use std::{
     collections::HashMap,
-    sync::mpsc::{self, Sender},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Sender},
+    },
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The reason the window gives when it keeps the project for unsaved work;
 /// the server words its refusal from it.
-const UNSAVED_WORK: &str = "the window has unsaved work";
+pub(super) const UNSAVED_WORK: &str = "the window has unsaved work";
 /// How long after a failed connection to the holder the window tries again.
 const RECONNECT: Duration = Duration::from_secs(1);
 /// How long one message may take to reach the other side.
@@ -35,10 +44,12 @@ const GRANT: Duration = Duration::from_secs(10);
 
 /// What the channel's thread reports to the frame.
 enum Event {
-    /// A server asks for the project on connection `link`.
+    /// A server, or a command, asks for the project on connection `link`.
     Request {
         link: u64,
         client: Option<String>,
+        /// An agent, or a command such as `apiforge run --live` (MCP-15).
+        role: HolderRole,
     },
     Message {
         link: u64,
@@ -55,9 +66,20 @@ enum Event {
 }
 
 enum Command {
-    Send { link: u64, message: Message },
-    Connect { link: u64, endpoint: Endpoint },
-    Close { link: u64 },
+    Send {
+        link: u64,
+        message: Message,
+    },
+    Connect {
+        link: u64,
+        endpoint: Endpoint,
+        owner_uid: Option<u32>,
+    },
+    Close {
+        link: u64,
+    },
+    /// The person's consent changed: every connection is told.
+    Consent,
 }
 
 /// The listener and the connections, on their own thread.
@@ -66,6 +88,9 @@ pub(super) struct Channel {
     commands: UnboundedSender<Command>,
     events: Receiver<Event>,
     next: u64,
+    /// The person's consent to live requests in the open project, read by
+    /// the channel's thread when a connection opens.
+    consent: Arc<AtomicBool>,
 }
 
 impl Channel {
@@ -74,6 +99,7 @@ impl Channel {
     pub(super) fn start(repaint: Option<egui::Context>) -> Self {
         let (commands, receiver) = unbounded_channel();
         let (sender, events) = mpsc::channel();
+        let consent = Arc::new(AtomicBool::new(false));
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build();
@@ -94,10 +120,11 @@ impl Channel {
                         None
                     }
                 };
+                let said = consent.clone();
                 let spawned = std::thread::Builder::new()
                     .name("apiforge-channel".into())
                     .spawn(move || {
-                        runtime.block_on(serve(listener, receiver, sender, repaint));
+                        runtime.block_on(serve(listener, receiver, sender, repaint, said));
                     });
                 if spawned.is_err() {
                     eprintln!("apiforge: channel: cannot start its thread");
@@ -112,6 +139,15 @@ impl Channel {
             events,
             // Connections this window opens; accepted ones count from the top.
             next: 1,
+            consent,
+        }
+    }
+
+    /// The person's consent in the open project: every connection hears a
+    /// change at once, and a new one hears it when it opens.
+    pub(super) fn set_consent(&self, live: bool) {
+        if self.consent.swap(live, Ordering::AcqRel) != live {
+            let _ = self.commands.send(Command::Consent);
         }
     }
 
@@ -124,10 +160,14 @@ impl Channel {
         let _ = self.commands.send(Command::Send { link, message });
     }
 
-    fn connect(&mut self, endpoint: Endpoint) -> u64 {
+    fn connect(&mut self, endpoint: Endpoint, owner_uid: Option<u32>) -> u64 {
         let link = self.next;
         self.next += 1;
-        let _ = self.commands.send(Command::Connect { link, endpoint });
+        let _ = self.commands.send(Command::Connect {
+            link,
+            endpoint,
+            owner_uid,
+        });
         link
     }
 
@@ -148,7 +188,11 @@ async fn serve(
     mut commands: UnboundedReceiver<Command>,
     events: Sender<Event>,
     repaint: Option<egui::Context>,
+    consent: Arc<AtomicBool>,
 ) {
+    let said = || Message::Permission {
+        live: consent.load(Ordering::Acquire),
+    };
     let tell = move |event: Event| {
         let _ = events.send(event);
         if let Some(context) = &repaint {
@@ -161,10 +205,17 @@ async fn serve(
     loop {
         tokio::select! {
             connection = accept(&mut listener) => match connection {
-                Ok(connection) => {
+                Ok(mut connection) => {
                     accepted += 1;
-                    let reading = read(accepted, connection, &tell, &closed);
-                    open.insert(accepted, reading);
+                    // Said before anything else, so a server that asks for a
+                    // live run hears the consent first.
+                    if matches!(
+                        tokio::time::timeout(SEND, connection.writer.send(&said())).await,
+                        Ok(Ok(()))
+                    ) {
+                        let reading = read(accepted, connection, &tell, &closed);
+                        open.insert(accepted, reading);
+                    }
                 }
                 Err(error) => {
                     eprintln!("apiforge: channel: a connection failed: {}", error.kind());
@@ -187,8 +238,14 @@ async fn serve(
                         tell(Event::Closed { link });
                     }
                 }
-                Some(Command::Connect { link, endpoint }) => {
-                    match tokio::time::timeout(SEND, apiforge_channel::connect(&endpoint)).await {
+                Some(Command::Connect { link, endpoint, owner_uid }) => {
+                    let connected = tokio::time::timeout(SEND, async {
+                        let mut connection = apiforge_channel::connect(&endpoint, owner_uid).await?;
+                        connection.writer.send(&said()).await?;
+                        Ok::<_, std::io::Error>(connection)
+                    })
+                    .await;
+                    match connected {
                         Ok(Ok(connection)) => {
                             let reading = read(link, connection, &tell, &closed);
                             open.insert(link, reading);
@@ -203,6 +260,24 @@ async fn serve(
                 Some(Command::Close { link }) => {
                     if let Some(connection) = open.remove(&link) {
                         connection.reader.abort();
+                    }
+                }
+                Some(Command::Consent) => {
+                    let message = said();
+                    let mut failed = Vec::new();
+                    for (link, connection) in &mut open {
+                        if !matches!(
+                            tokio::time::timeout(SEND, connection.writer.send(&message)).await,
+                            Ok(Ok(()))
+                        ) {
+                            failed.push(*link);
+                        }
+                    }
+                    for link in failed {
+                        if let Some(connection) = open.remove(&link) {
+                            connection.reader.abort();
+                            tell(Event::Closed { link });
+                        }
                     }
                 }
             },
@@ -238,8 +313,12 @@ fn read(
     let reader = tokio::spawn(async move {
         loop {
             match reader.next().await {
-                Ok(Some(Received::Message(Message::Request { client, .. }))) => {
-                    tell(Event::Request { link, client });
+                Ok(Some(Received::Message(Message::Request { client, role, .. }))) => {
+                    let role = match role {
+                        Some(Asker::Command) => HolderRole::Command,
+                        Some(Asker::Agent) | None => HolderRole::Agent,
+                    };
+                    tell(Event::Request { link, client, role });
                 }
                 Ok(Some(Received::Message(message))) => tell(Event::Message { link, message }),
                 Ok(Some(Received::Ignored(why))) => {
@@ -256,13 +335,17 @@ fn read(
 /// Where the hand-over stands, for the frame.
 pub(super) struct Handover {
     pub(super) channel: Channel,
-    /// A request not answered yet: its connection and the agent's name.
-    pending: Option<(u64, Option<String>)>,
+    /// A request not answered yet: its connection, the asker's name and
+    /// whether it is an agent or a command.
+    pending: Option<(u64, Option<String>, HolderRole)>,
     /// The request whose release is on the storage worker, and whether its
     /// connection closed meanwhile: then nobody waits for the project.
     releasing: Option<(u64, bool)>,
-    /// The connection to the agent this window observes.
+    /// The connection to the agent, or the command, this window observes.
     link: Option<u64>,
+    /// Who is on `link`: a command's run is its own and *Take back* is not
+    /// offered for it (MCP-15 decision 1 A).
+    linked: Option<HolderRole>,
     /// A connection being opened to the holder's endpoint.
     connecting: Option<u64>,
     /// When the last connection to the holder failed.
@@ -278,11 +361,17 @@ pub(super) struct Handover {
     stale: bool,
     /// The person asked for the project back and waits for `released`.
     pub(super) taking_back: bool,
-    /// The holder's run is in progress, as its last `run` message said.
-    agent_running: bool,
+    /// The holder's run as its last `run` message said, for the bar's
+    /// status line (MCP-10); gone with the connection.
+    pub(super) run: Option<holder::AgentRun>,
     /// A request was refused for unsaved work: the bar says so until the
     /// work is saved.
     pub(super) refused: bool,
+    /// The person's answer in the hand-over prompt for a request that no
+    /// longer waits: the next request hears it once (MCP-08c).
+    declined: Option<String>,
+    /// *Save all and hand over* is saving: a request waits for it.
+    pub(super) saving: bool,
     /// For tests: when the window decided to hand the project over, whether
     /// a check was in flight when it granted, and when the agent first said
     /// it saved.
@@ -301,14 +390,17 @@ impl Handover {
             pending: None,
             releasing: None,
             link: None,
+            linked: None,
             connecting: None,
             failed_at: None,
             released: false,
             granted_at: None,
             stale: false,
             taking_back: false,
-            agent_running: false,
+            run: None,
             refused: false,
+            declined: None,
+            saving: false,
             #[cfg(test)]
             decided: None,
             #[cfg(test)]
@@ -316,6 +408,18 @@ impl Handover {
             #[cfg(test)]
             first_saved: None,
         }
+    }
+
+    /// For tests: a request waits for an answer.
+    #[cfg(test)]
+    pub(super) fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// For tests: an answer waits for the next agent request.
+    #[cfg(test)]
+    pub(super) fn has_declined(&self) -> bool {
+        self.declined.is_some()
     }
 
     /// The holder this window observes over a connection, so *Take back*
@@ -333,10 +437,11 @@ impl Handover {
                 .is_some_and(|granted| granted.elapsed() < GRANT)
     }
 
-    /// A check named the holder: an agent that was granted the project has
-    /// taken it, and a connection to the holder may be opened again.
+    /// A check named the holder: an agent or a command that was granted the
+    /// project has taken it, and a connection to the holder may be opened
+    /// again.
     pub(super) fn holder_seen(&mut self, holder: &Holder) {
-        if holder.role() == Some(HolderRole::Agent) {
+        if matches!(holder.role(), Some(HolderRole::Agent | HolderRole::Command)) {
             self.granted_at = None;
         }
         self.stale = false;
@@ -347,7 +452,7 @@ impl Handover {
         self.released = true;
         self.granted_at = None;
         self.stale = true;
-        self.agent_running = false;
+        self.run = None;
         // The take-back asked for is answered. Should the agent hold the
         // project again before the window takes it, *Take back* is offered
         // anew rather than left waiting for an answer that has come.
@@ -356,13 +461,30 @@ impl Handover {
 
     /// The person waits for the agent's run to end before the take-back.
     pub(super) fn waits_for_run(&self) -> bool {
-        self.taking_back && self.agent_running
+        self.taking_back && self.run.as_ref().is_some_and(holder::AgentRun::is_running)
+    }
+
+    /// The agent this window observes is sending live requests. A
+    /// command's live run is the person's own and is not governed by the
+    /// agent's setting (MCP-15 decision 3 A).
+    pub(super) fn agent_runs_live(&self) -> bool {
+        self.linked != Some(HolderRole::Command)
+            && self
+                .run
+                .as_ref()
+                .is_some_and(|run| run.is_running() && run.is_live())
+    }
+
+    /// The window observes an agent over a connection, so *Take back* is
+    /// offered; never for a command (MCP-15 decision 1 A).
+    pub(super) fn offers_take_back(&self) -> bool {
+        self.is_linked() && self.linked != Some(HolderRole::Command)
     }
 
     /// Another project is open: a request made to the previous one is
     /// refused, and one being released is not retried.
     pub(super) fn forget_requests(&mut self) {
-        if let Some((link, _)) = self.pending.take() {
+        if let Some((link, ..)) = self.pending.take() {
             self.channel.send(
                 link,
                 Message::Refused {
@@ -381,6 +503,7 @@ impl Handover {
         if let Some(link) = self.link.take() {
             self.channel.close(link);
         }
+        self.linked = None;
         if let Some(link) = self.connecting.take() {
             self.channel.close(link);
         }
@@ -388,7 +511,7 @@ impl Handover {
         self.granted_at = None;
         self.stale = false;
         self.taking_back = false;
-        self.agent_running = false;
+        self.run = None;
         self.failed_at = None;
     }
 }
@@ -401,24 +524,26 @@ impl FolderApp {
         for event in events {
             self.follow_channel_event(event);
         }
+        self.note_saved_settings();
+        self.say_consent();
         self.answer_request();
         self.connect_to_holder();
-        if self.handover.refused
-            && self
-                .session
-                .as_ref()
-                .is_none_or(|session| session.is_read_only() || !session.has_unsaved_work())
+        if self
+            .session
+            .as_ref()
+            .is_none_or(|session| session.is_read_only() || !session.has_unsaved_work())
         {
             self.handover.refused = false;
+            self.handover.declined = None;
         }
     }
 
     fn follow_channel_event(&mut self, event: Event) {
         let handover = &mut self.handover;
         match event {
-            Event::Request { link, client } => {
+            Event::Request { link, client, role } => {
                 // The newest request is the one an agent waits for.
-                if let Some((older, _)) = handover.pending.replace((link, client))
+                if let Some((older, ..)) = handover.pending.replace((link, client, role))
                     && older != link
                 {
                     handover.channel.close(older);
@@ -428,6 +553,11 @@ impl FolderApp {
                 Message::Saved { .. } => {
                     #[cfg(test)]
                     handover.first_saved.get_or_insert_with(Instant::now);
+                    // A commit after the run ended: its last change is the
+                    // news now, in place of the run's outcome.
+                    if handover.run.as_ref().is_some_and(|run| !run.is_running()) {
+                        handover.run = None;
+                    }
                     self.watcher.release_hold();
                     self.watcher.rescan();
                 }
@@ -436,10 +566,33 @@ impl FolderApp {
                     self.watcher.release_hold();
                     self.watcher.rescan();
                 }
-                Message::Run { state, .. } => {
-                    handover.agent_running = state == RunState::Running;
+                Message::Run {
+                    path,
+                    mode,
+                    state,
+                    step_count,
+                    step,
+                    label,
+                } => {
+                    // MCP-10's status line words an agent's run (*Agent:
+                    // running …*); a command's run is not shown there, and
+                    // the bar keeps mock-up (a) of MCP-15. Whether and how
+                    // a command's run is shown is the owner's to decide.
+                    if handover.linked == Some(HolderRole::Command) {
+                        return;
+                    }
+                    handover.run = Some(holder::AgentRun::new(
+                        &path,
+                        mode,
+                        state,
+                        step_count,
+                        step.zip(label),
+                    ));
                 }
-                Message::Permission { .. } => {}
+                // The person's consent is said by this window, never heard.
+                Message::Permission { .. } => {
+                    eprintln!("apiforge: channel: ignored a message only a window sends");
+                }
                 Message::Request { .. }
                 | Message::Granted
                 | Message::Refused { .. }
@@ -467,12 +620,23 @@ impl FolderApp {
                     handover.connecting = None;
                     handover.failed_at = Some(Instant::now());
                 }
-                if handover
-                    .pending
-                    .as_ref()
-                    .is_some_and(|(pending, _)| *pending == link)
+                if let Some((_, _, role)) =
+                    handover.pending.take_if(|(pending, ..)| *pending == link)
                 {
-                    handover.pending = None;
+                    // A command that stopped waiting (Ctrl+C) has gone for
+                    // good: its prompt goes with it. An agent asks again, and
+                    // its prompt stays for that (MCP-08c).
+                    if role == HolderRole::Command
+                        && matches!(
+                            self.prompt,
+                            Some(Prompt::Handover {
+                                role: HolderRole::Command,
+                                ..
+                            })
+                        )
+                    {
+                        self.prompt = None;
+                    }
                 }
                 if let Some((releasing, lost)) = &mut handover.releasing
                     && *releasing == link
@@ -492,15 +656,16 @@ impl FolderApp {
     }
 
     /// Answers the waiting request once the window can: a clean window
-    /// hands the project over, a window with unsaved work refuses. While
+    /// hands the project over, a window with unsaved work asks the person.
+    /// While
     /// storage work, a run, a dialog or a switch is in progress the request
     /// waits; the agent hears `handover_pending` after thirty seconds and
     /// the next request is answered at once.
     fn answer_request(&mut self) {
-        let Some((link, client)) = self.handover.pending.clone() else {
+        let Some((link, client, role)) = self.handover.pending.clone() else {
             return;
         };
-        if self.handover.releasing.is_some() {
+        if self.handover.releasing.is_some() || self.handover.saving {
             return;
         }
         let Some(session) = self.session.as_ref() else {
@@ -517,9 +682,18 @@ impl FolderApp {
             self.refuse(link, "the window is closing");
             return;
         }
+        // With unsaved work the person decides (MCP-08c): an answer given
+        // to an agent's request that stopped waiting is the next agent
+        // request's, once; a command is always asked itself (MCP-15).
         if session.has_unsaved_work() {
-            self.refuse(link, UNSAVED_WORK);
-            self.handover.refused = true;
+            if role == HolderRole::Agent
+                && let Some(reason) = self.handover.declined.take()
+            {
+                self.refuse(link, &reason);
+                self.handover.refused = true;
+            } else {
+                self.ask_person(client, role);
+            }
             return;
         }
         // A check in flight reads the files the agent is about to replace.
@@ -533,7 +707,27 @@ impl FolderApp {
         {
             return;
         }
-        self.release(link, client);
+        self.release(link, client, role);
+    }
+
+    /// The person's answer that keeps the project here: the waiting request
+    /// hears `reason`; when none waits, the next agent request does. The
+    /// bar says why only to an agent, which asks again at its next write; a
+    /// command has its answer and ends, and an answer meant for a command
+    /// that has gone is nobody's (MCP-15). `asker` is who the prompt named;
+    /// the request waiting now decides.
+    pub(super) fn answer_waiting(&mut self, reason: &str, asker: HolderRole) {
+        match self.handover.pending.clone() {
+            Some((link, _, role)) => {
+                self.handover.refused = role == HolderRole::Agent;
+                self.refuse(link, reason);
+            }
+            None if asker == HolderRole::Agent => {
+                self.handover.refused = true;
+                self.handover.declined = Some(reason.to_owned());
+            }
+            None => {}
+        }
     }
 
     fn refuse(&mut self, link: u64, reason: &str) {
@@ -547,10 +741,11 @@ impl FolderApp {
         self.handover.channel.close(link);
     }
 
-    /// Lets the project go to the agent that asked on `link`: the saved
-    /// project is reread read-only with the same navigation, and only then
-    /// is the agent told `granted`, so the lock is free when it tries.
-    fn release(&mut self, link: u64, client: Option<String>) {
+    /// Lets the project go to the agent, or the command, that asked on
+    /// `link`: the saved project is reread read-only with the same
+    /// navigation, and only then is the asker told `granted`, so the lock is
+    /// free when it tries.
+    fn release(&mut self, link: u64, client: Option<String>, role: HolderRole) {
         self.handover.pending = None;
         self.handover.releasing = Some((link, false));
         #[cfg(test)]
@@ -575,7 +770,7 @@ impl FolderApp {
                 }
                 match result {
                     Ok(true) => {
-                        app.handed_over(link, client);
+                        app.handed_over(link, client, role);
                         if lost {
                             // The agent stopped waiting: the window takes the
                             // project back at its next check.
@@ -597,7 +792,7 @@ impl FolderApp {
                         } else if app.handover.pending.is_some() {
                             app.handover.channel.close(link);
                         } else {
-                            app.handover.pending = Some((link, client));
+                            app.handover.pending = Some((link, client, role));
                         }
                         app.open_run_journal();
                     }
@@ -615,17 +810,15 @@ impl FolderApp {
         );
     }
 
-    /// The window observes the agent it handed the project to, over the
-    /// connection the agent asked on.
-    fn handed_over(&mut self, link: u64, client: Option<String>) {
+    /// The window observes the agent, or the command, it handed the
+    /// project to, over the connection it asked on.
+    fn handed_over(&mut self, link: u64, client: Option<String>, role: HolderRole) {
         self.handover.reset_observing();
         self.handover.link = Some(link);
+        self.handover.linked = Some(role);
         self.handover.granted_at = Some(Instant::now());
         self.handover.refused = false;
-        self.holder = Some(holder::Observed::new(Holder::new(
-            HolderRole::Agent,
-            client,
-        )));
+        self.holder = Some(holder::Observed::new(Holder::new(role, client)));
         self.take_back = holder::TakeBack::default();
         self.last_change = None;
         self.follow_external(ExternalOutcome {
@@ -665,7 +858,12 @@ impl FolderApp {
         else {
             return;
         };
-        let link = self.handover.channel.connect(endpoint);
+        let owner_uid = self
+            .holder
+            .as_ref()
+            .map(holder::Observed::holder)
+            .and_then(Holder::owner_uid);
+        let link = self.handover.channel.connect(endpoint, owner_uid);
         self.handover.connecting = Some(link);
         self.handover.released = false;
     }

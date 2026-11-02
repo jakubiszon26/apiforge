@@ -3,8 +3,10 @@
 //! `ProjectSession` (`tools`); the write tools go through the agent session
 //! (`agent`), which holds the writer lock until the model finishes editing;
 //! `server` exposes them over stdio with `rmcp`; `handover` is the control
-//! channel to the window (MCP-08b).
+//! channel to the window (MCP-08b); `command` is `apiforge run --live` on a
+//! folder project (MCP-15).
 pub mod agent;
+pub mod command;
 pub mod error;
 pub mod executor;
 pub mod folder;

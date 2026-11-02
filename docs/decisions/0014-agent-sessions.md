@@ -90,3 +90,114 @@ requests.
 - Exactly-once execution of external requests is not promised; a lost
   response has a way to learn the outcome (`request_id`, revision hashes,
   the journal) and nothing is retried on the server's own initiative.
+
+## MCP-12 amendment: descriptive overview and client discovery (2026-10-28)
+
+Approved decisions D1–D3 and verification are in [MCP-12](../tickets/MCP-12.md).
+The overview retains a string `holder` (`none`, `window`, `another_process`,
+`agent_session`), adds nullable `holder_details` (role/client/since) and
+`hands_over_on_write`. Only this server's active session is `agent_session`;
+a valid window endpoint permits asking without guaranteeing hand-over.
+Overview does not connect or interpret another holder's journal. The owner
+accepted the prerelease closed-enum extension; tools/list exposes its schema
+without repurposing the crate, protocol, language or local format versions.
+
+Listeners keep their existing locations and endpoints remain random names;
+only a relative temporary directory, which no client searches, is now skipped
+by the listener as well (review of 2026-11-01), so it falls back to `/tmp`.
+Unix clients, including the window observing a server, discover existing
+sockets in order: absolute XDG_RUNTIME_DIR, `/run/user/<uid>`, temp_dir(),
+`/tmp`. Candidates are deduplicated and bounded by the Unix path limit. The uid
+comes from metadata of the same opened holder file that supplied its bytes;
+it remains in memory, never in the version-one JSON. Missing metadata fails
+conservatively. An endpoint directory must be a real directory, and its
+socket a real socket, both owned by that uid with no group/world access;
+symlinks and other node types are skipped. The shared `/tmp` base is allowed
+because the endpoint directory provides privacy. Discovery creates, removes
+and changes nothing. It selects the first valid socket; a failed connection
+does not retry another endpoint or replay a hand-over request. Filesystem
+checks narrow ordinary races, not malicious same-user activity. Windows
+retains its named pipe and existing access rules.
+
+A fixed candidate list cannot discover an arbitrary custom XDG or TMPDIR
+when its value is absent from the client. Same-side Windows/WSL execution is
+required. After a failed connection to a live window, Linux projects under
+`/mnt/<single ASCII letter>/…` receive a qualified same-side hint in the
+existing `held_by_window`, `wrote: false` refusal. Reads remain available;
+there is no close-window advice. A path and failed connection do not establish
+a Windows writer, and invisible cross-OS locks remain unsupported. Stale
+metadata never prevents acquiring a free OS lock. No project-format, channel
+message, live-consent or ownership rule changes.
+
+## MCP-09 amendment: when a window's consent is heard (2026-11-01)
+
+Decision 6 stands; [MCP-09](../tickets/MCP-09.md) fixes when the server
+knows the window's consent. A window says `permission { live }` on every
+control-channel connection as soon as it opens, before anything else, and on
+every change; it never takes a `permission` from the other side. While any
+window is connected to the server the windows decide: the newest consent
+heard among them, and off while a connected window has not said one yet;
+only when the last one goes does the start flag decide again. A live run
+that finds the project held by a window naming an endpoint hears that
+window's consent before it asks for the project: a window whose consent is
+off, or that says nothing within two seconds, is not asked, keeps the
+project, and the run is `live_disabled` (*live requests are off in this
+project's settings*), whatever the flag. A window of a build older than
+MCP-09 says nothing, so it never allows a live run; the window and the
+server ship together. The overview still never connects, so before a window
+is connected it reports the flag. The server
+tells connected windows `run { mode: live }` when its live run starts and
+ends. The consent is kept in `agent-consent.json` beside the preferences, by
+the manifest id; the project file format is unchanged.
+
+## MCP-18 amendment: the overview says the window decides (2026-11-02)
+
+The MCP-09 amendment's "the overview still never connects, so before a window
+is connected it reports the flag" becomes: while no window is connected it
+reports the flag unless a window holding the project names a valid endpoint,
+and then it says that the window decides when the run starts —
+`live_requests.allowed` is `null` with `source` *window setting, asked when
+the run starts* ([MCP-18](../tickets/MCP-18.md), decision 1 = A). The
+overview reads `run`'s predicate, narrowed to an endpoint that parses as
+`hands_over_on_write` does; it still opens no connection, and no channel
+message or file format changes.
+
+## MCP-15 amendment: a command asks the window too (2026-11-01)
+
+Decisions 2–5 stand; [MCP-15](../tickets/MCP-15.md) adds a second kind of
+asker. `apiforge run --folder … --live`, the person's own command, asks a
+window that holds the project and names its endpoint exactly as the server
+does: `request` gains an optional `role` (`agent`, `command`; absent is an
+agent, so an older peer reads it unchanged and `version` stays 1). The
+window hands over or asks the person as for an agent, observes while the
+command holds the project, and offers no *Take back* for a command, whose
+live run is never interrupted. The command waits for the person's answer
+without the server's thirty-second limit, tells the window `run` when its
+run starts and ends, and says `released` after letting the lock go at every
+end; a killed command is taken back by the window's check (decision 2). The
+person's `--live` is the consent: decision 6's per-project setting governs
+the agent only, and a `permission` from the window is ignored by the
+command. A command never asks an agent session (decision 1) and does not
+listen; `apply` keeps refusing. The project file format is unchanged.
+
+## MCP-16 amendment: the observer follows the holder (2026-11-01)
+
+Decision 5's last sentence keeps the camera and the selected blocks in
+every case; the active document and the code's scroll stay only while
+following is unpinned. [MCP-16](../tickets/MCP-16.md) records the owner's
+decisions 1–7. An
+observing window follows every holder's commits by default: the reload's
+diff (`ExternalOutcome::followed`) names what changed, and the window goes
+to the document of the commit's main change (created, saved, published,
+laid out, in that order) in the view the person is in, shows a saved
+source's first changed line and marks its changed lines in the gutter
+until the holder's next commit to that document. A deleted document's
+tab closes as before, and when it was the active one the window stays on
+the tab closing chose; a commit of the settings alone and a run move
+nothing. The person's own
+navigation to another document unpins following, as does *Follow* in the
+bottom bar, which pins it again and goes to the last change. Following
+starts pinned with every observation and is never persisted. The changed
+lines are computed from the two committed texts in `apiforge-project`
+(`CommitChange::lines`); no channel message, protocol version, file format
+or persisted setting changes.

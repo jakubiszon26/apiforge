@@ -39,6 +39,7 @@ pub struct Holder {
     client: Option<String>,
     since: Option<String>,
     endpoint: Option<String>,
+    owner_uid: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,6 +62,7 @@ impl Holder {
             client,
             since: Some(rfc3339(SystemTime::now())),
             endpoint: None,
+            owner_uid: None,
         }
     }
 
@@ -80,6 +82,7 @@ impl Holder {
             client: None,
             since: None,
             endpoint: None,
+            owner_uid: None,
         }
     }
 
@@ -111,6 +114,12 @@ impl Holder {
     pub fn endpoint(&self) -> Option<&str> {
         self.endpoint.as_deref()
     }
+    /// Unix owner of the opened holder file that supplied this description.
+    /// In-memory connection context only; absent on Windows or without metadata.
+    pub fn owner_uid(&self) -> Option<u32> {
+        self.owner_uid
+    }
+
     pub fn is_unknown(&self) -> bool {
         self.role.is_none()
     }
@@ -137,6 +146,7 @@ impl Holder {
                 client: line.client,
                 since: Some(line.since),
                 endpoint: line.endpoint,
+                owner_uid: None,
             },
             _ => Self::unknown(),
         }
@@ -150,9 +160,22 @@ impl Holder {
         let Ok(file) = File::open(path) else {
             return Self::unknown();
         };
+        #[cfg(unix)]
+        let owner_uid = {
+            use std::os::unix::fs::MetadataExt;
+            file.metadata().ok().map(|metadata| metadata.uid())
+        };
+        #[cfg(not(unix))]
+        let owner_uid = None;
         let mut bytes = Vec::new();
         match file.take(MAX_BYTES + 1).read_to_end(&mut bytes) {
-            Ok(_) if bytes.len() as u64 <= MAX_BYTES => Self::parse(&bytes),
+            Ok(_) if bytes.len() as u64 <= MAX_BYTES => {
+                let mut holder = Self::parse(&bytes);
+                if !holder.is_unknown() {
+                    holder.owner_uid = owner_uid;
+                }
+                holder
+            }
             _ => Self::unknown(),
         }
     }
