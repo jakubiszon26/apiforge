@@ -42,9 +42,9 @@ struct Report {
     /// In the order they were added; an undone check stays until another
     /// check replaces it, so that redo finds it again.
     checks: Vec<AddedCheck>,
-    /// The hash of the document's text at a source version, so a frame does
-    /// not hash the same text again.
-    text_hash: Cell<Option<(u64, u64)>>,
+    /// The document's text at a source version: its hash, and whether it is
+    /// the run's own source, so a frame does not read the same text again.
+    text: Cell<Option<(u64, u64, bool)>>,
 }
 
 impl Report {
@@ -53,7 +53,7 @@ impl Report {
             prepared,
             result,
             checks: Vec::new(),
-            text_hash: Cell::new(None),
+            text: Cell::new(None),
         }
     }
 }
@@ -152,12 +152,14 @@ impl FolderApp {
             return Freshness::Stale;
         };
         let version = document.source_version();
-        let hash = match report.text_hash.get() {
-            Some((cached, hash)) if cached == version => hash,
+        let (hash, run_source) = match report.text.get() {
+            Some((cached, hash, run_source)) if cached == version => (hash, run_source),
             _ => {
-                let hash = text_hash(document.text());
-                report.text_hash.set(Some((version, hash)));
-                hash
+                let text = document.text();
+                let hash = text_hash(text);
+                let run_source = report.prepared.snapshot.matches_source(text);
+                report.text.set(Some((version, hash, run_source)));
+                (hash, run_source)
             }
         };
         if let Some(index) = report
@@ -166,7 +168,7 @@ impl FolderApp {
             .rposition(|check| check.source_after == hash)
         {
             Freshness::ChecksOnly(index + 1)
-        } else if report.prepared.snapshot.matches_source(document.text()) {
+        } else if run_source {
             Freshness::Fresh
         } else {
             Freshness::Stale
