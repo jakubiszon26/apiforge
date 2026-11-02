@@ -168,30 +168,35 @@ impl FolderApp {
                     };
                     let mut chosen = None;
                     let mut review = false;
+                    let menu = |ui: &mut egui::Ui| {
+                        widgets::caption(ui, "RUN MODE");
+                        mode_item(
+                            ui,
+                            shown,
+                            &mut chosen,
+                            RunMode::Simulation,
+                            "Simulation",
+                            true,
+                        );
+                        widgets::hint(ui, "Sample responses; no request is sent.");
+                        ui.add_space(theme::SPACE_SM);
+                        // Live requests are the holder's to send while this
+                        // window observes (MCP-08a).
+                        mode_item(ui, shown, &mut chosen, RunMode::Live, "Live", !observing);
+                        widgets::hint(ui, "Requests go to the project's API.");
+                        ui.separator();
+                        widgets::hint(ui, "The Run button runs this mode until you change it.");
+                        ui.separator();
+                        if ui.button("Review legacy runs").clicked() {
+                            ui.close();
+                            review = true;
+                        }
+                    };
                     widgets::action_menu_at(
                         ui,
                         chevron,
                         widgets::icon_button(Icon::ChevronDown, OPTIONS),
-                        |ui| {
-                            widgets::caption(ui, "RUN MODE");
-                            mode_item(ui, shown, &mut chosen, RunMode::Simulation, "Simulation", true);
-                            widgets::hint(ui, "Sample responses; no request is sent.");
-                            ui.add_space(theme::SPACE_SM);
-                            // Live requests are the holder's to send while
-                            // this window observes (MCP-08a).
-                            mode_item(ui, shown, &mut chosen, RunMode::Live, "Live", !observing);
-                            widgets::hint(ui, "Requests go to the project's API.");
-                            ui.separator();
-                            widgets::hint(
-                                ui,
-                                "The Run button runs this mode until you change it.",
-                            );
-                            ui.separator();
-                            if ui.button("Review legacy runs").clicked() {
-                                ui.close();
-                                review = true;
-                            }
-                        },
+                        menu,
                     );
                     // Opening the menu writes nothing: a *Live* kept while
                     // observing stays until another mode is chosen (UX-02).

@@ -287,6 +287,19 @@ Verification of the round, all exiting 0:
   44 ignored
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 
+## Review round 2
+
+cubic's one point on `dc63007` was a 103-column call to `mode_item`.
+`cargo fmt --all -- --check` passed: rustfmt does not reformat the
+header's closure, because a long hover string from before this ticket
+stops it. The menu is now a named closure, formatted by hand within
+100 columns, and nothing else changed.
+- `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets
+  --locked -- -D warnings` pass.
+- `mod ux02`, the accessibility, component-run and header tests, and
+  MCP-08a's observing test pass: 51 tests.
+- The whole suite is CI's on this head.
+
 ## Regression smoke list
 
 Linux, 2026-11-02, release binaries of `a3aa0b9`:
