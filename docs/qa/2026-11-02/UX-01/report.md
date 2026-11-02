@@ -211,6 +211,9 @@ ticket is not accepted for Windows on this report.
   the check is applied after the prompt and is not counted, so the results
   read *Graph changed* as before this change. The demo has no such
   comments; no test.
+- A checked row of a document that cannot be edited (review round 1) in
+  the release binary: it needs another process holding the project; the
+  unit test covers it.
 - Double scale, keyboard-only operation and a screen reader session.
 - Windows, beyond the CI test run.
 
@@ -250,6 +253,8 @@ On `7f71bd1` (review round 1), all exit 0: `cargo fmt --all -- --check`;
 `cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo
 test --workspace --all-targets --locked`: 1 431 passed, 0 failed, 44
 ignored; `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`.
-Earlier: `e702e31` and `22bbf2d`, 1 430 passed, 44 ignored. CI on
+`f423393` (review round 2) changes a test helper only; on it the
+`ux01_*` tests and `review_ux01_two_checks` pass. Earlier: `e702e31` and
+`22bbf2d`, 1 430 passed, 44 ignored. CI on
 `22bbf2d` (runs 41509709984 and 41509716347): Linux and Windows build and
 test, CodeQL, all green.
