@@ -226,7 +226,16 @@ At the acceptance commit `d6e7dba`, the four `mcp05b_` tests and the stdio
 After the round, `apiforge-mcp` and `apiforge-cli`: 181 passed, 1 ignored;
 fmt and clippy clean.
 
-The first CI run of `47d1c5f` failed on windows-2022 only, in
-`mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run` with
-`LiveDisabled`. That is the known Windows flake recorded on #122 (KTLO-33),
-and the same test passed on that head's other windows-2022 run.
+CI on the review heads, windows-2022 only:
+
+- `47d1c5f`: one of its two windows-2022 runs failed in
+  `mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run` with
+  `LiveDisabled`, and the other run passed.
+  [Issue #122](https://github.com/jakubiszon26/apiforge/issues/122) (titled
+  *KTLO-33: Four tests fail now and then on CI and pass on a rerun*) records
+  this failure in the owner's comment of 2026-11-01. That comment names
+  this test, the same `LiveDisabled`, and the cause: the test turns the
+  consent off 250 ms after the run takes its slot.
+- `4636fae`: one windows-2022 job was cancelled at the job's 30-minute
+  limit, and the other passed in 29 min 18 s. This is not a test failure.
+  It is not on #122, so the job was not rerun; the next push ran CI again.
