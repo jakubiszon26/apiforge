@@ -41,7 +41,7 @@ struct HistoryIndex {
 
 impl ProjectStore {
     pub fn preview_diagram_recovery(&self) -> Result<DiagramRecoveryPreview> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let snapshot = self.stable_read(|| {
             Ok(vec![
                 ProjectPath::new(MANIFEST_PATH)?,
@@ -68,7 +68,7 @@ impl ProjectStore {
         replacement: &DiagramFile,
     ) -> Result<MetadataReplacement> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         if preview.root != self.root() {
             return Err(ProjectError::InvalidCheckpoint);
         }

@@ -5,6 +5,7 @@
 //! (`project::faults`), never enabled in a release build.
 use super::{ProjectError, Result, path};
 use std::{
+    ffi::OsString,
     fs::{self, File},
     io::Write,
     path::Path,
@@ -63,11 +64,15 @@ pub(super) fn atomic(path: &Path, bytes: &[u8], new_only: bool) -> Result<()> {
     // Recheck immediately before installing, rather than only at planning time.
     path::check_boundary(path)?;
     if new_only {
-        temporary.persist_noclobber(path)
+        temporary
+            .persist_noclobber(path)
+            .map(drop)
+            .map_err(|error| error.error)
     } else {
-        temporary.persist(path)
+        // A reader holding the target never fails the replace (MCP-19).
+        crate::file::install(temporary, path)
     }
-    .map_err(|error| ProjectError::io(path, error.error))?;
+    .map_err(|error| ProjectError::io(path, error))?;
     probe(kind, Phase::After, path)?;
     sync_directory(parent)
 }
@@ -111,7 +116,12 @@ pub(super) fn create_directory(path: &Path) -> Result<()> {
     sync_parent(path)
 }
 
-pub(super) fn remove(path: &Path, directory: bool) -> Result<()> {
+/// Removes the file or empty directory `path`. `removed` names the entries
+/// of a directory that its transaction removed before it: on Windows a
+/// removed file that another reader still holds keeps its name until that
+/// handle closes, and the directory's removal waits for it, at most
+/// [`crate::file::HELD_BOUND`] (MCP-19).
+pub(super) fn remove(path: &Path, directory: bool, removed: &[OsString]) -> Result<()> {
     path::check_boundary(path)?;
     let kind = if directory {
         Boundary::RemoveDirectory
@@ -120,13 +130,27 @@ pub(super) fn remove(path: &Path, directory: bool) -> Result<()> {
     };
     probe(kind, Phase::Before, path)?;
     if directory {
-        fs::remove_dir(path)
+        crate::file::while_held(
+            || fs::remove_dir(path),
+            |error| holds_only(error, path, removed),
+        )
     } else {
         fs::remove_file(path)
     }
     .map_err(|error| ProjectError::io(path, error))?;
     probe(kind, Phase::After, path)?;
     sync_parent(path)
+}
+
+/// Whether removing the directory `path` failed on Windows only because it
+/// still lists names in `removed`, which are delete-pending.
+fn holds_only(error: &std::io::Error, path: &Path, removed: &[OsString]) -> bool {
+    const ERROR_DIR_NOT_EMPTY: i32 = 145;
+    cfg!(windows)
+        && error.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY)
+        && fs::read_dir(path).is_ok_and(|mut entries| {
+            entries.all(|entry| entry.is_ok_and(|entry| removed.contains(&entry.file_name())))
+        })
 }
 
 pub(super) fn cleanup_directory(path: &Path) -> Result<()> {

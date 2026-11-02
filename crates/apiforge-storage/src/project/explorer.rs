@@ -1,6 +1,8 @@
 //! The project directory as the explorer presents it. Scans list the real tree
 //! without following links and hide `.git` and `.apiforge`; they are bounded so
-//! that a large or deep folder cannot stall the worker that performs them.
+//! that a large or deep folder cannot stall the worker that performs them. On
+//! a writer store that worker is the store's own: a save waits for a scan in
+//! progress, at most one bounded scan, as a scan waits for a save (MCP-19).
 use super::{path, *};
 use std::{fs, io};
 
@@ -90,21 +92,41 @@ pub fn tree_order(a: &TreeEntry, b: &TreeEntry) -> std::cmp::Ordering {
 }
 
 impl ProjectStore {
-    /// Lists the project tree. A transaction in progress, or one committed
-    /// during the scan, returns `Busy`; the caller retries on its next poll.
+    /// Lists the project tree.
+    ///
+    /// On a writer store the scan takes the worker like any other storage
+    /// work (MCP-19): it waits for a transaction in progress, including a
+    /// replace that waits up to a second for another program on Windows, and
+    /// never reads a file that transaction replaces or removes, which
+    /// Windows refuses while the file is open. The price is the other way
+    /// round: a save waits for a scan in progress, which lists at most
+    /// [`MAX_TREE_ENTRIES`] entries and hashes the `.afs` sources and the
+    /// manifest among them; other files are only sized. Called
+    /// on the thread that holds the worker (a fault hook inside a commit),
+    /// it cannot wait for itself and answers `Busy` for that commit.
+    ///
+    /// On a read-only store a transaction in progress in another process,
+    /// or one committed during the scan, returns `Busy`; the caller retries
+    /// on its next poll. An active transaction with no living writer
+    /// returns `RecoveryRequired`.
     pub fn scan_tree(&self) -> Result<TreeScan> {
+        // A read-only store's worker guards nothing another process does.
+        let own_commit = self.owner.holds_worker();
+        let _worker = (!self.is_read_only() && !own_commit).then(|| self.owner.lock_worker());
         let before = self.head()?;
         if before.active_transaction_id.is_some() {
-            // The scan does not wait for the writer lock. While this owner's
-            // worker holds it, the active transaction is a commit in progress;
-            // only one left behind with the lock free needs recovery. A
+            // Holding the worker, a writer sees no commit in progress: an
+            // active transaction was left behind and needs recovery. A
             // reader beside a living writer in another process sees that
             // writer's commit in progress (MCP-08a, planning decision 2).
-            // The worker is only asked, never held while the probe waits.
-            let own_commit = matches!(
-                self.owner.worker.try_lock(),
-                Err(std::sync::TryLockError::WouldBlock)
-            );
+            // A read-only worker is only asked, never held while the probe
+            // waits.
+            let own_commit = own_commit
+                || (self.is_read_only()
+                    && matches!(
+                        self.owner.worker.try_lock(),
+                        Err(std::sync::TryLockError::WouldBlock)
+                    ));
             return Err(
                 if own_commit
                     || self.head()?.active_transaction_id.is_none()
