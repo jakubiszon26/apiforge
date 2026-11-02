@@ -84,9 +84,16 @@ At the acceptance commit `74a70ac`, with the server unchanged:
   `read_source's structured result does not match its outputSchema:
   "path" is a required property at ""`, and the like for the other tools.
   The 14 that passed are the sessions with no refusal.
-- The desktop's MCP tests (`acceptance_tests::mcp08b`, `mcp08c`, `mcp09`):
-  15 failed, in `tool_error` on the `structuredContent` a refusal still
-  carried; 19 passed.
+- The desktop's MCP tests, `cargo test -p apiforge-desktop --locked --bins
+  -- acceptance_tests::mcp08b acceptance_tests::mcp08c
+  acceptance_tests::mcp09`: of the 39 tests the filters match, 15 failed, in
+  `tool_error` on the `structuredContent` a refusal still carried; 19
+  passed; 5 are ignored and were not run (three design-review views and two
+  spawned helpers, `server_process` and `mcp12_window_process`). The run's
+  output also shows a second `test result` line with one failure: it is
+  `mcp12_window_process`, spawned as a child by the failing
+  `mcp12_different_environments_handover_and_observation`, not a further
+  test.
 
 At `855d8f5`, the fix, with no assertion changed: all of them pass.
 

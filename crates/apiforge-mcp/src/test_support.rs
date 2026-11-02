@@ -261,6 +261,7 @@ pub fn tool_error(answer: &Value) -> Value {
         Some(1),
         "{answer}"
     );
+    assert_eq!(result["content"][0]["type"], "text", "{answer}");
     let error = refusal(answer).unwrap_or_else(|| panic!("a refusal's text is JSON: {answer}"));
     let mut keys: Vec<_> = error
         .as_object()
