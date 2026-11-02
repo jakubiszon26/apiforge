@@ -98,6 +98,18 @@ flake 6, `deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work`
 tab stayed. The same primitive under the observing window's take-back is
 KTLO-33 flake 4.
 
+**The cleanest evidence** (added 2026-11-02, KTLO-33 flake 7): run
+41449932414, the pull_request run of PR #199 at `04a11f2` (its push run
+passed), `mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was`.
+The holder there is a second `ProjectSession` in the test process, as the
+server's is; its `save` returned `Storage(Io { path:
+"…\.apiforge\diagram.json", Os { code: 5, PermissionDenied, "Access is
+denied." } })`. The observer's stable read lists the diagram checkpoint
+(`load_locked`) and reads its state for `committed_outside_sources`; the
+writer's transaction replaces it. Same collision, same primitive, another
+file; the error reached the holder as a refused save rather than as
+`recovery_required` only because of where in the transaction it struck.
+
 **Why the protocol's own retry does not help.** ADR 0011's stable read
 retries three times — on the *reader's* side. The *writer* has no retry:
 once activated it must finish, and an I/O error at a target is reported as
@@ -184,14 +196,16 @@ Windows no longer fails because something was looking at the file.
    serialisation; the status line's *native Windows durability
    unverified* stays.
 6. **The loop.** `mcp10_criterion_3`,
-   `deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work`
+   `deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work`,
+   `mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was`
    and `mcp07::a_transaction_left_by_the_holder_opens_the_recovery_view`
    pass 20 of 20 on windows-2022 and 20 of 20 on ubuntu-24.04 with
    KTLO-33's loop workflow (or its steps run ad hoc on this branch if
    KTLO-33 has not merged), run ids in the QA report; before the fix the
-   same loop reproduces at least one failure of `mcp10_criterion_3` or
-   `deleting_a_folder…` on windows-2022, recorded with its run id, or the
-   report says it did not and names the attempts.
+   same loop reproduces at least one failure of `mcp10_criterion_3`,
+   `mcp08a::the_holders_save…` or `deleting_a_folder…` on windows-2022,
+   recorded with its run id, or the report says it did not and names the
+   attempts.
 7. The existing fault-injection suite (`fault_tests.rs`, `transaction_tests.rs`)
    passes unchanged; no assertion is weakened.
 8. The verification commands of the development guide pass.
