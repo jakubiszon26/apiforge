@@ -126,7 +126,7 @@ struct Output {
 
 #[cfg(windows)]
 impl Output {
-    /// Appends one line; false when the log cannot be opened.
+    /// Appends one line; false when the log cannot be opened or written.
     fn append(&self, line: fmt::Arguments<'_>) -> bool {
         let file = self
             .file
@@ -135,8 +135,7 @@ impl Output {
             return false;
         };
         let mut file = file.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _ = writeln!(file, "{line}");
-        true
+        writeln!(file, "{line}").is_ok()
     }
 }
 

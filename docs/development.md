@@ -54,8 +54,8 @@ On Windows the release `apiforge-desktop.exe` is a windowed program
 ([REL-04](tickets/REL-04.md)): started from Explorer, the Start menu or the
 release ZIP, it opens no console window, and it never attaches to one. What it
 prints (`--version`, `--help`, `--check`, the control channel's diagnostics,
-an error that ends the start, the text of a crash) reaches a terminal only
-when it is redirected: `apiforge-desktop.exe --check FILE > out.txt` in `cmd`,
+an error that ends the start, the text of a crash) reaches whoever started it
+only through a redirection: `apiforge-desktop.exe --check FILE > out.txt` in `cmd`,
 or `$out = apiforge-desktop.exe --check FILE | Write-Output` in PowerShell,
 which waits for it only when the output goes on down a pipeline. Typed in a
 terminal without redirection, it prints nothing there: the output goes to
