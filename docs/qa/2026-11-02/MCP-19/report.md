@@ -6,9 +6,10 @@
   added in `9f58c18`, `47e72fa` and `cd9477f` and removed with this report
   (`cd3f8f4`). Review round 1 (cubic on `cd3f8f4`, ten comments) in
   `4e5a60e`: start handshakes in three tests and documentation, no
-  assertion changed; round 2 (cubic on `4e5a60e`: five repeats of round 1,
-  one new) in `d963b51`: one documentation sentence; round 3 (cubic on
-  `d963b51`: the count of CI runs below) in the commit that adds this.
+  assertion changed. Each later round was one new comment: round 2 (on
+  `4e5a60e`, what the scan hashes) in `d963b51`; round 3 (on `d963b51`,
+  the count of CI runs) in `aee5d13`; round 4 (on `aee5d13`, the runs of
+  that head named) in the commit that adds this.
 - Built with: Rust 1.99.0, `cargo test --locked` on the GitHub runners
   `windows-2022` and `ubuntu-24.04`, and locally on Linux. "Before" is the
   acceptance commit `d9165cf` (the storage code of `main` at `3dfc3f9`);
@@ -80,7 +81,10 @@ round 2's `d963b51`, the push run (41488259167) was green; its
 pull_request run (41488269021) failed on Windows in
 `mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run`
 (*live requests are off in this project's settings*), KTLO-33's flake 2,
-which this branch does not touch; the run of the next head is green. In 41465821527 on `windows-2022` all six MCP-19 tests passed:
+which this branch does not touch. Both runs of round 3's `aee5d13`
+(41492416111, 41492428226) are green on both runners.
+
+In 41465821527 on `windows-2022` all six MCP-19 tests passed:
 criterion 1, both criterion 2 cases (within the bound, and the 2 s reader
 with recovery after it let go), criterion 3's storage and desktop tests,
 criterion 4. The folder-project step of each run (release binary, demo shop
