@@ -8074,6 +8074,19 @@ mod ux05 {
         harness.get_by_label(GRIP).rect().center().y - 8.0
     }
 
+    /// What a failure message needs to tell a panel that went wrong from a
+    /// workspace that changed under it.
+    fn state(harness: &FolderHarness) -> String {
+        let app = folder(harness);
+        format!(
+            "workspace {:?}, {}, storage {:?}, notices {}",
+            workspace(harness),
+            app.report_state(),
+            app.storage.label(),
+            app.has_notices()
+        )
+    }
+
     /// The rect of the maximised panel (KTLO-19's id for that state).
     fn maximised_rect(harness: &FolderHarness) -> egui::Rect {
         egui::PanelState::load(&harness.ctx, egui::Id::new("report-maximised"))
@@ -8323,6 +8336,9 @@ mod ux05 {
             let rested = problems_top(&harness);
             choose(&mut harness, EXPAND);
             let expanded = problems_top(&harness);
+            // The strip of code above the expanded section begins with the
+            // editor, under the code panel's 6 px margin.
+            let strip_top = harness.get_by_label_contains("Contents of").rect().top() - 8.0;
             choose(&mut harness, RESTORE_PROBLEMS);
             assert!((problems_top(&harness) - rested).abs() <= 1.0);
 
@@ -8339,7 +8355,7 @@ mod ux05 {
             let shown = zone(&harness, PROBLEMS_ZONE)
                 .unwrap_or_else(|| panic!("{mode}: no *{PROBLEMS_ZONE}* 30 px under the ceiling"));
             assert!(
-                shown.bottom() <= expanded + 1.0 && shown.top() >= expanded - 96.0 - 1.0,
+                shown.bottom() <= expanded + 1.0 && shown.top() >= strip_top,
                 "{mode}: the zone {shown:?} is not over the strip of code above {expanded}"
             );
             release(&mut harness, near);
@@ -8427,8 +8443,10 @@ mod ux05 {
             assert!(zone(&harness, ZONE).is_none());
             assert!(
                 (panel_top(&harness) - ceiling).abs() <= 1.0,
-                "{size:?}: released outside the zone, the panel's top is {}, not the ceiling {ceiling}",
-                panel_top(&harness)
+                "{size:?}: released outside the zone, the panel's top is {}, not the ceiling \
+                 {ceiling} ({})",
+                panel_top(&harness),
+                state(&harness)
             );
         }
     }
@@ -8462,9 +8480,9 @@ mod ux05 {
             assert!(
                 (panel_top(&harness) - expected).abs() <= 1.0,
                 "{size:?}, {distance} px: the panel's top is {}, not {expected} \
-                 (the workspace {workspace:?} before the drag, {:?} after)",
+                 (the workspace {workspace:?} before the drag; now {})",
                 panel_top(&harness),
-                self::workspace(&harness)
+                state(&harness)
             );
         }
     }
@@ -8563,9 +8581,16 @@ mod ux05 {
                 );
             }
             press_on_grip(&mut harness, Key::Home);
+            // At 960 × 540 ↓ already reaches the least height the contents
+            // allow, so Home keeps it there.
+            let home = panel_top(&harness);
             assert!(
-                panel_top(&harness) > lowered + 1.0 || size == MINIMUM,
-                "{size:?}: Home does not lower the panel to its least height"
+                if size == MINIMUM {
+                    (home - lowered).abs() <= 1.0
+                } else {
+                    home > lowered + 1.0
+                },
+                "{size:?}: Home puts the panel's top at {home}, ↓ at {lowered}"
             );
             assert!(!maximised(&harness) && zone(&harness, ZONE).is_none());
         }

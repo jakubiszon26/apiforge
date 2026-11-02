@@ -257,7 +257,7 @@ pub struct FolderApp {
     problems_dragged: bool,
     /// While the edge of the section is dragged from its normal state, the
     /// height it had when the drag began (UX-05).
-    problems_drag: Option<f32>,
+    problems_drag_from: Option<f32>,
     /// The block whose statement the code view last revealed.
     revealed: Option<String>,
     /// The statement under the caret, for a document, source version and caret:
@@ -440,7 +440,7 @@ impl FolderApp {
             problems_expanded: false,
             problems_epoch: 0,
             problems_dragged: false,
-            problems_drag: None,
+            problems_drag_from: None,
             revealed: None,
             caret_statement: None,
             completion_names: None,

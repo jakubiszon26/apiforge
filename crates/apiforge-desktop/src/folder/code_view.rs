@@ -63,10 +63,10 @@ impl FolderApp {
         // Dragged from its normal state, the edge goes on past the normal
         // range up to the ceiling, where a release expands the section
         // (UX-05).
-        if !expanded && held && self.problems_drag.is_none() {
-            self.problems_drag = Some(self.workbench.panels.diagnostics);
+        if !expanded && held && self.problems_drag_from.is_none() {
+            self.problems_drag_from = Some(self.workbench.panels.diagnostics);
         }
-        let reaching = !expanded && self.problems_drag.is_some();
+        let reaching = !expanded && self.problems_drag_from.is_some();
         let panel = egui::Panel::bottom(diagnostics).resizable(true);
         let panel = if reaching {
             panel
@@ -105,7 +105,7 @@ impl FolderApp {
         if !expanded {
             self.workbench.panels.diagnostics = height.min(*PROBLEMS_HEIGHTS.end());
         }
-        if let Some(before) = self.problems_drag
+        if let Some(before) = self.problems_drag_from
             && reaching
         {
             // In the zone the section has grown towards the ceiling and is
@@ -115,7 +115,7 @@ impl FolderApp {
             let reach = area.bottom() - top;
             let snapped = reach > before + 1.0 && reach >= ceiling - DROP_SNAP;
             if let_go || !held {
-                self.problems_drag = None;
+                self.problems_drag_from = None;
                 // A drag that ends without a release expands nothing.
                 if snapped && let_go {
                     // As *Expand problems* does, keeping the height from before

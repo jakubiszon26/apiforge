@@ -127,6 +127,12 @@ impl FolderApp {
             && active.is_some_and(|id| self.runs.reports.contains_key(id))
     }
 
+    /// The run results panel's heights and drag, for a test's failure message.
+    #[cfg(test)]
+    pub(super) fn report_state(&self) -> String {
+        self.runs.panel.debug_state()
+    }
+
     /// Escape returns maximised run results to their height; the board, which
     /// has its own uses of Escape, is not drawn meanwhile.
     pub(super) fn restore_report_on_escape(&mut self, context: &egui::Context) {

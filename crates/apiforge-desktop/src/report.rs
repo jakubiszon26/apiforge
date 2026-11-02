@@ -224,6 +224,15 @@ impl ReportPanel {
         self.last_handle.unwrap()
     }
 
+    /// The remembered heights and the drag, for a test's failure message.
+    #[cfg(test)]
+    pub(crate) fn debug_state(&self) -> String {
+        format!(
+            "height {} compact {} drag {:?} maximised {}",
+            self.height, self.compact_height, self.drag, self.maximised
+        )
+    }
+
     /// Whether the open panel fills the window, so the caller draws nothing else.
     pub fn is_maximised(&self) -> bool {
         self.open && self.maximised
