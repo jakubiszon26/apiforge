@@ -306,9 +306,12 @@ stops it. The menu is now a named closure, formatted by hand within
 UX-01 (#243, `e6e4c3d`) was merged into this branch as `1e1bc78`. Where
 the two conflicted, in `folder/acceptance_tests.rs` and `testing.rs`, both
 sides had only added code, and both additions are kept.
-- UX-01's run helper in `mod ux01` and its review view clicked the header's
-  *Run*; they click *Run simulation* now.
-- No assertion of either ticket changed.
+- Against `main`, the merge changes exactly two lines of UX-01's code, and
+  both are clicks: `mod ux01`'s `run` helper and `review_ux01_two_checks`
+  clicked the header's *Run*, and they click *Run simulation* now.
+- No assertion of either ticket changed in the merge. This branch's earlier
+  re-pointing of older tests, listed under *Criteria and their evidence*,
+  is not part of it.
 
 On the merge, all exit 0:
 - `cargo fmt --all -- --check`
@@ -317,11 +320,13 @@ On the merge, all exit 0:
   45 ignored
 - `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
 
-Nothing drawn in this report's captures changed. `review_ux02_run_mode`,
-rendered before and after the merge, differs only in the run's clock time
-and duration on the Run results line. UX-01 changes Run results only after
-a *Check* is added, and no capture here adds one. The captures were not
-retaken.
+Nothing drawn in this report's captures changed. `review_ux02_run_mode` was
+rendered before and after the merge, and the renders differ only in the
+run's clock time and duration on the Run results line. Its 1600 × 1000
+renders include the Outputs rows with *Check* and *To variable*, which are
+also identical. UX-01's visible changes, *Check added* and the bar's count
+of checks, appear once a *Check* is clicked, and no capture here clicks
+one. The captures were not retaken.
 
 ## Regression smoke list
 
