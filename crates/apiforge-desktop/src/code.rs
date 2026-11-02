@@ -500,11 +500,13 @@ impl CodeEditor {
         let band = Rect::from_x_y_ranges(rect.x_range(), visible.y_range());
         painter.rect_filled(band, 0.0, ui.visuals().panel_fill);
         // The box's coloured stroke used to be the only sign of keyboard focus.
+        // The line is grey: in the accent it read as an error beside the red
+        // marks (UX-03).
         let focus = output
             .response
             .response
             .has_focus()
-            .then(|| Stroke::new(2.0, ui.visuals().selection.stroke.color));
+            .then(|| Stroke::new(2.0, theme::MUTED));
         if let Some(stroke) = focus {
             let x = band.right() - 1.0;
             painter.line_segment([pos2(x, band.top()), pos2(x, band.bottom())], stroke);

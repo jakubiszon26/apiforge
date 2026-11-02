@@ -12,15 +12,22 @@ const CODE_STRIP: f32 = 96.0;
 const CODE_MARGIN: f32 = 6.0;
 const EDITOR_MARGIN: f32 = 2.0;
 const CODE_FONT: f32 = 13.0;
-/// How long typing pauses before the editor marks errors again (UX-03).
-#[allow(dead_code, reason = "UX-03's acceptance tests come before its rule")]
+/// How long typing pauses before the editor marks errors again (UX-03):
+/// longer than the analysis pause, so the Problems list and the board keep
+/// ADR 0007's budget while the code itself stays quiet.
 pub(super) const MARKS_DELAY: Duration = Duration::from_millis(700);
 
 /// Whether the editor marks errors at `now`, with the text last changed by
-/// typing at `last_typed`. Before UX-03 the marks are always shown.
-#[allow(dead_code, reason = "UX-03's acceptance tests come before its rule")]
-pub(super) fn marks_due(_last_typed: Option<Instant>, _now: Instant, _delay: Duration) -> bool {
-    true
+/// typing at `last_typed`: with nothing typed, or `delay` after it.
+pub(super) fn marks_due(last_typed: Option<Instant>, now: Instant, delay: Duration) -> bool {
+    marks_wait(last_typed, now, delay).is_zero()
+}
+
+/// How long the marks still wait at `now`; zero once they are due.
+fn marks_wait(last_typed: Option<Instant>, now: Instant, delay: Duration) -> Duration {
+    last_typed.map_or(Duration::ZERO, |typed| {
+        (typed + delay).saturating_duration_since(now)
+    })
 }
 
 /// The height of the code panel above an expanded Problems section: as many
@@ -187,6 +194,24 @@ impl FolderApp {
             nodes: &completion.nodes,
             steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
+        // The red numbers, dots, underlines and hover messages wait until
+        // typing has paused (UX-03). Meanwhile none is drawn: the last
+        // analysis's would sit at the wrong places after the edit. The window
+        // is drawn again when they are due, mouse or not.
+        let now = self.marks_now();
+        let typed = self.marks_quiet_at.get(document_id).copied();
+        let wait =
+            (!marks_due(typed, now, MARKS_DELAY)).then(|| marks_wait(typed, now, MARKS_DELAY));
+        let marks: &[Diagnostic] = match wait {
+            None => {
+                self.marks_quiet_at.remove(document_id);
+                &snapshot.diagnostics
+            }
+            Some(wait) => {
+                ui.ctx().request_repaint_after(wait);
+                &[]
+            }
+        };
         let mut text = snapshot.text.clone();
         let mut scroll = egui::ScrollArea::both()
             .id_salt(("folder-code-scroll", document_id))
@@ -207,7 +232,7 @@ impl FolderApp {
                             &code::Context {
                                 mode: apiforge_script::complete::Mode::Script,
                                 scope: completion.names.scope(&shapes),
-                                diagnostics: &snapshot.diagnostics,
+                                diagnostics: marks,
                                 line_numbers: true,
                                 wrap: false,
                                 font_size: CODE_FONT,
@@ -231,12 +256,12 @@ impl FolderApp {
         {
             self.marks_shown = Some((
                 document_id.to_owned(),
-                code::marked_lines(&snapshot.text, &snapshot.diagnostics)
+                code::marked_lines(&snapshot.text, marks)
                     .into_iter()
                     .collect::<std::collections::BTreeSet<_>>()
                     .into_iter()
                     .collect(),
-                None,
+                wait,
             ));
             self.lines_in_view = outcome
                 .lines_in_view
@@ -253,6 +278,10 @@ impl FolderApp {
                 Ok(_) => {
                     self.analyser.typed(document_id, Instant::now());
                     self.changed_at = Some(Instant::now());
+                    // Typing, a paste, an undo or a redo in the editor: the
+                    // marks wait again, from the next frame, drawn at once.
+                    self.marks_quiet_at.insert(document_id.to_owned(), now);
+                    ui.ctx().request_repaint();
                 }
                 Err(error) => {
                     self.notice = Some(Notice {

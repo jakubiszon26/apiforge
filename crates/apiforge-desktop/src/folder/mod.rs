@@ -274,6 +274,10 @@ pub struct FolderApp {
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
+    /// When the editor last changed each document's text, while its error
+    /// marks wait for a pause in typing (UX-03). The analyser's own instant
+    /// cannot serve: it forgets it when the analysis starts.
+    marks_quiet_at: HashMap<String, Instant>,
     notice: Option<Notice>,
     /// The active tab last revealed in the strip, and the strip's last scroll
     /// offset, so activating a tab can scroll it into view.
@@ -453,6 +457,7 @@ impl FolderApp {
             clipboard: None,
             inspector: Inspector::default(),
             changed_at: None,
+            marks_quiet_at: HashMap::new(),
             notice: None,
             followed_tab: None,
             tabs_offset: 0.0,
@@ -689,6 +694,16 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
         self.lines_in_view.clone()
+    }
+
+    /// The present for the error marks' pause (UX-03): the real clock, or
+    /// the instant a test stepped it to.
+    fn marks_now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = self.marks_clock {
+            return now;
+        }
+        Instant::now()
     }
 
     /// Steps the clock the error marks' pause is measured by: from now on
