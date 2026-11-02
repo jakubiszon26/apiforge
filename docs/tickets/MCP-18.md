@@ -3,8 +3,8 @@
 - Size: S · Owner review: 10 min · Risk: MCP output compatibility
   (`live_requests` gains a state); no `format`, `migration`, `default`,
   `visible UI` or `removal`
-- State: Analysis (issue #190) · decision 1 open
-- Analysis model: Claude Fable 5.1 · Implementation model: —
+- State: Implementation (issue #190) · decision 1 taken: A (2026-11-02)
+- Analysis model: Claude Fable 5.1 · Implementation model: Claude Opus 5.5
 
 ## Goal
 
@@ -61,6 +61,13 @@ overview (`holder: window`, `hands_over_on_write: true`); only
    - **C: text only.** No schema change: `allowed: false` and the `source`
      text explains. Smallest change; a model trusting `allowed` is still
      told "no".
+
+   **Decided 2026-11-02: A.** `allowed` becomes nullable: `allowed: null`
+   means the window decides when the run starts, with `source: "window
+   setting, asked when the run starts"`. The schema's `allowed` is
+   `boolean | null` and stays required. The owner accepts this prerelease
+   schema change: a typed client generated from the earlier schema reads a
+   `bool` and must be regenerated.
 
 ## Mock-up
 
