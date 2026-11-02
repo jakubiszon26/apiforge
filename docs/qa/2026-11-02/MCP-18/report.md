@@ -108,11 +108,16 @@ in-process acceptance tests of `apiforge-mcp` compare `allowed` with
 `Some(true)`/`Some(false)` now that it is an `Option`; the states they
 assert are unchanged.
 
-Verification: `cargo fmt --all -- --check`,
+Verification on `98f2918` (review round 1, the code this report ends
+with): `cargo fmt --all -- --check`,
 `cargo clippy --workspace --all-targets --locked -- -D warnings`,
 `cargo test --workspace --all-targets --locked` (1409 passed, 0 failed,
-43 ignored, on `b6ae1e0`; `e2d97f3` changes one doc comment) and
-`cargo run -p apiforge-convert-v1 --locked -- --fixtures --check` pass.
+43 ignored; the malformed endpoint is one more case inside criterion 3, so
+the count is that of `b6ae1e0`) and
+`cargo run -p apiforge-convert-v1 --locked -- --fixtures --check` pass on
+Linux. The CI of `98f2918` passed on `ubuntu-24.04` and `windows-2022`.
+The transcripts are of `e2d97f3`'s release binary: round 1 changes the
+overview only for a malformed endpoint, which they do not drive.
 
 ### Documentation
 
