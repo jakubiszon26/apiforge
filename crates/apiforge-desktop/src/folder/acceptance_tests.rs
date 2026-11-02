@@ -5655,6 +5655,62 @@ mod mcp10 {
         drop(server);
     }
 
+    /// MCP-19 criterion 4: the agent writes ten times while the observing
+    /// window checks the folder as often as it can, so that on Windows its
+    /// reads meet the agent's replaces. Every write is written, none asks
+    /// for recovery, and the window follows each one.
+    #[test]
+    fn mcp19_criterion_4_ten_agent_writes_beside_a_window_that_checks_continuously() {
+        const WRITES: usize = 10;
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = folder_harness(root, WIDE);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, 0, false);
+        agent_writes(&mut harness, &mut server, "Handed over.");
+        assert!(read_only(&harness), "the window observes the agent");
+        let scenario = only(&harness, DocumentKind::Scenario);
+        // A check starts at every frame where none is running.
+        app(&mut harness).watcher.set_interval(Duration::ZERO);
+        for round in 1..=WRITES {
+            let (text, _) = read(&mut server, SCENARIO);
+            let written = commented(&text, &format!("Write {round} of {WRITES}."));
+            let answer = write(&mut harness, &mut server, SCENARIO, &written);
+            assert_eq!(
+                structured(&answer)["wrote"],
+                true,
+                "write {round}: {answer}"
+            );
+            let since = Instant::now();
+            while source_of(&harness, &scenario) != written {
+                assert!(
+                    !folder(&harness).watcher.recovery_required,
+                    "write {round}: the window asks for recovery"
+                );
+                assert!(
+                    since.elapsed() < Duration::from_secs(15),
+                    "write {round}: the window never followed it"
+                );
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                !folder(&harness).watcher.recovery_required,
+                "write {round}: the window asks for recovery"
+            );
+            assert!(
+                contains(&harness, PAUSED),
+                "write {round}: the bar no longer says the window follows"
+            );
+        }
+        app(&mut harness)
+            .watcher
+            .set_interval(crate::folder::watcher::POLL_INTERVAL);
+        settle(&mut harness);
+        drop(harness);
+        drop(server);
+    }
+
     /// Criterion 4: the status goes when the agent finishes, and when the
     /// channel drops in the middle of a run.
     #[test]
@@ -6722,5 +6778,132 @@ mod mcp16 {
             drop(harness);
             drop(server);
         }
+    }
+}
+
+/// MCP-19 (#191): on Windows a file operation beside the window's own check
+/// of the folder no longer fails because the check was reading its files.
+mod mcp19 {
+    use super::*;
+    use apiforge_storage::project::{
+        ProjectStore,
+        faults::{Boundary, Phase},
+    };
+    use std::sync::{
+        Mutex,
+        mpsc::{RecvTimeoutError, channel},
+    };
+
+    const FOLDER: &str = "scenarios";
+    const SOURCE: &str = "scenarios/promotion-and-cart-price.afs";
+    /// Long enough that a check which is not held has answered.
+    const NOT_HELD: Duration = Duration::from_millis(500);
+    /// Generous: only reached when something is broken.
+    const STUCK: Duration = Duration::from_secs(20);
+
+    /// Criterion 3: the window deletes a folder while its own check of the
+    /// folder is forced to run, as `Watcher::finish` runs it. The delete is
+    /// stopped where it removes the folder's scenario; the check waits for
+    /// it rather than reading the files it removes, then sees the folder
+    /// gone. The tab closes and nothing asks for recovery.
+    #[test]
+    fn mcp19_criterion_3_a_folder_deleted_beside_the_windows_check_closes_its_tab() {
+        let directory = shop();
+        let root = directory.path();
+        let (context, mut app) = open(root);
+        let id = document(&app, SOURCE);
+        app.workbench.open(&id);
+        frame(&mut app, &context, vec![]);
+        assert!(
+            app.workbench.tabs().iter().any(|tab| tab.document_id == id),
+            "the scenario is open"
+        );
+        app.request_delete(vec![FOLDER.into()]);
+        wait_storage(&mut app, &context);
+        let Some(Prompt::Delete { preview, .. }) = app.prompt.take() else {
+            panic!("a delete confirmation");
+        };
+
+        let (stopped, at_remove) = channel::<()>();
+        let (resume, resumed) = channel::<()>();
+        let (stopped, resumed) = (Mutex::new(Some(stopped)), Mutex::new(resumed));
+        app.storage.fault = Some(Arc::new(move |event| {
+            if event.boundary == Boundary::RemoveFile
+                && event.phase == Phase::Before
+                && event.path.ends_with(SOURCE)
+                && let Some(stopped) = stopped.lock().unwrap().take()
+            {
+                stopped.send(()).unwrap();
+                resumed
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(STUCK)
+                    .expect("the test resumes the delete");
+            }
+            Ok(())
+        }));
+        let check = app.session.as_ref().unwrap().external_check();
+        app.delete_confirmed(&preview).unwrap();
+        let deadline = Instant::now() + STUCK;
+        while at_remove.try_recv().is_err() {
+            assert!(
+                Instant::now() < deadline,
+                "the delete never reached the scenario's removal"
+            );
+            frame(&mut app, &context, vec![]);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let (checked, checking) = channel();
+        std::thread::spawn(move || {
+            checked.send(
+                check
+                    .run()
+                    .map(|changes| changes.scan)
+                    .map_err(|error| error.to_string()),
+            )
+        });
+        match checking.recv_timeout(NOT_HELD) {
+            Err(RecvTimeoutError::Timeout) => {}
+            early => panic!(
+                "the check answered during the delete: {:?}",
+                early.map(|answer| answer.map(|scan| scan.generation))
+            ),
+        }
+        resume.send(()).unwrap();
+        wait_storage(&mut app, &context);
+        frame(&mut app, &context, vec![]);
+        app.storage.fault = None;
+
+        let scan = checking
+            .recv_timeout(STUCK)
+            .expect("the check answers after the delete")
+            .expect("the check reads the folder after the delete");
+        assert!(
+            scan.entry(FOLDER).is_none() && scan.entry(SOURCE).is_none(),
+            "the check sees the folder gone"
+        );
+        let generation = ProjectStore::open_read_only(root)
+            .unwrap()
+            .read(&[])
+            .unwrap()
+            .generation;
+        assert_eq!(
+            scan.generation, generation,
+            "the check reads the delete's generation"
+        );
+        let notice = app.notice.as_ref().expect("the delete says what it did");
+        assert!(!notice.error, "the delete failed: {}", notice.text);
+        assert!(
+            app.workbench.tabs().iter().all(|tab| tab.document_id != id),
+            "the deleted scenario's tab closed"
+        );
+        assert!(!root.join(FOLDER).exists(), "the folder is gone");
+
+        watch(&mut app, &context);
+        assert!(!app.watcher.recovery_required, "nothing asks for recovery");
+        assert_eq!(app.watcher.problem, None);
+        assert!(app.workbench.tabs().iter().all(|tab| tab.document_id != id));
+        assert!(!root.join(FOLDER).exists());
     }
 }

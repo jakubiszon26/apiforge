@@ -143,4 +143,6 @@ impl ProjectError {
 #[cfg(test)]
 mod fault_tests;
 #[cfg(test)]
+mod replace_tests;
+#[cfg(test)]
 mod tests;
