@@ -7,7 +7,8 @@
   (`cd3f8f4`). Review round 1 (cubic on `cd3f8f4`, ten comments) in
   `4e5a60e`: start handshakes in three tests and documentation, no
   assertion changed; round 2 (cubic on `4e5a60e`: five repeats of round 1,
-  one new) in the commit that adds this line: one documentation sentence.
+  one new) in `d963b51`: one documentation sentence; round 3 (cubic on
+  `d963b51`: the count of CI runs below) in the commit that adds this.
 - Built with: Rust 1.99.0, `cargo test --locked` on the GitHub runners
   `windows-2022` and `ubuntu-24.04`, and locally on Linux. "Before" is the
   acceptance commit `d9165cf` (the storage code of `main` at `3dfc3f9`);
@@ -72,9 +73,14 @@ replace while any handle is open, even one that shares delete.
 ### Scenario 2: the same tests and the suite after the fix
 
 CI of `d1f27ff` (push run 41465821527, pull_request run 41465834540), of
-`47e72fa` (41466533907), of `cd9477f` (41472473949, 41472482827), of
-`cd3f8f4` (41477673452, 41477687100) and of review round 1's `4e5a60e`
-(41483273288, 41483284555): every job green. In 41465821527 on `windows-2022` all six MCP-19 tests passed:
+`47e72fa` (41466533907, 41466542094), of `cd9477f` (41472473949,
+41472482827), of `cd3f8f4` (41477673452, 41477687100) and of review round
+1's `4e5a60e` (41483273288, 41483284555): every job green, ten runs. Of
+round 2's `d963b51`, the push run (41488259167) was green; its
+pull_request run (41488269021) failed on Windows in
+`mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run`
+(*live requests are off in this project's settings*), KTLO-33's flake 2,
+which this branch does not touch; the run of the next head is green. In 41465821527 on `windows-2022` all six MCP-19 tests passed:
 criterion 1, both criterion 2 cases (within the bound, and the 2 s reader
 with recovery after it let go), criterion 3's storage and desktop tests,
 criterion 4. The folder-project step of each run (release binary, demo shop
