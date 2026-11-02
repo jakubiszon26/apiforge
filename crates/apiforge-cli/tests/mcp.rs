@@ -38,6 +38,12 @@
 //! result that carries `structuredContent`, errors included, as a client
 //! that validates whenever it is present does; the `mcp17_` tests assert the
 //! raw refusal and a refusal of every tool that can refuse.
+//!
+//! MCP-18 (#190): `project_overview.live_requests` while a scripted window
+//! holds the project and names its endpoint: `allowed: null`, the window
+//! decides when the run starts, whatever the flag, with no connection made;
+//! the flag where no window can be asked; a connected window's setting; and
+//! the `outputSchema` that admits the new state.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -2265,4 +2271,335 @@ fn mcp17_criterion_2_every_refusal_passes_a_validating_client() {
     expected.remove("language_reference");
     expected.remove("finish_editing");
     assert_eq!(refused, expected, "every tool that can refuse refused");
+}
+
+// MCP-18 (#190) --------------------------------------------------------------
+
+/// What `live_requests` says while a window holding the project decides at
+/// run time (owner decision 1 = A, 2026-11-02).
+fn asked_when_the_run_starts() -> Value {
+    json!({ "allowed": null, "source": "window setting, asked when the run starts" })
+}
+
+/// What the start flag says: `--allow-live` or not.
+fn the_flag(allow_live: bool) -> Value {
+    if allow_live {
+        json!({ "allowed": true, "source": "--allow-live" })
+    } else {
+        json!({ "allowed": false, "source": "no --allow-live" })
+    }
+}
+
+/// A server on `root`, started with `--allow-live` or without.
+fn spawn_flagged(root: &Path, allow_live: bool) -> Server {
+    let args: &[&str] = if allow_live { &["--allow-live"] } else { &[] };
+    Server::spawn_live(root, args, &[])
+}
+
+/// Every file under `root`, by relative path. The writer's lock file is
+/// always empty and, on Windows, cannot be read while it is held: it is
+/// listed by its length.
+fn files(root: &Path) -> BTreeMap<std::path::PathBuf, Vec<u8>> {
+    fn walk(root: &Path, directory: &Path, found: &mut BTreeMap<std::path::PathBuf, Vec<u8>>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(root, &path, found);
+            } else if path.is_file() {
+                let bytes = if path.ends_with(".apiforge/local/project.lock") {
+                    std::fs::metadata(&path)
+                        .unwrap()
+                        .len()
+                        .to_le_bytes()
+                        .to_vec()
+                } else {
+                    std::fs::read(&path).unwrap()
+                };
+                found.insert(path.strip_prefix(root).unwrap().to_owned(), bytes);
+            }
+        }
+    }
+    let mut found = BTreeMap::new();
+    walk(root, root, &mut found);
+    found
+}
+
+/// A scripted API Forge window: it holds the project as a window naming
+/// the endpoint it listens on, and counts the connections it accepts.
+/// Without `grant` it answers none. With `grant` it treats the first as
+/// the desktop's channel thread does: it says `permission { live: true }`,
+/// reads the request, lets the project go and answers `granted`, then
+/// observes until it is closed.
+struct Window {
+    accepted: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    close: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Window {
+    fn open(root: &Path, grant: bool) -> Self {
+        use apiforge_channel::{Listener, Message, Received};
+        use apiforge_storage::project::{Holder, ProjectStore};
+        use std::sync::{Arc, atomic::Ordering};
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut listener = {
+            let _context = runtime.enter();
+            Listener::bind().unwrap()
+        };
+        let owner = ProjectStore::open_exclusive_as(
+            root,
+            &Holder::window().with_endpoint(Some(listener.endpoint().name().to_owned())),
+        )
+        .unwrap();
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = accepted.clone();
+        let (close, mut closed) = tokio::sync::oneshot::channel::<()>();
+        let thread = thread::spawn(move || {
+            runtime.block_on(async move {
+                let mut owner = Some(owner);
+                loop {
+                    let mut connection = tokio::select! {
+                        _ = &mut closed => return,
+                        connection = listener.accept() => connection.unwrap(),
+                    };
+                    counter.fetch_add(1, Ordering::AcqRel);
+                    if !grant || owner.is_none() {
+                        continue;
+                    }
+                    connection
+                        .writer
+                        .send(&Message::Permission { live: true })
+                        .await
+                        .unwrap();
+                    loop {
+                        match connection.reader.next().await.unwrap() {
+                            Some(Received::Message(Message::Request { .. })) => break,
+                            Some(_) => {}
+                            None => panic!("the server went before asking"),
+                        }
+                    }
+                    drop(owner.take());
+                    connection.writer.send(&Message::Granted).await.unwrap();
+                    // Observes until closed: the channel ends with it.
+                    loop {
+                        tokio::select! {
+                            _ = &mut closed => return,
+                            message = connection.reader.next() => match message {
+                                Ok(Some(_)) => {}
+                                _ => break,
+                            },
+                        }
+                    }
+                }
+            });
+        });
+        Self {
+            accepted,
+            close: Some(close),
+            thread: Some(thread),
+        }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Closes the window, and with it the channel, and waits for it.
+    fn close(mut self) {
+        self.stop();
+    }
+
+    fn stop(&mut self) {
+        if let Some(close) = self.close.take() {
+            let _ = close.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        if !thread::panicking() {
+            self.stop();
+        } else if let Some(close) = self.close.take() {
+            let _ = close.send(());
+        }
+    }
+}
+
+/// Criteria 1 and 2: a window holds the project with a valid endpoint and
+/// nothing has connected; the overview says the window decides when the
+/// run starts, whatever the flag, without connecting and without changing
+/// the project folder.
+fn assert_the_holding_window_decides(allow_live: bool) {
+    let directory = demo();
+    let root = directory.path();
+    let window = Window::open(root, false);
+    let before = files(root);
+    let mut server = spawn_flagged(root, allow_live);
+    initialize(&mut server);
+    let overview = call(&mut server, 2, "project_overview", json!({}));
+    let overview = structured(&overview);
+    assert_eq!(overview["live_requests"], asked_when_the_run_starts());
+    assert_eq!(overview["holder"], "window");
+    assert_eq!(overview["hands_over_on_write"], true);
+    assert_clean_end(server);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(window.accepted(), 0, "the overview connected to the window");
+    assert_eq!(files(root), before, "the project folder is byte-identical");
+    window.close();
+}
+
+/// Criterion 1: without `--allow-live`, the window decides at run time.
+#[test]
+fn mcp18_criterion_1_a_holding_window_decides_at_run_time() {
+    assert_the_holding_window_decides(false);
+}
+
+/// Criterion 2: with `--allow-live`, the same: the flag does not decide
+/// for a window, which refuses fail-closed (owner decision on #93).
+#[test]
+fn mcp18_criterion_2_the_flag_does_not_speak_for_a_window() {
+    assert_the_holding_window_decides(true);
+}
+
+/// Criterion 3: the flag still speaks when no window can be asked: no
+/// holder, a window holding without an endpoint, and a foreign agent
+/// holding, whose endpoint is no window's.
+#[test]
+fn mcp18_criterion_3_the_flag_speaks_when_no_window_can_be_asked() {
+    use apiforge_storage::project::{Holder, HolderRole, ProjectStore};
+    let foreign = Holder::new(HolderRole::Agent, Some("Another agent".into()))
+        .with_endpoint(Some(apiforge_channel::Endpoint::random().name().to_owned()));
+    for (holder, shown) in [
+        (None, "none"),
+        (Some(Holder::window()), "window"),
+        (Some(foreign), "another_process"),
+    ] {
+        for allow_live in [false, true] {
+            let directory = demo();
+            let root = directory.path();
+            let owner = holder
+                .as_ref()
+                .map(|holder| ProjectStore::open_exclusive_as(root, holder).unwrap());
+            let mut server = spawn_flagged(root, allow_live);
+            initialize(&mut server);
+            let overview = call(&mut server, 2, "project_overview", json!({}));
+            let overview = structured(&overview);
+            assert_eq!(overview["holder"], shown, "{overview}");
+            assert_eq!(overview["hands_over_on_write"], false, "{overview}");
+            assert_eq!(
+                overview["live_requests"],
+                the_flag(allow_live),
+                "holder {shown}, --allow-live {allow_live}"
+            );
+            assert_clean_end(server);
+            drop(owner);
+        }
+    }
+}
+
+/// Criterion 4: once the window is connected, it granted the first write
+/// and said `permission { live: true }`, the overview says the window's
+/// setting; after the window's channel closes, the flag again.
+#[test]
+fn mcp18_criterion_4_a_connected_window_speaks_for_itself() {
+    let directory = demo();
+    let root = directory.path();
+    let window = Window::open(root, true);
+    let mut server = spawn_flagged(root, false);
+    initialize(&mut server);
+    let created = call(
+        &mut server,
+        2,
+        "create_document",
+        json!({ "kind": "scenario", "path": "scenarios/mcp18.afs", "text": "scenario \"MCP-18\" {\n}\n" }),
+    );
+    assert_eq!(structured(&created)["wrote"], true, "{created}");
+    assert_eq!(window.accepted(), 1);
+    let overview = call(&mut server, 3, "project_overview", json!({}));
+    let overview = structured(&overview);
+    assert_eq!(overview["holder"], "agent_session");
+    assert_eq!(
+        overview["live_requests"],
+        json!({ "allowed": true, "source": "window setting" })
+    );
+
+    window.close();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut id = 4;
+    loop {
+        let overview = call(&mut server, id, "project_overview", json!({}));
+        let seen = structured(&overview)["live_requests"].clone();
+        if seen == the_flag(false) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the overview still says {seen} after the window closed"
+        );
+        id += 1;
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_clean_end(server);
+}
+
+/// The object schema `schema` names, following one local `$ref`.
+fn resolved<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
+    match schema["$ref"].as_str() {
+        Some(reference) => root
+            .pointer(reference.trim_start_matches('#'))
+            .unwrap_or_else(|| panic!("{reference} is not in {root}")),
+        None => schema,
+    }
+}
+
+/// Criterion 5: `tools/list` advertises the new state: `allowed` admits
+/// null and stays required, and the overview of a window that decides at
+/// run time validates against it, as every overview of every stdio session
+/// does (MCP-14).
+#[test]
+fn mcp18_criterion_5_the_schema_admits_the_new_state() {
+    let directory = demo();
+    let root = directory.path();
+    let window = Window::open(root, false);
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let listed = server.request(2, "tools/list", json!({}));
+    let schema = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "project_overview")
+        .unwrap()["outputSchema"]
+        .clone();
+    let live = resolved(&schema, &schema["properties"]["live_requests"]);
+    let required = live["required"].as_array().unwrap();
+    assert!(required.contains(&json!("allowed")), "{live}");
+    assert!(required.contains(&json!("source")), "{live}");
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let overview = call(&mut server, 3, "project_overview", json!({}));
+    let mut overview = structured(&overview).clone();
+    let answered = overview["live_requests"].clone();
+    for allowed in [Value::Null, json!(true), json!(false)] {
+        overview["live_requests"]["allowed"] = allowed;
+        assert!(validator.is_valid(&overview), "admitted: {overview}");
+    }
+    overview["live_requests"]["allowed"] = json!("unknown");
+    assert!(!validator.is_valid(&overview), "only a boolean or null");
+    overview["live_requests"]
+        .as_object_mut()
+        .unwrap()
+        .remove("allowed");
+    assert!(!validator.is_valid(&overview), "allowed stays required");
+    // The server's own answer in that state, validated as `Server` reads it.
+    assert_eq!(answered, asked_when_the_run_starts());
+    assert!(server.validated.contains("project_overview"));
+    assert_clean_end(server);
+    window.close();
 }
