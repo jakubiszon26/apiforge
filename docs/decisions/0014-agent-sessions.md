@@ -150,6 +150,16 @@ tells connected windows `run { mode: live }` when its live run starts and
 ends. The consent is kept in `agent-consent.json` beside the preferences, by
 the manifest id; the project file format is unchanged.
 
+## MCP-18 amendment: the overview says the window decides (2026-11-02)
+
+The MCP-09 amendment's "the overview still never connects, so before a window
+is connected it reports the flag" becomes: it reports the flag unless a window
+holding the project names an endpoint, and then it says that the window
+decides when the run starts — `live_requests.allowed` is `null` with `source`
+*window setting, asked when the run starts* ([MCP-18](../tickets/MCP-18.md),
+decision 1 = A). The overview and `run` read the same predicate; the overview
+still opens no connection, and no channel message or file format changes.
+
 ## MCP-15 amendment: a command asks the window too (2026-11-01)
 
 Decisions 2–5 stand; [MCP-15](../tickets/MCP-15.md) adds a second kind of

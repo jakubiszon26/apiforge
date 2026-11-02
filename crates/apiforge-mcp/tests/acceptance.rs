@@ -173,7 +173,7 @@ fn criterion_3_the_overview_describes_the_demo_shop() {
     // A clone has no head file: generation 0 until the first commit.
     assert_eq!(overview.generation, 0);
     assert_eq!(overview.holder, Holder::None);
-    assert!(!overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.allowed, Some(false));
     assert_eq!(overview.live_requests.source, "no --allow-live");
     assert_eq!(overview.server_version, env!("CARGO_PKG_VERSION"));
     // MCP-03 criterion 12: the version of the reference `language_reference`
@@ -2760,7 +2760,7 @@ fn mcp06_criterion_1_without_allow_live_nothing_is_sent() {
     assert_eq!(error.message, NOT_ENABLED);
     assert_eq!(error.wrote, Wrote::No);
     let overview = server.overview_tool().unwrap();
-    assert!(!overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.allowed, Some(false));
     assert_eq!(overview.live_requests.source, "no --allow-live");
     thread::sleep(Duration::from_millis(200));
     assert_eq!(api.accepted(), 0, "the API saw no request");
@@ -2768,7 +2768,7 @@ fn mcp06_criterion_1_without_allow_live_nothing_is_sent() {
     assert!(journal(root).is_none());
 
     let allowed = live_server(root, true, &[]).overview_tool().unwrap();
-    assert!(allowed.live_requests.allowed);
+    assert_eq!(allowed.live_requests.allowed, Some(true));
     assert_eq!(allowed.live_requests.source, "--allow-live");
 }
 
@@ -2876,7 +2876,7 @@ fn mcp06_criterion_4_the_window_decides_while_connected_the_flag_otherwise() {
         Permission::Window { live: true }
     );
     let overview = server.overview_tool().unwrap();
-    assert!(overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.allowed, Some(true));
     assert_eq!(overview.live_requests.source, "window setting");
     let report = server
         .run_tool(live(SCENARIO), CancellationToken::new())
@@ -2903,7 +2903,7 @@ fn mcp06_criterion_4_the_window_decides_while_connected_the_flag_otherwise() {
         "the window overrides the flag"
     );
     let overview = flagged.overview_tool().unwrap();
-    assert!(!overview.live_requests.allowed);
+    assert_eq!(overview.live_requests.allowed, Some(false));
     assert_eq!(
         overview.live_requests.source,
         "off in the project's settings"
