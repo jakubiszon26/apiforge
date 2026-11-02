@@ -301,7 +301,30 @@ jobs:
               throw "$name.exe carries ProductVersion '$product', expected '$env:VERSION'."
             }
           }
-          & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
+          # REL-04 (#205): the desktop binary is a windowed program and the
+          # command line a console one, read from each .exe's PE header.
+          Add-Type -AssemblyName System.Reflection.Metadata
+          $subsystems = @{ 'apiforge' = 'WindowsCui'; 'apiforge-desktop' = 'WindowsGui' }
+          foreach ($name in $subsystems.Keys) {
+            $reader = [System.Reflection.PortableExecutable.PEReader]::new(
+              [System.IO.File]::OpenRead((Join-Path $root "$name.exe")))
+            try {
+              $subsystem = [string] $reader.PEHeaders.PEHeader.Subsystem
+            } finally {
+              $reader.Dispose()
+            }
+            Write-Host "$name.exe: PE subsystem $subsystem"
+            if ($subsystem -ne $subsystems[$name]) {
+              throw "$name.exe has PE subsystem $subsystem, expected $($subsystems[$name])."
+            }
+          }
+          # PowerShell waits for a windowed program only when it reads the
+          # program's output, so --check's output is read and asserted.
+          $check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
+          if ($LASTEXITCODE -ne 0 -or "$check" -notmatch '^Valid v\d+ document: \d+ project\(s\)$') {
+            throw "apiforge-desktop.exe --check printed '$check' with exit code $LASTEXITCODE."
+          }
+          Write-Host $check
           python -I packaging/mcp-smoke.py (Join-Path $root 'apiforge.exe') $env:VERSION `
             crates/apiforge-cli/tests/mcp.rs
 

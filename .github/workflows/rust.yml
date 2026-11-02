@@ -139,9 +139,17 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --locked -p apiforge-desktop -p apiforge-cli
 
+      # REL-04: the output is read, not left to the terminal, so a shell that
+      # does not wait for a windowed program still waits here.
       - name: Validate workspace using the native release binary
         shell: bash
-        run: ./${{ matrix.binary_path }} --check fixtures/workspace.json
+        run: |
+          output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"
+          printf '%s\n' "$output"
+          case "$output" in
+            'Valid v'*) ;;
+            *) echo "::error::--check did not print a Valid v line"; exit 1 ;;
+          esac
 
       # Exercise the actual event loop and renderer, not only the document importer.
       # Lavapipe makes this independent of a physical GPU on the Linux runner.
@@ -186,17 +194,29 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force test-results | Out-Null
+          # REL-04: a windowed program's errors reach the job log only through
+          # a file, printed whether or not the probe failed.
+          function Show-Failures([string] $Path) {
+            if ((Test-Path $Path -PathType Leaf) -and (Get-Item $Path).Length -gt 0) {
+              Get-Content $Path | ForEach-Object { Write-Host "  $_" }
+            }
+          }
           function Invoke-NativeProbe([string[]] $ProbeArguments) {
+            $failures = Join-Path $env:RUNNER_TEMP "native-probe-$([guid]::NewGuid()).err.log"
             $process = Start-Process -FilePath './${{ matrix.binary_path }}' `
-              -ArgumentList $ProbeArguments -NoNewWindow -PassThru
+              -ArgumentList $ProbeArguments -NoNewWindow -PassThru -RedirectStandardError $failures
             # Keep the process handle so ExitCode remains available after exit.
             $null = $process.Handle
-            if (-not $process.WaitForExit(45000)) {
-              & taskkill.exe /PID $process.Id /T /F | Out-Null
-              throw 'Native window probe exceeded 45 seconds.'
-            }
-            if ($process.ExitCode -ne 0) {
-              throw "Native window probe failed with exit code $($process.ExitCode)."
+            try {
+              if (-not $process.WaitForExit(45000)) {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+                throw 'Native window probe exceeded 45 seconds.'
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "Native window probe failed with exit code $($process.ExitCode)."
+              }
+            } finally {
+              Show-Failures $failures
             }
           }
           Invoke-NativeProbe -ProbeArguments @('--smoke-test', 'fixtures/workspace.json')
@@ -426,6 +446,7 @@ jobs:
       # the roaming directory of the runner account is reset between phases
       # instead. Nothing else in the job writes folder projects into it.
       - name: Exercise folder projects and managed startup (Windows)
+        id: folder-windows
         if: runner.os == 'Windows'
         timeout-minutes: 11
         env:
@@ -540,6 +561,14 @@ jobs:
             }
           }
 
+          # REL-04: a windowed capture's errors reach the job log only through
+          # a file, printed whether or not the capture failed.
+          function Show-Failures([string] $Path) {
+            if ((Test-Path $Path -PathType Leaf) -and (Get-Item $Path).Length -gt 0) {
+              Get-Content $Path | ForEach-Object { Write-Host "  $_" }
+            }
+          }
+
           function Get-MigrationId {
             $id = (Get-Content $catalogue -Raw | ConvertFrom-Json).migrationId
             if ([string]::IsNullOrWhiteSpace($id)) {
@@ -608,17 +637,22 @@ jobs:
           # 4. A migrated project renders. `tickets` was written by migration and
           # never opened, so this opens migration output from cold.
           $capture = 'test-results/native-folder.png'
-          $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -ArgumentList @(
+          $failures = Join-Path $scratch 'folder.err.log'
+          $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -RedirectStandardError $failures -ArgumentList @(
             '--screenshot', $capture,
             '--folder', (Join-Path $projects 'tickets')
           )
           $null = $process.Handle
-          if (-not $process.WaitForExit(45000)) {
-            & taskkill.exe /PID $process.Id /T /F | Out-Null
-            throw 'The folder-window capture exceeded 45 seconds.'
-          }
-          if ($process.ExitCode -ne 0) {
-            throw "The folder-window capture failed with exit code $($process.ExitCode)."
+          try {
+            if (-not $process.WaitForExit(45000)) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+              throw 'The folder-window capture exceeded 45 seconds.'
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "The folder-window capture failed with exit code $($process.ExitCode)."
+            }
+          } finally {
+            Show-Failures $failures
           }
           if (-not (Test-Path $capture -PathType Leaf)) {
             throw 'The folder-window capture was not created.'
@@ -635,19 +669,24 @@ jobs:
           foreach ($mode in @('code', 'diagram', 'split')) {
             foreach ($size in @('960x540', '1600x1000')) {
               $capture = "test-results/qa/$mode-$size.png"
-              $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -ArgumentList @(
+              $failures = Join-Path $scratch "qa-$mode-$size.err.log"
+              $process = Start-Process -FilePath $binary -NoNewWindow -PassThru -RedirectStandardError $failures -ArgumentList @(
                 '--screenshot', $capture,
                 '--folder', (Join-Path $projects 'shop'),
                 '--mode', $mode,
                 '--size', $size
               )
               $null = $process.Handle
-              if (-not $process.WaitForExit(45000)) {
-                & taskkill.exe /PID $process.Id /T /F | Out-Null
-                throw "The $mode $size capture exceeded 45 seconds."
-              }
-              if ($process.ExitCode -ne 0) {
-                throw "The $mode $size capture failed with exit code $($process.ExitCode)."
+              try {
+                if (-not $process.WaitForExit(45000)) {
+                  & taskkill.exe /PID $process.Id /T /F | Out-Null
+                  throw "The $mode $size capture exceeded 45 seconds."
+                }
+                if ($process.ExitCode -ne 0) {
+                  throw "The $mode $size capture failed with exit code $($process.ExitCode)."
+                }
+              } finally {
+                Show-Failures $failures
               }
               if (-not (Test-Path $capture -PathType Leaf) -or (Get-Item $capture).Length -eq 0) {
                 throw "The $mode $size capture is missing or empty."
@@ -668,6 +707,8 @@ jobs:
       # running window with its icon in the title bar and on the taskbar. The
       # extracted icons and the desktop capture are the artifact windows-icon.
       # The window opens the demo shop that the step above migrated.
+      # REL-04 (#205): the PE subsystem of each .exe, and the window started
+      # the way Explorer starts it owns no console.
       - name: Show the application icon (Windows)
         if: runner.os == 'Windows'
         timeout-minutes: 3
@@ -678,8 +719,34 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.Drawing
           Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Reflection.Metadata
           $out = 'test-results/icon'
           New-Item -ItemType Directory -Force $out | Out-Null
+          # REL-04: what is wrong with the subsystems and the console is
+          # reported together at the end, so one run shows all of it.
+          $problems = @()
+
+          # 0. REL-04 criterion 1: the release desktop binary is a windowed
+          # program (WindowsGui); the command line and the debug build that
+          # cargo test made keep their console (WindowsCui).
+          $subsystems = @(
+            @{ Exe = 'target/release/apiforge-desktop.exe'; Subsystem = 'WindowsGui' }
+            @{ Exe = 'target/release/apiforge.exe'; Subsystem = 'WindowsCui' }
+            @{ Exe = 'target/debug/apiforge-desktop.exe'; Subsystem = 'WindowsCui' }
+          )
+          foreach ($binary in $subsystems) {
+            $reader = [System.Reflection.PortableExecutable.PEReader]::new(
+              [System.IO.File]::OpenRead((Resolve-Path $binary.Exe).Path))
+            try {
+              $subsystem = [string] $reader.PEHeaders.PEHeader.Subsystem
+            } finally {
+              $reader.Dispose()
+            }
+            Write-Host "$($binary.Exe): PE subsystem $subsystem"
+            if ($subsystem -ne $binary.Subsystem) {
+              $problems += "$($binary.Exe) has PE subsystem $subsystem, expected $($binary.Subsystem)."
+            }
+          }
 
           # 1. Each .exe: the version resource, then its associated icon at
           # the shell's 32 x 32, against the PNG the .ico was built from.
@@ -732,13 +799,17 @@ jobs:
           }
 
           # 2. The window: started like a person would, captured with the
-          # whole desktop once it is on screen, then ended.
-          $shop = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'apiforge/projects/shop'
+          # whole desktop once it is on screen, then ended. REL-04 criterion
+          # 2: started the way Explorer starts it, without -NoNewWindow and
+          # without redirection, it owns no console; a console program
+          # started this way has its own conhost.exe.
+          $data = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'apiforge'
+          $shop = Join-Path $data 'projects/shop'
           if (-not (Test-Path (Join-Path $shop 'apiforge.project.json') -PathType Leaf)) {
             throw "$shop holds no project; the folder project step migrates it."
           }
-          $process = Start-Process -FilePath 'target/release/apiforge-desktop.exe' `
-            -ArgumentList @('--folder', $shop) -NoNewWindow -PassThru
+          $program = (Resolve-Path 'target/release/apiforge-desktop.exe').Path
+          $process = Start-Process -FilePath $program -ArgumentList @('--folder', $shop) -PassThru
           $null = $process.Handle
           try {
             $deadline = (Get-Date).AddSeconds(45)
@@ -769,11 +840,164 @@ jobs:
               throw "apiforge-desktop.exe exited with code $($process.ExitCode) while it was captured."
             }
             Write-Host "captured: $out/desktop-window.png ($($bounds.Width) x $($bounds.Height)), window '$($process.MainWindowTitle)'"
+            # The process tree while the window is open.
+            $record = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+            $creator = Get-CimInstance Win32_Process -Filter "ProcessId=$($record.ParentProcessId)"
+            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($process.Id)")
+            Write-Host ("process tree: {0} ({1}) > apiforge-desktop.exe ({2}) > {3}" -f `
+              $creator.Name, $record.ParentProcessId, $process.Id,
+              $(if ($children.Count -gt 0) { ($children | ForEach-Object { "$($_.Name) ($($_.ProcessId))" }) -join ', ' } else { 'no child process' }))
+            $consoles = @(Get-CimInstance Win32_Process -Filter "Name='conhost.exe' AND ParentProcessId=$($process.Id)")
+            if ($consoles.Count -ne 0) {
+              $problems += "apiforge-desktop.exe owns a console: conhost.exe $(($consoles | ForEach-Object { $_.ProcessId }) -join ', ')."
+            }
           } finally {
             if (-not $process.HasExited) {
               & taskkill.exe /PID $process.Id /T /F | Out-Null
             }
             $null = $process.WaitForExit(15000)
+            # Without a console of its own the window attaches to the runner's
+            # or, with none, writes to its log; either way, not to the job log.
+            $log = Join-Path $data 'logs/apiforge-desktop.log'
+            if (Test-Path $log -PathType Leaf) {
+              Write-Host "${log}:"
+              Get-Content $log | ForEach-Object { Write-Host "  $_" }
+            }
+          }
+          if ($problems.Count -gt 0) {
+            throw ($problems -join ' ')
+          }
+
+      # REL-04 (#205), criteria 4 and 7. Started by a parent with no console
+      # (Win32_Process.Create, whose parent is the WMI host), as from
+      # Explorer, the release desktop binary writes its output to the log
+      # beside the managed projects: one block per start, a log over 1 MiB
+      # renamed to .log.1 first. Output that cmd redirects still reaches its
+      # file. The data directory is the one the folder project step owned and
+      # reset, so no real log is touched; the step needs only that and the
+      # release binary, so it also runs when the window step above failed.
+      - name: Write the desktop log without a console (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && steps.folder-windows.outcome == 'success' }}
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $program = (Resolve-Path 'target/release/apiforge-desktop.exe').Path
+          $fixture = (Resolve-Path 'fixtures/workspace.json').Path
+          $logs = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'apiforge/logs'
+          $log = Join-Path $logs 'apiforge-desktop.log'
+          $rotated = Join-Path $logs 'apiforge-desktop.log.1'
+          if (-not ((Get-Content 'Cargo.toml' -Raw) -match '(?m)^\[workspace\.package\]\s+version = "([^"]+)"')) {
+            throw 'Cargo.toml has no workspace version.'
+          }
+          $version = $Matches[1]
+          # What --check prints, read through a pipe, which PowerShell waits for.
+          $valid = & $program --check $fixture
+          if ($LASTEXITCODE -ne 0 -or "$valid" -notmatch '^Valid v\d+ document: \d+ project\(s\)$') {
+            throw "apiforge-desktop.exe --check printed '$valid' with exit code $LASTEXITCODE."
+          }
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Rel04Process {
+              [DllImport("ntdll.dll")]
+              public static extern int NtResumeProcess(IntPtr process);
+          }
+          '@
+
+          # Created suspended, so that its exit code can be read however fast
+          # it ends, then resumed.
+          function Invoke-WithoutConsole([string] $Label) {
+            $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+              CreateFlags = [uint32] 4
+            }
+            $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+              CommandLine = "`"$program`" --check `"$fixture`""
+              CurrentDirectory = (Get-Location).Path
+              ProcessStartupInformation = $startup
+            }
+            if ($created.ReturnValue -ne 0) {
+              throw "Win32_Process.Create returned $($created.ReturnValue) ($Label)."
+            }
+            $process = Get-Process -Id $created.ProcessId
+            $null = $process.Handle
+            try {
+              $record = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.Id)"
+              $creator = Get-CimInstance Win32_Process -Filter "ProcessId=$($record.ParentProcessId)"
+              Write-Host ("{0}: apiforge-desktop.exe ({1}) started by {2} ({3})" -f `
+                $Label, $process.Id, $creator.Name, $record.ParentProcessId)
+              if ([Rel04Process]::NtResumeProcess($process.Handle) -ne 0) {
+                throw "apiforge-desktop.exe ($Label) could not be resumed."
+              }
+              if (-not $process.WaitForExit(45000)) {
+                throw "apiforge-desktop.exe --check ($Label) exceeded 45 seconds."
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "apiforge-desktop.exe --check ($Label) exited with code $($process.ExitCode)."
+              }
+            } finally {
+              if (-not $process.HasExited) {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+              }
+            }
+          }
+
+          # The log ends with this start's line and what --check printed.
+          function Assert-Log([string] $Label, [int] $Starts) {
+            if (-not (Test-Path $log -PathType Leaf)) {
+              throw "${Label}: $log was not written."
+            }
+            $lines = @(Get-Content $log)
+            Write-Host "${Label}: $log"
+            $lines | ForEach-Object { Write-Host "  $_" }
+            $found = @($lines | Where-Object { $_ -match '^--- apiforge-desktop ' }).Count
+            if ($found -ne $Starts) {
+              throw "${Label}: the log holds $found start lines; expected $Starts."
+            }
+            $start = "^--- apiforge-desktop $([regex]::Escape($version)) .+ ---$"
+            if ($lines.Count -lt 2 -or $lines[-2] -notmatch $start -or $lines[-1] -ne "$valid") {
+              throw "${Label}: the log does not end with a start line and '$valid'."
+            }
+          }
+
+          if (Test-Path $logs) {
+            Remove-Item -Recurse -Force $logs
+          }
+          Invoke-WithoutConsole 'first'
+          Assert-Log 'first' 1
+          Invoke-WithoutConsole 'second'
+          Assert-Log 'second' 2
+
+          # A log over 1 MiB at start is renamed to apiforge-desktop.log.1.
+          $full = 1MB + 1
+          [System.IO.File]::WriteAllBytes($log, [byte[]]::new($full))
+          Invoke-WithoutConsole 'rotated'
+          if (-not (Test-Path $rotated -PathType Leaf) -or (Get-Item $rotated).Length -ne $full) {
+            throw "A log of $full bytes was not renamed to $rotated."
+          }
+          Write-Host "rotated: $rotated holds the $full bytes of the previous log"
+          Assert-Log 'rotated' 1
+
+          # Criterion 7: cmd /c with its output redirected to a file. cmd need
+          # not wait for a windowed program, so the file is awaited.
+          $redirected = Join-Path $env:RUNNER_TEMP 'rel-04-version.txt'
+          Remove-Item -Force -ErrorAction SilentlyContinue $redirected
+          & cmd.exe /c "$program --version > $redirected"
+          $deadline = (Get-Date).AddSeconds(15)
+          $line = ''
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $redirected -PathType Leaf) {
+              $line = (Get-Content $redirected -Raw) -replace '\r?\n$', ''
+              if ($line) {
+                break
+              }
+            }
+            Start-Sleep -Milliseconds 250
+          }
+          Write-Host "cmd /c `"apiforge-desktop.exe --version > file`" wrote '$line'"
+          if ($line -ne "apiforge-desktop $version") {
+            throw "cmd /c with a redirection wrote '$line', expected 'apiforge-desktop $version'."
           }
 
       - name: Upload the application icon (Windows)
