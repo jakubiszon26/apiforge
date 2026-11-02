@@ -206,3 +206,21 @@ At the acceptance commit `d6e7dba`, the four `mcp05b_` tests and the stdio
 - The regression smoke list was not run. The change is in the MCP server
   and its machine-local record only, and nothing in the window reads the
   record.
+
+## Review round 1 (head `e5cf13d`)
+
+- CodeQL `rust/cleartext-logging` (alerts 44 and 45): two `mcp05b_`
+  assertions formatted a tool error's message into their failure text.
+  Those assertions no longer format any error. This is the fix MCP-05
+  made in `bb698bd`.
+- cubic, the `publish` description: it now says that a replay needs the
+  same path and hash, and that another path or hash is `invalid_inputs`.
+- cubic, a failed removal of an entry after a refusal: the guide now
+  says what happens. The entry stays and the id answers `unknown_outcome`,
+  never a second revision. The code was already written that way.
+- cubic, an id dropped after 1 000 newer entries publishes again; the
+  version-1 read; the ticket's regression section: answered on the pull
+  request with the reasons, and nothing changed.
+
+After the round, `apiforge-mcp` and `apiforge-cli`: 181 passed, 1 ignored;
+fmt and clippy clean.

@@ -495,7 +495,9 @@ language-reference and local holder/channel versions retain their purposes.
   `expected_source_sha256` and `started_at`, and writes nothing —
   `project_overview` lists every revision with its `source_sha256`, which
   tells whether that publication happened. A refusal before the commit
-  leaves no entry, so the same id publishes once the cause is fixed. As for
+  leaves no entry, so the same id publishes once the cause is fixed (should
+  the record fail to be rewritten at that moment, the entry stays and the id
+  answers `unknown_outcome`, never a second revision). As for
   a live run, an id is at most 256 bytes (`too_large`) and never a known
   secret value (`secret_in_text`); a replay takes the project for the agent
   session, as a publication does.

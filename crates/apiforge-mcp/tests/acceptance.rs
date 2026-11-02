@@ -4162,20 +4162,16 @@ fn mcp05b_criterion_2_a_publication_an_earlier_server_started_is_unknown_outcome
     let error = server
         .publish(&publish_with_id(PRODUCT, &hash, "lost-with-the-server"))
         .unwrap_err();
-    assert_eq!(
-        error.code,
-        ErrorCode::UnknownOutcome,
-        "{}",
-        error_text(&error)
-    );
+    assert_eq!(error.code, ErrorCode::UnknownOutcome);
     assert_eq!(error.wrote, Wrote::No);
     assert_eq!(error.details["path"], PRODUCT);
     assert_eq!(error.details["expected_source_sha256"], hash.as_str());
     assert_eq!(error.details["started_at"], "2026-10-28T10:00:00.000Z");
+    // The message is not formatted into the failure: CodeQL treats a
+    // tool error's message as possibly carrying a secret.
     assert!(
         error.message.contains("project_overview"),
-        "the overview tells: {}",
-        error.message
+        "the message advises project_overview"
     );
     assert_eq!(shared(root), before, "nothing published");
     assert_eq!(
@@ -4244,12 +4240,7 @@ fn mcp05b_criterion_2_a_publication_an_earlier_server_started_is_unknown_outcome
     let error = agent(root)
         .publish(&publish_with_id(PRODUCT, &hash, "cannot-be-recorded"))
         .unwrap_err();
-    assert_eq!(
-        error.code,
-        ErrorCode::ProjectUnreadable,
-        "{}",
-        error_text(&error)
-    );
+    assert_eq!(error.code, ErrorCode::ProjectUnreadable);
     assert_eq!(error.wrote, Wrote::No);
     assert_eq!(error.details["file"], REQUESTS);
     assert_eq!(shared(root), before, "nothing published");
@@ -4390,7 +4381,10 @@ fn mcp05b_criterion_4_an_unreadable_record_refuses_a_publish_with_an_id() {
     assert_eq!(error.code, ErrorCode::ProjectUnreadable);
     assert_eq!(error.wrote, Wrote::No);
     assert_eq!(error.details["file"], REQUESTS);
-    assert!(error.message.contains(REQUESTS), "{}", error.message);
+    assert!(
+        error.message.contains(REQUESTS),
+        "the message names the file"
+    );
     assert_eq!(shared(root), before, "nothing published");
     assert_eq!(fs::read(root.join(REQUESTS)).unwrap(), b"{ broken");
     // Reads, simulations and a publication without an id still work.
