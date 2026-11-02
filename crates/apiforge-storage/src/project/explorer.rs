@@ -100,7 +100,8 @@ impl ProjectStore {
     /// never reads a file that transaction replaces or removes, which
     /// Windows refuses while the file is open. The price is the other way
     /// round: a save waits for a scan in progress, which lists at most
-    /// [`MAX_TREE_ENTRIES`] entries and hashes their files. Called
+    /// [`MAX_TREE_ENTRIES`] entries and hashes the `.afs` sources and the
+    /// manifest among them; other files are only sized. Called
     /// on the thread that holds the worker (a fault hook inside a commit),
     /// it cannot wait for itself and answers `Busy` for that commit.
     ///

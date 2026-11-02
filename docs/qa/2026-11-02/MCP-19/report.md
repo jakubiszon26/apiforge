@@ -3,7 +3,11 @@
 - Branch: `docs/mcp-19-windows-recovery` (PR #203), with `main` at `3dfc3f9`
   (REL-02, KTLO-32) merged in `79021e1`. Acceptance tests `d9165cf`;
   implementation `d1f27ff`. The ad hoc loop workflow of criterion 6 was
-  added in `9f58c18`, `47e72fa` and `cd9477f` and removed with this report.
+  added in `9f58c18`, `47e72fa` and `cd9477f` and removed with this report
+  (`cd3f8f4`). Review round 1 (cubic on `cd3f8f4`, ten comments) in
+  `4e5a60e`: start handshakes in three tests and documentation, no
+  assertion changed; round 2 (cubic on `4e5a60e`: five repeats of round 1,
+  one new) in the commit that adds this line: one documentation sentence.
 - Built with: Rust 1.99.0, `cargo test --locked` on the GitHub runners
   `windows-2022` and `ubuntu-24.04`, and locally on Linux. "Before" is the
   acceptance commit `d9165cf` (the storage code of `main` at `3dfc3f9`);
@@ -68,8 +72,9 @@ replace while any handle is open, even one that shares delete.
 ### Scenario 2: the same tests and the suite after the fix
 
 CI of `d1f27ff` (push run 41465821527, pull_request run 41465834540), of
-`47e72fa` (41466533907) and of `cd9477f` (41472473949, 41472482827): every
-job green. In 41465821527 on `windows-2022` all six MCP-19 tests passed:
+`47e72fa` (41466533907), of `cd9477f` (41472473949, 41472482827), of
+`cd3f8f4` (41477673452, 41477687100) and of review round 1's `4e5a60e`
+(41483273288, 41483284555): every job green. In 41465821527 on `windows-2022` all six MCP-19 tests passed:
 criterion 1, both criterion 2 cases (within the bound, and the 2 s reader
 with recovery after it let go), criterion 3's storage and desktop tests,
 criterion 4. The folder-project step of each run (release binary, demo shop
@@ -104,7 +109,7 @@ next write answered `project_unreadable` — *Cannot access
 window checked continuously. It is a refusal on the reader's side of the
 same file, not the writer's replace the analysis describes; how the
 unfixed primitive led to it is not established (see *Not verified*).
-Observed after: 0 failures in 60 rounds on each runner, and none in the six
+Observed after: 0 failures in 60 rounds on each runner, and none in the ten
 CI runs after the fix.
 
 ## Linux
@@ -125,7 +130,7 @@ the scan does not wait for a worker its own thread holds.
 
 - The mechanism of the one before-fix loop failure (an *Access is denied*
   opening `head.json` to read it): not reproduced, so not explained. It did
-  not recur after the fix in 60 Windows loop rounds or six CI runs.
+  not recur after the fix in 60 Windows loop rounds or ten CI runs.
 - A third program holding a project file without sharing delete, outside
   the tests (an editor, antivirus): only the test's
   `share_mode(FILE_SHARE_READ)` reader shows the bound and the recoverable
