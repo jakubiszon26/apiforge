@@ -2,6 +2,7 @@
 //! and the dialogs.
 
 use super::*;
+use crate::run_mode::RunMode;
 
 impl FolderApp {
     pub(super) fn header(&mut self, ui: &mut egui::Ui) {
@@ -148,7 +149,7 @@ impl FolderApp {
                     }
                 } else if let Some(id) = &run_document {
                     // Right to left, the chevron is the rightmost: its place
-                    // is taken first and the button put in it after *Run
+                    // is taken first and the chevron added there after *Run
                     // simulation*, which Tab therefore reaches first.
                     let (_, chevron) = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
                     ui.add_space(2.0 - ui.spacing().item_spacing.x);
@@ -1032,8 +1033,6 @@ fn tab_face(
     }
     None
 }
-
-use crate::run_mode::RunMode;
 
 /// The chevron at the right of the Run button, and its menu's name.
 const OPTIONS: &str = "Run options";
