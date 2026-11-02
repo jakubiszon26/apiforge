@@ -1,8 +1,11 @@
 # UX-1: the usability sprint — triage and proposed plan
 
-- State: proposal of 2026-11-02, awaiting the owner's decisions (the quiz in
-  [section 5](#5-owner-decisions)). Nothing here is scheduled until the owner
-  answers; no issue was created, edited or labelled by this plan.
+- State: **approved 2026-11-02**. The owner answered the twenty questions of
+  [section 5](#5-owner-decisions) the same day (recorded in
+  [section 6](#6-decisions-taken-2026-11-02)) and added one more from real
+  work: the component mock-up COMP-00 moves to wave 2 and is made first. The
+  tickets exist as issues labelled `sprint:ux`
+  ([section 7](#7-tickets-and-issues)).
 - Analysis model: Fable.
 - Inputs: every open issue on 2026-11-02 (`gh issue list --state open`), read
   with its comments; the KTLO retrospective; UX-00 and the owner's five
@@ -96,11 +99,11 @@ cited code is still on `main` and matches the report.
 | #172 (3) | Card controls stay clickable under the Library panel | automated, code | S · 10 | — | no |
 | #172 (1, 2) | Inline input does not select its card; invalid inline edits desynchronise from the Inspector | automated | M · 20 | default | yes (COMP-00 group) |
 | #173 | Copy/paste limited to one graph tab; Duplicate overlaps and repeats labels; chips ignore Copy | automated, code | M · 20 | default | yes (COMP-00 group) |
-| #174 | Component inputs cannot be edited in Diagram, are hidden by default, duplicate chips overlap | automated | L → split | visible UI, format (`@layout`) | yes (COMP-00 group) |
+| #174 | Component inputs cannot be edited in Diagram, are hidden by default, duplicate chips overlap | automated, **confirmed in real work 2026-11-02** | L → split on the mock-up | visible UI, format (`@layout`) | yes (COMP-00, #239, wave 2) |
 | #161 (1) | Card detail lost below 75 % zoom; failed cards hard to spot | automated, verified | M | visible UI | yes (DIAG-00 group) |
 | #170 (2) | Anonymous `{ 2 fields }` pills at 50 %; URL subtitles clipped without an ellipsis | automated | with #161 (1) | visible UI | DIAG-00 group |
-| #170 (1) | *Save as component* opens a modal saying it is not available in folder projects | automated | S · 10 | removal | decision 16 |
-| #170 (3) | *Curves* wire style draws steps with rounded corners | automated, code | S · 5 | removal | decision 17 |
+| #170 (1) | *Save as component* opens a modal saying it is not available in folder projects | automated | M · 30 (UX-30, #238) | visible UI | decision 17 = C: implement, after COMP-00 |
+| #170 (3) | *Curves* wire style draws steps with rounded corners | automated, code | S · 10 (UX-28, #236) | removal | decision 18 = A: removed |
 | #144 DIAG-01 | Descriptions beside blocks | owner wish | M | visible UI, format | yes (DIAG-00 group) |
 | #145 DIAG-02 | Readable assertions on the diagram | owner wish | M | visible UI | yes (DIAG-00 group) |
 | #167 | IF/ELSE emits a wire to every step of a branch; ports clash with left-to-right layout; no arrowheads | automated | L | visible UI, format | LAY (out) |
@@ -309,8 +312,11 @@ tickets on the same screen region in flight at once (header, Run results
 panel, editor gutter, board camera, Explorer, a dialog); the `after` column
 sequences them. Minutes are owner review minutes.
 
-Proposed ticket IDs continue the UX line; the caller creates the issues after
-the quiz.
+Ticket IDs continue the UX line. Where the source issue is already a ticket
+(an ID in its title, one result) it carries the ticket: UX-08 is #214
+(MCP-26), UX-09 is #215 (KTLO-38), UX-10 is #208 (MCP-22), UX-13 is #193,
+UX-14 is #202 (KTLO-36). Every other ticket has its own issue
+([section 7](#7-tickets-and-issues)).
 
 ### Wave 1 — the decided findings and the critical real-work problems (135 min)
 
@@ -330,10 +336,11 @@ UX-08, UX-10 = 60 min; (c) UX-09 with the start of wave 2. UX-10 is non-UI
 and may merge on green CI under the standing authorisation, which frees its
 slot early.
 
-### Wave 2 — real-work editor and notice defects, and the verified defects without a design (140 min)
+### Wave 2 — real-work editor and notice defects, the verified defects without a design, and the component mock-up (170 min)
 
 | ID | Issue(s) | Result | Size | Region | After |
 | --- | --- | --- | --- | --- | --- |
+| COMP-00 | #239 (#174, #161 (2), #172 (1, 2), #173, #170 (1), #165) | One mock-up for authoring a component in Diagram: inputs on the board (adding, editing, visibility, overlapping chips), the Inspector, *Save as component*, *Publish*. The sprint's first mock-up, made right away in parallel with wave 1 (owner, 2026-11-02, from real work on #174) | S · 30 + discussion | component board, Inspector | — |
 | UX-11 | #216, #217 | No completion in a comment; a click after a line's end focuses the editor | S · 15 | editor | UX-03 |
 | UX-12 | #218, #175 (4) | Non-error notices clear; the error banner is per document | S · 10 | notice bar | UX-04 (decision 6) |
 | UX-13 | #193 | A tab keeps its scroll; the caret is restored without re-centring | S · 15 | editor | UX-11 (decision 7) |
@@ -356,23 +363,23 @@ slot early.
 | UX-25 | #165 | *Publish* disabled with nothing to publish; no banner flash; the stale-results rule for a republished component | S · 15 | header, Run results bar | UX-04, UX-19 (decision 16) |
 | UX-26 | #160, #156 (2) | Wording, plurals, hints, *Skipped* in the summary | S · 10 | several, text only | UX-19 |
 | UX-27 | #159 | Distinct accessible labels | S · 10 | several, labels only | UX-26 |
-| UX-28 | #170 (1), #170 (3) | *Save as component* disabled with a reason in folder projects; *Curves* removed until it draws curves | S · 10 | board toolbar | UX-17 (decisions 17, 18) |
+| UX-28 | #170 (3) | *Curves* removed until it draws curves; a saved preference falls back to *Steps* | S · 10 | board toolbar | UX-17 (decision 18) |
 | UX-07 | #147 | A wider Inspector | S · 15 | inspector | UX-24 (one capture per size) |
 | UX-29 | #172 (3) | Card controls clipped to the board | S · 10 | board | UX-18 |
 
-### Wave 4 — the shared mock-ups (owner wishes and designs; not estimated beyond the mock-up)
+### Wave 4 — the remaining shared mock-ups and *Save as component* (150 min)
 
 Each group is one analysis ticket with one mock-up, as UX-00 was, and its
 tickets are estimated on the mock-up. Review: about 30 min per mock-up plus
-the discussion.
+the discussion. COMP-00 moved to wave 2 (above).
 
 | Group | Issues | Mock-up shows |
 | --- | --- | --- |
 | WS-00 workspace | UX-06 #146, #161 (4), #157 | One left sidebar (Files / Library) in Code, Diagram and Split; what folds at 960 × 540 with Run results and the Inspector open; the *Add step* popup at 540 px |
 | DIAG-00 card readability | DIAG-01 #144, DIAG-02 #145, #161 (1), #170 (2) | A card at 50 %, 62 % and 91 %: labels, the failed state, a description beside a block, a readable check; the `format` question of where a description lives |
-| COMP-00 component authoring in Diagram | #174, #161 (2), #173, #172 (1, 2) | Inputs on the component board; the component's metadata without Code mode; copy and paste across graphs; inline edits and the Inspector in step |
 | RUN-00 run inputs and settings | #161 (3), #161 (5), REP-04 #148 | *Run with inputs…*, the sample from a contract, settings saved in one step, a *Discard* action, the JSON response view with its menu |
 | MCP-20 | #192 | A command's run in the bottom bar (its own S mock-up) |
+| UX-30 | #238 (#170 (1)) | *Save as component* in a folder project, M · 30, after COMP-00 (decision 17 = C) |
 
 REP-01 (#135) shares UX-19's mock-up and becomes a ticket when that mock-up
 is decided.
@@ -382,13 +389,15 @@ is decided.
 | Wave | Tickets | Review minutes |
 | --- | --- | --- |
 | 1 | 8 | 135 |
-| 2 | 10 | 140 |
+| 2 | 10 + COMP-00 | 170 |
 | 3 | 10 | 140 |
-| 1–3 | 28 | **415** |
-| 4 | 5 mock-ups | about 150 for the mock-ups; tickets estimated afterwards |
+| 4 | 4 mock-ups + UX-30 | 150 |
+| All | 33 | **595** (the plan asked 565 before COMP-00's move and UX-30's 30) |
 
-At the MCP sprint's pace (about 60 review minutes a day) waves 1–3 take about
-two weeks of the owner's reviews; the WIP cap keeps four tickets in flight.
+At the MCP sprint's pace (about 60 review minutes a day) the sprint takes
+about ten review days; the WIP cap keeps four tickets in flight. The tickets
+that mock-ups produce (WS-00, DIAG-00, RUN-00, COMP-00) are estimated on the
+mock-ups and added to the backlog table then.
 
 ## 4. Out of the sprint
 
@@ -403,13 +412,13 @@ two weeks of the owner's reviews; the WIP cap keeps four tickets in flight.
 | #158 | Not reproduced; stays until someone reproduces it with the revision and the sequence. |
 | #116 BRAND-00 | After LAY by the owner's note. |
 | #191 MCP-19, #205 REL-04, #122 KTLO-33 | In flight from the MCP sprint; they finish under their own authorisations and count against the WIP cap while open. |
-| #95 MCP-11 | Decision 3. |
+| #95 MCP-11 | Closed without a report (decision 3 = C). |
 | #201 KTLO-35 | Docs only, authorised to merge on green CI; not a sprint ticket. |
 
 ## 5. Owner decisions
 
-Each question lists the recommended option first. Answers are recorded on
-the issues by the coordinating session after the quiz.
+Asked 2026-11-02; each question lists the recommended option first. The
+answers are in [section 6](#6-decisions-taken-2026-11-02).
 
 **Sprint shape**
 
@@ -542,6 +551,80 @@ the issues by the coordinating session after the quiz.
     A. Keep: the model's history takes it, as the test
     `model_history_survives_switches_and_ctrl_z_follows_the_focus` fixes.
     B. Ignore Ctrl+Z when the editor has no focus.
+
+## 6. Decisions taken (2026-11-02)
+
+Answered by the owner in an interactive quiz on PR #220. Two differ from the
+recommendation (1 and 17); one was added from real work.
+
+| # | Answer | Effect |
+| --- | --- | --- |
+| 1 | **C** | Waves 1–4 are in: the shared mock-ups WS-00, DIAG-00, COMP-00, RUN-00 and MCP-20 |
+| 2 | A | UX-1 now; LAY afterwards |
+| 3 | **C** | MCP-11 (#95) closed without a report |
+| 4 | A | #214: the live toggle takes effect on *Apply settings* only; *Cancel* discards; the sentence names "any URL the project's documents name" |
+| 5 | A | #215: the first window is min(1600 × 1000, work area minus title bar), never below 960 × 540; a remembered size is clamped the same way |
+| 6 | A | #218: a non-error notice clears after 5 s or at the next action; errors stay; one banner per tab |
+| 7 | A | #193: a tab keeps its scroll; the caret is restored without moving the view unless off-view, then the least scroll |
+| 8 | A | #202: *Required* unticked when the literal becomes the default |
+| 9 | A | #163: 0 or 1 card or a chip selected → the whole board; 2 or more → the selection |
+| 10 | A | #150: a failed run selects its first failed, blocked or errored step and scrolls to it; a passing run keeps the board's selection |
+| 11 | A | #169: component rows collapsed when all passed, open on failure, with a breadcrumb |
+| 12 | A | #164: *Start* not offered in a component, *Export* is; the subtitle names the component |
+| 13 | A | #166: *New component* always in `components/`, *New scenario* in `scenarios/` |
+| 14 | A | #177: the manifest shown and protected; a click explains why |
+| 15 | A | #177: a *Show code* button |
+| 16 | A | #165: *Publish* disabled when equal to the latest revision; a republish marks stale only the scenarios that call it |
+| 17 | **C** | #170: implement *Save as component*, M, after COMP-00 → UX-30 (#238) |
+| 18 | A | #170: *Curves* removed until it draws curves; a saved preference falls back to *Steps* |
+| 19 | A | #154: keep KTLO-18; fix the clipping only if reproduced |
+| 20 | A | #153: Ctrl+Z without editor focus keeps going to the model's history, with a test |
+| + | real work | #174 confirmed from real work: a component's inputs are hard or impossible to add and edit graphically and unclear on the diagram. COMP-00 moves to wave 2, scoped to inputs on the diagram (adding, editing, visibility, duplicate or overlapping chips), editing in the Inspector, *Save as component* and *Publish*; it is the sprint's first mock-up and may be made at once, in parallel with wave 1 |
+
+## 7. Tickets and issues
+
+Created 2026-11-02, labelled `sprint:ux` with their size and risk labels. A
+source issue a ticket merges carries a comment naming the ticket and stays
+open until the ticket is accepted.
+
+| Ticket | Issue | Carries | Ready label |
+| --- | --- | --- | --- |
+| UX-01..05 | #98–#102 | — | `ready:opus` (criteria posted on the issues) |
+| UX-06 | #146 | estimated on WS-00 | — |
+| UX-07 | #147 | — | — (one capture per size first) |
+| UX-08 | #214 | MCP-26 | `ready:opus` |
+| UX-09 | #215 | KTLO-38 | `ready:sol` |
+| UX-10 | #208 | MCP-22 | `ready:sol` |
+| UX-11 | #221 | #216, #217 | `ready:sol` |
+| UX-12 | #222 | #218, #175 (4) | `ready:sol` |
+| UX-13 | #193 | — | `ready:sol` |
+| UX-14 | #202 | KTLO-36 | `ready:sol` |
+| UX-15 | #223 | #151, #176 (1) | `ready:sol` |
+| UX-16 | #224 | #162 | `ready:sol` |
+| UX-17 | #225 | #163, #168 (4) | `ready:sol` |
+| UX-18 | #226 | #171, #156 (1) | `ready:opus` |
+| UX-19 | #227 | #150, #169, #135 (mock-up) | — (mock-up) |
+| UX-20 | #228 | #176 (2), #153 (1), #170 (5) | `ready:sol` |
+| UX-21 | #229 | #164 | `ready:opus` |
+| UX-22 | #230 | #166 | `ready:sol` |
+| UX-23 | #231 | #177 | `ready:opus` |
+| UX-24 | #232 | #175 (1–3) | — (badge mock-up) |
+| UX-25 | #233 | #165 | `ready:opus` |
+| UX-26 | #234 | #160, #156 (2) | `ready:sol` |
+| UX-27 | #235 | #159 | `ready:sol` |
+| UX-28 | #236 | #170 (3) | `ready:opus` |
+| UX-29 | #237 | #172 (3) | `ready:sol` |
+| UX-30 | #238 | #170 (1) | — (after COMP-00) |
+| COMP-00 | #239 | #174, #161 (2), #172 (1, 2), #173, #170 (1), #165 | `decision-needed` |
+| WS-00 | #240 | #146, #157, #161 (4) | `decision-needed` |
+| DIAG-00 | #241 | #144, #145, #161 (1), #170 (2) | `decision-needed` |
+| RUN-00 | #242 | #148, #161 (3, 5) | `decision-needed` |
+| MCP-20 | #192 | — | — (mock-up) |
+
+`ready:opus` is used where the ticket is decided and bounded but carries a
+`removal` flag, a permission control or an M with a camera or wording
+interplay; `ready:sol` where the autonomy document's conditions hold in
+full. A ticket's `after` column in the wave tables still gates its start.
 
 ## Technical appendix
 
