@@ -482,6 +482,87 @@ mod review {
         stop_on_screen(WIDE, "migration-stop-window", Some(window.expand(1.0)));
     }
 
+    /// UX-01: one simulation of the demo shop in Split, then a check added
+    /// for `productId` and `total` of *Add to cart* from Run results without
+    /// running again; the other fields still offer *Check*. At 960 × 540 Run
+    /// results is maximised, as the fields do not show at its normal height,
+    /// and restored after the checks; at 1600 × 1000 it is at its tallest
+    /// normal height. The states of the approved mock-up `ux01-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux01_two_checks() {
+        use egui_kittest::kittest::NodeT;
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).scroll_to_me();
+            settle(harness);
+            harness.get_by_label(label).click();
+            // The pointer leaves for the header's empty top margin, so no
+            // control is captured hovered.
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        /// The *Check* nearest the field's label, on its row.
+        fn check(harness: &mut FolderHarness, field: &str) {
+            let y = harness.get_by_label(field).rect().center().y;
+            harness
+                .get_all_by_label("Check")
+                .min_by(|a, b| {
+                    let a = (a.rect().center().y - y).abs();
+                    let b = (b.rect().center().y - y).abs();
+                    a.total_cmp(&b)
+                })
+                .unwrap()
+                .click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            click(&mut harness, "Split");
+            click(&mut harness, "Run");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("PASSED").is_none() {
+                assert!(Instant::now() < deadline, "the run must pass");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            // The mock-up has no notice under the header.
+            click(&mut harness, "Dismiss");
+            if size == MINIMUM {
+                click(&mut harness, "Maximise run results");
+            } else {
+                // The panel at its tallest normal height, from its edge's
+                // keyboard, so the fields show.
+                harness.get_by_label("Resize run report").focus();
+                harness.step();
+                harness.key_press(egui::Key::End);
+                settle(&mut harness);
+            }
+            let step = harness
+                .get_by_label_contains("Add to cart · Passed")
+                .accesskit_node()
+                .label()
+                .unwrap_or_default();
+            click(&mut harness, &step);
+            capture(&mut harness, &format!("ux01-before-{suffix}"), None);
+            check(&mut harness, "productId");
+            check(&mut harness, "total");
+            assert_eq!(harness.query_all_by_label("Check added").count(), 2);
+            assert!(
+                harness
+                    .query_by_label("2 checks added · they run on the next run")
+                    .is_some()
+            );
+            capture(&mut harness, &format!("ux01-two-checks-{suffix}"), None);
+            if size == MINIMUM {
+                click(&mut harness, "Restore run results");
+                capture(&mut harness, "ux01-two-checks-restored-960x540", None);
+            }
+        }
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
