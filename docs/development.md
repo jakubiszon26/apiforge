@@ -740,9 +740,12 @@ unregistered path is `resource_not_found` with `data.code`
   `create_document` and `publish` neither, `finish_editing` only
   idempotent. A result carries
   `structuredContent` and the same JSON as readable text in `content`.
-- A call that could not do what was asked is `isError: true` with
-  `structuredContent` `{ code, message, wrote, details }`. The codes form a
-  fixed list: `not_a_project`, `project_unreadable`, `unknown_document`,
+- A call that could not do what was asked is `isError: true` with one text
+  block in `content` holding the pretty JSON `{ code, message, wrote,
+  details }`, and no `structuredContent`: each tool's `outputSchema`
+  describes its result only, and a client that validates whatever
+  `structuredContent` it receives would reject an error object there
+  (MCP-17). The codes form a fixed list: `not_a_project`, `project_unreadable`, `unknown_document`,
   `invalid_text`, `invalid_inputs`, `not_a_component`,
   `invalid_checkpoint`, `stale_source`, `stale_project`, `held_by_window`,
   `handover_pending`, `handover_refused`, `held_by_other`, `live_disabled`,
