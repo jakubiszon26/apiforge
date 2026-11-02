@@ -122,6 +122,11 @@ impl Port {
         self.required.unwrap_or(false)
     }
 
+    /// KTLO-32 acceptance stub: today's reading, replaced by the implementation.
+    pub fn is_required_input(&self) -> bool {
+        self.is_required()
+    }
+
     pub fn display_name(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.name)
     }
@@ -772,6 +777,79 @@ mod tests {
         assert_eq!(
             operator.inputs[VALUE_INPUT].at(&["right".into()]),
             Some(&Binding::literal(json!(0)))
+        );
+    }
+
+    /// KTLO-32 criterion 1: a component input declared with neither
+    /// `@optional`/`@required(false)` nor a default is required wherever the
+    /// component is called; `@optional` and `@required(true)` keep their
+    /// reading, an input with a default keeps its own (it is never missing),
+    /// and the built-in ports are untouched.
+    #[test]
+    fn an_undeclared_component_input_is_required() {
+        assert!(Port::new("note", ValueType::String).is_required_input());
+        assert!(
+            Port::new("note", ValueType::String)
+                .required(true)
+                .is_required_input()
+        );
+        assert!(
+            !Port::new("note", ValueType::String)
+                .required(false)
+                .is_required_input()
+        );
+        let defaulted = Port {
+            default_value: OptionalJson::Present(json!("hello")),
+            ..Port::new("greeting", ValueType::String)
+        };
+        assert!(!defaulted.is_required_input());
+
+        let mut project = project();
+        project.components.push(Component {
+            id: "notes".into(),
+            revision: 1,
+            handle: "notes".into(),
+            name: "Notes".into(),
+            description: String::new(),
+            inputs: vec![
+                Port::new("note", ValueType::String),
+                Port::new("extra", ValueType::String).required(false),
+                Port::new("flag", ValueType::Boolean).required(true),
+                defaulted,
+            ],
+            graph: Graph::default(),
+            action: None,
+        });
+        let mut call = node("call", NodeKind::Component);
+        call.config.component_id = Some("notes".into());
+        call.config.revision = Some(1);
+        let ports = input_ports(&call, &project);
+        let required: Vec<(&str, Option<bool>)> = ports
+            .iter()
+            .map(|port| (port.name.as_str(), port.required))
+            .collect();
+        assert_eq!(
+            required,
+            [
+                ("note", Some(true)),
+                ("extra", Some(false)),
+                ("flag", Some(true)),
+                ("greeting", Some(false)),
+            ]
+        );
+        assert!(ports[0].is_required(), "the board and the engine read it");
+
+        let request = node("r", NodeKind::Request);
+        let body = input_ports(&request, &project)
+            .into_iter()
+            .find(|port| port.name == BODY_INPUT)
+            .unwrap();
+        assert_eq!(body.required, None, "a request without a body still runs");
+        assert!(!body.is_required());
+        let export = input_ports(&node("e", NodeKind::Export), &project);
+        assert!(
+            !export[0].is_required(),
+            "an export's value keeps its reading"
         );
     }
 
