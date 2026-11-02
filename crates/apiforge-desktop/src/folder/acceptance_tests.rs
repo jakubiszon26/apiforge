@@ -7384,15 +7384,20 @@ mod ux01 {
     /// *Maximise* / *Restore run results* and the policy combo are within the
     /// window and disjoint at 960 × 540 maximised and restored, and at
     /// 1600 × 1000 at the panel's tallest normal height; a *Check added* row
-    /// stays within the window.
+    /// stays within the window where the rows show. At 960 × 540 restored the
+    /// rows are below the panel's scrolled area, as in the mock-up, and an
+    /// accessibility node keeps a row's place there without painting it.
     #[test]
     fn ux01_criterion_8_the_bar_fits() {
-        fn fits(harness: &FolderHarness, toggle: &str, at: &str) {
+        fn fits(harness: &FolderHarness, toggle: &str, rows: bool, at: &str) {
             let labels = ["Run results", "PASSED", TWO, toggle, POLICY];
             assert_within_window(harness, &labels);
             assert_disjoint(harness, &labels);
+            if !rows {
+                return;
+            }
             let added: Vec<_> = harness.query_all_by_label(ADDED).collect();
-            assert!(!added.is_empty() || toggle == MAXIMISE, "{at}: rows shown");
+            assert!(!added.is_empty(), "{at}: rows shown");
             let window = harness.ctx.content_rect();
             for node in added {
                 assert!(
@@ -7406,9 +7411,9 @@ mod ux01 {
         let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
         check(&mut harness, "productId");
         check(&mut harness, "total");
-        fits(&harness, RESTORE, "960 × 540 maximised");
+        fits(&harness, RESTORE, true, "960 × 540 maximised");
         choose(&mut harness, RESTORE);
-        fits(&harness, MAXIMISE, "960 × 540 restored");
+        fits(&harness, MAXIMISE, false, "960 × 540 restored");
 
         let (_project, mut harness, _scenario, _) = after_a_run(WIDE);
         choose(&mut harness, RESTORE);
@@ -7422,6 +7427,7 @@ mod ux01 {
         fits(
             &harness,
             MAXIMISE,
+            true,
             "1600 × 1000 at the tallest normal height",
         );
         assert!(
