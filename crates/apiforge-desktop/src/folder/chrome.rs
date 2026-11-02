@@ -1048,6 +1048,12 @@ const OPTIONS: &str = "Run options";
 const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
 const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
 
+/// The header's *Running …* label while a run runs (UX-04). Stub of the
+/// acceptance commit: the implementation gives it its colour and size.
+pub(super) fn running_text(text: &str) -> RichText {
+    RichText::new(text)
+}
+
 fn run_label(live: bool) -> &'static str {
     if live { "Run live" } else { "Run simulation" }
 }

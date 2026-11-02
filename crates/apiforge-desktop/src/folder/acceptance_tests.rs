@@ -7478,14 +7478,14 @@ mod ux02 {
     }
 
     /// Chooses `item`, *Simulation* or *Live*, in the chevron's menu.
-    fn choose_mode(harness: &mut FolderHarness, item: &str) {
+    pub(super) fn choose_mode(harness: &mut FolderHarness, item: &str) {
         open_options(harness);
         choose(harness, item);
         close_options(harness);
     }
 
     /// Whether hovering the widget `label` shows a tooltip with `text`.
-    fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
+    pub(super) fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
         harness.get_by_label(label).hover();
         settle(harness);
         harness.run_steps(60);
@@ -7493,7 +7493,7 @@ mod ux02 {
     }
 
     /// The project name in the header (the explorer may name it too).
-    fn title(harness: &FolderHarness) -> egui::Rect {
+    pub(super) fn title(harness: &FolderHarness) -> egui::Rect {
         harness
             .query_all_by_label(NAME)
             .map(|node| node.rect())
@@ -7532,7 +7532,7 @@ mod ux02 {
     }
 
     /// The demo shop with its base URL at `base`.
-    fn shop_at(base: &str) -> tempfile::TempDir {
+    pub(super) fn shop_at(base: &str) -> tempfile::TempDir {
         let directory = shop();
         let manifest = directory.path().join("apiforge.project.json");
         let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
@@ -7993,5 +7993,430 @@ mod ux02 {
             "{visited:?}"
         );
         frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
+    }
+}
+
+/// UX-04 (#101, resolves #152): while a run runs, the header says what runs,
+/// just left of *Cancel run*, in grey, naming the file on another tab; when
+/// the run ends the words go, and the band under the tab strip never holds
+/// a *Running …* notice (docs/tickets/UX-04.md). A run that is still running
+/// when a test looks is a live run against a loopback listener that accepts
+/// and never answers; the run is cancelled at the end.
+mod ux04 {
+    use super::mcp08b::contains;
+    use super::mcp09::{set_box, window};
+    use super::ux02::{choose_mode, hover_shows, shop_at, title};
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui::accesskit::{Action, Role};
+    use egui_kittest::kittest::NodeT;
+
+    const SIMULATE: &str = "Run simulation";
+    const LIVE: &str = "Run live";
+    const LIVE_ITEM: &str = "Live";
+    const CANCEL: &str = "Cancel run";
+    const BADGE: &str = "Live allowed";
+    const UNSAVED: &str = "Running unsaved code";
+    const SAVED: &str = "Running saved code";
+    const EARLIER: &str = "Running earlier code";
+    const UNSAVED_HOVER: &str = "The run uses the code in the editor, which is not saved yet.";
+    const EARLIER_HOVER: &str =
+        "The editor's code has errors; the run uses the last confirmed code and configuration.";
+    /// The demo shop's scenario, as the label names it on another tab.
+    const FILE: &str = "promotion-and-cart-price.afs";
+
+    /// A loopback API that accepts every connection and never answers, so a
+    /// live run against it stays in progress until its step times out.
+    fn silent_api() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                held.push(stream);
+            }
+        });
+        base
+    }
+
+    /// A loopback API that closes every connection it accepts, so each
+    /// request of a live run fails at once.
+    fn closing_api() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                drop(stream);
+            }
+        });
+        base
+    }
+
+    /// The window over `root` at `size`, the run mode Live, the scenario's
+    /// tab active.
+    fn live_window(
+        root: &std::path::Path,
+        size: egui::Vec2,
+        configuration: &std::path::Path,
+    ) -> FolderHarness {
+        let mut harness = window(root, size, configuration);
+        choose_mode(&mut harness, LIVE_ITEM);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        harness
+    }
+
+    /// Replaces the first `from` in the document's code with `to`, unsaved.
+    fn edit(harness: &mut FolderHarness, id: &str, from: &str, to: &str) {
+        let source = source_of(harness, id);
+        let edited = source.replacen(from, to, 1);
+        assert_ne!(edited, source, "{from:?} is in the source");
+        app(harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(id, &edited, CODE)
+            .unwrap();
+        app(harness).analyser.typed(id, Instant::now());
+        settle(harness);
+    }
+
+    /// An unsaved, valid change to the scenario: its description.
+    fn edit_validly(harness: &mut FolderHarness) {
+        let scenario = only(harness, DocumentKind::Scenario);
+        edit(
+            harness,
+            &scenario,
+            "description \"",
+            "description \"Edited. ",
+        );
+    }
+
+    /// The header's *Running …* label: its text and rect. The header is the
+    /// window's top band, above the tab strip.
+    fn running(harness: &FolderHarness) -> Option<(String, egui::Rect)> {
+        let strip = harness.get_by_label("Code").rect().bottom();
+        let found: Vec<(String, egui::Rect)> = harness
+            .query_all_by_label_contains("Running ")
+            .filter(|node| node.rect().bottom() <= strip + 4.0)
+            .map(|node| {
+                let node_ref = node.accesskit_node();
+                (
+                    node_ref
+                        .label()
+                        .or_else(|| node_ref.value())
+                        .unwrap_or_default(),
+                    node.rect(),
+                )
+            })
+            .collect();
+        assert!(found.len() <= 1, "one label at most: {found:?}");
+        found.into_iter().next()
+    }
+
+    /// No *Running …* notice in the band under the tab strip, nor anywhere
+    /// below the header.
+    fn assert_band_is_clear(harness: &FolderHarness, context: &str) {
+        let notice = folder(harness)
+            .notice
+            .as_ref()
+            .map(|notice| notice.text.clone());
+        assert!(
+            !notice
+                .as_deref()
+                .is_some_and(|text| text.starts_with("Running")),
+            "{context}: the band holds {notice:?}"
+        );
+        let strip = harness.get_by_label("Code").rect().bottom();
+        let below: Vec<String> = harness
+            .query_all_by_label_contains("Running ")
+            .filter(|node| node.rect().bottom() > strip + 4.0)
+            .map(|node| format!("{:?}", node.accesskit_node().label()))
+            .collect();
+        assert!(below.is_empty(), "{context}: below the header {below:?}");
+    }
+
+    /// The label reads `text`, on *Cancel run*'s row, its right edge left of
+    /// *Cancel run*'s left edge by at most the item spacing plus 8 px.
+    fn assert_beside_cancel(harness: &FolderHarness, text: &str, context: &str) {
+        let (shown, label) = running(harness).unwrap_or_else(|| panic!("{context}: no label"));
+        assert_eq!(shown, text, "{context}");
+        let cancel = harness.get_by_label(CANCEL).rect();
+        assert!(
+            (label.center().y - cancel.center().y).abs() <= 2.0,
+            "{context}: on Cancel run's row: {label:?}, {cancel:?}"
+        );
+        let gap = cancel.left() - label.right();
+        let spacing = harness.ctx.global_style().spacing.item_spacing.x;
+        assert!(
+            gap >= 0.0 && gap <= spacing + 8.0,
+            "{context}: {gap} px between the label and Cancel run"
+        );
+    }
+
+    /// Clicks *Cancel run* and steps until the run has ended.
+    fn cancel(harness: &mut FolderHarness) {
+        harness.get_by_label(CANCEL).click();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must end");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Steps frame by frame until the run started from the window ends,
+    /// asserting in every frame that the label shows exactly while the run
+    /// runs: from the frame after the click until the frame the run ends.
+    fn step_to_the_end(harness: &mut FolderHarness, context: &str) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut frames = 0;
+        loop {
+            harness.step();
+            frames += 1;
+            let runs = folder(harness).runs.handle.is_some();
+            let shown = running(harness);
+            if !runs {
+                assert_eq!(shown, None, "{context}: the frame the run ended");
+                break;
+            }
+            if frames > 1 {
+                assert!(
+                    shown.is_some(),
+                    "{context}: frame {frames} while the run runs"
+                );
+            }
+            assert!(Instant::now() < deadline, "{context}: the run must end");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+        assert_eq!(running(harness), None, "{context}: after the run");
+        assert_band_is_clear(harness, context);
+    }
+
+    /// Criterion 1: after an unsaved valid change, *Running unsaved code*
+    /// sits just left of *Cancel run*, grey at the label size, with its
+    /// hover; the band holds no notice.
+    #[test]
+    fn ux04_criterion_1_unsaved_code_is_said_left_of_cancel_run() {
+        let mut text = egui::text::LayoutJob::default();
+        super::super::chrome::running_text(UNSAVED).append_to(
+            &mut text,
+            &egui::Style::default(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+        assert_eq!(text.sections.len(), 1);
+        assert_eq!(text.sections[0].format.color, theme::MUTED, "grey");
+        assert_eq!(
+            text.sections[0].format.font_id.size,
+            theme::FONT_LABEL,
+            "the label size"
+        );
+
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        for size in [MINIMUM, WIDE] {
+            let directory = shop_at(&base);
+            let mut harness = live_window(directory.path(), size, configuration.path());
+            assert_eq!(running(&harness), None, "{size:?}: no run, no label");
+            edit_validly(&mut harness);
+            choose(&mut harness, LIVE);
+            assert!(
+                folder(&harness).runs.handle.is_some(),
+                "{size:?}: the run runs"
+            );
+            let context = format!("{size:?}");
+            assert_beside_cancel(&harness, UNSAVED, &context);
+            assert_band_is_clear(&harness, &context);
+            assert!(
+                hover_shows(&mut harness, UNSAVED, UNSAVED_HOVER),
+                "{context}: hover"
+            );
+            cancel(&mut harness);
+        }
+    }
+
+    /// Criterion 1: a run of saved code says so in the same place.
+    #[test]
+    fn ux04_criterion_1_saved_code_is_said_too() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        assert_beside_cancel(&harness, SAVED, "saved");
+        assert_band_is_clear(&harness, "saved");
+        cancel(&mut harness);
+    }
+
+    /// Criterion 1, refinement: a run accepted through *Run this version*
+    /// while the code is invalid says *Running earlier code*, its full
+    /// sentence on hover.
+    #[test]
+    fn ux04_criterion_1_earlier_code_is_said() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        let scenario = only(&harness, DocumentKind::Scenario);
+        edit(&mut harness, &scenario, "{", "{ broken");
+        choose(&mut harness, LIVE);
+        assert!(has_label(&harness, "Run this version"), "the prompt");
+        choose(&mut harness, "Run this version");
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        assert_beside_cancel(&harness, EARLIER, "earlier");
+        assert_band_is_clear(&harness, "earlier");
+        assert!(hover_shows(&mut harness, EARLIER, EARLIER_HOVER), "hover");
+        cancel(&mut harness);
+    }
+
+    /// Criterion 2: a simulation that passes; the label is gone the frame
+    /// it ends and the band holds nothing from it.
+    #[test]
+    fn ux04_criterion_2_the_label_goes_when_the_run_passes() {
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        harness.get_by_label(SIMULATE).click();
+        step_to_the_end(&mut harness, "passed");
+        let active = folder(&harness).workbench.active().unwrap().to_owned();
+        assert_eq!(
+            folder(&harness).run_result(&active).unwrap().status,
+            RunStatus::Passed
+        );
+    }
+
+    /// Criterion 2: a live run whose API closes every connection fails;
+    /// the label goes the frame it ends.
+    #[test]
+    fn ux04_criterion_2_the_label_goes_when_the_run_fails() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = closing_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        harness.get_by_label(LIVE).click();
+        step_to_the_end(&mut harness, "failed");
+        let active = folder(&harness).workbench.active().unwrap().to_owned();
+        assert_eq!(
+            folder(&harness).run_result(&active).unwrap().status,
+            RunStatus::Failed
+        );
+    }
+
+    /// Criterion 2: *Cancel run*; the label goes the frame the run ends.
+    #[test]
+    fn ux04_criterion_2_the_label_goes_when_the_run_is_cancelled() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        assert_beside_cancel(&harness, UNSAVED, "before the cancel");
+        harness.get_by_label(CANCEL).click();
+        step_to_the_end(&mut harness, "cancelled");
+    }
+
+    /// Criterion 3: on another tab the label names the file that runs; back
+    /// on the run's tab it says *code* again.
+    #[test]
+    fn ux04_criterion_3_another_tab_names_the_file() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let component = only(&harness, DocumentKind::Component);
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert_beside_cancel(
+            &harness,
+            &format!("Running unsaved {FILE}"),
+            "the component's tab",
+        );
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert_beside_cancel(&harness, UNSAVED, "the run's tab");
+        cancel(&mut harness);
+    }
+
+    /// Criterion 5: at both windows, in every mode, with *Live allowed*, on
+    /// the run's tab and on a component's tab (*Publish*, and the label
+    /// naming the file), the header's controls are within the window and
+    /// disjoint, and the project name overlaps none of them.
+    #[test]
+    fn ux04_criterion_5_the_header_fits() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        for size in [MINIMUM, WIDE] {
+            let directory = shop_at(&base);
+            let mut harness = live_window(directory.path(), size, configuration.path());
+            set_box(&mut harness, true);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            let component = only(&harness, DocumentKind::Component);
+            edit_validly(&mut harness);
+            choose(&mut harness, LIVE);
+            assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+            let named = format!("Running unsaved {FILE}");
+            for (tab, label) in [(&scenario, UNSAVED), (&component, named.as_str())] {
+                app(&mut harness).activate_tab(tab);
+                settle(&mut harness);
+                for mode in ["Code", "Diagram", "Split"] {
+                    choose(&mut harness, mode);
+                    let what = format!("{mode}, {label} at {size:?}");
+                    assert!(
+                        folder(&harness).runs.handle.is_some(),
+                        "{what}: still running"
+                    );
+                    let mut labels = vec![
+                        "Project", BADGE, "Code", "Diagram", "Split", "Save", "Save all", label,
+                        CANCEL,
+                    ];
+                    if tab == &component {
+                        labels.push("Publish");
+                    }
+                    assert_within_window(&harness, &labels);
+                    assert_disjoint(&harness, &labels);
+                    let title = title(&harness);
+                    for other in &labels {
+                        assert!(
+                            !title.intersects(harness.get_by_label(other).rect()),
+                            "{what}: the name overlaps {other}"
+                        );
+                    }
+                }
+            }
+            cancel(&mut harness);
+        }
+    }
+
+    /// Criterion 6: the label is a label for assistive technology, named by
+    /// its text, and Tab never stops on it.
+    #[test]
+    fn ux04_criterion_6_the_label_is_named() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        assert!(running(&harness).is_some(), "the label shows");
+        let node = harness.get_by_label(UNSAVED);
+        let node = node.accesskit_node();
+        assert_eq!(node.role(), Role::Label, "a label");
+        assert!(!node.data().supports_action(Action::Focus), "not focusable");
+        assert!(!contains(&harness, "Running unsaved code."), "no notice");
+        cancel(&mut harness);
     }
 }
