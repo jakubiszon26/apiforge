@@ -2094,6 +2094,9 @@ impl App {
                 error_policy: self.editor.scenario().error_policy,
                 running: self.is_running(),
                 stale: self.is_run_stale(),
+                // The legacy workspace window keeps its behaviour: a check
+                // makes its results stale. Several checks from one run
+                // (UX-01) are the folder window's.
                 checked: &[],
                 files_busy: self.files.busy(),
                 component: false,

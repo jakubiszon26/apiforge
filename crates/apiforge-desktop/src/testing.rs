@@ -168,6 +168,24 @@ pub fn assert_disjoint<State>(harness: &Harness<'_, State>, labels: &[&str]) {
     }
 }
 
+/// Clicks the *Check* on the row of `field` in Run results: the *Check*
+/// nearest the field's label (UX-01). The pointer then leaves for the
+/// header's empty top margin, so nothing stays hovered.
+pub fn check_field(harness: &mut FolderHarness, field: &str) {
+    let y = harness.get_by_label(field).rect().center().y;
+    harness
+        .query_all_by_label("Check")
+        .min_by(|a, b| {
+            let a = (a.rect().center().y - y).abs();
+            let b = (b.rect().center().y - y).abs();
+            a.total_cmp(&b)
+        })
+        .unwrap_or_else(|| panic!("no field offers Check, so {field} cannot be checked"))
+        .click();
+    harness.hover_at(egui::pos2(480.0, 3.0));
+    settle(harness);
+}
+
 /// Where design review captures are written: `APIFORGE_CAPTURE_DIR`, otherwise
 /// `gui-captures` in the Cargo target directory. Never inside the sources.
 pub fn capture_dir() -> PathBuf {
@@ -501,21 +519,6 @@ mod review {
             harness.hover_at(egui::pos2(480.0, 3.0));
             settle(harness);
         }
-        /// The *Check* nearest the field's label, on its row.
-        fn check(harness: &mut FolderHarness, field: &str) {
-            let y = harness.get_by_label(field).rect().center().y;
-            harness
-                .get_all_by_label("Check")
-                .min_by(|a, b| {
-                    let a = (a.rect().center().y - y).abs();
-                    let b = (b.rect().center().y - y).abs();
-                    a.total_cmp(&b)
-                })
-                .unwrap()
-                .click();
-            harness.hover_at(egui::pos2(480.0, 3.0));
-            settle(harness);
-        }
         for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
             let project = shop_project();
             let mut harness = folder_harness(project.path(), size);
@@ -547,8 +550,8 @@ mod review {
                 .unwrap_or_default();
             click(&mut harness, &step);
             capture(&mut harness, &format!("ux01-before-{suffix}"), None);
-            check(&mut harness, "productId");
-            check(&mut harness, "total");
+            check_field(&mut harness, "productId");
+            check_field(&mut harness, "total");
             assert_eq!(harness.query_all_by_label("Check added").count(), 2);
             assert!(
                 harness

@@ -689,10 +689,10 @@ impl ReportPanel {
                                 .collect::<Map<String, Value>>(),
                         );
                         let branch = format!("{run_id}:{}:request:headers", selected.key);
-                        self.value_tree(ui, &branch, "headers", &headers, None, actions);
+                        self.value_tree(ui, &branch, "headers", &headers, None, false, actions);
                         if let OptionalJson::Present(body) = &request.body {
                             let branch = format!("{run_id}:{}:request:body", selected.key);
-                            self.value_tree(ui, &branch, "body", body, None, actions);
+                            self.value_tree(ui, &branch, "body", body, None, false, actions);
                         }
                     }
                 }
@@ -713,11 +713,15 @@ impl ReportPanel {
                         );
                         return;
                     }
-                    let interactive = self.tab == DetailTab::Outputs && checkable && editable;
+                    // The rows of a checkable step's outputs name their field,
+                    // so a checked one reads *Check added* (UX-01) even while
+                    // the document cannot be edited; only an editable one
+                    // offers *Check* and *To variable*.
+                    let fields = self.tab == DetailTab::Outputs && checkable;
                     for (port, value) in map {
                         let branch = format!("{run_id}:{}:{}:{port}", selected.key, self.tab as u8);
-                        let target = interactive.then_some((step.node_id.as_str(), port.as_str()));
-                        self.value_tree(ui, &branch, port, value, target, actions);
+                        let target = fields.then_some((step.node_id.as_str(), port.as_str()));
+                        self.value_tree(ui, &branch, port, value, target, editable, actions);
                     }
                 }
             },
@@ -732,6 +736,7 @@ impl ReportPanel {
         label: &str,
         value: &Value,
         interactive: Option<(&str, &str)>,
+        editable: bool,
         actions: &mut Vec<Action>,
     ) {
         self.value_branch(
@@ -743,6 +748,7 @@ impl ReportPanel {
             0,
             true,
             interactive,
+            editable,
             actions,
         );
     }
@@ -758,6 +764,7 @@ impl ReportPanel {
         depth: usize,
         valid_path: bool,
         interactive: Option<(&str, &str)>,
+        editable: bool,
         actions: &mut Vec<Action>,
     ) {
         let path_text = path.to_string();
@@ -800,7 +807,7 @@ impl ReportPanel {
                 }
             }
 
-            let can_drag = interactive.is_some() && valid_path;
+            let can_drag = interactive.is_some() && editable && valid_path;
             let key_color = if can_drag { theme::LINK } else { theme::TEXT };
             let sense = if can_drag {
                 Sense::click_and_drag()
@@ -816,7 +823,7 @@ impl ReportPanel {
                 label,
             );
             if let Some((node_id, port)) = interactive
-                && valid_path
+                && can_drag
             {
                 let drag_label = if path_text.is_empty() {
                     port.to_owned()
@@ -865,6 +872,8 @@ impl ReportPanel {
                             .size(theme::FONT_LABEL)
                             .color(theme::SUCCESS),
                     );
+                } else if !editable {
+                    // Stale or read-only results offer neither control.
                 } else if valid_path {
                     let target_name = if path_text.is_empty() {
                         label
@@ -934,6 +943,7 @@ impl ReportPanel {
                         depth + 1,
                         valid_path,
                         interactive,
+                        editable,
                         actions,
                     );
                 }
@@ -965,6 +975,7 @@ impl ReportPanel {
                         depth + 1,
                         child_valid,
                         interactive,
+                        editable,
                         actions,
                     );
                 }
@@ -1517,6 +1528,82 @@ mod tests {
             out.textures_delta.clear();
         }
     }
+    /// UX-01: a checked row reads *Check added* while the document cannot be
+    /// edited (another process holds the project, say), and no row offers
+    /// *Check* or *To variable* then.
+    #[test]
+    fn a_checked_row_reads_check_added_while_the_document_is_locked() {
+        fn painted(shape: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().for_each(|shape| painted(shape, out))
+                }
+                egui::epaint::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+                _ => {}
+            }
+        }
+        let run = sample_run();
+        let checked = [CheckedField {
+            node_id: "comp-1".into(),
+            port: "token".into(),
+            path: "value".into(),
+        }];
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        // Maximised, so the rows below the step's header are in view.
+        let mut panel = ReportPanel {
+            open: true,
+            maximised: true,
+            ..Default::default()
+        };
+        for locked in [false, true] {
+            let mut texts = Vec::new();
+            for _ in 0..2 {
+                texts.clear();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1600.0, 1000.0),
+                    )),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    let context = Context {
+                        run: Some(&run),
+                        selected_node_id: Some("comp-1"),
+                        error_policy: ErrorPolicy::Continue,
+                        running: false,
+                        stale: false,
+                        checked: &checked,
+                        files_busy: false,
+                        component: false,
+                        document_locked: locked,
+                    };
+                    let _ = panel.show(ui, &context);
+                });
+                out.textures_delta.clear();
+                for clipped in &out.shapes {
+                    painted(&clipped.shape, &mut texts);
+                }
+            }
+            assert!(
+                texts.iter().any(|text| text == "Check added"),
+                "locked {locked}: {texts:?}"
+            );
+            assert!(
+                texts
+                    .iter()
+                    .any(|text| text == "1 check added · it runs on the next run")
+            );
+            let offered = texts.iter().filter(|text| *text == "Check").count();
+            if locked {
+                assert_eq!(offered, 0, "a locked document offers no Check");
+            } else {
+                assert_eq!(offered, 1, "the token row still offers Check");
+            }
+        }
+    }
+
     #[test]
     fn resize_handle_receives_pointer_focus_and_keyboard_in_both_layouts() {
         for screen_height in [900.0, 400.0] {

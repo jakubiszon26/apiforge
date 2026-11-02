@@ -7011,18 +7011,7 @@ mod ux01 {
     /// Clicks the *Check* on the row of `field`: the *Check* nearest the
     /// field's label, as the mock-up's helper does.
     fn check(harness: &mut FolderHarness, field: &str) {
-        let y = harness.get_by_label(field).rect().center().y;
-        harness
-            .query_all_by_label(CHECK)
-            .min_by(|a, b| {
-                let a = (a.rect().center().y - y).abs();
-                let b = (b.rect().center().y - y).abs();
-                a.total_cmp(&b)
-            })
-            .unwrap_or_else(|| panic!("no field offers Check, so {field} cannot be checked"))
-            .click();
-        harness.hover_at(egui::pos2(480.0, 3.0));
-        settle(harness);
+        crate::testing::check_field(harness, field);
     }
 
     /// The colour `text` is painted in this frame, when it is painted.
