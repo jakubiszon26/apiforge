@@ -45,6 +45,26 @@ impl ProjectSession {
         })
     }
 
+    /// Whether the run is stale for a reason other than its document's text
+    /// and the edits that led to it: an earlier version ran, the session or
+    /// the project's context changed, fields are unresolved, the document is
+    /// in conflict or the registry changed. A caller that knows which texts
+    /// it still accepts for these results compares the text itself (UX-01:
+    /// checks added from the results).
+    pub fn run_is_stale_beyond_text(&self, prepared: &PreparedRun) -> bool {
+        self.index(prepared.document_id()).map_or(true, |index| {
+            let document = &self.documents[index];
+            let ticket = self.ticket(index);
+            prepared.last_valid
+                || ticket.session_id != prepared.ticket.session_id
+                || ticket.session_epoch != prepared.ticket.session_epoch
+                || ticket.context_generation != prepared.ticket.context_generation
+                || document.fields != prepared.fields
+                || document.conflict.is_some()
+                || self.registry != crate::RegistryState::Current
+        })
+    }
+
     /// An explicit portable export of all in-memory recovery and public settings.
     /// This does not acknowledge any source or local recovery as saved.
     pub fn export_unsaved(&self) -> Result<Vec<u8>> {
