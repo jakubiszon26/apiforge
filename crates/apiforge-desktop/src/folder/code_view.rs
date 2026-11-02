@@ -12,6 +12,16 @@ const CODE_STRIP: f32 = 96.0;
 const CODE_MARGIN: f32 = 6.0;
 const EDITOR_MARGIN: f32 = 2.0;
 const CODE_FONT: f32 = 13.0;
+/// How long typing pauses before the editor marks errors again (UX-03).
+#[allow(dead_code, reason = "UX-03's acceptance tests come before its rule")]
+pub(super) const MARKS_DELAY: Duration = Duration::from_millis(700);
+
+/// Whether the editor marks errors at `now`, with the text last changed by
+/// typing at `last_typed`. Before UX-03 the marks are always shown.
+#[allow(dead_code, reason = "UX-03's acceptance tests come before its rule")]
+pub(super) fn marks_due(_last_typed: Option<Instant>, _now: Instant, _delay: Duration) -> bool {
+    true
+}
 
 /// The height of the code panel above an expanded Problems section: as many
 /// whole lines as fit in [`CODE_STRIP`] with the margins around them, so the
@@ -219,6 +229,15 @@ impl FolderApp {
         let outcome = output.inner;
         #[cfg(test)]
         {
+            self.marks_shown = Some((
+                document_id.to_owned(),
+                code::marked_lines(&snapshot.text, &snapshot.diagnostics)
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                None,
+            ));
             self.lines_in_view = outcome
                 .lines_in_view
                 .clone()

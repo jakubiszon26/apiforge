@@ -320,6 +320,15 @@ pub struct FolderApp {
     /// The document the code view drew last and the lines it showed whole.
     #[cfg(test)]
     lines_in_view: Option<(String, std::ops::RangeInclusive<usize>)>,
+    /// The instant the rule of the error marks reads as now, set by a test
+    /// to step the clock by hand (UX-03); `None` reads the real clock.
+    #[cfg(test)]
+    marks_clock: Option<Instant>,
+    /// The document the code view drew last, the lines its editor was given
+    /// diagnostics for, and the wait it asked to be drawn again after for
+    /// the marks to appear (UX-03).
+    #[cfg(test)]
+    marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
 }
 
 struct Clipboard {
@@ -472,6 +481,10 @@ impl FolderApp {
             follow: follow::Follow::default(),
             #[cfg(test)]
             lines_in_view: None,
+            #[cfg(test)]
+            marks_clock: None,
+            #[cfg(test)]
+            marks_shown: None,
         }
     }
 
@@ -676,6 +689,37 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
         self.lines_in_view.clone()
+    }
+
+    /// Steps the clock the error marks' pause is measured by: from now on
+    /// the rule reads `now` as the present, as does a keystroke it records
+    /// (UX-03). A test seam; the window reads the real clock.
+    #[cfg(test)]
+    pub(crate) fn set_marks_clock(&mut self, now: Instant) {
+        self.marks_clock = Some(now);
+    }
+
+    /// The lines, counted from one, the code view last gave `document_id`'s
+    /// editor diagnostics for: the red numbers and dots it drew (UX-03). A
+    /// test seam.
+    #[cfg(test)]
+    pub(crate) fn marked_lines(&self, document_id: &str) -> Vec<usize> {
+        self.marks_shown
+            .as_ref()
+            .filter(|(shown, ..)| shown == document_id)
+            .map(|(_, lines, _)| lines.clone())
+            .unwrap_or_default()
+    }
+
+    /// How long the code view last asked to wait before drawing
+    /// `document_id` again for its error marks, `None` when it asked for
+    /// nothing (UX-03). A test seam.
+    #[cfg(test)]
+    pub(crate) fn marks_wait(&self, document_id: &str) -> Option<Duration> {
+        self.marks_shown
+            .as_ref()
+            .filter(|(shown, ..)| shown == document_id)
+            .and_then(|(.., wait)| *wait)
     }
 
     /// Keeps the person's per-project settings in `directory`, as

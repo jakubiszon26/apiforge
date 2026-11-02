@@ -5,7 +5,9 @@
 //! The KTLO-18 tests at the end expand the Problems section over the code
 //! (docs/tickets/KTLO-18.md); they share this file's `editor` and
 //! `problems_top`. The KTLO-32 test after them reads the board's painted
-//! text the same way (docs/tickets/KTLO-32.md).
+//! text the same way (docs/tickets/KTLO-32.md). `mod ux03` at the end turns
+//! the focus line grey and holds the error marks back while typing
+//! (docs/tickets/UX-03.md).
 use super::project_interaction_tests::{app, replace_text};
 use super::*;
 use crate::testing::{
@@ -103,9 +105,15 @@ fn line_numbers(harness: &FolderHarness) -> Vec<(String, egui::Rect, egui::Rect)
         .collect()
 }
 
-/// Whether an accent-coloured line is painted in the gutter: left of the text
-/// area and taller than a dot.
+/// Whether the focus line is painted in the gutter: a grey line (UX-03, the
+/// accent before it) left of the text area and taller than a dot.
 fn focus_line(harness: &FolderHarness) -> bool {
+    line_in_gutter(harness, theme::MUTED)
+}
+
+/// Whether a line of `colour` is painted in the gutter: left of the text area
+/// and taller than a dot.
+fn line_in_gutter(harness: &FolderHarness, colour: egui::Color32) -> bool {
     let editor = editor(harness);
     let in_gutter = |rect: egui::Rect| {
         rect.right() <= editor.left() + 1.0
@@ -114,11 +122,11 @@ fn focus_line(harness: &FolderHarness) -> bool {
     };
     shapes(harness).into_iter().any(|(_, shape)| match shape {
         Shape::LineSegment { points, stroke } => {
-            stroke.color == theme::ACCENT
+            stroke.color == colour
                 && stroke.width > 0.0
                 && in_gutter(egui::Rect::from_two_pos(points[0], points[1]))
         }
-        Shape::Rect(rect) => rect.fill == theme::ACCENT && in_gutter(rect.rect),
+        Shape::Rect(rect) => rect.fill == colour && in_gutter(rect.rect),
         _ => false,
     })
 }
@@ -683,5 +691,474 @@ fn ktlo32_an_undeclared_input_is_marked_required_on_a_call() {
             harness.query_by_label("note *").is_some(),
             "{size:?}: still required"
         );
+    }
+}
+
+// ---- UX-03: a grey focus line; error marks after a pause in typing ----
+
+mod ux03 {
+    use super::*;
+    use crate::folder::code_view::{MARKS_DELAY, marks_due};
+    use crate::testing::capture;
+    use egui_kittest::kittest::NodeT;
+    use std::time::{Duration, Instant};
+
+    /// The statement the mock-up shows half typed: `cart` is no block of
+    /// the scenario and the line does not end, so the code is invalid.
+    const HALF_TYPED: &str = "total = cart.body.";
+
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+
+    fn active_id(harness: &FolderHarness) -> String {
+        folder(harness).workbench.active().unwrap().to_owned()
+    }
+
+    fn snapshot(harness: &FolderHarness) -> Snapshot {
+        let id = active_id(harness);
+        folder(harness).snapshot(&id).unwrap()
+    }
+
+    fn marked(harness: &FolderHarness) -> Vec<usize> {
+        folder(harness).marked_lines(&active_id(harness))
+    }
+
+    /// The demo shop in Code with the marks' clock held at `start`.
+    fn shop_in_code(size: egui::Vec2, start: Instant) -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        show(&mut harness, "Code");
+        app(&mut harness).set_marks_clock(start);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// The caret at the end of line 2, the scenario's description, by a
+    /// click in the editor, which then has keyboard focus.
+    fn caret_after_line_2(harness: &mut FolderHarness) {
+        let at = editor(harness).left_top() + egui::vec2(120.0, 24.0);
+        click_at(harness, at);
+        harness.key_press(egui::Key::End);
+        settle(harness);
+    }
+
+    /// A new line 3 typed after the description, as in the mock-up:
+    /// Enter, then [`HALF_TYPED`] in one go.
+    fn type_half_statement(harness: &mut FolderHarness) {
+        caret_after_line_2(harness);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text(HALF_TYPED.into()));
+        settle_analysed(harness);
+    }
+
+    /// Settles until the analysis of the active document has a result: the
+    /// analyser's own pause of 250 ms is real time and does not change.
+    fn settle_analysed(harness: &mut FolderHarness) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            settle(harness);
+            if snapshot(harness).analysis != AnalysisState::Pending {
+                return;
+            }
+            assert!(Instant::now() < deadline, "the analysis never finished");
+            std::thread::sleep(ms(10));
+        }
+    }
+
+    /// The marks' clock stepped to `now`, then the window settled.
+    fn at(harness: &mut FolderHarness, now: Instant) {
+        app(harness).set_marks_clock(now);
+        settle(harness);
+    }
+
+    /// The marks' clock stepped to `now`, a moment before the marks are
+    /// due, and two frames drawn. The window asks for the next frame at
+    /// once, as it should with the marks due within a frame (the harness's
+    /// frame is 250 ms), so with the clock held it would never settle.
+    fn just_before(harness: &mut FolderHarness, now: Instant) {
+        app(harness).set_marks_clock(now);
+        harness.step();
+        harness.step();
+    }
+
+    /// The lines the analysis has errors on, counted from one, sorted.
+    fn error_lines(harness: &FolderHarness) -> Vec<usize> {
+        let snapshot = snapshot(harness);
+        let mut lines: Vec<usize> = snapshot
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .map(|diagnostic| line_column(&snapshot.text, diagnostic.range.start).0)
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        lines
+    }
+
+    /// The byte ranges of the code the editor painted with a red underline.
+    fn underlined(harness: &FolderHarness) -> Vec<std::ops::Range<usize>> {
+        let source = active_source(harness);
+        shapes(harness)
+            .into_iter()
+            .filter_map(|(_, shape)| match shape {
+                Shape::Text(text) if text.galley.job.text == source => Some(text.galley),
+                _ => None,
+            })
+            .flat_map(|galley| {
+                galley
+                    .job
+                    .sections
+                    .iter()
+                    .filter(|section| {
+                        section.format.underline.width > 0.0
+                            && section.format.underline.color == theme::DANGER
+                    })
+                    .map(|section| section.byte_range.start.0..section.byte_range.end.0)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// No red number, dot or underline anywhere in the code.
+    fn assert_no_marks(harness: &FolderHarness, when: &str) {
+        assert_eq!(marked(harness), Vec::<usize>::new(), "{when}: marked lines");
+        assert_eq!(
+            underlined(harness),
+            Vec::<std::ops::Range<usize>>::new(),
+            "{when}: underlined code"
+        );
+    }
+
+    /// The marks of the current analysis: every error's line marked and its
+    /// range underlined.
+    fn assert_marks_of_the_analysis(harness: &FolderHarness, when: &str) {
+        let lines = error_lines(harness);
+        assert!(!lines.is_empty(), "{when}: the code has errors to mark");
+        let mut shown = marked(harness);
+        shown.sort_unstable();
+        assert_eq!(shown, lines, "{when}: the marked lines");
+        let underlined = underlined(harness);
+        for diagnostic in snapshot(harness)
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        {
+            // A diagnostic at the end of the text has an empty range; the
+            // token it touches is underlined.
+            let range =
+                diagnostic.range.start..diagnostic.range.end.max(diagnostic.range.start + 1);
+            assert!(
+                underlined
+                    .iter()
+                    .any(|under| under.start < range.end && range.start < under.end),
+                "{when}: {:?} at {range:?} is not underlined; underlined: {underlined:?}",
+                diagnostic.message
+            );
+        }
+    }
+
+    /// The status beside PROBLEMS, which starts with `save_state`, and
+    /// whether it is painted red.
+    fn problems_status(harness: &FolderHarness, save_state: &str) -> (String, bool) {
+        // A label's text is its accessible value.
+        let node = harness.get_by_label_contains(save_state);
+        let status = node
+            .value()
+            .or_else(|| node.accesskit_node().label())
+            .unwrap_or_default();
+        let red = shapes(harness).into_iter().any(|(_, shape)| match shape {
+            Shape::Text(text) => {
+                text.galley.job.text == status
+                    && text
+                        .galley
+                        .job
+                        .sections
+                        .iter()
+                        .all(|section| section.format.color == theme::DANGER)
+            }
+            _ => false,
+        });
+        (status, red)
+    }
+
+    /// Steps the window one frame at a time until it settles and the
+    /// analysis has a result, checking after every frame that no mark is
+    /// drawn.
+    fn settle_without_marks(harness: &mut FolderHarness, when: &str) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            harness.step();
+            assert_no_marks(harness, when);
+            let immediate = harness
+                .output()
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|output| output.repaint_delay.is_zero());
+            if !immediate
+                && folder(harness).is_analysed()
+                && snapshot(harness).analysis != AnalysisState::Pending
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{when}: the window never settled"
+            );
+            std::thread::sleep(ms(1));
+        }
+    }
+
+    /// Criterion 1: the focus line at the gutter's edge is 2 px grey while
+    /// the editor has keyboard focus, never the accent, and absent without
+    /// focus.
+    #[test]
+    fn ux03_criterion_1_the_focus_line_is_grey() {
+        let (_project, mut harness) = shop_in_code(MINIMUM, Instant::now());
+        // On line 1, which is shorter than the panel, so the code does not
+        // scroll from under the gutter.
+        let at = editor(&harness).left_top() + egui::vec2(60.0, 10.0);
+        click_at(&mut harness, at);
+        assert!(
+            harness.get_by_label_contains("Contents of").is_focused(),
+            "a click in the editor gives it keyboard focus"
+        );
+        assert_eq!(
+            folder(&harness).code.focus_stroke(),
+            Some(egui::Stroke::new(2.0, theme::MUTED)),
+            "the focus line the editor painted"
+        );
+        assert!(focus_line(&harness), "no grey line in the gutter");
+        assert!(
+            !line_in_gutter(&harness, theme::ACCENT) && !line_in_gutter(&harness, theme::DANGER),
+            "a red line is still painted in the gutter"
+        );
+
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+        assert!(!harness.get_by_label_contains("Contents of").is_focused());
+        assert_eq!(folder(&harness).code.focus_stroke(), None);
+        assert!(!focus_line(&harness), "a focus line without focus");
+    }
+
+    /// Criterion 2: while typing pauses for less than 700 ms the editor marks
+    /// nothing, although the analysis has finished and PROBLEMS counts the
+    /// errors.
+    #[test]
+    fn ux03_criterion_2_no_marks_while_typing() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        type_half_statement(&mut harness);
+        at(&mut harness, start + ms(300));
+        assert_eq!(snapshot(&harness).analysis, AnalysisState::Invalid);
+        assert!(error_lines(&harness).contains(&3), "line 3 has an error");
+        let (status, red) = problems_status(&harness, "Unsaved changes");
+        assert!(
+            status.starts_with("Unsaved changes") && status.contains("error"),
+            "PROBLEMS counts the errors: {status:?}"
+        );
+        assert!(red, "the status {status:?} is red");
+        assert_no_marks(&harness, "300 ms after typing");
+    }
+
+    /// Criterion 2: an error corrected within the pause is never marked.
+    #[test]
+    fn ux03_criterion_2_an_error_corrected_within_the_pause_shows_no_mark() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        caret_after_line_2(&mut harness);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text(HALF_TYPED.into()));
+        settle_without_marks(&mut harness, "while the error is typed");
+        at(&mut harness, start + ms(300));
+        assert_eq!(snapshot(&harness).analysis, AnalysisState::Invalid);
+        assert_no_marks(&harness, "300 ms after typing the error");
+
+        // `cart.body.` replaced by `2`: `total = 2` is a valid statement.
+        for _ in 0.."cart.body.".len() {
+            harness.key_press(egui::Key::Backspace);
+        }
+        harness.event(egui::Event::Text("2".into()));
+        settle_without_marks(&mut harness, "while the error is corrected");
+        assert!(
+            active_source(&harness).contains("\n  total = 2\n"),
+            "the line is corrected:\n{}",
+            active_source(&harness)
+        );
+        assert_eq!(snapshot(&harness).analysis, AnalysisState::Valid);
+        at(&mut harness, start + ms(600));
+        assert_no_marks(&harness, "300 ms after the correction");
+        just_before(&mut harness, start + ms(999));
+        assert_no_marks(&harness, "699 ms after the correction");
+        for after in [700, 2000] {
+            at(&mut harness, start + ms(300 + after));
+            assert_no_marks(&harness, &format!("{after} ms after the correction"));
+        }
+    }
+
+    /// Criterion 2 and 5: the marks of the current analysis appear once
+    /// typing has paused for 700 ms, not at 699.
+    #[test]
+    fn ux03_criterion_2_marks_follow_the_analysis_after_the_pause() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        type_half_statement(&mut harness);
+        just_before(&mut harness, start + ms(699));
+        assert_no_marks(&harness, "699 ms after typing");
+        at(&mut harness, start + ms(700));
+        assert_marks_of_the_analysis(&harness, "700 ms after typing");
+        assert!(marked(&harness).contains(&3), "line 3 is marked");
+    }
+
+    /// Criterion 3 (a regression test): the PROBLEMS status and list follow
+    /// the analysis as before, with the marks' clock not moved at all:
+    /// *Unsaved changes · N errors* in red, and a row for line 3. The
+    /// analysis pause is still 250 ms.
+    #[test]
+    fn ux03_criterion_3_the_problems_status_is_unchanged() {
+        assert_eq!(crate::buffers::APPLY_DELAY, ms(250));
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        let (status, red) = problems_status(&harness, "Saved");
+        assert_eq!(status, "Saved");
+        assert!(!red, "a saved, valid document's status is not red");
+
+        type_half_statement(&mut harness);
+        let errors = snapshot(&harness)
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .count();
+        let (status, red) = problems_status(&harness, "Unsaved changes");
+        let expected = if errors == 1 {
+            "Unsaved changes  ·  1 error".to_owned()
+        } else {
+            format!("Unsaved changes  ·  {errors} errors")
+        };
+        assert_eq!(status, expected);
+        assert!(red, "the status {status:?} is red");
+        assert!(
+            harness.query_by_label_contains("Line 3, column").is_some(),
+            "the list names line 3"
+        );
+    }
+
+    /// Criterion 5: the rule itself.
+    #[test]
+    fn ux03_criterion_5_marks_due_at_the_delay() {
+        assert_eq!(MARKS_DELAY, ms(700));
+        let typed = Instant::now();
+        assert!(marks_due(None, typed, MARKS_DELAY), "nothing typed");
+        assert!(!marks_due(Some(typed), typed, MARKS_DELAY));
+        assert!(!marks_due(Some(typed), typed + ms(699), MARKS_DELAY));
+        assert!(marks_due(Some(typed), typed + ms(700), MARKS_DELAY));
+        assert!(marks_due(Some(typed), typed + ms(5000), MARKS_DELAY));
+    }
+
+    /// Criterion 5: while the marks wait, the window asks to be drawn again
+    /// when they are due, so they appear without a mouse move.
+    #[test]
+    fn ux03_criterion_5_a_repaint_is_requested_for_the_marks() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        let id = active_id(&harness);
+        type_half_statement(&mut harness);
+        at(&mut harness, start + ms(300));
+        assert_eq!(folder(&harness).marks_wait(&id), Some(ms(400)));
+        let delay = harness
+            .output()
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .unwrap()
+            .repaint_delay;
+        assert!(
+            delay <= ms(400),
+            "the window asked to be drawn again after {delay:?}, later than the marks"
+        );
+        at(&mut harness, start + ms(700));
+        assert_eq!(folder(&harness).marks_wait(&id), None);
+    }
+
+    /// Criterion 6: typing, paste, undo and redo restart the pause; moving
+    /// the caret, selecting and scrolling do not.
+    #[test]
+    fn ux03_criterion_6_only_text_changes_restart_the_pause() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        type_half_statement(&mut harness);
+        // Long enough for the text edit to keep an undo point here.
+        harness.run_steps(90);
+
+        // Not text changes, 400 ms into the pause.
+        at(&mut harness, start + ms(400));
+        harness.key_press(egui::Key::ArrowLeft);
+        harness.key_press(egui::Key::ArrowUp);
+        harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+        settle(&mut harness);
+        harness.hover_at(editor(&harness).left_top() + egui::vec2(120.0, 60.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -40.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(&mut harness);
+        harness.key_press(egui::Key::End);
+        settle(&mut harness);
+        at(&mut harness, start + ms(700));
+        assert_marks_of_the_analysis(&harness, "caret moves, a selection and a scroll");
+
+        // Each text change restarts it: marks at 700 ms, not at 699.
+        let mut now = start + ms(700);
+        for (change, event) in [
+            ("a paste", None),
+            ("an undo", Some(egui::Modifiers::COMMAND)),
+            (
+                "a redo",
+                Some(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT),
+            ),
+        ] {
+            let before = active_source(&harness);
+            match event {
+                None => harness.event(egui::Event::Paste(" x".into())),
+                Some(modifiers) => harness.key_press_modifiers(modifiers, egui::Key::Z),
+            }
+            settle_analysed(&mut harness);
+            assert_ne!(active_source(&harness), before, "{change} changes the text");
+            assert_eq!(
+                snapshot(&harness).analysis,
+                AnalysisState::Invalid,
+                "{change} leaves the code invalid"
+            );
+            just_before(&mut harness, now + ms(699));
+            assert_no_marks(&harness, &format!("699 ms after {change}"));
+            at(&mut harness, now + ms(700));
+            assert_marks_of_the_analysis(&harness, &format!("700 ms after {change}"));
+            now += ms(700);
+            app(&mut harness).set_marks_clock(now);
+            harness.run_steps(90);
+        }
+    }
+
+    /// Criterion 4: the design review view of the three states the QA report
+    /// compares with `ux03-now`: the focused editor with its grey line; the
+    /// statement half typed, the analysis done and no mark yet; the pause
+    /// passed and the marks shown.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux03_editor_typing() {
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let start = Instant::now();
+            let (_project, mut harness) = shop_in_code(size, start);
+            caret_after_line_2(&mut harness);
+            capture(&mut harness, &format!("ux03-focused-{suffix}"), None);
+            harness.key_press(egui::Key::Enter);
+            harness.event(egui::Event::Text(HALF_TYPED.into()));
+            settle_analysed(&mut harness);
+            at(&mut harness, start + ms(300));
+            capture(&mut harness, &format!("ux03-typing-{suffix}"), None);
+            at(&mut harness, start + ms(700));
+            capture(&mut harness, &format!("ux03-marks-{suffix}"), None);
+        }
     }
 }
