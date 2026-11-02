@@ -150,6 +150,24 @@ tells connected windows `run { mode: live }` when its live run starts and
 ends. The consent is kept in `agent-consent.json` beside the preferences, by
 the manifest id; the project file format is unchanged.
 
+## MCP-15 amendment: a command asks the window too (2026-11-01)
+
+Decisions 2–5 stand; [MCP-15](../tickets/MCP-15.md) adds a second kind of
+asker. `apiforge run --folder … --live`, the person's own command, asks a
+window that holds the project and names its endpoint exactly as the server
+does: `request` gains an optional `role` (`agent`, `command`; absent is an
+agent, so an older peer reads it unchanged and `version` stays 1). The
+window hands over or asks the person as for an agent, observes while the
+command holds the project, and offers no *Take back* for a command, whose
+live run is never interrupted. The command waits for the person's answer
+without the server's thirty-second limit, tells the window `run` when its
+run starts and ends, and says `released` after letting the lock go at every
+end; a killed command is taken back by the window's check (decision 2). The
+person's `--live` is the consent: decision 6's per-project setting governs
+the agent only, and a `permission` from the window is ignored by the
+command. A command never asks an agent session (decision 1) and does not
+listen; `apply` keeps refusing. The project file format is unchanged.
+
 ## MCP-16 amendment: the observer follows the holder (2026-11-01)
 
 Decision 5's last sentence keeps the camera and the selected blocks in

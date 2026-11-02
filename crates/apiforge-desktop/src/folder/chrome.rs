@@ -543,7 +543,7 @@ impl FolderApp {
             Prompt::Register { path, kind, error } => {
                 self.register_prompt(context, path, kind, error)
             }
-            Prompt::Handover { client } => self.handover_prompt(context, client),
+            Prompt::Handover { client, role } => self.handover_prompt(context, client, role),
         };
     }
 

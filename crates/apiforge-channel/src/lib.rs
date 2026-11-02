@@ -30,11 +30,18 @@ pub const MAX_SOCKET_PATH: usize = 100;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
-    /// The server asks the window that holds the project to hand it over.
+    /// The server, or a command, asks the window that holds the project to
+    /// hand it over.
     Request {
-        /// The agent's client, as it named itself.
+        /// The agent's client, as it named itself, or the command's name as
+        /// typed (`run --live`).
         client: Option<String>,
         pid: u32,
+        /// Who asks (MCP-15). Absent is an agent: a peer older than the
+        /// field reads the message unchanged, since unknown fields are
+        /// ignored.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<Asker>,
     },
     /// The window has let the project go; the server takes it.
     Granted,
@@ -72,6 +79,16 @@ pub enum Message {
     Permission { live: bool },
     /// The person wants the project back.
     TakeBack,
+}
+
+/// Who asks for the project in a [`Message::Request`] (MCP-15).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Asker {
+    /// `apiforge mcp`, writing for an agent.
+    Agent,
+    /// A command-line subcommand, such as `apiforge run --live`.
+    Command,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -525,6 +542,12 @@ mod tests {
             Message::Request {
                 client: Some("Claude Code".into()),
                 pid: 42,
+                role: None,
+            },
+            Message::Request {
+                client: Some("run --live".into()),
+                pid: 43,
+                role: Some(Asker::Command),
             },
             Message::Granted,
             Message::Refused {
@@ -605,6 +628,39 @@ mod tests {
         );
     }
 
+    /// MCP-15: the asker's role is one additive field. A request without it
+    /// is an agent's, as every server before MCP-15 sends it, and an
+    /// agent's request is written without it, byte for byte as before.
+    #[test]
+    fn a_request_without_a_role_is_an_agents_and_is_written_as_before() {
+        assert_eq!(
+            decode(b"{\"version\":1,\"type\":\"request\",\"client\":\"Claude Code\",\"pid\":7}"),
+            Received::Message(Message::Request {
+                client: Some("Claude Code".into()),
+                pid: 7,
+                role: None,
+            })
+        );
+        let agent = encode(&Message::Request {
+            client: None,
+            pid: 7,
+            role: None,
+        });
+        assert_eq!(
+            agent,
+            b"{\"version\":1,\"type\":\"request\",\"client\":null,\"pid\":7}\n"
+        );
+        let command = encode(&Message::Request {
+            client: Some("run --live".into()),
+            pid: 7,
+            role: Some(Asker::Command),
+        });
+        assert_eq!(
+            command,
+            b"{\"version\":1,\"type\":\"request\",\"client\":\"run --live\",\"pid\":7,\"role\":\"command\"}\n"
+        );
+    }
+
     #[test]
     fn an_endpoint_is_a_random_name_and_only_such_a_name_parses() {
         let endpoint = Endpoint::random();
@@ -663,6 +719,7 @@ mod tests {
                 .send(&Message::Request {
                     client: None,
                     pid: 1,
+                    role: None,
                 })
                 .await
                 .unwrap();
@@ -678,7 +735,8 @@ mod tests {
                 second,
                 Some(Received::Message(Message::Request {
                     client: None,
-                    pid: 1
+                    pid: 1,
+                    role: None,
                 }))
             );
             assert_eq!(end, None, "the end of the connection");

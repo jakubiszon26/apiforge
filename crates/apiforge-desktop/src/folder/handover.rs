@@ -20,7 +20,7 @@
 //! on every change: a server learns it before it could start a live run. The
 //! window takes no consent from the other side.
 use super::*;
-use apiforge_channel::{Connection, Endpoint, Listener, Message, Received, Writer};
+use apiforge_channel::{Asker, Connection, Endpoint, Listener, Message, Received, Writer};
 use apiforge_storage::project::{Holder, HolderRole};
 use std::{
     collections::HashMap,
@@ -44,10 +44,12 @@ const GRANT: Duration = Duration::from_secs(10);
 
 /// What the channel's thread reports to the frame.
 enum Event {
-    /// A server asks for the project on connection `link`.
+    /// A server, or a command, asks for the project on connection `link`.
     Request {
         link: u64,
         client: Option<String>,
+        /// An agent, or a command such as `apiforge run --live` (MCP-15).
+        role: HolderRole,
     },
     Message {
         link: u64,
@@ -311,8 +313,12 @@ fn read(
     let reader = tokio::spawn(async move {
         loop {
             match reader.next().await {
-                Ok(Some(Received::Message(Message::Request { client, .. }))) => {
-                    tell(Event::Request { link, client });
+                Ok(Some(Received::Message(Message::Request { client, role, .. }))) => {
+                    let role = match role {
+                        Some(Asker::Command) => HolderRole::Command,
+                        Some(Asker::Agent) | None => HolderRole::Agent,
+                    };
+                    tell(Event::Request { link, client, role });
                 }
                 Ok(Some(Received::Message(message))) => tell(Event::Message { link, message }),
                 Ok(Some(Received::Ignored(why))) => {
@@ -329,13 +335,17 @@ fn read(
 /// Where the hand-over stands, for the frame.
 pub(super) struct Handover {
     pub(super) channel: Channel,
-    /// A request not answered yet: its connection and the agent's name.
-    pending: Option<(u64, Option<String>)>,
+    /// A request not answered yet: its connection, the asker's name and
+    /// whether it is an agent or a command.
+    pending: Option<(u64, Option<String>, HolderRole)>,
     /// The request whose release is on the storage worker, and whether its
     /// connection closed meanwhile: then nobody waits for the project.
     releasing: Option<(u64, bool)>,
-    /// The connection to the agent this window observes.
+    /// The connection to the agent, or the command, this window observes.
     link: Option<u64>,
+    /// Who is on `link`: a command's run is its own and *Take back* is not
+    /// offered for it (MCP-15 decision 1 A).
+    linked: Option<HolderRole>,
     /// A connection being opened to the holder's endpoint.
     connecting: Option<u64>,
     /// When the last connection to the holder failed.
@@ -380,6 +390,7 @@ impl Handover {
             pending: None,
             releasing: None,
             link: None,
+            linked: None,
             connecting: None,
             failed_at: None,
             released: false,
@@ -405,6 +416,12 @@ impl Handover {
         self.pending.is_some()
     }
 
+    /// For tests: an answer waits for the next agent request.
+    #[cfg(test)]
+    pub(super) fn has_declined(&self) -> bool {
+        self.declined.is_some()
+    }
+
     /// The holder this window observes over a connection, so *Take back*
     /// can be offered.
     pub(super) fn is_linked(&self) -> bool {
@@ -420,10 +437,11 @@ impl Handover {
                 .is_some_and(|granted| granted.elapsed() < GRANT)
     }
 
-    /// A check named the holder: an agent that was granted the project has
-    /// taken it, and a connection to the holder may be opened again.
+    /// A check named the holder: an agent or a command that was granted the
+    /// project has taken it, and a connection to the holder may be opened
+    /// again.
     pub(super) fn holder_seen(&mut self, holder: &Holder) {
-        if holder.role() == Some(HolderRole::Agent) {
+        if matches!(holder.role(), Some(HolderRole::Agent | HolderRole::Command)) {
             self.granted_at = None;
         }
         self.stale = false;
@@ -446,17 +464,27 @@ impl Handover {
         self.taking_back && self.run.as_ref().is_some_and(holder::AgentRun::is_running)
     }
 
-    /// The agent this window observes is sending live requests.
+    /// The agent this window observes is sending live requests. A
+    /// command's live run is the person's own and is not governed by the
+    /// agent's setting (MCP-15 decision 3 A).
     pub(super) fn agent_runs_live(&self) -> bool {
-        self.run
-            .as_ref()
-            .is_some_and(|run| run.is_running() && run.is_live())
+        self.linked != Some(HolderRole::Command)
+            && self
+                .run
+                .as_ref()
+                .is_some_and(|run| run.is_running() && run.is_live())
+    }
+
+    /// The window observes an agent over a connection, so *Take back* is
+    /// offered; never for a command (MCP-15 decision 1 A).
+    pub(super) fn offers_take_back(&self) -> bool {
+        self.is_linked() && self.linked != Some(HolderRole::Command)
     }
 
     /// Another project is open: a request made to the previous one is
     /// refused, and one being released is not retried.
     pub(super) fn forget_requests(&mut self) {
-        if let Some((link, _)) = self.pending.take() {
+        if let Some((link, ..)) = self.pending.take() {
             self.channel.send(
                 link,
                 Message::Refused {
@@ -475,6 +503,7 @@ impl Handover {
         if let Some(link) = self.link.take() {
             self.channel.close(link);
         }
+        self.linked = None;
         if let Some(link) = self.connecting.take() {
             self.channel.close(link);
         }
@@ -512,9 +541,9 @@ impl FolderApp {
     fn follow_channel_event(&mut self, event: Event) {
         let handover = &mut self.handover;
         match event {
-            Event::Request { link, client } => {
+            Event::Request { link, client, role } => {
                 // The newest request is the one an agent waits for.
-                if let Some((older, _)) = handover.pending.replace((link, client))
+                if let Some((older, ..)) = handover.pending.replace((link, client, role))
                     && older != link
                 {
                     handover.channel.close(older);
@@ -545,6 +574,13 @@ impl FolderApp {
                     step,
                     label,
                 } => {
+                    // MCP-10's status line words an agent's run (*Agent:
+                    // running …*); a command's run is not shown there, and
+                    // the bar keeps mock-up (a) of MCP-15. Whether and how
+                    // a command's run is shown is the owner's to decide.
+                    if handover.linked == Some(HolderRole::Command) {
+                        return;
+                    }
                     handover.run = Some(holder::AgentRun::new(
                         &path,
                         mode,
@@ -584,12 +620,23 @@ impl FolderApp {
                     handover.connecting = None;
                     handover.failed_at = Some(Instant::now());
                 }
-                if handover
-                    .pending
-                    .as_ref()
-                    .is_some_and(|(pending, _)| *pending == link)
+                if let Some((_, _, role)) =
+                    handover.pending.take_if(|(pending, ..)| *pending == link)
                 {
-                    handover.pending = None;
+                    // A command that stopped waiting (Ctrl+C) has gone for
+                    // good: its prompt goes with it. An agent asks again, and
+                    // its prompt stays for that (MCP-08c).
+                    if role == HolderRole::Command
+                        && matches!(
+                            self.prompt,
+                            Some(Prompt::Handover {
+                                role: HolderRole::Command,
+                                ..
+                            })
+                        )
+                    {
+                        self.prompt = None;
+                    }
                 }
                 if let Some((releasing, lost)) = &mut handover.releasing
                     && *releasing == link
@@ -615,7 +662,7 @@ impl FolderApp {
     /// waits; the agent hears `handover_pending` after thirty seconds and
     /// the next request is answered at once.
     fn answer_request(&mut self) {
-        let Some((link, client)) = self.handover.pending.clone() else {
+        let Some((link, client, role)) = self.handover.pending.clone() else {
             return;
         };
         if self.handover.releasing.is_some() || self.handover.saving {
@@ -636,13 +683,16 @@ impl FolderApp {
             return;
         }
         // With unsaved work the person decides (MCP-08c): an answer given
-        // to a request that stopped waiting is this one's, once.
+        // to an agent's request that stopped waiting is the next agent
+        // request's, once; a command is always asked itself (MCP-15).
         if session.has_unsaved_work() {
-            if let Some(reason) = self.handover.declined.take() {
+            if role == HolderRole::Agent
+                && let Some(reason) = self.handover.declined.take()
+            {
                 self.refuse(link, &reason);
                 self.handover.refused = true;
             } else {
-                self.ask_person(client);
+                self.ask_person(client, role);
             }
             return;
         }
@@ -657,16 +707,26 @@ impl FolderApp {
         {
             return;
         }
-        self.release(link, client);
+        self.release(link, client, role);
     }
 
     /// The person's answer that keeps the project here: the waiting request
-    /// hears `reason`, or, when none waits, the next one does.
-    pub(super) fn answer_waiting(&mut self, reason: &str) {
-        self.handover.refused = true;
+    /// hears `reason`; when none waits, the next agent request does. The
+    /// bar says why only to an agent, which asks again at its next write; a
+    /// command has its answer and ends, and an answer meant for a command
+    /// that has gone is nobody's (MCP-15). `asker` is who the prompt named;
+    /// the request waiting now decides.
+    pub(super) fn answer_waiting(&mut self, reason: &str, asker: HolderRole) {
         match self.handover.pending.clone() {
-            Some((link, _)) => self.refuse(link, reason),
-            None => self.handover.declined = Some(reason.to_owned()),
+            Some((link, _, role)) => {
+                self.handover.refused = role == HolderRole::Agent;
+                self.refuse(link, reason);
+            }
+            None if asker == HolderRole::Agent => {
+                self.handover.refused = true;
+                self.handover.declined = Some(reason.to_owned());
+            }
+            None => {}
         }
     }
 
@@ -681,10 +741,11 @@ impl FolderApp {
         self.handover.channel.close(link);
     }
 
-    /// Lets the project go to the agent that asked on `link`: the saved
-    /// project is reread read-only with the same navigation, and only then
-    /// is the agent told `granted`, so the lock is free when it tries.
-    fn release(&mut self, link: u64, client: Option<String>) {
+    /// Lets the project go to the agent, or the command, that asked on
+    /// `link`: the saved project is reread read-only with the same
+    /// navigation, and only then is the asker told `granted`, so the lock is
+    /// free when it tries.
+    fn release(&mut self, link: u64, client: Option<String>, role: HolderRole) {
         self.handover.pending = None;
         self.handover.releasing = Some((link, false));
         #[cfg(test)]
@@ -709,7 +770,7 @@ impl FolderApp {
                 }
                 match result {
                     Ok(true) => {
-                        app.handed_over(link, client);
+                        app.handed_over(link, client, role);
                         if lost {
                             // The agent stopped waiting: the window takes the
                             // project back at its next check.
@@ -731,7 +792,7 @@ impl FolderApp {
                         } else if app.handover.pending.is_some() {
                             app.handover.channel.close(link);
                         } else {
-                            app.handover.pending = Some((link, client));
+                            app.handover.pending = Some((link, client, role));
                         }
                         app.open_run_journal();
                     }
@@ -749,17 +810,15 @@ impl FolderApp {
         );
     }
 
-    /// The window observes the agent it handed the project to, over the
-    /// connection the agent asked on.
-    fn handed_over(&mut self, link: u64, client: Option<String>) {
+    /// The window observes the agent, or the command, it handed the
+    /// project to, over the connection it asked on.
+    fn handed_over(&mut self, link: u64, client: Option<String>, role: HolderRole) {
         self.handover.reset_observing();
         self.handover.link = Some(link);
+        self.handover.linked = Some(role);
         self.handover.granted_at = Some(Instant::now());
         self.handover.refused = false;
-        self.holder = Some(holder::Observed::new(Holder::new(
-            HolderRole::Agent,
-            client,
-        )));
+        self.holder = Some(holder::Observed::new(Holder::new(role, client)));
         self.take_back = holder::TakeBack::default();
         self.last_change = None;
         self.follow_external(ExternalOutcome {

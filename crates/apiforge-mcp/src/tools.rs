@@ -1158,7 +1158,7 @@ impl Drop for Told<'_> {
 /// The `run` message a window is told when `report` has ended, its state
 /// as the agent's answer gives it (`status`): how many
 /// steps it had and, when it failed, the first step that did not pass.
-fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
+pub(crate) fn ended(path: &str, mode: ChannelMode, report: &RunResult) -> Message {
     let state = match report.status {
         RunStatus::Passed => RunState::Passed,
         RunStatus::Cancelled => RunState::Cancelled,

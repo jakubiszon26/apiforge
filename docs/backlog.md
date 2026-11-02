@@ -171,6 +171,8 @@ criteria:
 | [#123](https://github.com/jakubiszon26/apiforge/issues/123) | MCP-12 Discover a window holder and hand over across different process environments; [ticket](tickets/MCP-12.md); D1–D3 approved 2026-10-28; after MCP-08b, MCP-06 | M · 40 min · MCP output compatibility, `default` |
 | [#95](https://github.com/jakubiszon26/apiforge/issues/95) | MCP-11 The whole workflow end to end with a real client — the sprint's acceptance; [ticket](tickets/MCP-11.md); after every MCP ticket | S · 30 min |
 | [#96](https://github.com/jakubiszon26/apiforge/issues/96) | KTLO-31 The `timing; run in release` ignore (`folder/tests.rs` frame budgets) names its ticket, or the test moves to the release-only verification step | S · 5 min |
+| [#181](https://github.com/jakubiszon26/apiforge/issues/181) | MCP-14 `run`'s structured output matches its own output schema; a test validates every tool's output against its `outputSchema`; found by the owner 2026-11-01; hotfix before other tickets, merge authorised on green CI | S · 10 min |
+| [#182](https://github.com/jakubiszon26/apiforge/issues/182) | MCP-15 A live run from the command line asks the open window for the project over the control channel instead of refusing; [ticket](tickets/MCP-15.md); owner decision 2026-11-01, decisions 1–6 taken 2026-11-01 (all A), mock-up approved 2026-11-01; after MCP-12 | M · 30 min · `default`, `visible UI` |
 | [#57](https://github.com/jakubiszon26/apiforge/issues/57) | KTLO-24 The bar with the open files hides itself when no file is open; [ticket](tickets/KTLO-24.md) — merged in #70 | S · 15 min · `visible UI`, `default` |
 | [#79](https://github.com/jakubiszon26/apiforge/issues/79) | KTLO-26 A board edit keeps the model the printed source reads back, so the checkpoint it seals describes its source; [ticket](tickets/KTLO-26.md); decision A 2026-10-27 | S · 10 min · `format` |
 | [#76](https://github.com/jakubiszon26/apiforge/issues/76) | KTLO-25 The demo Product component carries a type warning — merged in #82 | S · 5 min |
@@ -183,7 +185,8 @@ Order and parallelism: MCP-01, MCP-02 and MCP-07 depend on nothing and may
 start together within the WIP cap; MCP-03 follows 01 and 02; MCP-04 follows
 03; MCP-08a follows 07; MCP-05 and MCP-06 follow 04; MCP-08b follows 08a and
 04; MCP-08c and MCP-10 follow 08b; MCP-09 and MCP-12 follow 08b and 06;
-MCP-16 follows MCP-10; MCP-11 closes, after MCP-12.
+MCP-15 follows MCP-12; MCP-16 follows MCP-10; MCP-11 closes, after MCP-12,
+MCP-14 and MCP-15.
 
 ### Interface findings carried from KTLO — the UX line
 
