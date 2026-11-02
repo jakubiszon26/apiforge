@@ -31,9 +31,13 @@ fn arguments(args: &[OsString]) -> Option<(&Path, bool)> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().skip(1).collect();
+    if args.len() == 1 && args[0] == "--version" {
+        println!("apiforge {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     if args.len() == 1 && matches!(args[0].to_str(), Some("--help" | "-h")) {
         println!(
-            "apiforge fmt <file.afs> [--check]\n{}\n{}\n{}\n{}",
+            "apiforge fmt <file.afs> [--check]\n{}\n{}\n{}\n{}\napiforge --version",
             document::USAGE,
             folder::USAGE,
             run::USAGE,

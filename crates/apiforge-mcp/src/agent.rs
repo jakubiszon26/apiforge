@@ -3,11 +3,18 @@
 //! calls `finish_editing`, stdin ends or the process exits. Each write builds
 //! a fresh session over the saved project from that one store, checks the
 //! version the model names, validates before the first byte, and commits.
+//!
+//! `publish` (MCP-05) is the window's Publish on that session: the same
+//! transaction, the comment-loss question answered only for the hash the
+//! model names, and a `request_id` kept in the record of request ids
+//! (MCP-05b, `requests`) so that a lost response can be asked for again,
+//! of this server or of a restarted one, without a second revision.
 use crate::{
     error::{ErrorCode, ToolError, Wrote},
     folder,
     handover::{Answer, Hub},
-    secrets::Secrets,
+    live, requests,
+    secrets::{self, Secrets},
     tools::{self, Diagnostic, Kind, MAX_TEXT_BYTES},
 };
 use apiforge_channel::Message;
@@ -23,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     ffi::OsString,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -34,7 +41,7 @@ use std::{
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 /// How long the server keeps trying for a lock the window has just granted:
 /// a check of the window's may still hold it for a moment.
-const GRANTED_LOCK: Duration = Duration::from_secs(2);
+pub(crate) const GRANTED_LOCK: Duration = Duration::from_secs(2);
 /// How long a write after *Take back* lets the window take the free lock
 /// before it asks the window for the project again.
 const YIELD: Duration = Duration::from_secs(3);
@@ -68,6 +75,54 @@ pub struct CreateDocumentArguments {
     /// different, `stale_project`.
     #[serde(default)]
     pub expected_generation: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct PublishArguments {
+    /// The working component's registered path, as `project_overview` lists
+    /// it.
+    pub path: String,
+    /// The `source_sha256` of the saved text you checked, as `read_source`
+    /// or `write_source` returned it. A different hash on disk is
+    /// `stale_source`.
+    pub expected_source_sha256: String,
+    /// Publish although canonical printing drops the comments that belong
+    /// to no statement, which `comments_would_be_lost` listed. Holds for
+    /// `expected_source_sha256` only, in this call only.
+    #[serde(default)]
+    pub accept_comment_loss: bool,
+    /// The project `generation` the component was checked at; when given
+    /// and different, `stale_project`.
+    #[serde(default)]
+    pub expected_generation: Option<u64>,
+    /// An id of your choosing for this publication. Repeated after a lost
+    /// response, the server returns the recorded result instead of
+    /// publishing again, also after a restart.
+    #[serde(default)]
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PublishResult {
+    /// The working component's registered path.
+    pub path: String,
+    /// The handle a scenario calls the revision by: `handle@revision(…)`.
+    pub handle: String,
+    /// The new revision's number: always the next unused one.
+    pub revision: u32,
+    /// Where the immutable revision was written.
+    pub revision_path: String,
+    /// SHA-256 of the revision's bytes, as `project_overview` lists it.
+    pub source_sha256: String,
+    /// The project's head generation after the publication.
+    pub generation: u64,
+    pub wrote: bool,
+    /// The project paths the commit wrote: the revision, the registry and
+    /// the checkpoint.
+    pub changed: Vec<String>,
+    /// The result recorded for this `request_id` earlier: nothing was
+    /// published by this call.
+    pub replayed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
@@ -200,12 +255,28 @@ impl AgentSession {
     }
 
     /// The writer lock for a live run (MCP-06): the session's, taken now
-    /// when the project is free, refused with the holder otherwise. The
-    /// store knows the session's secrets.
+    /// when the project is free, refused with the holder otherwise. A
+    /// window that holds the project is asked only when its consent allows
+    /// the run (MCP-09). The store knows the session's secrets.
     pub(crate) fn writer(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
         self.set_client(client);
         let mut state = self.state();
-        self.store(&mut state)
+        self.store_for(&mut state, true)
+    }
+
+    /// The project is held by a window that names its channel, and this
+    /// session can ask it: its consent, not the start flag, decides a live
+    /// run (MCP-09).
+    pub(crate) fn window_decides(&self) -> bool {
+        if self.is_active() || self.hub.get().is_none() {
+            return false;
+        }
+        ProjectStore::open_read_only(&self.folder)
+            .ok()
+            .and_then(|probe| probe.holder().ok().flatten())
+            .is_some_and(|holder| {
+                holder.role() == Some(HolderRole::Window) && holder.endpoint().is_some()
+            })
     }
 
     /// The session's store while it holds the lock. Never waits for a
@@ -348,6 +419,171 @@ impl AgentSession {
         })
     }
 
+    /// Publishes the saved working component as its next revision, in the
+    /// window's Publish transaction, when it is the version the model names.
+    pub fn publish(&self, arguments: &PublishArguments) -> Result<PublishResult, ToolError> {
+        let path = folder::validate(&arguments.path)?;
+        // The rules of a live run's id (MCP-06): bounded, and never a known
+        // secret value.
+        if let Some(id) = &arguments.request_id {
+            requests::check_id(id)?;
+            secrets::refuse_in_text(id, &self.secrets.values()?)?;
+        }
+        let mut state = self.state();
+        let store = self.store(&mut state)?;
+        // A publication this id named, recorded by this server or an earlier
+        // one (MCP-05b): its result, never a second revision.
+        if let Some(request) = &arguments.request_id
+            && let Some(recorded) = requests::find_publish(&store, request)?
+        {
+            return replay(recorded, &path, arguments);
+        }
+        // The working source is not read: publishing never rewrites it, and a
+        // source over the limit is the session's `too_large`, not a storage
+        // failure. What a publication changes: the checkpoint and registry.
+        let watched = &watched(&path)?[1..];
+        let before = read(&store, watched)?;
+        let mut session = ProjectSession::from_store_saved(store.clone()).map_err(load_error)?;
+        expect_generation(&before, arguments.expected_generation)?;
+        let id = folder::select(&session, &arguments.path)?;
+        let document = session.document(&id).ok_or_else(unknown_document)?;
+        if document.entry().kind != DocumentKind::Component {
+            return Err(not_a_component());
+        }
+        match document.unavailable() {
+            None => {}
+            Some(Unavailable::TooLarge) => {
+                return Err(ToolError::new(
+                    ErrorCode::TooLarge,
+                    "The saved component exceeds the 1 MiB limit and cannot be published",
+                ));
+            }
+            Some(_) => {
+                return Err(ToolError::new(
+                    ErrorCode::ProjectUnreadable,
+                    "The saved component cannot be read as source; read_source says why",
+                ));
+            }
+        }
+        let saved = document.saved_sha256().map(str::to_owned);
+        if saved.as_deref() != Some(arguments.expected_source_sha256.as_str()) {
+            return Err(ToolError::new(
+                ErrorCode::StaleSource,
+                "The component changed on disk since the version you checked; nothing was published. Read it again, check it and publish with the new source_sha256",
+            )
+            .with_details(json!({ "source_sha256": saved })));
+        }
+        // The comments a refusal lists come from the saved text.
+        if store
+            .validate_managed_payload(document.text().as_bytes())
+            .is_err()
+        {
+            return Err(ToolError::new(
+                ErrorCode::SecretInSource,
+                "The saved component contains the value of a known secret; nothing was published and the value is not repeated. Name the secret instead: env.name",
+            ));
+        }
+        session.settle(&id).map_err(tools::storage_error)?;
+        let (document, valid) = folder::check_document(&session, &id)?;
+        if !valid {
+            let (diagnostics, omitted) = tools::diagnostics(document);
+            return Err(ToolError::new(
+                ErrorCode::InvalidText,
+                "The saved component has errors and was not published; fix the diagnostics, write it and publish again",
+            )
+            .with_details(json!({ "diagnostics": diagnostics, "omitted": omitted })));
+        }
+        let comments = unattached(document);
+        if !comments.is_empty() {
+            if !arguments.accept_comment_loss {
+                return Err(ToolError::new(
+                    ErrorCode::CommentsWouldBeLost,
+                    "Publishing prints the component canonically, which drops the comments that belong to no statement; nothing was published. Attach them to statements and write the component, or publish again with accept_comment_loss: true and the same expected_source_sha256",
+                )
+                .with_details(json!({ "comments": comments, "source_sha256": saved })));
+            }
+            // The decision binds to the source version just checked against
+            // the hash the model named, as the window's binds to the text
+            // the person reviewed.
+            session
+                .accept_comment_loss(&id)
+                .map_err(tools::storage_error)?;
+        }
+        // The id is on disk before the transaction starts, as a live run's
+        // is before its first request: a server that stops before it
+        // records the result leaves an entry a new server answers with
+        // `unknown_outcome`, never a second revision.
+        if let Some(request) = &arguments.request_id {
+            requests::record_publish_started(
+                &store,
+                request,
+                path.as_str(),
+                &arguments.expected_source_sha256,
+            )?;
+        }
+        let published = match session.publish(&id, Origin::SESSION) {
+            Ok(published) => published,
+            Err(error) => {
+                let error = publish_failed(&mut state, &store, error, &path);
+                // Refused before its activation, nothing was published and
+                // the id may publish once the cause is fixed. After it, the
+                // revision may exist: the entry stays. An entry that cannot
+                // be removed stays too, which only costs a new id.
+                if let Some(request) = &arguments.request_id
+                    && error.wrote != Wrote::Unknown
+                {
+                    let _ = requests::forget_publish(&store, request);
+                }
+                return Err(error);
+            }
+        };
+        // From here the revision exists: nothing may fail before the result
+        // is recorded.
+        let revision = session
+            .manifest()
+            .revisions
+            .iter()
+            .find(|entry| {
+                entry.component_id == published.component_id && entry.revision == published.revision
+            })
+            .cloned()
+            .expect("a publication registers the revision it wrote");
+        // The revision did not exist before: the transaction expected it
+        // missing. A publication always writes the registry and the
+        // checkpoint, which is what `changed` says if they cannot be read.
+        let mut changed = vec![revision.path.as_str().to_owned()];
+        match read(&store, watched) {
+            Ok(after) => changed.extend(self::changed(watched, &before, &after)),
+            Err(_) => changed.extend(watched.iter().map(|p| p.as_str().to_owned())),
+        }
+        let result = PublishResult {
+            path: path.as_str().to_owned(),
+            handle: revision.handle,
+            revision: published.revision,
+            revision_path: revision.path.as_str().to_owned(),
+            source_sha256: revision.source_hash,
+            generation: published.generation,
+            wrote: true,
+            changed,
+            replayed: false,
+        };
+        if let Some(request) = &arguments.request_id {
+            // A result the record cannot take leaves the entry without one:
+            // a retry is then `unknown_outcome`. The revision exists, so the
+            // call still answers with it.
+            let _ = requests::record_publish_result(
+                &store,
+                request,
+                &arguments.expected_source_sha256,
+                &result,
+            );
+        }
+        // Connected windows hear of the revision before the tool answers,
+        // as of a save (MCP-08b).
+        self.saved(result.generation, &result.changed);
+        Ok(result)
+    }
+
     /// Ends the session and releases the writer lock; connected windows are
     /// told `released`. A write in flight finishes first: it holds the state.
     pub fn finish_editing(&self) -> Finished {
@@ -396,6 +632,11 @@ impl AgentSession {
 
     /// The writer lock of the session, taken at its first write.
     fn store(&self, state: &mut State) -> Result<ProjectStore, ToolError> {
+        self.store_for(state, false)
+    }
+
+    /// As [`Self::store`], for a `live` run when it is one.
+    fn store_for(&self, state: &mut State, live: bool) -> Result<ProjectStore, ToolError> {
         if state.recovery_required {
             return Err(ToolError::new(
                 ErrorCode::RecoveryRequired,
@@ -405,7 +646,7 @@ impl AgentSession {
         let store = match &state.store {
             Some(store) => store.clone(),
             None => {
-                let store = self.take_lock(state.client.clone())?;
+                let store = self.take_lock(state.client.clone(), live)?;
                 state.store = Some(store.clone());
                 self.set_held(Some(store.clone()));
                 self.active.store(true, Ordering::Release);
@@ -416,7 +657,7 @@ impl AgentSession {
         Ok(store)
     }
 
-    fn take_lock(&self, client: Option<String>) -> Result<ProjectStore, ToolError> {
+    fn take_lock(&self, client: Option<String>, live: bool) -> Result<ProjectStore, ToolError> {
         // A folder without a project gets no `.apiforge/local` from a write.
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
         let manifest = ProjectPath::new(MANIFEST_PATH).map_err(storage)?;
@@ -435,8 +676,8 @@ impl AgentSession {
             }
         }
         let hub = self.hub.get();
-        let holder = Holder::new(HolderRole::Agent, client.clone())
-            .with_endpoint(hub.and_then(Hub::endpoint));
+        let holder =
+            Holder::new(HolderRole::Agent, client).with_endpoint(hub.and_then(Hub::endpoint));
         // A holder that leaves between the refusal and the reading of its
         // description gets one more attempt.
         for _ in 0..2 {
@@ -449,14 +690,7 @@ impl AgentSession {
                         if found.role() == Some(HolderRole::Window)
                             && let (Some(hub), Some(endpoint)) = (hub, found.endpoint())
                         {
-                            return self.ask(
-                                hub,
-                                endpoint,
-                                client.clone(),
-                                &holder,
-                                &probe,
-                                &found,
-                            );
+                            return self.ask(hub, endpoint, live, &holder, &probe, &found);
                         }
                         return Err(held(&found));
                     }
@@ -476,22 +710,24 @@ impl AgentSession {
         &self,
         hub: &Arc<Hub>,
         endpoint: &str,
-        client: Option<String>,
+        live: bool,
         holder: &Holder,
         probe: &ProjectStore,
         window: &Holder,
     ) -> Result<ProjectStore, ToolError> {
-        let connection = match hub.ask(endpoint, client) {
-            Answer::Granted(connection) => connection,
+        let client = holder.client().map(str::to_owned);
+        let (connection, consent) = match hub.ask(endpoint, window.owner_uid(), client, live) {
+            Answer::Granted(connection, consent) => (connection, consent),
+            Answer::LiveDisabled(permission) => return Err(live::refusal(permission)),
             Answer::Refused(reason) => return Err(refused(&reason, window)),
             Answer::Pending => return Err(pending(window)),
-            Answer::Unreachable => return Err(held(window)),
+            Answer::Unreachable => return Err(not_reached(window, endpoint, probe.root())),
         };
         let deadline = Instant::now() + GRANTED_LOCK;
         loop {
             match ProjectStore::open_exclusive_as(&self.folder, holder) {
                 Ok(store) => {
-                    hub.adopt(connection);
+                    hub.adopt(connection, consent);
                     return Ok(store);
                 }
                 Err(ProjectError::Locked) if Instant::now() < deadline => {
@@ -649,6 +885,110 @@ fn commit_failed(
     }
 }
 
+/// The answer to a publication the record holds for its `request_id`: its
+/// result for the same path and hash, `invalid_inputs` for another call,
+/// `unknown_outcome` when the server that started it did not record how it
+/// ended. Nothing is written.
+fn replay(
+    recorded: requests::Publication,
+    path: &ProjectPath,
+    arguments: &PublishArguments,
+) -> Result<PublishResult, ToolError> {
+    let Some(result) = recorded.result else {
+        return Err(ToolError::new(
+            ErrorCode::UnknownOutcome,
+            "A publication with this request_id was started, by this server or an earlier apiforge mcp process, and how it ended was not recorded; nothing was published now. project_overview lists every revision with its source_sha256, which tells whether it was published. Use a new request_id to publish again",
+        )
+        .with_details(json!({
+            "path": recorded.path,
+            "expected_source_sha256": recorded.expected_source_sha256,
+            "started_at": recorded.started_at,
+        })));
+    };
+    if recorded.path != path.as_str()
+        || recorded.expected_source_sha256 != arguments.expected_source_sha256
+    {
+        return Err(ToolError::new(
+            ErrorCode::InvalidInputs,
+            "This request_id answered a publication of another document or another version; nothing was written. Use a new request_id for a new publication",
+        )
+        .with_details(json!({ "path": recorded.path })));
+    }
+    Ok(PublishResult {
+        replayed: true,
+        ..result
+    })
+}
+
+fn not_a_component() -> ToolError {
+    ToolError::new(
+        ErrorCode::NotAComponent,
+        "Only a component can be published; this document is a scenario",
+    )
+}
+
+/// A publication the session refused or a commit that failed. The session's
+/// own refusals keep their meaning; storage failures are a write's.
+fn publish_failed(
+    state: &mut State,
+    store: &ProjectStore,
+    error: apiforge_project::Error,
+    source: &ProjectPath,
+) -> ToolError {
+    use apiforge_project::Error;
+    match error {
+        Error::NotAComponent => not_a_component(),
+        Error::HandleChanged { published } => ToolError::new(
+            ErrorCode::InvalidText,
+            format!(
+                "This component is published as {published}; a published component cannot be renamed, so nothing was published. Keep its handle"
+            ),
+        ),
+        Error::RevisionExists { revision, .. } => ToolError::new(
+            ErrorCode::PathExists,
+            format!(
+                "A file for revision {revision} already exists and is never overwritten; nothing was published"
+            ),
+        ),
+        Error::CommentsWouldBeLost { .. } => ToolError::new(
+            ErrorCode::CommentsWouldBeLost,
+            "Publishing would drop comments that belong to no statement; nothing was published",
+        ),
+        Error::InvalidModel | Error::InvalidRevision { .. } | Error::Unprintable => ToolError::new(
+            ErrorCode::InvalidText,
+            "The component cannot be printed as a valid revision; nothing was published. Check it and publish again",
+        ),
+        Error::RegistryChanged | Error::ExternalConflict => ToolError::new(
+            ErrorCode::StaleProject,
+            "The project changed on disk while the publication was prepared; nothing was published. Check again and publish with the new generation",
+        ),
+        error => commit_failed(state, store, error, source, false),
+    }
+}
+
+/// The comments of a settled document's text that canonical printing would
+/// drop, with their positions, in source order.
+fn unattached(document: &apiforge_project::DocumentSession) -> Vec<serde_json::Value> {
+    let found: Vec<_> = document
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message == apiforge_script::UNATTACHED_COMMENT)
+        .cloned()
+        .collect();
+    let (positioned, _) = tools::positioned(document.text(), &found, 0);
+    found
+        .iter()
+        .zip(positioned)
+        .map(|(diagnostic, position)| {
+            json!({
+                "line": position.line,
+                "column": position.column,
+                "text": document.text().get(diagnostic.range.clone()).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
 /// Why a new document was refused: its first registration problem, or the
 /// errors of its text.
 fn refusal(
@@ -725,6 +1065,83 @@ fn description(holder: &Holder) -> serde_json::Value {
     })
 }
 
+/// A window that was not reached. Only a valid endpoint whose discovery
+/// could run (the holder file's owner is known) was actually tried; a
+/// malformed endpoint or missing owner is the ordinary refusal, with no
+/// Windows/WSL hint.
+fn not_reached(window: &Holder, endpoint: &str, root: &Path) -> ToolError {
+    if could_try(window, endpoint) {
+        unreachable(window, root)
+    } else {
+        held(window)
+    }
+}
+
+/// A failed connection is evidence for a possible same-side mismatch only
+/// on a Linux Windows-drive mount, never proof of a Windows writer.
+fn unreachable(window: &Holder, root: &Path) -> ToolError {
+    let mut error = held(window);
+    if on_windows_drive(root) {
+        error.message.push_str(". This project is on a Windows drive; if the window and MCP run on different sides of Windows/WSL, run both on the same side");
+    }
+    error
+}
+
+/// A Linux path under `/mnt/<single ASCII letter>/…`, where WSL mounts a
+/// Windows drive. Elsewhere, and on other systems, never.
+pub(crate) fn on_windows_drive(root: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let mut parts = root.components();
+        parts.next() == Some(std::path::Component::RootDir)
+            && parts.next().is_some_and(|part| part.as_os_str() == "mnt")
+            && parts.next().is_some_and(|part| {
+                let bytes = part.as_os_str().as_encoded_bytes();
+                bytes.len() == 1 && bytes[0].is_ascii_alphabetic()
+            })
+            && parts.next().is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = root;
+        false
+    }
+}
+
+/// Whether a connection to the window's `endpoint` was actually attempted:
+/// the name is an endpoint's, and on Unix the holder file's owner is known,
+/// so discovery could run.
+pub(crate) fn could_try(window: &Holder, endpoint: &str) -> bool {
+    apiforge_channel::Endpoint::parse(endpoint).is_some()
+        && (cfg!(not(unix)) || window.owner_uid().is_some())
+}
+
+/// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp*: an
+/// agent session in a refusal, as the server and the command word it.
+pub(crate) fn agent_name(client: Option<&str>) -> String {
+    format!("{} via apiforge mcp", shown(client, "An agent"))
+}
+
+/// *apiforge apply*: a command in a refusal.
+pub(crate) fn command_name(client: Option<&str>) -> String {
+    format!("apiforge {}", shown(client, "command"))
+}
+
+/// A client names itself in the holder file; a refusal shows the name on
+/// one line, without control characters, and cut to a bounded length, as
+/// the window's bar does.
+fn shown(client: Option<&str>, otherwise: &str) -> String {
+    const MAX_CLIENT_CHARS: usize = 40;
+    match client {
+        Some(client) => client
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(MAX_CLIENT_CHARS)
+            .collect(),
+        None => otherwise.to_owned(),
+    }
+}
+
 /// The refusal of a write while another process holds the project: who and
 /// since when. Never advice to edit a file directly.
 fn held(holder: &Holder) -> ToolError {
@@ -733,21 +1150,21 @@ fn held(holder: &Holder) -> ToolError {
         (Some(HolderRole::Window), _) => (
             ErrorCode::HeldByWindow,
             format!(
-                "Another API Forge window has held this project since {since} and saves it there; nothing was written. Ask the person to close the project in that window, then write again; reading works meanwhile"
+                "Another API Forge window has held this project since {since} and saves it there; nothing was written. The window could not be reached for hand-over; reading remains available"
             ),
         ),
         (Some(HolderRole::Command), client) => (
             ErrorCode::HeldByOther,
             format!(
-                "apiforge {} has held this project since {since}; nothing was written. Write again when it has finished",
-                client.unwrap_or("command")
+                "{} has held this project since {since}; nothing was written. Write again when it has finished",
+                command_name(client)
             ),
         ),
         (Some(HolderRole::Agent), client) => (
             ErrorCode::HeldByOther,
             format!(
-                "{} via apiforge mcp has held this project since {since}; nothing was written. Write again when it has finished editing",
-                client.unwrap_or("An agent")
+                "{} has held this project since {since}; nothing was written. Write again when it has finished editing",
+                agent_name(client)
             ),
         ),
         (None, _) => (
@@ -756,4 +1173,60 @@ fn held(holder: &Holder) -> ToolError {
         ),
     };
     ToolError::new(code, message).with_details(json!({ "holder": description(holder) }))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod mcp12_diagnostics {
+    use super::*;
+
+    #[test]
+    fn only_unreachable_live_window_endpoints_on_windows_mounts_get_the_qualified_hint() {
+        let window = Holder::window()
+            .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into()));
+        for (path, hint) in [
+            ("/mnt/c/project", true),
+            ("/mnt/C/project", true),
+            ("/mnt/cat/project", false),
+            ("/mnt/1/project", false),
+            ("/mnt/c", false),
+            ("/home/project", false),
+        ] {
+            let error = unreachable(&window, Path::new(path));
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert_eq!(
+                error.message.contains("Windows/WSL"),
+                hint,
+                "{path}: {}",
+                error.message
+            );
+            if hint {
+                assert!(error.message.contains("if"));
+                assert!(error.message.contains("same side"));
+            }
+            assert!(error.message.contains("reading"));
+            assert!(
+                !held(&window).message.contains("Windows/WSL"),
+                "metadata alone is not a diagnosis"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_that_was_never_tried_gets_no_windows_hint() {
+        let root = Path::new("/mnt/c/project");
+        let valid = "apiforge-0123456789abcdef0123456789abcdef";
+        for endpoint in [valid, "apiforge-not-an-endpoint", "../socket"] {
+            // Without the holder file's owner, discovery cannot run.
+            let window = Holder::window().with_endpoint(Some(endpoint.into()));
+            let error = not_reached(&window, endpoint, root);
+            assert_eq!(error.code, ErrorCode::HeldByWindow);
+            assert_eq!(error.wrote, Wrote::No);
+            assert!(error.message.contains("reading"));
+            assert!(
+                !error.message.contains("Windows/WSL"),
+                "{endpoint}: no connection was attempted"
+            );
+        }
+    }
 }

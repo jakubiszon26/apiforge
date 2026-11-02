@@ -22,20 +22,40 @@
 //! next server reporting the journal's entry; a whole session grepped for
 //! two secret values. Live requests go to the demo API in this process or a
 //! loopback listener that never answers.
+//!
+//! MCP-05 (#64) over real stdio: `publish` in the tool list with its
+//! annotations; the comment-loss refusal and the consent; a repeated
+//! `request_id` answered from the record; a window holding the project.
+//!
+//! MCP-14 (#181): every successful tool result read through `Server` is
+//! validated against the `outputSchema` its tool advertises in `tools/list`,
+//! so each session above checks it too; the `mcp14_` tests drive every kind
+//! of `run` result and every tool.
+//!
+//! MCP-17 (#188): a refusal is `isError: true` with the error object as the
+//! JSON of its one text block and no `structuredContent`; `tool_error`
+//! asserts that shape for every refusal above. `Server` validates every
+//! result that carries `structuredContent`, errors included, as a client
+//! that validates whenever it is present does; the `mcp17_` tests assert the
+//! raw refusal and a refusal of every tool that can refuse.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
     io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
-    sync::mpsc::{Receiver, channel},
+    sync::{
+        OnceLock,
+        mpsc::{Receiver, channel},
+    },
     thread,
     time::{Duration, Instant},
 };
 
 const PRODUCT: &str = "components/product.afs";
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-const TOOLS: [&str; 10] = [
+const TOOLS: [&str; 11] = [
     "project_overview",
     "language_reference",
     "read_source",
@@ -45,15 +65,17 @@ const TOOLS: [&str; 10] = [
     "run",
     "write_source",
     "create_document",
+    "publish",
     "finish_editing",
 ];
-/// The tools that change the project or its writer lock (MCP-04), or may
-/// send live requests (`run`, MCP-06), with their `destructiveHint` and
-/// `idempotentHint`.
-const WRITE_TOOLS: [(&str, bool, bool); 4] = [
+/// The tools that change the project or its writer lock (MCP-04, MCP-05),
+/// or may send live requests (`run`, MCP-06), with their `destructiveHint`
+/// and `idempotentHint`.
+const WRITE_TOOLS: [(&str, bool, bool); 5] = [
     ("run", true, false),
     ("write_source", true, true),
     ("create_document", false, false),
+    ("publish", false, false),
     ("finish_editing", false, true),
 ];
 
@@ -71,6 +93,13 @@ struct Server {
     /// Every line written to stdout, in order.
     stdout: Vec<String>,
     stderr: thread::JoinHandle<String>,
+    /// The tool of each `tools/call` sent and not yet answered, by id.
+    calls: HashMap<Value, String>,
+    /// The tools whose successful results were validated against their
+    /// output schema (MCP-14).
+    validated: BTreeSet<String>,
+    /// The tools that answered with a refusal, `isError: true` (MCP-17).
+    refused: BTreeSet<String>,
 }
 
 impl Server {
@@ -117,10 +146,19 @@ impl Server {
             lines,
             stdout: Vec::new(),
             stderr,
+            calls: HashMap::new(),
+            validated: BTreeSet::new(),
+            refused: BTreeSet::new(),
         }
     }
 
     fn send(&mut self, message: &str) {
+        if let Ok(sent) = serde_json::from_str::<Value>(message)
+            && sent["method"] == "tools/call"
+            && let Some(name) = sent["params"]["name"].as_str()
+        {
+            self.calls.insert(sent["id"].clone(), name.to_owned());
+        }
         let stdin = self.stdin.as_mut().unwrap();
         stdin.write_all(message.as_bytes()).unwrap();
         stdin.write_all(b"\n").unwrap();
@@ -146,6 +184,22 @@ impl Server {
             self.stdout.push(line.clone());
             let message: Value = serde_json::from_str(&line)
                 .unwrap_or_else(|_| panic!("stdout carried a non-JSON line: {line:?}"));
+            if let Some(name) = self.calls.remove(&message["id"])
+                && !message["result"].is_null()
+            {
+                let result = &message["result"];
+                let refused = result["isError"] == true;
+                // MCP-17: a client that validates whenever `structuredContent`
+                // is present, errors included, as older SDK clients do.
+                if !refused || result.get("structuredContent").is_some() {
+                    assert_matches_output_schema(&name, &result["structuredContent"]);
+                }
+                if refused {
+                    self.refused.insert(name);
+                } else {
+                    self.validated.insert(name);
+                }
+            }
             if matches(&message) {
                 return message;
             }
@@ -173,6 +227,52 @@ impl Server {
         let stderr = self.stderr.join().unwrap();
         (status, elapsed, self.stdout, stderr)
     }
+}
+
+/// Each tool's `outputSchema` as `tools/list` advertises it over stdio, from
+/// a server started once per test binary for the purpose (MCP-14).
+fn output_schemas() -> &'static BTreeMap<String, Value> {
+    static SCHEMAS: OnceLock<BTreeMap<String, Value>> = OnceLock::new();
+    SCHEMAS.get_or_init(|| {
+        let directory = demo();
+        let root = directory.path();
+        let mut server = Server::spawn(Some(root), root);
+        initialize(&mut server);
+        let list = server.request(2, "tools/list", json!({}));
+        let schemas = list["result"]["tools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{list}"))
+            .iter()
+            .map(|tool| {
+                (
+                    tool["name"].as_str().unwrap().to_owned(),
+                    tool["outputSchema"].clone(),
+                )
+            })
+            .collect();
+        assert_clean_end(server);
+        schemas
+    })
+}
+
+/// `content`, a tool's structured result, is valid against the
+/// `outputSchema` that tool advertises: what an MCP client checks before it
+/// hands the result to the model.
+fn assert_matches_output_schema(tool: &str, content: &Value) {
+    let schema = output_schemas()
+        .get(tool)
+        .unwrap_or_else(|| panic!("{tool} is not in tools/list"));
+    let validator = jsonschema::validator_for(schema)
+        .unwrap_or_else(|error| panic!("{tool}'s outputSchema does not compile: {error}"));
+    let errors: Vec<String> = validator
+        .iter_errors(content)
+        .map(|error| format!("{error} at {:?}", error.instance_path().as_str()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "{tool}'s structured result does not match its outputSchema:\n{}\nresult: {content}",
+        errors.join("\n")
+    );
 }
 
 fn meta() -> Value {
@@ -229,14 +329,48 @@ fn structured(response: &Value) -> &Value {
     &result["structuredContent"]
 }
 
-fn tool_error(response: &Value, code: &str) {
+/// A refusal's error object (MCP-17): `isError: true`, no
+/// `structuredContent`, and one text block whose JSON is an object with
+/// exactly `code`, `message`, `wrote` and `details`.
+fn refusal(response: &Value) -> Value {
     let result = &response["result"];
     assert_eq!(result["isError"], true, "{response}");
-    let error = &result["structuredContent"];
+    assert!(
+        result.get("structuredContent").is_none(),
+        "a refusal carries no structuredContent: {response}"
+    );
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1, "{response}");
+    assert_eq!(content[0]["type"], "text", "{response}");
+    let error: Value = serde_json::from_str(content[0]["text"].as_str().unwrap())
+        .unwrap_or_else(|_| panic!("a refusal's text is JSON: {response}"));
+    let keys: BTreeSet<_> = error
+        .as_object()
+        .unwrap_or_else(|| panic!("a refusal's text is an object: {response}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        BTreeSet::from(["code", "details", "message", "wrote"]),
+        "{response}"
+    );
+    error
+}
+
+/// A refusal with `code` that wrote nothing; its error object.
+fn tool_error(response: &Value, code: &str) -> Value {
+    let error = refusal(response);
     assert_eq!(error["code"], code, "{response}");
     assert_eq!(error["wrote"], false);
     assert!(error["message"].is_string());
     assert!(error["details"].is_object());
+    error
+}
+
+/// Whether `response` is a refusal with `code`, for a test that polls.
+fn refused_with(response: &Value, code: &str) -> bool {
+    response["result"]["isError"] == true && refusal(response)["code"] == code
 }
 
 fn assert_clean_end(server: Server) {
@@ -565,7 +699,7 @@ fn mcp03_criterion_10_a_cancelled_run_over_stdio() {
     let mut id = 5;
     let report = loop {
         let response = call(&mut server, id, "run", json!({ "path": PRODUCT }));
-        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+        if !refused_with(&response, "run_in_progress") {
             break response;
         }
         assert!(
@@ -835,12 +969,9 @@ fn mcp04_criterion_3_a_write_based_on_a_version_apply_replaced_is_stale() {
         "write_source",
         json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
     );
-    tool_error(&stale, "stale_source");
+    let stale = tool_error(&stale, "stale_source");
     let (_, current_hash) = read(&mut server, 4, SCENARIO);
-    assert_eq!(
-        stale["result"]["structuredContent"]["details"]["source_sha256"],
-        current_hash.as_str()
-    );
+    assert_eq!(stale["details"]["source_sha256"], current_hash.as_str());
     assert_eq!(std::fs::read(root.join(SCENARIO)).unwrap(), current);
     assert_clean_end(server);
 }
@@ -897,9 +1028,9 @@ fn mcp04_criterion_8_a_window_holding_the_project_refuses_the_write_over_stdio()
         "write_source",
         json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
     );
-    tool_error(&refused, "held_by_window");
+    let error = tool_error(&refused, "held_by_window");
     assert!(
-        refused["result"]["structuredContent"]["message"]
+        error["message"]
             .as_str()
             .unwrap()
             .contains("API Forge window"),
@@ -1137,9 +1268,8 @@ fn mcp06_criterion_1_without_allow_live_over_stdio() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    tool_error(&refused, "live_disabled");
     assert_eq!(
-        refused["result"]["structuredContent"]["message"],
+        tool_error(&refused, "live_disabled")["message"],
         NOT_ENABLED
     );
     assert_clean_end(server);
@@ -1312,18 +1442,17 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
         "run",
         json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
     );
-    tool_error(&retried, "unknown_outcome");
-    assert_reported(
-        &retried["result"]["structuredContent"]["details"]["interrupted"],
-        &journalled,
-    );
+    let error = tool_error(&retried, "unknown_outcome");
+    assert_reported(&error["details"]["interrupted"], &journalled);
     assert_clean_end(live);
 }
 
 /// Criterion 10: with a secret in the environment and another in the
 /// `--secrets` file, a session of every tool — reads, checks, runs, refused
-/// writes with the value inside `text` — never returns a value: not in a
-/// result, not on stderr, not in the journal written mid-run.
+/// writes with the value inside `text`, a publication with a `request_id`
+/// (MCP-05b criterion 5) — never returns a value: not in a result, not on
+/// stderr, not in the journal written mid-run, not in the record of request
+/// ids.
 #[test]
 fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     let directory = demo();
@@ -1346,6 +1475,7 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     server.request(2, "tools/list", json!({}));
     let text = std::fs::read_to_string(root.join(SCENARIO)).unwrap();
     let hash = read(&mut server, 3, SCENARIO).1;
+    let product_hash = read(&mut server, 4, PRODUCT).1;
     let leaked = |value: &str| text.replacen(" {\n", &format!(" {{\n  // {value}\n"), 1);
     let mut id = 4;
     let mut next = || {
@@ -1403,10 +1533,23 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
             json!({ "kind": "scenario", "path": "scenarios/leak.afs", "text": format!("scenario \"Leak\" {{\n  // {FILE_TOKEN}\n}}\n") }),
         ),
         ("run", json!({ "path": SCENARIO, "request_id": TOKEN })),
+        (
+            "publish",
+            json!({ "path": PRODUCT, "expected_source_sha256": product_hash, "request_id": TOKEN }),
+        ),
     ] {
         let response = call(&mut server, next(), name, arguments);
         tool_error(&response, "secret_in_text");
     }
+    // A publication with a request_id is recorded (MCP-05b), and the record
+    // is grepped below with the journal.
+    let published = call(
+        &mut server,
+        next(),
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": product_hash, "request_id": "publish-without-a-secret" }),
+    );
+    assert_eq!(structured(&published)["revision"], 2);
     let listed = server.request(next(), "resources/list", json!({}));
     assert!(listed["result"]["resources"].is_array());
     let read = server.request(
@@ -1436,7 +1579,7 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     let started = Instant::now();
     loop {
         let response = call(&mut server, next(), "run", json!({ "path": PRODUCT }));
-        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+        if !refused_with(&response, "run_in_progress") {
             break;
         }
         assert!(
@@ -1450,6 +1593,12 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     assert_eq!(structured(&finished)["finished"], true);
     let (status, _, stdout, stderr) = server.close();
     assert_eq!(status.code(), Some(0), "stderr: {stderr}");
+    let requests = std::fs::read_to_string(root.join(".apiforge/local/agent-requests.json"))
+        .expect("the record of request ids holds the publication");
+    assert!(
+        requests.contains("\"publish-without-a-secret\""),
+        "{requests}"
+    );
     for value in [TOKEN, FILE_TOKEN] {
         for line in &stdout {
             assert!(!line.contains(value), "a result carried a secret value");
@@ -1458,6 +1607,10 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
         assert!(
             !journalled.contains(value),
             "the journal holds a secret value"
+        );
+        assert!(
+            !requests.contains(value),
+            "the record of request ids holds a secret value"
         );
     }
     assert!(!root.join("scenarios/leak.afs").exists());
@@ -1485,4 +1638,657 @@ fn mcp06_a_secrets_file_that_cannot_be_read_stops_the_server() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("The secrets file is not JSON"), "{stderr}");
     assert!(!stderr.contains(TOKEN));
+}
+
+// MCP-05 (#64) ---------------------------------------------------------------
+
+/// Criteria 1, 4 and 6 over stdio: the refusal that lists the comments, the
+/// consent bound to the hash, a repeated `request_id` answered from the
+/// record, and the overview listing the revision with its hash.
+#[test]
+fn mcp05_publish_over_stdio() {
+    const LOOSE: &str = "// A loose note from the model.";
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (text, hash) = read(&mut server, 2, PRODUCT);
+    let written = call(
+        &mut server,
+        3,
+        "write_source",
+        json!({ "path": PRODUCT, "text": format!("{LOOSE}\n\n{text}"), "expected_source_sha256": hash }),
+    );
+    let hash = structured(&written)["source_sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let refused = call(
+        &mut server,
+        4,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash, "request_id": "qa-1" }),
+    );
+    assert_eq!(
+        tool_error(&refused, "comments_would_be_lost")["details"]["comments"][0]["text"],
+        LOOSE
+    );
+
+    let arguments = json!({
+        "path": PRODUCT,
+        "expected_source_sha256": hash,
+        "accept_comment_loss": true,
+        "request_id": "qa-1",
+    });
+    let published = call(&mut server, 5, "publish", arguments.clone());
+    let published = structured(&published).clone();
+    assert_eq!(published["wrote"], true);
+    assert_eq!(published["replayed"], false);
+    assert_eq!(published["handle"], "product");
+    assert_eq!(published["revision"], 2);
+    let revision_path = published["revision_path"].as_str().unwrap();
+    assert!(root.join(revision_path).is_file());
+
+    let again = call(&mut server, 6, "publish", arguments);
+    let again = structured(&again).clone();
+    assert_eq!(again["replayed"], true);
+    assert_eq!(again["revision"], 2);
+    assert_eq!(again["source_sha256"], published["source_sha256"]);
+    assert!(
+        !root
+            .join(revision_path.replace("/2.afs", "/3.afs"))
+            .exists()
+    );
+
+    let overview = call(&mut server, 7, "project_overview", json!({}));
+    let overview = structured(&overview);
+    assert!(
+        overview["revisions"].as_array().unwrap().iter().any(|r| {
+            r["handle"] == "product"
+                && r["revision"] == 2
+                && r["source_sha256"] == published["source_sha256"]
+        }),
+        "{overview}"
+    );
+    assert_eq!(overview["holder"], "agent_session");
+    assert!(locked(root), "the lock stays with the session");
+    assert_clean_end(server);
+}
+
+/// Criterion 7 over stdio: a window holding the project refuses `publish`.
+#[test]
+fn mcp05_criterion_7_a_window_holding_the_project_refuses_publish_over_stdio() {
+    use apiforge_storage::project::ProjectStore;
+    let directory = demo();
+    let root = directory.path();
+    let manifest = std::fs::read(root.join("apiforge.project.json")).unwrap();
+    let window = ProjectStore::open_exclusive(root).unwrap();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (_, hash) = read(&mut server, 2, PRODUCT);
+    let refused = call(
+        &mut server,
+        3,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash }),
+    );
+    tool_error(&refused, "held_by_window");
+    drop(window);
+    assert_clean_end(server);
+    assert_eq!(
+        std::fs::read(root.join("apiforge.project.json")).unwrap(),
+        manifest,
+        "no revision was registered"
+    );
+}
+
+// MCP-14 (#181) --------------------------------------------------------------
+
+/// Every step of a compact report, nested ones included.
+fn flattened(steps: &Value) -> Vec<&Value> {
+    let mut all = Vec::new();
+    for step in steps.as_array().unwrap() {
+        all.push(step);
+        if let Some(inner) = step.get("steps") {
+            all.extend(flattened(inner));
+        }
+    }
+    all
+}
+
+/// One `run` result checked against the advertised schema, with the flags
+/// MCP-14 sends as `false` present rather than omitted (criterion 3).
+fn assert_run_result(response: &Value) -> Value {
+    let report = structured(response).clone();
+    assert_matches_output_schema("run", &report);
+    for flag in ["live", "redacted", "replayed", "journal_unreadable"] {
+        assert!(report[flag].is_boolean(), "{flag} is sent: {report}");
+    }
+    if let Some(steps) = report.get("steps") {
+        for step in flattened(steps) {
+            assert!(
+                step["may_have_reached_api"].is_boolean(),
+                "may_have_reached_api is sent: {step}"
+            );
+        }
+    }
+    report
+}
+
+/// Criteria 1 and 3: simulated runs of every kind (passed with a
+/// component's steps nested, a component alone with its inputs, the full
+/// report, a failed verdict, an unreadable journal, past the deadline) match
+/// `run`'s advertised outputSchema, with every `false` sent.
+#[test]
+fn mcp14_criterion_1_simulated_run_results_match_the_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+
+    let passed = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
+    assert_eq!(passed["status"], "passed");
+    assert_eq!(passed["replayed"], false);
+    assert_eq!(passed["journal_unreadable"], false);
+    assert!(
+        passed["steps"][0]["steps"].is_array(),
+        "a component's steps nested: {passed}"
+    );
+    assert!(
+        flattened(&passed["steps"])
+            .iter()
+            .all(|step| step["may_have_reached_api"] == false)
+    );
+
+    let component = assert_run_result(&call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": PRODUCT, "inputs": { "id": 7 } }),
+    ));
+    assert_eq!(component["status"], "passed");
+
+    let full = assert_run_result(&call(
+        &mut server,
+        4,
+        "run",
+        json!({ "path": SCENARIO, "full": true }),
+    ));
+    assert!(full["report"].is_object(), "{full}");
+    assert!(full.get("steps").is_none(), "absent with full");
+
+    let scenario = root.join(SCENARIO);
+    let text = std::fs::read_to_string(&scenario).unwrap();
+    std::fs::write(
+        &scenario,
+        replaced(&text, "expected_price = 80 * 1", "expected_price = 81 * 1"),
+    )
+    .unwrap();
+    let failed = assert_run_result(&call(&mut server, 5, "run", json!({ "path": SCENARIO })));
+    assert_eq!(failed["status"], "failed");
+    let price = flattened(&failed["steps"])
+        .into_iter()
+        .find(|step| step["handle"] == "promotional_price")
+        .unwrap()
+        .clone();
+    assert_eq!(price["expected"], 81, "{price}");
+    std::fs::write(&scenario, &text).unwrap();
+
+    std::fs::create_dir_all(root.join(".apiforge/local")).unwrap();
+    std::fs::write(root.join(JOURNAL), b"not a journal").unwrap();
+    let unreadable = assert_run_result(&call(&mut server, 6, "run", json!({ "path": SCENARIO })));
+    assert_eq!(unreadable["journal_unreadable"], true, "{unreadable}");
+    assert_clean_end(server);
+
+    let mut server = Server::spawn_with(
+        Some(root),
+        root,
+        &[
+            ("APIFORGE_MCP_TEST_STEP_DELAY_MS", "200"),
+            ("APIFORGE_MCP_TEST_DEADLINE_MS", "300"),
+        ],
+    );
+    initialize(&mut server);
+    let cancelled = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["ended_by"], "timed_out");
+    assert_clean_end(server);
+}
+
+/// Criteria 1 and 3: live runs (passed, the recorded result of a repeated
+/// `request_id`, and a request on its way at the deadline) match `run`'s
+/// advertised outputSchema.
+#[test]
+fn mcp14_criterion_1_live_run_results_match_the_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let demo_api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", demo_api.base_url()));
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    let arguments = json!({ "path": SCENARIO, "live": true, "request_id": "mcp14-live" });
+    let live = assert_run_result(&call(&mut server, 2, "run", arguments.clone()));
+    assert_eq!(live["status"], "passed", "{}", live["error"]);
+    assert_eq!(live["live"], true);
+    assert_eq!(live["replayed"], false);
+    let replayed = assert_run_result(&call(&mut server, 3, "run", arguments));
+    assert_eq!(replayed["replayed"], true, "{replayed}");
+    assert_clean_end(server);
+
+    let api = Listener::start();
+    point_at(root, &api.base_url());
+    let mut server = Server::spawn_live(
+        root,
+        &["--allow-live"],
+        &[("APIFORGE_MCP_TEST_DEADLINE_MS", "500")],
+    );
+    initialize(&mut server);
+    let timed_out = assert_run_result(&call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    ));
+    assert_eq!(timed_out["ended_by"], "timed_out", "{timed_out}");
+    let marked: Vec<_> = flattened(&timed_out["steps"])
+        .into_iter()
+        .filter(|step| step["may_have_reached_api"] == true)
+        .collect();
+    assert_eq!(marked.len(), 1, "{timed_out}");
+    assert_clean_end(server);
+}
+
+/// Criterion 2: a session in which every tool answers with a result, each
+/// result validated against the outputSchema of its tool from `tools/list`.
+#[test]
+fn mcp14_criterion_2_every_tool_result_matches_its_output_schema() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    call(&mut server, 2, "project_overview", json!({}));
+    call(&mut server, 3, "language_reference", json!({}));
+    let (text, hash) = read(&mut server, 4, PRODUCT);
+    call(&mut server, 5, "check", json!({}));
+    call(&mut server, 6, "check", json!({ "path": PRODUCT }));
+    call(
+        &mut server,
+        7,
+        "check_text",
+        json!({ "path": PRODUCT, "text": text }),
+    );
+    call(
+        &mut server,
+        8,
+        "check_text",
+        json!({ "path": "scenarios/new.afs", "text": DRAFT_TEXT }),
+    );
+    call(&mut server, 9, "print", json!({ "path": PRODUCT }));
+    call(&mut server, 10, "run", json!({ "path": PRODUCT }));
+    let written = call(
+        &mut server,
+        11,
+        "write_source",
+        json!({ "path": PRODUCT, "text": commented(&text), "expected_source_sha256": hash }),
+    );
+    let hash = structured(&written)["source_sha256"].clone();
+    call(
+        &mut server,
+        12,
+        "create_document",
+        json!({ "kind": "scenario", "path": "scenarios/draft.afs", "text": DRAFT_TEXT }),
+    );
+    let published = call(
+        &mut server,
+        13,
+        "publish",
+        json!({ "path": PRODUCT, "expected_source_sha256": hash, "accept_comment_loss": true }),
+    );
+    assert_eq!(structured(&published)["wrote"], true, "{published}");
+    call(&mut server, 14, "finish_editing", json!({}));
+    assert_eq!(
+        server
+            .validated
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        {
+            let mut tools = TOOLS.to_vec();
+            tools.sort_unstable();
+            tools
+        },
+        "every tool answered with a result that was validated"
+    );
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp12_stdio_exposes_holder_contract_and_handover_guidance() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    let init = server.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "MCP-12 client", "version": "1"}
+        }),
+    );
+    assert!(
+        init["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("hand")
+    );
+    server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let listed = server.request(2, "tools/list", json!({}));
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    let overview = tools
+        .iter()
+        .find(|tool| tool["name"] == "project_overview")
+        .unwrap();
+    let schema = &overview["outputSchema"];
+    let holder_schema = &schema["properties"]["holder"];
+    assert_eq!(holder_schema["type"], "string");
+    let mut values: Vec<_> = holder_schema["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    values.sort();
+    assert_eq!(
+        values,
+        ["agent_session", "another_process", "none", "window"]
+    );
+    for field in ["holder_details", "hands_over_on_write"] {
+        assert!(schema["properties"].get(field).is_some(), "{schema}");
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(field))
+        );
+    }
+    assert!(
+        overview["description"]
+            .as_str()
+            .unwrap()
+            .contains("hands_over_on_write")
+    );
+    let run = tools.iter().find(|tool| tool["name"] == "run").unwrap();
+    let guidance = run["description"].as_str().unwrap();
+    assert!(guidance.contains("hand"));
+    assert!(guidance.contains("unsaved"));
+    assert!(guidance.contains("held_by_other"));
+    assert!(guidance.contains("live_disabled"));
+    let before = call(&mut server, 3, "project_overview", json!({}));
+    assert_eq!(structured(&before)["holder"], "none");
+    assert_eq!(structured(&before)["holder_details"], Value::Null);
+    assert_eq!(structured(&before)["hands_over_on_write"], false);
+    let created = call(
+        &mut server,
+        4,
+        "create_document",
+        json!({
+            "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+        }),
+    );
+    assert_eq!(structured(&created)["wrote"], true);
+    let active = call(&mut server, 5, "project_overview", json!({}));
+    assert_eq!(structured(&active)["holder"], "agent_session");
+    assert_eq!(structured(&active)["holder_details"]["role"], "agent");
+    assert_eq!(
+        structured(&active)["holder_details"]["client"],
+        "MCP-12 client"
+    );
+    assert_eq!(structured(&active)["hands_over_on_write"], false);
+    assert_clean_end(server);
+}
+
+#[test]
+fn mcp12_actual_cli_connects_with_a_filtered_environment() {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args([
+        "--ignored",
+        "--exact",
+        "mcp12_cli_window_process",
+        "--nocapture",
+    ]);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = format!(
+            "/run/user/{}",
+            std::fs::metadata(temp.path()).unwrap().uid()
+        );
+        assert!(
+            Path::new(&runtime).is_dir(),
+            "MCP-12 requires the runner's provisioned /run/user directory"
+        );
+        command.env("XDG_RUNTIME_DIR", runtime);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[ignore = "launched by MCP-12 with the window's isolated runtime environment"]
+fn mcp12_cli_window_process() {
+    use apiforge_channel::{Listener, Message, Received};
+    use apiforge_storage::project::{Holder, ProjectStore};
+    for eof in [false, true] {
+        let directory = demo();
+        let root = directory.path();
+        #[cfg(unix)]
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut listener = {
+            let _context = runtime.enter();
+            Listener::bind().unwrap()
+        };
+        let owner = ProjectStore::open_exclusive_as(
+            root,
+            &Holder::window().with_endpoint(Some(listener.endpoint().name().to_owned())),
+        )
+        .unwrap();
+        let window = thread::spawn(move || {
+            runtime.block_on(async move {
+                let mut connection = listener.accept().await.unwrap();
+                assert!(matches!(
+                    connection.reader.next().await.unwrap(),
+                    Some(Received::Message(Message::Request { .. }))
+                ));
+                drop(owner);
+                connection.writer.send(&Message::Granted).await.unwrap();
+                let mut saved = false;
+                loop {
+                    match connection.reader.next().await.unwrap() {
+                        Some(Received::Message(Message::Saved { .. })) => saved = true,
+                        Some(Received::Message(Message::Released)) | None => break,
+                        _ => {}
+                    }
+                }
+                assert!(saved, "the CLI sent its saved event");
+            })
+        });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_apiforge"));
+        command.arg("mcp").arg("--folder").arg(root);
+        #[cfg(unix)]
+        command
+            .env_remove("XDG_RUNTIME_DIR")
+            .env("TMPDIR", temp.path());
+        #[cfg(windows)]
+        {
+            command.env_clear();
+            for name in ["PATH", "SystemRoot"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        let mut server = Server::spawn_command(command, root);
+        initialize(&mut server);
+        let overview = call(&mut server, 2, "project_overview", json!({}));
+        assert_eq!(structured(&overview)["holder"], "window");
+        assert_eq!(structured(&overview)["hands_over_on_write"], true);
+        let created = call(
+            &mut server,
+            3,
+            "create_document",
+            json!({
+                "kind": "scenario", "path": "scenarios/mcp12.afs", "text": "scenario \"MCP-12\" {\n}\n"
+            }),
+        );
+        assert_eq!(structured(&created)["wrote"], true, "{created}");
+        if !eof {
+            let finished = call(&mut server, 4, "finish_editing", json!({}));
+            assert_eq!(structured(&finished)["finished"], true);
+        }
+        assert_clean_end(server);
+        window.join().unwrap();
+        assert!(
+            ProjectStore::open_exclusive(root).is_ok(),
+            "ownership returns on finish and EOF"
+        );
+    }
+}
+
+// MCP-17 (#188) --------------------------------------------------------------
+
+/// Criterion 1: the raw response of a `path_rejected` and a `live_disabled`
+/// refusal over stdio. `isError: true`, no `structuredContent` key, and one
+/// text block holding the same pretty JSON as before: the error object the
+/// tools give, `{ code, message, wrote, details }`.
+#[test]
+fn mcp17_criterion_1_a_refusal_travels_as_text() {
+    use apiforge_mcp::{ErrorCode, ToolError};
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let rejected = call(&mut server, 2, "read_source", json!({ "path": "../x.afs" }));
+    let live = call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    for (response, expected) in [
+        (
+            &rejected,
+            apiforge_mcp::tools::read_source(root, "../x.afs").unwrap_err(),
+        ),
+        (
+            &live,
+            ToolError::new(ErrorCode::LiveDisabled, NOT_ENABLED)
+                .with_details(json!({ "source": "no --allow-live" })),
+        ),
+    ] {
+        let result = response["result"].as_object().unwrap();
+        let keys: BTreeSet<_> = result.keys().map(String::as_str).collect();
+        assert_eq!(keys, BTreeSet::from(["content", "isError"]), "{response}");
+        assert_eq!(result["isError"], true, "{response}");
+        assert_eq!(
+            result["content"],
+            json!([{
+                "type": "text",
+                "text": serde_json::to_string_pretty(&expected).unwrap(),
+            }]),
+            "{response}"
+        );
+        assert_eq!(
+            tool_error(response, expected.code.as_str()),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+    assert_eq!(
+        server.refused,
+        BTreeSet::from(["read_source", "run"].map(String::from))
+    );
+    assert_clean_end(server);
+}
+
+/// Criterion 2: every tool that can refuse refuses at least once, and each
+/// refusal passes `Server`, which validates every result carrying
+/// `structuredContent` against its tool's `outputSchema`, errors included.
+/// `language_reference` and `finish_editing` never refuse: they answer every
+/// call with a result, which MCP-14's criterion 2 validates.
+#[test]
+fn mcp17_criterion_2_every_refusal_passes_a_validating_client() {
+    let empty = tempfile::tempdir().unwrap();
+    let mut outside = Server::spawn(None, empty.path());
+    initialize(&mut outside);
+    tool_error(
+        &call(&mut outside, 2, "project_overview", json!({})),
+        "not_a_project",
+    );
+    let mut refused = outside.refused.clone();
+    assert_clean_end(outside);
+
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let missing = "components/missing.afs";
+    let unknown_hash = "0".repeat(64);
+    for (id, name, arguments, code) in [
+        (
+            2,
+            "read_source",
+            json!({ "path": "../x.afs" }),
+            "path_rejected",
+        ),
+        (3, "check", json!({ "path": missing }), "unknown_document"),
+        (
+            4,
+            "check_text",
+            json!({ "path": "../x.afs", "text": DRAFT_TEXT }),
+            "path_rejected",
+        ),
+        (5, "print", json!({ "path": missing }), "unknown_document"),
+        (
+            6,
+            "run",
+            json!({ "path": SCENARIO, "live": true }),
+            "live_disabled",
+        ),
+        (
+            7,
+            "write_source",
+            json!({ "path": PRODUCT, "text": DRAFT_TEXT, "expected_source_sha256": unknown_hash }),
+            "stale_source",
+        ),
+        (
+            8,
+            "create_document",
+            json!({ "kind": "component", "path": PRODUCT, "text": "component x {\n}\n" }),
+            "path_exists",
+        ),
+        (
+            9,
+            "publish",
+            json!({ "path": missing, "expected_source_sha256": unknown_hash }),
+            "unknown_document",
+        ),
+    ] {
+        tool_error(&call(&mut server, id, name, arguments), code);
+    }
+    refused.extend(server.refused.iter().cloned());
+    assert_clean_end(server);
+    let mut expected: BTreeSet<String> = TOOLS.iter().map(|tool| (*tool).to_owned()).collect();
+    expected.remove("language_reference");
+    expected.remove("finish_editing");
+    assert_eq!(refused, expected, "every tool that can refuse refused");
 }

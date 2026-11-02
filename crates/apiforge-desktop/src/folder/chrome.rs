@@ -11,6 +11,7 @@ impl FolderApp {
         let name = session.manifest().name.clone();
         let read_only = session.is_read_only();
         let observing = self.observing();
+        let live_allowed = self.live_allowed();
         let unsaved = session
             .documents()
             .iter()
@@ -47,10 +48,28 @@ impl FolderApp {
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             // Keep room for the widest toolbar, a component's with Publish
-            // (635 px), and the read-only badge, on every tab so that the
-            // title keeps its width (KTLO-23 decision 6). A long project name
-            // must not paint into the Code tab at 960 px.
-            let reserved = 650.0 + if read_only { 80.0 } else { 0.0 };
+            // (635 px), and the read-only and live badges, on every tab so
+            // that the title keeps its width (KTLO-23 decision 6). A long
+            // project name must not paint into the Code tab at 960 px.
+            // The badges reserve what they measure, so *Observing* and
+            // *Live allowed* together still leave the name its room at 960 px
+            // (MCP-09, mock-up M3).
+            let badge = |ui: &egui::Ui, text: &str| {
+                let font = egui::FontId::proportional(theme::FONT_META);
+                ui.fonts_mut(|fonts| {
+                    fonts
+                        .layout_no_wrap(text.to_owned(), font, theme::WARNING)
+                        .size()
+                        .x
+                }) + ui.spacing().item_spacing.x
+            };
+            let mut reserved = 650.0;
+            if read_only {
+                reserved += badge(ui, if observing { "Observing" } else { "Read-only" });
+            }
+            if live_allowed {
+                reserved += badge(ui, "Live allowed");
+            }
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
@@ -75,6 +94,18 @@ impl FolderApp {
                     RichText::new(if observing { "Observing" } else { "Read-only" })
                         .size(theme::FONT_META)
                         .color(theme::WARNING),
+                );
+            }
+            if live_allowed {
+                // The person's consent is never hidden while it holds
+                // (MCP-09, decision 15 A).
+                ui.label(
+                    RichText::new("Live allowed")
+                        .size(theme::FONT_META)
+                        .color(theme::WARNING),
+                )
+                .on_hover_text(
+                    "An MCP agent may send live requests in this project. Change it in Project settings.",
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -263,6 +294,7 @@ impl FolderApp {
         });
         self.tabs_offset = output.state.offset.x.max(0.0);
         if let Some(document_id) = activate {
+            self.navigated_to(&document_id);
             self.activate_tab(&document_id);
             self.followed_tab = Some(document_id);
             self.touched();
@@ -511,6 +543,7 @@ impl FolderApp {
             Prompt::Register { path, kind, error } => {
                 self.register_prompt(context, path, kind, error)
             }
+            Prompt::Handover { client, role } => self.handover_prompt(context, client, role),
         };
     }
 

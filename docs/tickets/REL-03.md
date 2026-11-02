@@ -7,7 +7,9 @@
   this file is the analysis it asked for. Implementation starts after REL-01
   (#118) merges: `release.yml`, `packaging/release.py` and the manifests are
   that pull request's. `v0.1.0-rc.1` may go out without it; `v0.1.0` may not.
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Claude Opus 5.5 (taken
+  2026-11-01 under `ready:sol`; QA report
+  [docs/qa/2026-11-01/REL-03/report.md](../qa/2026-11-01/REL-03/report.md))
 - After REL-01 (#118)
 
 ## Goal

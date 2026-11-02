@@ -15,7 +15,7 @@ jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -56,11 +56,73 @@ jobs:
           toolchain: '1.99.0'
           components: rustfmt, clippy
 
+      # REL-03 (#120): the third-party notices every package carries. A
+      # dependency whose licence about.toml does not accept, or a crate the
+      # file misses, fails here on every push and not in the release. The
+      # same pinned cargo-about as release.yml.
+      - name: Download cargo-about
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CARGO_ABOUT_URL: https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.2/cargo-about-0.9.2-x86_64-unknown-linux-musl.tar.gz
+          CARGO_ABOUT_SHA256: 9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af
+        run: |
+          tools="$RUNNER_TEMP/cargo-about"
+          mkdir -p "$tools"
+          curl -fsSL --retry 3 -o "$tools/cargo-about.tar.gz" "$CARGO_ABOUT_URL"
+          printf '%s  %s\n' "$CARGO_ABOUT_SHA256" "$tools/cargo-about.tar.gz" | sha256sum -c -
+          tar xzf "$tools/cargo-about.tar.gz" -C "$tools" --strip-components 1
+          echo "$tools" >> "$GITHUB_PATH"
+
+      - name: Generate and check the third-party notices
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo about --version
+          cargo fetch --locked
+          mkdir -p test-results
+          cargo about generate --frozen --workspace --fail -o test-results/THIRD-PARTY-NOTICES.md packaging/about.hbs \
+            2> "$RUNNER_TEMP/cargo-about.log" \
+            || { cat "$RUNNER_TEMP/cargo-about.log" >&2; exit 1; }
+          cat "$RUNNER_TEMP/cargo-about.log" >&2
+          # A stale clarify entry is only a warning to cargo-about.
+          if grep -q 'failed to validate' "$RUNNER_TEMP/cargo-about.log"; then
+            echo '::error::about.toml has a clarification that no longer matches its files.'
+            exit 1
+          fi
+          for triple in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+            cargo tree -e normal --locked --color never --prefix none --format '{p}' --target "$triple" \
+              -p apiforge-desktop -p apiforge-cli
+          done | python3 -I packaging/release.py check-notices test-results/THIRD-PARTY-NOTICES.md
+
+      - name: Upload the third-party notices
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: third-party-notices
+          path: test-results/THIRD-PARTY-NOTICES.md
+          if-no-files-found: error
+
+      - name: Test the release checks (Linux)
+        if: runner.os == 'Linux'
+        run: python3 -I packaging/test_release.py
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy lints
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Provision Linux user runtime for MCP-12 environment tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          runtime="/run/user/$(id -u)"
+          if ! test -d "$runtime"; then
+            sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" "$runtime"
+          fi
+          test "$(stat -c %u "$runtime")" = "$(id -u)"
 
       - name: Run workspace unit and integration tests
         run: cargo test --workspace --all-targets --locked

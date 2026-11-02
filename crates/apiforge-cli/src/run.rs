@@ -135,12 +135,26 @@ pub(super) fn execute_request(
 ) -> Result<RunStatus, String> {
     // What an earlier run left unfinished is said before this one adds to it.
     if let Some(journal) = &journal {
-        report_interrupted(&journal.interrupted);
-        if journal.unreadable {
-            eprintln!("An unreadable interrupted-run journal was preserved for review.");
-        }
+        report_journal(&journal.interrupted, journal.unreadable);
     }
     let outcome = executor::execute(request, journal, CancellationToken::new(), DEADLINE)?;
+    print_outcome(outcome, json)
+}
+
+/// Says what an earlier run left unfinished, and that a journal that could
+/// not be read was kept.
+pub(super) fn report_journal(runs: &[apiforge_core::journal::JournalRun], unreadable: bool) {
+    report_interrupted(runs);
+    if unreadable {
+        eprintln!("An unreadable interrupted-run journal was preserved for review.");
+    }
+}
+
+/// Prints the report of a run that has ended, and returns its verdict.
+pub(super) fn print_outcome(
+    outcome: executor::RunOutcome,
+    json: bool,
+) -> Result<RunStatus, String> {
     if outcome.ended_by == EndedBy::TimedOut {
         return Err("The run did not finish within ten minutes".into());
     }

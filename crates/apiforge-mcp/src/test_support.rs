@@ -246,9 +246,40 @@ pub fn structured(answer: &Value) -> &Value {
     &result["structuredContent"]
 }
 
-/// A tool's `structuredContent` when it answered an error.
-pub fn tool_error(answer: &Value) -> &Value {
+/// A tool's error object when it refused (MCP-17): `isError: true`, no
+/// `structuredContent`, and one text block whose JSON is
+/// `{ code, message, wrote, details }`.
+pub fn tool_error(answer: &Value) -> Value {
     let result = &answer["result"];
     assert_eq!(result["isError"], true, "{answer}");
-    &result["structuredContent"]
+    assert!(
+        result.get("structuredContent").is_none(),
+        "a refusal carries no structuredContent: {answer}"
+    );
+    assert_eq!(
+        result["content"].as_array().map(Vec::len),
+        Some(1),
+        "{answer}"
+    );
+    assert_eq!(result["content"][0]["type"], "text", "{answer}");
+    let error = refusal(answer).unwrap_or_else(|| panic!("a refusal's text is JSON: {answer}"));
+    let mut keys: Vec<_> = error
+        .as_object()
+        .unwrap_or_else(|| panic!("a refusal's text is an object: {answer}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["code", "details", "message", "wrote"], "{answer}");
+    error
+}
+
+/// The error object of a refusal, read from its text block, or `None` when
+/// `answer` is not a refusal: for a test that polls.
+pub fn refusal(answer: &Value) -> Option<Value> {
+    let result = &answer["result"];
+    if result["isError"] != true {
+        return None;
+    }
+    serde_json::from_str(result["content"][0]["text"].as_str()?).ok()
 }

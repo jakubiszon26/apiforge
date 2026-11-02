@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "apiforge"
@@ -20,9 +21,13 @@ apiforge-project.workspace = true
 apiforge-mcp.workspace = true
 
 [dev-dependencies]
+apiforge-channel.workspace = true
+tokio.workspace = true
 tempfile.workspace = true
 # Live runs over stdio against the local demo API (MCP-06).
 apiforge-demo-api.workspace = true
+# Structured output checked against each tool's output schema (MCP-14).
+jsonschema.workspace = true
 
 [lints]
 workspace = true
