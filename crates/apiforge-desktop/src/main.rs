@@ -28,6 +28,7 @@ mod stop;
 mod testing;
 mod theme;
 mod widgets;
+mod windows_console;
 
 use apiforge_storage::WorkspaceStore;
 use std::{
