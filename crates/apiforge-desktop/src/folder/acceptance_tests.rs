@@ -6912,3 +6912,516 @@ mod mcp19 {
         assert!(!root.join(FOLDER).exists());
     }
 }
+
+/// UX-01: several checks from one run (docs/tickets/UX-01.md). *Check* on a
+/// field in Run results adds its check at once and the results stay usable;
+/// the panel's bar counts the checks that wait for the next run, any other
+/// change makes the results stale as before, and the model's undo takes a
+/// check back. The demo shop in Split at 960 × 540 unless said otherwise.
+mod ux01 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui_kittest::kittest::NodeT;
+
+    const STEP: &str = "Add to cart · Passed";
+    const ONE: &str = "1 check added · it runs on the next run";
+    const TWO: &str = "2 checks added · they run on the next run";
+    const STALE: &str = "Graph changed · results from an earlier version";
+    const ADDED: &str = "Check added";
+    const CHECK: &str = "Check";
+    const TO_VARIABLE: &str = "To variable";
+    const MAXIMISE: &str = "Maximise run results";
+    const RESTORE: &str = "Restore run results";
+    const POLICY: &str = "When a step fails";
+
+    /// The demo shop at `size` in Split with its scenario active.
+    fn window(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        choose(&mut harness, "Split");
+        (project, harness, scenario)
+    }
+
+    /// Runs the active tab with the header's run button.
+    fn run(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run");
+        finish_run(harness)
+    }
+
+    /// Chooses a step in the list of Run results, as a click on its row.
+    fn select_step(harness: &mut FolderHarness, step: &str) {
+        harness.get_by_label_contains(step).scroll_to_me();
+        settle(harness);
+        harness.get_by_label_contains(step).click();
+        settle(harness);
+    }
+
+    /// The window after one simulation of the scenario, its Run results
+    /// maximised on *Add to cart*.
+    fn after_a_run(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String, RunResult) {
+        let (project, mut harness, scenario) = window(size);
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        assert!(has_label(&harness, "productId"), "Add to cart's outputs");
+        (project, harness, scenario, report)
+    }
+
+    /// The controls on the row of `field` in the shown value tree: those of
+    /// `names` whose centre is level with the field's label.
+    fn on_row(harness: &FolderHarness, field: &str, names: &[&str]) -> Vec<String> {
+        let y = harness.get_by_label(field).rect().center().y;
+        names
+            .iter()
+            .filter(|name| {
+                harness
+                    .query_all_by_label(name)
+                    .any(|node| (node.rect().center().y - y).abs() < 8.0)
+            })
+            .map(|name| (*name).to_owned())
+            .collect()
+    }
+
+    /// What the row of `field` offers: *Check added*, or *Check* and *To
+    /// variable*.
+    fn row(harness: &FolderHarness, field: &str) -> Vec<String> {
+        on_row(harness, field, &[ADDED, CHECK, TO_VARIABLE])
+    }
+
+    fn offers_check(harness: &FolderHarness, field: &str) {
+        assert_eq!(
+            row(harness, field),
+            [CHECK, TO_VARIABLE],
+            "the {field} row offers Check and To variable"
+        );
+    }
+
+    fn reads_added(harness: &FolderHarness, field: &str) {
+        assert_eq!(
+            row(harness, field),
+            [ADDED],
+            "the {field} row reads Check added, with neither Check nor To variable"
+        );
+    }
+
+    /// Clicks the *Check* on the row of `field`: the *Check* nearest the
+    /// field's label, as the mock-up's helper does.
+    fn check(harness: &mut FolderHarness, field: &str) {
+        crate::testing::check_field(harness, field);
+    }
+
+    /// The colour `text` is painted in this frame, when it is painted.
+    fn colour_of(harness: &FolderHarness, text: &str) -> Option<egui::Color32> {
+        fn find(shape: &egui::epaint::Shape, text: &str) -> Option<egui::Color32> {
+            match shape {
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().find_map(|shape| find(shape, text))
+                }
+                egui::epaint::Shape::Text(shape) if shape.galley.job.text == text => shape
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|section| section.format.color),
+                _ => None,
+            }
+        }
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|clipped| find(&clipped.shape, text))
+    }
+
+    /// The bar's text, which is one of the count, the stale text or none.
+    fn bar(harness: &FolderHarness) -> Option<&'static str> {
+        let shown: Vec<_> = [ONE, TWO, STALE]
+            .into_iter()
+            .filter(|text| has_label(harness, text))
+            .collect();
+        assert!(shown.len() <= 1, "one text at a time: {shown:?}");
+        shown.first().copied()
+    }
+
+    fn nodes(harness: &FolderHarness, document_id: &str) -> usize {
+        let model = folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(document_id)
+            .unwrap()
+            .model()
+            .cloned()
+            .expect("a valid model");
+        graph_of(&model, false).nodes.len()
+    }
+
+    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+        !harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// No field offers *Check* or *To variable*, as on stale results today:
+    /// their row shows the value only.
+    fn no_check_offered(harness: &FolderHarness) {
+        assert!(has_label(harness, "productId"), "the outputs are shown");
+        assert_eq!(harness.query_all_by_label(CHECK).count(), 0, "no Check");
+        assert_eq!(harness.query_all_by_label(TO_VARIABLE).count(), 0);
+    }
+
+    /// Ctrl+Z outside the code editor: the model's undo, the gesture that
+    /// undoes a block added from the library. `redo` presses Ctrl+Shift+Z.
+    fn model_history(harness: &mut FolderHarness, redo: bool) {
+        let modifiers = if redo {
+            Modifiers::COMMAND | Modifiers::SHIFT
+        } else {
+            Modifiers::COMMAND
+        };
+        harness.key_press_modifiers(modifiers, Key::Z);
+        settle(harness);
+    }
+
+    /// Criterion 1: *Check* on `productId` adds a check card and the panel
+    /// stays usable: one more field assertion in the source, *Add to cart*'s
+    /// Outputs still shown, the row reads *Check added* and offers neither
+    /// *Check* nor *To variable*; *Check* on `total` adds a second card
+    /// without a run, and its row reads *Check added* too.
+    #[test]
+    fn ux01_criterion_1_two_checks_from_one_run() {
+        let (_project, mut harness, scenario, report) = after_a_run(MINIMUM);
+        let before = nodes(&harness, &scenario);
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+
+        check(&mut harness, "productId");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check card");
+        assert!(
+            source_of(&harness, &scenario).contains("add_to_cart.productId == 123"),
+            "the source gains the field's assertion:\n{}",
+            source_of(&harness, &scenario)
+        );
+        assert!(
+            has_label(&harness, "Outputs  1"),
+            "the panel still shows Add to cart's Outputs"
+        );
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+        offers_check(&harness, "quantity");
+
+        check(&mut harness, "total");
+        assert_eq!(nodes(&harness, &scenario), before + 2, "a second card");
+        assert!(source_of(&harness, &scenario).contains("add_to_cart.total == 80"));
+        assert!(folder(&harness).runs.handle.is_none(), "without a run");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+        reads_added(&harness, "productId");
+        reads_added(&harness, "total");
+        offers_check(&harness, "id");
+        offers_check(&harness, "quantity");
+    }
+
+    /// Criterion 2 (first half): with only checks added since the run, the
+    /// bar counts them in grey and *Graph changed* is absent.
+    #[test]
+    fn ux01_criterion_2_the_bar_counts_the_checks() {
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        check(&mut harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE));
+        assert_eq!(colour_of(&harness, ONE), Some(theme::MUTED), "in grey");
+        check(&mut harness, "total");
+        assert_eq!(bar(&harness), Some(TWO));
+        assert_eq!(colour_of(&harness, TWO), Some(theme::MUTED), "in grey");
+        assert!(enabled(&harness, POLICY), "the error policy stays usable");
+        assert!(enabled(&harness, "Export"), "Export stays usable");
+    }
+
+    /// Criterion 2 (second half): after a check, any other change — typing a
+    /// space into the code, a block added with the board's *Add step*, the
+    /// other error policy — makes the bar read *Graph changed* in amber, the
+    /// count is gone and no field offers *Check*, as on stale results today.
+    ///
+    /// Moving a block is not such a change: it moves the card, not the
+    /// source, and keeps fresh results fresh today, so it keeps the count.
+    #[test]
+    fn ux01_criterion_2_another_change_makes_the_results_stale() {
+        fn stale(harness: &mut FolderHarness, change: &str) {
+            assert_eq!(bar(harness), Some(STALE), "after {change}");
+            assert_eq!(
+                colour_of(harness, STALE),
+                Some(theme::WARNING),
+                "amber after {change}"
+            );
+            if has_label(harness, MAXIMISE) {
+                choose(harness, MAXIMISE);
+            }
+            no_check_offered(harness);
+            assert!(!enabled(harness, POLICY), "{change}: the policy is locked");
+        }
+
+        // Typing a space into the code.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE));
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &scenario);
+        type_into(&mut harness, &editor, " ");
+        stale(&mut harness, "typing a space into the code");
+
+        // A block added with the board's Add step.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        choose(&mut harness, RESTORE);
+        let before = nodes(&harness, &scenario);
+        choose(&mut harness, "Add step");
+        choose(&mut harness, "A = B");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "a block is added");
+        stale(&mut harness, "a block added on the board");
+
+        // The other error policy.
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert!(enabled(&harness, POLICY));
+        choose(&mut harness, POLICY);
+        choose(&mut harness, "Stop on error");
+        stale(&mut harness, "choosing the other error policy");
+
+        // Moving a block keeps the count, as it keeps fresh results fresh.
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        choose(&mut harness, RESTORE);
+        move_card(&mut harness, &scenario, "Expected price (Value)");
+        assert_eq!(bar(&harness), None, "a move keeps fresh results fresh");
+        assert!(folder(&harness).fresh_run(&scenario).is_some());
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        check(&mut harness, "productId");
+        choose(&mut harness, RESTORE);
+        move_card(&mut harness, &scenario, "Expected price (Value)");
+        assert_eq!(bar(&harness), Some(ONE), "a move keeps the count");
+    }
+
+    /// Drags the card named `card` on the board by (120, 80) and asserts it
+    /// moved.
+    fn move_card(harness: &mut FolderHarness, scenario: &str, card: &str) {
+        let position = |harness: &FolderHarness| {
+            let model = folder(harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .document(scenario)
+                .unwrap()
+                .model()
+                .cloned()
+                .unwrap();
+            graph_of(&model, false)
+                .nodes
+                .iter()
+                .find(|node| node.id == "expected")
+                .unwrap()
+                .position
+                .clone()
+        };
+        let before = position(harness);
+        let start = harness.get_by_label(card).rect().center();
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + egui::vec2(5.0, 3.0) * step as f32);
+            harness.step();
+        }
+        harness.drop_at(start + egui::vec2(40.0, 24.0));
+        harness.hover_at(egui::pos2(480.0, 3.0));
+        settle(harness);
+        assert_ne!(position(harness), before, "the card moved");
+    }
+
+    /// Criterion 3: the model's undo (Ctrl+Z outside the code editor) takes
+    /// the last check back like any edit: after two checks one undo gives
+    /// *1 check added* and `total` offers *Check* again, a second gives a
+    /// fresh report with no bar text; redo brings *1 check added* back.
+    #[test]
+    fn ux01_criterion_3_undo_takes_a_check_back() {
+        let (_project, mut harness, scenario, _) = after_a_run(MINIMUM);
+        let before = nodes(&harness, &scenario);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        assert_eq!(bar(&harness), Some(TWO));
+
+        model_history(&mut harness, false);
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check undone");
+        assert_eq!(bar(&harness), Some(ONE));
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+
+        model_history(&mut harness, false);
+        assert_eq!(nodes(&harness, &scenario), before, "both undone");
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        assert!(folder(&harness).fresh_run(&scenario).is_some(), "fresh");
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+
+        model_history(&mut harness, true);
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one redone");
+        assert_eq!(bar(&harness), Some(ONE));
+        reads_added(&harness, "productId");
+        offers_check(&harness, "total");
+    }
+
+    /// Criterion 5: the next run runs the checks: two more passed steps, no
+    /// bar text, and every field offers *Check* again.
+    #[test]
+    fn ux01_criterion_5_the_next_run_runs_the_checks() {
+        let (_project, mut harness, _scenario, first) = after_a_run(MINIMUM);
+        let passed = |report: &RunResult| {
+            report
+                .steps
+                .iter()
+                .filter(|step| step.status == apiforge_core::run::StepStatus::Passed)
+                .count()
+        };
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        let next = run(&mut harness);
+        assert_eq!(next.status, RunStatus::Passed, "{:?}", next.error);
+        assert_eq!(passed(&next), passed(&first) + 2, "the two checks ran");
+        assert_eq!(bar(&harness), None, "a new count starts");
+        if has_label(&harness, MAXIMISE) {
+            choose(&mut harness, MAXIMISE);
+        }
+        select_step(&mut harness, STEP);
+        for field in ["id", "productId", "quantity", "total"] {
+            offers_check(&harness, field);
+        }
+    }
+
+    /// Criterion 6: the board and the code keep the run's marks while only
+    /// checks were added, and lose them after another change.
+    #[test]
+    fn ux01_criterion_6_the_board_keeps_the_run() {
+        let (_project, mut harness, scenario, report) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        assert_eq!(
+            folder(&harness).fresh_run(&scenario).map(|run| run.id),
+            Some(report.id),
+            "the cards keep the run's pass marks after a check"
+        );
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &scenario);
+        type_into(&mut harness, &editor, " ");
+        assert!(
+            folder(&harness).fresh_run(&scenario).is_none(),
+            "the marks are gone after another change"
+        );
+    }
+
+    /// Criterion 7: a component's own run (KTLO-23) counts its checks the
+    /// same way: *Fetch product*'s `name` and `price` checked from one run,
+    /// the count, undo, and an edit of the code making the results stale.
+    #[test]
+    fn ux01_criterion_7_a_component_run_counts_its_checks() {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        let component = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == "components/product.afs")
+            .unwrap()
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        choose(&mut harness, "Split");
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, "Fetch product · Passed");
+        let before = nodes(&harness, &component);
+        offers_check(&harness, "name");
+
+        check(&mut harness, "name");
+        assert_eq!(nodes(&harness, &component), before + 1);
+        reads_added(&harness, "name");
+        assert_eq!(bar(&harness), Some(ONE));
+        check(&mut harness, "price");
+        reads_added(&harness, "price");
+        assert_eq!(bar(&harness), Some(TWO));
+        assert!(folder(&harness).fresh_run(&component).is_some());
+
+        model_history(&mut harness, false);
+        assert_eq!(bar(&harness), Some(ONE));
+        offers_check(&harness, "price");
+
+        choose(&mut harness, RESTORE);
+        let editor = editor(&harness, &component);
+        type_into(&mut harness, &editor, " ");
+        assert_eq!(bar(&harness), Some(STALE));
+        assert!(folder(&harness).fresh_run(&component).is_none());
+    }
+
+    /// Criterion 8: the bar fits. *Run results*, the status pill, the count,
+    /// *Maximise* / *Restore run results* and the policy combo are within the
+    /// window and disjoint at 960 × 540 maximised and restored, and at
+    /// 1600 × 1000 at the panel's tallest normal height; a *Check added* row
+    /// stays within the window where the rows show. At 960 × 540 restored the
+    /// rows are below the panel's scrolled area, as in the mock-up, and an
+    /// accessibility node keeps a row's place there without painting it.
+    #[test]
+    fn ux01_criterion_8_the_bar_fits() {
+        fn fits(harness: &FolderHarness, toggle: &str, rows: bool, at: &str) {
+            let labels = ["Run results", "PASSED", TWO, toggle, POLICY];
+            assert_within_window(harness, &labels);
+            assert_disjoint(harness, &labels);
+            if !rows {
+                return;
+            }
+            let added: Vec<_> = harness.query_all_by_label(ADDED).collect();
+            assert!(!added.is_empty(), "{at}: rows shown");
+            let window = harness.ctx.content_rect();
+            for node in added {
+                assert!(
+                    window.contains_rect(node.rect()),
+                    "{at}: a Check added row at {:?} reaches past the panel",
+                    node.rect()
+                );
+            }
+        }
+
+        let (_project, mut harness, _scenario, _) = after_a_run(MINIMUM);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        fits(&harness, RESTORE, true, "960 × 540 maximised");
+        choose(&mut harness, RESTORE);
+        fits(&harness, MAXIMISE, false, "960 × 540 restored");
+
+        let (_project, mut harness, _scenario, _) = after_a_run(WIDE);
+        choose(&mut harness, RESTORE);
+        // The panel at its tallest normal height, from its edge's keyboard.
+        harness.get_by_label("Resize run report").focus();
+        harness.step();
+        harness.key_press(Key::End);
+        settle(&mut harness);
+        check(&mut harness, "productId");
+        check(&mut harness, "total");
+        fits(
+            &harness,
+            MAXIMISE,
+            true,
+            "1600 × 1000 at the tallest normal height",
+        );
+        assert!(
+            harness.query_all_by_label(ADDED).count() == 2,
+            "both rows show at the tallest normal height"
+        );
+    }
+}
