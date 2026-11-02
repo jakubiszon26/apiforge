@@ -228,7 +228,7 @@ impl ApiforgeServer {
         let _slot = self.runs.claim()?;
         let store = self.agent.writer(client)?;
         if let Some(id) = &arguments.request_id
-            && let Some(started) = requests::find(&store, id)?
+            && let Some(started) = requests::find_live_run(&store, id)?
         {
             return Err(self.unknown_outcome(&started, &values));
         }
@@ -595,7 +595,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "Publishes the saved working component at `path` as its next immutable revision, exactly as Publish in the API Forge window: the revision file, its registry entry and checkpoint, and the working document's base revision advanced, in one transaction; a scenario can then call `handle@revision(…)`. Name the version you checked with `expected_source_sha256` (a different hash on disk is `stale_source`, nothing written). Publishing prints the component canonically: when that would drop comments that belong to no statement, the call is `comments_would_be_lost` with the comments listed, and only `accept_comment_loss: true` with the same hash publishes. A component with errors is `invalid_text`, a scenario `not_a_component`. Give a `request_id` to repeat the call safely after a lost response: this server then returns the recorded result and publishes nothing more; project_overview lists every revision with its source_sha256. Takes the project for this agent session as write_source does.",
+        description = "Publishes the saved working component at `path` as its next immutable revision, exactly as Publish in the API Forge window: the revision file, its registry entry and checkpoint, and the working document's base revision advanced, in one transaction; a scenario can then call `handle@revision(…)`. Name the version you checked with `expected_source_sha256` (a different hash on disk is `stale_source`, nothing written). Publishing prints the component canonically: when that would drop comments that belong to no statement, the call is `comments_would_be_lost` with the comments listed, and only `accept_comment_loss: true` with the same hash publishes. A component with errors is `invalid_text`, a scenario `not_a_component`. Give a `request_id` to repeat the call safely after a lost response, also after the server restarted: the result recorded for it comes back with `replayed: true` and nothing more is published; when the server that started it did not record how it ended, the answer is `unknown_outcome`, and project_overview lists every revision with its source_sha256. Takes the project for this agent session as write_source does.",
         output_schema = schema_for_output::<crate::agent::PublishResult>(),
         annotations(
             title = "Publish",
