@@ -51,6 +51,7 @@ mod navigator;
 mod persistence;
 mod preferences;
 mod report;
+mod run_mode;
 mod shapes;
 mod stop;
 #[cfg(test)]
