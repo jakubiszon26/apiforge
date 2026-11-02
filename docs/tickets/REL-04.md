@@ -325,3 +325,13 @@ The implementing agent's decisions, made during implementation:
   It reads `--check`'s exit code by creating the process suspended
   (`Win32_ProcessStartup.CreateFlags = 4`) and resuming it once its handle is
   held.
+- **PowerShell and a windowed program's output.** The first Windows run of
+  the implementation showed that `$x = & apiforge-desktop.exe --version`
+  does not wait: PowerShell 7 treats a windowed program at the end of a
+  pipeline as one to start and leave, closes the pipe it made, and the
+  program's `println!` fails on it (os error 232). It waits and reads only
+  when the output goes on down a pipeline, so every step that reads the
+  desktop binary pipes it (`& … --version | Write-Output`), criterion 7's
+  `$line = & …` included, and the guide says so instead of the analysis'
+  "waits because it reads the output". The acceptance tests that quoted
+  the bare assignment were changed with them.

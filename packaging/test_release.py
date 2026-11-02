@@ -868,11 +868,24 @@ class OutputCapture(unittest.TestCase):
 
     def test_the_release_smoke_reads_the_checks_output(self):
         smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
-        self.assertIn("$check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json", smoke)
+        # Assigning a windowed program's output is not enough: PowerShell then
+        # neither waits nor reads, and the program writes into a closed pipe.
+        self.assertIn(
+            "$check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json | Write-Output",
+            smoke,
+        )
         self.assertNotRegex(smoke, r"(?m)^\s*& \(Join-Path \$root 'apiforge-desktop\.exe'\) --check")
         self.assertIn("$LASTEXITCODE -ne 0", smoke)
         self.assertIn("\"$check\" -notmatch '^Valid v", smoke)
-        self.assertIn("$line = & (Join-Path $root \"$name.exe\") --version", smoke)
+        self.assertIn("$line = & (Join-Path $root \"$name.exe\") --version | Write-Output", smoke)
+
+    def test_every_windows_step_pipes_what_it_reads_from_the_desktop_binary(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("(& $exe --version | Write-Output)", icon)
+        log = step(self.rust, "Write the desktop log without a console (Windows)")
+        self.assertIn("$valid = & $program --check $fixture | Write-Output", log)
+        for workflow in [self.rust, self.release]:
+            self.assertNotRegex(workflow, r"(?m)= \(?& [^\n|]*--(version|check)[^\n|]*$")
 
     def test_the_native_validation_reads_the_valid_line(self):
         validate = step(self.rust, "Validate workspace using the native release binary")

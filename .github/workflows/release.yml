@@ -291,7 +291,9 @@ jobs:
           Expand-Archive "dist/$env:STEM.zip" -DestinationPath $extracted
           $root = Join-Path $extracted $env:STEM
           foreach ($name in @('apiforge', 'apiforge-desktop')) {
-            $line = & (Join-Path $root "$name.exe") --version
+            # REL-04: PowerShell waits for a windowed program, and reads what
+            # it prints, only when its output goes on down a pipeline.
+            $line = & (Join-Path $root "$name.exe") --version | Write-Output
             if ($line -ne "$name $env:VERSION") {
               throw "$name.exe --version printed '$line', expected '$name $env:VERSION'."
             }
@@ -318,9 +320,9 @@ jobs:
               throw "$name.exe has PE subsystem $subsystem, expected $($subsystems[$name])."
             }
           }
-          # PowerShell waits for a windowed program only when it reads the
-          # program's output, so --check's output is read and asserted.
-          $check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
+          # PowerShell waits for a windowed program only when its output goes
+          # on down a pipeline, so --check's output is piped and asserted.
+          $check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json | Write-Output
           if ($LASTEXITCODE -ne 0 -or "$check" -notmatch '^Valid v\d+ document: \d+ project\(s\)$') {
             throw "apiforge-desktop.exe --check printed '$check' with exit code $LASTEXITCODE."
           }

@@ -56,9 +56,11 @@ release ZIP, it opens no console window. Started from a terminal, it attaches
 to the terminal's console, so `--version`, `--help`, `--check` and error
 messages print there as before; but `cmd` does not wait for a windowed
 program, so its prompt may come back before the output, and `%ERRORLEVEL%` is
-set only under `start /wait apiforge-desktop.exe …`. PowerShell waits whenever
-it reads the output (`$out = & apiforge-desktop.exe --check FILE`), and output
-redirected to a file or a pipe arrives as from any program. With no console at
+set only under `start /wait apiforge-desktop.exe …`. PowerShell waits, and
+reads the output, only when it goes on down a pipeline
+(`$out = apiforge-desktop.exe --check FILE | Write-Output`) or under
+`Start-Process -Wait`; assigning the output to a variable alone is not enough.
+Output redirected to a file arrives as from any program. With no console at
 all, what it would have printed (the control channel's diagnostics, an error
 that ends the start, the text of a crash) goes to
 `%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects.

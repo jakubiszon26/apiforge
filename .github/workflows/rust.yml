@@ -759,7 +759,9 @@ jobs:
             $name = $binary.Name
             $exe = (Resolve-Path $binary.Exe).Path
             $info = (Get-Item $exe).VersionInfo
-            $version = (& $exe --version) -replace "^$([regex]::Escape($name)) ", ''
+            # REL-04: PowerShell waits for a windowed program, and reads what
+            # it prints, only when its output goes on down a pipeline.
+            $version = (& $exe --version | Write-Output) -replace "^$([regex]::Escape($name)) ", ''
             Write-Host ("{0}.exe: ProductName '{1}', FileDescription '{2}', ProductVersion '{3}', FileVersion '{4}'" -f `
               $name, $info.ProductName, $info.FileDescription, $info.ProductVersion, $info.FileVersion)
             if ($info.ProductName -ne 'API Forge' -or $info.FileDescription -ne $binary.Description -or
@@ -891,8 +893,9 @@ jobs:
             throw 'Cargo.toml has no workspace version.'
           }
           $version = $Matches[1]
-          # What --check prints, read through a pipe, which PowerShell waits for.
-          $valid = & $program --check $fixture
+          # What --check prints. PowerShell waits for a windowed program, and
+          # reads its output, only when the output goes on down a pipeline.
+          $valid = & $program --check $fixture | Write-Output
           if ($LASTEXITCODE -ne 0 -or "$valid" -notmatch '^Valid v\d+ document: \d+ project\(s\)$') {
             throw "apiforge-desktop.exe --check printed '$valid' with exit code $LASTEXITCODE."
           }
