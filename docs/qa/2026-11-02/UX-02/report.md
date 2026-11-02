@@ -301,6 +301,28 @@ stops it. The menu is now a named closure, formatted by hand within
 - The whole suite was left to CI, which runs it on Linux and Windows for
   every push.
 
+## Merge of `main` with UX-01
+
+UX-01 (#243, `e6e4c3d`) was merged into this branch as `1e1bc78`. Where
+the two conflicted, in `folder/acceptance_tests.rs` and `testing.rs`, both
+sides had only added code, and both additions are kept.
+- UX-01's run helper in `mod ux01` and its review view clicked the header's
+  *Run*; they click *Run simulation* now.
+- No assertion of either ticket changed.
+
+On the merge, all exit 0:
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`: 1 451 passed, 0 failed,
+  45 ignored
+- `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
+
+Nothing drawn in this report's captures changed. `review_ux02_run_mode`,
+rendered before and after the merge, differs only in the run's clock time
+and duration on the Run results line. UX-01 changes Run results only after
+a *Check* is added, and no capture here adds one. The captures were not
+retaken.
+
 ## Regression smoke list
 
 Linux, 2026-11-02, release binaries of `a3aa0b9`:
