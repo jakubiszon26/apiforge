@@ -264,7 +264,7 @@ impl ProjectStore {
     /// Read-only sessions may preview recovery. Neither previewing nor a matching
     /// base hash makes any source/model change or writes a file.
     pub fn load_source_recovery(&self, project_id: &str) -> Result<RecoveryRead> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.read_recovery(project_id)
     }
 
@@ -285,7 +285,7 @@ impl ProjectStore {
         desired: &SourceRecovery,
     ) -> Result<RecoveryRead> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.validate_public_changes(&changes)?;
         if preview.from_backup {
             return Err(ProjectError::RecoveryDecisionRequired);
@@ -306,7 +306,7 @@ impl ProjectStore {
         mut boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<RecoveryRead> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         if preview.from_backup {
             return Err(ProjectError::RecoveryDecisionRequired);
         }
@@ -353,7 +353,7 @@ impl ProjectStore {
     /// bytes over it. Changed primary/backup/registry requires a new preview.
     pub fn restore_source_recovery_backup(&self, preview: &RecoveryRead) -> Result<RecoveryRead> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         if !preview.from_backup {
             return Err(ProjectError::NoRecoveryCandidate);
         }

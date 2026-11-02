@@ -17,6 +17,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 use thiserror::Error;
 
@@ -348,9 +349,7 @@ fn write_atomic_with_sync(
         .write_all(bytes)
         .and_then(|()| temporary.as_file().sync_all())
         .map_err(|source| StorageError::io(temporary.path(), source))?;
-    temporary
-        .persist(path)
-        .map_err(|error| StorageError::io(path, error.error))?;
+    install(temporary, path).map_err(|source| StorageError::io(path, source))?;
     // A failed directory flush means the replacement may not survive power loss.
     // The new document can already be visible, but it must not be reported saved.
     sync_directory(directory).map_err(|source| StorageError::io(directory, source))?;
@@ -358,6 +357,67 @@ fn write_atomic_with_sync(
         sync_directory(&parent).map_err(|source| StorageError::io(&parent, source))?;
     }
     Ok(())
+}
+
+/// How long an install or a directory removal waits, on Windows, for another
+/// program's handle that does not share delete (MCP-19, ADR 0011).
+pub(crate) const HELD_BOUND: Duration = Duration::from_secs(1);
+/// How often it tries again meanwhile.
+const HELD_STEP: Duration = Duration::from_millis(20);
+
+/// Installs the synced `temporary` at `path`, replacing a file already there.
+///
+/// `std::fs::rename`, not `NamedTempFile::persist` (MCP-19): on Windows
+/// `persist` is `MoveFileExW` alone, which refuses to replace a file that
+/// any handle holds open, even a reader that shares delete as every Rust
+/// reader does. `rename` then falls back to a POSIX-semantics rename, which
+/// replaces the file and leaves that reader the bytes it opened. A handle
+/// that does not share delete is waited for, at most [`HELD_BOUND`]. On Unix
+/// both are the same `rename(2)`.
+pub(crate) fn install(temporary: tempfile::NamedTempFile, path: &Path) -> io::Result<()> {
+    // `keep` clears the temporary-file attribute Windows gave the file, as
+    // `persist` does, so the installed file is an ordinary one. From here
+    // the file is no longer removed on drop: a failed rename removes it.
+    let temporary = temporary
+        .into_temp_path()
+        .keep()
+        .map_err(|error| error.error)?;
+    let installed = while_held(|| fs::rename(&temporary, path), held_open);
+    if installed.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    installed
+}
+
+/// Whether Windows refused an operation because another handle holds the
+/// file open without sharing what the operation needs.
+fn held_open(error: &io::Error) -> bool {
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    cfg!(windows)
+        && matches!(
+            error.raw_os_error(),
+            Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION)
+        )
+}
+
+/// Runs `operation`, and again every [`HELD_STEP`] while it fails with an
+/// error `held` accepts, until it succeeds or [`HELD_BOUND`] has passed;
+/// then its last answer stands. `held` accepts only Windows errors, so
+/// elsewhere `operation` runs once.
+pub(crate) fn while_held(
+    mut operation: impl FnMut() -> io::Result<()>,
+    held: impl Fn(&io::Error) -> bool,
+) -> io::Result<()> {
+    let deadline = Instant::now() + HELD_BOUND;
+    loop {
+        match operation() {
+            Err(error) if held(&error) && Instant::now() < deadline => {
+                std::thread::sleep(HELD_STEP);
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Makes the rename durable where the platform supports syncing directories.

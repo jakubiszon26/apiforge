@@ -211,7 +211,7 @@ pub struct TrashCommit {
 
 impl ProjectStore {
     pub fn preview_trash(&self, document_ids: &[String]) -> Result<TrashPreview> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let (manifest, snapshot) = self.load_locked(&recovery_paths()?)?;
         let ids: HashSet<_> = document_ids.iter().collect();
         if ids.is_empty() || ids.len() != document_ids.len() {
@@ -253,7 +253,7 @@ impl ProjectStore {
     /// preserved byte for byte. The registry and hidden control data cannot be
     /// deleted this way, and a link inside a directory refuses the operation.
     pub fn preview_trash_paths(&self, paths: &[ProjectPath]) -> Result<TrashPreview> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         if paths.is_empty() {
             return Err(ProjectError::InvalidTrash);
         }
@@ -348,7 +348,7 @@ impl ProjectStore {
     /// Every readable trash operation, most recent first. Unreadable or future
     /// indexes are preserved and left out.
     pub fn trash_operations(&self) -> Result<Vec<TrashIndex>> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let snapshot = self.stable_read(|| {
             let directory = super::path::resolve(self.root(), TRASH)?;
             let listing = match std::fs::read_dir(&directory) {
@@ -405,7 +405,7 @@ impl ProjectStore {
         boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<TrashCommit> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.check_preview(&preview.root, &preview.snapshot)?;
         let ids: HashSet<_> = preview
             .entries
@@ -561,7 +561,7 @@ impl ProjectStore {
     }
 
     pub fn preview_trash_restore(&self, operation_id: &str) -> Result<TrashRestorePreview> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let index_path = operation_path(operation_id, "index.json")?;
         let snapshot = self.stable_read(|| {
             // Discover payloads under the same stable-read protocol as the index.
@@ -618,7 +618,7 @@ impl ProjectStore {
         boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<TrashCommit> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.check_preview(&preview.root, &preview.snapshot)?;
         let mut overrides = BTreeMap::new();
         for destination in destinations {

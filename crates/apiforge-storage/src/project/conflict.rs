@@ -144,7 +144,7 @@ impl ProjectStore {
     /// Available to read-only owners. Returning candidates changes neither source
     /// nor consent; the byte slices support deliberate export by an adapter.
     pub fn preview_transaction_recovery(&self) -> Result<Option<TransactionRecoveryPreview>> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.transaction_preview_locked()
     }
 
@@ -238,7 +238,7 @@ impl ProjectStore {
         mut boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<RecoveryCompletion> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let (active, mut approvals) = self.check_recovery_preview(preview)?;
         self.check_transaction_secrets(&active)?;
         let mut additions = Vec::new();

@@ -177,7 +177,7 @@ impl ProjectStore {
     /// Invalid/foreign/future caches are preserved and ignored with a notice.
     /// Shared head/registry errors still block the read; they are not cache loss.
     pub fn load_last_valid_cache(&self, project_id: &str) -> Result<LastValidRead> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.load_cache_locked(project_id)
     }
 
@@ -268,7 +268,7 @@ impl ProjectStore {
         replace: bool,
     ) -> Result<LastValidRead> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         if preview.root != self.root() {
             return Err(ProjectError::InvalidCache);
         }
