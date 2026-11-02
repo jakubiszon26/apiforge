@@ -169,18 +169,19 @@ pub fn assert_disjoint<State>(harness: &Harness<'_, State>, labels: &[&str]) {
 }
 
 /// Clicks the *Check* on the row of `field` in Run results: the *Check*
-/// nearest the field's label (UX-01). The pointer then leaves for the
+/// level with the field's label (UX-01). The pointer then leaves for the
 /// header's empty top margin, so nothing stays hovered.
 pub fn check_field(harness: &mut FolderHarness, field: &str) {
     let y = harness.get_by_label(field).rect().center().y;
     harness
         .query_all_by_label("Check")
+        .filter(|check| (check.rect().center().y - y).abs() < 8.0)
         .min_by(|a, b| {
             let a = (a.rect().center().y - y).abs();
             let b = (b.rect().center().y - y).abs();
             a.total_cmp(&b)
         })
-        .unwrap_or_else(|| panic!("no field offers Check, so {field} cannot be checked"))
+        .unwrap_or_else(|| panic!("the {field} row offers no Check"))
         .click();
     harness.hover_at(egui::pos2(480.0, 3.0));
     settle(harness);
