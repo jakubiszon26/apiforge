@@ -30,50 +30,46 @@ The whole suite still passes with the commands of the
 
 ## 2. The functional QA report
 
-Every pull request that changes behaviour ends with a report at
-`docs/qa/<yyyy-mm-dd>/<ticket>/report.md`, linked from the pull request. The
-owner reads it before deciding whether to build locally; it is written for
-that reader.
+Since the owner's decision of 2026-11-03, the QA report is a short **QA
+section in the pull request body**, not a file under `docs/qa/`. The owner
+reads it before deciding whether to build locally; it is written for that
+reader.
+
+The section contains:
+
+- a table of acceptance criteria → tests;
+- at most five lines on what was not verified;
+- for a change to the interface, the 2–4 release captures the owner's
+  acceptance quiz needs, at 960 × 540, plus 1600 × 1000 where layout matters.
+  They are committed under `docs/qa/<yyyy-mm-dd>/<ticket>/` and linked from the
+  pull request.
 
 ```markdown
-# KTLO-05b: Block palette in the folder mode — QA report
+## QA
 
-- Branch and commit: …
-- Built with: cargo build --release --locked
-- Compared against mock-up: docs/tickets/KTLO-05a.md
+| Acceptance criterion | Test |
+| --- | --- |
+| A dropped "Request" becomes a selected card with its inspector open | `palette_drop_adds_request` |
+| The card lands at the drop point | `palette_drop_position` |
 
-## Linux
-### Scenario 1: add a request from the palette
-1. Open the demo shop project (`--folder …`).
-2. Switch to Diagram (Ctrl+E).
-3. Drag "Request" from the palette onto the board.
-Expected: a new request card at the drop point, selected, with its inspector open.
-Observed: as expected. [capture](palette-drop-960.png) at 960 × 540, [capture](palette-drop-1600.png) at 1600 × 1000.
+Captures (release binary): [960 × 540](docs/qa/2026-11-03/KTLO-05b/palette-drop-960.png),
+[1600 × 1000](docs/qa/2026-11-03/KTLO-05b/palette-drop-1600.png)
 
-### Scenario 2: …
-
-## Windows
-Same scenarios, with captures from the CI artifacts of this branch, or
-"not run on Windows: <reason>" per scenario.
-
-## Not verified
-- Keyboard-only placement of a block: no acceptance criterion, tracked as KTLO-11.
-- Screen reader session: not run.
-
-## Regression smoke list
-Result of each item of the list below, with the date and platform.
+Not verified:
+- Keyboard-only placement of a block: no criterion, tracked as KTLO-11.
+- Windows: not run, owner's build pending.
 ```
 
 Rules:
 
-- Captures come from the release binary of the branch, at 960 × 540 and
-  1600 × 1000, through `--screenshot` or the native host; a headless
-  `egui_kittest` capture is a design review aid, not QA evidence.
-- "Observed" states what was seen, including what was wrong. A report with
-  only expected outcomes and no "not verified" section is incomplete.
-- Windows evidence comes from the CI artifacts of the branch (captures and the
-  binary) and from the owner's local build; a report without a Windows
-  section says so, and the ticket is not accepted for Windows.
+- Captures come from the release binary of the branch, through `--screenshot`
+  or the native host; a headless `egui_kittest` capture is a design review aid,
+  not QA evidence.
+- The verification commands, CI, the cubic and CodeQL checks before merge and
+  the owner's acceptance stay as they are.
+- A review finding about the wording of the QA section or of the ticket gets a
+  one-line answer and never a commit of its own.
+- Earlier reports under `docs/qa/` stay as they are.
 
 ### How to fetch Windows captures for a QA report
 
