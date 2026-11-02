@@ -153,12 +153,14 @@ the manifest id; the project file format is unchanged.
 ## MCP-18 amendment: the overview says the window decides (2026-11-02)
 
 The MCP-09 amendment's "the overview still never connects, so before a window
-is connected it reports the flag" becomes: it reports the flag unless a window
-holding the project names an endpoint, and then it says that the window
-decides when the run starts — `live_requests.allowed` is `null` with `source`
-*window setting, asked when the run starts* ([MCP-18](../tickets/MCP-18.md),
-decision 1 = A). The overview and `run` read the same predicate; the overview
-still opens no connection, and no channel message or file format changes.
+is connected it reports the flag" becomes: while no window is connected it
+reports the flag unless a window holding the project names a valid endpoint,
+and then it says that the window decides when the run starts —
+`live_requests.allowed` is `null` with `source` *window setting, asked when
+the run starts* ([MCP-18](../tickets/MCP-18.md), decision 1 = A). The
+overview reads `run`'s predicate, narrowed to an endpoint that parses as
+`hands_over_on_write` does; it still opens no connection, and no channel
+message or file format changes.
 
 ## MCP-15 amendment: a command asks the window too (2026-11-01)
 

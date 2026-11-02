@@ -2469,8 +2469,8 @@ fn mcp18_criterion_2_the_flag_does_not_speak_for_a_window() {
 }
 
 /// Criterion 3: the flag still speaks when no window can be asked: no
-/// holder, a window holding without an endpoint, and a foreign agent
-/// holding, whose endpoint is no window's.
+/// holder, a window holding without an endpoint or with a malformed one,
+/// and a foreign agent holding, whose endpoint is no window's.
 #[test]
 fn mcp18_criterion_3_the_flag_speaks_when_no_window_can_be_asked() {
     use apiforge_storage::project::{Holder, HolderRole, ProjectStore};
@@ -2479,6 +2479,11 @@ fn mcp18_criterion_3_the_flag_speaks_when_no_window_can_be_asked() {
     for (holder, shown) in [
         (None, "none"),
         (Some(Holder::window()), "window"),
+        // Review of #195: an endpoint no window can listen on is none.
+        (
+            Some(Holder::window().with_endpoint(Some("apiforge-not-an-endpoint".into()))),
+            "window",
+        ),
         (Some(foreign), "another_process"),
     ] {
         for allow_live in [false, true] {

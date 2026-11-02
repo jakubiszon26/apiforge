@@ -3,7 +3,8 @@
 - Branch: `docs/mcp-18-overview-live`, with `main` at `109562e` (MCP-17)
   merged in `f73a3c1`. Owner's decision recorded in `0d5f7a5`; acceptance
   tests `176a5ee`; implementation `b6ae1e0` and `e2d97f3` (the schema's
-  description of `allowed` without the ticket's name).
+  description of `allowed` without the ticket's name); review round 1 after
+  this report's transcripts, which a malformed endpoint alone changes.
 - Built with: `cargo build --release --locked -p apiforge-cli`, Rust 1.99.0,
   rmcp 3.8.0. "Before" is the release binary of `176a5ee` (the server code of
   `main` at `109562e`); "after" is the release binary of `e2d97f3`.
@@ -19,7 +20,7 @@
 | --- | --- | --- | --- |
 | 1 | A window holds the project with a valid endpoint, no `--allow-live`, nothing connected: `live_requests` is `{ allowed: null, source: "window setting, asked when the run starts" }`; `holder: window`, `hands_over_on_write: true`; no connection; the folder byte-identical | `mcp18_criterion_1_a_holding_window_decides_at_run_time` | Scenario 1 |
 | 2 | The same with `--allow-live` | `mcp18_criterion_2_the_flag_does_not_speak_for_a_window` | Scenario 1 |
-| 3 | The flag still speaks with no holder, a window without an endpoint, a foreign agent | `mcp18_criterion_3_the_flag_speaks_when_no_window_can_be_asked` (all three holders, with and without the flag); `mcp06_criterion_1_without_allow_live_over_stdio` unchanged | Scenario 3 (no holder) |
+| 3 | The flag still speaks with no holder, a window without an endpoint (or with a malformed one, review round 1), a foreign agent | `mcp18_criterion_3_the_flag_speaks_when_no_window_can_be_asked` (all four holders, with and without the flag); `mcp06_criterion_1_without_allow_live_over_stdio` unchanged | Scenario 3 (no holder) |
 | 4 | A connected window speaks for itself (`window setting`); after its channel closes, the flag again | `mcp18_criterion_4_a_connected_window_speaks_for_itself` (stdio); `mcp06_criterion_4_the_window_decides_while_connected_the_flag_otherwise` (in process, states unchanged) | Scenario 2 |
 | 5 | `tools/list` advertises `allowed: boolean \| null`, still required; every overview result validates | `mcp18_criterion_5_the_schema_admits_the_new_state`; `Server::response` validates every overview of every stdio session (MCP-14) | Scenario 1 |
 | 6 | Documentation: development guide, ADR 0014 MCP-18 amendment, the tool description and `INSTRUCTIONS`; no change to the window, the channel messages, `agent-consent.json` or the file format | — | Scenario 1 (description and instructions as served); *Documentation* below |
@@ -141,8 +142,10 @@ pull request's checks are the Windows evidence.
 - A real MCP client (Claude Code, Codex) reading `allowed: null`, or a typed
   client generated from the earlier schema (which the owner accepted would
   break on `null`).
-- A window whose holder file names a malformed endpoint: the overview says
-  `null`, as `run`'s predicate does (`agent.window_decides()` checks only
-  that an endpoint is present), while `hands_over_on_write` parses it and
-  says `false`. Not driven; unchanged from MCP-09 for `run`.
+- A window whose holder file names a malformed endpoint, over the release
+  binary: review round 1 (cubic on `f3039eb`) narrowed the overview to an
+  endpoint that parses, as `hands_over_on_write` does, so it reports the
+  flag there; criterion 3 asserts it over stdio, and fails without the
+  narrowing. `run` is unchanged for that holder (it still defers the flag
+  and ends `held_by_window`, as since MCP-09).
 - The regression smoke list: not run; nothing in the window changes.

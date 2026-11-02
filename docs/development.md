@@ -641,7 +641,7 @@ the project hears that window's setting first: when it is off the run is
 nothing within two seconds. The window reads the file again once a second,
 so a change made in another window is followed. The overview never connects
 to a window: until one is connected it reports the flag, except while a window
-holding the project names its endpoint, when it says that window decides when
+holding the project names a valid endpoint, when it says that window decides when
 the live run starts (MCP-18). The server
 tells connected windows `run { mode: live }` when a live run starts and ends,
 so a box unticked meanwhile says *A live run is in progress; it will finish.

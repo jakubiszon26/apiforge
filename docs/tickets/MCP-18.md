@@ -1,7 +1,9 @@
 # MCP-18: `project_overview` says who decides live requests while a window holds the project
 
 - Size: S · Owner review: 10 min · Risk: MCP output compatibility
-  (`live_requests` gains a state); no `format`, `migration`, `default`,
+  (`live_requests` gains a state; with decision A the type of `allowed`
+  changes from `boolean` to `boolean | null`, so a typed client generated
+  from the prerelease schema breaks); no `format`, `migration`, `default`,
   `visible UI` or `removal`
 - State: Implementation (issue #190) · decision 1 taken: A (2026-11-02)
 - Analysis model: Claude Fable 5.1 · Implementation model: Claude Opus 5.5

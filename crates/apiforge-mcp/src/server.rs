@@ -240,7 +240,8 @@ impl ApiforgeServer {
 
     /// No window is connected, and a window holding the project names its
     /// endpoint: its consent, heard when a live run starts, decides instead
-    /// of the flag (MCP-09). `run` and the overview ask the same (MCP-18).
+    /// of the flag (MCP-09). The overview asks the same, of a window whose
+    /// endpoint is valid (MCP-18).
     fn window_decides(&self) -> bool {
         matches!(self.permission.current(), Permission::Flag(_)) && self.agent.window_decides()
     }
@@ -384,7 +385,11 @@ impl ApiforgeServer {
             overview.holder = tools::Holder::AgentSession;
             overview.interrupted_runs = self.read_journal()?.0.len();
         }
-        overview.live_requests = self.permission.describe(self.window_decides());
+        // Only a window the run can actually ask: `hands_over_on_write`
+        // parses the endpoint `window_decides` only finds present.
+        overview.live_requests = self
+            .permission
+            .describe(overview.hands_over_on_write && self.window_decides());
         Ok(overview)
     }
 
