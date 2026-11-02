@@ -1010,6 +1010,105 @@ mod ux03 {
         assert!(marked(&harness).contains(&3), "line 3 is marked");
     }
 
+    /// Criterion 2: the frame of the keystroke itself shows no mark, though
+    /// the marks were shown up to it: the edited text is never drawn with
+    /// the earlier analysis's marks.
+    #[test]
+    fn ux03_criterion_2_the_keystroke_frame_shows_no_mark() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        type_half_statement(&mut harness);
+        at(&mut harness, start + ms(700));
+        assert_marks_of_the_analysis(&harness, "700 ms after typing");
+
+        // Before `cart`: the marks would land one column off.
+        for _ in 0.."cart.body.".len() {
+            harness.key_press(egui::Key::ArrowLeft);
+        }
+        settle(&mut harness);
+        assert_marks_of_the_analysis(&harness, "after moving the caret");
+        harness.event(egui::Event::Text("x".into()));
+        harness.step();
+        assert!(
+            active_source(&harness).contains("total = xcart.body."),
+            "the key reached the text:\n{}",
+            active_source(&harness)
+        );
+        assert_no_marks(&harness, "the keystroke's frame");
+    }
+
+    /// Criterion 2: once the pause has passed the marks are the current
+    /// analysis's: while the typed text is still being analysed none is
+    /// drawn, not the earlier analysis's at their old places.
+    #[test]
+    fn ux03_criterion_2_marks_wait_for_the_analysis_of_the_typed_text() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        let id = active_id(&harness);
+        type_half_statement(&mut harness);
+        at(&mut harness, start + ms(700));
+        assert_marks_of_the_analysis(&harness, "700 ms after typing");
+
+        // A second line typed at 700 ms, its analysis held back.
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text("more = cart.".into()));
+        harness.step();
+        app(&mut harness)
+            .analyser
+            .typed(&id, Instant::now() + Duration::from_secs(3600));
+        at(&mut harness, start + ms(1400));
+        assert_eq!(snapshot(&harness).analysis, AnalysisState::Pending);
+        assert!(
+            !snapshot(&harness).diagnostics.is_empty(),
+            "the earlier analysis's diagnostics are still held"
+        );
+        assert_no_marks(&harness, "700 ms after typing, the analysis pending");
+
+        app(&mut harness)
+            .analyser
+            .typed(&id, Instant::now() - crate::buffers::APPLY_DELAY);
+        settle_analysed(&mut harness);
+        assert_marks_of_the_analysis(&harness, "the analysis done");
+        assert!(marked(&harness).contains(&4), "the new line 4 is marked");
+    }
+
+    /// Criterion 2: the message on hover is a mark too: none over the error
+    /// during the pause, the diagnostic's after it.
+    #[test]
+    fn ux03_criterion_2_the_hover_message_waits_for_the_pause() {
+        let start = Instant::now();
+        let (_project, mut harness) = shop_in_code(MINIMUM, start);
+        type_half_statement(&mut harness);
+        at(&mut harness, start + ms(300));
+        let message = "Unknown block handle";
+        assert!(
+            harness
+                .query_by_label_contains(&format!("Line 3, column 11   {message}"))
+                .is_some(),
+            "the list names the error"
+        );
+        // Over `cart` on line 3: `  total = ` is ten columns.
+        let (row, column) = harness.ctx.fonts_mut(|fonts| {
+            let font = egui::FontId::monospace(CODE_FONT);
+            (fonts.row_height(&font), fonts.glyph_width(&font, '0'))
+        });
+        let editor = editor(&harness);
+        let over = editor.left_top() + egui::vec2(4.0 + column * 11.5, 2.0 + row * 2.5);
+        harness.hover_at(over);
+        harness.run_steps(6);
+        assert!(
+            harness.query_by_label(message).is_none(),
+            "a hover message during the pause"
+        );
+        app(&mut harness).set_marks_clock(start + ms(700));
+        harness.hover_at(over + egui::vec2(1.0, 0.0));
+        harness.run_steps(6);
+        assert!(
+            harness.query_by_label(message).is_some(),
+            "no hover message over the error after the pause"
+        );
+    }
+
     /// Criterion 3 (a regression test): the PROBLEMS status and list follow
     /// the analysis as before, with the marks' clock not moved at all:
     /// *Unsaved changes · N errors* in red, and a row for line 3. The
@@ -1108,8 +1207,23 @@ mod ux03 {
         at(&mut harness, start + ms(700));
         assert_marks_of_the_analysis(&harness, "caret moves, a selection and a scroll");
 
-        // Each text change restarts it: marks at 700 ms, not at 699.
+        // Typing restarts a pause that is already running: a key at 700 ms,
+        // another 400 ms later, the marks 700 ms after the second.
         let mut now = start + ms(700);
+        harness.event(egui::Event::Text("y".into()));
+        settle_analysed(&mut harness);
+        at(&mut harness, now + ms(400));
+        harness.event(egui::Event::Text("z".into()));
+        settle_analysed(&mut harness);
+        assert_eq!(snapshot(&harness).analysis, AnalysisState::Invalid);
+        just_before(&mut harness, now + ms(400 + 699));
+        assert_no_marks(&harness, "699 ms after typing within a pause");
+        at(&mut harness, now + ms(400 + 700));
+        assert_marks_of_the_analysis(&harness, "700 ms after typing within a pause");
+        now += ms(400 + 700);
+        harness.run_steps(90);
+
+        // Each other text change restarts it: marks at 700 ms, not at 699.
         for (change, event) in [
             ("a paste", None),
             ("an undo", Some(egui::Modifiers::COMMAND)),
