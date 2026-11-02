@@ -39,13 +39,27 @@ pub enum Action {
     ExportReport,
 }
 
+/// A field checked from these results since their run (UX-01): its row
+/// reads *Check added*, and the check runs on the next run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckedField {
+    pub node_id: String,
+    pub port: String,
+    pub path: String,
+}
+
 /// Everything the report panel needs to draw one frame.
 pub struct Context<'a> {
     pub run: Option<&'a RunResult>,
     pub selected_node_id: Option<&'a str>,
     pub error_policy: ErrorPolicy,
     pub running: bool,
+    /// The document changed since the run in another way than by checks
+    /// added from these results.
     pub stale: bool,
+    /// The fields checked from these results since the run, while nothing
+    /// else changed (UX-01).
+    pub checked: &'a [CheckedField],
     pub files_busy: bool,
     /// The run is a component's on its own (KTLO-23): it has no error policy,
     /// and the empty report does not speak of a scenario.
@@ -149,6 +163,8 @@ pub struct ReportPanel {
     selected_key: Option<String>,
     tab: DetailTab,
     expanded: HashSet<String>,
+    /// This frame's `Context::checked`, for the value rows.
+    checked: Vec<CheckedField>,
 }
 
 impl Default for ReportPanel {
@@ -166,6 +182,7 @@ impl Default for ReportPanel {
             selected_key: None,
             tab: DetailTab::Outputs,
             expanded: HashSet::new(),
+            checked: Vec::new(),
         }
     }
 }
@@ -189,6 +206,9 @@ impl ReportPanel {
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
+        if self.checked != context.checked {
+            self.checked = context.checked.to_vec();
+        }
 
         let was_open = self.open;
         let maximised = self.is_maximised();
@@ -442,6 +462,14 @@ impl ReportPanel {
                         RichText::new("Graph changed · results from an earlier version")
                             .size(11.0)
                             .color(theme::WARNING),
+                    );
+                } else if !context.checked.is_empty() {
+                    // Checks added from these results leave them usable
+                    // (UX-01); they run on the next run.
+                    ui.label(
+                        RichText::new(checks_added(context.checked.len()))
+                            .size(11.0)
+                            .color(theme::MUTED),
                     );
                 }
             });
@@ -821,7 +849,23 @@ impl ReportPanel {
             .on_hover_text(summary);
 
             if let Some((node_id, port)) = interactive {
-                if valid_path {
+                if valid_path
+                    && self.checked.iter().any(|checked| {
+                        checked.node_id == node_id
+                            && checked.port == port
+                            && checked.path == path_text
+                    })
+                {
+                    // A check from these results waits for the next run; the
+                    // edit is undone like any other (UX-01).
+                    let (icon, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::hover());
+                    Icon::Check.paint(ui.painter(), icon, theme::SUCCESS);
+                    ui.label(
+                        RichText::new("Check added")
+                            .size(theme::FONT_LABEL)
+                            .color(theme::SUCCESS),
+                    );
+                } else if valid_path {
                     let target_name = if path_text.is_empty() {
                         label
                     } else {
@@ -940,6 +984,15 @@ impl ReportPanel {
             }
             _ => {}
         }
+    }
+}
+
+/// The bar's text while only checks were added since the run (UX-01).
+fn checks_added(count: usize) -> String {
+    if count == 1 {
+        "1 check added · it runs on the next run".into()
+    } else {
+        format!("{count} checks added · they run on the next run")
     }
 }
 
@@ -1326,6 +1379,7 @@ mod tests {
             error_policy: ErrorPolicy::Continue,
             running: false,
             stale: false,
+            checked: &[],
             files_busy: false,
             component: false,
             document_locked: false,
@@ -1436,6 +1490,7 @@ mod tests {
                     error_policy: ErrorPolicy::Continue,
                     running: false,
                     stale: false,
+                    checked: &[],
                     files_busy: false,
                     component: false,
                     document_locked: false,
@@ -1452,6 +1507,7 @@ mod tests {
                     error_policy: ErrorPolicy::Stop,
                     running: false,
                     stale: true,
+                    checked: &[],
                     files_busy: false,
                     component: false,
                     document_locked: false,
@@ -1476,6 +1532,7 @@ mod tests {
                 error_policy: ErrorPolicy::Continue,
                 running: false,
                 stale: false,
+                checked: &[],
                 files_busy: false,
                 component: false,
                 document_locked: false,

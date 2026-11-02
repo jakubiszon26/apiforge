@@ -2094,6 +2094,7 @@ impl App {
                 error_policy: self.editor.scenario().error_policy,
                 running: self.is_running(),
                 stale: self.is_run_stale(),
+                checked: &[],
                 files_busy: self.files.busy(),
                 component: false,
                 document_locked: self.document_locked(),
