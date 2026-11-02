@@ -4,8 +4,9 @@
 //! editor paints is read from the frame's shapes. See docs/tickets/KTLO-13.md.
 //! The KTLO-18 tests at the end expand the Problems section over the code
 //! (docs/tickets/KTLO-18.md); they share this file's `editor` and
-//! `problems_top`.
-use super::project_interaction_tests::replace_text;
+//! `problems_top`. The KTLO-32 test after them reads the board's painted
+//! text the same way (docs/tickets/KTLO-32.md).
+use super::project_interaction_tests::{app, replace_text};
 use super::*;
 use crate::testing::{
     FolderHarness, MINIMUM, WIDE, assert_within_window, folder, folder_harness, settle,
@@ -565,4 +566,122 @@ fn clicking_a_problem_while_expanded_still_reveals_its_line() {
             .memory(|memory| memory.has_focus(editor_id(&id))),
         "clicking the problem did not focus the editor"
     );
+}
+
+/// KTLO-32: a project whose one scenario holds only a call to `notes@1`, a
+/// component whose only input `note` is a string declared with neither
+/// `@optional`/`@required` nor a default.
+fn undeclared_input_project() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    let mut demo = apiforge_core::demos::empty_project();
+    demo.components.push(
+        serde_json::from_value(serde_json::json!({
+            "id": "notes", "revision": 1, "handle": "notes", "name": "Notes",
+            "description": "", "inputs": [{ "name": "note", "type": "string" }],
+            "graph": {
+                "nodes": [
+                    {"id": "out", "kind": "export", "handle": "note",
+                     "position": {"x": 80, "y": 80},
+                     "inputs": {"value": {"kind": "parameter", "name": "note"}},
+                     "config": {"type": "string"}}
+                ],
+                "edges": []
+            }
+        }))
+        .unwrap(),
+    );
+    demo.scenarios[0].graph = serde_json::from_value(serde_json::json!({
+        "nodes": [
+            {"id": "call", "kind": "component", "handle": "write_a_note",
+             "label": "Write a note", "position": {"x": 80, "y": 80}, "inputs": {},
+             "config": {"componentId": "notes", "revision": 1}}
+        ],
+        "edges": []
+    }))
+    .unwrap();
+    apiforge_project::prepare_project(directory.path(), &demo).unwrap();
+    directory
+}
+
+/// Whether `text` is painted on the board, the area of *Diagram board*.
+fn painted_on_board(harness: &FolderHarness, text: &str) -> bool {
+    let board = harness.get_by_label("Diagram board").rect();
+    shapes(harness).into_iter().any(|(_, shape)| match shape {
+        Shape::Text(shape) => {
+            shape.galley.job.text == text && board.contains_rect(shape.visual_bounding_rect())
+        }
+        _ => false,
+    })
+}
+
+/// KTLO-32 criterion 4: with the call card selected, its row for the
+/// undeclared input `note` is the missing marker (`note *`, *Value missing*)
+/// and the inspector labels it `note *` with *Set this required argument.*;
+/// binding a value in the code clears the marker and the message. At both
+/// window sizes.
+#[test]
+fn ktlo32_an_undeclared_input_is_marked_required_on_a_call() {
+    for size in [MINIMUM, WIDE] {
+        let project = undeclared_input_project();
+        let mut harness = folder_harness(project.path(), size);
+        let id = document(folder(&harness), "scenarios/new-scenario.afs");
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        show(&mut harness, "Diagram");
+        harness.get_by_label_contains("Write a note (").click();
+        settle(&mut harness);
+        assert_eq!(
+            folder(&harness).selections.get(&id).cloned(),
+            Some(vec!["call".to_owned()]),
+            "{size:?}: the call card is selected"
+        );
+
+        assert!(
+            painted_on_board(&harness, "note *"),
+            "{size:?}: the row's name"
+        );
+        assert!(
+            painted_on_board(&harness, "Value missing"),
+            "{size:?}: the missing marker"
+        );
+        assert!(
+            !painted_on_board(&harness, "Optional"),
+            "{size:?}: not the optional one"
+        );
+        assert!(
+            harness.query_by_label("note *").is_some(),
+            "{size:?}: the inspector's label"
+        );
+        assert!(
+            harness
+                .query_by_label("Set this required argument.")
+                .is_some(),
+            "{size:?}: the inspector's message"
+        );
+
+        let source = active_source(&harness);
+        let bound = source.replacen("notes@1()", "notes@1(note: \"hello\")", 1);
+        assert_ne!(bound, source, "the call is in the source:\n{source}");
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&id, &bound, CODE)
+            .unwrap();
+        settle(&mut harness);
+        assert!(
+            !painted_on_board(&harness, "Value missing"),
+            "{size:?}: a bound input is not missing"
+        );
+        assert!(
+            harness
+                .query_by_label("Set this required argument.")
+                .is_none(),
+            "{size:?}: nor asked for"
+        );
+        assert!(
+            harness.query_by_label("note *").is_some(),
+            "{size:?}: still required"
+        );
+    }
 }

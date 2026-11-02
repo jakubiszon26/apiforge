@@ -94,7 +94,8 @@ pub(crate) async fn run_validated(
 
 /// A component run on its own executes its graph as a scenario without a
 /// cleanup phase, its parameters the given inputs over the defaults written in
-/// code. Also returns the required inputs that have neither (KTLO-23).
+/// code. Also returns the required inputs that have neither (KTLO-23); an
+/// input declared neither required nor optional is required (KTLO-32).
 fn component_run(
     component: &Component,
     inputs: &IndexMap<String, Value>,
@@ -106,7 +107,7 @@ fn component_run(
             Some(value) => {
                 parameters.insert(port.name.clone(), value.clone());
             }
-            None if port.is_required() => missing.push(port.name.clone()),
+            None if port.is_required_input() => missing.push(port.name.clone()),
             None => {}
         }
     }

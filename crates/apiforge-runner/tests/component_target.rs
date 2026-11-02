@@ -347,3 +347,132 @@ async fn ktlo23_a_live_component_run_is_journalled_under_its_name() {
     assert_eq!(left.runs[0].scenario_id, "get-product");
     assert_eq!(left.runs[0].scenario_name, name);
 }
+
+/// KTLO-32: the shop with a component `notes` whose only input `note` is a
+/// string whose `required` is absent, `false` or `true` as `required` says,
+/// with `default`, whose export returns `param.note`, and a scenario `calls`
+/// whose one step calls `notes@1` with `arguments` as its inputs.
+fn notes(required: Option<bool>, default: Option<Value>, arguments: Value) -> Project {
+    let mut project = shop();
+    let mut note = json!({ "name": "note", "type": "string" });
+    if let Some(required) = required {
+        note["required"] = json!(required);
+    }
+    if let Some(default) = default {
+        note["defaultValue"] = default;
+    }
+    project.components.push(
+        serde_json::from_value(json!({
+            "id": "notes", "revision": 1, "handle": "notes", "name": "Notes",
+            "description": "", "inputs": [note],
+            "graph": {
+                "nodes": [
+                    {"id": "out", "kind": "export", "handle": "note",
+                     "position": {"x": 0, "y": 0},
+                     "inputs": {"value": {"kind": "parameter", "name": "note"}},
+                     "config": {"type": "string"}}
+                ],
+                "edges": []
+            }
+        }))
+        .unwrap(),
+    );
+    project.scenarios.push(
+        serde_json::from_value(json!({
+            "id": "calls", "name": "Calls", "description": "",
+            "graph": {
+                "nodes": [
+                    {"id": "call", "kind": "component", "handle": "notes",
+                     "position": {"x": 0, "y": 0}, "inputs": arguments,
+                     "config": {"componentId": "notes", "revision": 1}}
+                ],
+                "edges": []
+            },
+            "cleanup": {"nodes": [], "edges": []},
+            "parameters": {},
+            "errorPolicy": "stop"
+        }))
+        .unwrap(),
+    );
+    project
+}
+
+/// KTLO-32 criterion 2: run alone without `note`, an input with neither
+/// attribute nor default fails the step that reads it as missing, as a
+/// `@required(true)` one does; `@optional` runs on with the input absent
+/// (KTLO-27), and a default is used.
+#[tokio::test]
+async fn ktlo32_an_undeclared_input_is_required_when_run_alone() {
+    let alone = |project| RunRequest::component(project, "notes", 1, RunMode::Simulation);
+    for required in [None, Some(true)] {
+        let report = run(alone(notes(required, None, json!({}))), options()).await;
+        assert_eq!(report.status, RunStatus::Failed, "required: {required:?}");
+        assert_eq!(report.steps[0].node_id, "out");
+        assert_eq!(report.steps[0].status, StepStatus::Error);
+        assert_eq!(
+            report.steps[0].message.as_deref(),
+            Some("Missing required input: note."),
+            "required: {required:?}"
+        );
+    }
+
+    let report = run(alone(notes(Some(false), None, json!({}))), options()).await;
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.steps);
+    assert_eq!(
+        report.steps[0].outputs.get("value"),
+        None,
+        "absent, not null"
+    );
+
+    let report = run(
+        alone(notes(None, Some(json!("from the default")), json!({}))),
+        options(),
+    )
+    .await;
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.steps);
+    assert_eq!(
+        report.steps[0].outputs.get("value"),
+        Some(&json!("from the default"))
+    );
+
+    let inputs = IndexMap::from([("note".to_owned(), json!("given"))]);
+    let report = run(
+        request(
+            notes(None, None, json!({})),
+            "notes",
+            inputs,
+            RunMode::Simulation,
+        ),
+        options(),
+    )
+    .await;
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.steps);
+    assert_eq!(report.steps[0].outputs.get("value"), Some(&json!("given")));
+}
+
+/// KTLO-32 criterion 3: a scenario's `notes@1(…)` without the argument fails
+/// the call step with *Missing required input: note.*, before the component
+/// runs; with the argument the component runs and returns it.
+#[tokio::test]
+async fn ktlo32_an_undeclared_input_is_required_on_a_call() {
+    let scenario = |project| RunRequest::new(project, "calls", RunMode::Simulation);
+    let report = run(scenario(notes(None, None, json!({}))), options()).await;
+    assert_eq!(report.status, RunStatus::Failed, "{:?}", report.steps);
+    let call = &report.steps[0];
+    assert_eq!(call.node_id, "call");
+    assert_eq!(call.status, StepStatus::Error);
+    assert_eq!(
+        call.message.as_deref(),
+        Some("Missing required input: note.")
+    );
+    assert!(
+        call.children.as_deref().unwrap_or_default().is_empty(),
+        "the component does not run: {:?}",
+        call.children
+    );
+
+    let given = json!({ "note": { "kind": "literal", "value": "hello" } });
+    let report = run(scenario(notes(None, None, given)), options()).await;
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.steps);
+    assert_eq!(report.steps[0].outputs.get("note"), Some(&json!("hello")));
+}

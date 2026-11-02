@@ -258,6 +258,13 @@ them without writing internal identities or layout:
 - `@note("...")` preserves an exact note that trimmed line comments cannot carry.
 - Component inputs support `@required(true|false)` and `@exposed(true|false)`;
   `@optional` and `@hidden` remain the short forms for false.
+  Amended 2026-10-28 ([KTLO-32](../tickets/KTLO-32.md), the owner's decision
+  on #62): an input with no `@required`/`@optional` attribute (`@exposed`
+  and `@hidden` do not count) and no default is required: the
+  Run inputs dialog and the MCP `run` tool ask for it, the runner fails the
+  step that lacks it, and a call on the board marks it. An input with a
+  default receives it when left out. The attribute stays absent from the
+  model and the printed source; nothing is migrated.
 - `action key: type contract "id"` specifies action metadata independently of the
   input's type/contract. Without a type, the action inherits the input metadata.
   An explicit type without `contract` means an absent action contract.
