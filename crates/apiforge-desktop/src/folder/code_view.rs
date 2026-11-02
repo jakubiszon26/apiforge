@@ -195,18 +195,21 @@ impl FolderApp {
             steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
         // The red numbers, dots, underlines and hover messages wait until
-        // typing has paused (UX-03). Meanwhile none is drawn: the last
-        // analysis's would sit at the wrong places after the edit. The window
-        // is drawn again when they are due, mouse or not.
+        // typing has paused (UX-03), and then for the analysis of the typed
+        // text: the last analysis's would sit at the wrong places after the
+        // edit. The window is drawn again when they are due, mouse or not;
+        // a finished analysis asks for a frame of its own.
         let now = self.marks_now();
         let typed = self.marks_quiet_at.get(document_id).copied();
         let wait =
             (!marks_due(typed, now, MARKS_DELAY)).then(|| marks_wait(typed, now, MARKS_DELAY));
+        let analysed = typed.is_none() || snapshot.analysis != AnalysisState::Pending;
         let marks: &[Diagnostic] = match wait {
-            None => {
+            None if analysed => {
                 self.marks_quiet_at.remove(document_id);
                 &snapshot.diagnostics
             }
+            None => &[],
             Some(wait) => {
                 ui.ctx().request_repaint_after(wait);
                 &[]
@@ -279,9 +282,14 @@ impl FolderApp {
                     self.analyser.typed(document_id, Instant::now());
                     self.changed_at = Some(Instant::now());
                     // Typing, a paste, an undo or a redo in the editor: the
-                    // marks wait again, from the next frame, drawn at once.
+                    // marks wait again. This pass drew them over the edited
+                    // text, so it is drawn again without them before it is
+                    // shown.
                     self.marks_quiet_at.insert(document_id.to_owned(), now);
-                    ui.ctx().request_repaint();
+                    if !marks.is_empty() {
+                        ui.ctx()
+                            .request_discard("UX-03: error marks drawn over an edit");
+                    }
                 }
                 Err(error) => {
                     self.notice = Some(Notice {

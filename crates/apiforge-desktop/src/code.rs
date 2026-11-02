@@ -464,6 +464,10 @@ impl CodeEditor {
             }
             let output = edit.show(ui);
             let mut lines_in_view = None;
+            #[cfg(test)]
+            {
+                self.focus_stroke = None;
+            }
             if let Some(gutter) = gutter {
                 self.keep_caret_clear_of_gutter(ui, &output, gutter_width);
                 lines_in_view = self.paint_gutter(ui, gutter, text, &output, context);
