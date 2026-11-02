@@ -65,6 +65,23 @@ release captures are of `3fa5afb`: none of these changes alters what they
 show (no deletion, no disabled toggle, no focused editor, no wrapped
 line).
 
+## Merge of MCP-15 (`acd0e2e`)
+
+MCP-15 (a live run from the command line asks the window) merged to
+`main` as `3dad2b7` and was merged into this branch. The bar of an agent
+is unchanged, so the captures above stand. A command holder has no *Take
+back* and no run status (MCP-15); *Follow* shows for it too, at the bar's
+right end, since the ticket follows every holder's commits ("the toggle
+shows whenever the bar does"). A command's run commits nothing, so
+following moves nothing while it holds the project. Release capture of
+`acd0e2e`: `apiforge run --folder … --live` against a scratch loopback
+API that answers each `GET` after 8 s; the clean window handed the
+project over: *apiforge run --live · since 07:20 · editing is paused
+here; this window follows every change*, *Follow* pressed, no *Take back*
+([capture](command-observing-960x540.png)); after the command ended the
+window was the writer again with no bar
+([capture](command-ended-960x540.png)).
+
 ## Criteria and their evidence
 
 | # | Criterion | Test (`folder/acceptance_tests.rs`, `mod mcp16`) | Release binary |
@@ -272,5 +289,12 @@ On `3fa5afb`, all exit 0:
 
 After review round 1: fmt and clippy pass again, and the `mcp16`,
 `mcp10`, `mcp08a`, `mcp08b`, code editor, follow and widget tests passed
-twice in a row, four at a time (80 tests); CI runs the whole suite on both
-platforms.
+twice in a row, four at a time (80 tests).
+
+On `acd0e2e`, the merge of MCP-15, all exit 0:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked --no-fail-fast`: 1 402
+  passed, 0 failed, 43 ignored (`mod mcp15` and `mod mcp16` among them)
+- `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`
