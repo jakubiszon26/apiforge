@@ -112,7 +112,7 @@ pub struct RevisionSummary {
 #[schemars(transform = require_allowed)]
 pub struct LiveRequests {
     /// Whether a live run may send now; null while a window holding the
-    /// project decides when the run starts (MCP-18).
+    /// project decides when the run starts.
     pub allowed: Option<bool>,
     /// Why live requests are allowed or not.
     pub source: String,
