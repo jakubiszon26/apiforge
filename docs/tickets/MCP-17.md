@@ -3,8 +3,8 @@
 - Size: S · Owner review: 10 min · Risk: MCP output compatibility (what a
   client reads on a refusal); no `format`, `migration`, `default`,
   `visible UI` or `removal`
-- State: Analysis (issue #188) · decision 1 open
-- Analysis model: Claude Fable 5.1 · Implementation model: —
+- State: Approved (issue #188) · decision 1 taken 2026-11-02: A, text only
+- Analysis model: Claude Fable 5.1 · Implementation model: Claude Opus 5.5
 
 ## Goal
 
@@ -89,6 +89,16 @@ example of a tool execution error in all three versions carries `content`
    - **C: leave it.** Rely on the SDK's current guard. Rejected by the
      analysis: the installed client carries the older check and the
      specification writes no exception.
+
+## Decision taken (2026-11-02, on #188)
+
+1. **A, text only.** A refusal is `isError: true` with the same pretty JSON
+   `{ code, message, wrote, details }` in `content[0].text` and no
+   `structuredContent`. It matches every example of the specification and
+   both forms of the SDK's client check, and the model reads the same text
+   as before. (B, union output schemas, was declined: eleven larger schemas
+   read at every session and union types in any typed client; C, leaving
+   it, was declined: the installed client carries the older check.)
 
 ## Mock-up
 
