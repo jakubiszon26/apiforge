@@ -752,14 +752,22 @@ jobs:
               Start-Sleep -Milliseconds 500
               $process.Refresh()
             }
-            # A few frames, so the capture shows the drawn window.
+            # A few frames, so the capture shows the drawn window; it must
+            # still be open when the capture is taken and after it.
             Start-Sleep -Seconds 5
+            $process.Refresh()
+            if ($process.HasExited -or $process.MainWindowHandle -eq [IntPtr]::Zero) {
+              throw 'The window closed before it was captured.'
+            }
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
             $desktop = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
             $graphics = [System.Drawing.Graphics]::FromImage($desktop)
             $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
             $graphics.Dispose()
             $desktop.Save((Join-Path $out 'desktop-window.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+            if ($process.HasExited) {
+              throw "apiforge-desktop.exe exited with code $($process.ExitCode) while it was captured."
+            }
             Write-Host "captured: $out/desktop-window.png ($($bounds.Width) x $($bounds.Height)), window '$($process.MainWindowTitle)'"
           } finally {
             if (-not $process.HasExited) {

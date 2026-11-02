@@ -661,7 +661,7 @@ class IconWorkflows(unittest.TestCase):
         for name in ["apiforge.exe", "apiforge-desktop.exe"]:
             self.assertIn(name, icon)
         # 32 x 32, a transparent corner, an opaque centre, the source's pixels.
-        self.assertIn("32", icon)
+        self.assertIn("$bitmap.Width -ne 32 -or $bitmap.Height -ne 32", icon)
         self.assertIn("GetPixel(0, 0).A", icon)
         self.assertIn("GetPixel(16, 16).A", icon)
         self.assertIn("packaging/icon/apiforge-32.png", icon)
