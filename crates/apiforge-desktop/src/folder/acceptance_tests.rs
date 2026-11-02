@@ -1860,7 +1860,7 @@ mod mcp04 {
 mod mcp08b {
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
-    use apiforge_mcp::test_support::{StdioServer, structured, tool_error};
+    use apiforge_mcp::test_support::{StdioServer, refusal, structured, tool_error};
     use apiforge_storage::project::{Holder, HolderRole, ProjectStore};
     use egui_kittest::kittest::NodeT;
     use serde_json::{Value, json};
@@ -2003,7 +2003,7 @@ mod mcp08b {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let probe = call(harness, server, "run", json!({ "path": "missing.afs" }));
-            if probe["result"]["structuredContent"]["code"] == "run_in_progress" {
+            if refusal(&probe).is_some_and(|error| error["code"] == "run_in_progress") {
                 return run;
             }
             assert!(
@@ -2698,7 +2698,9 @@ mod mcp08b {
         harness.get_by_label(TAKE_BACK).click();
         let answer = answer(&mut harness, &mut server, write);
         let on_disk = fs::read_to_string(root.join(SCENARIO)).unwrap();
-        match answer["result"]["structuredContent"]["wrote"].as_bool() {
+        // A refusal carries its error object as text (MCP-17).
+        let outcome = refusal(&answer).unwrap_or_else(|| structured(&answer).clone());
+        match outcome["wrote"].as_bool() {
             Some(true) => assert_eq!(on_disk, second),
             Some(false) => assert_eq!(on_disk, first),
             None => panic!("wrote is true or false, never half: {answer}"),
@@ -3848,7 +3850,7 @@ mod mcp09 {
     };
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
-    use apiforge_mcp::test_support::{StdioServer, structured, tool_error};
+    use apiforge_mcp::test_support::{StdioServer, refusal, structured, tool_error};
     use apiforge_project::{FixedPlacer, Holder, HolderRole};
     use egui_kittest::kittest::NodeT;
     use serde_json::{Value, json};
@@ -4386,7 +4388,7 @@ mod mcp09 {
                 "run",
                 json!({ "path": "missing.afs" }),
             );
-            if probe["result"]["structuredContent"]["code"] == "run_in_progress" {
+            if refusal(&probe).is_some_and(|error| error["code"] == "run_in_progress") {
                 break;
             }
             // A probe that came first held the slot for a moment, and the

@@ -31,6 +31,13 @@
 //! validated against the `outputSchema` its tool advertises in `tools/list`,
 //! so each session above checks it too; the `mcp14_` tests drive every kind
 //! of `run` result and every tool.
+//!
+//! MCP-17 (#188): a refusal is `isError: true` with the error object as the
+//! JSON of its one text block and no `structuredContent`; `tool_error`
+//! asserts that shape for every refusal above. `Server` validates every
+//! result that carries `structuredContent`, errors included, as a client
+//! that validates whenever it is present does; the `mcp17_` tests assert the
+//! raw refusal and a refusal of every tool that can refuse.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -91,6 +98,8 @@ struct Server {
     /// The tools whose successful results were validated against their
     /// output schema (MCP-14).
     validated: BTreeSet<String>,
+    /// The tools that answered with a refusal, `isError: true` (MCP-17).
+    refused: BTreeSet<String>,
 }
 
 impl Server {
@@ -139,6 +148,7 @@ impl Server {
             stderr,
             calls: HashMap::new(),
             validated: BTreeSet::new(),
+            refused: BTreeSet::new(),
         }
     }
 
@@ -175,11 +185,20 @@ impl Server {
             let message: Value = serde_json::from_str(&line)
                 .unwrap_or_else(|_| panic!("stdout carried a non-JSON line: {line:?}"));
             if let Some(name) = self.calls.remove(&message["id"])
-                && message["result"]["isError"] != true
                 && !message["result"].is_null()
             {
-                assert_matches_output_schema(&name, &message["result"]["structuredContent"]);
-                self.validated.insert(name);
+                let result = &message["result"];
+                let refused = result["isError"] == true;
+                // MCP-17: a client that validates whenever `structuredContent`
+                // is present, errors included, as older SDK clients do.
+                if !refused || result.get("structuredContent").is_some() {
+                    assert_matches_output_schema(&name, &result["structuredContent"]);
+                }
+                if refused {
+                    self.refused.insert(name);
+                } else {
+                    self.validated.insert(name);
+                }
             }
             if matches(&message) {
                 return message;
@@ -310,14 +329,48 @@ fn structured(response: &Value) -> &Value {
     &result["structuredContent"]
 }
 
-fn tool_error(response: &Value, code: &str) {
+/// A refusal's error object (MCP-17): `isError: true`, no
+/// `structuredContent`, and one text block whose JSON is an object with
+/// exactly `code`, `message`, `wrote` and `details`.
+fn refusal(response: &Value) -> Value {
     let result = &response["result"];
     assert_eq!(result["isError"], true, "{response}");
-    let error = &result["structuredContent"];
+    assert!(
+        result.get("structuredContent").is_none(),
+        "a refusal carries no structuredContent: {response}"
+    );
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1, "{response}");
+    assert_eq!(content[0]["type"], "text", "{response}");
+    let error: Value = serde_json::from_str(content[0]["text"].as_str().unwrap())
+        .unwrap_or_else(|_| panic!("a refusal's text is JSON: {response}"));
+    let keys: BTreeSet<_> = error
+        .as_object()
+        .unwrap_or_else(|| panic!("a refusal's text is an object: {response}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        BTreeSet::from(["code", "details", "message", "wrote"]),
+        "{response}"
+    );
+    error
+}
+
+/// A refusal with `code` that wrote nothing; its error object.
+fn tool_error(response: &Value, code: &str) -> Value {
+    let error = refusal(response);
     assert_eq!(error["code"], code, "{response}");
     assert_eq!(error["wrote"], false);
     assert!(error["message"].is_string());
     assert!(error["details"].is_object());
+    error
+}
+
+/// Whether `response` is a refusal with `code`, for a test that polls.
+fn refused_with(response: &Value, code: &str) -> bool {
+    response["result"]["isError"] == true && refusal(response)["code"] == code
 }
 
 fn assert_clean_end(server: Server) {
@@ -646,7 +699,7 @@ fn mcp03_criterion_10_a_cancelled_run_over_stdio() {
     let mut id = 5;
     let report = loop {
         let response = call(&mut server, id, "run", json!({ "path": PRODUCT }));
-        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+        if !refused_with(&response, "run_in_progress") {
             break response;
         }
         assert!(
@@ -916,12 +969,9 @@ fn mcp04_criterion_3_a_write_based_on_a_version_apply_replaced_is_stale() {
         "write_source",
         json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
     );
-    tool_error(&stale, "stale_source");
+    let stale = tool_error(&stale, "stale_source");
     let (_, current_hash) = read(&mut server, 4, SCENARIO);
-    assert_eq!(
-        stale["result"]["structuredContent"]["details"]["source_sha256"],
-        current_hash.as_str()
-    );
+    assert_eq!(stale["details"]["source_sha256"], current_hash.as_str());
     assert_eq!(std::fs::read(root.join(SCENARIO)).unwrap(), current);
     assert_clean_end(server);
 }
@@ -978,9 +1028,9 @@ fn mcp04_criterion_8_a_window_holding_the_project_refuses_the_write_over_stdio()
         "write_source",
         json!({ "path": SCENARIO, "text": commented(&text), "expected_source_sha256": hash }),
     );
-    tool_error(&refused, "held_by_window");
+    let error = tool_error(&refused, "held_by_window");
     assert!(
-        refused["result"]["structuredContent"]["message"]
+        error["message"]
             .as_str()
             .unwrap()
             .contains("API Forge window"),
@@ -1218,9 +1268,8 @@ fn mcp06_criterion_1_without_allow_live_over_stdio() {
         "run",
         json!({ "path": SCENARIO, "live": true }),
     );
-    tool_error(&refused, "live_disabled");
     assert_eq!(
-        refused["result"]["structuredContent"]["message"],
+        tool_error(&refused, "live_disabled")["message"],
         NOT_ENABLED
     );
     assert_clean_end(server);
@@ -1393,11 +1442,8 @@ fn mcp06_criterion_8_a_killed_server_leaves_the_journal_entry() {
         "run",
         json!({ "path": SCENARIO, "live": true, "request_id": "killed-run" }),
     );
-    tool_error(&retried, "unknown_outcome");
-    assert_reported(
-        &retried["result"]["structuredContent"]["details"]["interrupted"],
-        &journalled,
-    );
+    let error = tool_error(&retried, "unknown_outcome");
+    assert_reported(&error["details"]["interrupted"], &journalled);
     assert_clean_end(live);
 }
 
@@ -1517,7 +1563,7 @@ fn mcp06_criterion_10_no_secret_value_leaves_the_server() {
     let started = Instant::now();
     loop {
         let response = call(&mut server, next(), "run", json!({ "path": PRODUCT }));
-        if response["result"]["structuredContent"]["code"] != "run_in_progress" {
+        if !refused_with(&response, "run_in_progress") {
             break;
         }
         assert!(
@@ -1598,9 +1644,8 @@ fn mcp05_publish_over_stdio() {
         "publish",
         json!({ "path": PRODUCT, "expected_source_sha256": hash, "request_id": "qa-1" }),
     );
-    tool_error(&refused, "comments_would_be_lost");
     assert_eq!(
-        refused["result"]["structuredContent"]["details"]["comments"][0]["text"],
+        tool_error(&refused, "comments_would_be_lost")["details"]["comments"][0]["text"],
         LOOSE
     );
 
@@ -2092,4 +2137,132 @@ fn mcp12_cli_window_process() {
             "ownership returns on finish and EOF"
         );
     }
+}
+
+// MCP-17 (#188) --------------------------------------------------------------
+
+/// Criterion 1: the raw response of a `path_rejected` and a `live_disabled`
+/// refusal over stdio. `isError: true`, no `structuredContent` key, and one
+/// text block holding the same pretty JSON as before: the error object the
+/// tools give, `{ code, message, wrote, details }`.
+#[test]
+fn mcp17_criterion_1_a_refusal_travels_as_text() {
+    use apiforge_mcp::{ErrorCode, ToolError};
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let rejected = call(&mut server, 2, "read_source", json!({ "path": "../x.afs" }));
+    let live = call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    );
+    for (response, expected) in [
+        (
+            &rejected,
+            apiforge_mcp::tools::read_source(root, "../x.afs").unwrap_err(),
+        ),
+        (
+            &live,
+            ToolError::new(ErrorCode::LiveDisabled, NOT_ENABLED)
+                .with_details(json!({ "source": "no --allow-live" })),
+        ),
+    ] {
+        let result = response["result"].as_object().unwrap();
+        let keys: BTreeSet<_> = result.keys().map(String::as_str).collect();
+        assert_eq!(keys, BTreeSet::from(["content", "isError"]), "{response}");
+        assert_eq!(result["isError"], true, "{response}");
+        assert_eq!(
+            result["content"],
+            json!([{
+                "type": "text",
+                "text": serde_json::to_string_pretty(&expected).unwrap(),
+            }]),
+            "{response}"
+        );
+        assert_eq!(
+            tool_error(response, expected.code.as_str()),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+    assert_eq!(
+        server.refused,
+        BTreeSet::from(["read_source", "run"].map(String::from))
+    );
+    assert_clean_end(server);
+}
+
+/// Criterion 2: every tool that can refuse refuses at least once, and each
+/// refusal passes `Server`, which validates every result carrying
+/// `structuredContent` against its tool's `outputSchema`, errors included.
+/// `language_reference` and `finish_editing` never refuse: they answer every
+/// call with a result, which MCP-14's criterion 2 validates.
+#[test]
+fn mcp17_criterion_2_every_refusal_passes_a_validating_client() {
+    let empty = tempfile::tempdir().unwrap();
+    let mut outside = Server::spawn(None, empty.path());
+    initialize(&mut outside);
+    tool_error(
+        &call(&mut outside, 2, "project_overview", json!({})),
+        "not_a_project",
+    );
+    let mut refused = outside.refused.clone();
+    assert_clean_end(outside);
+
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let missing = "components/missing.afs";
+    let unknown_hash = "0".repeat(64);
+    for (id, name, arguments, code) in [
+        (
+            2,
+            "read_source",
+            json!({ "path": "../x.afs" }),
+            "path_rejected",
+        ),
+        (3, "check", json!({ "path": missing }), "unknown_document"),
+        (
+            4,
+            "check_text",
+            json!({ "path": "../x.afs", "text": DRAFT_TEXT }),
+            "path_rejected",
+        ),
+        (5, "print", json!({ "path": missing }), "unknown_document"),
+        (
+            6,
+            "run",
+            json!({ "path": SCENARIO, "live": true }),
+            "live_disabled",
+        ),
+        (
+            7,
+            "write_source",
+            json!({ "path": PRODUCT, "text": DRAFT_TEXT, "expected_source_sha256": unknown_hash }),
+            "stale_source",
+        ),
+        (
+            8,
+            "create_document",
+            json!({ "kind": "component", "path": PRODUCT, "text": "component x {\n}\n" }),
+            "path_exists",
+        ),
+        (
+            9,
+            "publish",
+            json!({ "path": missing, "expected_source_sha256": unknown_hash }),
+            "unknown_document",
+        ),
+    ] {
+        tool_error(&call(&mut server, id, name, arguments), code);
+    }
+    refused.extend(server.refused.iter().cloned());
+    assert_clean_end(server);
+    let mut expected: BTreeSet<String> = TOOLS.iter().map(|tool| (*tool).to_owned()).collect();
+    expected.remove("language_reference");
+    expected.remove("finish_editing");
+    assert_eq!(refused, expected, "every tool that can refuse refused");
 }
