@@ -4,7 +4,11 @@
   evidence comes from that commit's
   [pull_request CI run 41437797866](https://github.com/jakubiszon26/apiforge/actions/runs/41437797866)
   (`windows-2022`, artifact `windows-icon`). The Linux evidence comes from a
-  local release build of the same commit.
+  local release build of the same commit. Review round 1 (`04a11f2`) makes
+  the step fail if the window closes before or during the capture. Its push
+  run [41449922065](https://github.com/jakubiszon26/apiforge/actions/runs/41449922065)
+  printed the same four lines below, extracted byte-identical icons and took
+  the same capture.
 - Built with: `cargo build --release --locked -p apiforge-desktop -p
   apiforge-cli`, on `windows-2022` by CI (MSVC, the Windows SDK's `rc.exe`)
   and on Ubuntu 24.04 locally, with Rust 1.99.0.
@@ -159,3 +163,9 @@ platform gate on the window icon; nothing else is touched.
   `header_tests::a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary`
   ("hovering the shortened name shows its full text"), a known flake listed
   on #122. Its failed job was rerun once and passed.
+- CI on `04a11f2`: the push run passed on both platforms. The pull_request
+  run failed once on `windows-2022` in
+  `mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was`,
+  with a storage write that Windows refused (`diagram.json`, *Access is
+  denied*). That test is not on #122, so the job was not rerun. It passed
+  in every other run of this branch, and REL-02 touches no storage code.
