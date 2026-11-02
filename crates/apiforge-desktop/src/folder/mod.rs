@@ -789,8 +789,9 @@ impl FolderApp {
         self.holder_bar(ui);
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
-        // Maximised run results leave no room for anything else (KTLO-19).
-        if self.report_maximised(active.as_deref()) {
+        // Maximised run results leave no room for anything else (KTLO-19),
+        // nor do run results dragged above their ceiling (UX-05).
+        if self.report_covers(active.as_deref()) {
             self.prompts(ui.ctx());
             self.protect(now);
             return;

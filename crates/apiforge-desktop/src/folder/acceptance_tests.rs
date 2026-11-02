@@ -8279,6 +8279,32 @@ mod ux05 {
         );
     }
 
+    /// Held above its normal ceiling, Run results leave the strip above them
+    /// to the zone or the bare workspace: the board and the code, which have
+    /// no room there, are not drawn until the release, and come back after a
+    /// release outside the zone (the mid-drag frame of `ux05-mid-drag-*`).
+    #[test]
+    fn ux05_above_the_ceiling_the_views_above_are_not_drawn() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, _) = ran(size);
+            let workspace = workspace(&harness);
+            let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
+            for label in HIDDEN {
+                assert!(
+                    harness.query_by_label_contains(label).is_none(),
+                    "{size:?}: {label:?} is drawn above the dragged panel"
+                );
+            }
+            release(&mut harness, at);
+            for label in HIDDEN {
+                assert!(
+                    harness.query_by_label_contains(label).is_some(),
+                    "{size:?}: {label:?} is not back after the release"
+                );
+            }
+        }
+    }
+
     /// Criterion 3: in Code and in Split, *Resize problems* dragged to within
     /// 64 px of KTLO-18's ceiling shows *Release to expand problems* over the
     /// strip of code; released there, the section is expanded as *Expand

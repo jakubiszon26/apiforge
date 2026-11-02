@@ -177,6 +177,9 @@ pub struct ReportPanel {
     /// While the grip is dragged, how far under the panel's top it was
     /// pressed.
     grab: Option<f32>,
+    /// A drag holds the panel above its normal ceiling, where the views
+    /// above it have too little room to be drawn (UX-05).
+    above_ceiling: bool,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
     last_run_id: Option<String>,
@@ -198,6 +201,7 @@ impl Default for ReportPanel {
             maximised: false,
             drag: None,
             grab: None,
+            above_ceiling: false,
             #[cfg(test)]
             last_handle: None,
             last_run_id: None,
@@ -219,6 +223,13 @@ impl ReportPanel {
     /// Whether the open panel fills the window, so the caller draws nothing else.
     pub fn is_maximised(&self) -> bool {
         self.open && self.maximised
+    }
+
+    /// Whether the caller draws nothing above the panel: it is maximised, or a
+    /// drag holds it above its normal ceiling, where the zone or the bare
+    /// workspace shows until the release (UX-05).
+    pub fn covers_workspace(&self) -> bool {
+        self.is_maximised() || (self.open && self.above_ceiling)
     }
 
     /// Returns a maximised panel to its normal height.
@@ -344,10 +355,13 @@ impl ReportPanel {
         // The panel's own edge, found unnamed by the audit of a component's run
         // results (KTLO-23).
         widgets::name_resize_handle(ui.ctx(), panel_id, "Resize run results");
+        self.above_ceiling = false;
         if !was_open {
             return actions;
         }
         let rect = response.response.rect;
+        self.above_ceiling =
+            !maximised && self.drag.is_some() && rect.top() < workspace.bottom() - maximum - 0.5;
         // Maximised, the normal height is kept for the restore.
         let actual_height = rect.height().clamp(min_height, ceiling);
         if !maximised {
