@@ -6854,8 +6854,10 @@ mod mcp19 {
             std::thread::sleep(Duration::from_millis(1));
         }
 
+        let (started, starting) = channel::<()>();
         let (checked, checking) = channel();
         std::thread::spawn(move || {
+            started.send(()).unwrap();
             checked.send(
                 check
                     .run()
@@ -6863,6 +6865,9 @@ mod mcp19 {
                     .map_err(|error| error.to_string()),
             )
         });
+        // The check has started before the delete can go on: what follows
+        // is its answer during the delete, or its wait.
+        starting.recv_timeout(STUCK).expect("the check starts");
         match checking.recv_timeout(NOT_HELD) {
             Err(RecvTimeoutError::Timeout) => {}
             early => panic!(

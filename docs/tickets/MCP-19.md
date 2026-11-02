@@ -14,8 +14,11 @@
 An agent session that holds the writer lock commits beside an observing
 window on Windows exactly as on Linux. A reader that merely looks at a
 file — the window following the agent, the window's own once-a-second
-check beside its own save, a command-line reader — never turns a commit
-into *recovery required*, and never leaves a tab open after a delete.
+check beside its own save, a command-line reader, any reader that shares
+delete as API Forge's do, or another program that lets go within a
+second — never turns a commit into *recovery required*, and never leaves
+a tab open after a delete. A program that holds a file for longer still
+does, as part 2 says.
 
 ## What the owner will see
 
@@ -145,8 +148,14 @@ process.** Three parts, all in `apiforge-storage`:
    is the practice of Cargo and rustup for the same Windows condition; it
    is bounded, Windows-only, and never silently drops a write.
 3. `scan_tree` takes the store's worker lock for the duration of the scan
-   when the store is a writer. The check thread then waits a few
-   milliseconds behind a save rather than hashing beside it; a read-only
+   when the store is a writer. The check thread then waits behind a save
+   for as long as the save takes — on Windows up to part 2's second more
+   while another program holds a file — rather than hashing beside it,
+   and a save waits for a scan in progress. On the thread that holds the
+   worker (a fault hook inside a commit) the scan cannot wait for itself
+   and answers `Busy`, as the existing
+   `a_scan_during_this_owners_own_commit_is_busy_not_an_interrupted_transaction`
+   asserts; a read-only
    store's scan is unchanged, since its worker lock guards nothing another
    process does. The `Busy`/`RecoveryRequired` reasoning on an active head
    (`explorer.rs:97-115`) stands.
@@ -255,4 +264,7 @@ Windows no longer fails because something was looking at the file.
   2022 on NTFS. ReFS and SMB shares without POSIX rename fall back to the
   error, which part 2's bound then handles as today.
 - Estimate: M · 20 min · about 420 changed lines (storage 60, tests 200,
-  ADR 20, this file and the QA report the rest).
+  ADR 20, this file and the QA report the rest). Actual, recorded at
+  implementation (the estimate is kept for the retrospective): storage
+  about 200, tests about 520, ADR about 30, plus this file and the QA
+  report.

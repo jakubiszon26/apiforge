@@ -56,8 +56,12 @@ with no wait. New files keep the no-clobber install. On file systems
 without POSIX rename (ReFS, some network shares) the bound applies to every
 open handle. Within one writer, the tree scan of the external-change check
 takes the worker like any other storage work, so it never reads a file the
-worker's transaction replaces or removes; a read-only store's scan does
-not, since its worker guards nothing another process does.
+worker's transaction replaces or removes; in turn a save waits for a scan
+in progress, which lists at most the explorer's entry bound. A scan on the
+thread that already holds the worker (a fault hook inside a commit) cannot
+wait for itself: it reports that commit's active transaction as busy
+before reading the tree. A read-only store's scan does not take its
+worker, since it guards nothing another process does.
 
 Transaction fingerprints describe exact file bytes, including line endings. Do
 not normalise CRLF/LF when comparing expected/target states or checking staged

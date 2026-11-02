@@ -1053,8 +1053,6 @@ impl ProjectStore {
     }
 }
 
-/// One JSON line beside the lock, replaced atomically; an unknown holder
-/// writes nothing.
 /// The names directly inside `directory` that `earlier` operations removed:
 /// what Windows may still list, delete-pending, when the transaction comes
 /// to remove the directory itself (MCP-19).
@@ -1068,6 +1066,8 @@ fn removed_from(earlier: &[Operation], directory: &ProjectPath) -> Vec<std::ffi:
         .collect()
 }
 
+/// One JSON line beside the lock, replaced atomically; an unknown holder
+/// writes nothing.
 fn write_holder(root: &Path, holder: &Holder) -> Result<()> {
     let Some(line) = holder.to_line() else {
         return Ok(());

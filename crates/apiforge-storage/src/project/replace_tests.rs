@@ -67,6 +67,8 @@ struct Beside {
 
 /// Commits `save()` on this thread while another thread holds `MAIN` open
 /// with `open` from just before the commit replaces it until `release`.
+/// The reader's hold starts when the commit records its first attempt, so a
+/// slow scheduler cannot close the handle before the attempt.
 fn commit_beside_a_reader(
     writer: &ProjectStore,
     open: impl FnOnce(&Path) -> io::Result<File> + Send + 'static,
@@ -76,6 +78,7 @@ fn commit_beside_a_reader(
     let (open_now, opening) = channel::<()>();
     let (holding, held) = channel::<()>();
     let (let_go, letting_go) = channel::<()>();
+    let (attempting, attempt) = channel::<()>();
     let closed = Arc::new(AtomicBool::new(false));
     let reader = {
         let target = target.clone();
@@ -89,7 +92,11 @@ fn commit_beside_a_reader(
             match release {
                 // A commit that failed drops the hook, and with it the sender.
                 Release::AfterTheReplace => drop(letting_go.recv()),
-                Release::After(hold) => thread::sleep(hold),
+                Release::After(hold) => {
+                    if attempt.recv().is_ok() {
+                        thread::sleep(hold);
+                    }
+                }
             }
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)
@@ -112,6 +119,7 @@ fn commit_beside_a_reader(
                     held.recv_timeout(STUCK)
                         .expect("the reader holds the target");
                     attempted.set(Some(Instant::now()));
+                    let _ = attempting.send(());
                 }
                 if is_replace_of(event, Phase::After, &target) {
                     let _ = let_go.send(());
@@ -301,8 +309,17 @@ fn mcp19_criterion_3_a_scan_waits_behind_this_writers_commit() {
     let (observed, observing) = channel();
     thread::spawn(move || observed.send(observer.scan_tree().map(|scan| scan.generation)));
     let watcher = writer.clone();
+    let (started, starting) = channel::<()>();
     let (scanned, scanning) = channel();
-    thread::spawn(move || scanned.send(watcher.scan_tree().map(|scan| scan.generation)));
+    thread::spawn(move || {
+        started.send(()).unwrap();
+        scanned.send(watcher.scan_tree().map(|scan| scan.generation))
+    });
+    // The scan has started before the commit can go on: what follows is
+    // its answer during the commit, or its wait.
+    starting
+        .recv_timeout(STUCK)
+        .expect("the writer's scan starts");
 
     let other = observing
         .recv_timeout(STUCK)
