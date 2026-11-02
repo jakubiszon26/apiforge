@@ -315,8 +315,8 @@ work-in-progress limit of four pull requests within 60 review minutes
 ([process](../process/README.md#limits-that-keep-review-possible)), which
 the owner allows UX-1 to exceed except for `L` tickets (an `L` is never
 scheduled; it is split) — so the batches below are the order, not a gate,
-and the three MCP pull requests still open (#203 accepted and merged on
-2026-11-02, #204, #206) do not hold wave 1 back; no two tickets on the same
+and the two MCP pull requests still open (#204, #206; #203 was merged on
+2026-11-02) do not hold wave 1 back; no two tickets on the same
 screen region in flight at once (header, Run results panel, editor gutter,
 board camera, Explorer, a dialog); the `after` column sequences them.
 Minutes are owner review minutes.
@@ -621,12 +621,14 @@ recommendation (1 and 17); one was added from real work.
 
 The component mock-up (`mock/comp-00` at `5ea3b9c`, captures under
 `docs/qa/2026-11-02/COMP-00/`) was decided by the owner in a quiz on #239
-and approved as a whole. `docs/tickets/COMP-00.md` records them in the first
+and approved as a whole. Two numberings exist: the quiz's questions Q1–Q7
+below, and the mock-up sheet's follow-ups M2 and M3 under its question 1
+(storage of option A's card or B's chips), which option C made moot. `docs/tickets/COMP-00.md` records them in the first
 implementation pull request (UX-31).
 
 | Q | Answer | Effect |
 | --- | --- | --- |
-| 1 | **C**, an INPUTS strip | Under the board's header row: pills and *+ Add input*, no wires; selecting a pill rings the steps that read it; nothing is stored, the project format is unchanged. Questions 2 and 3 of the mock-up (storing a card or chips) do not apply → UX-31 (#248) |
+| 1 | **C**, an INPUTS strip | Under the board's header row: pills and *+ Add input*, no wires; selecting a pill rings the steps that read it; nothing is stored, the project format is unchanged. The mock-up sheet's own follow-ups M2 and M3 (where to store A's card or B's chips) do not apply; they are not the quiz's Q2 and Q3 below → UX-31 (#248) |
 | 2 | **A** | *+ Add input* opens a *New input* form in the Inspector → UX-32 (#249) |
 | 3 | as captured + live edits | Input editing in the Inspector as captured; each change shows on the board as typed; an invalid name stays in the field with an inline error and the code keeps the last valid name (#172 part 2) → UX-32 |
 | 4 | a *Component settings* button | In the board header; the owner's choice, differing from the recommendation; not rendered, approved without a second round and judged on the implementation's QA captures → UX-33 (#250) |

@@ -293,7 +293,7 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
 | [#146](https://github.com/jakubiszon26/apiforge/issues/146) | UX-06 Shared left sidebar; the Explorer available in Split; estimated on WS-00 | M · 30 min · `visible UI`, `default` |
 
 Wave 1 is #98–#102, #214, #215, #208; wave 2 runs from COMP-00 to UX-20;
-wave 3 from UX-21 to UX-34; wave 4 holds the three remaining mock-ups,
+wave 3 holds UX-21..UX-29, UX-07, UX-33 and UX-34; wave 4 holds the three remaining mock-ups,
 MCP-20, UX-30 and UX-06. The tickets a mock-up produces join this table
 with the estimate taken on the mock-up.
 
