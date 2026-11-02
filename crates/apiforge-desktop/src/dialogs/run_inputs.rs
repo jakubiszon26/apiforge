@@ -116,7 +116,7 @@ impl RunInputsDialog {
                             .find(|contract| &contract.id == id)
                             .map_or_else(|| id.clone(), |contract| contract.name.clone())
                     }),
-                    optional: port.required == Some(false) && port.default().is_none(),
+                    optional: !port.is_required_input() && port.default().is_none(),
                     source,
                     text: value
                         .map(|value| text(port.value_type, value))

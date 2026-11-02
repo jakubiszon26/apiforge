@@ -800,3 +800,62 @@ fn extraction_uses_the_nested_slot_type_instead_of_the_outer_result() {
     };
     crate::validate_project(&project).unwrap();
 }
+
+/// KTLO-32: editing a component keeps a public argument declared neither
+/// required nor optional, and without a default, required — the draft's
+/// *Required* box starts ticked, so saving does not make it optional — while
+/// `@optional` and a default keep their reading.
+#[test]
+fn an_undeclared_public_argument_stays_required_when_the_component_is_edited() {
+    let graph = Graph {
+        nodes: vec![request("one", &[("id", Binding::parameter("recordId"))])],
+        edges: vec![],
+        proxies: Vec::new(),
+    };
+    let defaulted = Port {
+        default_value: OptionalJson::Present(json!(1)),
+        ..Port::new("page", ValueType::Number)
+    };
+    let initial = with_outputs(
+        Component {
+            inputs: vec![
+                Port::new("recordId", ValueType::Any),
+                Port::new("note", ValueType::String),
+                Port::new("extra", ValueType::String).required(false),
+                defaulted,
+            ],
+            ..component("reusable", 1, graph)
+        },
+        vec![output(
+            "record",
+            ValueType::Object,
+            Binding::reference("one", "body", ""),
+        )],
+    );
+    let graph = initial.graph.clone();
+    let ids = graph.nodes.iter().map(|n| n.id.as_str()).collect();
+    let p = project(graph.clone(), vec![initial.clone()]);
+    let d = draft(&graph, &ids, &p, Some(&initial));
+    let required = |name: &str| {
+        d.inputs
+            .iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| panic!("a row for {name}"))
+            .required
+    };
+    assert!(required("recordId"), "a used argument");
+    assert!(required("note"), "an argument kept without a use");
+    assert!(!required("extra"));
+    assert!(!required("page"));
+    let result = materialize_component(&graph, &ids, &d, Some(&initial)).unwrap();
+    let saved = |name: &str| {
+        result
+            .inputs
+            .iter()
+            .find(|port| port.name == name)
+            .unwrap()
+            .is_required_input()
+    };
+    assert!(saved("recordId") && saved("note"));
+    assert!(!saved("extra") && !saved("page"));
+}

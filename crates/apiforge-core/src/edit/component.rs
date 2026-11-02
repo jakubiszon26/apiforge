@@ -267,10 +267,14 @@ pub fn initialize_inputs(
                         .and_then(|public| public.exposed)
                         .or(port.exposed)
                         .unwrap_or(true),
-                    required: public
-                        .and_then(|public| public.required)
-                        .or(leaf_port.required)
-                        .unwrap_or(true),
+                    // A public argument keeps its declaration; one declared
+                    // neither way without a default is required (KTLO-32).
+                    required: match public {
+                        Some(public) if public.required.is_some() || public.default().is_none() => {
+                            public.is_required_input()
+                        }
+                        _ => leaf_port.required.unwrap_or(true),
+                    },
                     // An argument takes the whole parameter; each use keeps its field.
                     original: match original {
                         Some(Binding::Parameter { name, .. }) => Some(Binding::parameter(name)),
@@ -305,7 +309,7 @@ pub fn initialize_inputs(
             value_type: port.value_type,
             contract_id: port.contract_id.clone(),
             exposed: port.exposed.unwrap_or(true),
-            required: port.required.unwrap_or(false),
+            required: port.is_required_input(),
             original: Some(Binding::parameter(port.name.clone())),
             targets: vec![],
             default_value: port.default().cloned(),

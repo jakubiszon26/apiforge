@@ -8,7 +8,8 @@
 - State: Analysis approved — the owner's decision of 2026-10-28 (quiz on
   #62, recorded on #112): an input with no default and no `required` flag
   is required everywhere; this file is the analysis it asked for.
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Claude Opus 5.5 (taken
+  from `ready:sol` on 2026-11-02)
 - Found in the review of #109; charged to the sprint's UX line.
 
 ## Goal
@@ -105,3 +106,19 @@ ports are untouched by construction (criterion 1).
   `crates/apiforge-desktop/src/dialogs/run_inputs.rs`,
   `crates/apiforge-mcp/src/tools.rs`, the tests named above,
   `docs/decisions/0005-scenario-language.md`.
+
+## Implementation notes (Claude Opus 5.5, 2026-11-02)
+
+- Criterion 1 reads "true unless `required == Some(false)`" for an input
+  without a default, which is the case the decision covers.
+  `is_required_input()` returns `required.unwrap_or(default is none)`: an
+  undeclared input *with* a default is not marked required, so its row on a
+  call stays *Optional* as today (the ticket's "unchanged: inputs with a
+  default"); the runner gives it its default either way. The dialog and the
+  MCP tool keep their `default().is_none()` condition, so neither changes.
+- *Edit component* (`edit/component.rs`, `initialize_inputs`) read an
+  undeclared public argument as not required and saved `required: false`,
+  which under the new rule would have turned a required input optional on
+  save. It now starts the *Required* box from `is_required_input()`;
+  regression test
+  `an_undeclared_public_argument_stays_required_when_the_component_is_edited`.

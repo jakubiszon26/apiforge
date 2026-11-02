@@ -118,13 +118,19 @@ impl Port {
         self
     }
 
+    /// Whether a value must be bound, as a built-in port declares it: only an
+    /// explicit `required(true)`. Component inputs are read by
+    /// [`Port::is_required_input`] instead, and a call's ports carry its result.
     pub fn is_required(&self) -> bool {
         self.required.unwrap_or(false)
     }
 
-    /// KTLO-32 acceptance stub: today's reading, replaced by the implementation.
+    /// Whether a declared component input is required (KTLO-32, the owner's
+    /// decision on #62): `@required(true)` is, `@optional`/`@required(false)`
+    /// is not, and an input with neither is unless it has a default, which a
+    /// caller that leaves it out receives instead.
     pub fn is_required_input(&self) -> bool {
-        self.is_required()
+        self.required.unwrap_or(self.default().is_none())
     }
 
     pub fn display_name(&self) -> &str {
@@ -227,8 +233,19 @@ pub fn input_ports(node: &Node, project: &Project) -> Vec<Port> {
             port.exposed = Some(true);
             vec![port]
         }
+        // A call reads the component's inputs as declared (KTLO-32), so the
+        // engine, the board, the inspector and Extract component agree.
         NodeKind::Component => component_definition(project, node)
-            .map(|component| component.inputs.clone())
+            .map(|component| {
+                component
+                    .inputs
+                    .iter()
+                    .map(|input| Port {
+                        required: Some(input.is_required_input()),
+                        ..input.clone()
+                    })
+                    .collect()
+            })
             .unwrap_or_default(),
         NodeKind::Request => {
             let mut ports = vec![

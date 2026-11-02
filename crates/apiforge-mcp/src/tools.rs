@@ -1241,7 +1241,7 @@ fn component_inputs(
                 }
                 None => invalid.push(&port.name),
             },
-            None if port.default().is_none() && port.required != Some(false) => {
+            None if port.default().is_none() && port.is_required_input() => {
                 missing.push(&port.name);
             }
             None => {}
@@ -1257,7 +1257,7 @@ fn component_inputs(
                 "name": port.name,
                 "type": port.value_type.as_str(),
                 "has_default": port.default().is_some(),
-                "optional": port.required == Some(false) && port.default().is_none(),
+                "optional": !port.is_required_input() && port.default().is_none(),
             })
         })
         .collect();
