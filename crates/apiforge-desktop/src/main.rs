@@ -2,6 +2,14 @@
 //!
 //! Opening a document never executes a request.
 
+// REL-04: on Windows a release build is a windowed program, so a start from
+// Explorer opens no console window; `windows_console` says where its output
+// goes. Debug builds and tests keep their console.
+#![cfg_attr(
+    all(windows, not(debug_assertions), not(test)),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod board_edit;
 mod buffers;
@@ -217,6 +225,7 @@ const HELP: &str = "API Forge
 Opening a document never executes requests.";
 
 fn main() -> ExitCode {
+    windows_console::prepare();
     let arguments = match arguments(env::args_os().skip(1)) {
         Ok(arguments) => arguments,
         Err(message) => {

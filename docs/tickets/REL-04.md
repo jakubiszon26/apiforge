@@ -298,3 +298,30 @@ and the module is `#[cfg(windows)]`.
   unit tests of 4; the integration test of 5) → implementation → QA report
   with the `windows-icon` capture and the conhost assertion quoted → pull
   request ready.
+
+## Implementation notes
+
+The implementing agent's decisions, made during implementation:
+
+- **Unsafe code.** `AttachConsole` and `SetStdHandle` are foreign calls, and
+  the workspace forbids `unsafe` code (`[workspace.lints.rust]`), which no
+  attribute can lift. `apiforge-desktop` therefore declares its own lints,
+  equal to the workspace's except `unsafe_code = "deny"`, and
+  `src/windows_console.rs` allows it in one `#[cfg(windows)]` module of two
+  calls. `test_release.py` (`UnsafeScope`) fails if another file of the crate
+  allows unsafe code or the crate's lints drift from the workspace's. Nothing
+  changes for the person using the application; decision 2 = A cannot be
+  built without it.
+- **Which handles count as given.** `prepare()` leaves the output alone when
+  the parent gave either standard output or standard error, not only standard
+  error: a parent that redirected one of them is handling the output.
+- **The icon step's window** is started without redirection, as criterion 2
+  requires, so its standard error cannot be sent to a file as criterion 6
+  asks of the other probes. It attaches to the runner's console or, with
+  none, writes the log, which the step prints; its failures are still caught
+  by the exit code and the window handle.
+- **The log step** runs when the folder project step succeeded, even after a
+  failed window step, so that one run reports criteria 1, 2 and 4 together.
+  It reads `--check`'s exit code by creating the process suspended
+  (`Win32_ProcessStartup.CreateFlags = 4`) and resuming it once its handle is
+  held.

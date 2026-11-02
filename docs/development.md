@@ -50,6 +50,23 @@ without `--folder`, because the workspace window has no modes. `--size WxH`
 sets the window's logical size for either window (default 1600x1000, at least
 960x540); the PNG is that size times the display scale.
 
+On Windows the release `apiforge-desktop.exe` is a windowed program
+([REL-04](tickets/REL-04.md)): started from Explorer, the Start menu or the
+release ZIP, it opens no console window. Started from a terminal, it attaches
+to the terminal's console, so `--version`, `--help`, `--check` and error
+messages print there as before; but `cmd` does not wait for a windowed
+program, so its prompt may come back before the output, and `%ERRORLEVEL%` is
+set only under `start /wait apiforge-desktop.exe …`. PowerShell waits whenever
+it reads the output (`$out = & apiforge-desktop.exe --check FILE`), and output
+redirected to a file or a pipe arrives as from any program. With no console at
+all, what it would have printed (the control channel's diagnostics, an error
+that ends the start, the text of a crash) goes to
+`%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects.
+Each start appends a line `--- apiforge-desktop <version> <date time> ---`
+first, and a log over 1 MiB at start is renamed to `apiforge-desktop.log.1`. A
+crash of the window then also shows a dialog that names the log. Debug builds
+(`cargo run`) and `apiforge.exe` remain console programs.
+
 ### Demo API
 
 The demo projects send requests to `http://127.0.0.1:4318/demo`:

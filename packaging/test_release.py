@@ -747,7 +747,9 @@ class ConsoleSubsystem(unittest.TestCase):
         self.release = read(".github/workflows/release.yml")
 
     def test_the_release_desktop_build_is_a_windowed_program_and_nothing_else_is(self):
-        main = read("crates/apiforge-desktop/src/main.rs")
+        # rustfmt wraps the attribute over four lines; compared on one.
+        main = re.sub(r"\s+", " ", read("crates/apiforge-desktop/src/main.rs"))
+        main = main.replace("( ", "(").replace(" )", ")")
         self.assertEqual(main.count(WINDOWS_SUBSYSTEM), 1)
         self.assertEqual(main.count("windows_subsystem"), 1)
         for path in ["crates/apiforge-cli/src/main.rs", "crates/apiforge-cli/src/lib.rs"]:
@@ -945,6 +947,36 @@ class NoNewCrate(unittest.TestCase):
             "apiforge.exe",
         ]:
             self.assertIn(text, " ".join(paragraph.split()), text)
+
+
+class UnsafeScope(unittest.TestCase):
+    """REL-04's two Windows calls are the only unsafe code: the desktop crate
+    denies it instead of forbidding it, and allows it in one module only."""
+
+    def test_the_desktop_lints_are_the_workspaces_with_unsafe_code_denied(self):
+        root = read("Cargo.toml")
+        manifest = read("crates/apiforge-desktop/Cargo.toml")
+        self.assertIn('unsafe_code = "forbid"', toml_section(root, "[workspace.lints.rust]"))
+        self.assertEqual(toml_section(manifest, "[lints.rust]").strip(), 'unsafe_code = "deny"')
+        self.assertEqual(
+            toml_section(manifest, "[lints.clippy]").strip(),
+            toml_section(root, "[workspace.lints.clippy]").strip(),
+        )
+
+    def test_only_the_windows_native_calls_allow_unsafe_code(self):
+        allowed = []
+        for directory, _, names in os.walk(os.path.join(ROOT, "crates", "apiforge-desktop")):
+            for name in names:
+                if name.endswith(".rs"):
+                    path = os.path.join(directory, name)
+                    with open(path, encoding="utf-8") as file:
+                        if "allow(unsafe_code)" in file.read():
+                            allowed.append(os.path.relpath(path, ROOT).replace(os.sep, "/"))
+        self.assertEqual(allowed, ["crates/apiforge-desktop/src/windows_console.rs"])
+        source = read("crates/apiforge-desktop/src/windows_console.rs")
+        self.assertEqual(source.count("allow(unsafe_code)"), 1)
+        self.assertRegex(source, r"#\[cfg\(windows\)\]\nmod native \{\n    #!\[allow\(unsafe_code\)\]")
+        self.assertEqual(source.count("unsafe {"), 2)
 
 
 if __name__ == "__main__":

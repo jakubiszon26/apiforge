@@ -274,6 +274,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 
