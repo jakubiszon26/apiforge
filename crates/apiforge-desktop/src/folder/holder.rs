@@ -247,7 +247,7 @@ impl FolderApp {
                     status.is_none().then(|| self.last_change.clone()).flatten(),
                     status,
                     self.handover
-                        .is_linked()
+                        .offers_take_back()
                         .then_some(!self.handover.taking_back),
                 )
             }
@@ -433,6 +433,15 @@ pub(super) fn agent_name(client: Option<&str>) -> String {
     }
 }
 
+/// *apiforge run --live*, or *The apiforge command* for one that gave no
+/// name (MCP-15).
+pub(super) fn command_name(client: Option<&str>) -> String {
+    match client.map(shown_client) {
+        Some(command) => format!("apiforge {command}"),
+        None => "The apiforge command".to_owned(),
+    }
+}
+
 fn shown_client(client: &str) -> String {
     client
         .chars()
@@ -449,8 +458,7 @@ pub(super) fn holder_text(holder: &Holder, doing: &str) -> String {
         (None, _) => return format!("Another process · {doing}"),
         (Some(HolderRole::Window), _) => "Another API Forge window".to_owned(),
         (Some(HolderRole::Agent), client) => agent_name(client.as_deref()),
-        (Some(HolderRole::Command), Some(command)) => format!("apiforge {command}"),
-        (Some(HolderRole::Command), None) => "The apiforge command".to_owned(),
+        (Some(HolderRole::Command), client) => command_name(client.as_deref()),
     };
     match holder
         .since()

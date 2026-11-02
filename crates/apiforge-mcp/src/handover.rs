@@ -38,7 +38,9 @@ use tokio::{runtime::Handle, task::JoinHandle};
 /// How long a write waits for the window's answer before `handover_pending`.
 const ANSWER: Duration = Duration::from_secs(30);
 /// How long one message may take to reach a window before it is dropped.
-const SEND: Duration = Duration::from_secs(2);
+pub(crate) const SEND: Duration = Duration::from_secs(2);
+/// The prefix of the server's channel log lines.
+const SERVER: &str = "apiforge mcp";
 /// How long a live run waits for a window's consent; a window says it as
 /// soon as the connection opens, and one that does not is taken as off.
 const CONSENT: Duration = Duration::from_secs(2);
@@ -173,6 +175,7 @@ impl Hub {
         let request = Message::Request {
             client,
             pid: std::process::id(),
+            role: None,
         };
         self.handle.block_on(async move {
             let asked = tokio::time::timeout(ANSWER, async {
@@ -190,22 +193,9 @@ impl Hub {
                         return Ok(Answer::LiveDisabled(Permission::Window { live: false }));
                     }
                 }
-                connection.writer.send(&request).await?;
-                loop {
-                    match connection.reader.next().await? {
-                        None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
-                        Some(Received::Message(Message::Granted)) => {
-                            return Ok(Answer::Granted(connection, consent));
-                        }
-                        Some(Received::Message(Message::Permission { live })) => {
-                            consent = Some(live);
-                        }
-                        Some(Received::Message(Message::Refused { reason })) => {
-                            return Ok(Answer::Refused(reason));
-                        }
-                        Some(Received::Message(message)) => ignored(kind(&message)),
-                        Some(Received::Ignored(why)) => ignored(why),
-                    }
+                match request_project(&mut connection, &request, &mut consent, SERVER).await? {
+                    Reply::Granted => Ok(Answer::Granted(connection, consent)),
+                    Reply::Refused(reason) => Ok::<_, io::Error>(Answer::Refused(reason)),
                 }
             })
             .await;
@@ -463,6 +453,42 @@ async fn read(
     }
 }
 
+/// How the window answered a request for the project.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reply {
+    /// The window let the project go; the connection stays to observe.
+    Granted,
+    /// The window keeps the project, and says why.
+    Refused(String),
+}
+
+/// Sends `request` on `connection` and reads until the window answers it,
+/// however long that takes: the caller bounds the wait, the server to
+/// thirty seconds, a command not at all (MCP-15). The consent a window says
+/// meanwhile is kept in `consent`; anything else is logged on stderr as
+/// ignored, prefixed by `program`. The end of the connection before an
+/// answer is an error.
+pub async fn request_project(
+    connection: &mut Connection,
+    request: &Message,
+    consent: &mut Option<bool>,
+    program: &str,
+) -> io::Result<Reply> {
+    connection.writer.send(request).await?;
+    loop {
+        match connection.reader.next().await? {
+            None => return Err(io::Error::from(io::ErrorKind::UnexpectedEof)),
+            Some(Received::Message(Message::Granted)) => return Ok(Reply::Granted),
+            Some(Received::Message(Message::Permission { live })) => *consent = Some(live),
+            Some(Received::Message(Message::Refused { reason })) => {
+                return Ok(Reply::Refused(reason));
+            }
+            Some(Received::Message(message)) => ignored_by(program, kind(&message)),
+            Some(Received::Ignored(why)) => ignored_by(program, why),
+        }
+    }
+}
+
 /// The consent a window says when a connection opens; `None` when it says
 /// something else first, as a window older than MCP-09 does.
 async fn consent_of(connection: &mut Connection) -> io::Result<Option<bool>> {
@@ -480,10 +506,16 @@ async fn consent_of(connection: &mut Connection) -> io::Result<Option<bool>> {
 }
 
 fn ignored(why: &str) {
-    eprintln!("apiforge mcp: channel: ignored {why}");
+    ignored_by(SERVER, why);
 }
 
-fn kind(message: &Message) -> &'static str {
+/// Logs a line that is not acted on, by kind, never quoted.
+pub(crate) fn ignored_by(program: &str, why: &str) {
+    eprintln!("{program}: channel: ignored {why}");
+}
+
+/// What a message is, for a log line that does not quote it.
+pub(crate) fn kind(message: &Message) -> &'static str {
     match message {
         Message::Request { .. } => "a request",
         Message::Granted => "a granted message",

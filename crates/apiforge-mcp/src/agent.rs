@@ -41,7 +41,7 @@ use std::{
 const DIAGRAM_PATH: &str = ".apiforge/diagram.json";
 /// How long the server keeps trying for a lock the window has just granted:
 /// a check of the window's may still hold it for a moment.
-const GRANTED_LOCK: Duration = Duration::from_secs(2);
+pub(crate) const GRANTED_LOCK: Duration = Duration::from_secs(2);
 /// How long a write after *Take back* lets the window take the free lock
 /// before it asks the window for the project again.
 const YIELD: Duration = Duration::from_secs(3);
@@ -1075,9 +1075,7 @@ fn description(holder: &Holder) -> serde_json::Value {
 /// malformed endpoint or missing owner is the ordinary refusal, with no
 /// Windows/WSL hint.
 fn not_reached(window: &Holder, endpoint: &str, root: &Path) -> ToolError {
-    let tried = apiforge_channel::Endpoint::parse(endpoint).is_some()
-        && (cfg!(not(unix)) || window.owner_uid().is_some());
-    if tried {
+    if could_try(window, endpoint) {
         unreachable(window, root)
     } else {
         held(window)
@@ -1087,26 +1085,66 @@ fn not_reached(window: &Holder, endpoint: &str, root: &Path) -> ToolError {
 /// A failed connection is evidence for a possible same-side mismatch only
 /// on a Linux Windows-drive mount, never proof of a Windows writer.
 fn unreachable(window: &Holder, root: &Path) -> ToolError {
-    let error = held(window);
+    let mut error = held(window);
+    if on_windows_drive(root) {
+        error.message.push_str(". This project is on a Windows drive; if the window and MCP run on different sides of Windows/WSL, run both on the same side");
+    }
+    error
+}
+
+/// A Linux path under `/mnt/<single ASCII letter>/…`, where WSL mounts a
+/// Windows drive. Elsewhere, and on other systems, never.
+pub(crate) fn on_windows_drive(root: &Path) -> bool {
     #[cfg(target_os = "linux")]
     {
         let mut parts = root.components();
-        let mounted_drive = parts.next() == Some(std::path::Component::RootDir)
+        parts.next() == Some(std::path::Component::RootDir)
             && parts.next().is_some_and(|part| part.as_os_str() == "mnt")
             && parts.next().is_some_and(|part| {
                 let bytes = part.as_os_str().as_encoded_bytes();
                 bytes.len() == 1 && bytes[0].is_ascii_alphabetic()
             })
-            && parts.next().is_some();
-        if mounted_drive {
-            let mut error = error;
-            error.message.push_str(". This project is on a Windows drive; if the window and MCP run on different sides of Windows/WSL, run both on the same side");
-            return error;
-        }
+            && parts.next().is_some()
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = root;
-    error
+    {
+        let _ = root;
+        false
+    }
+}
+
+/// Whether a connection to the window's `endpoint` was actually attempted:
+/// the name is an endpoint's, and on Unix the holder file's owner is known,
+/// so discovery could run.
+pub(crate) fn could_try(window: &Holder, endpoint: &str) -> bool {
+    apiforge_channel::Endpoint::parse(endpoint).is_some()
+        && (cfg!(not(unix)) || window.owner_uid().is_some())
+}
+
+/// *Claude Code via apiforge mcp*, or *An agent via apiforge mcp*: an
+/// agent session in a refusal, as the server and the command word it.
+pub(crate) fn agent_name(client: Option<&str>) -> String {
+    format!("{} via apiforge mcp", shown(client, "An agent"))
+}
+
+/// *apiforge apply*: a command in a refusal.
+pub(crate) fn command_name(client: Option<&str>) -> String {
+    format!("apiforge {}", shown(client, "command"))
+}
+
+/// A client names itself in the holder file; a refusal shows the name on
+/// one line, without control characters, and cut to a bounded length, as
+/// the window's bar does.
+fn shown(client: Option<&str>, otherwise: &str) -> String {
+    const MAX_CLIENT_CHARS: usize = 40;
+    match client {
+        Some(client) => client
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(MAX_CLIENT_CHARS)
+            .collect(),
+        None => otherwise.to_owned(),
+    }
 }
 
 /// The refusal of a write while another process holds the project: who and
@@ -1123,15 +1161,15 @@ fn held(holder: &Holder) -> ToolError {
         (Some(HolderRole::Command), client) => (
             ErrorCode::HeldByOther,
             format!(
-                "apiforge {} has held this project since {since}; nothing was written. Write again when it has finished",
-                client.unwrap_or("command")
+                "{} has held this project since {since}; nothing was written. Write again when it has finished",
+                command_name(client)
             ),
         ),
         (Some(HolderRole::Agent), client) => (
             ErrorCode::HeldByOther,
             format!(
-                "{} via apiforge mcp has held this project since {since}; nothing was written. Write again when it has finished editing",
-                client.unwrap_or("An agent")
+                "{} has held this project since {since}; nothing was written. Write again when it has finished editing",
+                agent_name(client)
             ),
         ),
         (None, _) => (
