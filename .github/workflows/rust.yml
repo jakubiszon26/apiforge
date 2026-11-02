@@ -858,8 +858,8 @@ jobs:
               & taskkill.exe /PID $process.Id /T /F | Out-Null
             }
             $null = $process.WaitForExit(15000)
-            # Without a console of its own the window attaches to the runner's
-            # or, with none, writes to its log; either way, not to the job log.
+            # Started without handles, the window writes what it prints to its
+            # log, not to the job log.
             $log = Join-Path $data 'logs/apiforge-desktop.log'
             if (Test-Path $log -PathType Leaf) {
               Write-Host "${log}:"
@@ -875,7 +875,8 @@ jobs:
       # Explorer, the release desktop binary writes its output to the log
       # beside the managed projects: one block per start, a log over 1 MiB
       # renamed to .log.1 first. Output that cmd redirects still reaches its
-      # file. The data directory is the one the folder project step owned and
+      # file; started by cmd without a redirection, the program attaches to
+      # no console (decision 2 = B) and writes the line to the log. The data directory is the one the folder project step owned and
       # reset, so no real log is touched; the step needs only that and the
       # release binary, so it also runs when the window step above failed.
       - name: Write the desktop log without a console (Windows)
@@ -1001,6 +1002,26 @@ jobs:
           Write-Host "cmd /c `"apiforge-desktop.exe --version > file`" wrote '$line'"
           if ($line -ne "apiforge-desktop $version") {
             throw "cmd /c with a redirection wrote '$line', expected 'apiforge-desktop $version'."
+          }
+
+          # Decision 2 = B: without a redirection the line goes to the log as a
+          # new block, not to cmd's console. cmd runs in a console of its own,
+          # as in a terminal, not on this step's pipes.
+          Start-Process -FilePath cmd.exe -ArgumentList @('/c', "$program --version") -Wait
+          $deadline = (Get-Date).AddSeconds(15)
+          $lines = @()
+          while ((Get-Date) -lt $deadline) {
+            $lines = @(Get-Content $log)
+            if ($lines.Count -gt 0 -and $lines[-1] -eq "apiforge-desktop $version") {
+              break
+            }
+            Start-Sleep -Milliseconds 250
+          }
+          Write-Host "cmd /c `"apiforge-desktop.exe --version`": $log"
+          $lines | ForEach-Object { Write-Host "  $_" }
+          $start = "^--- apiforge-desktop $([regex]::Escape($version)) .+ ---$"
+          if ($lines.Count -lt 2 -or $lines[-1] -ne "apiforge-desktop $version" -or $lines[-2] -notmatch $start) {
+            throw "cmd /c without a redirection did not write 'apiforge-desktop $version' to the log in a new block."
           }
 
       - name: Upload the application icon (Windows)

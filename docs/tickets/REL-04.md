@@ -2,8 +2,9 @@
 
 - Size: S · Owner review: 15 min · Risk: `visible UI` (Windows only: the
   console window behind the app goes; a crash shows a message box)
-- State: Analysis approved (issue #205) · decisions 1 = A and 2 = A, the
-  owner's decisions of 2026-11-02 (quiz on this analysis, recorded on #205)
+- State: Analysis approved (issue #205) · decisions 1 = A and 2 = B, the
+  owner's decisions of 2026-11-02 (quiz on this analysis, then on PR #206,
+  recorded on #205)
   · before `v0.1.0` (the owner, 2026-11-02, on the REL-02 acceptance quiz of
   #199)
 - Analysis model: Fable · Implementation model: Claude Opus 5.5
@@ -34,7 +35,8 @@ command line stays a console program.
   What happened is written to %APPDATA%\apiforge\logs\apiforge-desktop.log.*
   with one *OK* button, and the process ends as it does today. Until now
   the window simply vanished.
-- Changed (decision 2 = A): from a terminal, `apiforge-desktop.exe
+- Changed (decision 2 = A, superseded by B on 2026-11-02: see *Decided*):
+  from a terminal, `apiforge-desktop.exe
   --version`, `--help`, `--check FILE` and error messages still print there.
   What changes is what Windows does with every windowed program: `cmd` does
   not wait for it, so its prompt may come back before the line, and
@@ -56,6 +58,11 @@ system's standard error dialog (`rfd::MessageDialog`, level *Error*, title
 the owner approves or rewords it with decision 1.
 
 ## How output travels today, and after
+
+*Written for decision 2 = A. Under B, which the owner chose on 2026-11-02,
+the program attaches to no console and calls Windows only through the
+standard library: see
+[Implementation notes](#implementation-notes).*
 
 Today `apiforge-desktop.exe` is a console-subsystem program. Windows attaches
 it to the console of the shell that started it, or creates one when there is
@@ -129,10 +136,14 @@ The owner, 2026-11-02, on #205:
    thread shows the standard error dialog *API Forge stopped unexpectedly.
    What happened is written to <path>.* with *OK*. A panic on a worker
    thread is logged only.
-2. **A.** A start from a terminal attaches to the parent console
-   (`AttachConsole(ATTACH_PARENT_PROCESS)`), so `--version`, `--help`,
-   `--check` and errors print there; the guide documents that `cmd` does not
-   wait for a windowed program.
+2. **B** (first A, changed on 2026-11-02 on PR #206). The owner ruled out
+   `unsafe` code, which attaching to a console needs: the workspace keeps
+   `unsafe_code = "forbid"` for every crate. The desktop app attaches to no
+   console. From a terminal it prints nothing unless its output is
+   redirected; without given handles, the output goes to the log, as after
+   a start from Explorer. Every line the program prints goes through one
+   function, which makes that choice. The guide documents it and `cmd`'s
+   treatment of windowed programs.
 
 ## Acceptance criteria
 
@@ -199,19 +210,18 @@ ZIP*. The workflow steps are themselves checked by tests in
    every step uses, is independent of the subsystem and stays. Test:
    `packaging/test_release.py` reads both workflows and checks each of these
    calls.
-7. **Terminal start (decision 2 = A).** `cmd /c "apiforge-desktop.exe
+7. **Terminal start (decision 2 = B).** `cmd /c "apiforge-desktop.exe
    --version > out.txt"` on the Windows job writes `apiforge-desktop
-   <version>` to the file, and `$line = & apiforge-desktop.exe --version`
-   keeps working in the icon step and the ZIP smoke (criterion 3). The attach
-   itself — a bare `apiforge-desktop.exe --version` typed in cmd, whose
-   console no CI step can read — is a QA step on the owner's Windows machine
-   and is otherwise listed as not verified; with decision B the criterion is
-   that the same command writes the line to the log instead.
+   <version>` to the file, and the piped `& apiforge-desktop.exe --version |
+   Write-Output` keeps working in the icon step and the ZIP smoke (criterion
+   3). A start from `cmd` without a redirection prints nothing in the
+   terminal. Instead, the same command, run by a `cmd` in a console of its
+   own, writes the line to the log as a new block. The look of a terminal
+   that shows nothing is the owner's QA step.
 8. **Nothing else moves.** The verification commands of the development
-   guide pass; a Linux build fetches no new crate (`windows-sys` is a
-   `[target.'cfg(windows)'.dependencies]` entry at the version already in
-   `Cargo.lock`, so the lock gains no package and the third-party notices of
-   REL-03 need no change); `apiforge.exe` and `crates/apiforge-cli` are not
+   guide pass; no crate is added and `Cargo.lock` is unchanged (decision 2 =
+   B needs no `windows-sys`), and the crate keeps the workspace's
+   `unsafe_code = "forbid"`; `apiforge.exe` and `crates/apiforge-cli` are not
    touched; `docs/development.md` *Running* gains the paragraph of decision
    2 and names the log file. Test: `test_release.py` checks the paragraph as
    `IconDocs` checks REL-02's; the Linux job proves the absence of a new
@@ -237,6 +247,11 @@ unchanged; Linux compiles no new code because the attribute is `windows`-gated
 and the module is `#[cfg(windows)]`.
 
 ## Technical appendix
+
+*Written for decision 2 = A. Under B, which the owner chose on 2026-11-02,
+the program attaches to no console and calls Windows only through the
+standard library: see
+[Implementation notes](#implementation-notes).*
 
 - **Files.** `crates/apiforge-desktop/src/main.rs` (the attribute; a call
   to `windows_console::prepare()` as the first statement of `main`; the
@@ -301,25 +316,38 @@ and the module is `#[cfg(windows)]`.
 
 ## Implementation notes
 
-The implementing agent's decisions, made during implementation:
+The appendix above describes decision 2 = A: `AttachConsole`, `SetStdHandle`
+and `windows-sys`. A first implementation built it that way, with the crate's
+lints relaxed to allow two `unsafe` calls. The owner then ruled out unsafe
+code (decision 2 = B), and that implementation was removed. What stands,
+decided while implementing:
 
-- **Unsafe code.** `AttachConsole` and `SetStdHandle` are foreign calls, and
-  the workspace forbids `unsafe` code (`[workspace.lints.rust]`), which no
-  attribute can lift. `apiforge-desktop` therefore declares its own lints,
-  equal to the workspace's except `unsafe_code = "deny"`, and
-  `src/windows_console.rs` allows it in one `#[cfg(windows)]` module of two
-  calls. `test_release.py` (`UnsafeScope`) fails if another file of the crate
-  allows unsafe code or the crate's lints drift from the workspace's. Nothing
-  changes for the person using the application; decision 2 = A cannot be
-  built without it.
-- **Which handles count as given.** `prepare()` leaves the output alone when
-  the parent gave either standard output or standard error, not only standard
-  error: a parent that redirected one of them is handling the output.
+- **One function for every line.** `windows_console::write(stream, line)`
+  is called by the macros `outln!` and `errln!` of `main.rs`, which replace
+  the program's 13 `println!`/`eprintln!` in `main.rs` and 11 in
+  `folder/handover.rs`. A line goes to standard output or standard error
+  when the parent gave that stream. Otherwise, on Windows, it goes to the
+  log. `test_release.py` fails if the program prints any other way.
+- **The safe check.** "Given" is decided per stream, at each line, with the
+  standard library's safe `AsRawHandle` on `io::stdout()` or `io::stderr()`.
+  It is null, or `INVALID_HANDLE_VALUE`, when the parent passed no handle
+  (Explorer, the WMI host, a `cmd` without redirection). A handle that is
+  present but unusable cannot be told apart without a Windows call. Such a
+  handle is treated as given, and what is written to it is lost, as before
+  this ticket.
+- **The log opens at the first line that needs it**, so a start that prints
+  nothing leaves the file alone. The start line and the rotation happen at
+  that moment.
+- **The panic hook.** When standard error was given, the previous hook
+  prints the panic as before. Otherwise the hook appends `thread '<name>'
+  panicked at …` (and a backtrace when `RUST_BACKTRACE` asks for one) to
+  the log. On the window's thread, and only if the log could be opened, it
+  then shows the dialog of decision 1.
 - **The icon step's window** is started without redirection, as criterion 2
   requires, so its standard error cannot be sent to a file as criterion 6
-  asks of the other probes. It attaches to the runner's console or, with
-  none, writes the log, which the step prints; its failures are still caught
-  by the exit code and the window handle.
+  asks of the other probes. What it prints goes to the log, which the step
+  prints; its failures are still caught by the exit code and the window
+  handle.
 - **The log step** runs when the folder project step succeeded, even after a
   failed window step, so that one run reports criteria 1, 2 and 4 together.
   It reads `--check`'s exit code by creating the process suspended

@@ -34,19 +34,8 @@ inspection = ["eframe/inspection"]
 [target.'cfg(windows)'.build-dependencies]
 winresource.workspace = true
 
-# REL-04: AttachConsole and SetStdHandle in src/windows_console.rs; a Linux
-# build never fetches this.
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
-
-# The workspace's lints, except that unsafe code is denied rather than
-# forbidden, so that the one Windows module that needs it can allow it for
-# itself (src/windows_console.rs, REL-04). Keep in step with [workspace.lints].
-[lints.rust]
-unsafe_code = "deny"
-
-[lints.clippy]
-dbg_macro = "deny"
+[lints]
+workspace = true
 
 [dev-dependencies]
 apiforge-demo-api.workspace = true

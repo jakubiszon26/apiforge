@@ -1,32 +1,63 @@
-//! Where the program's output goes on Windows (REL-04, #205).
+//! Where the program's output goes (REL-04, #205).
 //!
-//! A release build on Windows is a windowed program: it has no console of its
-//! own. Standard output and standard error that the parent redirected (a pipe,
-//! a file, a variable) are used as they are. Otherwise the program attaches to
-//! the console of the terminal that started it, and when there is none (a
-//! start from Explorer, the Start menu or the release ZIP) it appends both to
-//! `apiforge-desktop.log` beside the managed projects. Every `eprintln!` and
-//! Rust's own panic message then land there unchanged, and a panic on the
-//! window's thread also shows a dialog that names the log. Anywhere else, and
-//! whenever any of this fails, nothing changes: the window starts regardless.
+//! On Windows a release build is a windowed program with no console of its
+//! own. Everything the program prints goes through [`write`]: to standard
+//! output or standard error when the parent gave the program that handle (a
+//! console of a debug build, a pipe, a file, a variable), and otherwise, on
+//! Windows, to `apiforge-desktop.log` beside the managed projects. The program
+//! never attaches to a console (decision 2 = B) and uses no `unsafe` code: the
+//! only question asked of Windows is the standard library's own
+//! `AsRawHandle`, which is null when the parent gave no handle. A panic is
+//! written to the same log, and a panic on the window's thread also shows a
+//! dialog that names the log. Anywhere else, and whenever the log cannot be
+//! opened, the program behaves as before: the window starts regardless.
 
+use std::{
+    fmt,
+    io::{self, Write},
+};
 #[cfg(any(windows, test))]
 use std::{
     fs,
-    io::{self, Write},
     path::{Path, PathBuf},
 };
 
-/// A log longer than this when the program starts is renamed to
-/// `apiforge-desktop.log.1` first, so there is never much more than twice it.
+/// A log longer than this when it is first opened is renamed to
+/// `apiforge-desktop.log.1`, so there is never much more than twice it.
 #[cfg(any(windows, test))]
 const LOG_LIMIT: u64 = 1024 * 1024;
 
-/// Gives the program somewhere to write before anything is written. The first
-/// statement of `main`.
+/// The stream a line belongs to when the parent gave one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stream {
+    Out,
+    Err,
+}
+
+/// Prints one line, as `println!` or `eprintln!` would, or appends it to the
+/// log when that stream has no handle. A failed write is ignored: there is
+/// nowhere left to report it.
+pub fn write(stream: Stream, line: fmt::Arguments<'_>) {
+    #[cfg(windows)]
+    if let Some(output) = OUTPUT.get()
+        && !(output.present)(stream)
+    {
+        output.append(line);
+        return;
+    }
+    let _ = match stream {
+        Stream::Out => writeln!(io::stdout().lock(), "{line}"),
+        Stream::Err => writeln!(io::stderr().lock(), "{line}"),
+    };
+}
+
+/// Sets up the log and the crash report on Windows before anything is
+/// printed; the first statement of `main`. Elsewhere it does nothing.
 pub fn prepare() {
     #[cfg(windows)]
-    native::prepare();
+    if let Some(data) = dirs::data_dir() {
+        install(log_path(&data), given, show_dialog);
+    }
 }
 
 /// `apiforge-desktop.log` in `logs/` of the application data directory, beside
@@ -79,24 +110,83 @@ fn open_log(path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
-/// Opens the log and makes it the program's standard output and error.
+/// Where lines without a handle go, set once by [`install`].
 #[cfg(windows)]
-pub fn log_to(path: &Path) -> io::Result<()> {
-    native::redirect(open_log(path)?)
+static OUTPUT: std::sync::OnceLock<Output> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+struct Output {
+    log: PathBuf,
+    /// Whether the parent gave the program this stream.
+    present: fn(Stream) -> bool,
+    /// Opened at the first line that needs it, so that a start which prints
+    /// nothing leaves the log alone; `None` when it cannot be opened.
+    file: std::sync::OnceLock<Option<std::sync::Mutex<fs::File>>>,
 }
 
-/// After the usual panic message, which goes wherever standard error goes, a
-/// panic on the thread that calls this (the window's) also calls `show` with
-/// the dialog's text. A panic on another thread is reported by the message
-/// alone: the window survives it and says so itself.
 #[cfg(windows)]
-pub fn report_crashes(log: PathBuf, show: impl Fn(&str) + Send + Sync + 'static) {
+impl Output {
+    /// Appends one line; false when the log cannot be opened.
+    fn append(&self, line: fmt::Arguments<'_>) -> bool {
+        let file = self
+            .file
+            .get_or_init(|| open_log(&self.log).ok().map(std::sync::Mutex::new));
+        let Some(file) = file else {
+            return false;
+        };
+        let mut file = file.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = writeln!(file, "{line}");
+        true
+    }
+}
+
+/// Whether the parent gave the program this stream: the standard library
+/// reports a stream it was not given as a null handle.
+#[cfg(windows)]
+fn given(stream: Stream) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    let handle = match stream {
+        Stream::Out => io::stdout().as_raw_handle(),
+        Stream::Err => io::stderr().as_raw_handle(),
+    };
+    // Null, or INVALID_HANDLE_VALUE, which is -1.
+    !handle.is_null() && handle as isize != -1
+}
+
+/// Sends lines without a handle to `log`, and reports panics there: after a
+/// panic's text is appended, a panic on the thread that calls this (the
+/// window's) also calls `show` with the dialog's text. A panic on another
+/// thread is reported by its text alone: the window survives it and says so
+/// itself. When the parent gave standard error, a panic is printed there as
+/// before and nothing is shown.
+#[cfg(windows)]
+pub fn install(
+    log: PathBuf,
+    present: fn(Stream) -> bool,
+    show: impl Fn(&str) + Send + Sync + 'static,
+) {
+    let output = OUTPUT.get_or_init(|| Output {
+        log,
+        present,
+        file: std::sync::OnceLock::new(),
+    });
     let window = std::thread::current().id();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        previous(info);
-        if std::thread::current().id() == window {
-            show(&dialog_text(&log));
+        if (output.present)(Stream::Err) {
+            previous(info);
+            return;
+        }
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>");
+        let backtrace = std::backtrace::Backtrace::capture();
+        let written = if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+            output.append(format_args!("thread '{name}' {info}\n{backtrace}"))
+        } else {
+            output.append(format_args!("thread '{name}' {info}"))
+        };
+        if written && thread.id() == window {
+            show(&dialog_text(&output.log));
         }
     }));
 }
@@ -111,64 +201,6 @@ fn show_dialog(text: &str) {
         .set_description(text)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
-}
-
-/// The two calls the standard library does not offer. The workspace forbids
-/// `unsafe` code; this crate denies it and allows it here only.
-#[cfg(windows)]
-mod native {
-    #![allow(unsafe_code)]
-
-    use std::{
-        fs, io,
-        os::windows::io::{AsRawHandle, IntoRawHandle, RawHandle},
-    };
-    use windows_sys::Win32::{
-        Foundation::INVALID_HANDLE_VALUE,
-        System::Console::{
-            ATTACH_PARENT_PROCESS, AttachConsole, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
-        },
-    };
-
-    pub(super) fn prepare() {
-        // The parent gave the program its output: a pipe, a file, a variable.
-        if present(io::stdout().as_raw_handle()) || present(io::stderr().as_raw_handle()) {
-            return;
-        }
-        // SAFETY: AttachConsole takes a process identifier by value and
-        // touches no memory of this program. On success Windows sets the
-        // standard handles to the console's, which the standard library reads
-        // on every write.
-        if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } != 0 {
-            return;
-        }
-        let Some(data) = dirs::data_dir() else {
-            return;
-        };
-        let log = super::log_path(&data);
-        if super::log_to(&log).is_ok() {
-            super::report_crashes(log, super::show_dialog);
-        }
-    }
-
-    fn present(handle: RawHandle) -> bool {
-        !handle.is_null() && handle != INVALID_HANDLE_VALUE
-    }
-
-    /// Makes `file` the standard output and error for the rest of the
-    /// process; its handle is never closed.
-    pub(super) fn redirect(file: fs::File) -> io::Result<()> {
-        let handle = file.into_raw_handle();
-        for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-            // SAFETY: `handle` is an open file handle that this program owns
-            // and never closes, so it stays valid for every later write
-            // through the standard handles.
-            if unsafe { SetStdHandle(which, handle) } == 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

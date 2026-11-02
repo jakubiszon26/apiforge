@@ -858,6 +858,12 @@ class DesktopLog(unittest.TestCase):
         self.assertIn('& cmd.exe /c "$program --version > $redirected"', self.log)
         self.assertIn('$line -ne "apiforge-desktop $version"', self.log)
 
+    def test_cmd_without_a_redirection_writes_the_version_to_the_log(self):
+        # Owner's decision of 2026-11-02 on #205: 2 = B, no console attached.
+        self.assertIn("Start-Process -FilePath cmd.exe -ArgumentList @('/c', \"$program --version\") -Wait", self.log)
+        self.assertIn('$lines[-1] -ne "apiforge-desktop $version"', self.log)
+        self.assertIn("$lines[-2] -notmatch $start", self.log)
+
 
 class OutputCapture(unittest.TestCase):
     """Criterion 6: CI reads a windowed program's output deterministically."""
@@ -933,22 +939,46 @@ class NoNewCrate(unittest.TestCase):
     """Criterion 8: windows-sys only for Windows, at a version the lock already
     holds; apiforge-cli is untouched; the guide says what changed."""
 
-    def test_windows_sys_is_a_windows_only_dependency_at_a_locked_version(self):
+    def test_no_new_crate_and_no_unsafe_code(self):
+        # Owner's decision of 2026-11-02 on #205: no unsafe code, so no
+        # windows-sys either; the lock keeps the three versions it held.
         root = read("Cargo.toml")
-        pinned = re.search(r'^windows-sys = \{ version = "=(\d+\.\d+\.\d+)", features = \[([^\]]*)\] \}', root, re.M)
-        self.assertIsNotNone(pinned, "the workspace pins windows-sys")
-        features = re.findall(r'"([^"]+)"', pinned.group(2))
-        self.assertEqual(features, ["Win32_Foundation", "Win32_System_Console"])
-        # The three versions the lock held before REL-04, and no other.
+        self.assertNotIn("windows-sys", root)
+        self.assertIn('unsafe_code = "forbid"', toml_section(root, "[workspace.lints.rust]"))
         locked = re.findall(r'^name = "windows-sys"\nversion = "([^"]+)"', read("Cargo.lock"), re.M)
         self.assertEqual(locked, ["0.52.0", "0.59.0", "0.61.2"])
-        self.assertIn(pinned.group(1), locked)
-        manifest = read("crates/apiforge-desktop/Cargo.toml")
-        section = toml_section(manifest, "[target.'cfg(windows)'.dependencies]")
-        self.assertIsNotNone(section)
-        self.assertIn("windows-sys.workspace = true", section)
-        self.assertEqual(manifest.count("windows-sys"), 1)
-        self.assertNotIn("windows-sys", read("crates/apiforge-cli/Cargo.toml"))
+        for crate in ["crates/apiforge-desktop", "crates/apiforge-cli"]:
+            manifest = read(f"{crate}/Cargo.toml")
+            self.assertNotIn("windows-sys", manifest, crate)
+            self.assertEqual(toml_section(manifest, "[lints]").strip(), "workspace = true", crate)
+        for directory, _, names in os.walk(os.path.join(ROOT, "crates", "apiforge-desktop")):
+            for name in names:
+                if name.endswith(".rs"):
+                    with open(os.path.join(directory, name), encoding="utf-8") as file:
+                        text = file.read()
+                    self.assertNotIn("unsafe_code", text, name)
+                    self.assertNotRegex(text, r"\bunsafe\s*\{", name)
+
+    def test_every_line_the_desktop_prints_goes_through_one_function(self):
+        # Decision 2 = B: no console is attached, so a line printed straight to
+        # a handle the parent did not give would be lost instead of logged.
+        main = read("crates/apiforge-desktop/src/main.rs")
+        self.assertIn("macro_rules! outln", main)
+        self.assertIn("macro_rules! errln", main)
+        self.assertIn("$crate::windows_console::write(", main)
+        source = os.path.join(ROOT, "crates", "apiforge-desktop", "src")
+        for directory, _, names in os.walk(source):
+            for name in names:
+                if not name.endswith(".rs") or name in {"tests.rs", "testing.rs", "windows_console.rs"} or name.endswith("_tests.rs"):
+                    continue
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    text = file.read()
+                # Test modules may print; the program may not.
+                program = text.split("\n#[cfg(test)]\nmod tests", 1)[0]
+                for found in re.finditer(r"\b(e?print(ln)?)!\(", program):
+                    line = program[: found.start()].count("\n") + 1
+                    self.fail(f"{os.path.relpath(path, ROOT)}:{line} uses {found.group(1)}!")
 
     def test_running_says_where_the_output_goes_without_a_console(self):
         running = read("docs/development.md").split("## Running", 1)[1].split("\n## ", 1)[0]
@@ -959,40 +989,12 @@ class NoNewCrate(unittest.TestCase):
             "apiforge-desktop.log.1",
             "start /wait",
             "%ERRORLEVEL%",
-            "console",
+            "never attaches",
+            "> out.txt",
+            "| Write-Output",
             "apiforge.exe",
         ]:
             self.assertIn(text, " ".join(paragraph.split()), text)
-
-
-class UnsafeScope(unittest.TestCase):
-    """REL-04's two Windows calls are the only unsafe code: the desktop crate
-    denies it instead of forbidding it, and allows it in one module only."""
-
-    def test_the_desktop_lints_are_the_workspaces_with_unsafe_code_denied(self):
-        root = read("Cargo.toml")
-        manifest = read("crates/apiforge-desktop/Cargo.toml")
-        self.assertIn('unsafe_code = "forbid"', toml_section(root, "[workspace.lints.rust]"))
-        self.assertEqual(toml_section(manifest, "[lints.rust]").strip(), 'unsafe_code = "deny"')
-        self.assertEqual(
-            toml_section(manifest, "[lints.clippy]").strip(),
-            toml_section(root, "[workspace.lints.clippy]").strip(),
-        )
-
-    def test_only_the_windows_native_calls_allow_unsafe_code(self):
-        allowed = []
-        for directory, _, names in os.walk(os.path.join(ROOT, "crates", "apiforge-desktop")):
-            for name in names:
-                if name.endswith(".rs"):
-                    path = os.path.join(directory, name)
-                    with open(path, encoding="utf-8") as file:
-                        if "allow(unsafe_code)" in file.read():
-                            allowed.append(os.path.relpath(path, ROOT).replace(os.sep, "/"))
-        self.assertEqual(allowed, ["crates/apiforge-desktop/src/windows_console.rs"])
-        source = read("crates/apiforge-desktop/src/windows_console.rs")
-        self.assertEqual(source.count("allow(unsafe_code)"), 1)
-        self.assertRegex(source, r"#\[cfg\(windows\)\]\nmod native \{\n    #!\[allow\(unsafe_code\)\]")
-        self.assertEqual(source.count("unsafe {"), 2)
 
 
 if __name__ == "__main__":

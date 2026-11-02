@@ -52,26 +52,25 @@ sets the window's logical size for either window (default 1600x1000, at least
 
 On Windows the release `apiforge-desktop.exe` is a windowed program
 ([REL-04](tickets/REL-04.md)): started from Explorer, the Start menu or the
-release ZIP, it opens no console window. Started from a terminal, it attaches
-to the terminal's console, so `--version`, `--help`, `--check` and error
-messages print there as before; but `cmd` does not wait for a windowed
-program, so its prompt may come back before the output, and `%ERRORLEVEL%` is
-set only under `start /wait apiforge-desktop.exe …`. PowerShell waits for it,
-and reads the output, only when the output goes on down a pipeline
-(`$out = apiforge-desktop.exe --check FILE | Write-Output`); assigning it to a
-variable alone is not enough. `Start-Process -Wait` waits too, but returns the
-output only with `-RedirectStandardOutput` or `-RedirectStandardError`. Output
-redirected to a file arrives as from any program. With no console at all,
-what it would have printed (the control channel's diagnostics, an error that
-ends the start, the text of a crash) goes to
-`%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects;
-if that file cannot be created, the window still starts and the output is
-lost. Each start appends a line `--- apiforge-desktop <version> <date time>
----` first, and a log over 1 MiB at start is renamed to
-`apiforge-desktop.log.1`, unless another running window holds it, in which
-case this start appends to it. When the log could be opened, a crash of the
-window also shows a dialog that names it. Debug builds (`cargo run`) and `apiforge.exe` remain
-console programs.
+release ZIP, it opens no console window, and it never attaches to one. What it
+prints (`--version`, `--help`, `--check`, the control channel's diagnostics,
+an error that ends the start, the text of a crash) reaches a terminal only
+when it is redirected: `apiforge-desktop.exe --check FILE > out.txt` in `cmd`,
+or `$out = apiforge-desktop.exe --check FILE | Write-Output` in PowerShell,
+which waits for it only when the output goes on down a pipeline. Typed in a
+terminal without redirection, it prints nothing there: the output goes to
+`%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects,
+as after a start from Explorer. `cmd` does not wait for a windowed program,
+and `%ERRORLEVEL%` is set only under `start /wait apiforge-desktop.exe …`;
+`Start-Process -Wait` waits too, but returns the output only with
+`-RedirectStandardOutput` or `-RedirectStandardError`. The log is opened when
+the first line needs it: each start that writes there appends a line
+`--- apiforge-desktop <version> <date time> ---` first, and a log over 1 MiB
+at that moment is renamed to `apiforge-desktop.log.1`, unless another running
+window holds it, in which case this start appends to it. If the log cannot be
+created, the window still starts and the output is lost. When the log could
+be opened, a crash of the window also shows a dialog that names it. Debug
+builds (`cargo run`) and `apiforge.exe` remain console programs.
 
 ### Demo API
 
