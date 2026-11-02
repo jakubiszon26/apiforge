@@ -670,6 +670,105 @@ mod review {
         }
     }
 
+    /// UX-05: Run results dragged by its grip until its top is 64 px under
+    /// the tab strip, held there with the drop zone shown, then released and
+    /// filling the workspace with its grip at the top; and Problems held
+    /// within 64 px of its ceiling in Code at 960 × 540, with its zone over
+    /// the strip of code. A real pointer drag, captured while the button is
+    /// still down. Compare with `docs/qa/2026-11-02/UX-00/ux05-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux05_drag_to_workspace() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        /// Presses at `from` and moves to `to` at most 32 px a frame.
+        fn hold(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
+            harness.hover_at(from);
+            harness.step();
+            harness.drag_at(from);
+            harness.step();
+            let steps = ((to - from).length() / 32.0).ceil().max(1.0);
+            for step in 1..=steps as usize {
+                harness.hover_at(from + (to - from) * (step as f32 / steps));
+                harness.step();
+            }
+            harness.step();
+        }
+        fn release(harness: &mut FolderHarness, at: egui::Pos2) {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+            harness.remove_cursor();
+            settle(harness);
+        }
+        /// [`capture`] without taking the pointer away, which would end the
+        /// drag.
+        fn capture_held(harness: &mut FolderHarness, name: &str) {
+            let image = harness
+                .render()
+                .unwrap_or_else(|error| panic!("cannot render {name}: {error}"));
+            let directory = capture_dir();
+            std::fs::create_dir_all(&directory).unwrap();
+            image.save(directory.join(format!("{name}.png"))).unwrap();
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            click(&mut harness, "Split");
+            click(&mut harness, "Run simulation");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("PASSED").is_none() {
+                assert!(Instant::now() < deadline, "the run must pass");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            // The mock-up has no notice under the tab strip.
+            click(&mut harness, "Dismiss");
+            let top = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
+                .unwrap()
+                .outer_rect
+                .bottom();
+            let from = harness.get_by_label("Resize run report").rect().center();
+            let to = egui::pos2(from.x, top + 64.0 + 8.0);
+            hold(&mut harness, from, to);
+            assert!(
+                harness
+                    .query_by_label("Release to fill the workspace")
+                    .is_some()
+            );
+            capture_held(&mut harness, &format!("ux05-mid-drag-{suffix}"));
+            release(&mut harness, to);
+            assert!(harness.query_by_label("Restore run results").is_some());
+            capture(&mut harness, &format!("ux05-released-{suffix}"), None);
+            if size == MINIMUM {
+                click(&mut harness, "Restore run results");
+                click(&mut harness, "Code");
+                click(&mut harness, "Expand problems");
+                let ceiling = harness.get_by_label("Resize problems").rect().center().y;
+                click(&mut harness, "Restore problems");
+                let edge = harness.get_by_label("Resize problems").rect().center();
+                let to = egui::pos2(edge.x, ceiling + 30.0);
+                hold(&mut harness, edge, to);
+                assert!(
+                    harness
+                        .query_by_label("Release to expand problems")
+                        .is_some()
+                );
+                capture_held(&mut harness, "ux05-problems-mid-drag-960x540");
+                release(&mut harness, to);
+                capture(&mut harness, "ux05-problems-released-960x540", None);
+            }
+        }
+    }
+
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_workspace_window() {
