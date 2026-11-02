@@ -5320,8 +5320,6 @@ mod mcp16 {
         await_bar(harness, "promotion-and-cart-price.afs saved");
     }
 
-    /// Clicks the tab of `name` in the tab strip: the explorer's row has the
-    /// same name, lower in the window.
     /// Scrolls the code of `document_id` down with the mouse wheel.
     fn scroll_code(harness: &mut FolderHarness, document_id: &str) {
         let code = harness.get_by_label(&editor(harness, document_id)).rect();
@@ -5335,6 +5333,8 @@ mod mcp16 {
         settle(harness);
     }
 
+    /// Clicks the tab of `name` in the tab strip: the explorer's row has the
+    /// same name, lower in the window.
     fn click_tab(harness: &mut FolderHarness, name: &str) {
         harness
             .query_all_by_label(name)
