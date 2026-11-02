@@ -1,7 +1,10 @@
 # UX-03: The focus line turns grey; error marks appear after a pause in typing — QA report
 
 - Branch: `docs/ux-03-grey-focus-line` (pull request #245). Captures are
-  from the release binary of `4ca66c5`.
+  from the release binary of `4ca66c5`. Review round 1 (`d5c162e` tests,
+  `98c518f` fix) changed what is drawn in two moments the captures do not
+  show (the keystroke's own frame, and an analysis still running after the
+  pause); see *Review round 1*.
 - Built with: `cargo build --release --locked -p apiforge-desktop`
   (Rust 1.99.0).
 - Compared against mock-up: the approved UX-00 captures `ux03-now-*` and
@@ -44,11 +47,11 @@ the real clock for the marks.
 | # | Criterion | Test | Release binary |
 | --- | --- | --- | --- |
 | 1 | The focus line is 2 px grey while the editor has focus, never red, absent without focus | `ux03_criterion_1_the_focus_line_is_grey` (and KTLO-13's `a_focus_line_shows_in_the_gutter_only_while_the_editor_has_focus`) | Scenario 1 |
-| 2 | No marks during a pause shorter than 700 ms although PROBLEMS counts the errors; an error corrected within the pause is never marked; the marks of the analysis appear at 700 ms | `ux03_criterion_2_no_marks_while_typing`, `ux03_criterion_2_an_error_corrected_within_the_pause_shows_no_mark`, `ux03_criterion_2_marks_follow_the_analysis_after_the_pause` | Scenarios 2 and 3 |
+| 2 | No marks during a pause shorter than 700 ms although PROBLEMS counts the errors; an error corrected within the pause is never marked; the marks of the analysis appear at 700 ms; none on the keystroke's own frame, none while the typed text is still analysed, no hover message during the pause | `ux03_criterion_2_no_marks_while_typing`, `ux03_criterion_2_an_error_corrected_within_the_pause_shows_no_mark`, `ux03_criterion_2_marks_follow_the_analysis_after_the_pause`, `ux03_criterion_2_the_keystroke_frame_shows_no_mark`, `ux03_criterion_2_marks_wait_for_the_analysis_of_the_typed_text`, `ux03_criterion_2_the_hover_message_waits_for_the_pause` | Scenarios 2 and 3 |
 | 3 | The PROBLEMS status and list unchanged; the analysis pause still 250 ms | `ux03_criterion_3_the_problems_status_is_unchanged`; the existing Problems tests | Scenarios 2 and 3 |
-| 4 | Matches `ux03-now` and `ux03-no-focus-line` at both sizes | this report; `review_ux03_editor_typing` | *Against the mock-up* |
+| 4 | Matches `ux03-now` and `ux03-no-focus-line` at both sizes | this report; `review_ux03_editor_typing` | *Against the mock-up*; *Windows* |
 | 5 | `marks_due` false at 699 ms, true at 700; a repaint is asked for the moment the marks are due | `ux03_criterion_5_marks_due_at_the_delay`, `ux03_criterion_5_a_repaint_is_requested_for_the_marks` | Scenario 3 (the marks appear with the pointer parked) |
-| 6 | Typing, paste, undo and redo restart the pause; caret moves, selecting and scrolling do not | `ux03_criterion_6_only_text_changes_restart_the_pause` | typing only (scenario 3) |
+| 6 | Typing (also within a running pause), paste, undo and redo restart the pause; caret moves, selecting and scrolling do not | `ux03_criterion_6_only_text_changes_restart_the_pause` | typing only (scenario 3) |
 | 7 | `APPLY_DELAY` still 250 ms; ADR 0007's board tests and `mod mcp16` pass unchanged | criterion 3's test; the workspace suite | — |
 
 The design review view `review_ux03_editor_typing` (`tools/gui/review.sh
@@ -160,32 +163,82 @@ other visible difference.
   appendix's *nothing else in the editor changes*). The test reads the
   wait through a seam and the window's repaint delay. Recorded in the
   ticket.
-- **The keystroke's own frame.** The text edit changes the text while it
-  is drawn, so the frame of a keystroke still has the marks of the
-  analysis before it; the next frame, asked for at once, has none. With
-  the real clock the two are one frame apart, and in the grabs above no
-  frame after typing showed a mark before 700 ms. Recorded in the ticket.
+- **The keystroke's own frame** (fixed in review round 1). The text edit
+  changes the text while it is drawn, so the pass of a keystroke drew the
+  earlier analysis's marks over the edited text; on `4ca66c5` that one
+  frame was shown, then the next had none. Now a pass that drew marks over
+  an edit is discarded and drawn again (`request_discard`), so it is never
+  shown; a pass without marks costs nothing extra. Recorded in the ticket.
+- **Marks after the pause wait for the analysis** (added in review round
+  1). The session keeps the earlier analysis's diagnostics until the
+  typed text's analysis is in, so a pause that ended before it would have
+  shown them at their old places. The analysis normally ends within about
+  300 ms of the last key (scenario 3), so this only shows on a slow
+  analysis. A board edit, which is not typing, shows them as before.
 
 ## Windows
 
-Not run on Windows by hand. The CI run of this branch on `windows-2022`
-runs the `ux03_*` tests (see *Verification*); its `qa-captures` artifact
-holds the standard mode captures only, not the UX-03 states. The ticket
-is not accepted for Windows on this report.
+Not run on Windows by hand. The CI runs of this branch on `windows-2022`
+run the `ux03_*` tests: run 41530347616 on `4ca66c5`, all passed (`Build &
+Test (windows-2022)`, success). Its `qa-captures-windows-2022` artifact
+holds the standard mode captures only, of the migrated demo shop with no
+editor focus and no typing, so it cannot show the grey line or the pause.
+What it can show was compared: in
+[Code at 960 × 540](windows-code-960x540.png) the gutter (numbers' ink at
+x 253–274), the code's first column (x 273) and the empty gutter edge (no
+line without focus) are where they are in the Linux release capture and in
+that run's `qa-captures-ubuntu-24.04` capture, so nothing moved on Windows.
+Its 1600 × 1000 captures are 1024 × 768, the runner's display, with a
+warning on the run, as on earlier runs (not committed). The focused and
+typing states on Windows wait for the owner's build; the ticket is not
+accepted for Windows on this report.
 
 ## Not verified
 
 - Paste, undo and redo restarting the pause, and caret moves, selections
   and scrolling not restarting it, in the release binary; the criterion 6
   test covers them.
-- The message on hover: a release capture hovering `cart` after the pause
-  showed no tooltip within 2.3 s, which was not investigated further. Its
-  absence during the pause follows from the editor getting no diagnostics
-  (the same list feeds it) and has no test of its own.
+- The message on hover in the release binary: in this Xvfb setup no
+  tooltip appeared under the X test pointer at all, neither the diagnostic's
+  over `cart` after the pause nor the description of `product`, which this
+  change does not touch, after 3 s of hovering; so it says nothing about
+  UX-03. The interaction test
+  `ux03_criterion_2_the_hover_message_waits_for_the_pause` (review round
+  1) shows the diagnostic's message is absent during the pause and shown
+  after it.
+- The keystroke's own frame and an analysis still running after the pause,
+  in the release binary: the review round 1 tests cover them.
 - Split: the code side is the same view; the board following within
   500 ms (smoke item 5) is covered by the existing tests, not captured.
 - Double scale, keyboard-only use, a screen reader session.
 - Windows, beyond the CI test run.
+
+## Review round 1
+
+The automated review of `3c76667` (cubic, eleven points) is answered on the
+pull request. Fixed:
+
+- The keystroke's own frame no longer shows the earlier analysis's marks
+  (see *Deviations*); test
+  `ux03_criterion_2_the_keystroke_frame_shows_no_mark`.
+- After the pause the marks wait for the analysis of the typed text; test
+  `ux03_criterion_2_marks_wait_for_the_analysis_of_the_typed_text`.
+- The hover message has a test,
+  `ux03_criterion_2_the_hover_message_waits_for_the_pause`; criterion 6's
+  test also types within a running pause.
+- The focus-line seam is cleared also when the editor has no gutter.
+- The ticket: *Removed or hidden* and *Default behaviour* name the marks
+  held back while typing; criterion 5 says the code view works out the
+  wait; criterion 4 says what the Windows artifact can show; the sprint
+  plan link resolves after merging `main` (`86e9c34`).
+
+Answered without a change: Ctrl+Z outside the editor runs the model's
+history, a board-side edit the ticket keeps out of the pause (*a board
+edit is not typing*); the marks then behave as before this change.
+
+The two tests that came with the fix failed on `3c76667` and pass on
+`98c518f`; the release captures above are from `4ca66c5` and were not
+taken again, since the states they show did not change.
 
 ## Regression smoke list
 
@@ -202,7 +255,13 @@ The owner's Windows run is pending as for the earlier tickets.
 
 ## Verification
 
-On `4ca66c5`, all exit 0: `cargo fmt --all -- --check`; `cargo clippy
---workspace --all-targets --locked -- -D warnings`; `cargo test
---workspace --all-targets --locked`: 1 439 passed, 0 failed, 45 ignored;
-`cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`.
+On `98c518f` (review round 1), all exit 0: `cargo fmt --all -- --check`;
+`cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo
+test --workspace --all-targets --locked`: 1 442 passed, 0 failed, 45
+ignored; `cargo run -p apiforge-convert-v1 --locked -- --fixtures
+--check`. Earlier, on `4ca66c5`: 1 439 passed, 45 ignored. CI on
+`4ca66c5` (run 41530347616): Linux and Windows build and test, CodeQL,
+all green. On `3c76667` the pull-request run's Windows job failed once in
+`mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run`
+(`LiveDisabled`), the Windows flake recorded on #122; its push run passed
+on both platforms.
