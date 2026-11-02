@@ -891,7 +891,7 @@ class OutputCapture(unittest.TestCase):
         validate = step(self.rust, "Validate workspace using the native release binary")
         self.assertIn("shell: bash", validate)
         self.assertIn('output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"', validate)
-        self.assertIn("'Valid v'*)", validate)
+        self.assertIn('[[ ! "$output" =~ ^Valid\\ v[0-9]+\\ document:\\ [0-9]+\\ project\\(s\\)$ ]]', validate)
         self.assertIn("exit 1", validate)
 
     def test_every_windowed_probe_redirects_its_errors_and_prints_them(self):
@@ -939,7 +939,10 @@ class NoNewCrate(unittest.TestCase):
         self.assertIsNotNone(pinned, "the workspace pins windows-sys")
         features = re.findall(r'"([^"]+)"', pinned.group(2))
         self.assertEqual(features, ["Win32_Foundation", "Win32_System_Console"])
-        self.assertIn(f'name = "windows-sys"\nversion = "{pinned.group(1)}"', read("Cargo.lock"))
+        # The three versions the lock held before REL-04, and no other.
+        locked = re.findall(r'^name = "windows-sys"\nversion = "([^"]+)"', read("Cargo.lock"), re.M)
+        self.assertEqual(locked, ["0.52.0", "0.59.0", "0.61.2"])
+        self.assertIn(pinned.group(1), locked)
         manifest = read("crates/apiforge-desktop/Cargo.toml")
         section = toml_section(manifest, "[target.'cfg(windows)'.dependencies]")
         self.assertIsNotNone(section)

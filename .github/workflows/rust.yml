@@ -146,10 +146,10 @@ jobs:
         run: |
           output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"
           printf '%s\n' "$output"
-          case "$output" in
-            'Valid v'*) ;;
-            *) echo "::error::--check did not print a Valid v line"; exit 1 ;;
-          esac
+          if [[ ! "$output" =~ ^Valid\ v[0-9]+\ document:\ [0-9]+\ project\(s\)$ ]]; then
+            echo "::error::--check did not print one Valid v<n> document line"
+            exit 1
+          fi
 
       # Exercise the actual event loop and renderer, not only the document importer.
       # Lavapipe makes this independent of a physical GPU on the Linux runner.
