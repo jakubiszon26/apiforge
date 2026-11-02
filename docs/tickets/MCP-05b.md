@@ -10,7 +10,7 @@
   MCP-05 criterion 6; this file is the analysis it asked for. Implementation
   starts after MCP-05 (#117) merges: it replaces the in-memory record of
   `crates/apiforge-mcp/src/agent.rs::publish`.
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 - After MCP-05 (#117); builds on MCP-06's `requests.rs`
 
 ## Goal

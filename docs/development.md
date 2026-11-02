@@ -483,17 +483,22 @@ language-reference and local holder/channel versions retain their purposes.
   component is `comments_would_be_lost` with `details.comments` (line,
   column, text) until the model calls again with `accept_comment_loss: true`
   and the same hash; the consent holds for that call and that hash only.
-- A `publish` with a `request_id` this server has answered returns the
-  recorded result with `replayed: true` and publishes nothing. The server
-  keeps the last 64 in memory: the same id for another path or hash is
-  `invalid_inputs`, and an id whose result was dropped is `unknown_outcome`
-  for the next 1 024 dropped ids, after which it is unknown again.
-  Unlike a live run's, a publication's id is not written to
-  `.apiforge/local/agent-requests.json`, so a restarted server knows none of
-  them — `project_overview` lists every revision with its `source_sha256`,
-  which tells whether a lost publication happened. As for a live run, an id
-  is at most 256 bytes (`too_large`) and never a known secret value
-  (`secret_in_text`).
+- A `publish` with a `request_id` is answered from the record of request
+  ids (below), by this server or by one started later for the same folder:
+  an id that published returns the recorded result with `replayed: true`
+  and publishes nothing; the same id for another path or hash is
+  `invalid_inputs`. The id is written to the record, with the path, the
+  expected hash and the time, before the transaction starts, and the result
+  right after the commit; a server that finds an entry without a result (an
+  earlier one stopped between the two, or its commit failed after the
+  activation) answers `unknown_outcome` with the entry's `path`,
+  `expected_source_sha256` and `started_at`, and writes nothing —
+  `project_overview` lists every revision with its `source_sha256`, which
+  tells whether that publication happened. A refusal before the commit
+  leaves no entry, so the same id publishes once the cause is fixed. As for
+  a live run, an id is at most 256 bytes (`too_large`) and never a known
+  secret value (`secret_in_text`); a replay takes the project for the agent
+  session, as a publication does.
 - A text containing a known secret value (`APIFORGE_SECRET_<NAME>`, read at
   each call) is `secret_in_text`, the value never repeated.
 - While a window holds the project the write, `publish` included, asks it
@@ -690,13 +695,20 @@ its first request, the id, the path and the time are written atomically to
 is: machine-local, untracked, never part of the project's format. A new
 server that finds an id there answers `unknown_outcome` with the record's
 `path` and `started_at` and the journal's `interrupted` runs, and sends
-nothing; the model uses a new id to run again. The record keeps the 1 000
-most recent ids, the oldest dropped first, and an id is at most 256 bytes
-(`too_large`). A record that cannot be read (damaged, or written by a newer
-version) is never overwritten: every live run with a `request_id` is refused
-with `project_unreadable` naming the file until it is moved aside, because
-the server could not tell whether the id already ran; a live run without a
-`request_id` still works.
+nothing; the model uses a new id to run again. A `publish` with a
+`request_id` is recorded in the same file (MCP-05b), with its result once
+the commit is done, so a restarted server replays it (above); a live run's
+result stays in the server's memory only. Every entry has a `kind`,
+`liveRun` or `publish`, and the same id may name one of each. The record
+keeps the 1 000 most recent entries of both kinds, the oldest dropped
+first, and an id is at most 256 bytes (`too_large`); it holds ids, paths,
+hashes, times and a publication's result, never a secret value. A record
+that cannot be read (damaged, or written by a newer version) is never
+overwritten: every live run and every `publish` with a `request_id` is
+refused with `project_unreadable` naming the file until it is moved aside,
+because the server could not tell whether the id already ran; without a
+`request_id` both still work. A record written before MCP-05b (version 1,
+live runs only) is read, and written as version 2 on the next change.
 
 #### The four ends of a live run
 
