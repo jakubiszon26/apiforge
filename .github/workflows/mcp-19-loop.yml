@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d9165cf
+          ref: d9165cfe2dc6681fb48d5de641813c7bfac54917
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
