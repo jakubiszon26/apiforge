@@ -18,6 +18,7 @@ mod icons;
 mod inspector;
 mod labels;
 mod library;
+mod mock_comp00;
 mod navigator;
 mod persistence;
 mod preferences;

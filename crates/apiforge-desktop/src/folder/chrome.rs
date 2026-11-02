@@ -151,15 +151,40 @@ impl FolderApp {
                         }
                     });
                 }
-                if let Some((id, enabled)) = &publish
+                // COMP-00 mock-up, Q6: *Publish* with nothing to publish.
+                let mock_publish = crate::mock_comp00::get().publish;
+                let (publish_text, publish_enabled) = match (mock_publish, &publish) {
+                    (_, None) => (String::new(), false),
+                    (crate::mock_comp00::Publish::Off, Some((_, enabled))) => {
+                        ("Publish".to_owned(), *enabled)
+                    }
+                    (crate::mock_comp00::Publish::Latest(n), _) => (format!("Published r{n}"), false),
+                    (crate::mock_comp00::Publish::Changed(n), _) => {
+                        (format!("Publish r{}", n + 1), true)
+                    }
+                    (crate::mock_comp00::Publish::LatestCaption(_), _) => ("Publish".to_owned(), false),
+                };
+                if let Some((id, _)) = &publish
                     && ui
-                        .add_enabled(*enabled, egui::Button::new("Publish"))
+                        .add_enabled(publish_enabled, egui::Button::new(publish_text))
                         .on_hover_text(
                             "Save this component and publish its next immutable revision",
+                        )
+                        .on_disabled_hover_text(
+                            "The file equals its latest revision: nothing to publish",
                         )
                         .clicked()
                 {
                     self.component_action(id, publication::Action::Publish);
+                }
+                if let (crate::mock_comp00::Publish::LatestCaption(n), Some(_)) =
+                    (mock_publish, &publish)
+                {
+                    ui.label(
+                        RichText::new(format!("r{n} · no changes"))
+                            .size(theme::FONT_META)
+                            .color(theme::MUTED),
+                    );
                 }
                 if ui
                     .add_enabled(
@@ -478,6 +503,9 @@ impl FolderApp {
     }
 
     pub(super) fn prompts(&mut self, context: &egui::Context) {
+        if self.session.is_some() {
+            crate::mock_comp00::show_dialog(context, &self.context_project());
+        }
         let Some(prompt) = self.prompt.take() else {
             return;
         };

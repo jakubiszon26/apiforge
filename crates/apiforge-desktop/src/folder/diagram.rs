@@ -66,6 +66,10 @@ impl FolderApp {
             );
             return;
         };
+        crate::mock_comp00::set_board(match &*model {
+            Document::Component(component) => Some(crate::mock_comp00::Board::of(component)),
+            Document::Scenario(_) => None,
+        });
         let cleanup = self.cleanup(document_id);
         // The document's header shares the board's header row (KTLO-12): Split
         // leaves the file name and kind to the tab strip beside the code.
@@ -416,6 +420,22 @@ impl FolderApp {
         let Some(model) = snapshot.model.clone() else {
             return;
         };
+        if crate::mock_comp00::get().panel != crate::mock_comp00::Panel::Off
+            && let Document::Component(component) = &*model
+        {
+            let component = component.clone();
+            egui::Panel::right("folder-inspector")
+                .default_size(360.0)
+                .size_range(300.0..=520.0)
+                .frame(egui::Frame::new().fill(theme::WHITE).inner_margin(16))
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.add(widgets::icon_button(Icon::Close, "Close Inspector").compact());
+                    });
+                    super::comp00_inspector::show(ui, &component, &self.context_project());
+                });
+            return;
+        }
         let cleanup = self.cleanup(document_id);
         let graph = graph_of(&model, cleanup);
         let Some(node) = self

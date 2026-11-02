@@ -13,6 +13,7 @@ pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;
+mod comp00_inspector;
 mod conflict_view;
 mod diagram;
 mod dog;

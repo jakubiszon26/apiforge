@@ -4,6 +4,7 @@
 //! them through the editor, which validates every change. Positions being dragged,
 //! wires being drawn and the camera are view state only.
 
+mod comp00;
 mod layout;
 mod menu;
 mod paint;
@@ -346,7 +347,19 @@ impl Canvas {
         }
         let viewport = Self::viewport(ui);
         let measures = self.measure_overlays(ui, input);
-        let overlays = layout::board_overlays(viewport, &measures);
+        let mut overlays = layout::board_overlays(viewport, &measures);
+        // COMP-00 mock-up, option C: the inputs' strip under the header row.
+        let band = (crate::mock_comp00::get().inputs == crate::mock_comp00::Inputs::Band
+            && crate::mock_comp00::board().is_some())
+        .then(|| {
+            let band = Rect::from_min_size(
+                overlays.board.min,
+                vec2(overlays.board.width(), comp00::BAND),
+            );
+            overlays.board.min.y += comp00::BAND;
+            overlays.focus.min.y += comp00::BAND;
+            band
+        });
         // The toolbar comes before the board in the keyboard order: it ends the
         // header row, which reads before the board below it (KTLO-12).
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
@@ -369,6 +382,8 @@ impl Canvas {
             .iter()
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
+        let extra = comp00::place(&cards, &mut chips);
+        crate::mock_comp00::set_extra_bounds(extra.bounds());
 
         let focus_changed = self
             .last_focus
@@ -408,6 +423,20 @@ impl Canvas {
         self.last_size = viewport.size();
         self.last_focus = Some(overlays.focus);
         self.last_viewport = viewport;
+        if crate::mock_comp00::get().reveal_inputs
+            && let Some(inputs) = extra.bounds()
+        {
+            // COMP-00 mock-up: the inputs at a working zoom, at the left of
+            // the view, with the steps that read them beside.
+            let focus = overlays.focus.translate(-viewport.min.to_vec2());
+            self.camera.zoom = 0.9_f32
+                .min(focus.height() / inputs.height())
+                .clamp(MIN_ZOOM, MAX_ZOOM);
+            self.camera.pan = vec2(
+                focus.left() + 8.0 - inputs.left() * self.camera.zoom,
+                focus.top() + 24.0 - inputs.top() * self.camera.zoom,
+            );
+        }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
@@ -446,9 +475,32 @@ impl Canvas {
 
         // Wires go under the cards. They are routed around the cards and chips, so
         // what is drawn is also what hit testing uses.
-        let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
+        let mock_selected = crate::mock_comp00::get()
+            .selected_input
+            .map(|name| crate::mock_comp00::chip_id(&name));
+        let mut selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
+        if let Some(id) = &mock_selected {
+            selection.insert(id.as_str());
+        }
         let board_wires = board_wires(input.graph, &cards, &chips);
-        let (related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        if band.is_some()
+            && let Some(name) = crate::mock_comp00::get().selected_input
+        {
+            // Option C has no chips: the steps reading the input are ringed.
+            let ghost = Chip {
+                proxy: apiforge_core::format::Proxy {
+                    id: crate::mock_comp00::chip_id(&name),
+                    source: ProxySource::Parameter { name },
+                    position: Position { x: 0.0, y: 0.0 },
+                },
+                label: String::new(),
+                caption: "input",
+                known: true,
+                origin: Pos2::ZERO,
+            };
+            related_blocks.extend(highlights(input.graph, &[ghost], &selection).0);
+        }
         let moving: HashSet<String> = match &self.drag {
             Some(Drag::Nodes { ids, .. }) => ids.iter().cloned().collect(),
             _ => HashSet::new(),
@@ -572,6 +624,8 @@ impl Canvas {
             );
         }
 
+        comp00::paint_frame(&board_painter, &extra, camera);
+        comp00::paint_pills(&board_painter, &extra, camera);
         for chip in &chips {
             let rect = camera.rect(chip.rect());
             if !rect.intersects(overlays.board) {
@@ -633,7 +687,17 @@ impl Canvas {
             {
                 commands.push(Command::Move(moved_positions(input.graph, &ids, offset)));
             }
-            paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
+            if comp00::is_input(chip) {
+                comp00::paint_input(
+                    &board_painter,
+                    chip,
+                    camera,
+                    selection.contains(chip.id()),
+                    &extra,
+                );
+            } else {
+                paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
+            }
             self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
@@ -687,6 +751,9 @@ impl Canvas {
             self.handle_keys(ui, input, &mut commands);
         }
 
+        if let Some(band) = band {
+            comp00::paint_band(&painter, band, &extra.inputs);
+        }
         let summary = paint::steps_summary(input.graph);
         if let Some(at) = paint::overlay_chrome(
             &painter,
@@ -844,6 +911,11 @@ impl Canvas {
             zoom,
             pan: local_focus_center - bounds.center().to_vec2() * zoom,
         };
+        // COMP-00 mock-up: a board wider than the view at the smallest zoom
+        // starts at its left edge, where the inputs are, instead of its centre.
+        if crate::mock_comp00::extra_bounds().is_some() && bounds.width() * zoom > focus.width() {
+            self.camera.pan.x = focus.left() - viewport.left() - bounds.left() * zoom;
+        }
     }
 
     fn zoom_at(&mut self, viewport: Rect, screen: Pos2, factor: f32) {
@@ -1788,6 +1860,7 @@ impl Shapes<'_> {
             .iter()
             .map(Card::rect)
             .chain(self.chips.iter().map(Chip::rect))
+            .chain(crate::mock_comp00::extra_bounds())
             .reduce(Rect::union)
     }
 }

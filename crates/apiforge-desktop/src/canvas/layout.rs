@@ -553,6 +553,9 @@ impl Chip {
     }
 
     pub fn width(&self) -> f32 {
+        if let Some(width) = crate::mock_comp00::chip_width(&self.proxy.id) {
+            return width;
+        }
         let text = 7.2 * self.label.chars().count() as f32 + 64.0;
         text.clamp(CHIP_MIN_WIDTH, CHIP_MAX_WIDTH)
     }

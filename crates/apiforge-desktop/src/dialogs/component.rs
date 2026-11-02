@@ -101,6 +101,53 @@ impl ComponentDialog {
         }
     }
 
+    /// COMP-00 mock-up: the dialog as a folder project would open it, with
+    /// *Required* unticked where the argument gets a default (KTLO-36).
+    pub fn mock_folder(&mut self, name: &str) {
+        self.draft.name = name.to_owned();
+        self.draft.description = "Add the product to a cart and check the cart's total.".to_owned();
+        // The cleanup reads the cart, so it leaves the selection as an output.
+        let cart = self
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == "add_to_cart")
+            .map(|node| node.id.clone());
+        for row in &mut self.draft.outputs {
+            row.enabled = Some(&row.node_id) == cart.as_ref();
+        }
+        if let Some(product) = self.draft.inputs.iter().find(|row| row.name == "product") {
+            self.draft.action = Some(product.key.clone());
+            self.draft.action_type = ValueType::Object;
+            self.draft.action_contract = product.contract_id.clone();
+        }
+        for row in &mut self.draft.inputs {
+            if row.default_value.is_some() {
+                row.required = false;
+            }
+            // The wire comes from *Expected price*, a number.
+            if row.name == "expected" {
+                row.value_type = ValueType::Number;
+            }
+        }
+    }
+
+    /// COMP-00 mock-up: the proposed inputs, name, required and default.
+    pub fn mock_inputs(&self) -> Vec<(String, bool, bool, Option<serde_json::Value>)> {
+        self.draft
+            .inputs
+            .iter()
+            .map(|row| {
+                (
+                    row.name.clone(),
+                    row.enabled,
+                    row.required,
+                    row.default_value.clone(),
+                )
+            })
+            .collect()
+    }
+
     /// Shows why the application rejected the definition.
     pub fn set_error(&mut self, message: impl Into<String>) {
         self.save_error = Some(message.into());
@@ -127,8 +174,22 @@ impl ComponentDialog {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, project: &Project) -> Outcome<SavedComponent> {
-        let eyebrow = format!("PROJECT LIBRARY · {} STEPS", self.selected.len());
-        let (title, note) = if self.initial.is_some() {
+        let folder = crate::mock_comp00::get().save_dialog;
+        let eyebrow = if folder {
+            format!("COMPONENTS/ · {} STEPS", self.selected.len())
+        } else {
+            format!("PROJECT LIBRARY · {} STEPS", self.selected.len())
+        };
+        let (title, note) = if folder {
+            (
+                "Save as component",
+                if crate::mock_comp00::get().publish_choice {
+                    "Publishes revision 1; the scenario calls it instead of these steps."
+                } else {
+                    "Creates the file only; the steps stay in the scenario."
+                },
+            )
+        } else if self.initial.is_some() {
             (
                 "Save a new revision",
                 "A new revision does not change existing instances.",
@@ -144,7 +205,11 @@ impl ComponentDialog {
             eyebrow: &eyebrow,
             title,
             width: 680.0,
-            apply_label: "Save component",
+            apply_label: if folder && crate::mock_comp00::get().publish_choice {
+                "Save and publish"
+            } else {
+                "Save component"
+            },
             note: Some(note),
         };
         let action = chrome.show(
@@ -178,6 +243,10 @@ impl ComponentDialog {
     }
 
     fn body(&mut self, ui: &mut Ui, project: &Project) {
+        if crate::mock_comp00::get().save_dialog {
+            self.folder_body(ui, project);
+            return;
+        }
         ui.horizontal_top(|ui| {
             let width = (ui.available_width() - 12.0) / 2.0;
             ui.vertical(|ui| {
@@ -363,6 +432,149 @@ impl ComponentDialog {
             widgets::error_box(ui, std::slice::from_ref(error));
             ui.add_space(4.0);
         }
+        widgets::error_box(ui, &self.errors());
+    }
+
+    /// COMP-00 mock-up: the dialog in a folder project, one line per input
+    /// so that the inputs, the file and what happens after saving fit.
+    fn folder_body(&mut self, ui: &mut Ui, project: &Project) {
+        ui.horizontal_top(|ui| {
+            let width = (ui.available_width() - 12.0) / 2.0;
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                widgets::field_label(ui, "Name");
+                let field = super::text_field(
+                    ui,
+                    &mut self.draft.name,
+                    "e.g. Fetch a record",
+                    width,
+                    false,
+                );
+                autofocus(&field, &mut self.focused);
+            });
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                widgets::field_label(ui, "File");
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("components/")
+                            .monospace()
+                            .size(theme::FONT_LABEL)
+                            .color(theme::MUTED),
+                    );
+                    let mut file =
+                        format!("{}.afs", self.draft.name.to_lowercase().replace(' ', "-"));
+                    let rest = ui.available_width();
+                    super::text_field(ui, &mut file, "", rest, false);
+                });
+            });
+        });
+        widgets::field_label(ui, "Description");
+        let width = ui.available_width();
+        super::text_field(
+            ui,
+            &mut self.draft.description,
+            "What does this component do?",
+            width,
+            false,
+        );
+        widgets::field_label(ui, "After saving");
+        let mut publish = crate::mock_comp00::get().publish_choice;
+        ui.radio_value(
+            &mut publish,
+            true,
+            "Publish revision 1 and call it here, in place of the selected steps",
+        );
+        ui.radio_value(
+            &mut publish,
+            false,
+            "Only create the file; the steps stay in the scenario",
+        );
+
+        let contracts = &project.contracts;
+        ui.add_space(theme::SPACE_SM);
+        ui.horizontal(|ui| {
+            widgets::section_inline(ui, "Inputs");
+            widgets::hint(ui, "from the wires and values entering the selection");
+        });
+        for row in &mut self.draft.inputs {
+            ui.push_id(("input", row.key.clone()), |ui| {
+                row_frame(ui, row.enabled, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(!row.mandatory, |ui| {
+                            ui.checkbox(&mut row.enabled, "").on_disabled_hover_text(
+                                "Fed from outside the selection, so it must be an input",
+                            );
+                        });
+                        super::text_field(ui, &mut row.name, "input name", 150.0, false)
+                            .on_hover_text("Input name");
+                        type_picker(ui, "type", &mut row.value_type, 96.0);
+                        contract_picker(
+                            ui,
+                            "contract",
+                            &mut row.contract_id,
+                            contracts,
+                            "No contract",
+                            120.0,
+                        );
+                        ui.checkbox(&mut row.required, "Required");
+                    });
+                    let origin = if row.mandatory {
+                        format!("{} · a wire from outside the selection", row.label)
+                    } else if let Some(value) = &row.default_value {
+                        format!(
+                            "{} · the value {} becomes its default",
+                            row.label,
+                            js::json_stringify(value)
+                        )
+                    } else {
+                        row.label.clone()
+                    };
+                    widgets::hint(ui, origin);
+                });
+            });
+        }
+        ui.add_space(theme::SPACE_SM);
+        ui.horizontal(|ui| {
+            widgets::section_inline(ui, "Outputs");
+            widgets::hint(ui, "read after the selection, here or in cleanup");
+        });
+        let names: Vec<(String, String)> = self
+            .selected
+            .iter()
+            .map(|id| (id.clone(), self.node_name(id)))
+            .collect();
+        for row in &mut self.draft.outputs {
+            let source = names
+                .iter()
+                .find(|(id, _)| *id == row.node_id)
+                .map_or("Saved binding", |(_, name)| name.as_str())
+                .to_owned();
+            ui.push_id(("output", row.key.clone()), |ui| {
+                row_frame(ui, row.enabled, |ui| {
+                    if !row.enabled {
+                        ui.checkbox(&mut row.enabled, format!("{source} → {}", row.port));
+                        return;
+                    }
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut row.enabled, "");
+                        super::text_field(ui, &mut row.name, "output name", 150.0, false);
+                        type_picker(ui, "type", &mut row.value_type, 96.0);
+                        contract_picker(
+                            ui,
+                            "contract",
+                            &mut row.contract_id,
+                            contracts,
+                            "No contract",
+                            120.0,
+                        );
+                    });
+                    widgets::hint(ui, format!("{source} → {}", row.port));
+                });
+            });
+        }
+        widgets::field_label(ui, "Offered after a block that outputs (action)");
+        self.action_picker(ui, contracts);
         widgets::error_box(ui, &self.errors());
     }
 

@@ -5,7 +5,7 @@
 
 mod binding;
 pub mod drafts;
-mod fields;
+pub(crate) mod fields;
 mod response;
 
 pub use fields::forget_field_text;

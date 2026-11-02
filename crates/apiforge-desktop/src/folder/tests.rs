@@ -7,6 +7,8 @@ mod acceptance_tests;
 mod accessibility_tests;
 #[path = "activation_tests.rs"]
 mod activation_tests;
+#[path = "comp00_review.rs"]
+mod comp00_review;
 #[path = "component_run_tests.rs"]
 mod component_run_tests;
 #[path = "dog_tests.rs"]
