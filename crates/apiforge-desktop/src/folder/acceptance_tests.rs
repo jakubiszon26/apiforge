@@ -8117,13 +8117,15 @@ mod ux05 {
         harness.step();
     }
 
-    /// Moves the pressed pointer from `from` to `to`, at most 32 px a frame.
+    /// Moves the pressed pointer from `from` to `to`, at most 32 px a frame,
+    /// then rests it for the frame that draws the panel where it was taken.
     fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
         let steps = ((to - from).length() / 32.0).ceil().max(1.0);
         for step in 1..=steps as usize {
             harness.hover_at(from + (to - from) * (step as f32 / steps));
             harness.step();
         }
+        harness.step();
     }
 
     /// Releases the button at `at`; then the pointer leaves the window.
@@ -8257,6 +8259,26 @@ mod ux05 {
         );
     }
 
+    /// Criterion 2 by egui's own edge: released in the zone, the panel is
+    /// maximised as by the grip.
+    #[test]
+    fn ux05_the_edge_released_in_the_zone_maximises_too() {
+        let (_project, mut harness, _) = ran(MINIMUM);
+        let workspace = workspace(&harness);
+        let from = edge(&harness, EDGE);
+        let to = egui::pos2(from.x, workspace.top() + 40.0);
+        press(&mut harness, from);
+        move_to(&mut harness, from, to);
+        assert!(zone(&harness, ZONE).is_some(), "no zone by the edge");
+        release(&mut harness, to);
+        assert!(maximised(&harness), "released in the zone, not maximised");
+        assert!(has_label(&harness, RESTORE));
+        assert!(
+            (maximised_rect(&harness).top() - workspace.top()).abs() <= 1.0,
+            "the maximised panel starts at the workspace's top"
+        );
+    }
+
     /// Criterion 3: in Code and in Split, *Resize problems* dragged to within
     /// 64 px of KTLO-18's ceiling shows *Release to expand problems* over the
     /// strip of code; released there, the section is expanded as *Expand
@@ -8264,7 +8286,8 @@ mod ux05 {
     /// problems* returns the height from before the drag. Released outside
     /// the zone, the section is 360 px high: at 1600 × 1000, as at 960 × 540
     /// the ceiling is under 360 + 64 px and every height past 360 px is in
-    /// the zone.
+    /// the zone, and with problems listed, as a section with none keeps only
+    /// the height of its caption and hint, as it does today.
     #[test]
     fn ux05_criterion_3_problems_drag_to_expand_keeps_the_strip() {
         for mode in ["Code", "Split"] {
@@ -8320,6 +8343,12 @@ mod ux05 {
         let project = crate::testing::shop_project();
         let mut harness = folder_harness(project.path(), WIDE);
         choose(&mut harness, "Code");
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        // Three lines that do not parse, so the list has rows (KTLO-18's test).
+        let label = editor(&harness, &scenario);
+        replace_text(&mut harness, &label, "scenario \"Main\" {\n  ???\n}\n");
         choose(&mut harness, EXPAND);
         let expanded = problems_top(&harness);
         choose(&mut harness, RESTORE_PROBLEMS);
@@ -8406,8 +8435,10 @@ mod ux05 {
             let expected = workspace.bottom() - (workspace.height() - distance).clamp(min, max);
             assert!(
                 (panel_top(&harness) - expected).abs() <= 1.0,
-                "{size:?}, {distance} px: the panel's top is {}, not {expected}",
-                panel_top(&harness)
+                "{size:?}, {distance} px: the panel's top is {}, not {expected} \
+                 (the workspace {workspace:?} before the drag, {:?} after)",
+                panel_top(&harness),
+                self::workspace(&harness)
             );
         }
     }

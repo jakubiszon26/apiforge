@@ -135,6 +135,22 @@ pub enum DetailTab {
 const MIN_REPORT_HEIGHT: f32 = 160.0;
 const MAX_REPORT_HEIGHT: f32 = 560.0;
 const KEYBOARD_RESIZE_STEP: f32 = 32.0;
+/// How near the workspace's top a dragged panel's top is released to fill
+/// the workspace (UX-05, decided by the owner).
+pub(crate) const DROP_SNAP: f32 = 64.0;
+/// The least room a drag of Run results leaves above it, so the drop zone's
+/// words always fit (UX-05).
+const DROP_ZONE_MIN: f32 = 32.0;
+
+/// A drag of Run results by its grip or its edge, while it lasts (UX-05).
+#[derive(Clone, Copy, Debug)]
+struct Drag {
+    /// The normal height when the drag began, which a panel maximised by the
+    /// release returns to.
+    height_before: f32,
+    /// The panel's top is within [`DROP_SNAP`] of the workspace's top.
+    snapped: bool,
+}
 
 /// Computes the next report panel height for a keyboard resize key.
 pub(crate) fn keyboard_height(current: f32, key: egui::Key, min: f32, max: f32) -> Option<f32> {
@@ -156,6 +172,11 @@ pub struct ReportPanel {
     size_epoch: u64,
     /// The panel fills the window below the tab strip (KTLO-19); never remembered.
     maximised: bool,
+    /// A drag towards the top, which a release near it maximises (UX-05).
+    drag: Option<Drag>,
+    /// While the grip is dragged, how far under the panel's top it was
+    /// pressed.
+    grab: Option<f32>,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
     last_run_id: Option<String>,
@@ -175,6 +196,8 @@ impl Default for ReportPanel {
             compact_height: 180.0,
             size_epoch: 0,
             maximised: false,
+            drag: None,
+            grab: None,
             #[cfg(test)]
             last_handle: None,
             last_run_id: None,
@@ -203,6 +226,39 @@ impl ReportPanel {
         self.maximised = false;
     }
 
+    /// The remembered height of the open panel in the layout `compact` names.
+    fn normal_height(&self, compact: bool) -> f32 {
+        if compact {
+            self.compact_height
+        } else {
+            self.height
+        }
+    }
+
+    fn set_normal_height(&mut self, compact: bool, height: f32) {
+        if compact {
+            self.compact_height = height;
+        } else {
+            self.height = height;
+        }
+    }
+
+    /// Ends a drag (UX-05). Released in the zone, the panel is maximised as
+    /// *Maximise run results* leaves it, and keeps the height it had before
+    /// the drag for the restore; released anywhere else, it keeps its height
+    /// within the normal range. The epoch makes egui forget a height taken
+    /// past that range.
+    fn release(&mut self, drag: Drag, compact: bool, min: f32, max: f32, height: f32) {
+        self.drag = None;
+        if drag.snapped {
+            self.maximised = true;
+            self.set_normal_height(compact, drag.height_before);
+        } else {
+            self.set_normal_height(compact, height.clamp(min, max));
+        }
+        self.size_epoch = self.size_epoch.wrapping_add(1);
+    }
+
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
         self.sync_selection(context.run, context.selected_node_id);
@@ -212,17 +268,13 @@ impl ReportPanel {
 
         let was_open = self.open;
         let maximised = self.is_maximised();
-        let full = ui.available_height();
-        let compact = ui.available_height() < 460.0;
+        // The workspace a drag can fill: everything under the tab strip, its
+        // notices and the holder bar (UX-05).
+        let workspace = ui.available_rect_before_wrap();
+        let full = workspace.height();
+        let compact = full < 460.0;
         let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
-        let maximum = (ui.available_height() - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
-        let height = if compact {
-            self.compact_height
-        } else {
-            self.height
-        }
-        .clamp(min_height, maximum);
-        let collapsed_height = if compact { 44.0 } else { 48.0 };
+        let maximum = (full - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
         let panel_id = if maximised {
             egui::Id::new("report-maximised")
         } else if was_open {
@@ -230,6 +282,30 @@ impl ReportPanel {
         } else {
             egui::Id::new("report-collapsed")
         };
+        // A drag of the grip or of egui's own edge lifts the ceiling while it
+        // lasts, so the panel follows the pointer towards the top (UX-05).
+        let handle_id = ui.id().with("report-resize-handle");
+        let edge = ui.ctx().read_response(panel_id.with("__resize"));
+        let edge_held = edge.as_ref().is_some_and(egui::Response::dragged);
+        let edge_let_go = edge.as_ref().is_some_and(egui::Response::drag_stopped);
+        if was_open
+            && !maximised
+            && self.drag.is_none()
+            && (edge_held
+                || ui
+                    .ctx()
+                    .read_response(handle_id)
+                    .is_some_and(|grip| grip.dragged()))
+        {
+            self.drag = Some(Drag {
+                height_before: self.normal_height(compact).clamp(min_height, maximum),
+                snapped: false,
+            });
+        }
+        let lifted = (full - DROP_ZONE_MIN).max(maximum);
+        let ceiling = if self.drag.is_some() { lifted } else { maximum };
+        let height = self.normal_height(compact).clamp(min_height, ceiling);
+        let collapsed_height = if compact { 44.0 } else { 48.0 };
         let response = egui::Panel::bottom(panel_id)
             .resizable(self.open && !maximised)
             .default_size(if maximised {
@@ -242,7 +318,7 @@ impl ReportPanel {
             .size_range(if maximised {
                 full..=full
             } else if self.open {
-                min_height..=maximum
+                min_height..=ceiling
             } else {
                 collapsed_height..=collapsed_height
             })
@@ -268,46 +344,80 @@ impl ReportPanel {
         // The panel's own edge, found unnamed by the audit of a component's run
         // results (KTLO-23).
         widgets::name_resize_handle(ui.ctx(), panel_id, "Resize run results");
-        // Maximised, the normal height is kept and there is nothing to resize.
-        if was_open && !maximised {
-            let actual_height = response.response.rect.height().clamp(min_height, maximum);
-            if compact {
-                self.compact_height = actual_height;
-            } else {
-                self.height = actual_height;
-            }
-            let center = response.response.rect.center_top() + egui::vec2(0.0, 8.0);
-            let handle_rect = egui::Rect::from_center_size(center, egui::vec2(80.0, 14.0));
-            let handle_id = ui.id().with("report-resize-handle");
-            let handle = ui
-                .interact(handle_rect, handle_id, Sense::click_and_drag())
-                .on_hover_cursor(egui::CursorIcon::ResizeVertical)
-                .on_hover_text("Resize run report (↑/↓, Home, End)");
-            let current_height = actual_height;
-            handle.widget_info(move || {
-                let mut info =
-                    egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Resize run report");
-                info.value = Some(f64::from(current_height.round()));
-                info
-            });
-            #[cfg(test)]
+        if !was_open {
+            return actions;
+        }
+        let rect = response.response.rect;
+        // Maximised, the normal height is kept for the restore.
+        let actual_height = rect.height().clamp(min_height, ceiling);
+        if !maximised {
+            self.set_normal_height(compact, actual_height);
+        }
+        // The grip: the panel's own handle, kept at the top of the maximised
+        // panel so that it can be dragged back down (UX-05).
+        let center = rect.center_top() + egui::vec2(0.0, 8.0);
+        let handle_rect = egui::Rect::from_center_size(center, egui::vec2(80.0, 14.0));
+        let handle = ui
+            .interact(handle_rect, handle_id, Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+            .on_hover_text("Resize run report (↑/↓, Home, End)");
+        let current_height = if maximised {
+            rect.height()
+        } else {
+            actual_height
+        };
+        handle.widget_info(move || {
+            let mut info =
+                egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Resize run report");
+            info.value = Some(f64::from(current_height.round()));
+            info
+        });
+        #[cfg(test)]
+        {
+            self.last_handle = Some((handle_id, handle_rect, current_height));
+        }
+        if handle.clicked() || handle.drag_started() {
+            handle.request_focus();
+        }
+        // The grip follows the pointer by position, as egui's edge does: the
+        // panel's top stays where the press landed on the grip, so a pointer
+        // taken past either end of the range finds the panel again where it
+        // left it (UX-05).
+        if handle.dragged() && self.grab.is_none() {
+            let origin = ui.input(|input| input.pointer.press_origin());
+            self.grab = Some(origin.map_or(8.0, |origin| origin.y - rect.top()));
+        } else if !handle.dragged() {
+            self.grab = None;
+        }
+        let wanted = handle
+            .interact_pointer_pos()
+            .zip(self.grab)
+            .filter(|_| handle.dragged())
+            .map(|(pointer, grab)| rect.bottom() - (pointer.y - grab));
+        if maximised {
+            // Dragged down, the panel is restored under the pointer and the
+            // same grip goes on dragging it.
+            if let Some(wanted) = wanted
+                && wanted < rect.height() - 0.5
             {
-                self.last_handle = Some((handle_id, handle_rect, actual_height));
-            }
-            if handle.clicked() || handle.drag_started() {
-                handle.request_focus();
-            }
-            if handle.dragged() {
-                let next = (actual_height - handle.drag_delta().y).clamp(min_height, maximum);
-                if compact {
-                    self.compact_height = next;
-                } else {
-                    self.height = next;
-                }
+                self.drag = Some(Drag {
+                    height_before: self.normal_height(compact).clamp(min_height, maximum),
+                    snapped: false,
+                });
+                self.maximised = false;
+                self.set_normal_height(compact, wanted.clamp(min_height, lifted));
                 self.size_epoch = self.size_epoch.wrapping_add(1);
                 ui.ctx().request_repaint();
             }
-            if handle.has_focus() {
+        } else {
+            if let Some(wanted) = wanted {
+                let next = wanted.clamp(min_height, ceiling);
+                self.set_normal_height(compact, next);
+                self.size_epoch = self.size_epoch.wrapping_add(1);
+                ui.ctx().request_repaint();
+            }
+            if handle.has_focus() && self.drag.is_none() {
+                // The keyboard keeps to the normal range (UX-05 criterion 9).
                 let keys = [
                     egui::Key::ArrowUp,
                     egui::Key::ArrowDown,
@@ -332,36 +442,53 @@ impl ReportPanel {
                 if let Some(next) = updated
                     && (next - actual_height).abs() > f32::EPSILON
                 {
-                    if compact {
-                        self.compact_height = next;
-                    } else {
-                        self.height = next;
-                    }
+                    self.set_normal_height(compact, next);
                     ui.ctx().request_repaint();
                     self.size_epoch = self.size_epoch.wrapping_add(1);
                 }
-                ui.painter().rect_stroke(
-                    handle_rect,
-                    4.0,
-                    Stroke::new(1.5, theme::ACCENT),
-                    egui::StrokeKind::Outside,
-                );
             }
-            ui.painter().line_segment(
-                [
-                    center - egui::vec2(18.0, 0.0),
-                    center + egui::vec2(18.0, 0.0),
-                ],
-                Stroke::new(
-                    2.0,
-                    if handle.has_focus() {
-                        theme::ACCENT
-                    } else {
-                        theme::BORDER
-                    },
-                ),
+            if let Some(drag) = self.drag.as_mut() {
+                drag.snapped = rect.top() <= workspace.top() + DROP_SNAP;
+                let held = handle.dragged() || edge_held;
+                let let_go = handle.drag_stopped() || edge_let_go;
+                if let_go || !held {
+                    let mut drag = *drag;
+                    // A drag that ends without a release (the panel went
+                    // away under it) maximises nothing.
+                    drag.snapped &= let_go;
+                    self.release(drag, compact, min_height, maximum, actual_height);
+                    if drag.snapped {
+                        // The grip moves to the top under a released pointer;
+                        // the maximised panel is shown as the button leaves it.
+                        handle.surrender_focus();
+                    }
+                    ui.ctx().request_repaint();
+                } else if drag.snapped {
+                    let zone = egui::Rect::from_min_max(
+                        workspace.min,
+                        egui::pos2(workspace.max.x, rect.top()),
+                    )
+                    .shrink(4.0);
+                    widgets::drop_zone(ui, zone, "Release to fill the workspace");
+                }
+            }
+        }
+        let accent = self.drag.is_some() || handle.has_focus();
+        if accent {
+            ui.painter().rect_stroke(
+                handle_rect,
+                4.0,
+                Stroke::new(1.5, theme::ACCENT),
+                egui::StrokeKind::Outside,
             );
         }
+        ui.painter().line_segment(
+            [
+                center - egui::vec2(18.0, 0.0),
+                center + egui::vec2(18.0, 0.0),
+            ],
+            Stroke::new(2.0, if accent { theme::ACCENT } else { theme::BORDER }),
+        );
         actions
     }
 
