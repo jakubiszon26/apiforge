@@ -5,7 +5,11 @@
   [push CI run 41494860353](https://github.com/jakubiszon26/apiforge/actions/runs/41494860353)
   (`windows-2022`, artifact `windows-icon`); its pull_request run
   [41494869307](https://github.com/jakubiszon26/apiforge/actions/runs/41494869307)
-  passed too. The "before" evidence comes from the acceptance commit
+  passed too. Review round 1 (`2172ce7`) made the bash validation match the
+  whole `Valid` line and qualified the guide; its push run
+  [41504278463](https://github.com/jakubiszon26/apiforge/actions/runs/41504278463)
+  printed the same subsystems, process tree (no child process), log blocks,
+  rotation and redirected version. The "before" evidence comes from the acceptance commit
   `a4c3a72`, [run 41486729082](https://github.com/jakubiszon26/apiforge/actions/runs/41486729082).
 - Built with: `cargo build --release --locked -p apiforge-desktop -p
   apiforge-cli` on `windows-2022` by CI (MSVC, Rust 1.99.0). Linux: the

@@ -69,8 +69,8 @@ if that file cannot be created, the window still starts and the output is
 lost. Each start appends a line `--- apiforge-desktop <version> <date time>
 ---` first, and a log over 1 MiB at start is renamed to
 `apiforge-desktop.log.1`, unless another running window holds it, in which
-case this start appends to it. A crash of the window then also shows a dialog
-that names the log. Debug builds (`cargo run`) and `apiforge.exe` remain
+case this start appends to it. When the log could be opened, a crash of the
+window also shows a dialog that names it. Debug builds (`cargo run`) and `apiforge.exe` remain
 console programs.
 
 ### Demo API
