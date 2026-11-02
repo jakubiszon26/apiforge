@@ -29,9 +29,10 @@
 `Stroke::new(2.0, theme::MUTED)` instead of the selection colour, the
 accent. `folder/code_view.rs` keeps, per document, the instant the editor
 last changed its text (`marks_quiet_at`); until `MARKS_DELAY` (700 ms) has
-passed since then it gives the editor no diagnostics, so the gutter shows
-plain numbers, the text no underline and no message on hover, and it asks
-egui to draw again when the marks are due. Typing, a paste, an undo and a
+passed since then, and until the analysis of the typed text is in (review
+round 1), it gives the editor no diagnostics, so the gutter shows plain
+numbers, the text no underline and no message on hover, and it asks egui
+to draw again when the marks are due. Typing, a paste, an undo and a
 redo in the editor all reach the same `outcome.changed` path and restart
 the pause; a board edit, a caret move, a selection and a scroll do not.
 The analyser, its 250 ms pause, the PROBLEMS caption and list and the
@@ -47,9 +48,9 @@ the real clock for the marks.
 | # | Criterion | Test | Release binary |
 | --- | --- | --- | --- |
 | 1 | The focus line is 2 px grey while the editor has focus, never red, absent without focus | `ux03_criterion_1_the_focus_line_is_grey` (and KTLO-13's `a_focus_line_shows_in_the_gutter_only_while_the_editor_has_focus`) | Scenario 1 |
-| 2 | No marks during a pause shorter than 700 ms although PROBLEMS counts the errors; an error corrected within the pause is never marked; the marks of the analysis appear at 700 ms; none on the keystroke's own frame, none while the typed text is still analysed, no hover message during the pause | `ux03_criterion_2_no_marks_while_typing`, `ux03_criterion_2_an_error_corrected_within_the_pause_shows_no_mark`, `ux03_criterion_2_marks_follow_the_analysis_after_the_pause`, `ux03_criterion_2_the_keystroke_frame_shows_no_mark`, `ux03_criterion_2_marks_wait_for_the_analysis_of_the_typed_text`, `ux03_criterion_2_the_hover_message_waits_for_the_pause` | Scenarios 2 and 3 |
+| 2 | No marks during a pause shorter than 700 ms although PROBLEMS counts the errors; an error corrected within the pause is never marked; the marks of the analysis appear 700 ms after the last key once the typed text's analysis is in (normally well before); none on the keystroke's own frame, none while the typed text is still analysed, no hover message during the pause | `ux03_criterion_2_no_marks_while_typing`, `ux03_criterion_2_an_error_corrected_within_the_pause_shows_no_mark`, `ux03_criterion_2_marks_follow_the_analysis_after_the_pause`, `ux03_criterion_2_the_keystroke_frame_shows_no_mark`, `ux03_criterion_2_marks_wait_for_the_analysis_of_the_typed_text`, `ux03_criterion_2_the_hover_message_waits_for_the_pause` | Scenarios 2 and 3 |
 | 3 | The PROBLEMS status and list unchanged; the analysis pause still 250 ms | `ux03_criterion_3_the_problems_status_is_unchanged`; the existing Problems tests | Scenarios 2 and 3 |
-| 4 | Matches `ux03-now` and `ux03-no-focus-line` at both sizes | this report; `review_ux03_editor_typing` | *Against the mock-up*; *Windows* |
+| 4 | Matches `ux03-now` and `ux03-no-focus-line` at both sizes | this report; `review_ux03_editor_typing` | *Against the mock-up*; *Windows* (960 × 540 only) |
 | 5 | `marks_due` false at 699 ms, true at 700; a repaint is asked for the moment the marks are due | `ux03_criterion_5_marks_due_at_the_delay`, `ux03_criterion_5_a_repaint_is_requested_for_the_marks` | Scenario 3 (the marks appear with the pointer parked) |
 | 6 | Typing (also within a running pause), paste, undo and redo restart the pause; caret moves, selecting and scrolling do not | `ux03_criterion_6_only_text_changes_restart_the_pause` | typing only (scenario 3) |
 | 7 | `APPLY_DELAY` still 250 ms; ADR 0007's board tests and `mod mcp16` pass unchanged | criterion 3's test; the workspace suite | — |
@@ -179,19 +180,23 @@ other visible difference.
 ## Windows
 
 Not run on Windows by hand. The CI runs of this branch on `windows-2022`
-run the `ux03_*` tests: run 41530347616 on `4ca66c5`, all passed (`Build &
-Test (windows-2022)`, success). Its `qa-captures-windows-2022` artifact
-holds the standard mode captures only, of the migrated demo shop with no
-editor focus and no typing, so it cannot show the grey line or the pause.
+run the `ux03_*` tests: run 41537343863 on `2467619` (after review round
+1), all eleven `ux03_*` tests passed, the review view ignored, `Build &
+Test (windows-2022)` success; earlier run 41530347616 on `4ca66c5`, the
+eight tests of that commit passed. The `qa-captures-windows-2022`
+artifact of run 41530347616 holds the standard mode captures only, of the
+migrated demo shop with no editor focus and no typing, so it cannot show
+the grey line or the pause.
 What it can show was compared: in
 [Code at 960 × 540](windows-code-960x540.png) the gutter (numbers' ink at
 x 253–274), the code's first column (x 273) and the empty gutter edge (no
 line without focus) are where they are in the Linux release capture and in
 that run's `qa-captures-ubuntu-24.04` capture, so nothing moved on Windows.
 Its 1600 × 1000 captures are 1024 × 768, the runner's display, with a
-warning on the run, as on earlier runs (not committed). The focused and
-typing states on Windows wait for the owner's build; the ticket is not
-accepted for Windows on this report.
+warning on the run, as on earlier runs (not committed), so 1600 × 1000 is
+not compared on Windows. That size, and the focused and typing states on
+Windows, wait for the owner's build; the ticket is not accepted for
+Windows on this report.
 
 ## Not verified
 
@@ -260,8 +265,8 @@ On `98c518f` (review round 1), all exit 0: `cargo fmt --all -- --check`;
 test --workspace --all-targets --locked`: 1 442 passed, 0 failed, 45
 ignored; `cargo run -p apiforge-convert-v1 --locked -- --fixtures
 --check`. Earlier, on `4ca66c5`: 1 439 passed, 45 ignored. CI on
-`4ca66c5` (run 41530347616): Linux and Windows build and test, CodeQL,
-all green. On `3c76667` the pull-request run's Windows job failed once in
+`2467619` (pull-request run 41537343863) and on `4ca66c5` (push run
+41530347616): Linux and Windows build and test, CodeQL, green. On `3c76667` the pull-request run's Windows job failed once in
 `mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run`
 (`LiveDisabled`), the Windows flake recorded on #122; its push run passed
 on both platforms.
