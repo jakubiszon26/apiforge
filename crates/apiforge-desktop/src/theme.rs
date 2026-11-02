@@ -26,6 +26,9 @@ pub const BRANCH_NO: Color32 = Color32::from_rgb(181, 112, 76);
 pub const OPERATOR: Color32 = Color32::from_rgb(58, 138, 96);
 pub const VARIABLE: Color32 = Color32::from_rgb(188, 105, 59);
 pub const ACCENT_SOFT: Color32 = Color32::from_rgb(251, 233, 221);
+/// A simulation: *Run simulation* and the SIMULATION badge in Run results
+/// (UX-02). White text on it reads at 6.3 : 1.
+pub const SIMULATION: Color32 = Color32::from_rgb(112, 76, 182);
 
 pub const SPACE_SM: f32 = 8.0;
 pub const SPACE_MD: f32 = 12.0;

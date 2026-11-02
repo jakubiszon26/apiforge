@@ -87,10 +87,17 @@ stay in memory for the session and are never written or exported.
 
 ## Runs
 
-**Run** simulates the active scenario with its sample responses. **Run options →
-Run live requests** sends real requests. A run takes the scenario's current text,
-saved or not, together with the published component revisions it calls; later
-edits do not change a run in progress. When the code has errors, Run offers the
+The Run button runs the project's run mode on the active scenario or component:
+**Run simulation** uses its sample responses and sends nothing; **Run live** sends
+real requests. The mode is chosen under **Run options**, the chevron at the button's
+right, and holds until it is changed. It is the person's, per project and computer,
+kept in `run-mode.json` beside `agent-consent.json` in the user's configuration
+directory by the manifest id, never in the project folder; a project never set is in
+Simulation. While the window observes another process's work, the button runs a
+simulation and *Live* cannot be chosen; the stored mode returns after *Take back*
+unless *Simulation* was chosen meanwhile. A run takes the scenario's current text,
+saved or not, together with the published component revisions it calls; later edits
+do not change a run in progress. When the code has errors, the Run button offers the
 last valid version and asks first. A live run is journalled under
 `.apiforge/local/`; one interrupted by a crash is listed at the next start until
 marked as handled. The command-line `run --folder` uses saved files only.

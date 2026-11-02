@@ -24,8 +24,8 @@ const APP_BAR: [&str; 8] = [
     "Split",
     "Save",
     "Save all",
+    "Run simulation",
     "Run options",
-    "Run",
 ];
 /// How far apart, in points, the centres of two widgets on one row may be.
 const ROW: f32 = 4.0;
