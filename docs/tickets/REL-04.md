@@ -2,9 +2,11 @@
 
 - Size: S · Owner review: 15 min · Risk: `visible UI` (Windows only: the
   console window behind the app goes; a crash shows a message box)
-- State: Analysis (issue #205) · decisions 1–2 pending · before `v0.1.0`
-  (the owner, 2026-11-02, on the REL-02 acceptance quiz of #199)
-- Analysis model: Fable · Implementation model: —
+- State: Analysis approved (issue #205) · decisions 1 = A and 2 = A, the
+  owner's decisions of 2026-11-02 (quiz on this analysis, recorded on #205)
+  · before `v0.1.0` (the owner, 2026-11-02, on the REL-02 acceptance quiz of
+  #199)
+- Analysis model: Fable · Implementation model: Claude Opus 5.5
 - After REL-02 (#199, merged): builds on its *Show the application icon
   (Windows)* step and `packaging/test_release.py`
 
@@ -117,6 +119,20 @@ decision 1.
      after an Explorer start. No console API call at all, but
      `apiforge-desktop --version` typed in a terminal prints nothing, which
      looks broken.
+
+### Decided
+
+The owner, 2026-11-02, on #205:
+
+1. **A.** A crash with no console writes the panic text to
+   `%APPDATA%\apiforge\logs\apiforge-desktop.log`, and a panic on the main
+   thread shows the standard error dialog *API Forge stopped unexpectedly.
+   What happened is written to <path>.* with *OK*. A panic on a worker
+   thread is logged only.
+2. **A.** A start from a terminal attaches to the parent console
+   (`AttachConsole(ATTACH_PARENT_PROCESS)`), so `--version`, `--help`,
+   `--check` and errors print there; the guide documents that `cmd` does not
+   wait for a windowed program.
 
 ## Acceptance criteria
 
