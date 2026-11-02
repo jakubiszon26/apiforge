@@ -1,9 +1,11 @@
 # UX-01: Several checks from one run — QA report
 
 - Branch: `docs/ux-01-several-checks` (pull request #243). Captures are from
-  the release binary of `22bbf2d`. The one later code commit, `e702e31`,
-  keeps the comparison of the text with the run's source for its source
-  version instead of making it each frame; nothing drawn changed.
+  the release binary of `22bbf2d`. Two code commits came later:
+  `e702e31` keeps the comparison of the text with the run's source for its
+  source version instead of making it each frame (nothing drawn changed),
+  and review round 1, `7f71bd1`, changes the rows of a document that
+  cannot be edited only (see *Review round 1*).
 - Built with: `cargo build --release --locked -p apiforge-desktop`
   (Rust 1.99.0).
 - Compared against mock-up: the approved UX-00 captures `ux01-*`
@@ -212,13 +214,31 @@ ticket is not accepted for Windows on this report.
 - Double scale, keyboard-only operation and a screen reader session.
 - Windows, beyond the CI test run.
 
+## Review round 1
+
+The automated review of `950e007` (cubic, eight points) is answered on the
+pull request. Fixed:
+
+- A checked row reads *Check added* also while the document cannot be
+  edited (another process holds the project, or it is read-only); such a
+  row, like every row then, offers neither *Check* nor *To variable*. New
+  unit test `report::tests::a_checked_row_reads_check_added_while_the_document_is_locked`.
+  Not captured in the release binary.
+- The ticket's *What the owner will see* and criteria 2 and 4 now match the
+  tests and this report (a moved block, stale rows without *Check*, Windows
+  captures not compared), and name the controls a checked row gives way to.
+- The nearest-*Check* helper is shared by the tests and the review view
+  (`testing::check_field`).
+- The legacy workspace window says in code that it keeps its behaviour.
+- The smoke line reports both runs' totals.
+
 ## Regression smoke list
 
 Linux, 2026-11-02, release binary of `22bbf2d`:
 
 | # | Result |
 | --- | --- |
-| 6 | Run a simulation: the report shows every step, *8 passed*, no request sent (scenarios 1 and 4) |
+| 6 | Run a simulation: the first report shows every step, *8 passed*; the next run, with the two checks, *10 passed*; no request sent (scenarios 1 and 4) |
 | 2, 10 | CI run 41509709984 on `22bbf2d`, `qa-captures-ubuntu-24.04`: the migrated demo shop in Code, Diagram and Split at 960 × 540 and 1600 × 1000, all six at the requested size, the tree, the editor and the board shown, every control visible. On `windows-2022` the 960 × 540 captures are the requested size and the 1600 × 1000 ones are 1024 × 768, the runner's display, as on earlier runs (not committed) |
 | 1, 3–5, 7–9 | Not run on the release binary for this ticket; the workspace suite covers their tests |
 
@@ -226,9 +246,10 @@ The owner's Windows run is pending as for the earlier tickets.
 
 ## Verification
 
-On `e702e31`, all exit 0: `cargo fmt --all -- --check`; `cargo clippy
---workspace --all-targets --locked -- -D warnings`; `cargo test --workspace
---all-targets --locked`: 1 430 passed, 0 failed, 44 ignored; `cargo run -p
-apiforge-convert-v1 --locked -- --fixtures --check`. The same on `22bbf2d`,
-with the same counts. CI on `22bbf2d` (runs 41509709984 and 41509716347):
-Linux and Windows build and test, CodeQL, all green.
+On `7f71bd1` (review round 1), all exit 0: `cargo fmt --all -- --check`;
+`cargo clippy --workspace --all-targets --locked -- -D warnings`; `cargo
+test --workspace --all-targets --locked`: 1 431 passed, 0 failed, 44
+ignored; `cargo run -p apiforge-convert-v1 --locked -- --fixtures --check`.
+Earlier: `e702e31` and `22bbf2d`, 1 430 passed, 44 ignored. CI on
+`22bbf2d` (runs 41509709984 and 41509716347): Linux and Windows build and
+test, CodeQL, all green.
