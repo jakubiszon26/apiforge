@@ -7995,3 +7995,539 @@ mod ux02 {
         frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
     }
 }
+
+// ----- UX-05: Run results and Problems drag to the whole workspace ------------
+
+/// UX-05 (#102): Run results and Problems are dragged up to the top of their
+/// workspace and released there to take it, as KTLO-19's and KTLO-18's
+/// buttons do, and dragged back down to return (docs/tickets/UX-05.md). A
+/// drag is a press on a named handle, moves of at most 32 px with a frame
+/// after each, and a release; the workspace is the area under the tab strip.
+/// Every test runs the demo shop in Split at 960 × 540 unless it says so.
+mod ux05 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+
+    const ZONE: &str = "Release to fill the workspace";
+    const PROBLEMS_ZONE: &str = "Release to expand problems";
+    /// Run results' grip, the 80 × 14 handle centred 8 px under its top.
+    const GRIP: &str = "Resize run report";
+    /// egui's own edge of Run results.
+    const EDGE: &str = "Resize run results";
+    const PROBLEMS_EDGE: &str = "Resize problems";
+    const MAXIMISE: &str = "Maximise run results";
+    const RESTORE: &str = "Restore run results";
+    const EXPAND: &str = "Expand problems";
+    const RESTORE_PROBLEMS: &str = "Restore problems";
+    const POLICY: &str = "When a step fails";
+    /// The owner's snap distance: the zone shows within 64 px of the top.
+    const SNAP: f32 = 64.0;
+    /// What maximised Run results hide in Split (KTLO-19's test).
+    const HIDDEN: [&str; 4] = ["Resize code", "Contents of", "Diagram board", "Add step"];
+
+    /// The demo shop at `size` in Split, after a passed simulation of its
+    /// scenario, with the scenario's id.
+    fn ran(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        choose(&mut harness, "Split");
+        choose(&mut harness, "Run simulation");
+        let report = finish_run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        (project, harness, scenario)
+    }
+
+    /// The workspace: from the tab strip's bottom to the window's bottom,
+    /// inside the harness's own central-panel margin (as KTLO-19 measures).
+    fn workspace(harness: &FolderHarness) -> egui::Rect {
+        let tabs = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
+            .expect("the tab strip is a panel")
+            .outer_rect;
+        let margin = egui::Frame::central_panel(&harness.ctx.global_style()).inner_margin;
+        let window = harness.ctx.content_rect();
+        egui::Rect::from_min_max(
+            egui::pos2(window.left(), tabs.bottom()),
+            egui::pos2(window.right(), window.bottom() - margin.bottomf()),
+        )
+    }
+
+    /// Run results' normal height range in `workspace`: at least 120 px
+    /// (160 px when the workspace is 460 px or more), at most 560 px or the
+    /// workspace less 200 px.
+    fn normal_range(workspace: egui::Rect) -> (f32, f32) {
+        let full = workspace.height();
+        let min = if full < 460.0 { 120.0 } else { 160.0 };
+        (min, (full - 200.0).clamp(min, 560.0))
+    }
+
+    /// Where Run results' top is at the normal ceiling.
+    fn ceiling_top(harness: &FolderHarness) -> f32 {
+        let workspace = workspace(harness);
+        workspace.bottom() - normal_range(workspace).1
+    }
+
+    /// The top of Run results, from its grip.
+    fn panel_top(harness: &FolderHarness) -> f32 {
+        harness.get_by_label(GRIP).rect().center().y - 8.0
+    }
+
+    /// The rect of the maximised panel (KTLO-19's id for that state).
+    fn maximised_rect(harness: &FolderHarness) -> egui::Rect {
+        egui::PanelState::load(&harness.ctx, egui::Id::new("report-maximised"))
+            .expect("a maximised panel")
+            .outer_rect
+    }
+
+    /// The active tab's Run results fill the workspace (KTLO-19's state).
+    fn maximised(harness: &FolderHarness) -> bool {
+        let app = folder(harness);
+        app.report_maximised(app.workbench.active())
+    }
+
+    /// The drop zone named `label`, while it is shown.
+    fn zone(harness: &FolderHarness, label: &str) -> Option<egui::Rect> {
+        harness.query_by_label(label).map(|zone| zone.rect())
+    }
+
+    /// Where a press on the grip lands: its centre.
+    fn grip(harness: &FolderHarness) -> egui::Pos2 {
+        harness.get_by_label(GRIP).rect().center()
+    }
+
+    /// Where a press on a panel's own edge lands: on the edge, left of the
+    /// grip that Run results centres on it.
+    fn edge(harness: &FolderHarness, label: &str) -> egui::Pos2 {
+        let rect = harness.get_by_label(label).rect();
+        egui::pos2(rect.left() + 60.0, rect.center().y)
+    }
+
+    /// The top of the Problems section: its edge lies on it.
+    fn problems_top(harness: &FolderHarness) -> f32 {
+        harness.get_by_label(PROBLEMS_EDGE).rect().center().y
+    }
+
+    /// Presses the primary button at `at`, the pointer resting there first.
+    fn press(harness: &mut FolderHarness, at: egui::Pos2) {
+        harness.hover_at(at);
+        harness.step();
+        harness.drag_at(at);
+        harness.step();
+    }
+
+    /// Moves the pressed pointer from `from` to `to`, at most 32 px a frame.
+    fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
+        let steps = ((to - from).length() / 32.0).ceil().max(1.0);
+        for step in 1..=steps as usize {
+            harness.hover_at(from + (to - from) * (step as f32 / steps));
+            harness.step();
+        }
+    }
+
+    /// Releases the button at `at`; then the pointer leaves the window.
+    fn release(harness: &mut FolderHarness, at: egui::Pos2) {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        harness.remove_cursor();
+        settle(harness);
+    }
+
+    /// Drags the grip until the panel's top is `top`, and holds it there.
+    fn hold_grip_at(harness: &mut FolderHarness, top: f32) -> egui::Pos2 {
+        let from = grip(harness);
+        let to = egui::pos2(from.x, top + 8.0);
+        press(harness, from);
+        move_to(harness, from, to);
+        to
+    }
+
+    /// Drags the grip 40 px under the workspace's top and releases it there.
+    fn drag_to_the_top(harness: &mut FolderHarness) {
+        let top = workspace(harness).top();
+        let at = hold_grip_at(harness, top + 40.0);
+        release(harness, at);
+    }
+
+    /// Criterion 1: dragged by the grip or by egui's edge to 40 px under the
+    /// workspace's top, the panel follows past its normal ceiling and the
+    /// zone *Release to fill the workspace* is between the workspace's top
+    /// and the panel's; held 100 px under the top instead, there is no zone.
+    #[test]
+    fn ux05_criterion_1_dragging_to_the_top_shows_the_drop_zone() {
+        let (_project, mut harness, _) = ran(MINIMUM);
+        let workspace = workspace(&harness);
+        let ceiling = ceiling_top(&harness);
+        for handle in [GRIP, EDGE] {
+            let from = if handle == GRIP {
+                grip(&harness)
+            } else {
+                edge(&harness, EDGE)
+            };
+            // How far under the panel's top the press lands.
+            let offset = from.y - panel_top(&harness);
+            press(&mut harness, from);
+            let near = egui::pos2(from.x, workspace.top() + 40.0 + offset);
+            move_to(&mut harness, from, near);
+            let top = panel_top(&harness);
+            assert!(
+                top < ceiling - SNAP && top <= workspace.top() + SNAP,
+                "{handle}: held 40 px under the top {}, the panel's top is {top} \
+                 (its normal ceiling is {ceiling})",
+                workspace.top()
+            );
+            let shown = zone(&harness, ZONE)
+                .unwrap_or_else(|| panic!("{handle}: no *{ZONE}* 40 px under the top"));
+            assert!(
+                shown.top() >= workspace.top() - 1.0 && shown.bottom() <= top + 1.0,
+                "{handle}: the zone {shown:?} is not between the top {} and the panel's top {top}",
+                workspace.top()
+            );
+            let far = egui::pos2(from.x, workspace.top() + 100.0 + offset);
+            move_to(&mut harness, near, far);
+            assert!(
+                (panel_top(&harness) - (workspace.top() + 100.0)).abs() <= 2.0,
+                "{handle}: held 100 px under the top, the panel's top is {}",
+                panel_top(&harness)
+            );
+            assert!(
+                zone(&harness, ZONE).is_none(),
+                "{handle}: a zone 100 px under the top"
+            );
+            release(&mut harness, far);
+        }
+    }
+
+    /// Criterion 2: released in the zone, the panel is maximised as the
+    /// button maximises it: the button reads *Restore run results*, the board
+    /// and the code are gone, the grip stays at the panel's top, and the
+    /// panel's rect is the one *Maximise run results* gives.
+    #[test]
+    fn ux05_criterion_2_the_drag_and_the_button_reach_one_state() {
+        let (_project, mut harness, _) = ran(MINIMUM);
+        let workspace = workspace(&harness);
+        drag_to_the_top(&mut harness);
+        assert!(maximised(&harness), "released in the zone, not maximised");
+        assert!(
+            has_label(&harness, RESTORE) && !has_label(&harness, MAXIMISE),
+            "released in the zone, the button is not *{RESTORE}*"
+        );
+        for label in HIDDEN {
+            assert!(
+                harness.query_by_label_contains(label).is_none(),
+                "{label:?} is drawn while maximised by the drag"
+            );
+        }
+        assert!(
+            zone(&harness, ZONE).is_none(),
+            "the zone stays after the release"
+        );
+        let dragged = maximised_rect(&harness);
+        assert!(
+            (dragged.top() - workspace.top()).abs() <= 1.0,
+            "the maximised panel {dragged:?} does not start at the workspace's top {}",
+            workspace.top()
+        );
+        assert!(
+            (panel_top(&harness) - dragged.top()).abs() <= 1.0,
+            "the grip is not at the maximised panel's top {}: {:?}",
+            dragged.top(),
+            harness.get_by_label(GRIP).rect()
+        );
+
+        choose(&mut harness, RESTORE);
+        assert!(!maximised(&harness), "*{RESTORE}* restores");
+        choose(&mut harness, MAXIMISE);
+        let clicked = maximised_rect(&harness);
+        assert!(
+            (dragged.min - clicked.min).length() <= 0.5
+                && (dragged.max - clicked.max).length() <= 0.5,
+            "the drag gives {dragged:?}, the button {clicked:?}"
+        );
+        assert!(has_label(&harness, RESTORE), "the button reads *{RESTORE}*");
+        assert!(
+            (panel_top(&harness) - clicked.top()).abs() <= 1.0,
+            "the button's maximised panel has its grip at its top too"
+        );
+    }
+
+    /// Criterion 3: in Code and in Split, *Resize problems* dragged to within
+    /// 64 px of KTLO-18's ceiling shows *Release to expand problems* over the
+    /// strip of code; released there, the section is expanded as *Expand
+    /// problems* expands it, with the strip of code above it, and *Restore
+    /// problems* returns the height from before the drag. Released outside
+    /// the zone, the section is 360 px high: at 1600 × 1000, as at 960 × 540
+    /// the ceiling is under 360 + 64 px and every height past 360 px is in
+    /// the zone.
+    #[test]
+    fn ux05_criterion_3_problems_drag_to_expand_keeps_the_strip() {
+        for mode in ["Code", "Split"] {
+            let project = crate::testing::shop_project();
+            let mut harness = folder_harness(project.path(), MINIMUM);
+            choose(&mut harness, mode);
+            let rested = problems_top(&harness);
+            choose(&mut harness, EXPAND);
+            let expanded = problems_top(&harness);
+            choose(&mut harness, RESTORE_PROBLEMS);
+            assert!((problems_top(&harness) - rested).abs() <= 1.0);
+
+            let from = edge(&harness, PROBLEMS_EDGE);
+            press(&mut harness, from);
+            let far = egui::pos2(from.x, expanded + 100.0);
+            move_to(&mut harness, from, far);
+            assert!(
+                zone(&harness, PROBLEMS_ZONE).is_none(),
+                "{mode}: a zone 100 px under the ceiling"
+            );
+            let near = egui::pos2(from.x, expanded + 30.0);
+            move_to(&mut harness, far, near);
+            let shown = zone(&harness, PROBLEMS_ZONE)
+                .unwrap_or_else(|| panic!("{mode}: no *{PROBLEMS_ZONE}* 30 px under the ceiling"));
+            assert!(
+                shown.bottom() <= expanded + 1.0 && shown.top() >= expanded - 96.0 - 1.0,
+                "{mode}: the zone {shown:?} is not over the strip of code above {expanded}"
+            );
+            release(&mut harness, near);
+            assert!(
+                folder(&harness).problems_expanded,
+                "{mode}: released in the zone, the problems are not expanded"
+            );
+            assert!(
+                has_label(&harness, RESTORE_PROBLEMS) && !has_label(&harness, EXPAND),
+                "{mode}: the button is not *{RESTORE_PROBLEMS}*"
+            );
+            assert!(
+                (problems_top(&harness) - expanded).abs() <= 1.0,
+                "{mode}: expanded by the drag, the section's top is {}, not {expanded} \
+                 where the button leaves the strip of code",
+                problems_top(&harness)
+            );
+            assert!(zone(&harness, PROBLEMS_ZONE).is_none());
+            choose(&mut harness, RESTORE_PROBLEMS);
+            assert!(
+                (problems_top(&harness) - rested).abs() <= 1.0,
+                "{mode}: restored to {}, not the height before the drag ({rested})",
+                problems_top(&harness)
+            );
+        }
+
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), WIDE);
+        choose(&mut harness, "Code");
+        choose(&mut harness, EXPAND);
+        let expanded = problems_top(&harness);
+        choose(&mut harness, RESTORE_PROBLEMS);
+        let from = edge(&harness, PROBLEMS_EDGE);
+        let to = egui::pos2(from.x, expanded + SNAP + 100.0);
+        press(&mut harness, from);
+        move_to(&mut harness, from, to);
+        assert!(
+            (problems_top(&harness) - to.y).abs() <= 2.0,
+            "the section does not follow past 360 px: its top is {}, the pointer at {}",
+            problems_top(&harness),
+            to.y
+        );
+        assert!(zone(&harness, PROBLEMS_ZONE).is_none());
+        release(&mut harness, to);
+        assert!(
+            !folder(&harness).problems_expanded,
+            "outside the zone, expanded"
+        );
+        assert!(has_label(&harness, EXPAND));
+        let height = folder(&harness).workbench.panels.diagnostics;
+        assert!(
+            (height - 360.0).abs() <= 1.0,
+            "released outside the zone, the section is {height} px high, not 360"
+        );
+    }
+
+    /// Criterion 6: released above the ceiling but outside the zone, the
+    /// panel's height is the ceiling; nothing is maximised and there is no
+    /// zone.
+    #[test]
+    fn ux05_criterion_6_releasing_outside_the_zone_returns_to_the_ceiling() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, _) = ran(size);
+            let workspace = workspace(&harness);
+            let ceiling = ceiling_top(&harness);
+            let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
+            assert!(
+                panel_top(&harness) < ceiling - SNAP,
+                "{size:?}: held above the ceiling {ceiling}, the panel's top is {}",
+                panel_top(&harness)
+            );
+            assert!(
+                zone(&harness, ZONE).is_none(),
+                "{size:?}: a zone outside it"
+            );
+            release(&mut harness, at);
+            assert!(!maximised(&harness), "{size:?}: maximised outside the zone");
+            assert!(has_label(&harness, MAXIMISE));
+            assert!(zone(&harness, ZONE).is_none());
+            assert!(
+                (panel_top(&harness) - ceiling).abs() <= 1.0,
+                "{size:?}: released outside the zone, the panel's top is {}, not the ceiling {ceiling}",
+                panel_top(&harness)
+            );
+        }
+    }
+
+    /// Criterion 7: maximised, the grip dragged down 200 px and released
+    /// restores the panel where it was released, within its normal range.
+    /// At 1600 × 1000 also 500 px, which lands under the ceiling (at
+    /// 960 × 540 the panel's contents after a run leave it only the 11 px
+    /// under the ceiling).
+    #[test]
+    fn ux05_criterion_7_dragging_down_restores() {
+        for (size, distance) in [(MINIMUM, 200.0), (WIDE, 200.0), (WIDE, 500.0)] {
+            let (_project, mut harness, _) = ran(size);
+            choose(&mut harness, MAXIMISE);
+            let workspace = workspace(&harness);
+            let from = grip(&harness);
+            let to = from + egui::vec2(0.0, distance);
+            press(&mut harness, from);
+            move_to(&mut harness, from, to);
+            release(&mut harness, to);
+            assert!(
+                !maximised(&harness),
+                "{size:?}, {distance} px: still maximised"
+            );
+            assert!(
+                has_label(&harness, MAXIMISE) && !has_label(&harness, RESTORE),
+                "{size:?}, {distance} px: the button is not *{MAXIMISE}*"
+            );
+            let (min, max) = normal_range(workspace);
+            let expected = workspace.bottom() - (workspace.height() - distance).clamp(min, max);
+            assert!(
+                (panel_top(&harness) - expected).abs() <= 1.0,
+                "{size:?}, {distance} px: the panel's top is {}, not {expected}",
+                panel_top(&harness)
+            );
+        }
+    }
+
+    /// Criterion 8: KTLO-19's exits restore a panel the drag maximised —
+    /// Escape, the button, another tab, another mode — at the height it had
+    /// before the drag began.
+    #[test]
+    fn ux05_criterion_8_the_exits_restore_the_height_before_the_drag() {
+        let (_project, mut harness, scenario) = ran(MINIMUM);
+        let component = only(&harness, DocumentKind::Component);
+        app(&mut harness).activate_tab(&component);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        let before = panel_top(&harness);
+        for exit in ["Escape", "button", "tab", "mode"] {
+            drag_to_the_top(&mut harness);
+            assert!(maximised(&harness), "{exit}: the drag did not maximise");
+            match exit {
+                "Escape" => {
+                    harness.key_press(Key::Escape);
+                    settle(&mut harness);
+                }
+                "button" => choose(&mut harness, RESTORE),
+                "tab" => {
+                    harness.key_press_modifiers(Modifiers::COMMAND, Key::Tab);
+                    settle(&mut harness);
+                    assert_eq!(
+                        folder(&harness).workbench.active(),
+                        Some(component.as_str())
+                    );
+                    harness.key_press_modifiers(Modifiers::COMMAND, Key::Tab);
+                    settle(&mut harness);
+                }
+                _ => {
+                    choose(&mut harness, "Diagram");
+                    assert!(!maximised(&harness), "another mode restores");
+                    choose(&mut harness, "Split");
+                }
+            }
+            assert!(!maximised(&harness), "{exit}: still maximised");
+            assert!(has_label(&harness, MAXIMISE), "{exit}: the button");
+            assert!(
+                (panel_top(&harness) - before).abs() <= 1.0,
+                "{exit}: restored with its top at {}, not {before} as before the drag",
+                panel_top(&harness)
+            );
+        }
+    }
+
+    /// Criterion 9: the keyboard is unchanged: ↑ and End on the grip stop at
+    /// the ceiling and do not maximise; ↓ lowers the panel by 32 px and Home
+    /// to its least height, as today. An arrow key also moves egui's focus
+    /// on, as it does today, so the grip is focused again before each key.
+    /// At 960 × 540 the panel's contents after a run are taller than 32 px
+    /// under the ceiling allows, so ↓ is measured exactly at 1600 × 1000.
+    #[test]
+    fn ux05_criterion_9_the_keys_stop_at_the_ceiling() {
+        fn press_on_grip(harness: &mut FolderHarness, key: Key) {
+            harness.get_by_label(GRIP).focus();
+            harness.step();
+            harness.key_press(key);
+            settle(harness);
+        }
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, _) = ran(size);
+            let ceiling = ceiling_top(&harness);
+            for key in [Key::ArrowUp, Key::End] {
+                for _ in 0..8 {
+                    press_on_grip(&mut harness, key);
+                }
+                assert!(
+                    !maximised(&harness),
+                    "{size:?}: {key:?} maximised the panel"
+                );
+                assert!(
+                    zone(&harness, ZONE).is_none(),
+                    "{size:?}: {key:?} showed the zone"
+                );
+                assert!(
+                    (panel_top(&harness) - ceiling).abs() <= 1.0,
+                    "{size:?}: {key:?}: the panel's top is {}, not the ceiling {ceiling}",
+                    panel_top(&harness)
+                );
+            }
+            press_on_grip(&mut harness, Key::ArrowDown);
+            let lowered = panel_top(&harness);
+            assert!(
+                lowered > ceiling + 1.0,
+                "{size:?}: ↓ does not lower the panel"
+            );
+            if size == WIDE {
+                assert!(
+                    (lowered - (ceiling + 32.0)).abs() <= 1.0,
+                    "↓ lowers the panel by 32 px: {lowered}"
+                );
+            }
+            press_on_grip(&mut harness, Key::Home);
+            assert!(
+                panel_top(&harness) > lowered + 1.0 || size == MINIMUM,
+                "{size:?}: Home does not lower the panel to its least height"
+            );
+            assert!(!maximised(&harness) && zone(&harness, ZONE).is_none());
+        }
+    }
+
+    /// Criterion 10: mid-drag, with the panel's top 64 px under the tab strip
+    /// as in `ux05-mid-drag-*`, the zone's label, the grip, *Run results*,
+    /// the status pill, the policy and the maximise button are within the
+    /// window and disjoint, at 960 × 540 and 1600 × 1000.
+    #[test]
+    fn ux05_criterion_10_mid_drag_fits() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, _) = ran(size);
+            let top = workspace(&harness).top() + SNAP;
+            let at = hold_grip_at(&mut harness, top);
+            let labels = [ZONE, GRIP, "Run results", "PASSED", POLICY, MAXIMISE];
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            release(&mut harness, at);
+        }
+    }
+}
