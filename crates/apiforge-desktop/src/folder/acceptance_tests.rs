@@ -11309,6 +11309,53 @@ mod ux13 {
         assert_eq!(in_view(&harness, &scenario).start(), lines.start());
     }
 
+    /// Criterion 1 with the caret in a statement: the board selects that
+    /// statement's block, as the caret asks, and the block selected with the
+    /// caret in it is not revealed again on return, which would centre it.
+    #[test]
+    fn ux13_criterion_1_a_caret_in_a_statement_keeps_the_scroll_too() {
+        let project = shop();
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let (first, rest) = text.split_once('\n').unwrap();
+        let values: String = (1..=80)
+            .map(|value| format!("  value_{value} = {value}\n"))
+            .collect();
+        fs::write(&path, format!("{first}\n{values}{rest}")).unwrap();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        choose(&mut harness, "Code");
+        settle(&mut harness);
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 3);
+        assert!(
+            folder(&harness)
+                .selections
+                .get(&scenario)
+                .is_some_and(|selected| selected.len() == 1),
+            "the board follows the caret to value_2"
+        );
+        for _ in 0..3 {
+            wheel_down(&mut harness, &scenario);
+        }
+        let scroll = scroll_of(&harness, &scenario);
+        let lines = in_view(&harness, &scenario);
+        assert!(scroll > 100.0, "the wheel scrolled the code: {scroll}");
+        assert!(!lines.contains(&3), "line 3 is out of view: {lines:?}");
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        assert_eq!(in_view(&harness, &scenario).start(), lines.start());
+        assert_eq!(caret_line(&harness, &scenario), 3, "the caret is restored");
+    }
+
     /// Criterion 2: a caret that was in view when the person left the tab
     /// and is out of view on return, because the text changed meanwhile, is
     /// brought into view by the least scroll: its line at the bottom edge,
