@@ -10204,3 +10204,350 @@ mod ux32 {
         }
     }
 }
+
+/// UX-33 (#250, COMP-00 Q4): a *Component settings* button in the
+/// component board's header row opens the component's settings in the
+/// Inspector: its name, the name in code, the description, the action and
+/// the lists of its inputs and outputs. A scenario's board has no such
+/// button (docs/tickets/COMP-00.md).
+mod ux33 {
+    use super::super::component_run_tests::{NOTES, shop_with_notes};
+    use super::mcp08b::contains;
+    use super::ux02::hover_shows;
+    use super::ux31::{toggled, window};
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui::accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+
+    const CART: &str = "components/add-to-cart.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const SETTINGS: &str = "Component settings";
+    const NAME: &str = "Component name";
+    const HANDLE: &str = "Name in code";
+    const DESCRIPTION: &str = "Component description";
+    const ACTION: &str = "Offered after a block that outputs (action)";
+    const ADD: &str = "Add input to the component";
+    const PRODUCT_ROW: &str = "Input product * object · Product";
+    const QUANTITY_ROW: &str = "Input quantity * number = 1";
+    const CART_DESCRIPTION: &str = "Create a cart with the product and fetch its calculated price.";
+    const FIXED: &str = "In code: add_to_cart · fixed once published";
+
+    fn field_value(harness: &FolderHarness, label: &str) -> String {
+        harness
+            .get_by_label(label)
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+    }
+
+    fn open_settings(harness: &mut FolderHarness) {
+        choose(harness, SETTINGS);
+        assert_eq!(
+            toggled(harness, SETTINGS),
+            Some(Toggled::True),
+            "the button is pressed while the settings are open"
+        );
+    }
+
+    /// Types `text` at the end of the focused field `label`, one keystroke
+    /// per frame, after clearing it; `written` checks the code after each.
+    fn type_each(
+        harness: &mut FolderHarness,
+        label: &str,
+        text: &str,
+        mut written: impl FnMut(&FolderHarness, &str),
+    ) {
+        harness.get_by_label(label).focus();
+        harness.step();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        let mut typed = String::new();
+        for character in text.chars() {
+            typed.push(character);
+            harness
+                .get_by_label(label)
+                .type_text(&character.to_string());
+            settle(harness);
+            written(harness, &typed);
+        }
+    }
+
+    /// Criterion 1: a component's board shows *Component settings* in its
+    /// header row beside *Add step*, in Diagram and Split at both sizes; it
+    /// keeps its label while the row has room and is an icon with a tooltip
+    /// when it has not. A scenario's board has no such button.
+    #[test]
+    fn ux33_criterion_1_a_component_board_has_the_button_a_scenario_none() {
+        for size in [MINIMUM, WIDE] {
+            for mode in ["Diagram", "Split"] {
+                let directory = shop();
+                let (harness, _) = window(directory.path(), size, CART, mode);
+                assert!(has_label(&harness, SETTINGS), "{mode} at {size:?}");
+                let button = harness.get_by_label(SETTINGS).rect();
+                let add_step = harness.get_by_label("Add step").rect();
+                assert!(
+                    (button.center().y - add_step.center().y).abs() < 2.0,
+                    "{mode} at {size:?}: on the row of Add step, {button:?} {add_step:?}"
+                );
+                let strip = harness.get_by_label("INPUTS").rect();
+                assert!(
+                    button.bottom() <= strip.top(),
+                    "{mode} at {size:?}: in the header row, above the strip"
+                );
+                assert_within_window(&harness, &[SETTINGS, "Add step"]);
+                assert_disjoint(&harness, &[SETTINGS, "Add step", "Tidy up"]);
+
+                let directory = shop();
+                let (harness, _) = window(directory.path(), size, SCENARIO, mode);
+                assert!(has_label(&harness, "Add step"), "the scenario's board");
+                assert!(
+                    !has_label(&harness, SETTINGS),
+                    "{mode} at {size:?}: a scenario has no Component settings"
+                );
+            }
+        }
+        // With room, the button reads its label.
+        let directory = shop();
+        let (harness, _) = window(directory.path(), WIDE, CART, "Diagram");
+        let button = harness.get_by_label(SETTINGS).rect();
+        assert!(button.width() > 100.0, "labelled: {button:?}");
+        // At 960 × 540 with the Inspector open the row has no room: an icon,
+        // which names itself in a tooltip.
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), MINIMUM, CART, "Diagram");
+        open_settings(&mut harness);
+        let button = harness.get_by_label(SETTINGS).rect();
+        assert!(button.width() < 40.0, "an icon: {button:?}");
+        assert!(hover_shows(
+            &mut harness,
+            SETTINGS,
+            "name, description, action, inputs and outputs"
+        ));
+    }
+
+    /// Criterion 2: the button opens the panel with the component's name,
+    /// name in code, description, action and the lists of its inputs and
+    /// outputs, as `add-to-cart.afs` declares them; a second click closes it.
+    #[test]
+    fn ux33_criterion_2_the_button_opens_the_settings() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, CART, "Diagram");
+            assert!(!has_label(&harness, NAME), "closed at first");
+            assert_eq!(toggled(&harness, SETTINGS), Some(Toggled::False));
+            open_settings(&mut harness);
+            assert!(has_label(&harness, "COMPONENT"), "the caption at {size:?}");
+            assert_eq!(field_value(&harness, NAME), "Add to cart");
+            assert!(contains(&harness, FIXED), "the name in code at {size:?}");
+            assert_eq!(field_value(&harness, DESCRIPTION), CART_DESCRIPTION);
+            assert_eq!(
+                field_value(&harness, ACTION),
+                "product · object · Product",
+                "the action at {size:?}"
+            );
+            assert!(has_label(&harness, PRODUCT_ROW), "{size:?}");
+            assert!(has_label(&harness, QUANTITY_ROW), "{size:?}");
+            assert!(has_label(&harness, ADD), "{size:?}");
+            assert!(has_label(&harness, "Output cart object · Cart"), "{size:?}");
+            assert!(contains(
+                &harness,
+                "Outputs are the Export blocks on the board."
+            ));
+            assert_within_window(&harness, &[NAME, DESCRIPTION, ACTION, SETTINGS]);
+
+            choose(&mut harness, SETTINGS);
+            assert!(!has_label(&harness, NAME), "a second click closes them");
+            assert_eq!(toggled(&harness, SETTINGS), Some(Toggled::False));
+        }
+    }
+
+    /// Criterion 3: the description is written as it is typed, and so is the
+    /// name; an empty name stays in the field with an inline error while the
+    /// code keeps the last one. Published, the name in code is read-only
+    /// with the *fixed once published* note.
+    #[test]
+    fn ux33_criterion_3_the_description_and_name_are_written_as_typed() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        assert!(before.contains(&format!("  description \"{CART_DESCRIPTION}\"\n")));
+        open_settings(&mut harness);
+
+        type_each(
+            &mut harness,
+            DESCRIPTION,
+            "Fills a cart",
+            |harness, typed| {
+                let source = source_of(harness, &id);
+                assert!(
+                    source.contains(&format!("  description \"{typed}\"\n")),
+                    "the description reads {typed}: {source}"
+                );
+                assert!(harness.get_by_label(DESCRIPTION).is_focused(), "typing");
+            },
+        );
+
+        replace_text(&mut harness, NAME, "Add item");
+        assert!(
+            source_of(&harness, &id).contains("component add_to_cart \"Add item\" {\n"),
+            "{}",
+            source_of(&harness, &id)
+        );
+        assert!(has_label(&harness, "Add item"), "the panel's title follows");
+        replace_text(&mut harness, NAME, "");
+        assert_eq!(field_value(&harness, NAME), "", "the text stays");
+        assert!(contains(&harness, "A component needs a name"));
+        assert!(source_of(&harness, &id).contains("component add_to_cart \"Add item\" {\n"));
+
+        // Published: the name in code is not a field.
+        assert!(!has_label(&harness, HANDLE), "read-only once published");
+        assert!(contains(&harness, FIXED));
+    }
+
+    /// Criterion 3, before the first publication: the name in code is a
+    /// field, written as typed while it is a valid name no other component
+    /// has; publishing makes it read-only with the note.
+    #[test]
+    fn ux33_criterion_3_the_name_in_code_is_editable_until_published() {
+        let project = shop_with_notes();
+        let (mut harness, id) = window(project.path(), WIDE, NOTES, "Diagram");
+        open_settings(&mut harness);
+        assert_eq!(field_value(&harness, NAME), "Notes");
+        assert_eq!(field_value(&harness, HANDLE), "Notes");
+        assert!(!contains(&harness, "· fixed once published"));
+
+        type_each(&mut harness, HANDLE, "memo", |harness, typed| {
+            let source = source_of(harness, &id);
+            assert!(
+                source.starts_with(&format!("component {typed} \"Notes\" {{\n")),
+                "the name in code reads {typed}: {source}"
+            );
+        });
+
+        replace_text(&mut harness, HANDLE, "add_to_cart");
+        assert_eq!(field_value(&harness, HANDLE), "add_to_cart");
+        assert!(contains(
+            &harness,
+            "Another component is already named add_to_cart"
+        ));
+        assert!(source_of(&harness, &id).starts_with("component memo \"Notes\" {\n"));
+        replace_text(&mut harness, HANDLE, "1 bad");
+        assert!(contains(&harness, "Not a valid name"));
+        assert!(source_of(&harness, &id).starts_with("component memo \"Notes\" {\n"));
+        // Leaving the field puts the code's name back.
+        harness.get_by_label(DESCRIPTION).focus();
+        settle(&mut harness);
+        assert_eq!(field_value(&harness, HANDLE), "memo");
+
+        choose(&mut harness, "Publish");
+        assert!(
+            folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .manifest()
+                .revisions
+                .iter()
+                .any(|revision| revision.handle == "memo"),
+            "published"
+        );
+        assert!(!has_label(&harness, HANDLE), "read-only once published");
+        assert!(contains(&harness, "In code: memo · fixed once published"));
+        assert_eq!(
+            field_value(&harness, NAME),
+            "Notes",
+            "the name stays editable"
+        );
+    }
+
+    /// Criterion 4: choosing the input that feeds the action writes the
+    /// component's `action` line with that input's type; *No action*
+    /// removes it.
+    #[test]
+    fn ux33_criterion_4_the_action_is_chosen_or_removed() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        assert!(source_of(&harness, &id).contains("  action product"));
+        open_settings(&mut harness);
+
+        choose(&mut harness, ACTION);
+        choose(&mut harness, "quantity · number");
+        let source = source_of(&harness, &id);
+        assert!(source.contains("  action quantity: number\n"), "{source}");
+        assert!(!source.contains("action product"), "{source}");
+        assert_eq!(field_value(&harness, ACTION), "quantity · number");
+
+        choose(&mut harness, ACTION);
+        choose(&mut harness, "No action");
+        let source = source_of(&harness, &id);
+        assert!(!source.contains("  action "), "{source}");
+        assert_eq!(field_value(&harness, ACTION), "No action");
+
+        choose(&mut harness, ACTION);
+        choose(&mut harness, "product · object · Product");
+        assert!(source_of(&harness, &id).contains("  action product"));
+    }
+
+    /// Criterion 5: *+ Add input* opens UX-32's *New input* form, and a
+    /// row of the inputs list opens that input's panel; either takes the
+    /// Inspector from the settings, as a pill of the strip does.
+    #[test]
+    fn ux33_criterion_5_the_lists_open_the_input_panels() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, CART, "Diagram");
+        open_settings(&mut harness);
+        choose(&mut harness, ADD);
+        assert!(has_label(&harness, "New input"), "UX-32's form");
+        assert!(harness.get_by_label("Input name").is_focused());
+        assert!(contains(&harness, "being added…"), "the strip's pill");
+        assert_eq!(toggled(&harness, SETTINGS), Some(Toggled::False));
+        assert!(!has_label(&harness, NAME), "the settings gave way");
+
+        open_settings(&mut harness);
+        assert!(!has_label(&harness, "New input"), "the form gave way");
+        choose(&mut harness, QUANTITY_ROW);
+        assert_eq!(field_value(&harness, "Input name"), "quantity");
+        assert!(has_label(&harness, "Used by"), "the input's panel");
+        assert_eq!(toggled(&harness, SETTINGS), Some(Toggled::False));
+        assert_eq!(
+            toggled(&harness, "quantity * number = 1"),
+            Some(Toggled::True),
+            "its pill is selected"
+        );
+
+        // A pill of the strip, too, takes the Inspector from the settings.
+        open_settings(&mut harness);
+        choose(&mut harness, "product * object · Product");
+        assert!(!has_label(&harness, NAME));
+        assert_eq!(field_value(&harness, "Input name"), "product");
+    }
+
+    /// The button and the panel beside the approved capture
+    /// `docs/qa/2026-11-02/COMP-00/comp00-q4-settings-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux33_component_settings() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            for mode in ["Diagram", "Split"] {
+                let directory = shop();
+                let (mut harness, _) = window(directory.path(), size, CART, mode);
+                let mode = mode.to_lowercase();
+                capture(&mut harness, &format!("ux33-button-{mode}-{suffix}"), None);
+                if harness
+                    .get_by_label(SETTINGS)
+                    .accesskit_node()
+                    .is_disabled()
+                {
+                    continue;
+                }
+                open_settings(&mut harness);
+                capture(
+                    &mut harness,
+                    &format!("ux33-settings-{mode}-{suffix}"),
+                    None,
+                );
+            }
+        }
+    }
+}
