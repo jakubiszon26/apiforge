@@ -449,7 +449,8 @@ struct Window {
     frames: u8,
     completed: Arc<AtomicBool>,
     closing_since: Option<Instant>,
-    /// Fits the first window to its monitor; `None` where its size is fixed.
+    /// Fits the first window to its monitor, and the workspace window the stop
+    /// window grows into; `None` where its size is fixed.
     fit: Option<window_fit::FirstFit>,
 }
 
@@ -481,7 +482,13 @@ impl eframe::App for Window {
                 ui.ctx().request_repaint_after(Duration::from_millis(16));
             }
         }
+        let stopped = matches!(self.app, Front::Stopped(_));
         ui.add_enabled_ui(self.closing_since.is_none(), |ui| self.app.ui(ui));
+        if stopped && !matches!(self.app, Front::Stopped(_)) {
+            // The stop window grew into the workspace window: fit it once the
+            // monitor is known, should it not have been when it grew.
+            self.fit = Some(window_fit::FirstFit::toward(DEFAULT_WINDOW_SIZE.into()));
+        }
         if let Some(capture) = &mut self.capture {
             if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
                 if let Err(message) = &result {

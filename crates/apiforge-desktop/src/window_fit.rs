@@ -70,9 +70,20 @@ pub fn screen(context: &egui::Context) -> Option<(Vec2, f32)> {
 pub struct FirstFit {
     attempts: u8,
     done: bool,
+    /// The size the window was asked to take, or `None` for the size it has.
+    size: Option<Vec2>,
 }
 
 impl FirstFit {
+    /// Fits a window that was just asked to take `size`, before the window
+    /// reports it: the stop window growing into the workspace window.
+    pub fn toward(size: Vec2) -> Self {
+        Self {
+            size: Some(size),
+            ..Self::default()
+        }
+    }
+
     /// Resizes the window if its size, opened or restored by the window
     /// manager, does not fit the monitor; waits a few frames for the monitor
     /// to be known.
@@ -82,12 +93,10 @@ impl FirstFit {
         }
         self.attempts += 1;
         let inner = context.input(|input| input.viewport().inner_rect);
-        let fitted = inner
+        let size = self.size.or(inner.map(|inner| inner.size()));
+        let fitted = size
             .zip(screen(context))
-            .map(|(inner, (monitor, title_bar))| {
-                let size = inner.size();
-                (size, fit_window_size(size, monitor, title_bar))
-            });
+            .map(|(size, (monitor, title_bar))| (size, fit_window_size(size, monitor, title_bar)));
         match fitted {
             Some((size, fitted)) => {
                 self.done = true;
@@ -213,5 +222,34 @@ mod tests {
         assert!(done && sent.is_empty());
         let (done, sent) = commands(vec2(1600.0, 1000.0), None);
         assert!(!done && sent.is_empty(), "it waits for the monitor");
+    }
+
+    /// The stop window growing into the workspace window fits the size it
+    /// asked for, not the dialog's size the window still reports, once the
+    /// monitor is known.
+    #[test]
+    fn a_window_asked_to_grow_fits_the_size_it_asked_for() {
+        let context = egui::Context::default();
+        let mut fit = FirstFit::toward(vec2(1600.0, 1000.0));
+        let mut frame = |monitor: Option<Vec2>| {
+            let mut input = egui::RawInput::default();
+            let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            viewport.inner_rect = Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 420.0)));
+            viewport.monitor_size = monitor;
+            let mut output = context.run_ui(input, |ui| fit.update(ui.ctx()));
+            output.textures_delta.clear();
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .filter(|command| matches!(command, egui::ViewportCommand::InnerSize(_)))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert!(frame(None).is_empty(), "it waits for the monitor");
+        assert_eq!(
+            frame(Some(vec2(1600.0, 1000.0))),
+            [egui::ViewportCommand::InnerSize(vec2(1600.0, 964.0))]
+        );
+        assert!(frame(Some(vec2(1600.0, 1000.0))).is_empty(), "once");
     }
 }
