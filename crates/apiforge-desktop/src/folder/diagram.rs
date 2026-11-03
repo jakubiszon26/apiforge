@@ -142,6 +142,20 @@ impl FolderApp {
         if !selection.is_empty() {
             self.new_inputs.remove(document_id);
         }
+        // A selected block or input, the *New input* form, or a scenario's
+        // board leaves no room for the component's settings (UX-33).
+        if !selection.is_empty()
+            || input_selected.is_some()
+            || inputs.is_none()
+            || self.new_inputs.contains_key(document_id)
+        {
+            self.component_settings.remove(document_id);
+        }
+        let settings = inputs.map(|_| canvas::SettingsButton {
+            open: self.component_settings.contains(document_id),
+            available: self.library_room(ui.ctx()),
+            header_width: header.full_width(ui),
+        });
         // The input the *New input* form is adding (UX-32).
         let adding_input = inputs
             .and_then(|_| self.new_inputs.get(document_id))
@@ -184,6 +198,7 @@ impl FolderApp {
                     inputs,
                     selected_input: input_selected.as_deref(),
                     adding_input: adding_input.as_deref(),
+                    settings,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -219,6 +234,7 @@ impl FolderApp {
                 command,
                 Command::Select(_)
                     | Command::SelectInput(_)
+                    | Command::ComponentSettings
                     // Opening a called component is navigation, which stays
                     // free while observing (MCP-08a).
                     | Command::EditComponent(_)
@@ -247,8 +263,10 @@ impl FolderApp {
         let result: Option<Result<Edit, String>> = match command {
             Command::Select(ids) => {
                 if !ids.is_empty() {
-                    // Selecting a block leaves the *New input* form.
+                    // Selecting a block leaves the *New input* form and the
+                    // component's settings.
                     self.new_inputs.remove(document_id);
+                    self.component_settings.remove(document_id);
                 }
                 self.selections.insert(document_id.to_owned(), ids);
                 self.selected_inputs.remove(document_id);
@@ -256,19 +274,25 @@ impl FolderApp {
             }
             Command::AddInput => {
                 if matches!(model, Document::Component(_)) {
-                    self.new_inputs.entry(document_id.to_owned()).or_default();
+                    self.open_new_input(document_id);
+                }
+                None
+            }
+            Command::ComponentSettings => {
+                // The button opens the settings, or closes them when open.
+                if matches!(model, Document::Component(_))
+                    && !self.component_settings.remove(document_id)
+                {
+                    self.component_settings.insert(document_id.to_owned());
                     self.selections.remove(document_id);
                     self.selected_inputs.remove(document_id);
+                    self.new_inputs.remove(document_id);
                 }
                 None
             }
             Command::SelectInput(name) => {
                 match name {
-                    Some(name) => {
-                        self.new_inputs.remove(document_id);
-                        self.selected_inputs.insert(document_id.to_owned(), name);
-                        self.selections.remove(document_id);
-                    }
+                    Some(name) => self.open_input(document_id, name),
                     None => {
                         self.selected_inputs.remove(document_id);
                     }
@@ -495,6 +519,8 @@ impl FolderApp {
             {
                 let port = port.clone();
                 self.input_panel(ui, document_id, component, &port, snapshot.editable);
+            } else if self.component_settings.contains(document_id) {
+                self.component_settings_panel(ui, document_id, component, snapshot.editable);
             }
             return;
         };
@@ -716,6 +742,18 @@ impl Header<'_> {
             .layout_no_wrap(text.to_owned(), font, theme::TEXT)
             .size()
             .x
+    }
+
+    /// The width the header takes when nothing of it is given up.
+    fn full_width(&self, ui: &egui::Ui) -> f32 {
+        self.fit(
+            ui,
+            canvas::HeaderRoom {
+                alone: f32::INFINITY,
+                with_summary: f32::INFINITY,
+            },
+        )
+        .width
     }
 
     /// Gives up, as the row narrows, first the kind, then the name's full
