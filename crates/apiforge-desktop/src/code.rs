@@ -84,6 +84,9 @@ pub struct Outcome {
     /// The lines the gutter showed whole, counted from one; `None` without
     /// a gutter or with no whole line in view.
     pub lines_in_view: Option<std::ops::RangeInclusive<usize>>,
+    /// Whether the caret was inside the visible part of the editor, with or
+    /// without the keyboard; `None` before it has a caret.
+    pub caret_in_view: Option<bool>,
 }
 
 /// The editor's own state: what the popup is showing and what it is for.
@@ -114,8 +117,29 @@ pub struct Completions {
     /// the one that moves and the one scrolled to.
     pending_caret: Option<(usize, usize)>,
     prepared_scroll: Option<usize>,
-    /// The pending caret is scrolled to only when it is out of view.
-    gentle: bool,
+    /// How the view moves to the pending caret.
+    reveal: Reveal,
+    /// Frames left in which a caret shown by the least scroll is brought back
+    /// into a view that shrank after it.
+    rechecks: u8,
+}
+
+/// The frames after a least scroll in which it is checked again.
+const LEAST_RECHECKS: u8 = 2;
+
+/// How the view moves to a caret placed from outside the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Reveal {
+    /// The caret's line to the middle of the view, wherever it is.
+    #[default]
+    Centre,
+    /// To the middle only when the line is out of view (MCP-16).
+    Gentle,
+    /// The least scroll that shows the line, only when it is out of view
+    /// (UX-13).
+    Least,
+    /// Not at all: the view stays where it is (UX-13).
+    Still,
 }
 
 #[derive(Clone)]
@@ -182,16 +206,48 @@ impl Completions {
         let cursor = output
             .cursor_range
             .map(|range| byte_offset(text, range.primary.index.0));
-        if let Some(caret) = self.prepared_scroll.take() {
+        let target = if let Some(caret) = self.prepared_scroll.take() {
+            self.rechecks = 0;
             let index = epaint_index(char_index(text, caret));
+            Some((
+                egui::text::CCursor::new(index),
+                std::mem::take(&mut self.reveal),
+                true,
+            ))
+        } else if self.rechecks > 0 {
+            self.rechecks -= 1;
+            output
+                .state
+                .cursor
+                .char_range()
+                .map(|range| (range.primary, Reveal::Least, false))
+        } else {
+            None
+        };
+        if let Some((caret, reveal, placed)) = target {
             let rect = output
                 .galley
-                .pos_from_cursor(egui::text::CCursor::new(index))
+                .pos_from_cursor(caret)
                 .translate(output.galley_pos.to_vec2());
-            let gentle = std::mem::take(&mut self.gentle);
-            if !(gentle && ui.clip_rect().contains_rect(rect)) {
-                ui.scroll_to_rect(rect.expand(8.0), Some(egui::Align::Center));
+            let in_view = ui.clip_rect().contains_rect(rect);
+            let align = match reveal {
+                Reveal::Centre => Some(Some(egui::Align::Center)),
+                Reveal::Gentle if !in_view => Some(Some(egui::Align::Center)),
+                Reveal::Least if !in_view => Some(None),
+                Reveal::Gentle | Reveal::Least | Reveal::Still => None,
+            };
+            if let Some(align) = align {
+                ui.scroll_to_rect(rect.expand(8.0), align);
                 ui.ctx().request_repaint();
+                // The frame a tab comes back in can still be settling: a
+                // panel below the code that grows to its contents shortens
+                // the view after this scroll, so the least scroll is checked
+                // again for the next frames.
+                if reveal == Reveal::Least && placed {
+                    self.rechecks = LEAST_RECHECKS;
+                }
+            } else {
+                self.rechecks = 0;
             }
         }
         if !output.response.has_focus() || !ui.is_enabled() {
@@ -290,7 +346,7 @@ impl Completions {
                 apply(text, &chosen);
                 let caret = chosen.replace.start + chosen.caret;
                 self.pending_caret = Some((caret, caret));
-                self.gentle = false;
+                self.reveal = Reveal::Centre;
                 self.popup = None;
                 true
             }
@@ -354,7 +410,7 @@ impl CodeEditor {
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
         self.completions.pending_caret = Some((at, at));
-        self.completions.gentle = false;
+        self.completions.reveal = Reveal::Centre;
     }
 
     /// Puts the caret at a byte offset on the next frame, as `reveal` does,
@@ -362,14 +418,28 @@ impl CodeEditor {
     /// changed stays where the person reads it (MCP-16).
     pub fn show_line(&mut self, at: usize) {
         self.completions.pending_caret = Some((at, at));
-        self.completions.gentle = true;
+        self.completions.reveal = Reveal::Gentle;
     }
 
     /// Selects a byte range on the next frame, keeping its direction: the caret
     /// is the end that moves.
     pub fn select(&mut self, anchor: usize, caret: usize) {
         self.completions.pending_caret = Some((anchor, caret));
-        self.completions.gentle = false;
+        self.completions.reveal = Reveal::Centre;
+    }
+
+    /// Restores a tab's selection on the next frame without moving the view
+    /// its scroll was restored to (UX-13). A caret that was in view when the
+    /// tab was left, `in_view`, and is out of it now, because the text changed
+    /// meanwhile, is shown by the least scroll; one the person had scrolled
+    /// away from stays out of view.
+    pub fn restore(&mut self, anchor: usize, caret: usize, in_view: bool) {
+        self.completions.pending_caret = Some((anchor, caret));
+        self.completions.reveal = if in_view {
+            Reveal::Least
+        } else {
+            Reveal::Still
+        };
     }
 
     /// Draws the editor and returns what the user did.
@@ -463,6 +533,15 @@ impl CodeEditor {
                     .min_size(vec2(0.0, to_bottom));
             }
             let output = edit.show(ui);
+            // Read before the edit is handled: a completion or an indent
+            // changes the text the galley was laid out for.
+            let caret_in_view = output.state.cursor.char_range().map(|range| {
+                let at = output
+                    .galley
+                    .pos_from_cursor(range.primary)
+                    .translate(output.galley_pos.to_vec2());
+                ui.clip_rect().contains_rect(at)
+            });
             let mut lines_in_view = None;
             #[cfg(test)]
             {
@@ -474,6 +553,7 @@ impl CodeEditor {
             }
             let mut shown = self.after_edit(ui, text, context, &output, Taken { keys, indent }, id);
             shown.lines_in_view = lines_in_view;
+            shown.caret_in_view = caret_in_view;
             outcome = Some(shown);
         });
         outcome.expect("the editor is always drawn")
@@ -644,7 +724,7 @@ impl CodeEditor {
             );
             if let Some(moved) = reindent(text, selection, deeper) {
                 self.completions.pending_caret = Some(moved);
-                self.completions.gentle = false;
+                self.completions.reveal = Reveal::Centre;
                 ui.ctx().request_repaint();
                 changed = true;
             }
@@ -695,7 +775,7 @@ impl CodeEditor {
                 && let Some(caret) = auto_indent(text, cursor)
             {
                 self.completions.pending_caret = Some((caret, caret));
-                self.completions.gentle = false;
+                self.completions.reveal = Reveal::Centre;
             }
         }
 
@@ -704,6 +784,7 @@ impl CodeEditor {
             response,
             changed,
             lines_in_view: None,
+            caret_in_view: None,
         }
     }
 }

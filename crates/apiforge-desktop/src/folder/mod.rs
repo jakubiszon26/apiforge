@@ -247,6 +247,10 @@ pub struct FolderApp {
     /// The document the code editor last showed; its caret is restored on entry.
     shown: Option<String>,
     scroll_restore: Option<f32>,
+    /// The documents whose caret was in view the last time their code was
+    /// drawn: returning to one shows a caret an edit moved away meanwhile,
+    /// while a caret the person scrolled away from stays where it is (UX-13).
+    carets_in_view: HashSet<String>,
     /// The Problems section is expanded over the code (KTLO-18). Deliberately
     /// not in the view state: a window reopens with the section at the height
     /// it was dragged to, not expanded.
@@ -462,6 +466,7 @@ impl FolderApp {
             code: code::CodeEditor::default(),
             shown: None,
             scroll_restore: None,
+            carets_in_view: HashSet::new(),
             problems_expanded: false,
             problems_epoch: 0,
             problems_dragged: false,
