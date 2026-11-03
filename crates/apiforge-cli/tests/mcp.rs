@@ -43,7 +43,12 @@
 //! holds the project and names its endpoint: `allowed: null`, the window
 //! decides when the run starts, whatever the flag, with no connection made;
 //! the flag where no window can be asked; a connected window's setting; and
-//! the `outputSchema` that admits the new state.
+//! the `outputSchema` that admits the new state. The source's wording is
+//! MCP-22's.
+//!
+//! MCP-22 (#208): `may_have_reached_api` over a live run against the demo
+//! API and against a closed port; a replayed `publish` in the same server
+//! and after a restart; no description that says the person is asked.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -2303,8 +2308,8 @@ fn mcp17_criterion_2_every_refusal_passes_a_validating_client() {
 
 /// What `live_requests` says while a window holding the project decides at
 /// run time (owner decision 1 = A, 2026-11-02).
-fn asked_when_the_run_starts() -> Value {
-    json!({ "allowed": null, "source": "window setting, asked when the run starts" })
+fn the_window_decides() -> Value {
+    json!({ "allowed": null, "source": "the open window's live setting decides" })
 }
 
 /// What the start flag says: `--allow-live` or not.
@@ -2471,7 +2476,7 @@ fn assert_the_holding_window_decides(allow_live: bool) {
     initialize(&mut server);
     let overview = call(&mut server, 2, "project_overview", json!({}));
     let overview = structured(&overview);
-    assert_eq!(overview["live_requests"], asked_when_the_run_starts());
+    assert_eq!(overview["live_requests"], the_window_decides());
     assert_eq!(overview["holder"], "window");
     assert_eq!(overview["hands_over_on_write"], true);
     assert_clean_end(server);
@@ -2629,8 +2634,218 @@ fn mcp18_criterion_5_the_schema_admits_the_new_state() {
         .remove("allowed");
     assert!(!validator.is_valid(&overview), "allowed stays required");
     // The server's own answer in that state, validated as `Server` reads it.
-    assert_eq!(answered, asked_when_the_run_starts());
+    assert_eq!(answered, the_window_decides());
     assert!(server.validated.contains("project_overview"));
     assert_clean_end(server);
     window.close();
+}
+
+// MCP-22 (#208) --------------------------------------------------------------
+
+/// Every description `tools/list` gives a property named `property` in
+/// `tool`'s outputSchema, wherever the schema defines it.
+fn described(tool: &str, property: &str) -> Vec<String> {
+    fn walk(schema: &Value, property: &str, found: &mut Vec<String>) {
+        match schema {
+            Value::Object(map) => {
+                if let Some(description) = map
+                    .get("properties")
+                    .and_then(|properties| properties.get(property))
+                    .and_then(|defined| defined.get("description"))
+                    .and_then(Value::as_str)
+                {
+                    found.push(description.to_owned());
+                }
+                for value in map.values() {
+                    walk(value, property, found);
+                }
+            }
+            Value::Array(values) => values.iter().for_each(|value| walk(value, property, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    walk(&output_schemas()[tool], property, &mut found);
+    assert!(
+        !found.is_empty(),
+        "{tool}'s outputSchema describes {property}"
+    );
+    found
+}
+
+/// The handles of the request steps of a runner report, nested ones
+/// included.
+fn request_handles(steps: &Value, found: &mut BTreeSet<String>) {
+    for step in steps.as_array().unwrap() {
+        if step["kind"] == "request" {
+            found.insert(step["handle"].as_str().unwrap().to_owned());
+        }
+        if let Some(children) = step.get("children") {
+            request_handles(children, found);
+        }
+    }
+}
+
+/// Criterion 1: over a live run against the demo API, every request step
+/// that was sent, answered or not, says it may have reached the API, and
+/// every other step does not; a request that never left the process (the
+/// port is closed) says it did not; the schema's description says so.
+#[test]
+fn mcp22_criterion_1_every_sent_live_request_may_have_reached_the_api() {
+    let directory = demo();
+    let root = directory.path();
+    let demo_api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
+    point_at(root, &format!("{}/shop", demo_api.base_url()));
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    let simulated = call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "full": true }),
+    );
+    let mut requests = BTreeSet::new();
+    request_handles(&structured(&simulated)["report"]["steps"], &mut requests);
+    assert!(!requests.is_empty(), "the demo scenario sends requests");
+
+    let live = assert_run_result(&call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    ));
+    assert_eq!(live["status"], "passed", "{}", live["error"]);
+    let steps = flattened(&live["steps"]);
+    for step in &steps {
+        let handle = step["handle"].as_str().unwrap();
+        assert_eq!(
+            step["may_have_reached_api"],
+            requests.contains(handle),
+            "{handle} is a sent request: {}; {step}",
+            requests.contains(handle)
+        );
+    }
+    assert!(
+        steps
+            .iter()
+            .any(|step| step["may_have_reached_api"] == true),
+        "{live}"
+    );
+    assert_clean_end(server);
+
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = closed.local_addr().unwrap();
+    drop(closed);
+    point_at(root, &format!("http://{address}/demo/shop"));
+    let mut server = Server::spawn_live(root, &["--allow-live"], &[]);
+    initialize(&mut server);
+    let refused = assert_run_result(&call(
+        &mut server,
+        2,
+        "run",
+        json!({ "path": SCENARIO, "live": true }),
+    ));
+    let steps = flattened(&refused["steps"]);
+    assert!(
+        steps.iter().any(|step| step["message"]
+            .as_str()
+            .is_some_and(|message| message.ends_with("Nothing was sent to the API."))),
+        "a request never left the process: {refused}"
+    );
+    assert!(
+        steps
+            .iter()
+            .all(|step| step["may_have_reached_api"] == false),
+        "{refused}"
+    );
+    assert_clean_end(server);
+
+    for description in described("run", "may_have_reached_api") {
+        assert!(description.contains("was sent"), "{description}");
+    }
+}
+
+/// Criterion 2: a repeated `request_id` of `publish`, in the same server
+/// and after a restart, answers `replayed: true` with `wrote: false`, and
+/// nothing more is published; `wrote` is described as this call's write.
+#[test]
+fn mcp22_criterion_2_a_replayed_publish_wrote_nothing() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let (_, hash) = read(&mut server, 2, PRODUCT);
+    let arguments =
+        json!({ "path": PRODUCT, "expected_source_sha256": hash, "request_id": "mcp22" });
+    let published = call(&mut server, 3, "publish", arguments.clone());
+    let published = structured(&published).clone();
+    assert_eq!(published["wrote"], true, "{published}");
+    assert_eq!(published["replayed"], false);
+    let next = root.join(
+        published["revision_path"]
+            .as_str()
+            .unwrap()
+            .replace("/2.afs", "/3.afs"),
+    );
+
+    let again = call(&mut server, 4, "publish", arguments.clone());
+    let again = structured(&again).clone();
+    assert_eq!(again["replayed"], true, "{again}");
+    assert_eq!(again["wrote"], false, "{again}");
+    assert_eq!(again["revision"], published["revision"]);
+    assert_clean_end(server);
+
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let restarted = call(&mut server, 2, "publish", arguments);
+    let restarted = structured(&restarted).clone();
+    assert_eq!(restarted["replayed"], true, "{restarted}");
+    assert_eq!(restarted["wrote"], false, "{restarted}");
+    assert_clean_end(server);
+    assert!(!next.exists(), "nothing more was published");
+
+    for description in described("publish", "wrote") {
+        assert!(description.contains("this call"), "{description}");
+    }
+}
+
+/// Criteria 3 and 4: while a window holds the project, the overview says
+/// the open window's live setting decides (MCP-18's tests above assert the
+/// whole value); neither it, the server's instructions nor any tool
+/// description says the person is asked.
+#[test]
+fn mcp22_criterion_3_nobody_is_said_to_be_asked() {
+    let directory = demo();
+    let root = directory.path();
+    let window = Window::open(root, false);
+    let mut server = Server::spawn(Some(root), root);
+    let initialized = server.request(
+        1,
+        "initialize",
+        json!({ "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "acceptance", "version": "1.0.0" } }),
+    );
+    server.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    let overview = call(&mut server, 2, "project_overview", json!({}));
+    let source = structured(&overview)["live_requests"]["source"].clone();
+    assert_eq!(source, "the open window's live setting decides");
+    let listed = server.request(3, "tools/list", json!({}));
+    assert_clean_end(server);
+    window.close();
+
+    let mut texts = vec![(
+        "instructions".to_owned(),
+        initialized["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+    )];
+    for tool in listed["result"]["tools"].as_array().unwrap() {
+        texts.push((
+            tool["name"].as_str().unwrap().to_owned(),
+            tool["description"].as_str().unwrap().to_owned(),
+        ));
+    }
+    for (name, text) in texts {
+        assert!(!text.contains("asked"), "{name}: {text}");
+    }
 }
