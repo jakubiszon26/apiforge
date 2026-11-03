@@ -8051,26 +8051,52 @@ mod ux02 {
         }
     }
 
-    /// Criterion 2: on a scenario's tab at 960 × 540, with *Live allowed*
-    /// beside it and *Run simulation*, the widest label, the project name is
-    /// whole.
+    /// Criterion 2, as amended by UX-25 (#233, the owner's decision A of
+    /// 2026-11-03): on a scenario's tab at 960 × 540 with *Run simulation*,
+    /// the widest label, the project name is whole. With *Live allowed*
+    /// beside it in a project with a published component, the header also
+    /// keeps room for *rN · no changes*: the name then ends in an ellipsis
+    /// and shows whole on hover.
     #[test]
     fn ux02_criterion_2_the_project_name_is_whole_at_960() {
         let configuration = tempfile::tempdir().unwrap();
         let directory = shop();
         let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        let whole = whole_width(&harness, NAME, theme::FONT_BODY);
+        assert!(has_label(&harness, SIMULATE));
+        assert!(!has_label(&harness, BADGE));
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            let width = title(&harness).width();
+            assert!(
+                width + 1.0 >= whole,
+                "{mode}: the name is {width} px wide, whole it is {whole} px"
+            );
+        }
+
         set_box(&mut harness, true);
         assert!(has_label(&harness, BADGE));
         assert!(has_label(&harness, SIMULATE));
         for mode in ["Code", "Diagram", "Split"] {
             choose(&mut harness, mode);
             let width = title(&harness).width();
-            let whole = whole_width(&harness, NAME, theme::FONT_BODY);
             assert!(
-                width + 1.0 >= whole,
-                "{mode}: the name is {width} px wide, whole it is {whole} px"
+                width + 1.0 < whole,
+                "{mode}: with Live allowed the name gives way: {width} px of {whole} px"
             );
         }
+        let names = harness.query_all_by_label(NAME).count();
+        harness
+            .query_all_by_label(NAME)
+            .find(|node| node.rect().top() < 40.0)
+            .expect("the project name in the header")
+            .hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert!(
+            harness.query_all_by_label(NAME).count() > names,
+            "hovering the shortened name shows it whole"
+        );
     }
 
     /// Criterion 3: the mode is kept in `apiforge/run-mode.json` in the

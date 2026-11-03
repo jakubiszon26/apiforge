@@ -52,18 +52,22 @@ impl FolderApp {
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
         // The latest revision of any component, for the room *rN · no
-        // changes* takes beside *Publish* (UX-25).
+        // changes* takes beside *Publish* (UX-25). A read-only window
+        // publishes nothing, so it shows no caption and keeps no room.
         let latest_revision = session
             .manifest()
             .revisions
             .iter()
             .map(|revision| revision.revision)
-            .max();
+            .max()
+            .filter(|_| !read_only);
         let running = self.running_label(active);
         // Nothing to publish while the component equals its latest revision
-        // (UX-25, plan decision 16 = A, COMP-00 Q6 = B).
+        // (UX-25, plan decision 16 = A, COMP-00 Q6 = B). The caption says so
+        // only when nothing else keeps *Publish* disabled.
         let unchanged = publish
             .as_ref()
+            .filter(|(_, enabled)| *enabled)
             .map(|(id, _)| id.clone())
             .and_then(|id| self.unchanged_revision(&id));
         ui.horizontal(|ui| {
@@ -122,7 +126,15 @@ impl FolderApp {
             if let Some(revision) = latest_revision {
                 reserved += badge(ui, &no_changes(revision));
             }
-            let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
+            // With *Live allowed* and the caption's room at 960 px the name
+            // gives way below its usual 60 px: it ends in an ellipsis and
+            // shows whole on hover (UX-25, the owner's decision A).
+            let minimum = if live_allowed && latest_revision.is_some() {
+                TITLE_NARROWEST
+            } else {
+                60.0
+            };
+            let title_width = (ui.available_width() - reserved).clamp(minimum, 320.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(title_width, theme::CONTROL_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -1156,6 +1168,10 @@ fn running_label(ui: &mut egui::Ui, text: &str, hover: Option<&str>, room: f32) 
         label.on_hover_text(hover);
     }
 }
+
+/// The narrowest the project name gets in the header: at 960 px with *Live
+/// allowed*, *Run simulation* and the room for *rN · no changes* (UX-25).
+const TITLE_NARROWEST: f32 = 36.0;
 
 /// The caption beside a disabled *Publish* (COMP-00 Q6 = B).
 fn no_changes(revision: u32) -> String {
