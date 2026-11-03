@@ -635,6 +635,148 @@ mod tests {
         assert!(latest.revision > component.revision);
     }
 
+    /// KTLO-36 (UX-14, owner decision 8 = A): *Save as a component* proposes
+    /// *Required* unticked for an argument whose extracted literal becomes its
+    /// default, and ticked for a wired argument without one.
+    mod ktlo36 {
+        use super::*;
+        use egui::accesskit::Toggled;
+        use egui_kittest::{
+            Harness,
+            kittest::{NodeT, Queryable},
+        };
+
+        type DialogHarness = Harness<'static, (ComponentDialog, Project)>;
+
+        /// The builder for the *Add to cart* call alone: its `product` is wired
+        /// from *Active promotion* outside the selection and its `quantity` is
+        /// the literal `1`.
+        fn add_to_cart() -> DialogHarness {
+            let project = demos::shop_project();
+            let graph = project.scenarios[0].graph.clone();
+            let dialog = ComponentDialog::new(&graph, &["cart".to_owned()], &project, None);
+            // The theme's fonts take effect from the frame after it is
+            // applied, and the builder draws one frame at once.
+            let mut themed = false;
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(1280.0, 800.0))
+                .build_ui_state(
+                    move |ui, (dialog, project): &mut (ComponentDialog, Project)| {
+                        if !themed {
+                            crate::theme::apply(ui.ctx());
+                            themed = true;
+                            return;
+                        }
+                        dialog.show(ui.ctx(), project);
+                    },
+                    (dialog, project),
+                );
+            harness.run_steps(3);
+            harness
+        }
+
+        /// The *Required* box of each proposed argument, in row order.
+        fn required_boxes(harness: &DialogHarness) -> Vec<Option<Toggled>> {
+            harness
+                .query_all_by_label("Required")
+                .map(|node| node.accesskit_node().toggled())
+                .collect()
+        }
+
+        fn row<'a>(harness: &'a DialogHarness, input: &str) -> &'a edit::InputRow {
+            harness
+                .state()
+                .0
+                .draft
+                .inputs
+                .iter()
+                .find(|row| row.input == input)
+                .unwrap_or_else(|| panic!("a row for {input}"))
+        }
+
+        #[test]
+        fn ktlo36_criterion_1_an_argument_given_a_default_proposes_required_unticked() {
+            let harness = add_to_cart();
+            let quantity = row(&harness, "quantity");
+            assert!(quantity.enabled, "the literal is proposed as an argument");
+            assert_eq!(
+                quantity.default_value,
+                Some(serde_json::json!(1)),
+                "the literal becomes the default"
+            );
+            assert!(contains_text(&harness, "Default value: 1"));
+            let boxes = required_boxes(&harness);
+            assert_eq!(boxes.len(), 2, "product and quantity: {boxes:?}");
+            assert_eq!(
+                boxes[1],
+                Some(Toggled::False),
+                "quantity gets a default, so it is not proposed as required"
+            );
+        }
+
+        #[test]
+        fn ktlo36_criterion_2_a_wired_argument_proposes_required_ticked() {
+            let harness = add_to_cart();
+            let product = row(&harness, "product");
+            assert!(product.mandatory && product.enabled, "wired from outside");
+            assert_eq!(product.default_value, None, "no default");
+            assert_eq!(
+                required_boxes(&harness)[0],
+                Some(Toggled::True),
+                "product has no default, so it is proposed as required"
+            );
+        }
+
+        #[test]
+        fn ktlo36_criterion_3_the_written_component_matches_the_box() {
+            let harness = add_to_cart();
+            let (dialog, project) = harness.state();
+            let saved = dialog.result().expect("the proposal is valid");
+            let next = edit::add_component(project, &saved.component, None).expect("valid project");
+            // The project stores it under a handle no other component uses.
+            let written = next.components.last().expect("the saved component");
+            let text =
+                apiforge_script::print_component(&next, written).expect("the component prints");
+            let declaration = |name: &str| -> String {
+                // An input's attributes are the lines right above its declaration.
+                let lines: Vec<&str> = text.lines().collect();
+                let at = lines
+                    .iter()
+                    .position(|line| line.trim_start().starts_with(&format!("input {name}:")))
+                    .unwrap_or_else(|| panic!("input {name} in\n{text}"));
+                let start = lines[..at]
+                    .iter()
+                    .rposition(|line| !line.trim_start().starts_with('@'))
+                    .map_or(0, |line| line + 1);
+                lines[start..=at].join("\n")
+            };
+            let quantity = declaration("quantity");
+            assert!(quantity.ends_with("= 1"), "keeps the default:\n{quantity}");
+            assert!(
+                !quantity.contains("@required(true)"),
+                "a default and no @required(true):\n{quantity}"
+            );
+            let product = declaration("product");
+            assert!(
+                product.contains("@required(true)"),
+                "the wired argument stays required:\n{product}"
+            );
+            let reread = |name: &str| {
+                written
+                    .inputs
+                    .iter()
+                    .find(|port| port.name == name)
+                    .unwrap()
+                    .is_required_input()
+            };
+            assert!(!reread("quantity") && reread("product"));
+        }
+
+        fn contains_text(harness: &DialogHarness, text: &str) -> bool {
+            harness.query_by_label_contains(text).is_some()
+        }
+    }
+
     #[test]
     fn escape_cancels() {
         let (project, graph, selected) = shop();
