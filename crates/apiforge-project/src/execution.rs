@@ -196,7 +196,8 @@ impl ProjectSession {
 }
 
 /// The components a snapshot's definition calls, directly or through the
-/// published components it calls, by component ID and whatever revision.
+/// revisions its calls pin, by component ID: a publication of any revision
+/// of one of them makes the run stale.
 fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
     use apiforge_core::model::NodeKind;
     use apiforge_storage::project::IdentityBase;
@@ -206,22 +207,25 @@ fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
         IdentityBase::Component(component) => vec![&component.graph],
     };
     let mut calls = std::collections::BTreeSet::new();
+    let mut visited = std::collections::BTreeSet::new();
     while let Some(graph) = graphs.pop() {
         for node in &graph.nodes {
-            let Some(id) = node
-                .config
-                .component_id
-                .as_ref()
-                .filter(|_| node.kind == NodeKind::Component)
-            else {
+            if node.kind != NodeKind::Component {
+                continue;
+            }
+            let Some(id) = &node.config.component_id else {
                 continue;
             };
-            if calls.insert(id.clone()) {
+            calls.insert(id.clone());
+            let revision = node.config.revision;
+            if visited.insert((id.clone(), revision)) {
                 graphs.extend(
                     context
                         .components
                         .iter()
-                        .filter(|component| &component.id == id)
+                        .filter(|component| {
+                            &component.id == id && Some(component.revision) == revision
+                        })
                         .map(|component| &component.graph),
                 );
             }
