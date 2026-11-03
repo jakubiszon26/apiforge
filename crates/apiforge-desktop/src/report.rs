@@ -186,6 +186,9 @@ pub struct ReportPanel {
     above_ceiling: bool,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
+    /// The last frame's workspace, normal ceiling and panel rect.
+    #[cfg(test)]
+    last_frame: Option<(egui::Rect, f32, egui::Rect)>,
     last_run_id: Option<String>,
     last_selected_node_id: Option<String>,
     selected_key: Option<String>,
@@ -208,6 +211,8 @@ impl Default for ReportPanel {
             above_ceiling: false,
             #[cfg(test)]
             last_handle: None,
+            #[cfg(test)]
+            last_frame: None,
             last_run_id: None,
             last_selected_node_id: None,
             selected_key: None,
@@ -228,8 +233,9 @@ impl ReportPanel {
     #[cfg(test)]
     pub(crate) fn debug_state(&self) -> String {
         format!(
-            "height {} compact {} drag {:?} maximised {}",
-            self.height, self.compact_height, self.drag, self.maximised
+            "height {} compact {} drag {:?} maximised {}, last frame (workspace, \
+             ceiling, panel) {:?}",
+            self.height, self.compact_height, self.drag, self.maximised, self.last_frame
         )
     }
 
@@ -416,6 +422,7 @@ impl ReportPanel {
         #[cfg(test)]
         {
             self.last_handle = Some((handle_id, handle_rect, current_height));
+            self.last_frame = Some((workspace, maximum, rect));
         }
         if handle.clicked() || handle.drag_started() {
             handle.request_focus();
