@@ -476,8 +476,15 @@ fn a_read_only_window_offers_only_session_secret_values() {
             .accesskit_node()
             .is_disabled()
     );
-    // Hidden while observing since MCP-09 (owner decision on M3).
-    assert!(harness.query_by_label("Apply settings").is_none());
+    // Hidden while observing in MCP-09 (owner decision on M3); shown since
+    // MCP-26, for the agent's toggle only (owner decision 4 = A of
+    // 2026-11-02), and disabled until it changes.
+    assert!(
+        harness
+            .get_by_label("Apply settings")
+            .accesskit_node()
+            .is_disabled()
+    );
     choose(&mut harness, "Cancel");
     open_project_menu(&mut harness, "Test environment…");
     assert!(
