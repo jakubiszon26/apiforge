@@ -58,6 +58,7 @@ mod stop;
 mod testing;
 mod theme;
 mod widgets;
+mod window_fit;
 mod windows_console;
 
 use apiforge_storage::WorkspaceStore;
