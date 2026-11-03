@@ -10688,17 +10688,43 @@ mod ux12 {
         assert!(!shows(&harness, SAVED), "the run cleared the notice");
     }
 
-    /// Criterion 2: switching to another tab clears the confirmation, and
-    /// switching back does not bring it back.
+    /// Clicks the tab of `document_id` in the tab strip, the topmost widget
+    /// named after its file.
+    fn click_tab(harness: &mut FolderHarness, document_id: &str) {
+        let path = path_of(harness, document_id);
+        let name = path.rsplit('/').next().unwrap().to_owned();
+        harness
+            .query_all_by_label(&name)
+            .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+            .unwrap_or_else(|| panic!("a tab named {name}"))
+            .click();
+        settle(harness);
+        assert_eq!(
+            folder(harness).workbench.active(),
+            Some(document_id),
+            "the click switched to {name}"
+        );
+    }
+
+    /// Criterion 2: the user switching to another tab clears the
+    /// confirmation, and switching back does not bring it back. A tab the
+    /// window activates by itself only hides it: that is no action.
     #[test]
     fn ux12_criterion_2_a_tab_switch_clears_the_confirmation() {
         let (_directory, mut harness, scenario, component) = edited();
         save_all(&mut harness);
         app(&mut harness).activate_tab(&component);
         settle(&mut harness);
-        assert!(!shows(&harness, SAVED), "the switch cleared the notice");
+        assert!(!shows(&harness, SAVED), "not shown on another tab");
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
+        assert!(
+            shows(&harness, SAVED),
+            "a switch the window made cleared nothing"
+        );
+        click_tab(&mut harness, &component);
+        assert!(!shows(&harness, SAVED), "the user's switch cleared it");
+        click_tab(&mut harness, &scenario);
         assert!(!shows(&harness, SAVED), "it does not come back");
     }
 
@@ -10777,6 +10803,43 @@ mod ux12 {
             shows(&harness, ERROR),
             "dismissing one tab's error leaves the other's"
         );
+    }
+
+    /// Criterion 3: a confirmation raised over an error shows for its five
+    /// seconds and the error is shown again after it, still undismissed.
+    #[test]
+    fn ux12_criterion_3_a_confirmation_does_not_take_the_place_of_an_error() {
+        let (_directory, mut harness, _, _) = edited();
+        fail(&mut harness, ERROR);
+        save_all(&mut harness);
+        wait(&mut harness, Duration::from_secs(5));
+        assert!(shows(&harness, ERROR), "the error is back after it");
+    }
+
+    /// Criterion 4: the error of an operation asked for on the scenario that
+    /// ends while the component's tab is active belongs to the scenario.
+    #[test]
+    fn ux12_criterion_4_an_operations_error_belongs_to_the_tab_it_was_asked_on() {
+        let (_directory, mut harness, scenario, component) = edited();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        app(&mut harness).storage_io(
+            "Checking…",
+            move || {
+                let _ = held.recv();
+            },
+            |app, _| app.notify(ERROR, true),
+        );
+        app(&mut harness).activate_tab(&component);
+        harness.step();
+        release.send(()).unwrap();
+        settle(&mut harness);
+        assert!(
+            !shows(&harness, ERROR),
+            "not on the component's tab, active when it ended"
+        );
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(shows(&harness, ERROR), "on the scenario's tab");
     }
 
     /// Criterion 5: the header's *Running …* words (UX-04) are not a notice:

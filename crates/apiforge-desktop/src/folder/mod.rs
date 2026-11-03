@@ -682,10 +682,14 @@ impl FolderApp {
         self.changed_at = Some(Instant::now());
     }
 
-    /// Shows a notice under the tabs, on the active tab (UX-12).
+    /// Shows a notice under the tabs, on the active tab, or on the tab the
+    /// operation whose outcome it reports was asked for on (UX-12).
     fn notify(&mut self, text: impl Into<String>, error: bool) {
-        self.notices
-            .raise(self.workbench.active(), text.into(), error);
+        let tab = match &self.notices.origin {
+            Some(origin) => origin.clone(),
+            None => self.workbench.active().map(str::to_owned),
+        };
+        self.notices.raise(tab.as_deref(), text.into(), error);
     }
 
     /// The notice under the tabs as the active tab shows it.
@@ -694,15 +698,13 @@ impl FolderApp {
     }
 
     /// Before anything acts this frame: a notice that is not an error goes
-    /// after five seconds, at an action or at a switch of tab (UX-12).
+    /// after five seconds or at an action (UX-12).
     fn tend_notices(&mut self, ctx: &egui::Context) {
         let acted = ctx.input(notices::acted);
         let tabs = self.workbench.tabs();
-        let wait = self.notices.tend(
-            self.workbench.active(),
-            |id| tabs.iter().any(|tab| tab.document_id == id),
-            acted,
-        );
+        let wait = self
+            .notices
+            .tend(|id| tabs.iter().any(|tab| tab.document_id == id), acted);
         if let Some(wait) = wait {
             ctx.request_repaint_after(wait);
         }

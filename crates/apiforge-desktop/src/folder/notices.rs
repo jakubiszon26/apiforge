@@ -45,101 +45,134 @@ impl Clock {
     }
 }
 
-/// One banner per tab, by the tab that was active when it was raised; the
-/// key `None` holds one raised with no tab open, which the window shows
-/// while the active tab has none of its own.
+/// A tab's notices, or the window's under the key `None` (raised with no
+/// tab open, or passed on by a closed tab).
+type Key = Option<String>;
+
+/// At most one error and one confirmation per tab, by the tab the notice was
+/// raised on. A confirmation shows over its tab's error for its lifetime;
+/// the error is shown again after it. The window's notices show on a tab
+/// that has none of its own.
 #[derive(Default)]
 pub(super) struct Notices {
-    banners: HashMap<Option<String>, Notice>,
+    errors: HashMap<Key, Notice>,
+    confirmations: HashMap<Key, Notice>,
+    /// While an operation's outcome is applied, the tab that was active when
+    /// the operation was asked for: its notices belong there.
+    pub(super) origin: Option<Key>,
     pub(super) clock: Clock,
 }
 
 impl Notices {
-    /// Shows `text` on `tab`, in place of that tab's banner.
+    /// Shows `text` on `tab`. An error replaces the tab's error and its
+    /// confirmation; a confirmation replaces only the tab's confirmation.
     pub(super) fn raise(&mut self, tab: Option<&str>, text: String, error: bool) {
-        let raised = self.clock.now();
-        self.banners.insert(
-            tab.map(str::to_owned),
-            Notice {
-                text,
-                error,
-                raised,
-            },
-        );
-    }
-
-    /// The key of the banner shown while `tab` is active.
-    fn key(&self, tab: Option<&str>) -> Option<Option<String>> {
-        let own = tab.map(str::to_owned);
-        if own.is_some() && self.banners.contains_key(&own) {
-            return Some(own);
+        let key: Key = tab.map(str::to_owned);
+        let notice = Notice {
+            text,
+            error,
+            raised: self.clock.now(),
+        };
+        if error {
+            self.confirmations.remove(&key);
+            self.errors.insert(key, notice);
+        } else {
+            self.confirmations.insert(key, notice);
         }
-        self.banners.contains_key(&None).then_some(None)
     }
 
-    /// The banner shown while `tab` is active: its own, else the window's.
+    /// Where the notice shown while `tab` is active is kept: the tab's own
+    /// first, a confirmation over an error, then the window's.
+    fn slot(&self, tab: Option<&str>) -> Option<(bool, Key)> {
+        let own: Key = tab.map(str::to_owned);
+        let keys = if own.is_some() {
+            vec![own, None]
+        } else {
+            vec![None]
+        };
+        keys.into_iter().find_map(|key| {
+            if self.confirmations.contains_key(&key) {
+                Some((false, key))
+            } else if self.errors.contains_key(&key) {
+                Some((true, key))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The notice shown while `tab` is active.
     pub(super) fn shown(&self, tab: Option<&str>) -> Option<&Notice> {
-        self.key(tab).and_then(|key| self.banners.get(&key))
+        let (error, key) = self.slot(tab)?;
+        if error {
+            self.errors.get(&key)
+        } else {
+            self.confirmations.get(&key)
+        }
     }
 
-    /// Dismisses the banner shown while `tab` is active.
+    /// Dismisses the notice shown while `tab` is active.
     pub(super) fn dismiss(&mut self, tab: Option<&str>) {
-        if let Some(key) = self.key(tab) {
-            self.banners.remove(&key);
-        }
+        match self.slot(tab) {
+            Some((true, key)) => self.errors.remove(&key),
+            Some((false, key)) => self.confirmations.remove(&key),
+            None => None,
+        };
     }
 
-    /// A tab renamed or moved keeps its banner.
+    /// A tab renamed or moved keeps its notices.
     pub(super) fn rename(&mut self, from: &str, to: &str) {
-        if let Some(notice) = self.banners.remove(&Some(from.to_owned())) {
-            self.banners.insert(Some(to.to_owned()), notice);
-        }
-    }
-
-    /// Every banner goes, as when another project is opened.
-    pub(super) fn clear(&mut self) {
-        self.banners.clear();
-    }
-
-    /// Once a frame, before anything acts: a notice that is not an error
-    /// goes when its five seconds are up, when `acted` (the user did
-    /// something this frame) or when its tab is no longer the active one; a
-    /// notice raised with no tab open stays across tabs the window opens by
-    /// itself. The banners of tabs no longer open go. Returns how long until
-    /// the next notice expires, for a repaint then.
-    pub(super) fn tend(
-        &mut self,
-        active: Option<&str>,
-        open: impl Fn(&str) -> bool,
-        acted: bool,
-    ) -> Option<Duration> {
-        let now = self.clock.now();
-        // A closed tab's error is not lost: the window shows it in place of a
-        // confirmation, unless it already shows an error of its own.
-        let closed: Vec<Option<String>> = self
-            .banners
-            .iter()
-            .filter(|(tab, notice)| notice.error && tab.as_deref().is_some_and(|tab| !open(tab)))
-            .map(|(tab, _)| tab.clone())
-            .collect();
-        for tab in closed {
-            if let Some(notice) = self.banners.remove(&tab)
-                && self.banners.get(&None).is_none_or(|window| !window.error)
-            {
-                self.banners.insert(None, notice);
+        let (from, to): (Key, Key) = (Some(from.to_owned()), Some(to.to_owned()));
+        for notices in [&mut self.errors, &mut self.confirmations] {
+            if let Some(notice) = notices.remove(&from) {
+                notices.insert(to.clone(), notice);
             }
         }
-        self.banners.retain(|tab, notice| {
-            let tab = tab.as_deref();
-            tab.is_none_or(&open)
-                && (notice.error
-                    || !(acted
-                        || tab.is_some_and(|tab| Some(tab) != active)
-                        || now.saturating_duration_since(notice.raised) >= NOTICE_LIFETIME))
+    }
+
+    /// Every notice goes, as when another project is opened.
+    pub(super) fn clear(&mut self) {
+        self.errors.clear();
+        self.confirmations.clear();
+    }
+
+    /// Once a frame, before anything acts: a confirmation goes when its five
+    /// seconds are up or when `acted` (the user did something this frame).
+    /// Another tab becoming active only hides it, so a tab the window opens
+    /// by itself clears nothing; a switch by the user is a click or a key, an
+    /// action. A closed tab's notices pass to the window: its error unless
+    /// the window holds an error already, its confirmation unless the
+    /// window's is newer. Returns how long until the next confirmation
+    /// expires, for a repaint then.
+    pub(super) fn tend(&mut self, open: impl Fn(&str) -> bool, acted: bool) -> Option<Duration> {
+        let now = self.clock.now();
+        let closed = |notices: &HashMap<Key, Notice>| -> Vec<Key> {
+            notices
+                .keys()
+                .filter(|tab| tab.as_deref().is_some_and(|tab| !open(tab)))
+                .cloned()
+                .collect()
+        };
+        for tab in closed(&self.errors) {
+            if let Some(notice) = self.errors.remove(&tab) {
+                self.errors.entry(None).or_insert(notice);
+            }
+        }
+        for tab in closed(&self.confirmations) {
+            if let Some(notice) = self.confirmations.remove(&tab)
+                && self
+                    .confirmations
+                    .get(&None)
+                    .is_none_or(|window| window.raised <= notice.raised)
+            {
+                self.confirmations.insert(None, notice);
+            }
+        }
+        self.confirmations.retain(|_, notice| {
+            !acted && now.saturating_duration_since(notice.raised) < NOTICE_LIFETIME
         });
-        self.banners
+        self.confirmations
             .values()
-            .filter(|notice| !notice.error)
             .map(|notice| {
                 NOTICE_LIFETIME.saturating_sub(now.saturating_duration_since(notice.raised))
             })
@@ -169,72 +202,103 @@ mod tests {
         Notices::default()
     }
 
-    #[test]
-    fn a_confirmation_raised_with_no_tab_stays_when_the_window_opens_one() {
-        let mut notices = notices();
-        notices.raise(None, "Created a project.".into(), false);
-        assert!(notices.tend(Some("a"), |_| true, false).is_some());
-        assert!(notices.shown(Some("a")).is_some());
-        notices.tend(Some("a"), |_| true, true);
-        assert!(notices.shown(Some("a")).is_none(), "an action clears it");
+    fn shown(notices: &Notices, tab: Option<&str>) -> Option<String> {
+        notices.shown(tab).map(|notice| notice.text.clone())
     }
 
     #[test]
-    fn a_confirmation_goes_when_its_tab_is_left() {
+    fn a_confirmation_raised_with_no_tab_shows_on_a_tab_the_window_opens() {
         let mut notices = notices();
+        notices.raise(None, "Created a project.".into(), false);
+        assert!(notices.tend(|_| true, false).is_some());
+        assert_eq!(
+            shown(&notices, Some("a")).as_deref(),
+            Some("Created a project.")
+        );
+        notices.tend(|_| true, true);
+        assert_eq!(shown(&notices, Some("a")), None, "an action clears it");
+    }
+
+    #[test]
+    fn a_confirmation_is_hidden_on_another_tab_and_passes_on_when_its_tab_closes() {
+        let mut notices = notices();
+        notices.raise(Some("a"), "Moved to the trash.".into(), false);
+        notices.tend(|_| true, false);
+        assert_eq!(shown(&notices, Some("b")), None);
+        assert!(shown(&notices, Some("a")).is_some(), "hidden, not gone");
+        notices.tend(|tab| tab == "b", false);
+        assert_eq!(
+            shown(&notices, Some("b")).as_deref(),
+            Some("Moved to the trash."),
+            "its tab closed: the window shows it"
+        );
+        notices.clock.step(NOTICE_LIFETIME);
+        notices.tend(|tab| tab == "b", false);
+        assert_eq!(shown(&notices, Some("b")), None, "for the rest of its time");
+    }
+
+    #[test]
+    fn a_confirmation_shows_over_an_error_which_comes_back_after_it() {
+        let mut notices = notices();
+        notices.raise(Some("a"), "error".into(), true);
         notices.raise(Some("a"), "Saved 1 file.".into(), false);
-        notices.tend(Some("b"), |_| true, false);
-        notices.tend(Some("a"), |_| true, false);
-        assert!(notices.shown(Some("a")).is_none());
+        assert_eq!(shown(&notices, Some("a")).as_deref(), Some("Saved 1 file."));
+        notices.clock.step(NOTICE_LIFETIME);
+        notices.tend(|_| true, false);
+        assert_eq!(shown(&notices, Some("a")).as_deref(), Some("error"));
+        notices.raise(Some("a"), "Saved 1 file.".into(), false);
+        notices.dismiss(Some("a"));
+        assert_eq!(
+            shown(&notices, Some("a")).as_deref(),
+            Some("error"),
+            "x dismissed the confirmation"
+        );
     }
 
     #[test]
     fn a_window_error_shows_where_a_tab_has_none_and_yields_to_its_own() {
         let mut notices = notices();
-        notices.tend(Some("a"), |_| true, false);
         notices.raise(None, "window".into(), true);
         notices.raise(Some("a"), "a".into(), true);
-        assert_eq!(notices.shown(Some("a")).unwrap().text, "a");
-        assert_eq!(notices.shown(Some("b")).unwrap().text, "window");
+        assert_eq!(shown(&notices, Some("a")).as_deref(), Some("a"));
+        assert_eq!(shown(&notices, Some("b")).as_deref(), Some("window"));
         notices.dismiss(Some("a"));
-        assert_eq!(notices.shown(Some("a")).unwrap().text, "window");
+        assert_eq!(shown(&notices, Some("a")).as_deref(), Some("window"));
     }
 
     #[test]
-    fn a_closed_tabs_error_passes_to_the_window_and_its_confirmation_goes() {
+    fn a_closed_tabs_error_passes_to_the_window_unless_it_holds_one() {
         let mut notices = notices();
+        notices.raise(None, "Created a project.".into(), false);
         notices.raise(Some("a"), "a".into(), true);
-        notices.raise(Some("c"), "Saved 1 file.".into(), false);
-        notices.tend(Some("b"), |tab| tab == "b", false);
-        assert_eq!(notices.shown(Some("b")).unwrap().text, "a");
-        assert_eq!(notices.banners.len(), 1, "the confirmation went");
-        notices.raise(Some("b"), "b".into(), true);
-        notices.tend(None, |_| false, false);
+        notices.tend(|tab| tab == "b", false);
+        notices.dismiss(Some("b"));
         assert_eq!(
-            notices.shown(None).unwrap().text,
-            "a",
+            shown(&notices, Some("b")).as_deref(),
+            Some("a"),
+            "kept under the window's confirmation"
+        );
+        notices.raise(Some("b"), "b".into(), true);
+        notices.tend(|_| false, false);
+        assert_eq!(
+            shown(&notices, None).as_deref(),
+            Some("a"),
             "the window keeps its own"
         );
     }
 
     #[test]
-    fn a_closed_tabs_error_takes_the_place_of_the_windows_confirmation() {
-        let mut notices = notices();
-        notices.raise(None, "Created a project.".into(), false);
-        notices.raise(Some("a"), "a".into(), true);
-        notices.tend(None, |_| false, false);
-        assert_eq!(notices.shown(None).unwrap().text, "a");
-    }
-
-    #[test]
-    fn a_renamed_tab_keeps_its_error() {
+    fn a_renamed_tab_keeps_its_notices() {
         let mut notices = notices();
         notices.raise(Some("a"), "a".into(), true);
+        notices.raise(Some("a"), "Saved 1 file.".into(), false);
         notices.rename("a", "b");
-        notices.tend(Some("b"), |tab| tab == "b", false);
-        assert_eq!(notices.shown(Some("b")).unwrap().text, "a");
+        notices.tend(|tab| tab == "b", false);
+        assert_eq!(shown(&notices, Some("b")).as_deref(), Some("Saved 1 file."));
+        notices.dismiss(Some("b"));
+        assert_eq!(shown(&notices, Some("b")).as_deref(), Some("a"));
         assert!(
-            notices.banners.contains_key(&Some("b".to_owned())),
+            notices.errors.contains_key(&Some("b".to_owned())),
             "still the tab's own"
         );
     }
@@ -242,16 +306,14 @@ mod tests {
     #[test]
     fn the_wait_is_what_is_left_of_the_five_seconds() {
         let mut notices = notices();
-        notices.tend(Some("a"), |_| true, false);
         notices.raise(Some("a"), "Saved 1 file.".into(), false);
         notices.clock.step(Duration::from_secs(2));
-        assert_eq!(
-            notices.tend(Some("a"), |_| true, false),
-            Some(Duration::from_secs(3))
-        );
+        assert_eq!(notices.tend(|_| true, false), Some(Duration::from_secs(3)));
         notices.raise(Some("a"), "error".into(), true);
+        notices.raise(Some("a"), "Saved 1 file.".into(), false);
+        notices.dismiss(Some("a"));
         assert_eq!(
-            notices.tend(Some("a"), |_| true, false),
+            notices.tend(|_| true, false),
             None,
             "errors wait for nothing"
         );
