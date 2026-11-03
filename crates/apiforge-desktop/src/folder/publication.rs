@@ -63,8 +63,15 @@ impl FolderApp {
                     session.redo(id, DIAGRAM)
                 };
                 // The board's history waits for code that analyses; the
-                // session's own error names its internals (UX-20).
-                if let Err(apiforge_project::Error::ModelLocked) = stepped {
+                // session's own error names its internals (UX-20). A
+                // conflict or a missing file locks it too, and is not the
+                // code's fault: that keeps the session's error.
+                let waits_for_code = session.document(id).is_some_and(|document| {
+                    document.conflict().is_none() && document.unavailable().is_none()
+                });
+                if let Err(apiforge_project::Error::ModelLocked) = stepped
+                    && waits_for_code
+                {
                     self.notify("Fix the code first: the board follows the source.", true);
                     return;
                 }

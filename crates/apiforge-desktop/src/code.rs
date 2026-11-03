@@ -337,19 +337,19 @@ impl Completions {
         let mut chosen = None;
         let selected = popup.selected;
         let completions = popup.completions.clone();
-        let (at, pivot, list_height) = placement(ui, popup_id, popup);
+        let placement = placement(ui, popup_id, popup);
         let area = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
-            .pivot(pivot)
-            .fixed_pos(at)
+            .pivot(placement.pivot)
+            .fixed_pos(placement.at)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
                     .fill(theme::WHITE)
                     .stroke(Stroke::new(1.0, theme::BORDER))
                     .show(ui, |ui| {
-                        ui.set_max_width(POPUP_WIDTH);
+                        ui.set_max_width(placement.width);
                         egui::ScrollArea::vertical()
-                            .max_height(list_height)
+                            .max_height(placement.list_height)
                             .show(ui, |ui| {
                                 for (index, completion) in completions.iter().enumerate() {
                                     let row = row_label(completion, context.font_size);
@@ -374,44 +374,61 @@ impl Completions {
     }
 }
 
-/// Where the popup goes: its anchor, which corner of it the anchor is, and
-/// how tall its list may grow.
+/// Where the popup goes and how large it may grow.
+struct Placement {
+    /// The anchor, in screen coordinates.
+    at: egui::Pos2,
+    /// Which corner of the popup the anchor is.
+    pivot: egui::Align2,
+    /// The tallest its list may grow.
+    list_height: f32,
+    /// The widest its list may grow.
+    width: f32,
+}
+
+/// Where the popup goes and how large it may grow.
 ///
 /// It opens under the caret. Inside bounds, where there is not room for it
 /// below but more above, it opens above the caret's line instead, and its
-/// list shortens to the room on the side it took; it moves left rather than
-/// past the right edge (UX-20). Its size is last frame's, or the largest it
-/// can be before it has been drawn.
-fn placement(ui: &Ui, popup_id: egui::Id, popup: &Popup) -> (egui::Pos2, egui::Align2, f32) {
+/// list shortens to the room on the side it took; it is no wider than the
+/// bounds and moves left rather than past their right edge (UX-20). Its
+/// size is last frame's, or the largest it can be before it has been drawn.
+fn placement(ui: &Ui, popup_id: egui::Id, popup: &Popup) -> Placement {
     let style = ui.style();
-    let list = ui.text_style_height(&egui::TextStyle::Body) * POPUP_ROWS as f32 + 8.0;
+    let row = ui.text_style_height(&egui::TextStyle::Body);
+    let list = row * POPUP_ROWS as f32 + 8.0;
     let Some(bounds) = popup.bounds else {
-        return (popup.at, egui::Align2::LEFT_TOP, list);
+        return Placement {
+            at: popup.at,
+            pivot: egui::Align2::LEFT_TOP,
+            list_height: list,
+            width: POPUP_WIDTH,
+        };
     };
     // The frame's margin and stroke around the list.
     let frame = style.spacing.menu_margin.sum() + vec2(2.0, 2.0);
+    let width = POPUP_WIDTH.min(bounds.width() - frame.x).max(row);
     let size = ui
         .ctx()
         .memory(|memory| memory.area_rect(popup_id))
-        .map_or(vec2(POPUP_WIDTH, list) + frame, |rect| rect.size());
+        .map_or(vec2(width, list) + frame, |rect| rect.size());
     let below = bounds.bottom() - popup.at.y;
     let above = popup.line_top - bounds.top();
-    let x = popup.at.x.min(bounds.right() - size.x).max(bounds.left());
-    let row = ui.text_style_height(&egui::TextStyle::Body);
-    if size.y <= below || below >= above {
-        let room = (below - frame.y).max(row);
-        (
-            egui::pos2(x, popup.at.y),
-            egui::Align2::LEFT_TOP,
-            list.min(room),
-        )
+    let x = popup
+        .at
+        .x
+        .min(bounds.right() - size.x.min(width + frame.x))
+        .max(bounds.left());
+    let (y, pivot, room) = if size.y <= below || below >= above {
+        (popup.at.y, egui::Align2::LEFT_TOP, below)
     } else {
-        let room = (above - frame.y).max(row);
-        (
-            egui::pos2(x, popup.line_top),
-            egui::Align2::LEFT_BOTTOM,
-            list.min(room),
-        )
+        (popup.line_top, egui::Align2::LEFT_BOTTOM, above)
+    };
+    Placement {
+        at: egui::pos2(x, y),
+        pivot,
+        list_height: list.min((room - frame.y).max(row)),
+        width,
     }
 }
 
