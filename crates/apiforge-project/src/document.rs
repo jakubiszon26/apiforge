@@ -140,6 +140,12 @@ impl DocumentSession {
     pub fn model(&self) -> Option<&Document> {
         self.model.as_deref()
     }
+    /// Whether the model was derived from the current text: still true
+    /// while an analysis is pending only because the project's context
+    /// changed, as it does after a publication.
+    pub fn model_describes_text(&self) -> bool {
+        self.model_source.as_deref() == Some(self.text())
+    }
     /// The same model, shared: a view can hold it without copying it, and tell
     /// by identity whether it has been replaced.
     pub fn shared_model(&self) -> Option<&Arc<Document>> {

@@ -51,7 +51,21 @@ impl FolderApp {
                 .and_then(|active| active.strip_prefix(TEXT_TAB))
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty);
+        // The latest revision of any component, for the room *rN · no
+        // changes* takes beside *Publish* (UX-25).
+        let latest_revision = session
+            .manifest()
+            .revisions
+            .iter()
+            .map(|revision| revision.revision)
+            .max();
         let running = self.running_label(active);
+        // Nothing to publish while the component equals its latest revision
+        // (UX-25, plan decision 16 = A, COMP-00 Q6 = B).
+        let unchanged = publish
+            .as_ref()
+            .map(|(id, _)| id.clone())
+            .and_then(|id| self.unchanged_revision(&id));
         ui.horizontal(|ui| {
             self.navigation_menu(ui);
             // Keep room for the widest toolbar, a component's with Publish
@@ -102,6 +116,11 @@ impl FolderApp {
             }
             if live_allowed {
                 reserved += badge(ui, "Live allowed");
+            }
+            // *rN · no changes* beside *Publish*, reserved on every tab as
+            // the toolbar is, for the highest revision the project has.
+            if let Some(revision) = latest_revision {
+                reserved += badge(ui, &no_changes(revision));
             }
             let title_width = (ui.available_width() - reserved).clamp(60.0, 320.0);
             ui.allocate_ui_with_layout(
@@ -235,15 +254,31 @@ impl FolderApp {
                 // Measured between left edges: the available width stops at
                 // zero when the row is too wide, an edge does not.
                 let before_rest = ui.min_rect().left();
-                if let Some((id, enabled)) = &publish
-                    && ui
-                        .add_enabled(*enabled, egui::Button::new("Publish"))
+                if let Some((id, enabled)) = &publish {
+                    let mut button = ui
+                        .add_enabled(
+                            *enabled && unchanged.is_none(),
+                            egui::Button::new("Publish"),
+                        )
                         .on_hover_text(
                             "Save this component and publish its next immutable revision",
-                        )
-                        .clicked()
-                {
-                    self.component_action(id, publication::Action::Publish);
+                        );
+                    if unchanged.is_some() {
+                        button = button.on_disabled_hover_text(
+                            "The component equals its latest revision: nothing to publish",
+                        );
+                    }
+                    if button.clicked() {
+                        self.component_action(id, publication::Action::Publish);
+                    }
+                }
+                // Right to left: the caption stands at *Publish*'s left.
+                if let Some(revision) = unchanged {
+                    ui.label(
+                        RichText::new(no_changes(revision))
+                            .size(theme::FONT_META)
+                            .color(theme::MUTED),
+                    );
                 }
                 if ui
                     .add_enabled(
@@ -1120,6 +1155,11 @@ fn running_label(ui: &mut egui::Ui, text: &str, hover: Option<&str>, room: f32) 
     if let Some(hover) = hover {
         label.on_hover_text(hover);
     }
+}
+
+/// The caption beside a disabled *Publish* (COMP-00 Q6 = B).
+fn no_changes(revision: u32) -> String {
+    format!("r{revision} · no changes")
 }
 
 fn run_label(live: bool) -> &'static str {

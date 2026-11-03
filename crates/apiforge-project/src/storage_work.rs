@@ -193,6 +193,7 @@ impl ProjectSession {
                 candidate.manifest = self.manifest.clone();
                 candidate.context = self.context.clone();
                 candidate.context_generation = self.context_generation;
+                candidate.publications = self.publications.clone();
             }
             // Keep/discard decisions entered during an older recovery save
             // remain authoritative. Only its durable read baseline is adopted.
@@ -272,6 +273,7 @@ impl ProjectSession {
             published: self.published.clone(),
             context: self.context.clone(),
             context_generation: self.context_generation,
+            publications: self.publications.clone(),
             documents: self.documents.clone(),
             texts: self.texts.clone(),
             sequence: self.sequence,
