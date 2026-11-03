@@ -14,15 +14,17 @@ Closes #<!-- issue number -->
 
 ## QA
 
-<!-- Criteria → tests table; for an interface change, 2–4 captures committed under docs/qa/<date>/<ticket>/ and linked here; regression smoke results. See docs/process/testing.md §2 -->
+<!-- Criteria → tests table (columns: Acceptance criterion | Test / QA step); for an interface change, 2–4 captures committed under docs/qa/<date>/<ticket>/ and linked here. See docs/process/testing.md §2 -->
 
-## Not verified
+Smoke list: <!-- result of the regression smoke list on the release binary, with date and platform -->
+
+### Not verified
 
 <!-- At most five lines; part of the QA section -->
 
 ## Checklist
 
-- [ ] Branch starts at `main`; one ticket, one pull request from analysis to QA report; changed lines stated above and the size re-approved if it proved wrong by a class
+- [ ] Branch starts at `main`; one ticket, one pull request from analysis to QA section; changed lines stated above and the size re-approved if it proved wrong by a class
 - [ ] Acceptance tests were committed before the implementation
 - [ ] `cargo fmt`, clippy with `-D warnings`, the workspace tests and the fixture check pass
 - [ ] Interface change: interaction tests and design review per `docs/gui-testing.md`

@@ -37,7 +37,10 @@ reader.
 
 The section contains:
 
-- a table of acceptance criteria → tests;
+- a table of acceptance criteria → tests or manual QA steps;
+- a **Smoke list** line with the result of the
+  [regression smoke list](#3-the-regression-smoke-list), the date and the
+  platform;
 - at most five lines on what was not verified;
 - for a change to the interface, the 2–4 release captures the owner's
   acceptance quiz needs, at 960 × 540, plus 1600 × 1000 where layout matters.
@@ -47,13 +50,15 @@ The section contains:
 ```markdown
 ## QA
 
-| Acceptance criterion | Test |
+| Acceptance criterion | Test / QA step |
 | --- | --- |
 | A dropped "Request" becomes a selected card with its inspector open | `palette_drop_adds_request` |
 | The card lands at the drop point | `palette_drop_position` |
 
 Captures (release binary): [960 × 540](docs/qa/2026-11-03/KTLO-05b/palette-drop-960.png),
 [1600 × 1000](docs/qa/2026-11-03/KTLO-05b/palette-drop-1600.png)
+
+Smoke list: 10 of 10 pass on the release binary, Linux, 2026-11-03.
 
 Not verified:
 - Keyboard-only placement of a block: no criterion, tracked as KTLO-11.
@@ -85,15 +90,15 @@ the run, so check the run's warnings before citing a capture as a standard
 size. Artifacts belong to one workflow run, so take them from the latest run of
 the branch under review (Actions → the run for the branch's head commit →
 Artifacts, or `gh run download <run-id> -n qa-captures-windows-2022`), cite the
-commit of that run in the report, and copy the captures used next to the
-report. Other views are captured the same way with
+commit of that run in the QA section of the pull request, and commit the
+captures used under `docs/qa/<yyyy-mm-dd>/<ticket>/`. Other views are captured the same way with
 `--screenshot OUT.png --folder PATH --mode … --size WxH`.
 
 ## 3. The regression smoke list
 
 Run on the release binary before every merge to `main`, on Linux by the agent
-and on Windows by the owner or from CI artifacts, and recorded at the end of
-the QA report. The list is short on purpose; it covers the flows whose loss
+and on Windows by the owner or from CI artifacts, and recorded in the
+QA section of the pull request. The list is short on purpose; it covers the flows whose loss
 would make the application unusable, and it grows only by a retrospective
 action.
 
@@ -118,4 +123,4 @@ Windows run is pending (KTLO-07, #10).
 The commands in the [development guide](../development.md#verification) run
 before every pull request; interface changes also follow
 [GUI testing](../gui-testing.md). Passing them is necessary, never sufficient:
-acceptance is the owner's reading of the report.
+acceptance is the owner's reading of the QA section.
