@@ -3,5 +3,6 @@
 .DS_Store
 .env
 
-# Agent worktrees created by Claude Code
-.claude/worktrees/
+# Claude Code local state: agent worktrees, credentials, transcripts, memory.
+# Never committed or pushed.
+/.claude/
