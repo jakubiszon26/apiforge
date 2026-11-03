@@ -210,6 +210,7 @@ impl FolderApp {
             publication::Action::Model {
                 next: Box::new(Document::Component(next)),
                 selection: None,
+                check: None,
             },
         );
     }
