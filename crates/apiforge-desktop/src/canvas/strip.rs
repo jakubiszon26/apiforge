@@ -1,7 +1,9 @@
 //! A component's INPUTS strip (UX-31, COMP-00 Q1 = C): one pill per input
 //! under the board's header row, and *+ Add input*. Selecting a pill rings
 //! the steps that read the input. The strip is drawn from the component's
-//! declared inputs and stores nothing.
+//! declared inputs and stores nothing. *+ Add input* opens the Inspector's
+//! *New input* form (UX-32), and while it is open the strip shows the input
+//! as being added.
 
 use crate::icons::Icon;
 use crate::{theme, widgets};
@@ -19,7 +21,9 @@ const PILL_GAP: f32 = 8.0;
 const DETAIL_GAP: f32 = 8.0;
 /// The room *+ Add input* takes before it has been drawn once.
 const ADD_WIDTH: f32 = 110.0;
-const ADD_HOVER: &str = "Coming with UX-32";
+const ADD_HOVER: &str = "Declare another input in the Inspector";
+/// The detail of the pill of an input the *New input* form is adding.
+const ADDING: &str = "being added…";
 
 /// One input as its pill and the Inspector show it.
 #[derive(Clone, Debug, PartialEq)]
@@ -113,6 +117,20 @@ impl Pill {
 pub enum Outcome {
     /// Select this input, or clear the selection when it is `None`.
     Select(Option<String>),
+    /// Open the *New input* form (UX-32).
+    Add,
+}
+
+/// What the strip shows besides the declared inputs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct State<'a> {
+    /// The selected input, whose readers are ringed.
+    pub selected: Option<&'a str>,
+    /// The name typed in the *New input* form while it is open, which may
+    /// still be empty.
+    pub adding: Option<&'a str>,
+    /// Whether *+ Add input* may add one: not on a read-only board.
+    pub can_add: bool,
 }
 
 fn name_font() -> FontId {
@@ -147,7 +165,12 @@ fn pill_width(ui: &egui::Ui, pill: &Pill) -> f32 {
 /// Draws the strip into `rect`, above the board, and returns what a click
 /// asked for. The pills scroll sideways when they do not fit, so
 /// *+ Add input* always stays whole at their end.
-pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -> Option<Outcome> {
+pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], state: State<'_>) -> Option<Outcome> {
+    let State {
+        selected,
+        adding,
+        can_add,
+    } = state;
     let mut outcome = None;
     let id = ui.id().with("board-inputs-strip");
     egui::Area::new(id)
@@ -187,7 +210,12 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                         .ctx()
                         .data(|data| data.get_temp::<f32>(add_key))
                         .unwrap_or(ADD_WIDTH);
-                    let widths: Vec<f32> = pills.iter().map(|pill| pill_width(ui, pill)).collect();
+                    let adding = adding.map(adding_name);
+                    let mut widths: Vec<f32> =
+                        pills.iter().map(|pill| pill_width(ui, pill)).collect();
+                    if let Some(name) = &adding {
+                        widths.push(adding_width(ui, name));
+                    }
                     let total = widths.iter().sum::<f32>()
                         + PILL_GAP * widths.len().saturating_sub(1) as f32;
                     let room = (ui.available_width() - add_width - 2.0 * PILL_GAP).max(0.0);
@@ -195,7 +223,11 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                     // selected and whenever the strip's room changes, as when
                     // the Inspector opens beside the board.
                     let shown_key = id.with("shown");
-                    let shown = (selected.map(str::to_owned), room.round() as i32);
+                    // The input being added is the one in view while it is.
+                    let focus = adding
+                        .as_ref()
+                        .map_or_else(|| selected.map(str::to_owned), |_| Some(ADDING.to_owned()));
+                    let shown = (focus.clone(), room.round() as i32);
                     let reveal = ui
                         .ctx()
                         .data(|data| data.get_temp::<(Option<String>, i32)>(shown_key))
@@ -208,9 +240,13 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                     // the offset that shows it whole at the right edge.
                     let reveal_offset = reveal
                         .then(|| {
-                            let index = pills
-                                .iter()
-                                .position(|pill| selected == Some(pill.name.as_str()))?;
+                            let index = if adding.is_some() {
+                                pills.len()
+                            } else {
+                                pills
+                                    .iter()
+                                    .position(|pill| focus.as_deref() == Some(pill.name.as_str()))?
+                            };
                             let left: f32 =
                                 widths[..index].iter().map(|width| width + PILL_GAP).sum();
                             let right = left + widths[index];
@@ -223,6 +259,9 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                             if self::pill(ui, pill, *width, on).clicked() {
                                 outcome = Some(Outcome::Select((!on).then(|| pill.name.clone())));
                             }
+                        }
+                        if let (Some(name), Some(width)) = (&adding, widths.last()) {
+                            adding_pill(ui, name, *width);
                         }
                     };
                     if total <= room {
@@ -243,8 +282,11 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                     }
                     ui.add_space(4.0);
                     let add = ui
-                        .add_enabled(false, widgets::action(Icon::Plus, "Add input").quiet())
-                        .on_disabled_hover_text(ADD_HOVER);
+                        .add_enabled(can_add, widgets::action(Icon::Plus, "Add input").quiet())
+                        .on_hover_text(ADD_HOVER);
+                    if add.clicked() {
+                        outcome = Some(Outcome::Add);
+                    }
                     let width = add.rect.width();
                     if ui.ctx().data(|data| data.get_temp::<f32>(add_key)) != Some(width) {
                         ui.ctx().data_mut(|data| data.insert_temp(add_key, width));
@@ -254,6 +296,63 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
             );
         });
     outcome
+}
+
+/// The name the pill of an input being added shows: the typed name, or a
+/// placeholder while the field is empty.
+fn adding_name(typed: &str) -> String {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        "new input".to_owned()
+    } else {
+        typed.to_owned()
+    }
+}
+
+fn adding_width(ui: &egui::Ui, name: &str) -> f32 {
+    PILL_PADDING
+        + text_width(ui, name, name_font())
+        + DETAIL_GAP
+        + text_width(ui, ADDING, detail_font())
+        + PILL_PADDING
+}
+
+/// The pill of the input the *New input* form is adding: selected, as the
+/// form is what the Inspector shows, and not a button, as there is nothing
+/// to select yet.
+fn adding_pill(ui: &mut egui::Ui, name: &str, width: f32) {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, PILL_HEIGHT), Sense::hover());
+    let text = format!("{name} {ADDING}");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter();
+    let radius = PILL_HEIGHT / 2.0;
+    painter.rect(
+        rect,
+        radius,
+        theme::ACCENT_SOFT,
+        Stroke::new(1.7, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    let name = painter.layout_no_wrap(name.to_owned(), name_font(), theme::TEXT);
+    let x = rect.left() + PILL_PADDING;
+    let width = name.size().x;
+    painter.galley(
+        pos2(x, rect.center().y - name.size().y / 2.0),
+        name,
+        theme::TEXT,
+    );
+    let detail = painter.layout_no_wrap(ADDING.to_owned(), detail_font(), theme::MUTED);
+    painter.galley(
+        pos2(
+            x + width + DETAIL_GAP,
+            rect.center().y - detail.size().y / 2.0,
+        ),
+        detail,
+        theme::MUTED,
+    );
 }
 
 /// One input's pill: its name, a red required mark and the muted detail;

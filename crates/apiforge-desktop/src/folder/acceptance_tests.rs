@@ -9941,7 +9941,8 @@ mod ux32 {
         assert_eq!(source_of(&harness, &id), before, "the code keeps quantity");
         assert!(has_label(&harness, QUANTITY), "the board keeps quantity");
 
-        type_over(&mut harness, NAME, "product");
+        // Typed at once: each valid prefix of it would be written as typed.
+        replace_text(&mut harness, NAME, "product");
         assert_eq!(field_value(&harness, NAME), "product");
         assert!(
             contains(&harness, "Another input is already named product"),
@@ -10089,7 +10090,7 @@ mod ux32 {
         settle(&mut harness);
         choose(&mut harness, CONFIRM_ADD);
         assert!(source_of(&harness, &id).contains("  input note: string\n"));
-        choose(&mut harness, "note * string");
+        // The added input is selected.
         assert!(contains(&harness, "No step reads this input yet"));
         choose(&mut harness, "Delete input");
         assert_eq!(source_of(&harness, &id), before, "deleted at once");
@@ -10117,7 +10118,7 @@ mod ux32 {
             capture(&mut harness, &format!("ux32-added-{suffix}"), None);
             choose(&mut harness, QUANTITY);
             capture(&mut harness, &format!("ux32-edit-{suffix}"), None);
-            type_over(&mut harness, NAME, "product");
+            replace_text(&mut harness, NAME, "product");
             capture(&mut harness, &format!("ux32-duplicate-{suffix}"), None);
         }
     }
