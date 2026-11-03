@@ -7668,6 +7668,103 @@ mod ux01 {
             "both rows show at the tallest normal height"
         );
     }
+
+    /// UX-35 (#252): the prompt a check's edit raises when the source holds
+    /// a comment that belongs to no statement.
+    const COMMENT_PROMPT: &str = "Continue without unattached comments?";
+
+    /// The window after one simulation of a scenario whose source starts
+    /// with a comment that belongs to no statement, its Run results
+    /// maximised on *Add to cart*; with the source the run used.
+    fn after_a_run_with_a_loose_comment()
+    -> (tempfile::TempDir, FolderHarness, String, RunResult, String) {
+        let (project, mut harness, scenario) = window(MINIMUM);
+        let text = format!("// loose comment\n\n{}", source_of(&harness, &scenario));
+        let session = app(&mut harness).session.as_mut().unwrap();
+        session.edit_source(&scenario, &text, CODE).unwrap();
+        session.settle(&scenario).unwrap();
+        settle(&mut harness);
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        assert!(has_label(&harness, "productId"), "Add to cart's outputs");
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        (project, harness, scenario, report, text)
+    }
+
+    /// UX-35 criterion 1: a check whose edit raised the prompt and was
+    /// confirmed reads *Check added* and adds 1 to the bar's count; the
+    /// results stay usable, so a second check counts too.
+    #[test]
+    fn ux35_criterion_1_a_confirmed_check_counts_as_added() {
+        let (_project, mut harness, scenario, report, text) = after_a_run_with_a_loose_comment();
+        let before = nodes(&harness, &scenario);
+
+        check(&mut harness, "productId");
+        assert!(
+            has_label(&harness, COMMENT_PROMPT),
+            "the check's edit asks first"
+        );
+        assert_eq!(source_of(&harness, &scenario), text, "nothing changed yet");
+        choose(&mut harness, "Continue");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "the prompt closed");
+
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check card");
+        assert!(
+            source_of(&harness, &scenario).contains("add_to_cart.productId == 123"),
+            "the source gains the field's assertion:\n{}",
+            source_of(&harness, &scenario)
+        );
+        assert!(has_label(&harness, "Outputs  1"), "Outputs still shown");
+        reads_added(&harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE), "the check is counted");
+        offers_check(&harness, "total");
+
+        check(&mut harness, "total");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "asked only once");
+        assert_eq!(nodes(&harness, &scenario), before + 2, "a second card");
+        reads_added(&harness, "productId");
+        reads_added(&harness, "total");
+        assert_eq!(bar(&harness), Some(TWO), "both checks are counted");
+        assert!(folder(&harness).runs.handle.is_none(), "without a run");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+    }
+
+    /// UX-35 criterion 2: a cancelled prompt adds nothing and leaves the
+    /// state unchanged: the source, the cards, the fresh results whose rows
+    /// still offer *Check*; asked again and confirmed, the check counts once.
+    #[test]
+    fn ux35_criterion_2_a_cancelled_prompt_adds_nothing() {
+        let (_project, mut harness, scenario, report, text) = after_a_run_with_a_loose_comment();
+        let before = nodes(&harness, &scenario);
+
+        check(&mut harness, "productId");
+        assert!(has_label(&harness, COMMENT_PROMPT), "the edit asks first");
+        choose(&mut harness, "Cancel");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "the prompt closed");
+
+        assert_eq!(source_of(&harness, &scenario), text, "the source is kept");
+        assert_eq!(nodes(&harness, &scenario), before, "no card");
+        assert_eq!(bar(&harness), None, "the results are fresh, no count");
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+
+        check(&mut harness, "productId");
+        choose(&mut harness, "Continue");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one card");
+        reads_added(&harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE), "counted once");
+    }
 }
 
 // ----- UX-02: the run mode is a setting ---------------------------------------
@@ -8270,26 +8367,27 @@ mod ux05 {
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
 
-    const ZONE: &str = "Release to fill the workspace";
-    const PROBLEMS_ZONE: &str = "Release to expand problems";
+    pub(super) const ZONE: &str = "Release to fill the workspace";
+    pub(super) const PROBLEMS_ZONE: &str = "Release to expand problems";
     /// Run results' grip, the 80 × 14 handle centred 8 px under its top.
-    const GRIP: &str = "Resize run report";
+    pub(super) const GRIP: &str = "Resize run report";
     /// egui's own edge of Run results.
-    const EDGE: &str = "Resize run results";
-    const PROBLEMS_EDGE: &str = "Resize problems";
-    const MAXIMISE: &str = "Maximise run results";
-    const RESTORE: &str = "Restore run results";
-    const EXPAND: &str = "Expand problems";
-    const RESTORE_PROBLEMS: &str = "Restore problems";
+    pub(super) const EDGE: &str = "Resize run results";
+    pub(super) const PROBLEMS_EDGE: &str = "Resize problems";
+    pub(super) const MAXIMISE: &str = "Maximise run results";
+    pub(super) const RESTORE: &str = "Restore run results";
+    pub(super) const EXPAND: &str = "Expand problems";
+    pub(super) const RESTORE_PROBLEMS: &str = "Restore problems";
     const POLICY: &str = "When a step fails";
     /// The owner's snap distance: the zone shows within 64 px of the top.
-    const SNAP: f32 = 64.0;
+    pub(super) const SNAP: f32 = 64.0;
     /// What maximised Run results hide in Split (KTLO-19's test).
-    const HIDDEN: [&str; 4] = ["Resize code", "Contents of", "Diagram board", "Add step"];
+    pub(super) const HIDDEN: [&str; 4] =
+        ["Resize code", "Contents of", "Diagram board", "Add step"];
 
     /// The demo shop at `size` in Split, after a passed simulation of its
     /// scenario, with the scenario's id.
-    fn ran(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    pub(super) fn ran(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
         let project = crate::testing::shop_project();
         let mut harness = folder_harness(project.path(), size);
         let scenario = only(&harness, DocumentKind::Scenario);
@@ -8304,7 +8402,7 @@ mod ux05 {
 
     /// The workspace: from the tab strip's bottom to the window's bottom,
     /// inside the harness's own central-panel margin (as KTLO-19 measures).
-    fn workspace(harness: &FolderHarness) -> egui::Rect {
+    pub(super) fn workspace(harness: &FolderHarness) -> egui::Rect {
         let tabs = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
             .expect("the tab strip is a panel")
             .outer_rect;
@@ -8316,29 +8414,40 @@ mod ux05 {
         )
     }
 
-    /// Run results' normal height range in `workspace`: at least 185 px
-    /// (160 px when the workspace is 460 px or more), at most 560 px or the
+    /// Run results' height range in `workspace`: at least 185 px (160 px
+    /// when the workspace is 460 px or more), at most the workspace less the
+    /// views' least height above them. Changed by the owner's decision of
+    /// 2026-11-03 (UX-36): the range no longer ends at 560 px or the
     /// workspace less 200 px.
     fn normal_range(workspace: egui::Rect) -> (f32, f32) {
         let full = workspace.height();
         let min = if full < 460.0 { 185.0 } else { 160.0 };
-        (min, (full - 200.0).clamp(min, 560.0))
+        (min, (full - crate::report::VIEWS_LEAST_HEIGHT).max(min))
     }
 
-    /// Where Run results' top is at the normal ceiling.
+    /// Where Run results' top is at the top of their range, the ceiling.
     fn ceiling_top(harness: &FolderHarness) -> f32 {
         let workspace = workspace(harness);
         workspace.bottom() - normal_range(workspace).1
     }
 
+    /// Where UX-05 kept Run results' top outside the zone: 560 px or the
+    /// workspace less 200 px from the bottom, which UX-36 dropped.
+    fn old_ceiling_top(harness: &FolderHarness) -> f32 {
+        let workspace = workspace(harness);
+        let full = workspace.height();
+        let min = if full < 460.0 { 185.0 } else { 160.0 };
+        workspace.bottom() - (full - 200.0).clamp(min, 560.0)
+    }
+
     /// The top of Run results, from its grip.
-    fn panel_top(harness: &FolderHarness) -> f32 {
+    pub(super) fn panel_top(harness: &FolderHarness) -> f32 {
         harness.get_by_label(GRIP).rect().center().y - 8.0
     }
 
     /// What a failure message needs to tell a panel that went wrong from a
     /// workspace that changed under it.
-    fn state(harness: &FolderHarness) -> String {
+    pub(super) fn state(harness: &FolderHarness) -> String {
         let app = folder(harness);
         format!(
             "workspace {:?}, {}, storage {:?}, notices {}",
@@ -8357,35 +8466,35 @@ mod ux05 {
     }
 
     /// The active tab's Run results fill the workspace (KTLO-19's state).
-    fn maximised(harness: &FolderHarness) -> bool {
+    pub(super) fn maximised(harness: &FolderHarness) -> bool {
         let app = folder(harness);
         app.report_maximised(app.workbench.active())
     }
 
     /// The drop zone named `label`, while it is shown.
-    fn zone(harness: &FolderHarness, label: &str) -> Option<egui::Rect> {
+    pub(super) fn zone(harness: &FolderHarness, label: &str) -> Option<egui::Rect> {
         harness.query_by_label(label).map(|zone| zone.rect())
     }
 
     /// Where a press on the grip lands: its centre.
-    fn grip(harness: &FolderHarness) -> egui::Pos2 {
+    pub(super) fn grip(harness: &FolderHarness) -> egui::Pos2 {
         harness.get_by_label(GRIP).rect().center()
     }
 
     /// Where a press on a panel's own edge lands: on the edge, left of the
     /// grip that Run results centres on it.
-    fn edge(harness: &FolderHarness, label: &str) -> egui::Pos2 {
+    pub(super) fn edge(harness: &FolderHarness, label: &str) -> egui::Pos2 {
         let rect = harness.get_by_label(label).rect();
         egui::pos2(rect.left() + 60.0, rect.center().y)
     }
 
     /// The top of the Problems section: its edge lies on it.
-    fn problems_top(harness: &FolderHarness) -> f32 {
+    pub(super) fn problems_top(harness: &FolderHarness) -> f32 {
         harness.get_by_label(PROBLEMS_EDGE).rect().center().y
     }
 
     /// Presses the primary button at `at`, the pointer resting there first.
-    fn press(harness: &mut FolderHarness, at: egui::Pos2) {
+    pub(super) fn press(harness: &mut FolderHarness, at: egui::Pos2) {
         harness.hover_at(at);
         harness.step();
         harness.drag_at(at);
@@ -8394,7 +8503,7 @@ mod ux05 {
 
     /// Moves the pressed pointer from `from` to `to`, at most 32 px a frame,
     /// then rests it for the frame that draws the panel where it was taken.
-    fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
+    pub(super) fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
         let steps = ((to - from).length() / 32.0).ceil().max(1.0);
         for step in 1..=steps as usize {
             harness.hover_at(from + (to - from) * (step as f32 / steps));
@@ -8404,7 +8513,7 @@ mod ux05 {
     }
 
     /// Releases the button at `at`; then the pointer leaves the window.
-    fn release(harness: &mut FolderHarness, at: egui::Pos2) {
+    pub(super) fn release(harness: &mut FolderHarness, at: egui::Pos2) {
         harness.event(egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -8417,7 +8526,7 @@ mod ux05 {
     }
 
     /// Drags the grip until the panel's top is `top`, and holds it there.
-    fn hold_grip_at(harness: &mut FolderHarness, top: f32) -> egui::Pos2 {
+    pub(super) fn hold_grip_at(harness: &mut FolderHarness, top: f32) -> egui::Pos2 {
         let from = grip(harness);
         let to = egui::pos2(from.x, top + 8.0);
         press(harness, from);
@@ -8433,14 +8542,17 @@ mod ux05 {
     }
 
     /// Criterion 1: dragged by the grip or by egui's edge to 40 px under the
-    /// workspace's top, the panel follows past its normal ceiling and the
-    /// zone *Release to fill the workspace* is between the workspace's top
-    /// and the panel's; held 100 px under the top instead, there is no zone.
+    /// workspace's top, the panel follows past UX-05's ceiling and the zone
+    /// *Release to fill the workspace* is between the workspace's top and the
+    /// panel's; held 100 px under the top instead, there is no zone. Since
+    /// the owner's decision of 2026-11-03 (UX-36) the panel itself stops
+    /// where the views above keep their least height, in both cases.
     #[test]
     fn ux05_criterion_1_dragging_to_the_top_shows_the_drop_zone() {
         let (_project, mut harness, _) = ran(MINIMUM);
         let workspace = workspace(&harness);
-        let ceiling = ceiling_top(&harness);
+        let ceiling = old_ceiling_top(&harness);
+        let highest = ceiling_top(&harness);
         for handle in [GRIP, EDGE] {
             let from = if handle == GRIP {
                 grip(&harness)
@@ -8454,9 +8566,9 @@ mod ux05 {
             move_to(&mut harness, from, near);
             let top = panel_top(&harness);
             assert!(
-                top < ceiling - SNAP && top <= workspace.top() + SNAP,
-                "{handle}: held 40 px under the top {}, the panel's top is {top} \
-                 (its normal ceiling is {ceiling})",
+                top < ceiling - SNAP && (top - highest).abs() <= 1.0,
+                "{handle}: held 40 px under the top {}, the panel's top is {top}, not \
+                 {highest} (UX-05's ceiling was {ceiling})",
                 workspace.top()
             );
             let shown = zone(&harness, ZONE)
@@ -8469,7 +8581,7 @@ mod ux05 {
             let far = egui::pos2(from.x, workspace.top() + 100.0 + offset);
             move_to(&mut harness, near, far);
             assert!(
-                (panel_top(&harness) - (workspace.top() + 100.0)).abs() <= 2.0,
+                (panel_top(&harness) - (workspace.top() + 100.0).max(highest)).abs() <= 2.0,
                 "{handle}: held 100 px under the top, the panel's top is {}",
                 panel_top(&harness)
             );
@@ -8554,20 +8666,20 @@ mod ux05 {
         );
     }
 
-    /// Held above its normal ceiling, Run results leave the strip above them
-    /// to the zone or the bare workspace: the board and the code, which have
-    /// no room there, are not drawn until the release, and come back after a
-    /// release outside the zone (the mid-drag frame of `ux05-mid-drag-*`).
+    /// Held above UX-05's ceiling, Run results leave the strip above them to
+    /// the board and the code, which stay drawn during the drag and after a
+    /// release outside the zone. Inverted by the owner's decision of
+    /// 2026-11-03 (UX-36): UX-05 drew neither until the release.
     #[test]
-    fn ux05_above_the_ceiling_the_views_above_are_not_drawn() {
+    fn ux05_above_the_old_ceiling_the_views_above_are_drawn() {
         for size in [MINIMUM, WIDE] {
             let (_project, mut harness, _) = ran(size);
             let workspace = workspace(&harness);
             let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
             for label in HIDDEN {
                 assert!(
-                    harness.query_by_label_contains(label).is_none(),
-                    "{size:?}: {label:?} is drawn above the dragged panel"
+                    harness.query_by_label_contains(label).is_some(),
+                    "{size:?}: {label:?} is not drawn above the dragged panel"
                 );
             }
             release(&mut harness, at);
@@ -8585,10 +8697,11 @@ mod ux05 {
     /// strip of code; released there, the section is expanded as *Expand
     /// problems* expands it, with the strip of code above it, and *Restore
     /// problems* returns the height from before the drag. Released outside
-    /// the zone, the section is 360 px high: at 1600 × 1000, as at 960 × 540
-    /// the ceiling is under 360 + 64 px and every height past 360 px is in
-    /// the zone, and with problems listed, as a section with none keeps only
-    /// the height of its caption and hint, as it does today.
+    /// the zone past 360 px, the section keeps the height it is released at
+    /// (the owner's decision of 2026-11-03, UX-36; UX-05 returned it to
+    /// 360 px): at 1600 × 1000, as at 960 × 540 the ceiling is under
+    /// 360 + 64 px, and with problems listed, as a section with none keeps
+    /// only the height of its caption and hint, as it does today.
     #[test]
     fn ux05_criterion_3_problems_drag_to_expand_keeps_the_strip() {
         for mode in ["Code", "Split"] {
@@ -8673,27 +8786,30 @@ mod ux05 {
             "outside the zone, expanded"
         );
         assert!(has_label(&harness, EXPAND));
-        let height = folder(&harness).workbench.panels.diagnostics;
         assert!(
-            (height - 360.0).abs() <= 1.0,
-            "released outside the zone, the section is {height} px high, not 360"
+            (problems_top(&harness) - to.y).abs() <= 2.0,
+            "released outside the zone at {}, the section's top is {} ({} px high)",
+            to.y,
+            problems_top(&harness),
+            folder(&harness).workbench.panels.diagnostics
         );
     }
 
-    /// Criterion 6: released above the ceiling but outside the zone, the
-    /// panel's height is the ceiling; nothing is maximised and there is no
-    /// zone.
+    /// Criterion 6: released above UX-05's ceiling but outside the zone, the
+    /// panel keeps the height it is released at; nothing is maximised and
+    /// there is no zone. Changed by the owner's decision of 2026-11-03
+    /// (UX-36): UX-05 returned the panel to its ceiling.
     #[test]
-    fn ux05_criterion_6_releasing_outside_the_zone_returns_to_the_ceiling() {
+    fn ux05_criterion_6_releasing_outside_the_zone_keeps_the_height() {
         for size in [MINIMUM, WIDE] {
             let (_project, mut harness, _) = ran(size);
             let workspace = workspace(&harness);
-            let ceiling = ceiling_top(&harness);
+            let ceiling = old_ceiling_top(&harness);
             let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
+            let held = panel_top(&harness);
             assert!(
-                panel_top(&harness) < ceiling - SNAP,
-                "{size:?}: held above the ceiling {ceiling}, the panel's top is {}",
-                panel_top(&harness)
+                held < ceiling - SNAP,
+                "{size:?}: held above UX-05's ceiling {ceiling}, the panel's top is {held}"
             );
             assert!(
                 zone(&harness, ZONE).is_none(),
@@ -8704,9 +8820,9 @@ mod ux05 {
             assert!(has_label(&harness, MAXIMISE));
             assert!(zone(&harness, ZONE).is_none());
             assert!(
-                (panel_top(&harness) - ceiling).abs() <= 1.0,
-                "{size:?}: released outside the zone, the panel's top is {}, not the ceiling \
-                 {ceiling} ({})",
+                (panel_top(&harness) - held).abs() <= 1.0,
+                "{size:?}: released outside the zone, the panel's top is {}, not {held} \
+                 where it was released ({})",
                 panel_top(&harness),
                 state(&harness)
             );
@@ -8714,8 +8830,9 @@ mod ux05 {
     }
 
     /// Criterion 7: maximised, the grip dragged down 200 px and released
-    /// restores the panel where it was released, within its normal range.
-    /// At 1600 × 1000 also 500 px, which lands under the ceiling.
+    /// restores the panel where it was released, within its range (since the
+    /// owner's decision of 2026-11-03, UX-36, up to the views' least height
+    /// instead of UX-05's ceiling). At 1600 × 1000 also 500 px.
     #[test]
     fn ux05_criterion_7_dragging_down_restores() {
         for (size, distance) in [(MINIMUM, 200.0), (WIDE, 200.0), (WIDE, 500.0)] {
@@ -8793,10 +8910,12 @@ mod ux05 {
         }
     }
 
-    /// Criterion 9: the keyboard is unchanged: ↑ and End on the grip stop at
-    /// the ceiling and do not maximise; ↓ lowers the panel by 32 px and Home
-    /// to its least height. An arrow key also moves egui's focus on, as it
-    /// does today, so the grip is focused again before each key.
+    /// Criterion 9: ↑ and End on the grip stop at the ceiling and do not
+    /// maximise; ↓ lowers the panel by 32 px and Home to its least height. An
+    /// arrow key also moves egui's focus on, as it does today, so the grip is
+    /// focused again before each key. Since the owner's decision of
+    /// 2026-11-03 (UX-36) the ceiling is the top of the range the drag has,
+    /// where the views above keep their least height.
     #[test]
     fn ux05_criterion_9_the_keys_stop_at_the_ceiling() {
         fn press_on_grip(harness: &mut FolderHarness, key: Key) {
@@ -8809,7 +8928,8 @@ mod ux05 {
             let (_project, mut harness, _) = ran(size);
             let ceiling = ceiling_top(&harness);
             for key in [Key::ArrowUp, Key::End] {
-                for _ in 0..8 {
+                // 16 presses: the range at 1600 × 1000 now reaches 786 px (UX-36).
+                for _ in 0..16 {
                     press_on_grip(&mut harness, key);
                 }
                 assert!(
@@ -8900,6 +9020,406 @@ mod ux05 {
             assert_within_window(&harness, &labels);
             assert_disjoint(&harness, &labels);
             release(&mut harness, at);
+        }
+    }
+}
+
+/// UX-36 (#260, the owner's feedback of 2026-11-03 on UX-05): Run results and
+/// Problems resize freely, like the VS Code terminal panel. The panel stays
+/// where it is released, with no clamp back to the old ceiling; the board or
+/// the code stays drawn in the space above it, during the drag and after,
+/// down to a header row and three lines of code; only a release within 64 px
+/// of the top maximises, as UX-05 made it. A real pointer drag on the named
+/// handles, as UX-05's tests drag them.
+mod ux36 {
+    use super::ux05::{
+        EDGE, EXPAND, GRIP, MAXIMISE, PROBLEMS_EDGE, PROBLEMS_ZONE, RESTORE, RESTORE_PROBLEMS,
+        SNAP, ZONE, edge, grip, hold_grip_at, maximised, move_to, panel_top, press, problems_top,
+        ran, release, state, workspace, zone,
+    };
+    use super::*;
+    use crate::testing::MINIMUM;
+
+    /// The modes; Diagram draws the board above Run results, Code the code
+    /// and its Problems, Split both.
+    const MODES: [&str; 3] = ["Diagram", "Code", "Split"];
+    /// The views above shrink to a small least height and no further
+    /// (criterion 2): a header row and a few lines, at most this high.
+    const SMALL: f32 = 120.0;
+    /// The whole lines of code the code view keeps in view, at the least.
+    const LINES: usize = 3;
+
+    /// The demo shop at `size` after a passed simulation, shown in `mode`.
+    fn ran_in(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarness) {
+        let (project, mut harness, _) = ran(size);
+        choose(&mut harness, mode);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// The views of `mode` are drawn in the strip between the workspace's
+    /// top and Run results' top: the board fills it; the code shows at least
+    /// three whole lines and the Problems caption row whole above the panel.
+    fn assert_drawn_above(harness: &FolderHarness, mode: &str, when: &str) {
+        let workspace = workspace(harness);
+        let top = panel_top(harness);
+        let strip = top - workspace.top();
+        if mode != "Code" {
+            let board = harness
+                .query_by_label_contains("Diagram board")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{when}: the board is not drawn above Run results at {top} ({})",
+                        state(harness)
+                    )
+                })
+                .rect();
+            assert!(
+                board.top() >= workspace.top() - 1.0
+                    && board.bottom() <= top + 1.0
+                    && board.height() >= strip - 1.0,
+                "{when}: the board {board:?} does not fill the strip {}..{top} above Run results",
+                workspace.top()
+            );
+        }
+        if mode != "Diagram" {
+            assert!(
+                harness.query_by_label_contains("Contents of").is_some(),
+                "{when}: the code is not drawn above Run results at {top} ({})",
+                state(harness)
+            );
+            let lines = folder(harness)
+                .code_lines_in_view()
+                .map_or(0, |(_, lines)| lines.count());
+            assert!(
+                lines >= LINES,
+                "{when}: {lines} whole lines of code above Run results at {top}, not {LINES}"
+            );
+            let caption = harness.get_by_label(EXPAND).rect();
+            assert!(
+                caption.top() >= workspace.top() - 1.0 && caption.bottom() <= top + 1.0,
+                "{when}: the Problems caption row ({caption:?}) is not whole above Run results \
+                 at {top}"
+            );
+        }
+    }
+
+    /// Criteria 1 and 2: dragged by the grip to 60 % of the workspace and then
+    /// to 70 % — both past the old ceiling (the workspace less 200 px at
+    /// 960 × 540, 560 px at 1600 × 1000) — the panel's top follows the
+    /// pointer with the board or the code drawn above it, and released, the
+    /// panel stays at that height, not maximised, with the views still drawn
+    /// above it: in Diagram, Code and Split, at both sizes.
+    #[test]
+    fn ux36_released_anywhere_the_panel_stays_and_the_views_stay_drawn() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                for share in [0.6, 0.7] {
+                    let workspace = workspace(&harness);
+                    let wanted = workspace.bottom() - share * workspace.height();
+                    let at = hold_grip_at(&mut harness, wanted);
+                    let when = format!("{size:?}, {mode}, held at {share}");
+                    assert!(
+                        (panel_top(&harness) - wanted).abs() <= 2.0,
+                        "{when}: the panel's top is {}, not {wanted} ({})",
+                        panel_top(&harness),
+                        state(&harness)
+                    );
+                    assert!(zone(&harness, ZONE).is_none(), "{when}: a zone");
+                    assert_drawn_above(&harness, mode, &when);
+                    release(&mut harness, at);
+                    let when = format!("{size:?}, {mode}, released at {share}");
+                    assert!(!maximised(&harness), "{when}: maximised");
+                    assert!(has_label(&harness, MAXIMISE), "{when}: the button");
+                    assert!(
+                        (panel_top(&harness) - wanted).abs() <= 2.0,
+                        "{when}: the panel's top is {}, not {wanted} where it was released ({})",
+                        panel_top(&harness),
+                        state(&harness)
+                    );
+                    assert_drawn_above(&harness, mode, &when);
+                }
+            }
+        }
+    }
+
+    /// Criterion 2: held as high as it goes outside the snap zone, 10 px and
+    /// then 30 px under the zone's edge, the panel stops at one height that
+    /// leaves the views a header row and three lines, at most 120 px, and
+    /// they stay drawn; released there it stays. Problems, squeezed under the
+    /// code meanwhile, keep the height they had once the panel goes down.
+    #[test]
+    fn ux36_the_views_above_keep_their_least_height() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                let problems = folder(&harness).workbench.panels.diagnostics;
+                let workspace = workspace(&harness);
+                let rested = panel_top(&harness);
+                let when = format!("{size:?}, {mode}");
+                let from = grip(&harness);
+                press(&mut harness, from);
+                let near = egui::pos2(from.x, workspace.top() + SNAP + 10.0 + 8.0);
+                move_to(&mut harness, from, near);
+                let highest = panel_top(&harness);
+                let far = egui::pos2(from.x, workspace.top() + SNAP + 30.0 + 8.0);
+                move_to(&mut harness, near, far);
+                assert!(
+                    (panel_top(&harness) - highest).abs() <= 1.0,
+                    "{when}: the panel's top moves from {highest} to {} above its highest",
+                    panel_top(&harness)
+                );
+                assert!(
+                    highest - workspace.top() <= SMALL,
+                    "{when}: at its highest the panel leaves {} px above it, more than {SMALL}",
+                    highest - workspace.top()
+                );
+                assert!(zone(&harness, ZONE).is_none(), "{when}: a zone");
+                assert_drawn_above(&harness, mode, &format!("{when}, held at the highest"));
+                release(&mut harness, far);
+                assert!(!maximised(&harness), "{when}: maximised outside the zone");
+                assert!(
+                    (panel_top(&harness) - highest).abs() <= 1.0,
+                    "{when}: released at its highest {highest}, the panel's top is {} ({})",
+                    panel_top(&harness),
+                    state(&harness)
+                );
+                assert_drawn_above(&harness, mode, &format!("{when}, released at the highest"));
+                let from = grip(&harness);
+                let back = egui::pos2(from.x, rested + 8.0);
+                press(&mut harness, from);
+                move_to(&mut harness, from, back);
+                release(&mut harness, back);
+                assert!(
+                    (panel_top(&harness) - rested).abs() <= 2.0,
+                    "{when}: dragged back to {rested}, the panel's top is {}",
+                    panel_top(&harness)
+                );
+                let after = folder(&harness).workbench.panels.diagnostics;
+                assert!(
+                    (after - problems).abs() <= 1.0,
+                    "{when}: Problems kept {after} px after the squeeze, not {problems}"
+                );
+            }
+        }
+    }
+
+    /// Criterion 2, found by the native QA run: with Run results at their
+    /// highest, the three lines of code are drawn above the Problems section
+    /// and none under it. The editor's scroll area kept 64 px for itself,
+    /// more than the code panel had, and painted its lines over the Problems
+    /// caption row. In Code and Split, at both sizes.
+    #[test]
+    fn ux36_at_the_least_height_no_code_is_drawn_over_problems() {
+        for size in [MINIMUM, WIDE] {
+            for mode in ["Code", "Split"] {
+                let (_project, mut harness) = ran_in(size, mode);
+                let workspace = workspace(&harness);
+                let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 20.0);
+                release(&mut harness, at);
+                assert_drawn_above(&harness, mode, &format!("{size:?}, {mode}"));
+                let code = egui::FontId::monospace(13.0);
+                fn texts(
+                    clip: egui::Rect,
+                    shape: &egui::Shape,
+                    into: &mut Vec<(egui::Rect, egui::epaint::TextShape)>,
+                ) {
+                    match shape {
+                        egui::Shape::Vec(shapes) => {
+                            for shape in shapes {
+                                texts(clip, shape, into);
+                            }
+                        }
+                        egui::Shape::Text(text) => into.push((clip, text.clone())),
+                        _ => {}
+                    }
+                }
+                let mut all = Vec::new();
+                for clipped in &harness.output().shapes {
+                    texts(clipped.clip_rect, &clipped.shape, &mut all);
+                }
+                // Where the section is drawn from: its caption's clip is the
+                // section's own rect.
+                let problems = all
+                    .iter()
+                    .find(|(_, text)| text.galley.job.text == "PROBLEMS")
+                    .map(|(clip, _)| clip.top())
+                    .unwrap_or_else(|| panic!("{size:?}, {mode}: no Problems caption"));
+                {
+                    for (clip, text) in all {
+                        let shown = text.visual_bounding_rect().intersect(clip);
+                        let monospace = text
+                            .galley
+                            .job
+                            .sections
+                            .first()
+                            .is_some_and(|section| section.format.font_id == code);
+                        assert!(
+                            !monospace
+                                || shown.is_negative()
+                                || shown.top() >= panel_top(&harness) - 1.0
+                                || shown.bottom() <= problems + 1.0,
+                            "{size:?}, {mode}: {:?} is drawn at {shown:?}, under the Problems \
+                             section's top {problems}",
+                            text.galley.job.text.chars().take(40).collect::<String>()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Criterion 3: held within 64 px of the top by the grip or by egui's
+    /// edge, the zone *Release to fill the workspace* shows over the strip
+    /// above Run results, with the views still drawn under it; released
+    /// there, the panel is maximised and the button reads *Restore run
+    /// results*. In every mode, at both sizes.
+    #[test]
+    fn ux36_only_the_snap_zone_maximises() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                for handle in [GRIP, EDGE] {
+                    let when = format!("{size:?}, {mode}, by {handle}");
+                    let workspace = workspace(&harness);
+                    let from = if handle == GRIP {
+                        grip(&harness)
+                    } else {
+                        edge(&harness, EDGE)
+                    };
+                    let offset = from.y - panel_top(&harness);
+                    let to = egui::pos2(from.x, workspace.top() + 40.0 + offset);
+                    press(&mut harness, from);
+                    move_to(&mut harness, from, to);
+                    let shown = zone(&harness, ZONE)
+                        .unwrap_or_else(|| panic!("{when}: no zone 40 px under the top"));
+                    assert!(
+                        shown.top() >= workspace.top() - 1.0
+                            && shown.bottom() <= panel_top(&harness) + 1.0,
+                        "{when}: the zone {shown:?} is not above Run results"
+                    );
+                    assert_drawn_above(&harness, mode, &format!("{when}, in the zone"));
+                    release(&mut harness, to);
+                    assert!(
+                        maximised(&harness),
+                        "{when}: released in the zone, not maximised"
+                    );
+                    assert!(
+                        has_label(&harness, RESTORE) && !has_label(&harness, MAXIMISE),
+                        "{when}: the button is not *{RESTORE}*"
+                    );
+                    choose(&mut harness, RESTORE);
+                    assert!(!maximised(&harness), "{when}: *{RESTORE}* restores");
+                }
+            }
+        }
+    }
+
+    /// Criterion 1, downwards: released at 70 %, then dragged down to 45 %
+    /// and released, the panel follows and stays there; maximised, its grip
+    /// dragged down to 65 % restores it at 65 %, not at the old ceiling.
+    #[test]
+    fn ux36_dragged_back_down_the_panel_resizes_freely() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness) = ran_in(size, "Split");
+            let workspace = workspace(&harness);
+            for share in [0.7, 0.45] {
+                let wanted = workspace.bottom() - share * workspace.height();
+                let at = hold_grip_at(&mut harness, wanted);
+                release(&mut harness, at);
+                assert!(
+                    (panel_top(&harness) - wanted).abs() <= 2.0,
+                    "{size:?}: released at {share}, the panel's top is {}, not {wanted} ({})",
+                    panel_top(&harness),
+                    state(&harness)
+                );
+            }
+            choose(&mut harness, MAXIMISE);
+            let wanted = workspace.bottom() - 0.65 * workspace.height();
+            let at = hold_grip_at(&mut harness, wanted);
+            release(&mut harness, at);
+            assert!(!maximised(&harness), "{size:?}: still maximised");
+            assert!(
+                (panel_top(&harness) - wanted).abs() <= 2.0,
+                "{size:?}: dragged down from maximised to 65 %, the panel's top is {}, not \
+                 {wanted} ({})",
+                panel_top(&harness),
+                state(&harness)
+            );
+            assert_drawn_above(
+                &harness,
+                "Split",
+                &format!("{size:?}, restored by the drag"),
+            );
+        }
+    }
+
+    /// Criterion 4: Problems, with problems listed, dragged past 360 px but
+    /// outside their zone and released, keep the height they are released
+    /// at, with the code drawn above them; dragged back down, they follow;
+    /// released in the zone, they expand as UX-05 made them, keeping
+    /// KTLO-18's strip of code. In Code and Split at 1600 × 1000.
+    #[test]
+    fn ux36_problems_resize_freely_too() {
+        for mode in ["Code", "Split"] {
+            let project = crate::testing::shop_project();
+            let mut harness = folder_harness(project.path(), WIDE);
+            choose(&mut harness, mode);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            app(&mut harness).activate_tab(&scenario);
+            settle(&mut harness);
+            let label = editor(&harness, &scenario);
+            replace_text(&mut harness, &label, "scenario \"Main\" {\n  ???\n}\n");
+            choose(&mut harness, EXPAND);
+            let expanded = problems_top(&harness);
+            choose(&mut harness, RESTORE_PROBLEMS);
+            for wanted in [expanded + SNAP + 100.0, expanded + SNAP + 300.0] {
+                let from = edge(&harness, PROBLEMS_EDGE);
+                let to = egui::pos2(from.x, wanted);
+                press(&mut harness, from);
+                move_to(&mut harness, from, to);
+                assert!(
+                    zone(&harness, PROBLEMS_ZONE).is_none(),
+                    "{mode}: a zone at {wanted}"
+                );
+                release(&mut harness, to);
+                assert!(
+                    !folder(&harness).problems_expanded,
+                    "{mode}: released outside the zone at {wanted}, expanded"
+                );
+                assert!(
+                    (problems_top(&harness) - wanted).abs() <= 2.0,
+                    "{mode}: released at {wanted}, the section's top is {} (it holds {} px)",
+                    problems_top(&harness),
+                    folder(&harness).workbench.panels.diagnostics
+                );
+                let lines = folder(&harness)
+                    .code_lines_in_view()
+                    .map_or(0, |(_, lines)| lines.count());
+                assert!(
+                    lines >= LINES,
+                    "{mode}: {lines} lines of code above Problems"
+                );
+            }
+            let from = edge(&harness, PROBLEMS_EDGE);
+            let to = egui::pos2(from.x, expanded + 30.0);
+            press(&mut harness, from);
+            move_to(&mut harness, from, to);
+            assert!(
+                zone(&harness, PROBLEMS_ZONE).is_some(),
+                "{mode}: no zone 30 px under the ceiling"
+            );
+            release(&mut harness, to);
+            assert!(
+                folder(&harness).problems_expanded,
+                "{mode}: released in the zone, not expanded"
+            );
+            assert!(
+                (problems_top(&harness) - expanded).abs() <= 1.0,
+                "{mode}: expanded by the drag, the section's top is {}, not {expanded}",
+                problems_top(&harness)
+            );
         }
     }
 }
@@ -10595,6 +11115,407 @@ mod ux33 {
                     None,
                 );
             }
+        }
+    }
+}
+
+/// UX-30 (#238, COMP-00 Q5): *Selection actions → Save as component* in a
+/// folder project opens a dialog that proposes the component's inputs from
+/// the wires and values entering the selection and its outputs from what is
+/// read after it. By default it publishes revision 1 and calls it in place
+/// of the selected steps; the other choice only creates the file
+/// (docs/tickets/COMP-00.md, decision 5).
+mod ux30 {
+    use super::mcp08b::contains;
+    use super::ux31::{toggled, window};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_core::{model::NodeKind, run::StepResult};
+    use egui::accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const FILE: &str = "components/check-cart-price.afs";
+    const TITLE: &str = "Save as component";
+    const NAME: &str = "Component name";
+    const FILE_NAME: &str = "Component file";
+    const DESCRIPTION: &str = "Component description";
+    const PUBLISH: &str = "Publish revision 1 and call it here, in place of the selected steps";
+    const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
+    const SAVE_AND_PUBLISH: &str = "Save and publish";
+    const CREATE_FILE: &str = "Create file";
+    const CART_DESCRIPTION: &str = "Add the product to a cart and check the cart's total.";
+
+    /// The component the dialog writes for the mock-up's choices.
+    const COMPONENT: &str = r#"component check_cart_price "Check cart price" {
+  description "Add the product to a cart and check the cart's total."
+  @contract("Product")
+  input product: object
+  input quantity: number = 1
+  input expected: number
+  action product: object contract "Product"
+  @label("Add to cart")
+  add_to_cart = add_to_cart@1(product: param.product, quantity: param.quantity)
+  @label("Promotional price")
+  promotional_price = assert add_to_cart.total ~= param.expected within 0.005
+  @label("Cart")
+  @config({ contractId: "Cart", type: "object" })
+  export cart: object = add_to_cart
+}
+"#;
+
+    fn field_value(harness: &FolderHarness, label: &str) -> String {
+        harness
+            .get_by_label(label)
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// The demo scenario at `size` in Diagram with *Add to cart* and
+    /// *Promotional price* selected and the dialog opened from *Selection
+    /// actions*.
+    fn open_dialog(root: &std::path::Path, size: egui::Vec2) -> (FolderHarness, String) {
+        let (mut harness, id) = window(root, size, SCENARIO, "Diagram");
+        select_and_open(&mut harness, &id);
+        (harness, id)
+    }
+
+    fn select_and_open(harness: &mut FolderHarness, id: &str) {
+        app(harness)
+            .selections
+            .insert(id.to_owned(), vec!["cart".to_owned(), "price".to_owned()]);
+        settle(harness);
+        choose(harness, "Selection actions");
+        choose(harness, TITLE);
+        assert!(has_label(harness, NAME), "the dialog is open");
+    }
+
+    /// Names the component as the mock-up does.
+    fn fill(harness: &mut FolderHarness) {
+        replace_text(harness, NAME, "Check cart price");
+        replace_text(harness, DESCRIPTION, CART_DESCRIPTION);
+    }
+
+    fn revisions(harness: &FolderHarness, handle: &str) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == handle)
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    fn components(root: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(root.join("components"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The scenario's text with the two steps replaced by the call, which
+    /// the cleanup's request now reads.
+    fn called(before: &str) -> String {
+        let steps = "  @label(\"Add to cart\")\n  \
+                     add_to_cart = add_to_cart@1(product: active_promotion, quantity: 1)\n  \
+                     @label(\"Promotional price\")\n  \
+                     promotional_price = assert add_to_cart.total ~= expected_price within 0.005\n";
+        let call = "  @label(\"Check cart price\")\n  \
+                    check_cart_price = check_cart_price@1(product: active_promotion, expected: expected_price)\n";
+        assert!(before.contains(steps), "{before}");
+        before
+            .replacen(steps, call, 1)
+            .replacen("{{add_to_cart.id}}", "{{check_cart_price.id}}", 1)
+    }
+
+    /// Runs the active tab's simulation and returns its report.
+    fn simulate(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run simulation");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+        let active = folder(harness).workbench.active().unwrap().to_owned();
+        folder(harness)
+            .run_result(&active)
+            .expect("the run leaves a report")
+            .clone()
+    }
+
+    /// What a run found: each request sent and each check with its values,
+    /// in the order they ran, however deeply they are nested in calls.
+    fn findings(report: &RunResult) -> Vec<String> {
+        fn walk(steps: &[StepResult], out: &mut Vec<String>) {
+            for step in steps {
+                if let Some(request) = &step.request {
+                    out.push(format!(
+                        "{} {} {:?} {:?}",
+                        request.method, request.url, request.headers, request.body
+                    ));
+                }
+                if matches!(step.kind, NodeKind::Assert | NodeKind::Condition) {
+                    out.push(format!(
+                        "{} · {} · {:?} · {:?}",
+                        step.display_name(),
+                        step.status.label(),
+                        step.actual,
+                        step.expected
+                    ));
+                }
+                if let Some(children) = &step.children {
+                    walk(children, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&report.steps, &mut out);
+        out
+    }
+
+    /// Criterion 1: the dialog opens with the name focused and the file
+    /// named after it; it proposes `product` (Object · Product, required,
+    /// from a wire outside the selection), `quantity` (Number, 1 becomes its
+    /// default) and `expected` (Number, required) as inputs, and `cart`
+    /// ticked with the check's `value` and `passed` unticked as outputs.
+    #[test]
+    fn ux30_criterion_1_the_dialog_proposes_inputs_and_outputs() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = open_dialog(directory.path(), size);
+            assert!(has_label(&harness, TITLE), "the title at {size:?}");
+            assert!(
+                harness.get_by_label(NAME).is_focused(),
+                "the name is focused at {size:?}"
+            );
+            assert_eq!(field_value(&harness, FILE_NAME), "new-component.afs");
+            replace_text(&mut harness, NAME, "Check cart price");
+            assert_eq!(
+                field_value(&harness, FILE_NAME),
+                "check-cart-price.afs",
+                "the file follows the name at {size:?}"
+            );
+            assert_eq!(toggled(&harness, PUBLISH), Some(Toggled::True));
+            assert_eq!(toggled(&harness, ONLY_CREATE), Some(Toggled::False));
+
+            for (row, name, value_type, contract, required, caption) in [
+                (
+                    1,
+                    "product",
+                    "Object",
+                    "Product",
+                    true,
+                    "Add to cart → product · a wire from outside the selection",
+                ),
+                (
+                    2,
+                    "quantity",
+                    "Number",
+                    "No contract",
+                    false,
+                    "Add to cart → Quantity · the value 1 becomes its default",
+                ),
+                (
+                    3,
+                    "expected",
+                    "Number",
+                    "No contract",
+                    true,
+                    "Promotional price → Expected value · a wire from outside the selection",
+                ),
+            ] {
+                assert_eq!(field_value(&harness, &format!("Input {row} name")), name);
+                assert_eq!(
+                    field_value(&harness, &format!("Input {row} type")),
+                    value_type,
+                    "{name} at {size:?}"
+                );
+                assert_eq!(
+                    field_value(&harness, &format!("Input {row} contract")),
+                    contract,
+                    "{name} at {size:?}"
+                );
+                assert_eq!(
+                    toggled(&harness, &format!("Input {row} required")),
+                    Some(if required {
+                        Toggled::True
+                    } else {
+                        Toggled::False
+                    }),
+                    "{name} at {size:?}"
+                );
+                assert!(has_label(&harness, caption), "{caption} at {size:?}");
+            }
+            assert!(
+                !has_label(&harness, "Input 4 name"),
+                "three inputs at {size:?}"
+            );
+
+            assert_eq!(toggled(&harness, "Use output 1"), Some(Toggled::True));
+            assert_eq!(field_value(&harness, "Output 1 name"), "cart");
+            assert_eq!(field_value(&harness, "Output 1 type"), "Object");
+            assert_eq!(field_value(&harness, "Output 1 contract"), "Cart");
+            assert!(has_label(&harness, "Add to cart → cart"));
+            for (row, caption) in [
+                (2, "Promotional price → value"),
+                (3, "Promotional price → passed"),
+            ] {
+                assert_eq!(
+                    toggled(&harness, &format!("Use output {row}")),
+                    Some(Toggled::False),
+                    "{caption} at {size:?}"
+                );
+                assert!(has_label(&harness, caption), "{caption} at {size:?}");
+            }
+            assert!(!disabled(&harness, SAVE_AND_PUBLISH), "{size:?}");
+        }
+    }
+
+    /// Criteria 2 and 6: *Save and publish* writes the component, publishes
+    /// revision 1 and puts one call in place of the two steps, wired from
+    /// the same sources and read by the same cleanup step; undo brings the
+    /// steps back, the revision stays, and the dialog's footer says so.
+    #[test]
+    fn ux30_criteria_2_and_6_save_and_publish_calls_it_and_undo_restores() {
+        let directory = shop();
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        fill(&mut harness);
+        assert!(contains(
+            &harness,
+            "Undo brings the steps back; revision 1 stays published."
+        ));
+        choose(&mut harness, SAVE_AND_PUBLISH);
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+
+        assert_eq!(
+            fs::read_to_string(directory.path().join(FILE)).unwrap(),
+            COMPONENT
+        );
+        assert_eq!(revisions(&harness, "check_cart_price"), vec![1]);
+        let published = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .find(|revision| revision.handle == "check_cart_price")
+            .unwrap()
+            .path
+            .as_str()
+            .to_owned();
+        assert_eq!(
+            fs::read_to_string(directory.path().join(published)).unwrap(),
+            COMPONENT,
+            "revision 1 is the file as written"
+        );
+        assert_eq!(source_of(&harness, &id), called(&before));
+        assert_eq!(
+            fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+            before,
+            "the scenario's change waits to be saved"
+        );
+
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness);
+        assert_eq!(source_of(&harness, &id), before, "undo restores the steps");
+        assert_eq!(revisions(&harness, "check_cart_price"), vec![1]);
+        assert!(directory.path().join(FILE).exists(), "the file stays");
+    }
+
+    /// Criterion 3: the scenario's simulation sends the same requests and
+    /// finds the same checks before and after the extraction.
+    #[test]
+    fn ux30_criterion_3_the_simulation_is_the_same_after_the_extraction() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        let before = simulate(&mut harness);
+        select_and_open(&mut harness, &id);
+        fill(&mut harness);
+        choose(&mut harness, SAVE_AND_PUBLISH);
+        assert!(source_of(&harness, &id).contains("check_cart_price@1("));
+        let after = simulate(&mut harness);
+        assert_eq!(after.status, before.status, "{:?}", after.error);
+        assert!(
+            findings(&before).iter().any(|row| row.contains("/carts")),
+            "the cart's requests are compared: {:?}",
+            findings(&before)
+        );
+        assert_eq!(findings(&after), findings(&before));
+    }
+
+    /// Criterion 4: *Only create the file* writes the component and leaves
+    /// the scenario as it was; nothing is published.
+    #[test]
+    fn ux30_criterion_4_only_create_the_file_leaves_the_scenario() {
+        let directory = shop();
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        fill(&mut harness);
+        choose(&mut harness, ONLY_CREATE);
+        assert_eq!(toggled(&harness, ONLY_CREATE), Some(Toggled::True));
+        assert!(!has_label(&harness, SAVE_AND_PUBLISH));
+        choose(&mut harness, CREATE_FILE);
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+
+        assert_eq!(
+            fs::read_to_string(directory.path().join(FILE)).unwrap(),
+            COMPONENT
+        );
+        assert!(revisions(&harness, "check_cart_price").is_empty());
+        assert_eq!(source_of(&harness, &id), before);
+    }
+
+    /// Criterion 5: a name another component has is refused inline and
+    /// disables the button; *Cancel* writes nothing.
+    #[test]
+    fn ux30_criterion_5_a_taken_name_is_refused_and_cancel_writes_nothing() {
+        let directory = shop();
+        let files = components(directory.path());
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        replace_text(&mut harness, NAME, "Add to cart");
+        assert!(has_label(
+            &harness,
+            "A component named Add to cart already exists."
+        ));
+        assert!(disabled(&harness, SAVE_AND_PUBLISH));
+        replace_text(&mut harness, NAME, "Check cart price");
+        assert!(!disabled(&harness, SAVE_AND_PUBLISH));
+
+        choose(&mut harness, "Cancel");
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+        assert_eq!(components(directory.path()), files);
+        assert!(revisions(&harness, "check_cart_price").is_empty());
+        assert_eq!(source_of(&harness, &id), before);
+    }
+
+    /// The dialog and the scenario after it beside the approved captures
+    /// `docs/qa/2026-11-02/COMP-00/comp00-q5-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux30_save_as_component() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let (mut harness, _) = open_dialog(directory.path(), size);
+            fill(&mut harness);
+            capture(&mut harness, &format!("ux30-dialog-{suffix}"), None);
+            choose(&mut harness, SAVE_AND_PUBLISH);
+            capture(&mut harness, &format!("ux30-after-{suffix}"), None);
         }
     }
 }

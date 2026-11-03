@@ -1276,3 +1276,164 @@ mod ux03 {
         }
     }
 }
+
+// ---- UX-11: no completion in a comment; a click after a line's end ----
+
+mod ux11 {
+    use super::*;
+
+    /// The demo shop in Code at the minimum size.
+    fn shop_in_code() -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        show(&mut harness, "Code");
+        (project, harness)
+    }
+
+    /// The line of the active source holding `needle`, counted from zero.
+    fn line_holding(harness: &FolderHarness, needle: &str) -> (usize, String) {
+        active_source(harness)
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(needle))
+            .map(|(index, line)| (index, line.to_owned()))
+            .unwrap_or_else(|| panic!("no line holds {needle:?}"))
+    }
+
+    /// The vertical middle of a line of the editor, counted from zero.
+    fn row_middle(harness: &mut FolderHarness, index: usize) -> f32 {
+        editor(harness).top() + 2.0 + row_height(harness) * (index as f32 + 0.5)
+    }
+
+    fn glyph_width(harness: &FolderHarness) -> f32 {
+        harness
+            .ctx
+            .fonts_mut(|fonts| fonts.glyph_width(&egui::FontId::monospace(CODE_FONT), '0'))
+    }
+
+    fn type_text(harness: &mut FolderHarness, text: &str) {
+        harness.event(egui::Event::Text(text.into()));
+        settle(harness);
+    }
+
+    fn popup_open(harness: &FolderHarness) -> bool {
+        folder(harness).code.popup_open()
+    }
+
+    fn focused(harness: &FolderHarness) -> bool {
+        harness.get_by_label_contains("Contents of").is_focused()
+    }
+
+    /// Criterion 1: with the caret inside a `//` comment, a typed letter
+    /// opens no completion popup; the same keystroke outside the comment
+    /// does. Completion inside a string that is not a template is a
+    /// follow-up, not part of this ticket.
+    #[test]
+    fn ux11_criterion_1_no_completion_inside_a_comment() {
+        let (_project, mut harness) = shop_in_code();
+        let (index, _) = line_holding(&harness, "on_error continue");
+        let y = row_middle(&mut harness, index);
+        let x = editor(&harness).left() + 40.0;
+        click_at(&mut harness, egui::pos2(x, y));
+        harness.key_press(egui::Key::End);
+        settle(&mut harness);
+
+        type_text(&mut harness, " // total = ");
+        type_text(&mut harness, "p");
+        assert!(
+            active_source(&harness).contains("on_error continue // total = p"),
+            "the letter was typed into the comment"
+        );
+        assert!(
+            !popup_open(&harness),
+            "a letter typed inside a comment opened the completion popup"
+        );
+
+        harness.key_press(egui::Key::Enter);
+        settle(&mut harness);
+        type_text(&mut harness, "total = ");
+        type_text(&mut harness, "p");
+        assert!(
+            popup_open(&harness),
+            "the same letter outside a comment opens the completion popup"
+        );
+    }
+
+    /// The demo shop with a one-word description, so no line of the
+    /// scenario is wider than the code panel at the wide size.
+    fn short_lines_project() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        let mut demo = apiforge_core::demos::shop_project();
+        demo.scenarios[0].description = "Short.".into();
+        apiforge_project::prepare_project(directory.path(), &demo).unwrap();
+        directory
+    }
+
+    /// The line of the active source at `index`, counted from zero.
+    fn line_at(harness: &FolderHarness, index: usize) -> String {
+        active_source(harness)
+            .lines()
+            .nth(index)
+            .unwrap()
+            .to_owned()
+    }
+
+    /// Criterion 2: a click to the right of a short line's last character
+    /// focuses the editor with the caret at the end of that line, and
+    /// typing inserts there; in Code and Split, at both sizes, with every
+    /// line narrower than the panel and with one wider than it.
+    #[test]
+    fn ux11_criterion_2_a_click_after_a_line_end_puts_the_caret_there() {
+        for lines in ["short lines", "a long line"] {
+            for size in [MINIMUM, WIDE] {
+                for mode in ["Code", "Split"] {
+                    let case = format!("{mode} at {size:?} with {lines}");
+                    let project = if lines == "short lines" {
+                        short_lines_project()
+                    } else {
+                        crate::testing::shop_project()
+                    };
+                    let mut harness = folder_harness(project.path(), size);
+                    show(&mut harness, mode);
+                    let (index, line) = line_holding(&harness, "on_error continue");
+                    let y = row_middle(&mut harness, index);
+                    let end =
+                        editor(&harness).left() + 4.0 + glyph_width(&harness) * line.len() as f32;
+                    click_at(&mut harness, egui::pos2(end + 80.0, y));
+                    assert!(
+                        focused(&harness),
+                        "{case}: a click after the line's end focuses the editor"
+                    );
+                    type_text(&mut harness, "x");
+                    assert_eq!(
+                        line_at(&harness, index),
+                        format!("{line}x"),
+                        "{case}: the letter went to the line's end"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Criterion 3: a click on the text still places the caret at the
+    /// clicked character.
+    #[test]
+    fn ux11_criterion_3_a_click_on_the_text_places_the_caret_there() {
+        let (_project, mut harness) = shop_in_code();
+        let (index, line) = line_holding(&harness, "on_error continue");
+        let column = line.find("on_error").unwrap() + 2;
+        let y = row_middle(&mut harness, index);
+        let x = editor(&harness).left() + 4.0 + glyph_width(&harness) * (column as f32 + 0.2);
+        click_at(&mut harness, egui::pos2(x, y));
+        assert!(focused(&harness), "a click on the text focuses the editor");
+
+        type_text(&mut harness, "x");
+        let mut expected = line.clone();
+        expected.insert(column, 'x');
+        assert_eq!(
+            line_at(&harness, index),
+            expected,
+            "the letter went to the clicked character"
+        );
+    }
+}

@@ -12,6 +12,7 @@ struct Harness {
     request_focus: bool,
     diagnostics: Vec<Diagnostic>,
     shapes: Vec<egui::epaint::ClippedShape>,
+    mode: Mode,
 }
 
 impl Harness {
@@ -26,6 +27,7 @@ impl Harness {
             request_focus: true,
             diagnostics: Vec::new(),
             shapes: Vec::new(),
+            mode: Mode::Script,
         }
     }
 
@@ -41,6 +43,7 @@ impl Harness {
         let top_space = self.top_space;
         let request_focus = self.request_focus;
         let diagnostics = self.diagnostics.clone();
+        let mode = self.mode;
         let text = &mut self.text;
         let editor = &mut self.editor;
         let mut output = self.context.run_ui(
@@ -59,6 +62,7 @@ impl Harness {
                     egui::Id::new("test-editor"),
                     text,
                     &Context {
+                        mode,
                         scope: Scope {
                             handles: &handles,
                             ..Scope::default()
@@ -313,6 +317,42 @@ fn what_was_typed_decides_whether_the_popup_opens_by_itself() {
     assert!(!opens_completion("x = ", 4));
     assert!(!opens_completion("x = (", 5));
     assert!(!opens_completion("", 0));
+}
+
+#[test]
+fn nothing_typed_in_a_comment_opens_the_popup_by_itself() {
+    // UX-11: a comment is prose; the line after it and a `//` inside a
+    // string are code again.
+    assert!(in_comment("x = 1 // prod", Mode::Script));
+    assert!(in_comment("// products.", Mode::Script));
+    assert!(!in_comment("// note\nprod", Mode::Script));
+    assert!(!in_comment("x = \"a // b\" + prod", Mode::Script));
+    // A comment inside a string's open hole is one; a closed hole's is not.
+    assert!(in_comment("x = \"a {{ b // prod", Mode::Script));
+    assert!(!in_comment("x = \"a {{ b // c\n }} prod", Mode::Script));
+    // A template is text: the `//` of a URL is not a comment, a hole's is.
+    assert!(!in_comment("https://{{prod", Mode::Template));
+    assert!(!in_comment("https://api/prod", Mode::Template));
+    assert!(in_comment("https://{{ a // prod", Mode::Template));
+}
+
+#[test]
+fn a_url_template_still_opens_the_popup_in_its_hole() {
+    let mut harness = Harness::new("https://shop/{{pro");
+    harness.mode = Mode::Template;
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+}
+
+#[test]
+fn typing_into_a_comment_closes_an_open_popup() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+    harness.type_text(" // p");
+    assert!(harness.editor.completions.popup.is_none());
 }
 
 #[test]

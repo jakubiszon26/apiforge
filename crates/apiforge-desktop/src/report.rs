@@ -137,14 +137,15 @@ const MIN_REPORT_HEIGHT: f32 = 160.0;
 /// one step row take whole, the height egui used to hold the panel at
 /// (owner, 2026-11-03, on UX-05).
 const MIN_COMPACT_REPORT_HEIGHT: f32 = 185.0;
-const MAX_REPORT_HEIGHT: f32 = 560.0;
+/// The least height Run results leave to the views above them, which are
+/// drawn there whatever the panel's height (UX-36): a header row of 46 px
+/// (the board's, or the Problems caption row under the code) and three
+/// lines of code of 16 px with the code panel's 14 px of margins.
+pub(crate) const VIEWS_LEAST_HEIGHT: f32 = 108.0;
 const KEYBOARD_RESIZE_STEP: f32 = 32.0;
-/// How near the workspace's top a dragged panel's top is released to fill
-/// the workspace (UX-05, decided by the owner).
+/// How near the workspace's top a drag that is released there fills the
+/// workspace (UX-05, decided by the owner).
 pub(crate) const DROP_SNAP: f32 = 64.0;
-/// The least room a drag of Run results leaves above it, so the drop zone's
-/// words always fit (UX-05).
-const DROP_ZONE_MIN: f32 = 32.0;
 
 /// A drag of Run results by its grip or its edge, while it lasts (UX-05).
 #[derive(Clone, Copy, Debug)]
@@ -152,9 +153,11 @@ struct Drag {
     /// The normal height when the drag began, which a panel maximised by the
     /// release returns to.
     height_before: f32,
-    /// The panel's top is within [`DROP_SNAP`] of the workspace's top.
+    /// The pointer holds the panel's top within [`DROP_SNAP`] of the
+    /// workspace's top; the panel itself stops lower, where the views above
+    /// keep [`VIEWS_LEAST_HEIGHT`] (UX-36).
     snapped: bool,
-    /// The highest normal ceiling the drag has seen, which a release outside
+    /// The most height the drag has seen allowed, which a release outside
     /// the zone keeps to: a notice under the tab strip that comes and goes
     /// during the drag (storage work) does not lower it for good.
     ceiling: f32,
@@ -177,7 +180,6 @@ pub struct ReportPanel {
     pub open: bool,
     height: f32,
     compact_height: f32,
-    size_epoch: u64,
     /// The panel fills the window below the tab strip (KTLO-19); never remembered.
     maximised: bool,
     /// A drag towards the top, which a release near it maximises (UX-05).
@@ -185,12 +187,9 @@ pub struct ReportPanel {
     /// While the grip is dragged, how far under the panel's top it was
     /// pressed.
     grab: Option<f32>,
-    /// A drag holds the panel above its normal ceiling, where the views
-    /// above it have too little room to be drawn (UX-05).
-    above_ceiling: bool,
     #[cfg(test)]
     last_handle: Option<(egui::Id, egui::Rect, f32)>,
-    /// The last frame's workspace, normal ceiling and panel rect.
+    /// The last frame's workspace, highest height and panel rect.
     #[cfg(test)]
     last_frame: Option<(egui::Rect, f32, egui::Rect)>,
     last_run_id: Option<String>,
@@ -208,11 +207,9 @@ impl Default for ReportPanel {
             open: false,
             height: 320.0,
             compact_height: 180.0,
-            size_epoch: 0,
             maximised: false,
             drag: None,
             grab: None,
-            above_ceiling: false,
             #[cfg(test)]
             last_handle: None,
             #[cfg(test)]
@@ -238,7 +235,7 @@ impl ReportPanel {
     pub(crate) fn debug_state(&self) -> String {
         format!(
             "height {} compact {} drag {:?} maximised {}, last frame (workspace, \
-             ceiling, panel) {:?}",
+             highest, panel) {:?}",
             self.height, self.compact_height, self.drag, self.maximised, self.last_frame
         )
     }
@@ -246,13 +243,6 @@ impl ReportPanel {
     /// Whether the open panel fills the window, so the caller draws nothing else.
     pub fn is_maximised(&self) -> bool {
         self.open && self.maximised
-    }
-
-    /// Whether the caller draws nothing above the panel: it is maximised, or a
-    /// drag holds it above its normal ceiling, where the zone or the bare
-    /// workspace shows until the release (UX-05).
-    pub fn covers_workspace(&self) -> bool {
-        self.is_maximised() || (self.open && self.above_ceiling)
     }
 
     /// Returns a maximised panel to its normal height.
@@ -279,9 +269,8 @@ impl ReportPanel {
 
     /// Ends a drag (UX-05). Released in the zone, the panel is maximised as
     /// *Maximise run results* leaves it, and keeps the height it had before
-    /// the drag for the restore; released anywhere else, it keeps its height
-    /// within the normal range. The epoch makes egui forget a height taken
-    /// past that range.
+    /// the drag for the restore; released anywhere else, it stays at the
+    /// height it was released at (UX-36).
     fn release(&mut self, drag: Drag, compact: bool, min: f32, height: f32) {
         self.drag = None;
         if drag.snapped {
@@ -290,7 +279,6 @@ impl ReportPanel {
         } else {
             self.set_normal_height(compact, height.clamp(min, drag.ceiling.max(min)));
         }
-        self.size_epoch = self.size_epoch.wrapping_add(1);
     }
 
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
@@ -312,16 +300,16 @@ impl ReportPanel {
         } else {
             MIN_REPORT_HEIGHT
         };
-        let maximum = (full - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
+        // The panel resizes freely between its least height and the height
+        // that leaves the views above theirs (UX-36).
+        let highest = (full - VIEWS_LEAST_HEIGHT).max(min_height);
         let panel_id = if maximised {
             egui::Id::new("report-maximised")
         } else if was_open {
-            egui::Id::new(("report-expanded", compact, self.size_epoch))
+            egui::Id::new(("report-expanded", compact))
         } else {
             egui::Id::new("report-collapsed")
         };
-        // A drag of the grip or of egui's own edge lifts the ceiling while it
-        // lasts, so the panel follows the pointer towards the top (UX-05).
         let handle_id = ui.id().with("report-resize-handle");
         let edge = ui.ctx().read_response(panel_id.with("__resize"));
         let edge_held = edge.as_ref().is_some_and(egui::Response::dragged);
@@ -336,22 +324,21 @@ impl ReportPanel {
                     .is_some_and(|grip| grip.dragged()))
         {
             self.drag = Some(Drag {
-                height_before: self.normal_height(compact).clamp(min_height, maximum),
+                height_before: self.normal_height(compact).clamp(min_height, highest),
                 snapped: false,
-                ceiling: maximum,
+                ceiling: highest,
             });
         }
         // egui keeps the size a panel was last drawn at and prefers it to
         // `default_size`; a workspace shorter for a frame would keep the
         // panel short after it. Unless egui's own edge is being dragged, the
-        // panel is drawn at the height kept here.
+        // panel is drawn at the height kept here, so no other id or epoch is
+        // needed to make egui forget a size.
         if was_open && !maximised && !edge_held && !edge_let_go {
             ui.ctx()
                 .data_mut(|data| data.remove::<egui::PanelState>(panel_id));
         }
-        let lifted = (full - DROP_ZONE_MIN).max(maximum);
-        let ceiling = if self.drag.is_some() { lifted } else { maximum };
-        let height = self.normal_height(compact).clamp(min_height, ceiling);
+        let height = self.normal_height(compact).clamp(min_height, highest);
         let collapsed_height = if compact { 44.0 } else { 48.0 };
         let response = egui::Panel::bottom(panel_id)
             .resizable(self.open && !maximised)
@@ -365,7 +352,7 @@ impl ReportPanel {
             .size_range(if maximised {
                 full..=full
             } else if self.open {
-                min_height..=ceiling
+                min_height..=highest
             } else {
                 collapsed_height..=collapsed_height
             })
@@ -391,30 +378,29 @@ impl ReportPanel {
         // The panel's own edge, found unnamed by the audit of a component's run
         // results (KTLO-23).
         widgets::name_resize_handle(ui.ctx(), panel_id, "Resize run results");
-        self.above_ceiling = false;
         if !was_open {
             return actions;
         }
         let rect = response.response.rect;
-        self.above_ceiling =
-            !maximised && self.drag.is_some() && rect.top() < workspace.bottom() - maximum - 0.5;
-        if self.above_ceiling {
-            // The caller draws nothing above the panel meanwhile; the strip
-            // shows the workspace's own background, not the window's.
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(workspace.min, egui::pos2(workspace.max.x, rect.top())),
-                0.0,
-                theme::BG,
-            );
-        }
-        let actual_height = rect.height().clamp(min_height, ceiling);
+        let actual_height = rect.height().clamp(min_height, highest);
         // The height to come back to is taken from the panel only while its
         // edge is dragged; the grip, the keyboard and a release set it
         // themselves. Taken every frame, a workspace that shrinks for a
         // moment (a notice under the tab strip while storage work runs)
         // shortened it for good. Maximised, it is kept for the restore.
         if !maximised && (edge_held || edge_let_go) {
-            self.set_normal_height(compact, actual_height);
+            // egui draws the edge no higher than this frame allows; held at
+            // that end in a frame whose workspace is shorter for a moment,
+            // the height the drag held above it is kept, up to the most the
+            // drag has seen allowed (UX-36).
+            let kept = self.normal_height(compact);
+            let ceiling = self.drag.map_or(highest, |drag| drag.ceiling.max(highest));
+            let next = if actual_height >= highest - 0.5 && kept > highest {
+                kept.min(ceiling)
+            } else {
+                actual_height
+            };
+            self.set_normal_height(compact, next);
         }
         // The grip: the panel's own handle, kept at the top of the maximised
         // panel so that it can be dragged back down (UX-05).
@@ -438,7 +424,7 @@ impl ReportPanel {
         #[cfg(test)]
         {
             self.last_handle = Some((handle_id, handle_rect, current_height));
-            self.last_frame = Some((workspace, maximum, rect));
+            self.last_frame = Some((workspace, highest, rect));
         }
         if handle.clicked() || handle.drag_started() {
             handle.request_focus();
@@ -453,11 +439,23 @@ impl ReportPanel {
         } else if !handle.dragged() {
             self.grab = None;
         }
-        let wanted = handle
+        // Where the pointer holds the panel's top, past the end of its range
+        // too: the snap zone is reached by the pointer, since the panel stops
+        // where the views above keep their least height (UX-36).
+        let pointer_top = handle
             .interact_pointer_pos()
             .zip(self.grab)
             .filter(|_| handle.dragged())
-            .map(|(pointer, grab)| rect.bottom() - (pointer.y - grab));
+            .map(|(pointer, grab)| pointer.y - grab)
+            .or_else(|| {
+                edge.as_ref()
+                    .filter(|_| edge_held || edge_let_go)
+                    .and_then(egui::Response::interact_pointer_pos)
+                    .map(|pointer| pointer.y)
+            });
+        let wanted = pointer_top
+            .filter(|_| handle.dragged())
+            .map(|top| rect.bottom() - top);
         if maximised {
             // Dragged down, the panel is restored under the pointer and the
             // same grip goes on dragging it.
@@ -465,24 +463,26 @@ impl ReportPanel {
                 && wanted < rect.height() - 0.5
             {
                 self.drag = Some(Drag {
-                    height_before: self.normal_height(compact).clamp(min_height, maximum),
+                    height_before: self.normal_height(compact).clamp(min_height, highest),
                     snapped: false,
-                    ceiling: maximum,
+                    ceiling: highest,
                 });
                 self.maximised = false;
-                self.set_normal_height(compact, wanted.clamp(min_height, lifted));
-                self.size_epoch = self.size_epoch.wrapping_add(1);
+                self.set_normal_height(compact, wanted.clamp(min_height, highest));
                 ui.ctx().request_repaint();
             }
         } else {
             if let Some(wanted) = wanted {
-                let next = wanted.clamp(min_height, ceiling);
-                self.set_normal_height(compact, next);
-                self.size_epoch = self.size_epoch.wrapping_add(1);
+                // Up to the most height the drag has seen allowed: a frame
+                // whose workspace is shorter for a moment draws the panel
+                // lower, but does not lower the height the drag holds.
+                let ceiling = self.drag.map_or(highest, |drag| drag.ceiling.max(highest));
+                self.set_normal_height(compact, wanted.clamp(min_height, ceiling));
                 ui.ctx().request_repaint();
             }
             if handle.has_focus() && self.drag.is_none() {
-                // The keyboard keeps to the normal range (UX-05 criterion 9).
+                // The keys move the panel over the same range as the drag and
+                // never maximise it (UX-05 criterion 9, UX-36).
                 let keys = [
                     egui::Key::ArrowUp,
                     egui::Key::ArrowDown,
@@ -497,7 +497,7 @@ impl ReportPanel {
                                 updated.unwrap_or(actual_height),
                                 key,
                                 min_height,
-                                maximum,
+                                highest,
                             )
                         {
                             updated = Some(next);
@@ -509,12 +509,13 @@ impl ReportPanel {
                 {
                     self.set_normal_height(compact, next);
                     ui.ctx().request_repaint();
-                    self.size_epoch = self.size_epoch.wrapping_add(1);
                 }
             }
             if let Some(drag) = self.drag.as_mut() {
-                drag.snapped = rect.top() <= workspace.top() + DROP_SNAP;
-                drag.ceiling = drag.ceiling.max(maximum);
+                if let Some(top) = pointer_top {
+                    drag.snapped = top <= workspace.top() + DROP_SNAP;
+                }
+                drag.ceiling = drag.ceiling.max(highest);
                 let held = handle.dragged() || edge_held;
                 let let_go = handle.drag_stopped() || edge_let_go;
                 if let_go || !held {
@@ -522,7 +523,13 @@ impl ReportPanel {
                     // A drag that ends without a release (the panel went
                     // away under it) maximises nothing.
                     drag.snapped &= let_go;
-                    self.release(drag, compact, min_height, actual_height);
+                    // The height the drag held, not the one this frame could
+                    // draw: released in a frame whose workspace is shorter
+                    // (a notice under the tab strip), the panel would keep
+                    // that frame's clamp for good. Dragged by egui's edge,
+                    // the held height is taken above, by the same rule.
+                    let held_height = self.normal_height(compact);
+                    self.release(drag, compact, min_height, held_height);
                     if drag.snapped {
                         // The grip moves to the top under a released pointer;
                         // the maximised panel is shown as the button leaves it.
@@ -530,6 +537,7 @@ impl ReportPanel {
                     }
                     ui.ctx().request_repaint();
                 } else if drag.snapped {
+                    // Over the views above, which stay drawn under it.
                     let zone = egui::Rect::from_min_max(
                         workspace.min,
                         egui::pos2(workspace.max.x, rect.top()),
@@ -1802,13 +1810,16 @@ mod tests {
 
     /// A workspace that is shorter for a frame (a notice under the tab strip
     /// while storage work runs) clamps the panel for that frame only: after
-    /// it the panel is back at the height it keeps (UX-05, seen on CI).
+    /// it the panel is back at the height it keeps (UX-05, seen on CI). The
+    /// panel is 500 px high, which a 560 px workspace cannot hold with the
+    /// views' least height above it (UX-36).
     #[test]
     fn a_workspace_shorter_for_a_frame_does_not_keep_the_panel_short() {
         let context = egui::Context::default();
         crate::theme::apply(&context);
         let mut panel = ReportPanel {
             open: true,
+            height: 500.0,
             ..Default::default()
         };
         let report_context = Context {
@@ -1839,12 +1850,90 @@ mod tests {
             panel.debug_resize_handle().2
         };
         for _ in 0..3 {
-            draw(600.0);
+            draw(700.0);
         }
-        assert_eq!(draw(600.0), 320.0, "the default height");
-        assert_eq!(draw(500.0), 300.0, "clamped to the shorter workspace");
-        draw(600.0);
-        assert_eq!(draw(600.0), 320.0, "back at its height");
+        assert_eq!(draw(700.0), 500.0, "the height it keeps");
+        assert_eq!(
+            draw(560.0),
+            560.0 - VIEWS_LEAST_HEIGHT,
+            "clamped to the shorter workspace"
+        );
+        draw(700.0);
+        assert_eq!(draw(700.0), 500.0, "back at its height");
+    }
+
+    /// Run results held at their highest, by the grip and by egui's edge,
+    /// and released in a frame whose workspace is shorter (a notice under
+    /// the tab strip while storage work runs) stay at their highest once the
+    /// workspace is back, as the drag's ceiling promises: the release takes
+    /// the height the drag held, not the height that one frame could draw
+    /// (UX-36, seen on CI).
+    #[test]
+    fn a_release_in_a_shorter_frame_keeps_the_highest_height() {
+        // Where each is pressed: the grip's centre, 8 px under the panel's
+        // top, and the edge on the top, left of the grip.
+        for (way, pressed) in [
+            ("grip", egui::pos2(600.0, 700.0 - 320.0 + 8.0)),
+            ("edge", egui::pos2(100.0, 700.0 - 320.0)),
+        ] {
+            let context = egui::Context::default();
+            crate::theme::apply(&context);
+            let mut panel = ReportPanel {
+                open: true,
+                ..Default::default()
+            };
+            let report_context = Context {
+                run: None,
+                selected_node_id: None,
+                error_policy: ErrorPolicy::Continue,
+                running: false,
+                stale: false,
+                checked: &[],
+                files_busy: false,
+                component: false,
+                document_locked: false,
+            };
+            let mut draw = |height: f32, events: Vec<egui::Event>| {
+                let mut output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1200.0, height),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        panel.show(ui, &report_context);
+                    },
+                );
+                output.textures_delta.clear();
+                (panel.debug_resize_handle().2, panel.debug_state())
+            };
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let highest = 700.0 - VIEWS_LEAST_HEIGHT;
+            draw(700.0, vec![]);
+            draw(700.0, vec![]);
+            draw(700.0, vec![egui::Event::PointerMoved(pressed)]);
+            draw(700.0, vec![button(pressed, true)]);
+            // Above the highest top, outside the snap zone.
+            let mut at = pressed;
+            while at.y > DROP_SNAP + 30.0 {
+                at.y = (at.y - 32.0).max(DROP_SNAP + 30.0);
+                draw(700.0, vec![egui::Event::PointerMoved(at)]);
+            }
+            let (held, state) = draw(700.0, vec![]);
+            assert_eq!(held, highest, "{way}: held at the highest: {state}");
+            draw(660.0, vec![button(at, false), egui::Event::PointerGone]);
+            draw(700.0, vec![]);
+            let (released, state) = draw(700.0, vec![]);
+            assert_eq!(released, highest, "{way}: released at the highest: {state}");
+        }
     }
 
     #[test]

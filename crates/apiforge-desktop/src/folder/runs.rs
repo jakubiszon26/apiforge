@@ -65,6 +65,21 @@ struct AddedCheck {
     source_after: u64,
 }
 
+/// A check whose edit is on its way to the document (UX-35): applied at
+/// once, or after the person confirms the comment prompt, it is counted
+/// only if its card was added.
+#[derive(Clone)]
+pub(super) struct PendingCheck {
+    field: crate::report::CheckedField,
+    /// Whether the card goes to the cleanup graph.
+    cleanup: bool,
+    /// The graph's card count before the edit.
+    before: usize,
+    /// The checks counted when the edit was asked for; later ones are
+    /// replaced, as after an undo.
+    checks: usize,
+}
+
 /// How a document's report relates to the document now (UX-01).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Freshness {
@@ -146,18 +161,11 @@ impl FolderApp {
         Some((format!("Running {what} {subject}"), hover))
     }
 
-    /// The active tab's run results fill the window (KTLO-19); what the
-    /// window draws follows [`Self::report_covers`].
-    #[cfg(test)]
+    /// The active tab's run results fill the window (KTLO-19), so nothing
+    /// else is drawn. At any other height the views stay drawn above them
+    /// (UX-36).
     pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
         self.runs.panel.is_maximised()
-            && active.is_some_and(|id| self.runs.reports.contains_key(id))
-    }
-
-    /// Nothing is drawn above the active tab's run results: they fill the
-    /// window, or a drag holds them above their normal ceiling (UX-05).
-    pub(super) fn report_covers(&self, active: Option<&str>) -> bool {
-        self.runs.panel.covers_workspace()
             && active.is_some_and(|id| self.runs.reports.contains_key(id))
     }
 
@@ -614,6 +622,7 @@ impl FolderApp {
                         publication::Action::Model {
                             next: Box::new(Document::Scenario(scenario)),
                             selection: None,
+                            check: None,
                         },
                     );
                 }
@@ -645,13 +654,26 @@ impl FolderApp {
                         parameters: &parameters,
                         sibling: sibling_of(&model, cleanup),
                     };
-                    self.apply_edit(
+                    let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
+                    // The check is counted when its edit applies, which may
+                    // first ask about unattached comments (UX-35).
+                    self.component_action(
                         id,
-                        &model,
-                        cleanup,
-                        Ok(board.push_node(edit::field_assertion(node, &port, &path, &value))),
+                        publication::Action::Model {
+                            next: Box::new(with_graph(&model, cleanup, pushed.graph)),
+                            selection: pushed.selection,
+                            check: Some(Box::new(PendingCheck {
+                                field: crate::report::CheckedField {
+                                    node_id,
+                                    port,
+                                    path,
+                                },
+                                cleanup,
+                                before,
+                                checks,
+                            })),
+                        },
                     );
-                    self.record_check(id, cleanup, before, checks, node_id, port, path);
                 }
             }
             Action::AssignField {
@@ -681,17 +703,7 @@ impl FolderApp {
     /// applied, the text right after it as the key (UX-01). A check after an
     /// undone one replaces it, as a new edit clears what redo would bring
     /// back.
-    #[allow(clippy::too_many_arguments)]
-    fn record_check(
-        &mut self,
-        id: &str,
-        cleanup: bool,
-        before: usize,
-        checks: usize,
-        node_id: String,
-        port: String,
-        path: String,
-    ) {
+    pub(super) fn record_check(&mut self, id: &str, check: PendingCheck) {
         let Some(document) = self
             .session
             .as_ref()
@@ -701,16 +713,12 @@ impl FolderApp {
         };
         let added = document
             .model()
-            .is_some_and(|model| graph_of(model, cleanup).nodes.len() > before);
+            .is_some_and(|model| graph_of(model, check.cleanup).nodes.len() > check.before);
         let source_after = text_hash(document.text());
         if added && let Some(report) = self.runs.reports.get_mut(id) {
-            report.checks.truncate(checks);
+            report.checks.truncate(check.checks);
             report.checks.push(AddedCheck {
-                field: crate::report::CheckedField {
-                    node_id,
-                    port,
-                    path,
-                },
+                field: check.field,
                 source_after,
             });
         }
