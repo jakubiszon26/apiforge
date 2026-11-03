@@ -23,8 +23,8 @@ pub use component::{
 };
 pub use connect::{connect, remove_connections};
 pub use extract::{
-    Extraction, Replaced, extraction_component, propose_extraction, replace_with_call,
-    unkept_outputs,
+    Extraction, Replaced, branch_leaves, extraction_component, propose_extraction,
+    replace_with_call, unkept_outputs,
 };
 pub use inputs::{
     InputNameError, add_input, check_input_name, delete_input, rename_input, replace_input,

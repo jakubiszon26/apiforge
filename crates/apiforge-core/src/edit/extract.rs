@@ -145,25 +145,68 @@ pub fn propose_extraction(
     }
 }
 
-/// The outputs a step after the selection reads that the draft does not
-/// keep, by the name of the block and port, e.g. `Add to cart → cart`.
+/// The output of the draft a reference to `port` of the selected `node_id`
+/// at `path` reads, with the path left inside that output.
+fn kept_output<'a>(
+    draft: &'a ComponentDraft,
+    node_id: &str,
+    port: &str,
+    path: &'a str,
+) -> Option<(&'a str, &'a str)> {
+    draft
+        .outputs
+        .iter()
+        .filter(|row| row.enabled && row.node_id == node_id && row.port == port)
+        .find_map(|row| {
+            let rest = if row.path.is_empty() {
+                path
+            } else if path == row.path {
+                ""
+            } else {
+                path.strip_prefix(row.path.as_str())?.strip_prefix('.')?
+            };
+            Some((js::trim(&row.name), rest))
+        })
+}
+
+/// What a step after the selection reads that no kept output provides, by
+/// the name of the block, port and field, e.g. `Add to cart → cart`.
 pub fn unkept_outputs(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Vec<String> {
-    extraction
-        .read_after()
-        .into_iter()
-        .filter(|(node, port)| {
-            !draft
-                .outputs
-                .iter()
-                .any(|row| row.enabled && &row.node_id == node && &row.port == port)
-        })
-        .map(|(node, port)| {
-            let name = extraction
-                .source(&node)
-                .map_or(node.as_str(), Node::display_name);
-            format!("{name} → {port}")
-        })
-        .collect()
+    let mut unkept: Vec<String> = Vec::new();
+    for node in extraction.readers() {
+        for binding in node.inputs.values() {
+            for reference in binding.references() {
+                if !extraction.selected.contains(reference.node_id)
+                    || kept_output(draft, reference.node_id, reference.port, reference.path)
+                        .is_some()
+                {
+                    continue;
+                }
+                let name = extraction
+                    .source(reference.node_id)
+                    .map_or(reference.node_id, Node::display_name);
+                let mut text = format!("{name} → {}", reference.port);
+                if !reference.path.is_empty() {
+                    text.push('.');
+                    text.push_str(reference.path);
+                }
+                if !unkept.contains(&text) {
+                    unkept.push(text);
+                }
+            }
+        }
+    }
+    unkept
+}
+
+/// Whether an IF/ELSE branch leads from inside the selection to outside it,
+/// which one call cannot carry.
+pub fn branch_leaves(extraction: &Extraction<'_>) -> bool {
+    extraction.graph.edges.iter().any(|edge| {
+        edge.branch.is_some()
+            && extraction.selected.contains(edge.source.as_str())
+            && !extraction.selected.contains(edge.target.as_str())
+    })
 }
 
 /// The definition a valid draft describes, its inputs written as a folder
@@ -211,11 +254,7 @@ pub fn replace_with_call(
     if let Some(output) = unkept.into_iter().next() {
         return Err(EditError::OutputNotKept(output));
     }
-    if graph.edges.iter().any(|edge| {
-        edge.branch.is_some()
-            && selected.contains(edge.source.as_str())
-            && !selected.contains(edge.target.as_str())
-    }) {
+    if branch_leaves(extraction) {
         return Err(EditError::BranchLeavesSelection);
     }
     let chosen: Vec<&Node> = graph
@@ -265,19 +304,6 @@ pub fn replace_with_call(
     }
 
     // A reader of a kept output reads the call's output of that name.
-    let outputs: Vec<(&str, &str, &str, &str)> = draft
-        .outputs
-        .iter()
-        .filter(|row| row.enabled)
-        .map(|row| {
-            (
-                row.node_id.as_str(),
-                row.port.as_str(),
-                row.path.as_str(),
-                js::trim(&row.name),
-            )
-        })
-        .collect();
     let call_id = call.id.clone();
     let redirect = |binding: &Binding| -> Binding {
         binding
@@ -287,22 +313,12 @@ pub fn replace_with_call(
                         node_id,
                         port,
                         path,
-                    } if selected.contains(node_id.as_str()) => outputs
-                        .iter()
-                        .find_map(|(node, output, prefix, name)| {
-                            if node != node_id || output != port {
-                                return None;
-                            }
-                            let rest = if prefix.is_empty() {
-                                path.as_str()
-                            } else if path == prefix {
-                                ""
-                            } else {
-                                path.strip_prefix(prefix)?.strip_prefix('.')?
-                            };
-                            Some(Binding::reference(&call_id, *name, rest))
-                        })
-                        .unwrap_or_else(|| leaf.clone()),
+                    } if selected.contains(node_id.as_str()) => {
+                        kept_output(draft, node_id, port, path).map_or_else(
+                            || leaf.clone(),
+                            |(name, rest)| Binding::reference(&call_id, name, rest),
+                        )
+                    }
                     other => other.clone(),
                 })
             })
@@ -502,6 +518,28 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_of_a_field_the_output_does_not_hold_is_refused() {
+        let (project, scenario) = shop();
+        let selected: HashSet<&str> = ["cart", "price"].into();
+        let later = [&scenario.cleanup];
+        let extraction = Extraction {
+            graph: &scenario.graph,
+            reference: &scenario.graph,
+            later: &later,
+            selected: &selected,
+        };
+        let mut draft = propose_extraction(&extraction, &project, "Check".into());
+        draft.outputs[0].path = "total".into();
+        assert_eq!(
+            unkept_outputs(&extraction, &draft),
+            vec!["Add to cart → cart.id".to_owned()]
+        );
+        draft.outputs[0].path = String::new();
+        assert!(unkept_outputs(&extraction, &draft).is_empty());
+        assert!(!branch_leaves(&extraction));
+    }
+
+    #[test]
     fn an_unticked_output_that_is_read_is_refused() {
         let (project, scenario) = shop();
         let selected: HashSet<&str> = ["cart", "price"].into();
@@ -517,7 +555,7 @@ mod tests {
         draft.outputs[1].enabled = true;
         assert_eq!(
             unkept_outputs(&extraction, &draft),
-            vec!["Add to cart → cart".to_owned()]
+            vec!["Add to cart → cart.id".to_owned()]
         );
         let component = extraction_component(&extraction, &draft).unwrap();
         assert!(matches!(

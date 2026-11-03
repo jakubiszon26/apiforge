@@ -10741,7 +10741,10 @@ mod ux30 {
         fn walk(steps: &[StepResult], out: &mut Vec<String>) {
             for step in steps {
                 if let Some(request) = &step.request {
-                    out.push(format!("{} {}", request.method, request.url));
+                    out.push(format!(
+                        "{} {} {:?} {:?}",
+                        request.method, request.url, request.headers, request.body
+                    ));
                 }
                 if matches!(step.kind, NodeKind::Assert | NodeKind::Condition) {
                     out.push(format!(

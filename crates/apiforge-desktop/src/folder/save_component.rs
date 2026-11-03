@@ -74,6 +74,24 @@ fn unkept_message(unkept: &[String]) -> Option<String> {
     }
 }
 
+/// Whether something is at `path` under `root`, or at a path that differs
+/// from it only in letter case, which registration refuses as well.
+fn exists_in_any_case(root: &std::path::Path, path: &str) -> bool {
+    let full = root.join(path);
+    if full.exists() {
+        return true;
+    }
+    let (Some(parent), Some(name)) = (full.parent(), full.file_name()) else {
+        return false;
+    };
+    let name = name.to_string_lossy().to_lowercase();
+    std::fs::read_dir(parent).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().to_lowercase() == name)
+    })
+}
+
 /// Where an input's value comes from, after its block and slot.
 fn origin(row: &InputRow) -> String {
     match &row.original {
@@ -218,7 +236,7 @@ impl SaveComponent {
         let exists = match &self.on_disk {
             Some((checked, exists)) if *checked == path => *exists,
             _ => {
-                let exists = self.root.join(&path).exists();
+                let exists = exists_in_any_case(&self.root, &path);
                 self.on_disk = Some((path.clone(), exists));
                 exists
             }
@@ -240,9 +258,16 @@ impl SaveComponent {
 
     /// The outputs a later step reads that the draft drops, when the steps
     /// are to be replaced.
+    ///
+    /// Only the default choice replaces the steps, so only it is refused
+    /// when one call cannot stand in for them; a file alone changes nothing
+    /// the steps after them read.
     fn unkept(&self) -> Option<String> {
         if !self.publish {
             return None;
+        }
+        if self.with_extraction(edit::branch_leaves) {
+            return Some(edit::EditError::BranchLeavesSelection.to_string());
         }
         unkept_message(
             &self.with_extraction(|extraction| edit::unkept_outputs(extraction, &self.draft)),
@@ -735,7 +760,20 @@ impl FolderApp {
                         }
                     };
                 let published = if publish {
-                    Some(session.publish(&id, DIAGRAM)?)
+                    match session.publish(&id, DIAGRAM) {
+                        Ok(published) => Some(published),
+                        Err(error) => {
+                            // Nothing half done stays behind: the new file
+                            // goes to the project's trash, so trying again
+                            // finds its path free.
+                            let _ = session
+                                .preview_delete(&[path.as_str()])
+                                .and_then(|preview| session.delete(&preview, DIAGRAM));
+                            return Ok(Err(format!(
+                                "The component could not be published: {error}"
+                            )));
+                        }
+                    }
                 } else {
                     None
                 };
