@@ -11834,10 +11834,29 @@ mod ux18 {
                 fitted < zoom,
                 "{size:?}: the narrower board fits: {zoom} to {fitted}"
             );
-            // At 960 × 540 the board beside the Inspector is narrower than
-            // the demo at the smallest zoom, so only the zoom is checked.
             if size == WIDE {
                 all_in_focus(&harness, &scenario);
+            } else {
+                // At 960 × 540 the board beside the Inspector is narrower
+                // than the demo at the smallest zoom: the fit stops there,
+                // centres the cards on the focus and keeps them whole in
+                // its height.
+                assert_eq!(fitted, 0.25, "the smallest zoom");
+                let canvas = canvas(&harness, &scenario);
+                let focus = canvas.debug_focus();
+                let cards = canvas
+                    .debug_cards()
+                    .iter()
+                    .fold(egui::Rect::NOTHING, |all, (_, rect)| all.union(*rect));
+                assert!(
+                    (cards.center() - focus.center()).length() < 1.0,
+                    "the cards {cards:?} are centred on the focus {focus:?}"
+                );
+                assert!(
+                    cards.top() >= focus.top() - EPSILON
+                        && cards.bottom() <= focus.bottom() + EPSILON,
+                    "the cards {cards:?} are whole in the focus's height {focus:?}"
+                );
             }
         }
     }
