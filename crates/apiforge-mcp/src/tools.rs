@@ -655,7 +655,9 @@ pub struct Step {
     /// `true` for every request of a live run that was sent, answered or
     /// not: the API may have performed it. `false` for a step that sent
     /// nothing: any step of a simulation, a step that is not a request, a
-    /// request that never left this process. Always sent, `false` included:
+    /// request that never left this process. A step the run data limit
+    /// emptied keeps whether it, or a component's nested step, sent one.
+    /// Always sent, `false` included:
     /// the output schema requires it (MCP-14, MCP-22).
     pub may_have_reached_api: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

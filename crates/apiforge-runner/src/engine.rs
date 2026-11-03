@@ -713,20 +713,17 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         let size = serde_json::to_vec(&step).map_or(usize::MAX, |bytes| bytes.len());
         if self.report_bytes.saturating_add(size) > self.limits.max_report_bytes {
             // The emptied step keeps the one fact a reader of a live run needs:
-            // whether its request can have reached the tested API (MCP-22).
-            let effect = (self.request.mode == apiforge_core::run::RunMode::Live
-                && step.request.is_some())
-            .then(|| {
-                if step
-                    .message
-                    .as_deref()
-                    .is_some_and(|message| message.ends_with(NOTHING_SENT))
-                {
-                    NOTHING_SENT
-                } else {
-                    MAY_HAVE_HAPPENED
-                }
-            });
+            // whether its request, or one of a component's, can have reached
+            // the tested API (MCP-22).
+            let effect = if self.request.mode != apiforge_core::run::RunMode::Live {
+                None
+            } else if may_have_sent(&step) {
+                Some(MAY_HAVE_HAPPENED)
+            } else if step.request.is_some() {
+                Some(NOTHING_SENT)
+            } else {
+                None
+            };
             let exceeded = format!(
                 "Exceeded the run data limit of {}.",
                 byte_size(self.limits.max_report_bytes)
@@ -1392,6 +1389,18 @@ fn outputs_value(outputs: &IndexMap<String, Value>) -> Value {
     )
 }
 
+/// Whether a live step, or a step nested in it, sent a request the API may
+/// have performed: one with a snapshot the runner did not mark as never sent.
+fn may_have_sent(step: &StepResult) -> bool {
+    let message = step.message.as_deref().unwrap_or_default();
+    message.ends_with(MAY_HAVE_HAPPENED)
+        || (step.request.is_some() && !message.ends_with(NOTHING_SENT))
+        || step
+            .children
+            .as_ref()
+            .is_some_and(|children| children.iter().any(may_have_sent))
+}
+
 /// The document name of an operator, e.g. `multiply`.
 fn operator_id(operator: Operator) -> String {
     match serde_json::to_value(operator) {
@@ -1535,6 +1544,47 @@ mod tests {
             assert!(message.ends_with(effect), "{message}");
         }
         server.abort();
+    }
+
+    /// MCP-22: a component step is marked by the requests nested in it, so
+    /// emptying it keeps that fact.
+    #[test]
+    fn a_component_may_have_sent_what_its_steps_sent() {
+        let step =
+            |kind: &str, message: Option<&str>, snapshot: bool, children: Vec<StepResult>| {
+                let mut step: StepResult = serde_json::from_value(serde_json::json!({
+                    "nodeId": "n", "handle": "h", "kind": kind, "status": "passed",
+                    "phase": "main", "inputs": {}, "outputs": {}, "durationMs": 0,
+                    "message": message,
+                }))
+                .unwrap();
+                step.request = snapshot.then(|| RequestSnapshot {
+                    method: "GET".into(),
+                    url: "http://a/".into(),
+                    headers: IndexMap::new(),
+                    body: OptionalJson::Missing,
+                });
+                step.children = (!children.is_empty()).then_some(children);
+                step
+            };
+        let refused = format!("Connection refused. {NOTHING_SENT}");
+        let sent = step("request", None, true, vec![]);
+        let unsent = step("request", Some(&refused), true, vec![]);
+        let value = step("value", None, false, vec![]);
+        assert!(may_have_sent(&sent));
+        assert!(!may_have_sent(&unsent));
+        assert!(may_have_sent(&step(
+            "component",
+            None,
+            false,
+            vec![value.clone(), sent]
+        )));
+        assert!(!may_have_sent(&step(
+            "component",
+            None,
+            false,
+            vec![value, unsent]
+        )));
     }
 
     #[tokio::test]
