@@ -124,6 +124,19 @@ impl FolderApp {
             .cloned()
             .unwrap_or_default();
         let context = context_key(document_id, cleanup);
+        // A component's board shows its inputs in the INPUTS strip (UX-31).
+        let inputs = match &*model {
+            Document::Component(component) => Some(component.inputs.as_slice()),
+            Document::Scenario(_) => None,
+        };
+        let input_selected =
+            selected_input(&model, &selection, self.selected_inputs.get(document_id))
+                .map(|port| port.name.clone());
+        if input_selected.is_none() {
+            // A block selected elsewhere, or an input the code no longer
+            // declares, ends the input's selection.
+            self.selected_inputs.remove(document_id);
+        }
         let can_paste = self
             .clipboard
             .as_ref()
@@ -159,6 +172,8 @@ impl FolderApp {
                     header_leading: None,
                     library: library.as_ref(),
                     read_only: !snapshot.editable,
+                    inputs,
+                    selected_input: input_selected.as_deref(),
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -193,6 +208,7 @@ impl FolderApp {
             && !matches!(
                 command,
                 Command::Select(_)
+                    | Command::SelectInput(_)
                     // Opening a called component is navigation, which stays
                     // free while observing (MCP-08a).
                     | Command::EditComponent(_)
@@ -221,6 +237,19 @@ impl FolderApp {
         let result: Option<Result<Edit, String>> = match command {
             Command::Select(ids) => {
                 self.selections.insert(document_id.to_owned(), ids);
+                self.selected_inputs.remove(document_id);
+                None
+            }
+            Command::SelectInput(name) => {
+                match name {
+                    Some(name) => {
+                        self.selected_inputs.insert(document_id.to_owned(), name);
+                        self.selections.remove(document_id);
+                    }
+                    None => {
+                        self.selected_inputs.remove(document_id);
+                    }
+                }
                 None
             }
             Command::Move(positions) => Some(Ok(board.moved(positions).into())),
@@ -425,6 +454,17 @@ impl FolderApp {
             .and_then(|selection| graph.nodes.iter().find(|node| node.id == selection[0]))
             .cloned()
         else {
+            let selection = self
+                .selections
+                .get(document_id)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(port) =
+                selected_input(&model, &selection, self.selected_inputs.get(document_id))
+            {
+                let port = port.clone();
+                self.input_panel(ui, document_id, &model, &port);
+            }
             return;
         };
         let project = self.context_project();
@@ -532,6 +572,47 @@ impl FolderApp {
         self.sync_field_drafts(document_id, &project_id);
     }
 
+    /// The Inspector of an input selected in the INPUTS strip (UX-31): what
+    /// the component declares about it and the steps that read it, read-only
+    /// until UX-32 edits it here.
+    fn input_panel(&mut self, ui: &mut egui::Ui, document_id: &str, model: &Document, port: &Port) {
+        let project = self.context_project();
+        let graph = graph_of(model, false);
+        let read = canvas::input_readers(graph, &port.name);
+        let mut readers: Vec<String> = graph
+            .nodes
+            .iter()
+            .filter(|node| read.contains(&node.id))
+            .map(|node| node.display_name().to_owned())
+            .collect();
+        readers.sort();
+        let mut close = false;
+        egui::Panel::right("folder-inspector")
+            .default_size(360.0)
+            .size_range(300.0..=520.0)
+            .frame(egui::Frame::new().fill(theme::WHITE).inner_margin(16))
+            .show(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    close = ui
+                        .add(widgets::icon_button(Icon::Close, "Close Inspector").compact())
+                        .clicked();
+                });
+                input_inspector(
+                    ui,
+                    &canvas::InputView::of(port, &project.contracts),
+                    &readers,
+                );
+            });
+        widgets::name_resize_handle(
+            ui.ctx(),
+            egui::Id::new("folder-inspector"),
+            "Resize inspector",
+        );
+        if close {
+            self.selected_inputs.remove(document_id);
+        }
+    }
+
     /// Unfinished inspector text joins the document's local recovery.
     pub(super) fn sync_field_drafts(&mut self, document_id: &str, project_id: &str) {
         if self.persistence.closing || self.storage.blocks_edits() {
@@ -619,6 +700,58 @@ impl FolderApp {
                 .memory_mut(|memory| memory.request_focus(editor_id(document_id)));
         }
     }
+}
+
+/// What the Inspector shows of a component's input: its declaration, read
+/// only, and the steps that read it.
+fn input_inspector(ui: &mut egui::Ui, input: &canvas::InputView, readers: &[String]) {
+    ui.label(
+        RichText::new("COMPONENT INPUT")
+            .size(theme::FONT_META)
+            .color(theme::MUTED),
+    );
+    ui.label(
+        RichText::new(&input.name)
+            .size(theme::FONT_PANEL_TITLE)
+            .family(theme::bold_family()),
+    );
+    ui.add_space(theme::SPACE_SM);
+    ui.separator();
+    let yes_no = |value: bool| Some(if value { "Yes" } else { "No" }.to_owned());
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let rows = [
+                ("Label", input.label.clone()),
+                ("Type", Some(input.value_type.clone())),
+                ("Contract", input.contract.clone()),
+                ("Default", input.default.clone()),
+                ("Required", yes_no(input.required)),
+                ("Editable on the block", yes_no(input.exposed)),
+            ];
+            for (label, value) in rows {
+                if let Some(value) = value {
+                    widgets::field_label(ui, label);
+                    ui.label(RichText::new(value).size(theme::FONT_BODY));
+                }
+            }
+            widgets::field_label(ui, "Read by");
+            if readers.is_empty() {
+                widgets::hint(ui, "No step reads it yet.");
+            } else {
+                for reader in readers {
+                    ui.label(RichText::new(reader).size(theme::FONT_BODY));
+                }
+            }
+            ui.add_space(theme::SPACE_MD);
+            widgets::hint(
+                ui,
+                format!(
+                    "Steps read it as param.{}. Change it in the code.",
+                    input.name
+                ),
+            );
+        });
 }
 
 /// The narrowest the file name is shortened to before the steps summary goes.

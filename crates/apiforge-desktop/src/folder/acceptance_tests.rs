@@ -9490,8 +9490,12 @@ mod ux31 {
                     && (quantity.center().y - add.center().y).abs() < 2.0,
                 "one row"
             );
-            let header = harness.get_by_label("add-to-cart.afs").rect();
-            assert!(header.bottom() <= product.top(), "under the header row");
+            // The tab strip names the file too; the board's header is lower.
+            let header = harness
+                .query_all_by_label("add-to-cart.afs")
+                .map(|node| node.rect().bottom())
+                .fold(f32::MIN, f32::max);
+            assert!(header <= product.top(), "under the header row");
             let toolbar = harness.get_by_label("Add step").rect();
             assert!(toolbar.bottom() <= product.top(), "under the toolbar");
             assert_within_window(&harness, &[CAPTION, PRODUCT, QUANTITY, ADD]);
@@ -9600,6 +9604,33 @@ mod ux31 {
             "disabled"
         );
         assert!(hover_shows(&mut harness, ADD, "Coming with UX-32"));
+    }
+
+    /// The strip beside the approved captures
+    /// `docs/qa/2026-11-02/COMP-00/comp00-q1-c-*.png`: Diagram and Split at
+    /// both sizes, and Diagram with `quantity` selected.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux31_inputs_strip() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            for mode in ["Diagram", "Split"] {
+                let (mut harness, _) = window(directory.path(), size, CART, mode);
+                let name = mode.to_lowercase();
+                capture(&mut harness, &format!("ux31-strip-{name}-{suffix}"), None);
+                if mode == "Diagram" {
+                    choose(&mut harness, QUANTITY);
+                    harness.hover_at(egui::pos2(480.0, 3.0));
+                    settle(&mut harness);
+                    capture(
+                        &mut harness,
+                        &format!("ux31-selected-{name}-{suffix}"),
+                        None,
+                    );
+                }
+            }
+        }
     }
 
     /// Criterion 6: at 960 × 540, inputs that do not fit beside one another
