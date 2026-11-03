@@ -214,6 +214,20 @@ impl Completions {
                 std::mem::take(&mut self.reveal),
                 true,
             ))
+        } else if self.rechecks > 0
+            && ui.input(|input| {
+                // The person scrolling, or pressing on a scroll bar, takes
+                // the view over: the caret is not brought back against it.
+                input.pointer.any_down()
+                    || input
+                        .raw
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::MouseWheel { .. }))
+            })
+        {
+            self.rechecks = 0;
+            None
         } else if self.rechecks > 0 {
             self.rechecks -= 1;
             output
