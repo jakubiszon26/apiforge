@@ -255,6 +255,9 @@ pub struct FolderApp {
     /// The edge of the expanded section has been dragged, so it keeps the
     /// height it was dragged to instead of following the window.
     problems_dragged: bool,
+    /// While the edge of the section is dragged from its normal state, the
+    /// height it had when the drag began (UX-05).
+    problems_drag_from: Option<f32>,
     /// The block whose statement the code view last revealed.
     revealed: Option<String>,
     /// The statement under the caret, for a document, source version and caret:
@@ -450,6 +453,7 @@ impl FolderApp {
             problems_expanded: false,
             problems_epoch: 0,
             problems_dragged: false,
+            problems_drag_from: None,
             revealed: None,
             caret_statement: None,
             completion_names: None,
@@ -873,8 +877,9 @@ impl FolderApp {
         self.holder_bar(ui);
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
-        // Maximised run results leave no room for anything else (KTLO-19).
-        if self.report_maximised(active.as_deref()) {
+        // Maximised run results leave no room for anything else (KTLO-19),
+        // nor do run results dragged above their ceiling (UX-05).
+        if self.report_covers(active.as_deref()) {
             self.prompts(ui.ctx());
             self.protect(now);
             return;

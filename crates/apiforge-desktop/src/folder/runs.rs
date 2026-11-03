@@ -146,10 +146,25 @@ impl FolderApp {
         Some((format!("Running {what} {subject}"), hover))
     }
 
-    /// The active tab's run results fill the window (KTLO-19).
+    /// The active tab's run results fill the window (KTLO-19); what the
+    /// window draws follows [`Self::report_covers`].
+    #[cfg(test)]
     pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
         self.runs.panel.is_maximised()
             && active.is_some_and(|id| self.runs.reports.contains_key(id))
+    }
+
+    /// Nothing is drawn above the active tab's run results: they fill the
+    /// window, or a drag holds them above their normal ceiling (UX-05).
+    pub(super) fn report_covers(&self, active: Option<&str>) -> bool {
+        self.runs.panel.covers_workspace()
+            && active.is_some_and(|id| self.runs.reports.contains_key(id))
+    }
+
+    /// The run results panel's heights and drag, for a test's failure message.
+    #[cfg(test)]
+    pub(super) fn report_state(&self) -> String {
+        self.runs.panel.debug_state()
     }
 
     /// Escape returns maximised run results to their height; the board, which

@@ -95,6 +95,34 @@ pub fn name_resize_handle(ctx: &egui::Context, panel: egui::Id, name: &str) {
     }
 }
 
+/// The place a dragged panel takes when it is released there (UX-05): a soft
+/// accent fill with an accent outline and `label` in bold accent text, painted
+/// above every panel. Its rect is a labelled widget that takes no click, so
+/// the zone is found by its words and the drag under it goes on.
+pub fn drop_zone(ui: &Ui, rect: egui::Rect, label: &str) {
+    let id = egui::Id::new(("drop-zone", label));
+    let painter = ui
+        .ctx()
+        .layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
+    painter.rect(
+        rect,
+        6,
+        theme::ACCENT_SOFT,
+        Stroke::new(1.5, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::new(theme::FONT_BODY, theme::bold_family()),
+        theme::ACCENT,
+    );
+    let label = label.to_owned();
+    ui.interact(rect, id, Sense::hover())
+        .widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+}
+
 pub fn field_label(ui: &mut Ui, text: &str) {
     let _ = field_name(ui, text);
 }

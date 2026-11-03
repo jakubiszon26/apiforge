@@ -1,6 +1,7 @@
 //! The code view: the active document as text, its problems and save state.
 
 use super::*;
+use crate::report::DROP_SNAP;
 
 /// The heights the Problems section can be dragged between, while it is not
 /// expanded.
@@ -59,25 +60,36 @@ impl FolderApp {
         // clicked (KTLO-18). The epoch is part of the id, as it is for the run
         // results panel, so egui forgets a height dragged under the other state.
         let expanded = self.problems_expanded;
-        let ceiling = (ui.available_height() - code_strip(ui)).max(*PROBLEMS_HEIGHTS.start());
+        let area = ui.available_rect_before_wrap();
+        let strip = code_strip(ui);
+        let ceiling = (ui.available_height() - strip).max(*PROBLEMS_HEIGHTS.start());
         let diagnostics = egui::Id::new((
             "folder-diagnostics",
             self.workbench.mode as u8,
             self.problems_epoch,
         ));
+        let edge = ui.ctx().read_response(diagnostics.with("__resize"));
+        let held = edge.as_ref().is_some_and(egui::Response::dragged);
+        let let_go = edge.as_ref().is_some_and(egui::Response::drag_stopped);
         // Until its edge is dragged, an expanded section follows the ceiling
         // every frame: a height taken once would keep whatever the first frame
         // after the click had room for, and would not follow the window.
-        if expanded
-            && ui
-                .ctx()
-                .read_response(diagnostics.with("__resize"))
-                .is_some_and(|handle| handle.dragged() || handle.drag_stopped())
-        {
+        if expanded && (held || let_go) {
             self.problems_dragged = true;
         }
+        // Dragged from its normal state, the edge goes on past the normal
+        // range up to the ceiling, where a release expands the section
+        // (UX-05).
+        if !expanded && held && self.problems_drag_from.is_none() {
+            self.problems_drag_from = Some(self.workbench.panels.diagnostics);
+        }
+        let reaching = !expanded && self.problems_drag_from.is_some();
         let panel = egui::Panel::bottom(diagnostics).resizable(true);
-        let panel = if !expanded {
+        let panel = if reaching {
+            panel
+                .default_size(self.workbench.panels.diagnostics)
+                .size_range(*PROBLEMS_HEIGHTS.start()..=ceiling.max(*PROBLEMS_HEIGHTS.end()))
+        } else if !expanded {
             panel
                 .default_size(self.workbench.panels.diagnostics)
                 .size_range(PROBLEMS_HEIGHTS)
@@ -102,11 +114,43 @@ impl FolderApp {
                 reveal = self.diagnostics_panel(ui, document_id, &snapshot);
             });
         // An expanded height is never remembered, so restoring returns the
-        // height the section had, and so does the next window. The outer
-        // height is what `default_size` takes, so a restore gives it back
-        // exactly; the inner height plus margins missed the separator's pixel.
+        // height the section had, and so does the next window; nor is a
+        // height past the normal range. The outer height is what
+        // `default_size` takes, so a restore gives it back exactly; the inner
+        // height plus margins missed the separator's pixel.
+        let height = shown.response.rect.height();
         if !expanded {
-            self.workbench.panels.diagnostics = shown.response.rect.height();
+            self.workbench.panels.diagnostics = height.min(*PROBLEMS_HEIGHTS.end());
+        }
+        if let Some(before) = self.problems_drag_from
+            && reaching
+        {
+            // In the zone the section has grown towards the ceiling and is
+            // within the snap distance of it. Its reach is measured from its
+            // top: a short list leaves the panel's fill short of it.
+            let top = shown.response.rect.top();
+            let reach = area.bottom() - top;
+            let snapped = reach > before + 1.0 && reach >= ceiling - DROP_SNAP;
+            if let_go || !held {
+                self.problems_drag_from = None;
+                // A drag that ends without a release expands nothing.
+                if snapped && let_go {
+                    // As *Expand problems* does, keeping the height from before
+                    // the drag for *Restore problems*.
+                    self.problems_expanded = true;
+                    self.problems_dragged = false;
+                    self.workbench.panels.diagnostics = before;
+                }
+                self.problems_epoch = self.problems_epoch.wrapping_add(1);
+                ui.ctx().request_repaint();
+            } else if snapped {
+                let zone = egui::Rect::from_min_max(
+                    area.min,
+                    egui::pos2(area.max.x, (area.top() + strip).min(top)),
+                )
+                .shrink(4.0);
+                widgets::drop_zone(ui, zone, "Release to expand problems");
+            }
         }
         widgets::name_resize_handle(ui.ctx(), diagnostics, "Resize problems");
         egui::CentralPanel::default()
