@@ -271,7 +271,10 @@ impl SaveComponent {
     }
 
     fn show(&mut self, context: &egui::Context) -> dialogs::Outcome<Request> {
-        let eyebrow = format!("{} · {} STEPS", FOLDER.to_uppercase(), self.selected.len());
+        let eyebrow = match self.selected.len() {
+            1 => format!("{} · 1 STEP", FOLDER.to_uppercase()),
+            count => format!("{} · {count} STEPS", FOLDER.to_uppercase()),
+        };
         let (apply, note) = if self.publish {
             ("Save and publish", PUBLISH_NOTE)
         } else {
@@ -827,10 +830,13 @@ impl FolderApp {
                 // A refusal of the edit replaces this notice with its reason.
                 self.notify(
                     format!(
-                        "Published {} revision {}; the scenario calls it in place of {} steps.",
+                        "Published {} revision {}; the scenario calls it in place of {}.",
                         component.name,
                         published.revision,
-                        dialog.selected.len()
+                        match dialog.selected.len() {
+                            1 => "the step".to_owned(),
+                            count => format!("{count} steps"),
+                        }
                     ),
                     false,
                 );
