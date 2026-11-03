@@ -2339,6 +2339,7 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 read_only: false,
+                component: self.editor.draft().is_some(),
                 header_leading: None,
                 library: None,
                 inputs: None,

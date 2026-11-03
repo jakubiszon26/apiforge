@@ -152,6 +152,9 @@ pub struct Input<'a> {
     /// moves, nothing is added, moved, wired or changed. An observing folder
     /// window shows it so (MCP-08a); a disabled board needs nothing more.
     pub read_only: bool,
+    /// The board is a component's: *Add step* offers *Export* and neither
+    /// *Start* nor *Data condition* (UX-21, decision 12).
+    pub component: bool,
     /// A component's declared inputs, shown in the INPUTS strip under the
     /// header row (UX-31); `None` for a board without the strip.
     pub inputs: Option<&'a [Port]>,
@@ -835,7 +838,13 @@ impl Canvas {
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
-            match menu.show(ui.ctx(), input.graph, input.project, input.library) {
+            match menu.show(
+                ui.ctx(),
+                input.graph,
+                input.project,
+                input.library,
+                input.component,
+            ) {
                 menu::Outcome::Open => {}
                 menu::Outcome::Close => self.menu = None,
                 menu::Outcome::Add(command) => {
@@ -2528,6 +2537,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -2578,6 +2588,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -2652,6 +2663,7 @@ mod tests {
                             context: "test",
                             library_in_view: true,
                             read_only: false,
+                            component: false,
                             header_leading: None,
                             library: None,
                             inputs: Some(&component.inputs),

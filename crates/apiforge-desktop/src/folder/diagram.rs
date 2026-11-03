@@ -195,6 +195,7 @@ impl FolderApp {
                     header_leading: None,
                     library: library.as_ref(),
                     read_only: !snapshot.editable,
+                    component: matches!(*model, Document::Component(_)),
                     inputs,
                     selected_input: input_selected.as_deref(),
                     adding_input: adding_input.as_deref(),

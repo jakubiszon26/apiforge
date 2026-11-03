@@ -114,10 +114,42 @@ impl Board<'_> {
             .map(|(node_id, port)| edit::OutputRef { node_id, port });
         let added = edit::add_node(self.graph, block, position, definition, source)
             .map_err(|error| error.to_string())?;
+        let mut graph = self.free_slot_for(added.graph, &added.node_id);
+        if block == Block::Export
+            && let Some(node) = graph.nodes.iter_mut().find(|node| node.id == added.node_id)
+            && let Some(x) = self.right_of_the_flow(node.position.x)
+        {
+            node.position.x = x;
+            node.auto_placed = true;
+        }
         Ok(Edit {
-            graph: self.free_slot_for(added.graph, &added.node_id),
+            graph,
             selection: Some(vec![added.node_id]),
         })
+    }
+
+    /// An *Export* passes values out of a component, so it is a sink: the
+    /// left edge one gap right of the rightmost card, when `x` is not already
+    /// there (UX-21). Being right of every card, it overlaps none; the
+    /// layout's free slot keeps the height it chose.
+    fn right_of_the_flow(&self, x: f64) -> Option<f64> {
+        /// The gap *Add step* leaves after a card, as the menu places a step
+        /// 340 right of a 280 wide card.
+        const GAP: f64 = 60.0;
+        let rightmost = self
+            .graph
+            .nodes
+            .iter()
+            .map(|node| {
+                f64::from(
+                    canvas::Card::build(node, self.reference, self.project)
+                        .rect()
+                        .max
+                        .x,
+                )
+            })
+            .reduce(f64::max)?;
+        (x < rightmost + GAP).then_some(rightmost + GAP)
     }
 
     /// Adds a node and selects it, keeping it clear of occupied positions.
