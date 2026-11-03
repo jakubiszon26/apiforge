@@ -116,6 +116,9 @@ pub struct Completions {
     prepared_scroll: Option<usize>,
     /// The pending caret is scrolled to only when it is out of view.
     gentle: bool,
+    /// Where the popup was drawn last, if it was: a test seam (UX-20).
+    #[cfg(test)]
+    shown: Option<Rect>,
 }
 
 #[derive(Clone)]
@@ -317,7 +320,7 @@ impl Completions {
         let selected = popup.selected;
         let completions = popup.completions.clone();
         let at = popup.at;
-        egui::Area::new(popup_id)
+        let area = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(ui.ctx(), |ui| {
@@ -345,6 +348,12 @@ impl Completions {
                             });
                     });
             });
+        #[cfg(test)]
+        {
+            self.shown = Some(area.response.rect);
+        }
+        #[cfg(not(test))]
+        let _ = area;
         chosen
     }
 }
@@ -361,6 +370,13 @@ impl CodeEditor {
     #[cfg(test)]
     pub fn popup_open(&self) -> bool {
         self.completions.popup.is_some()
+    }
+
+    /// Where the open completion popup was drawn: a test seam (UX-20).
+    #[cfg(test)]
+    pub fn popup_rect(&self) -> Option<Rect> {
+        self.completions.popup.as_ref()?;
+        self.completions.shown
     }
 
     /// Puts the caret at a byte offset on the next frame, for a selection made
