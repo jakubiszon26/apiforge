@@ -1841,6 +1841,73 @@ mod tests {
         assert_eq!(draw(700.0), 500.0, "back at its height");
     }
 
+    /// A grip held at the panel's highest and released in a frame whose
+    /// workspace is shorter (a notice under the tab strip while storage work
+    /// runs) leaves the panel at its highest once the workspace is back, as
+    /// the drag's ceiling promises: the release takes the height the drag
+    /// held, not the height that one frame could draw (UX-36, seen on CI).
+    #[test]
+    fn a_release_in_a_shorter_frame_keeps_the_highest_height() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let mut panel = ReportPanel {
+            open: true,
+            ..Default::default()
+        };
+        let report_context = Context {
+            run: None,
+            selected_node_id: None,
+            error_policy: ErrorPolicy::Continue,
+            running: false,
+            stale: false,
+            checked: &[],
+            files_busy: false,
+            component: false,
+            document_locked: false,
+        };
+        let mut draw = |height: f32, events: Vec<egui::Event>| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, height),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    panel.show(ui, &report_context);
+                },
+            );
+            output.textures_delta.clear();
+            (panel.debug_resize_handle().2, panel.debug_state())
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let highest = 700.0 - VIEWS_LEAST_HEIGHT;
+        draw(700.0, vec![]);
+        draw(700.0, vec![]);
+        let grip = egui::pos2(600.0, 700.0 - 320.0 + 8.0);
+        draw(700.0, vec![egui::Event::PointerMoved(grip)]);
+        draw(700.0, vec![button(grip, true)]);
+        // Above the highest top, outside the snap zone.
+        let mut at = grip;
+        while at.y > DROP_SNAP + 30.0 {
+            at.y = (at.y - 32.0).max(DROP_SNAP + 30.0);
+            draw(700.0, vec![egui::Event::PointerMoved(at)]);
+        }
+        let (held, state) = draw(700.0, vec![]);
+        assert_eq!(held, highest, "held at the highest: {state}");
+        draw(660.0, vec![button(at, false), egui::Event::PointerGone]);
+        draw(700.0, vec![]);
+        let (released, state) = draw(700.0, vec![]);
+        assert_eq!(released, highest, "released at the highest: {state}");
+    }
+
     #[test]
     fn resize_handle_receives_pointer_focus_and_keyboard_in_both_layouts() {
         for screen_height in [900.0, 400.0] {
