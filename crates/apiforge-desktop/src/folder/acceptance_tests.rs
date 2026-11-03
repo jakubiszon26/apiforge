@@ -11519,3 +11519,240 @@ mod ux30 {
         }
     }
 }
+
+// ----- UX-15: the unsaved dot survives a truncated tab name -------------------
+
+/// UX-15 (#223, from #151 and #176 part 1): the unsaved dot on a document tab
+/// stays visible however long the file name is. The tab is found by its
+/// accessible name, and what it shows is read from the glyphs painted inside
+/// it, since truncation happens in layout and the label's text keeps the
+/// whole name.
+mod ux15 {
+    use super::*;
+    use crate::testing::{MINIMUM, shop_project};
+    use egui::accesskit::Role;
+
+    /// The demo scenario: its name does not fit the tab's 160 points.
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const LONG: &str = "promotion-and-cart-price.afs";
+    /// A component whose name fits.
+    const COMPONENT: &str = "components/add-to-cart.afs";
+    const SHORT: &str = "add-to-cart.afs";
+    const DOT: char = '\u{25cf}';
+    const ELLIPSIS: char = '\u{2026}';
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned()
+    }
+
+    /// The demo shop at `size` with `path` open and active in Code.
+    fn window(root: &std::path::Path, size: egui::Vec2, path: &str) -> (FolderHarness, String) {
+        let mut harness = folder_harness(root, size);
+        let id = by_path(&harness, path);
+        app(&mut harness).workbench.open(&id);
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, "Code");
+        (harness, id)
+    }
+
+    fn document<'a>(harness: &'a FolderHarness, id: &str) -> &'a apiforge_project::DocumentSession {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(id)
+            .unwrap()
+    }
+
+    /// Appends `tail` to the document's text without saving it, as typing
+    /// would, and lets analysis finish.
+    fn edit(harness: &mut FolderHarness, id: &str, tail: &str) {
+        let text = format!("{}{tail}", document(harness, id).text());
+        let session = app(harness).session.as_mut().unwrap();
+        session.edit_source(id, &text, CODE).unwrap();
+        session.settle(id).unwrap();
+        settle(harness);
+        assert!(
+            document(harness, id).needs_recovery(),
+            "the edit is unsaved"
+        );
+    }
+
+    /// The tab named `name` and its close control: of the controls with that
+    /// accessible name (the project files row has it too), the one that holds
+    /// *Close `name`*.
+    fn tab(harness: &FolderHarness, name: &str) -> (egui::Rect, egui::Rect) {
+        let close = harness.get_by_label(&format!("Close {name}")).rect();
+        let tab = harness
+            .query_all_by_role_and_label(Role::Button, name)
+            .map(|node| node.rect())
+            .find(|rect| rect.contains(close.center()))
+            .unwrap_or_else(|| panic!("no tab named {name} holds its close control"));
+        (tab, close)
+    }
+
+    /// The visible characters painted inside `area` and not clipped away,
+    /// left to right, each with its rect on screen.
+    fn glyphs_in(harness: &FolderHarness, area: egui::Rect) -> Vec<(char, egui::Rect)> {
+        fn walk(
+            clip: egui::Rect,
+            shape: &egui::Shape,
+            area: egui::Rect,
+            into: &mut Vec<(char, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(clip, shape, area, into);
+                    }
+                }
+                egui::Shape::Text(text) => {
+                    for row in &text.galley.rows {
+                        let offset = text.pos.to_vec2() + row.pos.to_vec2();
+                        for glyph in &row.glyphs {
+                            let rect = glyph.logical_rect().translate(offset);
+                            let centre = rect.center();
+                            if !glyph.chr.is_whitespace()
+                                && area.contains(centre)
+                                && clip.contains(centre)
+                            {
+                                into.push((glyph.chr, rect));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut glyphs = Vec::new();
+        for clipped in &harness.output().shapes {
+            walk(clipped.clip_rect, &clipped.shape, area, &mut glyphs);
+        }
+        glyphs.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+        glyphs
+    }
+
+    fn shown(glyphs: &[(char, egui::Rect)]) -> String {
+        glyphs.iter().map(|(chr, _)| *chr).collect()
+    }
+
+    /// The tab shows the unsaved dot at its right: the last character drawn
+    /// in it, whole between the name and the close control.
+    fn assert_dot_at_the_right(harness: &FolderHarness, name: &str, context: &str) {
+        let (tab, close) = tab(harness, name);
+        let glyphs = glyphs_in(harness, tab);
+        let (last, dot) = glyphs
+            .last()
+            .unwrap_or_else(|| panic!("{context}: the tab {name} shows no text"));
+        assert_eq!(
+            *last,
+            DOT,
+            "{context}: the unsaved tab {name} shows {:?}, with no dot at its right",
+            shown(&glyphs)
+        );
+        assert!(
+            dot.left() >= tab.left() && dot.right() <= close.left() + 0.5,
+            "{context}: the dot {dot:?} is not whole between the name and the close \
+             control {close:?} in the tab {tab:?}"
+        );
+    }
+
+    /// Criterion 1: an unsaved document whose name exceeds the tab width shows
+    /// the dot at the tab's right, after the shortened name, at both sizes.
+    #[test]
+    fn a_long_unsaved_name_keeps_its_dot_at_the_tab_right() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, SCENARIO);
+            edit(&mut harness, &id, "// edited\n");
+            assert_eq!(document(&harness, &id).analysis(), AnalysisState::Valid);
+            let (tab, _) = tab(&harness, LONG);
+            let glyphs = glyphs_in(&harness, tab);
+            assert!(
+                glyphs.iter().any(|(chr, _)| *chr == ELLIPSIS),
+                "{context}: the name {LONG} is expected not to fit its tab, shown {:?}",
+                shown(&glyphs)
+            );
+            assert_dot_at_the_right(&harness, LONG, &context);
+        }
+    }
+
+    /// Criterion 2: a name that fits keeps today's rendering: the whole name,
+    /// then the dot where the one-piece label `name  ●` put it; saved, the
+    /// name alone.
+    #[test]
+    fn a_short_name_keeps_todays_rendering() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, COMPONENT);
+            let (saved, _) = tab(&harness, SHORT);
+            assert_eq!(
+                shown(&glyphs_in(&harness, saved)),
+                SHORT,
+                "{context}: a saved tab"
+            );
+
+            edit(&mut harness, &id, "// edited\n");
+            let (unsaved, _) = tab(&harness, SHORT);
+            let glyphs = glyphs_in(&harness, unsaved);
+            assert_eq!(
+                shown(&glyphs),
+                format!("{SHORT}{DOT}"),
+                "{context}: an unsaved tab"
+            );
+            assert_dot_at_the_right(&harness, SHORT, &context);
+
+            // Where today's one-piece label places the dot.
+            let expected = harness.ctx.fonts_mut(|fonts| {
+                let galley = fonts.layout_no_wrap(
+                    format!("{SHORT}  {DOT}"),
+                    egui::FontId::proportional(theme::FONT_BODY),
+                    theme::TEXT,
+                );
+                galley.rows[0]
+                    .glyphs
+                    .iter()
+                    .find(|glyph| glyph.chr == DOT)
+                    .map(|glyph| glyph.pos.x)
+                    .unwrap()
+            });
+            let start = glyphs[0].1.left();
+            let dot = glyphs.last().unwrap().1.left();
+            assert!(
+                (dot - start - expected).abs() <= 1.0,
+                "{context}: the dot is {} points after the name's start, {expected} before",
+                dot - start
+            );
+        }
+    }
+
+    /// Criterion 3: an invalid and unsaved document shows the unsaved dot, not
+    /// only the error colour, with the long name of the demo scenario.
+    #[test]
+    fn an_invalid_unsaved_document_shows_the_dot() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, SCENARIO);
+            edit(&mut harness, &id, "}}}\n");
+            assert_eq!(
+                document(&harness, &id).analysis(),
+                AnalysisState::Invalid,
+                "{context}: the edit is invalid"
+            );
+            assert_dot_at_the_right(&harness, LONG, &context);
+        }
+    }
+}
