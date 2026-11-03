@@ -48,7 +48,7 @@ use crate::{
 use analysis::Analyser;
 use apiforge_core::{
     edit,
-    format::{Graph, Position, Project},
+    format::{Graph, Port, Position, Project},
     graph::create_operator_node,
 };
 use apiforge_project::{
@@ -269,6 +269,9 @@ pub struct FolderApp {
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
     selections: HashMap<String, Vec<String>>,
+    /// The input selected in a component's INPUTS strip, by document
+    /// (UX-31). It counts only while no block of the document is selected.
+    selected_inputs: HashMap<String, String>,
     /// Each document's field drafts as the inspector and the session last
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
@@ -459,6 +462,7 @@ impl FolderApp {
             completion_names: None,
             canvases: HashMap::new(),
             selections: HashMap::new(),
+            selected_inputs: HashMap::new(),
             agreed_fields: HashMap::new(),
             clipboard: None,
             inspector: Inspector::default(),
@@ -1610,6 +1614,7 @@ impl FolderApp {
         }
         self.canvases.remove(document_id);
         self.selections.remove(document_id);
+        self.selected_inputs.remove(document_id);
         if self.shown.as_deref() == Some(document_id) {
             self.shown = None;
         }
@@ -1710,6 +1715,20 @@ fn parameters_of(model: &Document) -> Vec<String> {
             .map(|port| port.name.clone())
             .collect(),
     }
+}
+
+/// The input of a component selected in its INPUTS strip, while no block is
+/// selected and the component still declares it (UX-31).
+fn selected_input<'a>(
+    model: &'a Document,
+    selection: &[String],
+    selected: Option<&String>,
+) -> Option<&'a Port> {
+    let Document::Component(component) = model else {
+        return None;
+    };
+    let name = selected.filter(|_| selection.is_empty())?;
+    component.inputs.iter().find(|port| &port.name == name)
 }
 
 fn kind_label(kind: DocumentKind) -> &'static str {

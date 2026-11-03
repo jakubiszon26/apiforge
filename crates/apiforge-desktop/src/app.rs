@@ -2341,6 +2341,8 @@ impl App {
                 read_only: false,
                 header_leading: None,
                 library: None,
+                inputs: None,
+                selected_input: None,
             };
             self.canvas.show(ui, &input)
         };
@@ -2363,6 +2365,8 @@ impl App {
         }
         match command {
             Command::Select(ids) => self.editor.selection = ids,
+            // The workspace window shows no INPUTS strip.
+            Command::SelectInput(_) => {}
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);

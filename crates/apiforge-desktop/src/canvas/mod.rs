@@ -8,9 +8,11 @@ mod layout;
 mod menu;
 mod paint;
 mod routing;
+mod strip;
 
 pub use layout::{Card, Chip, parse_inline};
 pub use routing::WireStyle;
+pub use strip::Pill as InputView;
 
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
@@ -18,7 +20,7 @@ use apiforge_core::{
     binding::data_edge_id,
     block::Block,
     edit::proxy_binding,
-    format::{Binding, Graph, Position, Project, ProxySource},
+    format::{Binding, Graph, Port, Position, Project, ProxySource},
     graph::{ORDER_PORT, WireKind, wires},
     model::{Branch, NodeKind},
     operator::Operator,
@@ -42,6 +44,9 @@ const SOCKET_HIT: f32 = 10.0;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Select(Vec<String>),
+    /// Select a component's input in the INPUTS strip, or clear it (UX-31).
+    /// Selecting an input selects no block.
+    SelectInput(Option<String>),
     /// Final positions after a drag.
     Move(Vec<(String, Position)>),
     Connect {
@@ -141,6 +146,11 @@ pub struct Input<'a> {
     /// moves, nothing is added, moved, wired or changed. An observing folder
     /// window shows it so (MCP-08a); a disabled board needs nothing more.
     pub read_only: bool,
+    /// A component's declared inputs, shown in the INPUTS strip under the
+    /// header row (UX-31); `None` for a board without the strip.
+    pub inputs: Option<&'a [Port]>,
+    /// The input selected in the strip: the steps that read it are ringed.
+    pub selected_input: Option<&'a str>,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -227,6 +237,9 @@ pub struct Canvas {
     pub wire_style: WireStyle,
     /// Whether a crossing is drawn as a bridge, from the user's settings.
     pub bridges: bool,
+    /// The blocks the last frame ringed for the selected input.
+    #[cfg(test)]
+    ringed: Vec<String>,
 }
 
 impl Default for Canvas {
@@ -251,6 +264,8 @@ impl Default for Canvas {
             selected_wires: Vec::new(),
             inline: None,
             error: None,
+            #[cfg(test)]
+            ringed: Vec::new(),
         }
     }
 }
@@ -283,6 +298,12 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_menu_open(&self) -> bool {
         self.menu.is_some()
+    }
+
+    /// The blocks the last frame ringed for the selected input (UX-31).
+    #[cfg(test)]
+    pub(crate) fn debug_ringed(&self) -> Vec<String> {
+        self.ringed.clone()
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -350,6 +371,20 @@ impl Canvas {
         // The toolbar comes before the board in the keyboard order: it ends the
         // header row, which reads before the board below it (KTLO-12).
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
+        // The INPUTS strip reads after the header row and before the board.
+        if let (Some(rect), Some(inputs)) = (overlays.strip, input.inputs) {
+            let pills: Vec<strip::Pill> = inputs
+                .iter()
+                .map(|port| strip::Pill::of(port, &input.project.contracts))
+                .collect();
+            if let Some(strip::Outcome::Select(name)) =
+                strip::show(ui, rect, &pills, input.selected_input)
+            {
+                self.menu = None;
+                self.selected_wires.clear();
+                commands.push(Command::SelectInput(name));
+            }
+        }
         let background = ui.allocate_rect(viewport, Sense::click_and_drag());
         background.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Diagram board")
@@ -448,7 +483,18 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let board_wires = board_wires(input.graph, &cards, &chips);
-        let (related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        // The input selected in the strip has no shape on the board: the
+        // steps that read it are ringed (UX-31).
+        let ringed = input
+            .selected_input
+            .map_or_else(HashSet::new, |name| input_readers(input.graph, name));
+        #[cfg(test)]
+        {
+            self.ringed = ringed.iter().cloned().collect();
+            self.ringed.sort();
+        }
+        related_blocks.extend(ringed);
         let moving: HashSet<String> = match &self.drag {
             Some(Drag::Nodes { ids, .. }) => ids.iter().cloned().collect(),
             _ => HashSet::new(),
@@ -665,6 +711,9 @@ impl Canvas {
                     if !input.selection.is_empty() {
                         commands.push(Command::Select(vec![]));
                     }
+                    if input.selected_input.is_some() {
+                        commands.push(Command::SelectInput(None));
+                    }
                 }
             }
         }
@@ -778,6 +827,11 @@ impl Canvas {
         });
         let error_size = self.error.as_ref().map(|_| vec2(320.0, 32.0));
         OverlayMeasures {
+            strip_height: if input.inputs.is_some() {
+                strip::HEIGHT
+            } else {
+                0.0
+            },
             banner_height,
             toolbar_size,
             zoom_size: vec2(180.0, 36.0),
@@ -1948,15 +2002,37 @@ fn highlights(
         if let Some(node) = chip.source_node() {
             blocks.insert(node.to_owned());
         }
-        for node in &graph.nodes {
-            for (input, binding) in &node.inputs {
-                binding.for_each_leaf(&mut |leaf, path| {
-                    if reads_source(&chip.proxy.source, leaf) {
-                        blocks.insert(node.id.clone());
-                        wire_ids.insert(data_edge_id(&node.id, input, path));
-                    }
-                });
-            }
+        let (readers, wires) = readers(graph, &chip.proxy.source);
+        blocks.extend(readers);
+        wire_ids.extend(wires);
+    }
+    (blocks, wire_ids)
+}
+
+/// The blocks that read the parameter or component input `name`.
+pub fn input_readers(graph: &Graph, name: &str) -> HashSet<String> {
+    readers(
+        graph,
+        &ProxySource::Parameter {
+            name: name.to_owned(),
+        },
+    )
+    .0
+}
+
+/// The blocks that read what `source` stands for, a field of it included,
+/// and the data wires a proxy of it would draw to them.
+fn readers(graph: &Graph, source: &ProxySource) -> (HashSet<String>, HashSet<String>) {
+    let mut blocks = HashSet::new();
+    let mut wire_ids = HashSet::new();
+    for node in &graph.nodes {
+        for (input, binding) in &node.inputs {
+            binding.for_each_leaf(&mut |leaf, path| {
+                if reads_source(source, leaf) {
+                    blocks.insert(node.id.clone());
+                    wire_ids.insert(data_edge_id(&node.id, input, path));
+                }
+            });
         }
     }
     (blocks, wire_ids)
@@ -2315,6 +2391,8 @@ mod tests {
                                 read_only: false,
                                 header_leading: None,
                                 library: None,
+                                inputs: None,
+                                selected_input: None,
                             },
                         );
                     });
@@ -2361,6 +2439,8 @@ mod tests {
                                 read_only: false,
                                 header_leading: None,
                                 library: None,
+                                inputs: None,
+                                selected_input: None,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
