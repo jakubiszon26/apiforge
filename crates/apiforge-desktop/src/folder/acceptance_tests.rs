@@ -8270,26 +8270,27 @@ mod ux05 {
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
 
-    const ZONE: &str = "Release to fill the workspace";
-    const PROBLEMS_ZONE: &str = "Release to expand problems";
+    pub(super) const ZONE: &str = "Release to fill the workspace";
+    pub(super) const PROBLEMS_ZONE: &str = "Release to expand problems";
     /// Run results' grip, the 80 × 14 handle centred 8 px under its top.
-    const GRIP: &str = "Resize run report";
+    pub(super) const GRIP: &str = "Resize run report";
     /// egui's own edge of Run results.
-    const EDGE: &str = "Resize run results";
-    const PROBLEMS_EDGE: &str = "Resize problems";
-    const MAXIMISE: &str = "Maximise run results";
-    const RESTORE: &str = "Restore run results";
-    const EXPAND: &str = "Expand problems";
-    const RESTORE_PROBLEMS: &str = "Restore problems";
+    pub(super) const EDGE: &str = "Resize run results";
+    pub(super) const PROBLEMS_EDGE: &str = "Resize problems";
+    pub(super) const MAXIMISE: &str = "Maximise run results";
+    pub(super) const RESTORE: &str = "Restore run results";
+    pub(super) const EXPAND: &str = "Expand problems";
+    pub(super) const RESTORE_PROBLEMS: &str = "Restore problems";
     const POLICY: &str = "When a step fails";
     /// The owner's snap distance: the zone shows within 64 px of the top.
-    const SNAP: f32 = 64.0;
+    pub(super) const SNAP: f32 = 64.0;
     /// What maximised Run results hide in Split (KTLO-19's test).
-    const HIDDEN: [&str; 4] = ["Resize code", "Contents of", "Diagram board", "Add step"];
+    pub(super) const HIDDEN: [&str; 4] =
+        ["Resize code", "Contents of", "Diagram board", "Add step"];
 
     /// The demo shop at `size` in Split, after a passed simulation of its
     /// scenario, with the scenario's id.
-    fn ran(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    pub(super) fn ran(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
         let project = crate::testing::shop_project();
         let mut harness = folder_harness(project.path(), size);
         let scenario = only(&harness, DocumentKind::Scenario);
@@ -8304,7 +8305,7 @@ mod ux05 {
 
     /// The workspace: from the tab strip's bottom to the window's bottom,
     /// inside the harness's own central-panel margin (as KTLO-19 measures).
-    fn workspace(harness: &FolderHarness) -> egui::Rect {
+    pub(super) fn workspace(harness: &FolderHarness) -> egui::Rect {
         let tabs = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
             .expect("the tab strip is a panel")
             .outer_rect;
@@ -8332,13 +8333,13 @@ mod ux05 {
     }
 
     /// The top of Run results, from its grip.
-    fn panel_top(harness: &FolderHarness) -> f32 {
+    pub(super) fn panel_top(harness: &FolderHarness) -> f32 {
         harness.get_by_label(GRIP).rect().center().y - 8.0
     }
 
     /// What a failure message needs to tell a panel that went wrong from a
     /// workspace that changed under it.
-    fn state(harness: &FolderHarness) -> String {
+    pub(super) fn state(harness: &FolderHarness) -> String {
         let app = folder(harness);
         format!(
             "workspace {:?}, {}, storage {:?}, notices {}",
@@ -8357,35 +8358,35 @@ mod ux05 {
     }
 
     /// The active tab's Run results fill the workspace (KTLO-19's state).
-    fn maximised(harness: &FolderHarness) -> bool {
+    pub(super) fn maximised(harness: &FolderHarness) -> bool {
         let app = folder(harness);
         app.report_maximised(app.workbench.active())
     }
 
     /// The drop zone named `label`, while it is shown.
-    fn zone(harness: &FolderHarness, label: &str) -> Option<egui::Rect> {
+    pub(super) fn zone(harness: &FolderHarness, label: &str) -> Option<egui::Rect> {
         harness.query_by_label(label).map(|zone| zone.rect())
     }
 
     /// Where a press on the grip lands: its centre.
-    fn grip(harness: &FolderHarness) -> egui::Pos2 {
+    pub(super) fn grip(harness: &FolderHarness) -> egui::Pos2 {
         harness.get_by_label(GRIP).rect().center()
     }
 
     /// Where a press on a panel's own edge lands: on the edge, left of the
     /// grip that Run results centres on it.
-    fn edge(harness: &FolderHarness, label: &str) -> egui::Pos2 {
+    pub(super) fn edge(harness: &FolderHarness, label: &str) -> egui::Pos2 {
         let rect = harness.get_by_label(label).rect();
         egui::pos2(rect.left() + 60.0, rect.center().y)
     }
 
     /// The top of the Problems section: its edge lies on it.
-    fn problems_top(harness: &FolderHarness) -> f32 {
+    pub(super) fn problems_top(harness: &FolderHarness) -> f32 {
         harness.get_by_label(PROBLEMS_EDGE).rect().center().y
     }
 
     /// Presses the primary button at `at`, the pointer resting there first.
-    fn press(harness: &mut FolderHarness, at: egui::Pos2) {
+    pub(super) fn press(harness: &mut FolderHarness, at: egui::Pos2) {
         harness.hover_at(at);
         harness.step();
         harness.drag_at(at);
@@ -8394,7 +8395,7 @@ mod ux05 {
 
     /// Moves the pressed pointer from `from` to `to`, at most 32 px a frame,
     /// then rests it for the frame that draws the panel where it was taken.
-    fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
+    pub(super) fn move_to(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
         let steps = ((to - from).length() / 32.0).ceil().max(1.0);
         for step in 1..=steps as usize {
             harness.hover_at(from + (to - from) * (step as f32 / steps));
@@ -8404,7 +8405,7 @@ mod ux05 {
     }
 
     /// Releases the button at `at`; then the pointer leaves the window.
-    fn release(harness: &mut FolderHarness, at: egui::Pos2) {
+    pub(super) fn release(harness: &mut FolderHarness, at: egui::Pos2) {
         harness.event(egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -8417,7 +8418,7 @@ mod ux05 {
     }
 
     /// Drags the grip until the panel's top is `top`, and holds it there.
-    fn hold_grip_at(harness: &mut FolderHarness, top: f32) -> egui::Pos2 {
+    pub(super) fn hold_grip_at(harness: &mut FolderHarness, top: f32) -> egui::Pos2 {
         let from = grip(harness);
         let to = egui::pos2(from.x, top + 8.0);
         press(harness, from);
@@ -8900,6 +8901,341 @@ mod ux05 {
             assert_within_window(&harness, &labels);
             assert_disjoint(&harness, &labels);
             release(&mut harness, at);
+        }
+    }
+}
+
+/// UX-36 (#260, the owner's feedback of 2026-11-03 on UX-05): Run results and
+/// Problems resize freely, like the VS Code terminal panel. The panel stays
+/// where it is released, with no clamp back to the old ceiling; the board or
+/// the code stays drawn in the space above it, during the drag and after,
+/// down to a header row and three lines of code; only a release within 64 px
+/// of the top maximises, as UX-05 made it. A real pointer drag on the named
+/// handles, as UX-05's tests drag them.
+mod ux36 {
+    use super::ux05::{
+        EDGE, EXPAND, GRIP, MAXIMISE, PROBLEMS_EDGE, PROBLEMS_ZONE, RESTORE, RESTORE_PROBLEMS,
+        SNAP, ZONE, edge, grip, hold_grip_at, maximised, move_to, panel_top, press, problems_top,
+        ran, release, state, workspace, zone,
+    };
+    use super::*;
+    use crate::testing::MINIMUM;
+
+    /// The modes; Diagram draws the board above Run results, Code the code
+    /// and its Problems, Split both.
+    const MODES: [&str; 3] = ["Diagram", "Code", "Split"];
+    /// The views above shrink to a small least height and no further
+    /// (criterion 2): a header row and a few lines, at most this high.
+    const SMALL: f32 = 120.0;
+    /// The whole lines of code the code view keeps in view, at the least.
+    const LINES: usize = 3;
+
+    /// The demo shop at `size` after a passed simulation, shown in `mode`.
+    fn ran_in(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarness) {
+        let (project, mut harness, _) = ran(size);
+        choose(&mut harness, mode);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// The views of `mode` are drawn in the strip between the workspace's
+    /// top and Run results' top: the board fills it; the code shows at least
+    /// three whole lines and the Problems caption row whole above the panel.
+    fn assert_drawn_above(harness: &FolderHarness, mode: &str, when: &str) {
+        let workspace = workspace(harness);
+        let top = panel_top(harness);
+        let strip = top - workspace.top();
+        if mode != "Code" {
+            let board = harness
+                .query_by_label_contains("Diagram board")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{when}: the board is not drawn above Run results at {top} ({})",
+                        state(harness)
+                    )
+                })
+                .rect();
+            assert!(
+                board.top() >= workspace.top() - 1.0
+                    && board.bottom() <= top + 1.0
+                    && board.height() >= strip - 1.0,
+                "{when}: the board {board:?} does not fill the strip {}..{top} above Run results",
+                workspace.top()
+            );
+        }
+        if mode != "Diagram" {
+            assert!(
+                harness.query_by_label_contains("Contents of").is_some(),
+                "{when}: the code is not drawn above Run results at {top} ({})",
+                state(harness)
+            );
+            let lines = folder(harness)
+                .code_lines_in_view()
+                .map_or(0, |(_, lines)| lines.count());
+            assert!(
+                lines >= LINES,
+                "{when}: {lines} whole lines of code above Run results at {top}, not {LINES}"
+            );
+            let caption = harness.get_by_label(EXPAND).rect();
+            assert!(
+                caption.top() >= workspace.top() - 1.0 && caption.bottom() <= top + 1.0,
+                "{when}: the Problems caption row ({caption:?}) is not whole above Run results \
+                 at {top}"
+            );
+        }
+    }
+
+    /// Criteria 1 and 2: dragged by the grip to 60 % of the workspace and then
+    /// to 70 % — both past the old ceiling (the workspace less 200 px at
+    /// 960 × 540, 560 px at 1600 × 1000) — the panel's top follows the
+    /// pointer with the board or the code drawn above it, and released, the
+    /// panel stays at that height, not maximised, with the views still drawn
+    /// above it: in Diagram, Code and Split, at both sizes.
+    #[test]
+    fn ux36_released_anywhere_the_panel_stays_and_the_views_stay_drawn() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                for share in [0.6, 0.7] {
+                    let workspace = workspace(&harness);
+                    let wanted = workspace.bottom() - share * workspace.height();
+                    let at = hold_grip_at(&mut harness, wanted);
+                    let when = format!("{size:?}, {mode}, held at {share}");
+                    assert!(
+                        (panel_top(&harness) - wanted).abs() <= 2.0,
+                        "{when}: the panel's top is {}, not {wanted} ({})",
+                        panel_top(&harness),
+                        state(&harness)
+                    );
+                    assert!(zone(&harness, ZONE).is_none(), "{when}: a zone");
+                    assert_drawn_above(&harness, mode, &when);
+                    release(&mut harness, at);
+                    let when = format!("{size:?}, {mode}, released at {share}");
+                    assert!(!maximised(&harness), "{when}: maximised");
+                    assert!(has_label(&harness, MAXIMISE), "{when}: the button");
+                    assert!(
+                        (panel_top(&harness) - wanted).abs() <= 2.0,
+                        "{when}: the panel's top is {}, not {wanted} where it was released ({})",
+                        panel_top(&harness),
+                        state(&harness)
+                    );
+                    assert_drawn_above(&harness, mode, &when);
+                }
+            }
+        }
+    }
+
+    /// Criterion 2: held as high as it goes outside the snap zone, 10 px and
+    /// then 30 px under the zone's edge, the panel stops at one height that
+    /// leaves the views a header row and three lines, at most 120 px, and
+    /// they stay drawn; released there it stays. Problems, squeezed under the
+    /// code meanwhile, keep the height they had once the panel goes down.
+    #[test]
+    fn ux36_the_views_above_keep_their_least_height() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                let problems = folder(&harness).workbench.panels.diagnostics;
+                let workspace = workspace(&harness);
+                let rested = panel_top(&harness);
+                let when = format!("{size:?}, {mode}");
+                let from = grip(&harness);
+                press(&mut harness, from);
+                let near = egui::pos2(from.x, workspace.top() + SNAP + 10.0 + 8.0);
+                move_to(&mut harness, from, near);
+                let highest = panel_top(&harness);
+                let far = egui::pos2(from.x, workspace.top() + SNAP + 30.0 + 8.0);
+                move_to(&mut harness, near, far);
+                assert!(
+                    (panel_top(&harness) - highest).abs() <= 1.0,
+                    "{when}: the panel's top moves from {highest} to {} above its highest",
+                    panel_top(&harness)
+                );
+                assert!(
+                    highest - workspace.top() <= SMALL,
+                    "{when}: at its highest the panel leaves {} px above it, more than {SMALL}",
+                    highest - workspace.top()
+                );
+                assert!(zone(&harness, ZONE).is_none(), "{when}: a zone");
+                assert_drawn_above(&harness, mode, &format!("{when}, held at the highest"));
+                release(&mut harness, far);
+                assert!(!maximised(&harness), "{when}: maximised outside the zone");
+                assert!(
+                    (panel_top(&harness) - highest).abs() <= 1.0,
+                    "{when}: released at its highest {highest}, the panel's top is {} ({})",
+                    panel_top(&harness),
+                    state(&harness)
+                );
+                assert_drawn_above(&harness, mode, &format!("{when}, released at the highest"));
+                let from = grip(&harness);
+                let back = egui::pos2(from.x, rested + 8.0);
+                press(&mut harness, from);
+                move_to(&mut harness, from, back);
+                release(&mut harness, back);
+                assert!(
+                    (panel_top(&harness) - rested).abs() <= 2.0,
+                    "{when}: dragged back to {rested}, the panel's top is {}",
+                    panel_top(&harness)
+                );
+                let after = folder(&harness).workbench.panels.diagnostics;
+                assert!(
+                    (after - problems).abs() <= 1.0,
+                    "{when}: Problems kept {after} px after the squeeze, not {problems}"
+                );
+            }
+        }
+    }
+
+    /// Criterion 3: held within 64 px of the top by the grip or by egui's
+    /// edge, the zone *Release to fill the workspace* shows over the strip
+    /// above Run results, with the views still drawn under it; released
+    /// there, the panel is maximised and the button reads *Restore run
+    /// results*. In every mode, at both sizes.
+    #[test]
+    fn ux36_only_the_snap_zone_maximises() {
+        for size in [MINIMUM, WIDE] {
+            for mode in MODES {
+                let (_project, mut harness) = ran_in(size, mode);
+                for handle in [GRIP, EDGE] {
+                    let when = format!("{size:?}, {mode}, by {handle}");
+                    let workspace = workspace(&harness);
+                    let from = if handle == GRIP {
+                        grip(&harness)
+                    } else {
+                        edge(&harness, EDGE)
+                    };
+                    let offset = from.y - panel_top(&harness);
+                    let to = egui::pos2(from.x, workspace.top() + 40.0 + offset);
+                    press(&mut harness, from);
+                    move_to(&mut harness, from, to);
+                    let shown = zone(&harness, ZONE)
+                        .unwrap_or_else(|| panic!("{when}: no zone 40 px under the top"));
+                    assert!(
+                        shown.top() >= workspace.top() - 1.0
+                            && shown.bottom() <= panel_top(&harness) + 1.0,
+                        "{when}: the zone {shown:?} is not above Run results"
+                    );
+                    assert_drawn_above(&harness, mode, &format!("{when}, in the zone"));
+                    release(&mut harness, to);
+                    assert!(
+                        maximised(&harness),
+                        "{when}: released in the zone, not maximised"
+                    );
+                    assert!(
+                        has_label(&harness, RESTORE) && !has_label(&harness, MAXIMISE),
+                        "{when}: the button is not *{RESTORE}*"
+                    );
+                    choose(&mut harness, RESTORE);
+                    assert!(!maximised(&harness), "{when}: *{RESTORE}* restores");
+                }
+            }
+        }
+    }
+
+    /// Criterion 1, downwards: released at 70 %, then dragged down to 30 %
+    /// and released, the panel follows and stays there; maximised, its grip
+    /// dragged down to 65 % restores it at 65 %, not at the old ceiling.
+    #[test]
+    fn ux36_dragged_back_down_the_panel_resizes_freely() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness) = ran_in(size, "Split");
+            let workspace = workspace(&harness);
+            for share in [0.7, 0.3] {
+                let wanted = workspace.bottom() - share * workspace.height();
+                let at = hold_grip_at(&mut harness, wanted);
+                release(&mut harness, at);
+                assert!(
+                    (panel_top(&harness) - wanted).abs() <= 2.0,
+                    "{size:?}: released at {share}, the panel's top is {}, not {wanted} ({})",
+                    panel_top(&harness),
+                    state(&harness)
+                );
+            }
+            choose(&mut harness, MAXIMISE);
+            let wanted = workspace.bottom() - 0.65 * workspace.height();
+            let at = hold_grip_at(&mut harness, wanted);
+            release(&mut harness, at);
+            assert!(!maximised(&harness), "{size:?}: still maximised");
+            assert!(
+                (panel_top(&harness) - wanted).abs() <= 2.0,
+                "{size:?}: dragged down from maximised to 65 %, the panel's top is {}, not \
+                 {wanted} ({})",
+                panel_top(&harness),
+                state(&harness)
+            );
+            assert_drawn_above(
+                &harness,
+                "Split",
+                &format!("{size:?}, restored by the drag"),
+            );
+        }
+    }
+
+    /// Criterion 4: Problems, with problems listed, dragged past 360 px but
+    /// outside their zone and released, keep the height they are released
+    /// at, with the code drawn above them; dragged back down, they follow;
+    /// released in the zone, they expand as UX-05 made them, keeping
+    /// KTLO-18's strip of code. In Code and Split at 1600 × 1000.
+    #[test]
+    fn ux36_problems_resize_freely_too() {
+        for mode in ["Code", "Split"] {
+            let project = crate::testing::shop_project();
+            let mut harness = folder_harness(project.path(), WIDE);
+            choose(&mut harness, mode);
+            let scenario = only(&harness, DocumentKind::Scenario);
+            app(&mut harness).activate_tab(&scenario);
+            settle(&mut harness);
+            let label = editor(&harness, &scenario);
+            replace_text(&mut harness, &label, "scenario \"Main\" {\n  ???\n}\n");
+            choose(&mut harness, EXPAND);
+            let expanded = problems_top(&harness);
+            choose(&mut harness, RESTORE_PROBLEMS);
+            for wanted in [expanded + SNAP + 100.0, expanded + SNAP + 300.0] {
+                let from = edge(&harness, PROBLEMS_EDGE);
+                let to = egui::pos2(from.x, wanted);
+                press(&mut harness, from);
+                move_to(&mut harness, from, to);
+                assert!(
+                    zone(&harness, PROBLEMS_ZONE).is_none(),
+                    "{mode}: a zone at {wanted}"
+                );
+                release(&mut harness, to);
+                assert!(
+                    !folder(&harness).problems_expanded,
+                    "{mode}: released outside the zone at {wanted}, expanded"
+                );
+                assert!(
+                    (problems_top(&harness) - wanted).abs() <= 2.0,
+                    "{mode}: released at {wanted}, the section's top is {} (it holds {} px)",
+                    problems_top(&harness),
+                    folder(&harness).workbench.panels.diagnostics
+                );
+                let lines = folder(&harness)
+                    .code_lines_in_view()
+                    .map_or(0, |(_, lines)| lines.count());
+                assert!(
+                    lines >= LINES,
+                    "{mode}: {lines} lines of code above Problems"
+                );
+            }
+            let from = edge(&harness, PROBLEMS_EDGE);
+            let to = egui::pos2(from.x, expanded + 30.0);
+            press(&mut harness, from);
+            move_to(&mut harness, from, to);
+            assert!(
+                zone(&harness, PROBLEMS_ZONE).is_some(),
+                "{mode}: no zone 30 px under the ceiling"
+            );
+            release(&mut harness, to);
+            assert!(
+                folder(&harness).problems_expanded,
+                "{mode}: released in the zone, not expanded"
+            );
+            assert!(
+                (problems_top(&harness) - expanded).abs() <= 1.0,
+                "{mode}: expanded by the drag, the section's top is {}, not {expanded}",
+                problems_top(&harness)
+            );
         }
     }
 }
