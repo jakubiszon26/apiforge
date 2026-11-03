@@ -8317,19 +8317,30 @@ mod ux05 {
         )
     }
 
-    /// Run results' normal height range in `workspace`: at least 185 px
-    /// (160 px when the workspace is 460 px or more), at most 560 px or the
+    /// Run results' height range in `workspace`: at least 185 px (160 px
+    /// when the workspace is 460 px or more), at most the workspace less the
+    /// views' least height above them. Changed by the owner's decision of
+    /// 2026-11-03 (UX-36): the range no longer ends at 560 px or the
     /// workspace less 200 px.
     fn normal_range(workspace: egui::Rect) -> (f32, f32) {
         let full = workspace.height();
         let min = if full < 460.0 { 185.0 } else { 160.0 };
-        (min, (full - 200.0).clamp(min, 560.0))
+        (min, (full - crate::report::VIEWS_LEAST_HEIGHT).max(min))
     }
 
-    /// Where Run results' top is at the normal ceiling.
+    /// Where Run results' top is at the top of their range, the ceiling.
     fn ceiling_top(harness: &FolderHarness) -> f32 {
         let workspace = workspace(harness);
         workspace.bottom() - normal_range(workspace).1
+    }
+
+    /// Where UX-05 kept Run results' top outside the zone: 560 px or the
+    /// workspace less 200 px from the bottom, which UX-36 dropped.
+    fn old_ceiling_top(harness: &FolderHarness) -> f32 {
+        let workspace = workspace(harness);
+        let full = workspace.height();
+        let min = if full < 460.0 { 185.0 } else { 160.0 };
+        workspace.bottom() - (full - 200.0).clamp(min, 560.0)
     }
 
     /// The top of Run results, from its grip.
@@ -8434,14 +8445,17 @@ mod ux05 {
     }
 
     /// Criterion 1: dragged by the grip or by egui's edge to 40 px under the
-    /// workspace's top, the panel follows past its normal ceiling and the
-    /// zone *Release to fill the workspace* is between the workspace's top
-    /// and the panel's; held 100 px under the top instead, there is no zone.
+    /// workspace's top, the panel follows past UX-05's ceiling and the zone
+    /// *Release to fill the workspace* is between the workspace's top and the
+    /// panel's; held 100 px under the top instead, there is no zone. Since
+    /// the owner's decision of 2026-11-03 (UX-36) the panel itself stops
+    /// where the views above keep their least height, in both cases.
     #[test]
     fn ux05_criterion_1_dragging_to_the_top_shows_the_drop_zone() {
         let (_project, mut harness, _) = ran(MINIMUM);
         let workspace = workspace(&harness);
-        let ceiling = ceiling_top(&harness);
+        let ceiling = old_ceiling_top(&harness);
+        let highest = ceiling_top(&harness);
         for handle in [GRIP, EDGE] {
             let from = if handle == GRIP {
                 grip(&harness)
@@ -8455,9 +8469,9 @@ mod ux05 {
             move_to(&mut harness, from, near);
             let top = panel_top(&harness);
             assert!(
-                top < ceiling - SNAP && top <= workspace.top() + SNAP,
-                "{handle}: held 40 px under the top {}, the panel's top is {top} \
-                 (its normal ceiling is {ceiling})",
+                top < ceiling - SNAP && (top - highest).abs() <= 1.0,
+                "{handle}: held 40 px under the top {}, the panel's top is {top}, not \
+                 {highest} (UX-05's ceiling was {ceiling})",
                 workspace.top()
             );
             let shown = zone(&harness, ZONE)
@@ -8470,7 +8484,7 @@ mod ux05 {
             let far = egui::pos2(from.x, workspace.top() + 100.0 + offset);
             move_to(&mut harness, near, far);
             assert!(
-                (panel_top(&harness) - (workspace.top() + 100.0)).abs() <= 2.0,
+                (panel_top(&harness) - (workspace.top() + 100.0).max(highest)).abs() <= 2.0,
                 "{handle}: held 100 px under the top, the panel's top is {}",
                 panel_top(&harness)
             );
@@ -8555,20 +8569,20 @@ mod ux05 {
         );
     }
 
-    /// Held above its normal ceiling, Run results leave the strip above them
-    /// to the zone or the bare workspace: the board and the code, which have
-    /// no room there, are not drawn until the release, and come back after a
-    /// release outside the zone (the mid-drag frame of `ux05-mid-drag-*`).
+    /// Held above UX-05's ceiling, Run results leave the strip above them to
+    /// the board and the code, which stay drawn during the drag and after a
+    /// release outside the zone. Inverted by the owner's decision of
+    /// 2026-11-03 (UX-36): UX-05 drew neither until the release.
     #[test]
-    fn ux05_above_the_ceiling_the_views_above_are_not_drawn() {
+    fn ux05_above_the_old_ceiling_the_views_above_are_drawn() {
         for size in [MINIMUM, WIDE] {
             let (_project, mut harness, _) = ran(size);
             let workspace = workspace(&harness);
             let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
             for label in HIDDEN {
                 assert!(
-                    harness.query_by_label_contains(label).is_none(),
-                    "{size:?}: {label:?} is drawn above the dragged panel"
+                    harness.query_by_label_contains(label).is_some(),
+                    "{size:?}: {label:?} is not drawn above the dragged panel"
                 );
             }
             release(&mut harness, at);
@@ -8586,10 +8600,11 @@ mod ux05 {
     /// strip of code; released there, the section is expanded as *Expand
     /// problems* expands it, with the strip of code above it, and *Restore
     /// problems* returns the height from before the drag. Released outside
-    /// the zone, the section is 360 px high: at 1600 × 1000, as at 960 × 540
-    /// the ceiling is under 360 + 64 px and every height past 360 px is in
-    /// the zone, and with problems listed, as a section with none keeps only
-    /// the height of its caption and hint, as it does today.
+    /// the zone past 360 px, the section keeps the height it is released at
+    /// (the owner's decision of 2026-11-03, UX-36; UX-05 returned it to
+    /// 360 px): at 1600 × 1000, as at 960 × 540 the ceiling is under
+    /// 360 + 64 px, and with problems listed, as a section with none keeps
+    /// only the height of its caption and hint, as it does today.
     #[test]
     fn ux05_criterion_3_problems_drag_to_expand_keeps_the_strip() {
         for mode in ["Code", "Split"] {
@@ -8674,27 +8689,30 @@ mod ux05 {
             "outside the zone, expanded"
         );
         assert!(has_label(&harness, EXPAND));
-        let height = folder(&harness).workbench.panels.diagnostics;
         assert!(
-            (height - 360.0).abs() <= 1.0,
-            "released outside the zone, the section is {height} px high, not 360"
+            (problems_top(&harness) - to.y).abs() <= 2.0,
+            "released outside the zone at {}, the section's top is {} ({} px high)",
+            to.y,
+            problems_top(&harness),
+            folder(&harness).workbench.panels.diagnostics
         );
     }
 
-    /// Criterion 6: released above the ceiling but outside the zone, the
-    /// panel's height is the ceiling; nothing is maximised and there is no
-    /// zone.
+    /// Criterion 6: released above UX-05's ceiling but outside the zone, the
+    /// panel keeps the height it is released at; nothing is maximised and
+    /// there is no zone. Changed by the owner's decision of 2026-11-03
+    /// (UX-36): UX-05 returned the panel to its ceiling.
     #[test]
-    fn ux05_criterion_6_releasing_outside_the_zone_returns_to_the_ceiling() {
+    fn ux05_criterion_6_releasing_outside_the_zone_keeps_the_height() {
         for size in [MINIMUM, WIDE] {
             let (_project, mut harness, _) = ran(size);
             let workspace = workspace(&harness);
-            let ceiling = ceiling_top(&harness);
+            let ceiling = old_ceiling_top(&harness);
             let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 40.0);
+            let held = panel_top(&harness);
             assert!(
-                panel_top(&harness) < ceiling - SNAP,
-                "{size:?}: held above the ceiling {ceiling}, the panel's top is {}",
-                panel_top(&harness)
+                held < ceiling - SNAP,
+                "{size:?}: held above UX-05's ceiling {ceiling}, the panel's top is {held}"
             );
             assert!(
                 zone(&harness, ZONE).is_none(),
@@ -8705,9 +8723,9 @@ mod ux05 {
             assert!(has_label(&harness, MAXIMISE));
             assert!(zone(&harness, ZONE).is_none());
             assert!(
-                (panel_top(&harness) - ceiling).abs() <= 1.0,
-                "{size:?}: released outside the zone, the panel's top is {}, not the ceiling \
-                 {ceiling} ({})",
+                (panel_top(&harness) - held).abs() <= 1.0,
+                "{size:?}: released outside the zone, the panel's top is {}, not {held} \
+                 where it was released ({})",
                 panel_top(&harness),
                 state(&harness)
             );
@@ -8715,8 +8733,9 @@ mod ux05 {
     }
 
     /// Criterion 7: maximised, the grip dragged down 200 px and released
-    /// restores the panel where it was released, within its normal range.
-    /// At 1600 × 1000 also 500 px, which lands under the ceiling.
+    /// restores the panel where it was released, within its range (since the
+    /// owner's decision of 2026-11-03, UX-36, up to the views' least height
+    /// instead of UX-05's ceiling). At 1600 × 1000 also 500 px.
     #[test]
     fn ux05_criterion_7_dragging_down_restores() {
         for (size, distance) in [(MINIMUM, 200.0), (WIDE, 200.0), (WIDE, 500.0)] {
@@ -8794,10 +8813,12 @@ mod ux05 {
         }
     }
 
-    /// Criterion 9: the keyboard is unchanged: ↑ and End on the grip stop at
-    /// the ceiling and do not maximise; ↓ lowers the panel by 32 px and Home
-    /// to its least height. An arrow key also moves egui's focus on, as it
-    /// does today, so the grip is focused again before each key.
+    /// Criterion 9: ↑ and End on the grip stop at the ceiling and do not
+    /// maximise; ↓ lowers the panel by 32 px and Home to its least height. An
+    /// arrow key also moves egui's focus on, as it does today, so the grip is
+    /// focused again before each key. Since the owner's decision of
+    /// 2026-11-03 (UX-36) the ceiling is the top of the range the drag has,
+    /// where the views above keep their least height.
     #[test]
     fn ux05_criterion_9_the_keys_stop_at_the_ceiling() {
         fn press_on_grip(harness: &mut FolderHarness, key: Key) {
@@ -8810,7 +8831,8 @@ mod ux05 {
             let (_project, mut harness, _) = ran(size);
             let ceiling = ceiling_top(&harness);
             for key in [Key::ArrowUp, Key::End] {
-                for _ in 0..8 {
+                // 16 presses: the range at 1600 × 1000 now reaches 786 px (UX-36).
+                for _ in 0..16 {
                     press_on_grip(&mut harness, key);
                 }
                 assert!(
@@ -9086,6 +9108,71 @@ mod ux36 {
         }
     }
 
+    /// Criterion 2, found by the native QA run: with Run results at their
+    /// highest, the three lines of code are drawn above the Problems section
+    /// and none under it. The editor's scroll area kept 64 px for itself,
+    /// more than the code panel had, and painted its lines over the Problems
+    /// caption row. In Code and Split, at both sizes.
+    #[test]
+    fn ux36_at_the_least_height_no_code_is_drawn_over_problems() {
+        for size in [MINIMUM, WIDE] {
+            for mode in ["Code", "Split"] {
+                let (_project, mut harness) = ran_in(size, mode);
+                let workspace = workspace(&harness);
+                let at = hold_grip_at(&mut harness, workspace.top() + SNAP + 20.0);
+                release(&mut harness, at);
+                assert_drawn_above(&harness, mode, &format!("{size:?}, {mode}"));
+                let code = egui::FontId::monospace(13.0);
+                fn texts(
+                    clip: egui::Rect,
+                    shape: &egui::Shape,
+                    into: &mut Vec<(egui::Rect, egui::epaint::TextShape)>,
+                ) {
+                    match shape {
+                        egui::Shape::Vec(shapes) => {
+                            for shape in shapes {
+                                texts(clip, shape, into);
+                            }
+                        }
+                        egui::Shape::Text(text) => into.push((clip, text.clone())),
+                        _ => {}
+                    }
+                }
+                let mut all = Vec::new();
+                for clipped in &harness.output().shapes {
+                    texts(clipped.clip_rect, &clipped.shape, &mut all);
+                }
+                // Where the section is drawn from: its caption's clip is the
+                // section's own rect.
+                let problems = all
+                    .iter()
+                    .find(|(_, text)| text.galley.job.text == "PROBLEMS")
+                    .map(|(clip, _)| clip.top())
+                    .unwrap_or_else(|| panic!("{size:?}, {mode}: no Problems caption"));
+                {
+                    for (clip, text) in all {
+                        let shown = text.visual_bounding_rect().intersect(clip);
+                        let monospace = text
+                            .galley
+                            .job
+                            .sections
+                            .first()
+                            .is_some_and(|section| section.format.font_id == code);
+                        assert!(
+                            !monospace
+                                || shown.is_negative()
+                                || shown.top() >= panel_top(&harness) - 1.0
+                                || shown.bottom() <= problems + 1.0,
+                            "{size:?}, {mode}: {:?} is drawn at {shown:?}, under the Problems \
+                             section's top {problems}",
+                            text.galley.job.text.chars().take(40).collect::<String>()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Criterion 3: held within 64 px of the top by the grip or by egui's
     /// edge, the zone *Release to fill the workspace* shows over the strip
     /// above Run results, with the views still drawn under it; released
@@ -9132,7 +9219,7 @@ mod ux36 {
         }
     }
 
-    /// Criterion 1, downwards: released at 70 %, then dragged down to 30 %
+    /// Criterion 1, downwards: released at 70 %, then dragged down to 45 %
     /// and released, the panel follows and stays there; maximised, its grip
     /// dragged down to 65 % restores it at 65 %, not at the old ceiling.
     #[test]
@@ -9140,7 +9227,7 @@ mod ux36 {
         for size in [MINIMUM, WIDE] {
             let (_project, mut harness) = ran_in(size, "Split");
             let workspace = workspace(&harness);
-            for share in [0.7, 0.3] {
+            for share in [0.7, 0.45] {
                 let wanted = workspace.bottom() - share * workspace.height();
                 let at = hold_grip_at(&mut harness, wanted);
                 release(&mut harness, at);
