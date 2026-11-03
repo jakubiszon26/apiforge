@@ -281,6 +281,9 @@ pub struct Canvas {
     /// The blocks the last frame ringed for the selected input.
     #[cfg(test)]
     ringed: Vec<String>,
+    /// Each card's whole rectangle on screen in the last frame, unclipped.
+    #[cfg(test)]
+    on_screen: Vec<(String, Rect)>,
 }
 
 impl Default for Canvas {
@@ -307,6 +310,8 @@ impl Default for Canvas {
             error: None,
             #[cfg(test)]
             ringed: Vec::new(),
+            #[cfg(test)]
+            on_screen: Vec::new(),
         }
     }
 }
@@ -345,6 +350,34 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ringed(&self) -> Vec<String> {
         self.ringed.clone()
+    }
+
+    /// The camera's zoom in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_zoom(&self) -> f32 {
+        self.camera.zoom
+    }
+
+    /// The part of the board the camera fits and keeps cards in.
+    #[cfg(test)]
+    pub(crate) fn debug_focus(&self) -> Rect {
+        self.last_focus.unwrap_or(Rect::NOTHING)
+    }
+
+    /// A card's whole rectangle on screen in the last frame, unclipped by
+    /// the board, the panels beside it or the window.
+    #[cfg(test)]
+    pub(crate) fn debug_card_rect(&self, id: &str) -> Option<Rect> {
+        self.on_screen
+            .iter()
+            .find(|(card, _)| card == id)
+            .map(|(_, rect)| *rect)
+    }
+
+    /// Every card's whole rectangle on screen in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_cards(&self) -> &[(String, Rect)] {
+        &self.on_screen
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -519,6 +552,13 @@ impl Canvas {
             zoom: self.camera.zoom,
             pan: self.camera.pan + origin_offset,
         };
+        #[cfg(test)]
+        {
+            self.on_screen = cards
+                .iter()
+                .map(|card| (card.id.clone(), camera.rect(card.rect())))
+                .collect();
+        }
         if let Some(Drag::Nodes { ids, offset }) = &self.drag {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
                 *card = card.translated(*offset);
