@@ -64,7 +64,7 @@ the ticket, or takes it back.
 
 ## Who merges
 
-The owner merges to `main`, after reading the QA report. An agent merges only
+The owner merges to `main`, after reading the QA section of the pull request. An agent merges only
 when the owner has written an authorisation **in the issue of that ticket**
 that names merge; a general instruction to "work autonomously" does not
 include it. An agent never merges its own pull request; an authorised merge is

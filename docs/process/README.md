@@ -50,8 +50,9 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
    request. The verification commands of the development guide pass. A ticket
    labelled `ready:sol` or `ready:sonnet` may be taken from here by that model
    under [autonomy](autonomy.md).
-7. **QA report.** A functional report with screenshots per platform and an
-   explicit list of what was not verified. See [testing](testing.md).
+7. **QA report.** A short QA section in the pull request body: criteria →
+   tests, what was not verified, captures for interface changes. See
+   [testing](testing.md#2-the-functional-qa-report).
 8. **Owner acceptance.** The owner reads the report and, when they choose,
    builds and uses the change locally. Only the owner merges to `main`.
 9. **Retrospective.** At the end of each sprint, with the measures from

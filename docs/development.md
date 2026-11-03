@@ -922,8 +922,8 @@ order; these are the mechanics.
 - Small [Conventional Commits](https://www.conventionalcommits.org/).
   Acceptance tests are committed before the implementation
   ([testing](process/testing.md#1-acceptance-tests-first)).
-- The pull request follows `.github/PULL_REQUEST_TEMPLATE.md` and links its
-  QA report. At most four pull requests await owner acceptance at a time, and
+- The pull request follows `.github/PULL_REQUEST_TEMPLATE.md`; its QA section
+  is in the pull request body ([testing](process/testing.md#2-the-functional-qa-report)). At most four pull requests await owner acceptance at a time, and
   at most 60 estimated review minutes among them
   ([limits](process/README.md#limits-that-keep-review-possible)).
 - Only the owner merges to `main`. Passing the verification commands above is
