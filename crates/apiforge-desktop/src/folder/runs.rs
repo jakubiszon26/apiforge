@@ -111,7 +111,41 @@ fn publish(reports: &mut HashMap<String, Report>, prepared: &PreparedRun, result
     }
 }
 
+/// The hover of the header's label while a run of unsaved code runs (UX-04).
+const UNSAVED_HOVER: &str = "The run uses the code in the editor, which is not saved yet.";
+/// The hover while a run of the last confirmed code runs (UX-04).
+const EARLIER_HOVER: &str =
+    "The editor's code has errors; the run uses the last confirmed code and configuration.";
+
 impl FolderApp {
+    /// What the header says beside *Cancel run* while a run runs (UX-04):
+    /// the text and its hover, or nothing when no run runs. On the run's
+    /// own tab it says *code*; on any other it names the file that runs.
+    pub(super) fn running_label(
+        &self,
+        active: Option<&str>,
+    ) -> Option<(String, Option<&'static str>)> {
+        self.runs.handle.as_ref()?;
+        let prepared = self.runs.active.as_ref()?;
+        let (what, hover) = if prepared.last_valid {
+            ("earlier", Some(EARLIER_HOVER))
+        } else if prepared.unsaved {
+            ("unsaved", Some(UNSAVED_HOVER))
+        } else {
+            ("saved", None)
+        };
+        let id = prepared.document_id();
+        let subject = if active == Some(id) {
+            "code"
+        } else {
+            self.session
+                .as_ref()
+                .and_then(|session| session.document(id))
+                .map_or("code", |document| file_name(document.entry().path.as_str()))
+        };
+        Some((format!("Running {what} {subject}"), hover))
+    }
+
     /// The active tab's run results fill the window (KTLO-19); what the
     /// window draws follows [`Self::report_covers`].
     #[cfg(test)]
@@ -393,14 +427,8 @@ impl FolderApp {
             .start(request)
         {
             Ok(handle) => {
-                let message = if prepared.last_valid {
-                    "Running the confirmed earlier code and configuration."
-                } else if prepared.unsaved {
-                    "Running unsaved code."
-                } else {
-                    "Running saved code."
-                };
-                self.notify(message, false);
+                // What runs is said in the header for the run's life, not
+                // in the band (UX-04, #152).
                 self.runs.active = Some(prepared);
                 self.runs.handle = Some(handle);
                 self.runs.panel.open = true;

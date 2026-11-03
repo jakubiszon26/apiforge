@@ -291,7 +291,9 @@ jobs:
           Expand-Archive "dist/$env:STEM.zip" -DestinationPath $extracted
           $root = Join-Path $extracted $env:STEM
           foreach ($name in @('apiforge', 'apiforge-desktop')) {
-            $line = & (Join-Path $root "$name.exe") --version
+            # REL-04: PowerShell waits for a windowed program, and reads what
+            # it prints, only when its output goes on down a pipeline.
+            $line = & (Join-Path $root "$name.exe") --version | Write-Output
             if ($line -ne "$name $env:VERSION") {
               throw "$name.exe --version printed '$line', expected '$name $env:VERSION'."
             }
@@ -301,7 +303,30 @@ jobs:
               throw "$name.exe carries ProductVersion '$product', expected '$env:VERSION'."
             }
           }
-          & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json
+          # REL-04 (#205): the desktop binary is a windowed program and the
+          # command line a console one, read from each .exe's PE header.
+          Add-Type -AssemblyName System.Reflection.Metadata
+          $subsystems = @{ 'apiforge' = 'WindowsCui'; 'apiforge-desktop' = 'WindowsGui' }
+          foreach ($name in $subsystems.Keys) {
+            $reader = [System.Reflection.PortableExecutable.PEReader]::new(
+              [System.IO.File]::OpenRead((Join-Path $root "$name.exe")))
+            try {
+              $subsystem = [string] $reader.PEHeaders.PEHeader.Subsystem
+            } finally {
+              $reader.Dispose()
+            }
+            Write-Host "$name.exe: PE subsystem $subsystem"
+            if ($subsystem -ne $subsystems[$name]) {
+              throw "$name.exe has PE subsystem $subsystem, expected $($subsystems[$name])."
+            }
+          }
+          # PowerShell waits for a windowed program only when its output goes
+          # on down a pipeline, so --check's output is piped and asserted.
+          $check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json | Write-Output
+          if ($LASTEXITCODE -ne 0 -or "$check" -notmatch '^Valid v\d+ document: \d+ project\(s\)$') {
+            throw "apiforge-desktop.exe --check printed '$check' with exit code $LASTEXITCODE."
+          }
+          Write-Host $check
           python -I packaging/mcp-smoke.py (Join-Path $root 'apiforge.exe') $env:VERSION `
             crates/apiforge-cli/tests/mcp.rs
 

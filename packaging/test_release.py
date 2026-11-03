@@ -1,6 +1,8 @@
 """REL-01 (#115): the release workflow's checks, criteria 2, 3 and 5.
 REL-03 (#120): the third-party notices, criteria 1 to 6.
 REL-02 (#119): the application icon on Windows, criteria 1 to 6.
+REL-04 (#205): no console window behind the desktop app, criteria 1, 2, 4 and
+6 to 8 as the workflows and the sources state them.
 
     python3 -I packaging/test_release.py
 
@@ -702,6 +704,297 @@ class IconDocs(unittest.TestCase):
         self.assertIn("packaging/icon/apiforge.ico", releases)
         self.assertIn("python3 -I packaging/icon.py", releases)
         self.assertIn("winresource", releases)
+
+
+# REL-04 (#205): the attribute that makes the release desktop build a windowed
+# program, exactly as the ticket states it.
+WINDOWS_SUBSYSTEM = (
+    '#![cfg_attr(all(windows, not(debug_assertions), not(test)), windows_subsystem = "windows")]'
+)
+
+
+def start_process_calls(text):
+    """Each `Start-Process` statement of a PowerShell script, with its
+    backtick continuations and its argument array."""
+    calls = []
+    for found in re.finditer(r"Start-Process\b", text):
+        end = found.start()
+        depth = 0
+        while end < len(text):
+            char = text[end]
+            if char in "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "\n" and depth == 0 and not text[:end].rstrip(" ").endswith("`"):
+                break
+            end += 1
+        calls.append(text[found.start() : end])
+    return calls
+
+
+def steps_before(workflow, first, second):
+    return workflow.index(f"- name: {first}\n") < workflow.index(f"- name: {second}\n")
+
+
+class ConsoleSubsystem(unittest.TestCase):
+    """Criterion 1: the release desktop .exe is WindowsGui; apiforge.exe and the
+    debug desktop build stay WindowsCui; every Windows run and the release
+    smoke read it from the PE header."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_the_release_desktop_build_is_a_windowed_program_and_nothing_else_is(self):
+        # rustfmt wraps the attribute over four lines; compared on one.
+        main = re.sub(r"\s+", " ", read("crates/apiforge-desktop/src/main.rs"))
+        main = main.replace("( ", "(").replace(" )", ")")
+        self.assertEqual(main.count(WINDOWS_SUBSYSTEM), 1)
+        self.assertEqual(main.count("windows_subsystem"), 1)
+        for path in ["crates/apiforge-cli/src/main.rs", "crates/apiforge-cli/src/lib.rs"]:
+            if os.path.exists(os.path.join(ROOT, *path.split("/"))):
+                self.assertNotIn("windows_subsystem", read(path), path)
+
+    def test_every_windows_run_reads_the_subsystem_of_the_three_exes(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("System.Reflection.PortableExecutable.PEReader", icon)
+        self.assertIn(".PEHeaders.PEHeader.Subsystem", icon)
+        for exe, subsystem in [
+            ("target/release/apiforge-desktop.exe", "WindowsGui"),
+            ("target/release/apiforge.exe", "WindowsCui"),
+            ("target/debug/apiforge-desktop.exe", "WindowsCui"),
+        ]:
+            self.assertRegex(icon, re.escape(f"Exe = '{exe}'; Subsystem = '{subsystem}'"), exe)
+        self.assertIn("$subsystem -ne $binary.Subsystem", icon)
+        # The debug build is the one the test step made before.
+        self.assertTrue(steps_before(self.rust, "Run workspace unit and integration tests", "Show the application icon (Windows)"))
+
+    def test_the_release_smoke_reads_the_subsystem_of_both_extracted_exes(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        self.assertIn("System.Reflection.PortableExecutable.PEReader", smoke)
+        self.assertIn(".PEHeaders.PEHeader.Subsystem", smoke)
+        self.assertIn("'apiforge' = 'WindowsCui'", smoke)
+        self.assertIn("'apiforge-desktop' = 'WindowsGui'", smoke)
+        self.assertIn("Join-Path $root \"$name.exe\"", smoke)
+        self.assertRegex(smoke, r"if \(\$subsystem -ne [^)]+\) \{\s+throw")
+
+
+class NoConsoleWindow(unittest.TestCase):
+    """Criterion 2: the window started the way Explorer starts it owns no
+    conhost.exe, and is captured into windows-icon."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.icon = step(self.rust, "Show the application icon (Windows)")
+
+    def test_the_window_is_started_without_a_console_or_a_redirection(self):
+        calls = start_process_calls(self.icon)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("'--folder'", calls[0])
+        self.assertIn("-PassThru", calls[0])
+        self.assertNotIn("-NoNewWindow", calls[0])
+        self.assertNotIn("-Redirect", calls[0])
+
+    def test_the_open_window_owns_no_conhost(self):
+        self.assertIn("Get-CimInstance Win32_Process -Filter \"Name='conhost.exe' AND ParentProcessId=$($process.Id)\"", self.icon)
+        self.assertIn("$consoles.Count -ne 0", self.icon)
+        # Asked while the window is open: after its handle, before the kill.
+        query = self.icon.index("Name='conhost.exe'")
+        self.assertLess(self.icon.index("MainWindowHandle"), query)
+        self.assertLess(query, self.icon.index("} finally {", query))
+        self.assertIn("throw ($problems -join ' ')", self.icon)
+
+    def test_the_desktop_is_captured_into_windows_icon(self):
+        self.assertIn("CopyFromScreen", self.icon)
+        self.assertIn("'desktop-window.png'", self.icon)
+        upload = step(self.rust, "Upload the application icon (Windows)")
+        self.assertIn("name: windows-icon", upload)
+        self.assertIn("always()", upload)
+
+
+class DesktopLog(unittest.TestCase):
+    """Criteria 4 and 7: started by a parent with no console, the program writes
+    the log; cmd's redirection still reaches its file."""
+
+    NAME = "Write the desktop log without a console (Windows)"
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.log = step(self.rust, self.NAME)
+
+    def test_it_runs_on_windows_after_the_data_directory_is_owned(self):
+        folder = step(self.rust, "Exercise folder projects and managed startup (Windows)")
+        self.assertIn("id: folder-windows", folder)
+        self.assertIn("Reset-DataDirectory", folder)
+        self.assertIn(
+            "if: ${{ !cancelled() && runner.os == 'Windows' && steps.folder-windows.outcome == 'success' }}",
+            self.log,
+        )
+        self.assertTrue(steps_before(self.rust, "Exercise folder projects and managed startup (Windows)", self.NAME))
+        self.assertTrue(steps_before(self.rust, self.NAME, "Upload the application icon (Windows)"))
+
+    def test_the_parent_has_no_console(self):
+        self.assertIn("Invoke-CimMethod -ClassName Win32_Process -MethodName Create", self.log)
+        self.assertIn('--check `"$fixture`"', self.log)
+        self.assertIn("'fixtures/workspace.json'", self.log)
+        self.assertIn("$process.ExitCode -ne 0", self.log)
+
+    def test_the_log_ends_with_the_start_line_and_the_check(self):
+        self.assertIn("'apiforge/logs'", self.log)
+        self.assertIn("'apiforge-desktop.log'", self.log)
+        self.assertIn("^--- apiforge-desktop $([regex]::Escape($version)) .+ ---$", self.log)
+        self.assertIn("$lines[-1] -ne \"$valid\"", self.log)
+        self.assertIn("'^Valid v\\d+ document: \\d+ project\\(s\\)$'", self.log)
+
+    def test_two_starts_append_two_blocks_and_a_full_log_is_rotated(self):
+        self.assertRegex(self.log, r"Invoke-WithoutConsole 'first'\s+Assert-Log 'first' 1\s+Invoke-WithoutConsole 'second'\s+Assert-Log 'second' 2")
+        self.assertIn("$full = 1MB + 1", self.log)
+        self.assertIn("'apiforge-desktop.log.1'", self.log)
+        self.assertIn("(Get-Item $rotated).Length -ne $full", self.log)
+        self.assertIn("Assert-Log 'rotated' 1", self.log)
+
+    def test_cmd_redirects_the_version_into_a_file(self):
+        self.assertIn('& cmd.exe /c "$program --version > $redirected"', self.log)
+        self.assertIn('$line -ne "apiforge-desktop $version"', self.log)
+
+    def test_cmd_without_a_redirection_writes_the_version_to_the_log(self):
+        # Owner's decision of 2026-11-02 on #205: 2 = B, no console attached.
+        self.assertIn("Start-Process -FilePath cmd.exe -ArgumentList @('/c', \"$program --version\") -Wait", self.log)
+        self.assertIn('$lines[-1] -ne "apiforge-desktop $version"', self.log)
+        self.assertIn("$lines[-2] -notmatch $start", self.log)
+
+
+class OutputCapture(unittest.TestCase):
+    """Criterion 6: CI reads a windowed program's output deterministically."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_the_release_smoke_reads_the_checks_output(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        # Assigning a windowed program's output is not enough: PowerShell then
+        # neither waits nor reads, and the program writes into a closed pipe.
+        self.assertIn(
+            "$check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json | Write-Output",
+            smoke,
+        )
+        self.assertNotRegex(smoke, r"(?m)^\s*& \(Join-Path \$root 'apiforge-desktop\.exe'\) --check")
+        self.assertIn("$LASTEXITCODE -ne 0", smoke)
+        self.assertIn("\"$check\" -notmatch '^Valid v", smoke)
+        self.assertIn("$line = & (Join-Path $root \"$name.exe\") --version | Write-Output", smoke)
+
+    def test_every_windows_step_pipes_what_it_reads_from_the_desktop_binary(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("(& $exe --version | Write-Output)", icon)
+        log = step(self.rust, "Write the desktop log without a console (Windows)")
+        self.assertIn("$valid = & $program --check $fixture | Write-Output", log)
+        for workflow in [self.rust, self.release]:
+            self.assertNotRegex(workflow, r"(?m)= \(?& [^\n|]*--(version|check)[^\n|]*$")
+
+    def test_the_native_validation_reads_the_valid_line(self):
+        validate = step(self.rust, "Validate workspace using the native release binary")
+        self.assertIn("shell: bash", validate)
+        self.assertIn('output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"', validate)
+        self.assertIn('[[ ! "$output" =~ ^Valid\\ v[0-9]+\\ document:\\ [0-9]+\\ project\\(s\\)$ ]]', validate)
+        self.assertIn("exit 1", validate)
+
+    def test_every_windowed_probe_redirects_its_errors_and_prints_them(self):
+        for name in [
+            "Open native window and capture it (Windows)",
+            "Exercise folder projects and managed startup (Windows)",
+        ]:
+            text = step(self.rust, name)
+            calls = start_process_calls(text)
+            self.assertTrue(calls, name)
+            for call in calls:
+                self.assertIn("-RedirectStandardError", call, f"{name}: {call}")
+            self.assertIn("Show-Failures $failures", text, name)
+        native = step(self.rust, "Open native window and capture it (Windows)")
+        self.assertEqual(native.count("Show-Failures $failures"), 1)
+        folder = step(self.rust, "Exercise folder projects and managed startup (Windows)")
+        self.assertEqual(folder.count("Show-Failures $failures"), 2)
+        # The icon step's window cannot be redirected (criterion 2); what it
+        # writes without a console is in its log, which the step prints.
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("'logs/apiforge-desktop.log'", icon)
+        self.assertIn("Get-Content $log", icon)
+
+    def test_every_windows_start_keeps_its_exit_code(self):
+        for name in [
+            "Open native window and capture it (Windows)",
+            "Exercise folder projects and managed startup (Windows)",
+            "Show the application icon (Windows)",
+        ]:
+            text = step(self.rust, name)
+            for call in start_process_calls(text):
+                self.assertIn("-PassThru", call, f"{name}: {call}")
+            self.assertIn("$null = $process.Handle", text, name)
+            self.assertIn("WaitForExit(", text, name)
+            self.assertIn("ExitCode", text, name)
+
+
+class NoNewCrate(unittest.TestCase):
+    """Criterion 8: windows-sys only for Windows, at a version the lock already
+    holds; apiforge-cli is untouched; the guide says what changed."""
+
+    def test_no_new_crate_and_no_unsafe_code(self):
+        # Owner's decision of 2026-11-02 on #205: no unsafe code, so no
+        # windows-sys either; the lock keeps the three versions it held.
+        root = read("Cargo.toml")
+        self.assertNotIn("windows-sys", root)
+        self.assertIn('unsafe_code = "forbid"', toml_section(root, "[workspace.lints.rust]"))
+        locked = re.findall(r'^name = "windows-sys"\nversion = "([^"]+)"', read("Cargo.lock"), re.M)
+        self.assertEqual(locked, ["0.52.0", "0.59.0", "0.61.2"])
+        for crate in ["crates/apiforge-desktop", "crates/apiforge-cli"]:
+            manifest = read(f"{crate}/Cargo.toml")
+            self.assertNotIn("windows-sys", manifest, crate)
+            self.assertEqual(toml_section(manifest, "[lints]").strip(), "workspace = true", crate)
+        for directory, _, names in os.walk(os.path.join(ROOT, "crates", "apiforge-desktop")):
+            for name in names:
+                if name.endswith(".rs"):
+                    with open(os.path.join(directory, name), encoding="utf-8") as file:
+                        text = file.read()
+                    self.assertNotIn("unsafe_code", text, name)
+                    self.assertNotRegex(text, r"\bunsafe\s*\{", name)
+
+    def test_every_line_the_desktop_prints_goes_through_one_function(self):
+        # Decision 2 = B: no console is attached, so a line printed straight to
+        # a handle the parent did not give would be lost instead of logged.
+        main = read("crates/apiforge-desktop/src/main.rs")
+        self.assertIn("macro_rules! outln", main)
+        self.assertIn("macro_rules! errln", main)
+        self.assertIn("$crate::windows_console::write(", main)
+        source = os.path.join(ROOT, "crates", "apiforge-desktop", "src")
+        for directory, _, names in os.walk(source):
+            for name in names:
+                if not name.endswith(".rs") or name in {"tests.rs", "testing.rs", "windows_console.rs"} or name.endswith("_tests.rs"):
+                    continue
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    text = file.read()
+                # Test modules may print; the program may not.
+                program = text.split("\n#[cfg(test)]\nmod tests", 1)[0]
+                for found in re.finditer(r"\b(e?print(ln)?)!\(", program):
+                    line = program[: found.start()].count("\n") + 1
+                    self.fail(f"{os.path.relpath(path, ROOT)}:{line} uses {found.group(1)}!")
+
+    def test_running_says_where_the_output_goes_without_a_console(self):
+        running = read("docs/development.md").split("## Running", 1)[1].split("\n## ", 1)[0]
+        paragraph = next((p for p in running.split("\n\n") if "apiforge-desktop.log" in p), "")
+        self.assertTrue(paragraph, "Running names the log")
+        for text in [
+            "%APPDATA%\\apiforge\\logs\\apiforge-desktop.log",
+            "apiforge-desktop.log.1",
+            "start /wait",
+            "%ERRORLEVEL%",
+            "never attaches",
+            "> out.txt",
+            "| Write-Output",
+            "apiforge.exe",
+        ]:
+            self.assertIn(text, " ".join(paragraph.split()), text)
 
 
 if __name__ == "__main__":

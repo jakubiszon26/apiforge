@@ -532,8 +532,6 @@ mod review {
                 std::thread::sleep(Duration::from_millis(5));
             }
             settle(&mut harness);
-            // The mock-up has no notice under the header.
-            click(&mut harness, "Dismiss");
             if size == MINIMUM {
                 click(&mut harness, "Maximise run results");
             } else {
@@ -670,6 +668,122 @@ mod review {
         }
     }
 
+    /// UX-04: *Running unsaved code* just left of *Cancel run* while a
+    /// live run runs, on the run's tab and, at both windows, on a
+    /// component's tab with *Publish* and *Live allowed*, where it names
+    /// the file. The API accepts and never answers, so the run is still
+    /// running when captured. Compare with
+    /// `docs/qa/2026-11-02/UX-00/ux04-beside-cancel-*` and
+    /// `ux04-component-tab-960x540`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux04_running_label() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                held.push(stream);
+            }
+        });
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let manifest_path = project.path().join("apiforge.project.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["environment"]["baseUrl"] = serde_json::json!(format!("http://{address}"));
+            std::fs::write(
+                &manifest_path,
+                serde_json::to_vec_pretty(&manifest).unwrap(),
+            )
+            .unwrap();
+            let id = manifest["id"].as_str().unwrap().to_owned();
+            // MCP-09's consent, so *Live allowed* shares the header, and the
+            // run mode Live (UX-02).
+            let configuration = tempfile::tempdir().unwrap();
+            let directory = configuration.path().join("apiforge");
+            std::fs::create_dir_all(&directory).unwrap();
+            for (file, entry) in [
+                ("agent-consent.json", r#""live": true"#),
+                ("run-mode.json", r#""mode": "live""#),
+            ] {
+                std::fs::write(
+                    directory.join(file),
+                    format!(
+                        r#"{{"version": 1, "projects": {{"{id}": {{{entry}, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#
+                    ),
+                )
+                .unwrap();
+            }
+            let mut harness = folder_harness(project.path(), size);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Split");
+            // An unsaved, valid change to the scenario's description.
+            harness.state_mut().as_mut().unwrap().review_open(
+                "scenarios/promotion-and-cart-price.afs",
+                Some(("description \"", "description \"Edited. ")),
+            );
+            settle(&mut harness);
+            click(&mut harness, "Run live");
+            assert!(
+                harness.query_by_label("Cancel run").is_some(),
+                "the run is running"
+            );
+            let header = egui::Rect::from_min_max(
+                egui::Pos2::ZERO,
+                egui::pos2(size.x, harness.get_by_label("Code").rect().bottom() + 9.0),
+            );
+            let mut labels = vec![
+                "Code",
+                "Diagram",
+                "Split",
+                "Save",
+                "Save all",
+                "Live allowed",
+                "Cancel run",
+                "Running unsaved code",
+            ];
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-beside-cancel-{suffix}"), None);
+            capture(
+                &mut harness,
+                &format!("ux04-beside-cancel-header-{suffix}"),
+                Some(header),
+            );
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .review_open("components/add-to-cart.afs", None);
+            settle(&mut harness);
+            labels.pop();
+            labels.extend(["Publish", "Running unsaved promotion-and-cart-price.afs"]);
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-component-tab-{suffix}"), None);
+            click(&mut harness, "Cancel run");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("Cancel run").is_some() {
+                assert!(Instant::now() < deadline, "the run must end");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            capture(&mut harness, &format!("ux04-after-cancel-{suffix}"), None);
+        }
+    }
+
     /// UX-05: Run results dragged by its grip until its top is 64 px under
     /// the tab strip, held there with the drop zone shown, then released and
     /// filling the workspace with its grip at the top; and Problems held
@@ -730,8 +844,11 @@ mod review {
                 std::thread::sleep(Duration::from_millis(5));
             }
             settle(&mut harness);
-            // The mock-up has no notice under the tab strip.
-            click(&mut harness, "Dismiss");
+            // The mock-up has no notice under the tab strip (UX-04 moved
+            // *Running saved code.* to the header).
+            if harness.query_by_label("Dismiss").is_some() {
+                click(&mut harness, "Dismiss");
+            }
             let top = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
                 .unwrap()
                 .outer_rect
