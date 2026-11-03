@@ -10888,6 +10888,35 @@ mod ux34 {
         );
     }
 
+    /// Found in the native QA run: steps pasted into another graph keep the
+    /// place they were copied from, which can be outside the view; the board
+    /// brings them into view.
+    #[test]
+    fn ux34_steps_pasted_from_another_graph_are_brought_into_view() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        choose(&mut harness, PASTE);
+        harness.run_steps(30);
+        settle(&mut harness);
+        let board = harness.get_by_label("Diagram board").rect();
+        let field = harness
+            .query_by_label("A of Expected price 2")
+            .expect("the pasted card is drawn")
+            .rect();
+        assert!(
+            board.contains_rect(field),
+            "the pasted step is in view: {field:?} on {board:?}"
+        );
+    }
+
     /// Criterion 5: one undo removes a paste, and one undo removes a
     /// duplicate.
     #[test]

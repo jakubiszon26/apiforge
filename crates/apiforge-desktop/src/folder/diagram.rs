@@ -413,8 +413,8 @@ impl FolderApp {
     }
 
     /// Applies a paste or a duplicate as one model edit, so one undo removes
-    /// it, and names what its copies read that this board lacks: each such
-    /// reference is left unconnected (UX-34).
+    /// it, brings the copies into view, and names what they read that this
+    /// board lacks: each such reference is left unconnected (UX-34).
     fn apply_paste(
         &mut self,
         document_id: &str,
@@ -425,20 +425,26 @@ impl FolderApp {
         let Some(pasted) = pasted else {
             return;
         };
-        let (result, unresolved) = match pasted {
-            Ok(paste) => {
-                let summary = missing_summary(&paste.edit.graph, &paste.unresolved);
-                let ids = paste.edit.selection.clone();
-                (Ok(paste.edit), summary.map(|summary| (summary, ids)))
+        let paste = match pasted {
+            Ok(paste) => paste,
+            Err(message) => {
+                self.apply_edit(document_id, model, cleanup, Err(message));
+                return;
             }
-            Err(message) => (Err(message), None),
         };
-        self.apply_edit(document_id, model, cleanup, result);
-        // Only a paste that was applied, and so selected its copies, reports.
-        if let Some((summary, ids)) = unresolved
-            && ids.is_some()
-            && self.selections.get(document_id) == ids.as_ref()
-        {
+        let summary = missing_summary(&paste.edit.graph, &paste.unresolved);
+        let ids = paste.edit.selection.clone().unwrap_or_default();
+        self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
+        // An applied paste selects its copies; one that was refused does not.
+        if ids.is_empty() || self.selections.get(document_id) != Some(&ids) {
+            return;
+        }
+        // Copies from another graph keep their place, which may be outside
+        // the view.
+        if let Some(canvas) = self.canvases.get_mut(document_id) {
+            canvas.reveal(ids[0].clone());
+        }
+        if let Some(summary) = summary {
             self.notify(summary, false);
         }
     }
