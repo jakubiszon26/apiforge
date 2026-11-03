@@ -414,10 +414,12 @@ fn placement(ui: &Ui, popup_id: egui::Id, popup: &Popup) -> Placement {
         .map_or(vec2(width, list) + frame, |rect| rect.size());
     let below = bounds.bottom() - popup.at.y;
     let above = popup.line_top - bounds.top();
+    // Against the widest it may grow this frame, not last frame's width:
+    // new offers can widen it before its size is known.
     let x = popup
         .at
         .x
-        .min(bounds.right() - size.x.min(width + frame.x))
+        .min(bounds.right() - width - frame.x)
         .max(bounds.left());
     let (y, pivot, room) = if size.y <= below || below >= above {
         (popup.at.y, egui::Align2::LEFT_TOP, below)
