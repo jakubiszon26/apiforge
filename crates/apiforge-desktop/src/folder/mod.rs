@@ -1716,6 +1716,20 @@ fn graph_of(model: &Document, cleanup: bool) -> &Graph {
     }
 }
 
+/// The steps a binding on the board may name: on the Cleanup board, the Main
+/// steps and the Cleanup steps, as the scenario editor's board reads them.
+fn reference_of(model: &Document, cleanup: bool) -> std::borrow::Cow<'_, Graph> {
+    match model {
+        Document::Scenario(scenario) if cleanup => {
+            let mut graph = scenario.graph.clone();
+            graph.nodes.extend(scenario.cleanup.nodes.iter().cloned());
+            graph.edges.extend(scenario.cleanup.edges.iter().cloned());
+            std::borrow::Cow::Owned(graph)
+        }
+        _ => std::borrow::Cow::Borrowed(graph_of(model, false)),
+    }
+}
+
 fn with_graph(model: &Document, cleanup: bool, graph: Graph) -> Document {
     let mut next = model.clone();
     match &mut next {

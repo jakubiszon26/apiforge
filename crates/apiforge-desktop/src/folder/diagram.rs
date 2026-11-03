@@ -116,7 +116,7 @@ impl FolderApp {
                 .collect::<Vec<_>>()
         });
         let graph = graph_of(&model, cleanup);
-        let reference = graph_of(&model, false);
+        let reference = reference_of(&model, cleanup);
         let parameters = parameters_of(&model);
         let selection = self
             .selections
@@ -184,7 +184,7 @@ impl FolderApp {
                 }
                 let mut input = canvas::Input {
                     graph,
-                    reference_graph: reference,
+                    reference_graph: &reference,
                     project: &project,
                     parameters: &parameters,
                     selection: &selection,
@@ -247,11 +247,11 @@ impl FolderApp {
         }
         let project = self.context_project();
         let graph = graph_of(model, cleanup);
-        let reference = graph_of(model, false);
+        let reference = reference_of(model, cleanup);
         let parameters = parameters_of(model);
         let board = Board {
             graph,
-            reference,
+            reference: &reference,
             project: &project,
             parameters: &parameters,
         };
