@@ -147,12 +147,14 @@ impl Stopped {
                     ] {
                         context.send_viewport_cmd(command);
                     }
-                    // Centred again at its new size with its title bar, as the
-                    // stop window was, so it does not grow off the screen from
-                    // the dialog's corner.
+                    // Centred again at its new size with its title bar, above
+                    // the panel allowance, as the stop window was, so it does
+                    // not grow off the screen from the dialog's corner.
                     if let Some((monitor, title_bar)) = screen {
                         let outer = size + egui::vec2(0.0, title_bar);
-                        let corner = ((monitor - outer) / 2.0).max(egui::Vec2::ZERO);
+                        let work_area =
+                            monitor - egui::vec2(0.0, crate::window_fit::PANEL_ALLOWANCE);
+                        let corner = ((work_area - outer) / 2.0).max(egui::Vec2::ZERO);
                         context.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
                             corner.to_pos2(),
                         ));

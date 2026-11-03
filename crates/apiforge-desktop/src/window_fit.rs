@@ -6,9 +6,9 @@
 //!
 //! winit reports a monitor only to the event loop that eframe owns, and has no
 //! work area at all, so the window opens at its usual size and is fitted on
-//! its first frame from what egui reports: the monitor's size as the work
-//! area, and the title bar as the difference between the outer and the inner
-//! height. Where the frame cannot be measured — Wayland's server-side
+//! its first frame from what egui reports: the monitor's size less
+//! [`PANEL_ALLOWANCE`] as the work area, and the title bar as the difference
+//! between the outer and the inner height. Where the frame cannot be measured — Wayland's server-side
 //! decorations, a display without a window manager — a 36 px title bar is
 //! assumed.
 
@@ -17,6 +17,11 @@ use eframe::egui::{self, Rect, Vec2};
 /// The title bar assumed where the window's frame cannot be measured: the
 /// height KWin draws at 100 % scaling, where KTLO-38 was found.
 pub const ASSUMED_TITLE_BAR: f32 = 36.0;
+
+/// What a system panel or taskbar is assumed to take from the monitor's
+/// height, since its real work area cannot be read: enough for a KDE panel or
+/// the Windows taskbar at 100 % scaling (owner's decision, 2026-11-03).
+pub const PANEL_ALLOWANCE: f32 = 48.0;
 
 /// Frames to wait for the monitor and the window's rectangles before giving
 /// up and leaving the window at the size it opened with.
@@ -27,16 +32,17 @@ fn floor() -> Vec2 {
     Vec2::from(crate::MIN_WINDOW_SIZE)
 }
 
-/// The inner size of the first window on a monitor whose work area is
-/// `work_area`, under a title bar `title_bar` points high.
-pub fn first_window_size(work_area: Vec2, title_bar: f32) -> Vec2 {
-    fit_window_size(Vec2::from(crate::DEFAULT_WINDOW_SIZE), work_area, title_bar)
+/// The inner size of the first window on a monitor `monitor` points large,
+/// under a title bar `title_bar` points high.
+pub fn first_window_size(monitor: Vec2, title_bar: f32) -> Vec2 {
+    fit_window_size(Vec2::from(crate::DEFAULT_WINDOW_SIZE), monitor, title_bar)
 }
 
 /// A remembered inner size `size`, clamped so that the window with its title
-/// bar fits the work area, never below the minimum size.
-pub fn fit_window_size(size: Vec2, work_area: Vec2, title_bar: f32) -> Vec2 {
-    let room = work_area - Vec2::new(0.0, title_bar.max(0.0));
+/// bar fits the monitor's work area — the monitor less [`PANEL_ALLOWANCE`] —
+/// never below the minimum size.
+pub fn fit_window_size(size: Vec2, monitor: Vec2, title_bar: f32) -> Vec2 {
+    let room = monitor - Vec2::new(0.0, title_bar.max(0.0) + PANEL_ALLOWANCE);
     size.min(room).max(floor())
 }
 
