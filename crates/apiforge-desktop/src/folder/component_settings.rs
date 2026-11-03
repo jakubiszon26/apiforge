@@ -17,6 +17,8 @@ const ACTION_HOVER: &str = "Dropped after a block's output, the component is con
      this input. It changes nothing in a run.";
 const NO_ACTION: &str = "No action";
 const ROW_HEIGHT: f32 = 36.0;
+/// The room a required mark takes after an input's name in a row.
+const MARK_ROOM: f32 = 12.0;
 
 /// What the settings asked for in one frame.
 enum Change {
@@ -332,29 +334,34 @@ fn list_row(
             );
         }
         let inner = rect.shrink2(egui::vec2(theme::SPACE_MD, 0.0));
-        let name = painter.layout_no_wrap(
-            view.name.clone(),
-            egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
-            theme::TEXT,
-        );
         let detail = painter.layout_no_wrap(
             view.detail(),
             egui::FontId::proportional(theme::FONT_LABEL),
             theme::MUTED,
         );
-        // The detail keeps its place at the right; a long name gives way.
+        // The detail keeps its place at the right; a long name gives way,
+        // with an ellipsis, and its required mark stays after it.
         let detail_left = (inner.right() - detail.size().x).max(inner.center().x);
-        let name_room = egui::Rect::from_min_max(
-            inner.left_top(),
-            egui::pos2(detail_left - theme::SPACE_SM, inner.bottom()),
+        let mark = if view.required { MARK_ROOM } else { 0.0 };
+        let name_font = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+        let full = painter
+            .layout_no_wrap(view.name.clone(), name_font.clone(), theme::TEXT)
+            .size()
+            .x;
+        let name_right = (inner.left() + full).min(detail_left - theme::SPACE_SM - mark);
+        let name_room =
+            egui::Rect::from_min_max(inner.left_top(), egui::pos2(name_right, inner.bottom()));
+        widgets::paint_label(
+            painter,
+            name_room,
+            &view.name,
+            name_font,
+            theme::TEXT,
+            egui::Align::Min,
         );
-        let clipped = painter.with_clip_rect(name_room.intersect(painter.clip_rect()));
-        let name_at = egui::pos2(inner.left(), rect.center().y - name.size().y / 2.0);
-        let name_width = name.size().x;
-        clipped.galley(name_at, name, theme::TEXT);
-        if view.required {
-            clipped.text(
-                egui::pos2(name_at.x + name_width + 4.0, rect.center().y),
+        if view.required && name_room.width() >= 2.0 {
+            painter.text(
+                egui::pos2(name_room.right() + 4.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 "*",
                 egui::FontId::proportional(theme::FONT_BODY),

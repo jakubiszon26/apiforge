@@ -10250,8 +10250,8 @@ mod ux33 {
         );
     }
 
-    /// Types `text` at the end of the focused field `label`, one keystroke
-    /// per frame, after clearing it; `written` checks the code after each.
+    /// Selects everything in the field `label` and types `text` over it, one
+    /// keystroke per frame; `written` checks the code after each.
     fn type_each(
         harness: &mut FolderHarness,
         label: &str,
@@ -10361,9 +10361,9 @@ mod ux33 {
         }
     }
 
-    /// Criterion 3: the description is written as it is typed, and so is the
-    /// name; an empty name stays in the field with an inline error while the
-    /// code keeps the last one. Published, the name in code is read-only
+    /// Criterion 3: the description is written on each keystroke, and the
+    /// name as it is changed; an empty name stays in the field with an
+    /// inline error while the code keeps the last one. Published, the name in code is read-only
     /// with the *fixed once published* note.
     #[test]
     fn ux33_criterion_3_the_description_and_name_are_written_as_typed() {
@@ -10520,6 +10520,34 @@ mod ux33 {
         choose(&mut harness, "product * object · Product");
         assert!(!has_label(&harness, NAME));
         assert_eq!(field_value(&harness, "Input name"), "product");
+    }
+
+    /// Review round 1: the button is disabled, and says why, only where the
+    /// window has no room for the Inspector, which is Split at 960 × 540.
+    #[test]
+    fn ux33_the_button_waits_for_room_for_the_inspector() {
+        for size in [MINIMUM, WIDE] {
+            for mode in ["Diagram", "Split"] {
+                let directory = shop();
+                let (mut harness, _) = window(directory.path(), size, CART, mode);
+                let narrow = size == MINIMUM && mode == "Split";
+                assert_eq!(
+                    harness
+                        .get_by_label(SETTINGS)
+                        .accesskit_node()
+                        .is_disabled(),
+                    narrow,
+                    "{mode} at {size:?}"
+                );
+                if narrow {
+                    assert!(hover_shows(
+                        &mut harness,
+                        SETTINGS,
+                        "too narrow for the Inspector beside the code"
+                    ));
+                }
+            }
+        }
     }
 
     /// Found in the native QA run: the icon showed its own label as a
