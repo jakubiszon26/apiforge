@@ -437,6 +437,7 @@ impl FolderApp {
                 publication::Action::Model {
                     next: Box::new(with_graph(model, cleanup, edit.graph)),
                     selection: edit.selection,
+                    check: None,
                 },
             ),
             Err(message) => {

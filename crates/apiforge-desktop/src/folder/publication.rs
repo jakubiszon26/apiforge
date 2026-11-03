@@ -7,6 +7,9 @@ pub(super) enum Action {
     Model {
         next: Box<Document>,
         selection: Option<Vec<String>>,
+        /// A check added from the document's run results, counted once the
+        /// edit applies: at once, or after the comment prompt (UX-35).
+        check: Option<Box<runs::PendingCheck>>,
     },
     History {
         undo: bool,
@@ -72,11 +75,15 @@ impl FolderApp {
         match result {
             Ok(message) => {
                 if let Action::Model {
-                    selection: Some(selection),
-                    ..
+                    selection, check, ..
                 } = action
                 {
-                    self.selections.insert(id.to_owned(), selection);
+                    if let Some(selection) = selection {
+                        self.selections.insert(id.to_owned(), selection);
+                    }
+                    if let Some(check) = check {
+                        self.record_check(id, *check);
+                    }
                 }
                 if let Some(message) = message {
                     self.notify(message, false);

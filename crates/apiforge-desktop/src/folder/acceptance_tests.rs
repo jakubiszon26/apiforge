@@ -7668,6 +7668,103 @@ mod ux01 {
             "both rows show at the tallest normal height"
         );
     }
+
+    /// UX-35 (#252): the prompt a check's edit raises when the source holds
+    /// a comment that belongs to no statement.
+    const COMMENT_PROMPT: &str = "Continue without unattached comments?";
+
+    /// The window after one simulation of a scenario whose source starts
+    /// with a comment that belongs to no statement, its Run results
+    /// maximised on *Add to cart*; with the source the run used.
+    fn after_a_run_with_a_loose_comment()
+    -> (tempfile::TempDir, FolderHarness, String, RunResult, String) {
+        let (project, mut harness, scenario) = window(MINIMUM);
+        let text = format!("// loose comment\n\n{}", source_of(&harness, &scenario));
+        let session = app(&mut harness).session.as_mut().unwrap();
+        session.edit_source(&scenario, &text, CODE).unwrap();
+        session.settle(&scenario).unwrap();
+        settle(&mut harness);
+        let report = run(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        choose(&mut harness, MAXIMISE);
+        select_step(&mut harness, STEP);
+        assert!(has_label(&harness, "productId"), "Add to cart's outputs");
+        assert_eq!(bar(&harness), None, "fresh results have no bar text");
+        (project, harness, scenario, report, text)
+    }
+
+    /// UX-35 criterion 1: a check whose edit raised the prompt and was
+    /// confirmed reads *Check added* and adds 1 to the bar's count; the
+    /// results stay usable, so a second check counts too.
+    #[test]
+    fn ux35_criterion_1_a_confirmed_check_counts_as_added() {
+        let (_project, mut harness, scenario, report, text) = after_a_run_with_a_loose_comment();
+        let before = nodes(&harness, &scenario);
+
+        check(&mut harness, "productId");
+        assert!(
+            has_label(&harness, COMMENT_PROMPT),
+            "the check's edit asks first"
+        );
+        assert_eq!(source_of(&harness, &scenario), text, "nothing changed yet");
+        choose(&mut harness, "Continue");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "the prompt closed");
+
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one check card");
+        assert!(
+            source_of(&harness, &scenario).contains("add_to_cart.productId == 123"),
+            "the source gains the field's assertion:\n{}",
+            source_of(&harness, &scenario)
+        );
+        assert!(has_label(&harness, "Outputs  1"), "Outputs still shown");
+        reads_added(&harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE), "the check is counted");
+        offers_check(&harness, "total");
+
+        check(&mut harness, "total");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "asked only once");
+        assert_eq!(nodes(&harness, &scenario), before + 2, "a second card");
+        reads_added(&harness, "productId");
+        reads_added(&harness, "total");
+        assert_eq!(bar(&harness), Some(TWO), "both checks are counted");
+        assert!(folder(&harness).runs.handle.is_none(), "without a run");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+    }
+
+    /// UX-35 criterion 2: a cancelled prompt adds nothing and leaves the
+    /// state unchanged: the source, the cards, the fresh results whose rows
+    /// still offer *Check*; asked again and confirmed, the check counts once.
+    #[test]
+    fn ux35_criterion_2_a_cancelled_prompt_adds_nothing() {
+        let (_project, mut harness, scenario, report, text) = after_a_run_with_a_loose_comment();
+        let before = nodes(&harness, &scenario);
+
+        check(&mut harness, "productId");
+        assert!(has_label(&harness, COMMENT_PROMPT), "the edit asks first");
+        choose(&mut harness, "Cancel");
+        assert!(!has_label(&harness, COMMENT_PROMPT), "the prompt closed");
+
+        assert_eq!(source_of(&harness, &scenario), text, "the source is kept");
+        assert_eq!(nodes(&harness, &scenario), before, "no card");
+        assert_eq!(bar(&harness), None, "the results are fresh, no count");
+        offers_check(&harness, "productId");
+        offers_check(&harness, "total");
+        assert_eq!(
+            folder(&harness).run_result(&scenario).unwrap().id,
+            report.id,
+            "the same results"
+        );
+
+        check(&mut harness, "productId");
+        choose(&mut harness, "Continue");
+        assert_eq!(nodes(&harness, &scenario), before + 1, "one card");
+        reads_added(&harness, "productId");
+        assert_eq!(bar(&harness), Some(ONE), "counted once");
+    }
 }
 
 // ----- UX-02: the run mode is a setting ---------------------------------------
