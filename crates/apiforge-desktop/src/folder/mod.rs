@@ -30,6 +30,7 @@ mod opening;
 mod placement;
 mod publication;
 mod runs;
+mod save_component;
 mod saving;
 mod settings;
 mod storage;
@@ -175,6 +176,8 @@ enum Prompt {
         client: Option<String>,
         role: apiforge_storage::project::HolderRole,
     },
+    /// *Save as component* for the selected steps (UX-30).
+    SaveComponent(Box<save_component::SaveComponent>),
 }
 
 /// An `.afs` file in a folder without a project, offered for registration.
@@ -918,13 +921,18 @@ impl FolderApp {
         self.holder_bar(ui);
         let active = self.workbench.active().map(str::to_owned);
         self.run_report(ui, active.as_deref());
-        // Maximised run results leave no room for anything else (KTLO-19),
-        // nor do run results dragged above their ceiling (UX-05).
-        if self.report_covers(active.as_deref()) {
+        // Maximised run results leave no room for anything else (KTLO-19).
+        if self.report_maximised(active.as_deref()) {
             self.prompts(ui.ctx());
             self.protect(now);
             return;
         }
+        // At any other height the views are drawn in the room left above the
+        // run results, however little (UX-36), and clipped to it: a side
+        // panel whose contents are taller than the room grows past it, and
+        // its edge, drawn and hovered by this ui, would reach the run
+        // results' bar.
+        ui.set_clip_rect(ui.clip_rect().intersect(ui.available_rect_before_wrap()));
         match self.workbench.mode {
             Mode::Code => {
                 egui::Panel::left("folder-documents")

@@ -3,11 +3,15 @@
 use super::*;
 use crate::report::DROP_SNAP;
 
-/// The heights the Problems section can be dragged between, while it is not
-/// expanded.
-const PROBLEMS_HEIGHTS: std::ops::RangeInclusive<f32> = 72.0..=360.0;
+/// The least height of the Problems section while the code panel has room
+/// for it and three lines of code; with less, the section gives way down to
+/// its caption row (UX-36).
+const PROBLEMS_LEAST: f32 = 72.0;
 /// The most code an expanded Problems section leaves above itself (KTLO-18).
 const CODE_STRIP: f32 = 96.0;
+/// The lines of code a short code panel keeps above the Problems section
+/// (UX-36).
+const CODE_LEAST_LINES: f32 = 3.0;
 /// The code panel's margin above and below the editor, and the editor's own
 /// margin above its first line.
 const CODE_MARGIN: f32 = 6.0;
@@ -43,6 +47,15 @@ fn code_strip(ui: &egui::Ui) -> f32 {
     rows * row + margins
 }
 
+/// The least height of the code above the Problems section: three whole
+/// lines with the margins around them (UX-36).
+fn code_least(ui: &egui::Ui) -> f32 {
+    let row = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)));
+    CODE_LEAST_LINES * row + 2.0 * CODE_MARGIN + EDITOR_MARGIN
+}
+
 impl FolderApp {
     /// The active document as text, with its diagnostics and save state below.
     pub(super) fn code_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
@@ -62,7 +75,12 @@ impl FolderApp {
         let expanded = self.problems_expanded;
         let area = ui.available_rect_before_wrap();
         let strip = code_strip(ui);
-        let ceiling = (ui.available_height() - strip).max(*PROBLEMS_HEIGHTS.start());
+        // The most the section takes: the code panel's height less KTLO-18's
+        // strip of code, or, in a code panel too short for that (Run results
+        // dragged high, UX-36), less three lines of code.
+        let room = (area.height() - code_least(ui)).max(0.0);
+        let ceiling = (area.height() - strip).max(PROBLEMS_LEAST.min(room));
+        let least = PROBLEMS_LEAST.min(ceiling);
         let diagnostics = egui::Id::new((
             "folder-diagnostics",
             self.workbench.mode as u8,
@@ -77,24 +95,30 @@ impl FolderApp {
         if expanded && (held || let_go) {
             self.problems_dragged = true;
         }
-        // Dragged from its normal state, the edge goes on past the normal
-        // range up to the ceiling, where a release expands the section
-        // (UX-05).
+        // Dragged from its normal state, the edge goes up to the ceiling,
+        // where a release expands the section (UX-05).
         if !expanded && held && self.problems_drag_from.is_none() {
             self.problems_drag_from = Some(self.workbench.panels.diagnostics);
         }
         let reaching = !expanded && self.problems_drag_from.is_some();
+        // In its normal state the section is drawn at the height kept in the
+        // view state, which a code panel shorter for a while does not
+        // shorten: egui would keep the height it last drew and prefer it
+        // (UX-36, as UX-05 found for Run results).
+        let squeezed =
+            !expanded && !held && !let_go && ceiling + 0.5 < self.workbench.panels.diagnostics;
+        if !expanded && !held && !let_go {
+            ui.ctx()
+                .data_mut(|data| data.remove::<egui::PanelState>(diagnostics));
+        }
         let panel = egui::Panel::bottom(diagnostics).resizable(true);
-        let panel = if reaching {
+        let panel = if !expanded {
+            // It resizes freely up to the ceiling (UX-36).
             panel
                 .default_size(self.workbench.panels.diagnostics)
-                .size_range(*PROBLEMS_HEIGHTS.start()..=ceiling.max(*PROBLEMS_HEIGHTS.end()))
-        } else if !expanded {
-            panel
-                .default_size(self.workbench.panels.diagnostics)
-                .size_range(PROBLEMS_HEIGHTS)
+                .size_range(least..=ceiling)
         } else if self.problems_dragged {
-            panel.size_range(*PROBLEMS_HEIGHTS.start()..=ceiling)
+            panel.size_range(least..=ceiling)
         } else {
             panel.exact_size(ceiling)
         };
@@ -111,16 +135,28 @@ impl FolderApp {
                     // height it was given.
                     ui.set_min_height(ui.available_height());
                 }
-                reveal = self.diagnostics_panel(ui, document_id, &snapshot);
+                if squeezed {
+                    // Given way to a short code panel, the section shows what
+                    // fits of its caption row and list. Taller contents would
+                    // make egui grow the panel past its size and move its top
+                    // down, under the code drawn above it (UX-36).
+                    let rect = ui.max_rect();
+                    let mut fitted = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    fitted.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    reveal = self.diagnostics_panel(&mut fitted, document_id, &snapshot);
+                    ui.advance_cursor_after_rect(rect);
+                } else {
+                    reveal = self.diagnostics_panel(ui, document_id, &snapshot);
+                }
             });
         // An expanded height is never remembered, so restoring returns the
         // height the section had, and so does the next window; nor is a
-        // height past the normal range. The outer height is what
-        // `default_size` takes, so a restore gives it back exactly; the inner
-        // height plus margins missed the separator's pixel.
+        // height the section gives way to a short code panel at. The outer
+        // height is what `default_size` takes, so a restore gives it back
+        // exactly; the inner height plus margins missed the separator's pixel.
         let height = shown.response.rect.height();
-        if !expanded {
-            self.workbench.panels.diagnostics = height.min(*PROBLEMS_HEIGHTS.end());
+        if !expanded && !squeezed {
+            self.workbench.panels.diagnostics = height;
         }
         if let Some(before) = self.problems_drag_from
             && reaching
