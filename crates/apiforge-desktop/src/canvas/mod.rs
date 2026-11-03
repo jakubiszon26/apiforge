@@ -268,6 +268,8 @@ pub struct Canvas {
     fit_pending: bool,
     camera_moved_by_user: bool,
     reveal_pending: Option<String>,
+    /// A block just pasted, to show once the board is drawn (UX-34).
+    pasted_pending: Option<String>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -297,6 +299,7 @@ impl Default for Canvas {
             fit_pending: true,
             camera_moved_by_user: false,
             reveal_pending: None,
+            pasted_pending: None,
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -344,6 +347,14 @@ impl Canvas {
         self.menu.is_some()
     }
 
+    /// Whether a board rectangle was wholly in view in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_in_view(&self, world: Rect) -> bool {
+        self.last_focus.is_some_and(|focus| {
+            focus.contains_rect(self.screen_camera(self.last_viewport).rect(world))
+        })
+    }
+
     /// The blocks the last frame ringed for the selected input (UX-31).
     #[cfg(test)]
     pub(crate) fn debug_ringed(&self) -> Vec<String> {
@@ -353,6 +364,13 @@ impl Canvas {
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);
+    }
+
+    /// Shows a block just pasted or duplicated (UX-34): a fitted board fits
+    /// again, around the copies and their originals; a board the user has
+    /// moved reveals the block only when it is out of view.
+    pub fn show_pasted(&mut self, node_id: String) {
+        self.pasted_pending = Some(node_id);
     }
 
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
@@ -460,6 +478,19 @@ impl Canvas {
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
 
+        if let Some(id) = self.pasted_pending.take()
+            && let Some(card) = cards.iter().find(|card| card.id == id)
+        {
+            if !self.camera_moved_by_user {
+                // A fitted board stays fitted, now around the copies too.
+                self.fit_pending = true;
+            } else if !overlays
+                .focus
+                .contains_rect(self.screen_camera(viewport).rect(card.rect()))
+            {
+                self.reveal_pending = Some(id);
+            }
+        }
         let focus_changed = self
             .last_focus
             .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);

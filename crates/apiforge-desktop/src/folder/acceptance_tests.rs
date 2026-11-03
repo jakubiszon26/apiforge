@@ -10904,17 +10904,20 @@ mod ux34 {
         copy(&mut harness);
         choose(&mut harness, "Cleanup");
         choose(&mut harness, PASTE);
-        harness.run_steps(30);
+        harness.run_steps(5);
         settle(&mut harness);
-        let board = harness.get_by_label("Diagram board").rect();
-        let field = harness
-            .query_by_label("A of Expected price 2")
-            .expect("the pasted card is drawn")
-            .rect();
-        assert!(
-            board.contains_rect(field),
-            "the pasted step is in view: {field:?} on {board:?}"
-        );
+        let document = model(&harness, &id);
+        let project = folder(&harness).context_project();
+        let main = graph_of(&document, false);
+        let cleanup = graph_of(&document, true);
+        let canvas = folder(&harness).canvases.get(&id).expect("the board");
+        for handle in ["expected_price_2", "promotional_price_2", "delete_cart"] {
+            let card = Card::build(node(cleanup, handle), main, &project).rect();
+            assert!(
+                canvas.debug_in_view(card),
+                "{handle} is in view after the paste: {card:?}"
+            );
+        }
     }
 
     /// Criterion 5: one undo removes a paste, and one undo removes a

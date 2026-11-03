@@ -442,7 +442,7 @@ impl FolderApp {
         // Copies from another graph keep their place, which may be outside
         // the view.
         if let Some(canvas) = self.canvases.get_mut(document_id) {
-            canvas.reveal(ids[0].clone());
+            canvas.show_pasted(ids[0].clone());
         }
         if let Some(summary) = summary {
             self.notify(summary, false);
