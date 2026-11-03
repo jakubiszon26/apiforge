@@ -13,6 +13,7 @@ pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
 mod chrome;
 mod code_view;
+mod component_settings;
 mod conflict_view;
 mod diagram;
 mod dog;
@@ -67,7 +68,7 @@ use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
 use placement::CardPlacer;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, mpsc::Receiver},
     time::{Duration, Instant},
@@ -276,6 +277,10 @@ pub struct FolderApp {
     /// The *New input* form open on a component's board, by document
     /// (UX-32). While it is open the Inspector shows it.
     new_inputs: HashMap<String, inputs::NewInput>,
+    /// The components whose settings are open in the Inspector, by document
+    /// (UX-33). They give way to a selected block or input and to the *New
+    /// input* form.
+    component_settings: HashSet<String>,
     /// Each document's field drafts as the inspector and the session last
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
@@ -468,6 +473,7 @@ impl FolderApp {
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
             new_inputs: HashMap::new(),
+            component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
             clipboard: None,
             inspector: Inspector::default(),
@@ -1621,6 +1627,7 @@ impl FolderApp {
         self.selections.remove(document_id);
         self.selected_inputs.remove(document_id);
         self.new_inputs.remove(document_id);
+        self.component_settings.remove(document_id);
         if self.shown.as_deref() == Some(document_id) {
             self.shown = None;
         }

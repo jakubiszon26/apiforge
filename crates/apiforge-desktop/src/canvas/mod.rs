@@ -50,6 +50,9 @@ pub enum Command {
     /// Open the *New input* form for a component (UX-32): *+ Add input* in
     /// the INPUTS strip.
     AddInput,
+    /// Open or close the component's settings in the Inspector (UX-33):
+    /// *Component settings* in the board's header row.
+    ComponentSettings,
     /// Final positions after a drag.
     Move(Vec<(String, Position)>),
     Connect {
@@ -157,6 +160,38 @@ pub struct Input<'a> {
     /// The name typed in the *New input* form while it is open (UX-32): the
     /// strip shows the input as being added.
     pub adding_input: Option<&'a str>,
+    /// *Component settings* in the header row (UX-33); `None` on a board
+    /// without it, a scenario's.
+    pub settings: Option<SettingsButton>,
+}
+
+/// The state of the *Component settings* button in a component board's
+/// header row (UX-33, COMP-00 Q4).
+#[derive(Clone, Copy, Debug)]
+pub struct SettingsButton {
+    /// The settings are open in the Inspector: the button is pressed.
+    pub open: bool,
+    /// Whether the Inspector has room beside the board; without it the
+    /// button is disabled and says why.
+    pub available: bool,
+    /// The width the caller's header wants at the left of the row. The
+    /// button keeps its label while the row has room for both, and is an
+    /// icon with a tooltip when it has not.
+    pub header_width: f32,
+}
+
+/// The button's name, also its label when the header row has room.
+pub const SETTINGS: &str = "Component settings";
+const SETTINGS_HOVER: &str = "Component settings: name, description, action, inputs and outputs";
+const SETTINGS_UNAVAILABLE: &str =
+    "The window is too narrow for the Inspector beside the code. Widen it, or switch to Diagram.";
+
+/// How the toolbar shows *Component settings*.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SettingsShape {
+    None,
+    Icon,
+    Labelled,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -817,22 +852,80 @@ impl Canvas {
         commands
     }
 
-    fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
+    /// Where the toolbar's size is kept as last drawn in one shape.
+    fn toolbar_key(&self, ui: &egui::Ui, input: &Input<'_>, settings: SettingsShape) -> egui::Id {
+        ui.id().with((
+            "toolbar-size",
+            input.selection.len(),
+            !self.selected_wires.is_empty(),
+            input.can_paste,
+            settings,
+        ))
+    }
+
+    fn toolbar_measured(
+        &self,
+        ui: &egui::Ui,
+        input: &Input<'_>,
+        settings: SettingsShape,
+    ) -> Option<Vec2> {
+        let key = self.toolbar_key(ui, input, settings);
+        ui.ctx().data(|data| data.get_temp(key))
+    }
+
+    /// The toolbar's width before it has been drawn in a shape, with the
+    /// settings button as an icon when it has one.
+    fn toolbar_estimate(&self, input: &Input<'_>) -> f32 {
         let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
-        let toolbar_width = 96.0
-            + if input.can_paste { 56.0 } else { 0.0 }
-            + if has_selection { 108.0 } else { 0.0 };
-        let toolbar_size = ui
-            .ctx()
-            .data(|data| {
-                data.get_temp(ui.id().with((
-                    "toolbar-size",
-                    input.selection.len(),
-                    !self.selected_wires.is_empty(),
-                    input.can_paste,
-                )))
+        96.0 + if input.can_paste { 56.0 } else { 0.0 }
+            + if has_selection { 108.0 } else { 0.0 }
+            + if input.settings.is_some() { 44.0 } else { 0.0 }
+    }
+
+    /// How the toolbar shows *Component settings* (UX-33): with its label
+    /// while the header row has room for the caller's whole header beside
+    /// the labelled toolbar, which the steps summary gives way to; else as
+    /// an icon with a tooltip.
+    fn settings_shape(&self, ui: &egui::Ui, input: &Input<'_>) -> SettingsShape {
+        let Some(settings) = input.settings else {
+            return SettingsShape::None;
+        };
+        let label = ui
+            .painter()
+            .layout_no_wrap(
+                SETTINGS.to_owned(),
+                FontId::proportional(theme::FONT_LABEL),
+                theme::TEXT,
+            )
+            .size()
+            .x;
+        // A compact button's label and its gap from the icon, as
+        // `widgets::ActionButton` lays them out, beside the square icon.
+        let extra = 20.0 + 14.0 + 6.0 + label - 26.0;
+        let labelled = self
+            .toolbar_measured(ui, input, SettingsShape::Labelled)
+            .map(|size| size.x)
+            .or_else(|| {
+                self.toolbar_measured(ui, input, SettingsShape::Icon)
+                    .map(|size| size.x + extra)
             })
-            .unwrap_or(vec2(toolbar_width, 30.0));
+            .unwrap_or_else(|| self.toolbar_estimate(input) + extra);
+        let room = Self::viewport(ui).width()
+            - layout::OVERLAY_PADDING_LEFT
+            - layout::OVERLAY_PADDING_RIGHT
+            - labelled
+            - 2.0 * layout::OVERLAY_GAP;
+        if room >= settings.header_width {
+            SettingsShape::Labelled
+        } else {
+            SettingsShape::Icon
+        }
+    }
+
+    fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
+        let toolbar_size = self
+            .toolbar_measured(ui, input, self.settings_shape(ui, input))
+            .unwrap_or(vec2(self.toolbar_estimate(input), 30.0));
         let banner_height = toolbar_size.y.max(26.0);
 
         let hint_galley = ui.fonts_mut(|fonts| {
@@ -870,11 +963,18 @@ impl Canvas {
     pub fn header_room(&self, ui: &egui::Ui, input: &Input<'_>) -> HeaderRoom {
         // The header, a gap, the summary or nothing, a gap, the toolbar.
         let toolbar = self.measure_overlays(ui, input).toolbar_size.x;
-        let alone = Self::viewport(ui).width()
+        let row = Self::viewport(ui).width()
             - layout::OVERLAY_PADDING_LEFT
-            - layout::OVERLAY_PADDING_RIGHT
-            - toolbar
-            - 2.0 * layout::OVERLAY_GAP;
+            - layout::OVERLAY_PADDING_RIGHT;
+        // With too little room beside the toolbar for any header, the toolbar
+        // moves under the row (`layout::board_overlays`), and the header and
+        // the summary have the whole row.
+        let stacked = row - toolbar - layout::OVERLAY_GAP < layout::MIN_BANNER_SIDE_BY_SIDE;
+        let alone = if stacked {
+            row
+        } else {
+            row - toolbar - 2.0 * layout::OVERLAY_GAP
+        };
         let summary = ui
             .painter()
             .layout_no_wrap(
@@ -886,7 +986,7 @@ impl Canvas {
             .x;
         HeaderRoom {
             alone,
-            with_summary: alone - summary,
+            with_summary: alone - summary - if stacked { layout::OVERLAY_GAP } else { 0.0 },
         }
     }
 
@@ -1526,6 +1626,7 @@ impl Canvas {
         commands: &mut Vec<Command>,
     ) {
         let has_selection = !input.selection.is_empty();
+        let shape = self.settings_shape(ui, input);
         let measured = egui::Area::new(ui.id().with("board-toolbar"))
             .enabled(ui.is_enabled())
             .constrain_to(viewport)
@@ -1543,6 +1644,32 @@ impl Canvas {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let editable = !input.read_only;
+                            if let Some(settings) = input.settings {
+                                let labelled = shape == SettingsShape::Labelled;
+                                // An icon's own tooltip is its label: there
+                                // the longer text, under the button's name.
+                                let button = if labelled {
+                                    widgets::action(Icon::Settings, SETTINGS).compact().quiet()
+                                } else {
+                                    widgets::icon_button(Icon::Settings, SETTINGS_HOVER)
+                                        .named(SETTINGS)
+                                        .compact()
+                                };
+                                let mut response = ui
+                                    .add_enabled(
+                                        settings.available,
+                                        button.toggle(settings.open && settings.available),
+                                    )
+                                    .on_disabled_hover_text(SETTINGS_UNAVAILABLE);
+                                if labelled {
+                                    response = response.on_hover_text(SETTINGS_HOVER);
+                                }
+                                if response.clicked() {
+                                    self.menu = None;
+                                    commands.push(Command::ComponentSettings);
+                                }
+                                ui.separator();
+                            }
                             if ui
                                 .add_enabled(
                                     editable,
@@ -1683,12 +1810,7 @@ impl Canvas {
                         });
                     });
             });
-        let key = ui.id().with((
-            "toolbar-size",
-            input.selection.len(),
-            !self.selected_wires.is_empty(),
-            input.can_paste,
-        ));
+        let key = self.toolbar_key(ui, input, shape);
         let size = measured.response.rect.size();
         if ui.ctx().data(|data| data.get_temp::<Vec2>(key)) != Some(size) {
             ui.ctx().data_mut(|data| data.insert_temp(key, size));
@@ -2411,6 +2533,7 @@ mod tests {
                                 inputs: None,
                                 selected_input: None,
                                 adding_input: None,
+                                settings: None,
                             },
                         );
                     });
@@ -2460,6 +2583,7 @@ mod tests {
                                 inputs: None,
                                 selected_input: None,
                                 adding_input: None,
+                                settings: None,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -2496,6 +2620,69 @@ mod tests {
                 );
                 output.textures_delta.clear();
             }
+        }
+    }
+    /// UX-33: on a board too narrow for any header beside the toolbar, the
+    /// toolbar moves under the row and the header has the whole row, so a
+    /// wider toolbar does not cut the file name short for nothing.
+    #[test]
+    fn a_header_has_the_whole_row_when_the_toolbar_moves_below() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let project = apiforge_core::demos::shop_project();
+        let component = &project.components[0];
+        let graph = &component.graph;
+        let mut canvas = Canvas::default();
+        for frame in 0..3 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(340.0, 600.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut input = Input {
+                            graph,
+                            reference_graph: graph,
+                            project: &project,
+                            parameters: &[],
+                            selection: &[],
+                            steps: None,
+                            can_paste: false,
+                            context: "test",
+                            library_in_view: true,
+                            read_only: false,
+                            header_leading: None,
+                            library: None,
+                            inputs: Some(&component.inputs),
+                            selected_input: None,
+                            adding_input: None,
+                            settings: Some(SettingsButton {
+                                open: true,
+                                available: true,
+                                header_width: 200.0,
+                            }),
+                        };
+                        let room = canvas.header_room(ui, &input);
+                        input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));
+                        if frame == 2 {
+                            let row = Canvas::viewport(ui).width()
+                                - layout::OVERLAY_PADDING_LEFT
+                                - layout::OVERLAY_PADDING_RIGHT;
+                            assert!((room.alone - row).abs() < 0.01, "{room:?} of {row}");
+                            assert_eq!(canvas.settings_shape(ui, &input), SettingsShape::Icon);
+                            let overlays = layout::board_overlays(
+                                Canvas::viewport(ui),
+                                &canvas.measure_overlays(ui, &input),
+                            );
+                            assert!((overlays.leading.width() - 200.0).abs() < 0.01);
+                            assert!(overlays.toolbar.top() >= overlays.leading.bottom());
+                        }
+                        canvas.show(ui, &input);
+                    });
+                },
+            );
+            output.textures_delta.clear();
         }
     }
 }

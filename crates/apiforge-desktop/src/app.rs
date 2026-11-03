@@ -2344,6 +2344,7 @@ impl App {
                 inputs: None,
                 selected_input: None,
                 adding_input: None,
+                settings: None,
             };
             self.canvas.show(ui, &input)
         };
@@ -2366,8 +2367,8 @@ impl App {
         }
         match command {
             Command::Select(ids) => self.editor.selection = ids,
-            // The workspace window shows no INPUTS strip.
-            Command::SelectInput(_) | Command::AddInput => {}
+            // The workspace window shows no INPUTS strip or settings button.
+            Command::SelectInput(_) | Command::AddInput | Command::ComponentSettings => {}
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);

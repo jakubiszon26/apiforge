@@ -112,13 +112,13 @@ fn required_attribute(required: bool, has_default: bool) -> Option<bool> {
 /// The text a field shows: what is being typed in it while it has the
 /// keyboard, else what the code says. A draft belongs to the input it was
 /// typed for.
-fn draft(ui: &egui::Ui, id: egui::Id, owner: &str) -> Option<String> {
+pub(super) fn draft(ui: &egui::Ui, id: egui::Id, owner: &str) -> Option<String> {
     ui.data(|data| data.get_temp::<(String, String)>(id))
         .filter(|(draft_owner, _)| draft_owner == owner)
         .map(|(_, text)| text)
 }
 
-fn keep_draft(ui: &egui::Ui, id: egui::Id, owner: &str, text: &str, focused: bool) {
+pub(super) fn keep_draft(ui: &egui::Ui, id: egui::Id, owner: &str, text: &str, focused: bool) {
     ui.data_mut(|data| {
         if focused {
             data.insert_temp(id, (owner.to_owned(), text.to_owned()));
@@ -130,7 +130,7 @@ fn keep_draft(ui: &egui::Ui, id: egui::Id, owner: &str, text: &str, focused: boo
 
 /// A field's visible label when the field itself carries the same name, so
 /// that a reader finds one widget by it.
-fn unnamed_field_label(ui: &mut egui::Ui, text: &str) {
+pub(super) fn unnamed_field_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(theme::SPACE_SM);
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
@@ -141,7 +141,7 @@ fn unnamed_field_label(ui: &mut egui::Ui, text: &str) {
     ui.painter().galley(rect.min, galley, theme::MUTED);
 }
 
-fn heading(ui: &mut egui::Ui, caption: &str, title: &str) {
+pub(super) fn heading(ui: &mut egui::Ui, caption: &str, title: &str) {
     ui.label(
         RichText::new(caption)
             .size(theme::FONT_META)
@@ -158,7 +158,10 @@ fn heading(ui: &mut egui::Ui, caption: &str, title: &str) {
 
 /// The Inspector beside the board; returns whether it was closed and what
 /// `add_contents` returned.
-fn side_panel<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> (bool, R) {
+pub(super) fn side_panel<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> (bool, R) {
     let mut close = false;
     let inner = egui::Panel::right("folder-inspector")
         .default_size(360.0)
@@ -201,7 +204,7 @@ enum Change {
 
 impl FolderApp {
     /// A model edit of the component in `document_id`.
-    fn edit_component(&mut self, document_id: &str, next: Component) {
+    pub(super) fn edit_component(&mut self, document_id: &str, next: Component) {
         self.component_action(
             document_id,
             publication::Action::Model {
@@ -209,6 +212,23 @@ impl FolderApp {
                 selection: None,
             },
         );
+    }
+
+    /// Opens the *New input* form in the Inspector, in place of a selected
+    /// block or input or the component's settings.
+    pub(super) fn open_new_input(&mut self, document_id: &str) {
+        self.new_inputs.entry(document_id.to_owned()).or_default();
+        self.selections.remove(document_id);
+        self.selected_inputs.remove(document_id);
+        self.component_settings.remove(document_id);
+    }
+
+    /// Selects the input `name`: its panel takes the Inspector.
+    pub(super) fn open_input(&mut self, document_id: &str, name: String) {
+        self.new_inputs.remove(document_id);
+        self.component_settings.remove(document_id);
+        self.selections.remove(document_id);
+        self.selected_inputs.insert(document_id.to_owned(), name);
     }
 
     /// The *New input* form (COMP-00 Q2 = A): name, type, default,
