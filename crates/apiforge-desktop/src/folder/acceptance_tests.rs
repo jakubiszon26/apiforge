@@ -10021,6 +10021,10 @@ mod ux32 {
         assert_eq!(toggled(&harness, ACTION), Some(Toggled::True));
         let source = source_of(&harness, &id);
         assert!(source.contains("  action quantity: string\n"), "{source}");
+        assert!(
+            source.contains("  input quantity: string = 2\n"),
+            "{source}"
+        );
         assert!(!source.contains("action product"), "{source}");
         choose(&mut harness, PRODUCT);
         assert_eq!(toggled(&harness, ACTION), Some(Toggled::False), "product");
@@ -10117,6 +10121,60 @@ mod ux32 {
         assert!(
             caption.right() <= pill.left() && pill.right() <= add.left(),
             "the pill {pill:?} whole between {caption:?} and {add:?}"
+        );
+    }
+
+    /// A type the default does not fit is refused until the default
+    /// changes: `quantity = 1` stays a number when *List* is chosen, and a
+    /// default of another kind is an inline error that the code never gets.
+    #[test]
+    fn ux32_a_default_and_its_type_must_agree() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        choose(&mut harness, QUANTITY);
+        choose(&mut harness, TYPE);
+        choose(&mut harness, "List");
+        assert_eq!(source_of(&harness, &id), before, "the type is kept");
+        assert!(contains(&harness, "The default 1 is not a list"));
+        type_over(&mut harness, DEFAULT, "true");
+        assert!(contains(&harness, "The default is not a number"));
+        assert!(source_of(&harness, &id).contains("  input quantity: number\n"));
+        replace_text(&mut harness, DEFAULT, "[1, 2]");
+        assert!(contains(&harness, "The default is not a number"));
+        assert!(!source_of(&harness, &id).contains("[1, 2]"));
+    }
+
+    /// On a read-only board the panel's fields are disabled, but *Used by*
+    /// still selects the reading card.
+    #[test]
+    fn ux32_used_by_is_navigation_on_a_read_only_board() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        choose(&mut harness, QUANTITY);
+        // Code with an error leaves the last valid version, read-only.
+        let broken = format!("{}\n  broken = (\n", source_of(&harness, &id));
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&id, &broken, CODE)
+            .unwrap();
+        app(&mut harness).analyser.typed(&id, Instant::now());
+        settle(&mut harness);
+        assert!(contains(&harness, "read-only"), "the board says so");
+        assert!(harness.get_by_label(NAME).accesskit_node().is_disabled());
+        assert!(
+            !harness
+                .get_by_label("Select the step Cart item")
+                .accesskit_node()
+                .is_disabled()
+        );
+        choose(&mut harness, "Select the step Cart item");
+        assert_eq!(
+            folder(&harness).selections.get(&id).map(Vec::len),
+            Some(1),
+            "the card is selected"
         );
     }
 

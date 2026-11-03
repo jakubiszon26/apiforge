@@ -137,6 +137,11 @@ impl FolderApp {
             // declares, ends the input's selection.
             self.selected_inputs.remove(document_id);
         }
+        // A block selected by any path, a run's step or an added block among
+        // them, leaves the *New input* form (UX-32).
+        if !selection.is_empty() {
+            self.new_inputs.remove(document_id);
+        }
         // The input the *New input* form is adding (UX-32).
         let adding_input = inputs
             .and_then(|_| self.new_inputs.get(document_id))

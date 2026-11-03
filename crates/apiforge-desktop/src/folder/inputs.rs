@@ -45,22 +45,53 @@ const REQUIRED_RULE: &str =
 const REQUIRED_HOVER: &str = "Callers must give a value";
 const EXPOSED_HOVER: &str = "A block that calls the component lets its value be edited";
 
-/// A default as typed: a JSON value, and for text also the text itself
-/// without quotes; nothing when the field is empty.
-fn parse_default(text: &str, value_type: ValueType) -> Result<OptionalJson, &'static str> {
+/// A default as typed: a JSON value of the input's type, and for text also
+/// the text itself without quotes; nothing when the field is empty.
+fn parse_default(text: &str, value_type: ValueType) -> Result<OptionalJson, String> {
     let text = text.trim();
     if text.is_empty() {
         return Ok(OptionalJson::Missing);
     }
     match serde_json::from_str::<Value>(text) {
         Ok(value) if value_type != ValueType::String || value.is_string() => {
+            default_fits(&value, value_type)?;
             Ok(OptionalJson::Present(value))
         }
         // Text may be typed without its quotes; begun with one, it is JSON.
         _ if value_type == ValueType::String && !text.starts_with('"') => {
             Ok(OptionalJson::Present(Value::String(text.to_owned())))
         }
-        _ => Err(DEFAULT_ERROR),
+        _ => Err(DEFAULT_ERROR.to_owned()),
+    }
+}
+
+/// What a default of `value_type` must be, as a phrase and an example;
+/// nothing for text and any data, which take a value as written, as the
+/// language does.
+fn expected(value_type: ValueType) -> Option<(&'static str, &'static str)> {
+    match value_type {
+        ValueType::Any | ValueType::String => None,
+        ValueType::Number => Some(("a number", "1 or 2.5")),
+        ValueType::Boolean => Some(("yes or no", "true or false")),
+        ValueType::Object => Some(("an object", "{\"a\": 1}")),
+        ValueType::Array => Some(("a list", "[1, 2]")),
+    }
+}
+
+/// Whether `value` may be the default of an input of `value_type`.
+fn default_fits(value: &Value, value_type: ValueType) -> Result<(), String> {
+    let fits = match value_type {
+        ValueType::Any | ValueType::String => true,
+        ValueType::Number => value.is_number(),
+        ValueType::Boolean => value.is_boolean(),
+        ValueType::Object => value.is_object(),
+        ValueType::Array => value.is_array(),
+    };
+    match expected(value_type) {
+        Some((kind, example)) if !fits => Err(format!(
+            "The default is not {kind}. Write one such as {example}, or clear it."
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -235,52 +266,57 @@ impl FolderApp {
             .collect();
         let id = egui::Id::new(("component-input", document_id));
         let view = canvas::InputView::of(port, &project.contracts);
-        let (close, change) = side_panel(ui, |ui| {
+        let (close, changes) = side_panel(ui, |ui| {
+            let mut changes = ui
+                .add_enabled_ui(editable, |ui| input_form(ui, id, component, port, &view))
+                .inner;
+            // Going to a reading step is navigation, free on a read-only board.
+            used_by(ui, &readers, &mut changes);
             ui.add_enabled_ui(editable, |ui| {
-                input_form(ui, id, component, port, &view, &readers)
-            })
-            .inner
+                delete_input(ui, id, port, &readers, &mut changes);
+            });
+            changes
         });
         if close {
             self.selected_inputs.remove(document_id);
         }
-        let Some(change) = change else {
-            return;
-        };
-        if !editable && !matches!(change, Change::Select(_)) {
-            return;
-        }
-        match change {
-            Change::Port(next) => {
-                self.edit_component(
-                    document_id,
-                    edit::replace_input(component, &port.name, next),
-                );
-            }
-            Change::Rename(name) => {
-                self.edit_component(
-                    document_id,
-                    edit::rename_input(component, &port.name, &name),
-                );
-                self.selected_inputs.insert(document_id.to_owned(), name);
-            }
-            Change::Action(on) => {
-                let input = on.then_some(port.name.as_str());
-                self.edit_component(document_id, edit::set_action(component, input));
-            }
-            Change::Delete => {
-                self.selected_inputs.remove(document_id);
-                self.edit_component(document_id, edit::delete_input(component, &port.name));
-            }
-            Change::Select(node_id) => {
-                self.selected_inputs.remove(document_id);
-                self.selections
-                    .insert(document_id.to_owned(), vec![node_id.clone()]);
-                if let Some(canvas) = self.canvases.get_mut(document_id) {
-                    canvas.reveal(node_id);
+        // The frame's changes, applied in turn as one edit.
+        let mut next = component.clone();
+        let mut name = port.name.clone();
+        let mut deleted = false;
+        let mut select = None;
+        for change in changes {
+            match change {
+                Change::Select(node_id) => select = Some(node_id),
+                _ if !editable => {}
+                Change::Port(port) => next = edit::replace_input(&next, &name, port),
+                Change::Rename(to) => {
+                    next = edit::rename_input(&next, &name, &to);
+                    name = to;
                 }
-                self.touched();
+                Change::Action(on) => next = edit::set_action(&next, on.then_some(name.as_str())),
+                Change::Delete => {
+                    next = edit::delete_input(&next, &name);
+                    deleted = true;
+                }
             }
+        }
+        if next != *component {
+            self.edit_component(document_id, next);
+        }
+        if deleted {
+            self.selected_inputs.remove(document_id);
+        } else if name != port.name {
+            self.selected_inputs.insert(document_id.to_owned(), name);
+        }
+        if let Some(node_id) = select {
+            self.selected_inputs.remove(document_id);
+            self.selections
+                .insert(document_id.to_owned(), vec![node_id.clone()]);
+            if let Some(canvas) = self.canvases.get_mut(document_id) {
+                canvas.reveal(node_id);
+            }
+            self.touched();
         }
     }
 }
@@ -369,7 +405,7 @@ fn new_input_form(
         }));
     });
     let default = parse_default(&form.default, form.value_type);
-    if let Err(message) = default {
+    if let Err(message) = &default {
         widgets::field_error(ui, message);
     }
     let has_default = matches!(default, Ok(OptionalJson::Present(_)));
@@ -408,16 +444,15 @@ fn new_input_form(
     (valid && (add || entered), cancel)
 }
 
-/// Draws the panel of one input; returns what it asked for.
+/// Draws the fields of one input's panel; returns what they asked for.
 fn input_form(
     ui: &mut egui::Ui,
     id: egui::Id,
     component: &Component,
     port: &Port,
     view: &canvas::InputView,
-    readers: &[(String, String)],
-) -> Option<Change> {
-    let mut change = None;
+) -> Vec<Change> {
+    let mut changes = Vec::new();
     heading(ui, "COMPONENT INPUT", &port.name);
 
     // The name: written as typed while it is valid and unique.
@@ -451,7 +486,7 @@ fn input_form(
         None => widgets::hint(ui, format!("Steps read it as param.{}.", port.name)),
     }
     if response.changed() && problem.is_none() && name != port.name {
-        change = Some(Change::Rename(name));
+        changes.push(Change::Rename(name));
     }
 
     let mut next = port.clone();
@@ -474,12 +509,34 @@ fn input_form(
     }
 
     let default_id = id.with("default");
+    let type_error_id = id.with("type-error");
     let mut default = draft(ui, default_id, &port.name).unwrap_or_else(|| default_text(port));
     let mut default_problem = None;
     ui.columns(2, |columns| {
         widgets::field_label(&mut columns[0], "Type");
         if type_combo(&mut columns[0], id.with("type"), &mut next.value_type) {
-            changed = true;
+            // A type the default does not fit waits for the default.
+            let refused = match &port.default_value {
+                OptionalJson::Present(value) => default_fits(value, next.value_type).err(),
+                OptionalJson::Missing => None,
+            };
+            match refused {
+                Some(_) => {
+                    let kind = expected(next.value_type).map_or("", |(kind, _)| kind);
+                    let message = format!(
+                        "The default {} is not {kind}. Change or clear the default first.",
+                        default_text(port),
+                    );
+                    columns[0].data_mut(|data| {
+                        data.insert_temp(type_error_id, (port.name.clone(), message))
+                    });
+                    next.value_type = port.value_type;
+                }
+                None => {
+                    columns[0].data_mut(|data| data.remove::<(String, String)>(type_error_id));
+                    changed = true;
+                }
+            }
         }
         widgets::field_label(&mut columns[1], "Default");
         let outlined = parse_default(&default, next.value_type).is_err();
@@ -505,12 +562,16 @@ fn input_form(
             Ok(value) if response.changed() && value != port.default_value => {
                 next.default_value = value;
                 changed = true;
+                columns[1].data_mut(|data| data.remove::<(String, String)>(type_error_id));
             }
             Ok(_) => {}
             Err(message) => default_problem = Some(message),
         }
     });
     if let Some(message) = default_problem {
+        widgets::field_error(ui, message);
+    }
+    if let Some(message) = draft(ui, type_error_id, &port.name) {
         widgets::field_error(ui, message);
     }
     if let Some(contract) = &view.contract {
@@ -567,12 +628,16 @@ fn input_form(
         .on_hover_text(hover)
         .changed()
     {
-        change = Some(Change::Action(fed));
+        changes.push(Change::Action(fed));
     }
     if changed {
-        change = Some(Change::Port(next));
+        changes.push(Change::Port(next));
     }
+    changes
+}
 
+/// *Used by*: a link to each step that reads the input.
+fn used_by(ui: &mut egui::Ui, readers: &[(String, String)], changes: &mut Vec<Change>) {
     ui.add_space(theme::SPACE_SM);
     widgets::field_label(ui, "Used by");
     if readers.is_empty() {
@@ -589,10 +654,19 @@ fn input_form(
             .on_hover_text("Select its card on the board")
             .clicked()
         {
-            change = Some(Change::Select(node_id.clone()));
+            changes.push(Change::Select(node_id.clone()));
         }
     }
+}
 
+/// *Delete input*, which asks first when a step reads the input.
+fn delete_input(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    port: &Port,
+    readers: &[(String, String)],
+    changes: &mut Vec<Change>,
+) {
     ui.add_space(theme::SPACE_LG);
     let confirm_id = id.with("delete");
     let confirming = ui
@@ -617,7 +691,7 @@ fn input_form(
                 .add(widgets::action(Icon::Trash, "Delete anyway").danger())
                 .clicked()
             {
-                change = Some(Change::Delete);
+                changes.push(Change::Delete);
                 ui.data_mut(|data| data.remove::<String>(confirm_id));
             }
             if ui.add(egui::Button::new("Cancel")).clicked() {
@@ -633,12 +707,11 @@ fn input_form(
         .clicked()
     {
         if readers.is_empty() {
-            change = Some(Change::Delete);
+            changes.push(Change::Delete);
         } else {
             ui.data_mut(|data| data.insert_temp(confirm_id, port.name.clone()));
         }
     }
-    change
 }
 
 #[cfg(test)]
@@ -647,8 +720,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn a_default_is_json_and_text_may_drop_its_quotes() {
+    fn a_default_is_json_of_its_type_and_text_may_drop_its_quotes() {
         let present = |value| Ok(OptionalJson::Present(value));
+        let invalid = Err(DEFAULT_ERROR.to_owned());
         assert_eq!(
             parse_default("", ValueType::Number),
             Ok(OptionalJson::Missing)
@@ -663,12 +737,27 @@ mod tests {
             present(json!("EUR"))
         );
         assert_eq!(parse_default("12", ValueType::String), present(json!("12")));
-        assert_eq!(parse_default("\"EU", ValueType::String), Err(DEFAULT_ERROR));
-        assert_eq!(parse_default("EUR", ValueType::Any), Err(DEFAULT_ERROR));
+        assert_eq!(parse_default("\"EU", ValueType::String), invalid);
+        assert_eq!(parse_default("EUR", ValueType::Any), invalid);
+        assert_eq!(parse_default("true", ValueType::Any), present(json!(true)));
         assert_eq!(
             parse_default("{\"a\": 1}", ValueType::Object),
             present(json!({"a": 1}))
         );
+        // A value of another kind is not the input's default.
+        for (text, value_type) in [
+            ("\"EUR\"", ValueType::Number),
+            ("1", ValueType::Boolean),
+            ("[1]", ValueType::Object),
+            ("{}", ValueType::Array),
+        ] {
+            assert!(
+                parse_default(text, value_type)
+                    .unwrap_err()
+                    .starts_with("The default is not"),
+                "{text} for {value_type:?}"
+            );
+        }
     }
 
     #[test]

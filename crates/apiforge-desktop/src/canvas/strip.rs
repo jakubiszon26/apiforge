@@ -217,8 +217,9 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], state: State<'_>) -> Opti
                         widths.push(adding_width(ui, name));
                     }
                     let room = (ui.available_width() - add_width - 2.0 * PILL_GAP).max(0.0);
-                    // The input being added never takes more than the room:
-                    // its detail is cut instead, so its name stays in view.
+                    // The input being added takes no more than the room unless
+                    // its name alone is wider: its detail is cut first, and a
+                    // longer name scrolls with the pills.
                     if let (Some(name), Some(width)) = (&adding, widths.last_mut()) {
                         let least = 2.0 * PILL_PADDING + text_width(ui, name, name_font());
                         *width = width.min(room.max(least));

@@ -138,16 +138,34 @@ pub fn delete_input(component: &Component, name: &str) -> Component {
 }
 
 /// The component with its action fed by the input `name`, or by none. A
-/// component has one action, so it moves from any other input.
+/// component has one action, so it moves from any other input. A type or
+/// contract the action stated apart from its input's goes with it; one it
+/// took from its input is the new input's.
 pub fn set_action(component: &Component, name: Option<&str>) -> Component {
     let mut next = component.clone();
+    let previous = component.action.as_ref();
+    let from = previous.and_then(|action| {
+        component
+            .inputs
+            .iter()
+            .find(|port| port.name == action.input)
+    });
     next.action = name.and_then(|name| {
-        let port = next.inputs.iter().find(|port| port.name == name)?;
-        Some(ComponentAction {
+        let port = component.inputs.iter().find(|port| port.name == name)?;
+        let mut action = ComponentAction {
             input: port.name.clone(),
             value_type: port.value_type,
             contract_id: port.contract_id.clone(),
-        })
+        };
+        if let Some(previous) = previous {
+            if from.is_none_or(|from| from.value_type != previous.value_type) {
+                action.value_type = previous.value_type;
+            }
+            if from.is_none_or(|from| from.contract_id != previous.contract_id) {
+                action.contract_id = previous.contract_id.clone();
+            }
+        }
+        Some(action)
     });
     next
 }
@@ -278,6 +296,14 @@ mod tests {
             ("quantity", ValueType::Number, &None)
         );
         assert!(set_action(&cart, None).action.is_none());
+        // A type the action stated apart from its input's goes with it.
+        let mut stated = cart.clone();
+        stated.action.as_mut().unwrap().value_type = ValueType::Any;
+        let action = set_action(&stated, Some("quantity")).action.unwrap();
+        assert_eq!(
+            (action.value_type, &action.contract_id),
+            (ValueType::Any, &None)
+        );
         let port = Port {
             value_type: ValueType::String,
             ..moved.inputs[1].clone()
