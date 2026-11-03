@@ -9,6 +9,7 @@ mod clipboard;
 mod component;
 mod connect;
 mod fold;
+mod inputs;
 mod inspect;
 mod nodes;
 mod proxies;
@@ -20,6 +21,10 @@ pub use component::{
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use inputs::{
+    InputNameError, add_input, check_input_name, delete_input, rename_input, replace_input,
+    set_action,
+};
 pub use inspect::{
     RESPONSE_FIELD_DEPTH, RESPONSE_FIELD_LIMIT, ResponseField, ResponseFields,
     collect_response_fields, collect_response_fields_bounded, sample_paths,
