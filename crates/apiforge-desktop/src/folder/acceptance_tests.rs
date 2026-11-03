@@ -11119,6 +11119,407 @@ mod ux33 {
     }
 }
 
+/// UX-30 (#238, COMP-00 Q5): *Selection actions → Save as component* in a
+/// folder project opens a dialog that proposes the component's inputs from
+/// the wires and values entering the selection and its outputs from what is
+/// read after it. By default it publishes revision 1 and calls it in place
+/// of the selected steps; the other choice only creates the file
+/// (docs/tickets/COMP-00.md, decision 5).
+mod ux30 {
+    use super::mcp08b::contains;
+    use super::ux31::{toggled, window};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_core::{model::NodeKind, run::StepResult};
+    use egui::accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const FILE: &str = "components/check-cart-price.afs";
+    const TITLE: &str = "Save as component";
+    const NAME: &str = "Component name";
+    const FILE_NAME: &str = "Component file";
+    const DESCRIPTION: &str = "Component description";
+    const PUBLISH: &str = "Publish revision 1 and call it here, in place of the selected steps";
+    const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
+    const SAVE_AND_PUBLISH: &str = "Save and publish";
+    const CREATE_FILE: &str = "Create file";
+    const CART_DESCRIPTION: &str = "Add the product to a cart and check the cart's total.";
+
+    /// The component the dialog writes for the mock-up's choices.
+    const COMPONENT: &str = r#"component check_cart_price "Check cart price" {
+  description "Add the product to a cart and check the cart's total."
+  @contract("Product")
+  input product: object
+  input quantity: number = 1
+  input expected: number
+  action product: object contract "Product"
+  @label("Add to cart")
+  add_to_cart = add_to_cart@1(product: param.product, quantity: param.quantity)
+  @label("Promotional price")
+  promotional_price = assert add_to_cart.total ~= param.expected within 0.005
+  @label("Cart")
+  @config({ contractId: "Cart", type: "object" })
+  export cart: object = add_to_cart
+}
+"#;
+
+    fn field_value(harness: &FolderHarness, label: &str) -> String {
+        harness
+            .get_by_label(label)
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+    }
+
+    fn disabled(harness: &FolderHarness, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    /// The demo scenario at `size` in Diagram with *Add to cart* and
+    /// *Promotional price* selected and the dialog opened from *Selection
+    /// actions*.
+    fn open_dialog(root: &std::path::Path, size: egui::Vec2) -> (FolderHarness, String) {
+        let (mut harness, id) = window(root, size, SCENARIO, "Diagram");
+        select_and_open(&mut harness, &id);
+        (harness, id)
+    }
+
+    fn select_and_open(harness: &mut FolderHarness, id: &str) {
+        app(harness)
+            .selections
+            .insert(id.to_owned(), vec!["cart".to_owned(), "price".to_owned()]);
+        settle(harness);
+        choose(harness, "Selection actions");
+        choose(harness, TITLE);
+        assert!(has_label(harness, NAME), "the dialog is open");
+    }
+
+    /// Names the component as the mock-up does.
+    fn fill(harness: &mut FolderHarness) {
+        replace_text(harness, NAME, "Check cart price");
+        replace_text(harness, DESCRIPTION, CART_DESCRIPTION);
+    }
+
+    fn revisions(harness: &FolderHarness, handle: &str) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == handle)
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    fn components(root: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(root.join("components"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The scenario's text with the two steps replaced by the call, which
+    /// the cleanup's request now reads.
+    fn called(before: &str) -> String {
+        let steps = "  @label(\"Add to cart\")\n  \
+                     add_to_cart = add_to_cart@1(product: active_promotion, quantity: 1)\n  \
+                     @label(\"Promotional price\")\n  \
+                     promotional_price = assert add_to_cart.total ~= expected_price within 0.005\n";
+        let call = "  @label(\"Check cart price\")\n  \
+                    check_cart_price = check_cart_price@1(product: active_promotion, expected: expected_price)\n";
+        assert!(before.contains(steps), "{before}");
+        before
+            .replacen(steps, call, 1)
+            .replacen("{{add_to_cart.id}}", "{{check_cart_price.id}}", 1)
+    }
+
+    /// Runs the active tab's simulation and returns its report.
+    fn simulate(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run simulation");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+        let active = folder(harness).workbench.active().unwrap().to_owned();
+        folder(harness)
+            .run_result(&active)
+            .expect("the run leaves a report")
+            .clone()
+    }
+
+    /// What a run found: each request sent and each check with its values,
+    /// in the order they ran, however deeply they are nested in calls.
+    fn findings(report: &RunResult) -> Vec<String> {
+        fn walk(steps: &[StepResult], out: &mut Vec<String>) {
+            for step in steps {
+                if let Some(request) = &step.request {
+                    out.push(format!(
+                        "{} {} {:?} {:?}",
+                        request.method, request.url, request.headers, request.body
+                    ));
+                }
+                if matches!(step.kind, NodeKind::Assert | NodeKind::Condition) {
+                    out.push(format!(
+                        "{} · {} · {:?} · {:?}",
+                        step.display_name(),
+                        step.status.label(),
+                        step.actual,
+                        step.expected
+                    ));
+                }
+                if let Some(children) = &step.children {
+                    walk(children, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&report.steps, &mut out);
+        out
+    }
+
+    /// Criterion 1: the dialog opens with the name focused and the file
+    /// named after it; it proposes `product` (Object · Product, required,
+    /// from a wire outside the selection), `quantity` (Number, 1 becomes its
+    /// default) and `expected` (Number, required) as inputs, and `cart`
+    /// ticked with the check's `value` and `passed` unticked as outputs.
+    #[test]
+    fn ux30_criterion_1_the_dialog_proposes_inputs_and_outputs() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = open_dialog(directory.path(), size);
+            assert!(has_label(&harness, TITLE), "the title at {size:?}");
+            assert!(
+                harness.get_by_label(NAME).is_focused(),
+                "the name is focused at {size:?}"
+            );
+            assert_eq!(field_value(&harness, FILE_NAME), "new-component.afs");
+            replace_text(&mut harness, NAME, "Check cart price");
+            assert_eq!(
+                field_value(&harness, FILE_NAME),
+                "check-cart-price.afs",
+                "the file follows the name at {size:?}"
+            );
+            assert_eq!(toggled(&harness, PUBLISH), Some(Toggled::True));
+            assert_eq!(toggled(&harness, ONLY_CREATE), Some(Toggled::False));
+
+            for (row, name, value_type, contract, required, caption) in [
+                (
+                    1,
+                    "product",
+                    "Object",
+                    "Product",
+                    true,
+                    "Add to cart → product · a wire from outside the selection",
+                ),
+                (
+                    2,
+                    "quantity",
+                    "Number",
+                    "No contract",
+                    false,
+                    "Add to cart → Quantity · the value 1 becomes its default",
+                ),
+                (
+                    3,
+                    "expected",
+                    "Number",
+                    "No contract",
+                    true,
+                    "Promotional price → Expected value · a wire from outside the selection",
+                ),
+            ] {
+                assert_eq!(field_value(&harness, &format!("Input {row} name")), name);
+                assert_eq!(
+                    field_value(&harness, &format!("Input {row} type")),
+                    value_type,
+                    "{name} at {size:?}"
+                );
+                assert_eq!(
+                    field_value(&harness, &format!("Input {row} contract")),
+                    contract,
+                    "{name} at {size:?}"
+                );
+                assert_eq!(
+                    toggled(&harness, &format!("Input {row} required")),
+                    Some(if required {
+                        Toggled::True
+                    } else {
+                        Toggled::False
+                    }),
+                    "{name} at {size:?}"
+                );
+                assert!(has_label(&harness, caption), "{caption} at {size:?}");
+            }
+            assert!(
+                !has_label(&harness, "Input 4 name"),
+                "three inputs at {size:?}"
+            );
+
+            assert_eq!(toggled(&harness, "Use output 1"), Some(Toggled::True));
+            assert_eq!(field_value(&harness, "Output 1 name"), "cart");
+            assert_eq!(field_value(&harness, "Output 1 type"), "Object");
+            assert_eq!(field_value(&harness, "Output 1 contract"), "Cart");
+            assert!(has_label(&harness, "Add to cart → cart"));
+            for (row, caption) in [
+                (2, "Promotional price → value"),
+                (3, "Promotional price → passed"),
+            ] {
+                assert_eq!(
+                    toggled(&harness, &format!("Use output {row}")),
+                    Some(Toggled::False),
+                    "{caption} at {size:?}"
+                );
+                assert!(has_label(&harness, caption), "{caption} at {size:?}");
+            }
+            assert!(!disabled(&harness, SAVE_AND_PUBLISH), "{size:?}");
+        }
+    }
+
+    /// Criteria 2 and 6: *Save and publish* writes the component, publishes
+    /// revision 1 and puts one call in place of the two steps, wired from
+    /// the same sources and read by the same cleanup step; undo brings the
+    /// steps back, the revision stays, and the dialog's footer says so.
+    #[test]
+    fn ux30_criteria_2_and_6_save_and_publish_calls_it_and_undo_restores() {
+        let directory = shop();
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        fill(&mut harness);
+        assert!(contains(
+            &harness,
+            "Undo brings the steps back; revision 1 stays published."
+        ));
+        choose(&mut harness, SAVE_AND_PUBLISH);
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+
+        assert_eq!(
+            fs::read_to_string(directory.path().join(FILE)).unwrap(),
+            COMPONENT
+        );
+        assert_eq!(revisions(&harness, "check_cart_price"), vec![1]);
+        let published = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .find(|revision| revision.handle == "check_cart_price")
+            .unwrap()
+            .path
+            .as_str()
+            .to_owned();
+        assert_eq!(
+            fs::read_to_string(directory.path().join(published)).unwrap(),
+            COMPONENT,
+            "revision 1 is the file as written"
+        );
+        assert_eq!(source_of(&harness, &id), called(&before));
+        assert_eq!(
+            fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
+            before,
+            "the scenario's change waits to be saved"
+        );
+
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness);
+        assert_eq!(source_of(&harness, &id), before, "undo restores the steps");
+        assert_eq!(revisions(&harness, "check_cart_price"), vec![1]);
+        assert!(directory.path().join(FILE).exists(), "the file stays");
+    }
+
+    /// Criterion 3: the scenario's simulation sends the same requests and
+    /// finds the same checks before and after the extraction.
+    #[test]
+    fn ux30_criterion_3_the_simulation_is_the_same_after_the_extraction() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        let before = simulate(&mut harness);
+        select_and_open(&mut harness, &id);
+        fill(&mut harness);
+        choose(&mut harness, SAVE_AND_PUBLISH);
+        assert!(source_of(&harness, &id).contains("check_cart_price@1("));
+        let after = simulate(&mut harness);
+        assert_eq!(after.status, before.status, "{:?}", after.error);
+        assert!(
+            findings(&before).iter().any(|row| row.contains("/carts")),
+            "the cart's requests are compared: {:?}",
+            findings(&before)
+        );
+        assert_eq!(findings(&after), findings(&before));
+    }
+
+    /// Criterion 4: *Only create the file* writes the component and leaves
+    /// the scenario as it was; nothing is published.
+    #[test]
+    fn ux30_criterion_4_only_create_the_file_leaves_the_scenario() {
+        let directory = shop();
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        fill(&mut harness);
+        choose(&mut harness, ONLY_CREATE);
+        assert_eq!(toggled(&harness, ONLY_CREATE), Some(Toggled::True));
+        assert!(!has_label(&harness, SAVE_AND_PUBLISH));
+        choose(&mut harness, CREATE_FILE);
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+
+        assert_eq!(
+            fs::read_to_string(directory.path().join(FILE)).unwrap(),
+            COMPONENT
+        );
+        assert!(revisions(&harness, "check_cart_price").is_empty());
+        assert_eq!(source_of(&harness, &id), before);
+    }
+
+    /// Criterion 5: a name another component has is refused inline and
+    /// disables the button; *Cancel* writes nothing.
+    #[test]
+    fn ux30_criterion_5_a_taken_name_is_refused_and_cancel_writes_nothing() {
+        let directory = shop();
+        let files = components(directory.path());
+        let (mut harness, id) = open_dialog(directory.path(), WIDE);
+        let before = source_of(&harness, &id);
+        replace_text(&mut harness, NAME, "Add to cart");
+        assert!(has_label(
+            &harness,
+            "A component named Add to cart already exists."
+        ));
+        assert!(disabled(&harness, SAVE_AND_PUBLISH));
+        replace_text(&mut harness, NAME, "Check cart price");
+        assert!(!disabled(&harness, SAVE_AND_PUBLISH));
+
+        choose(&mut harness, "Cancel");
+        assert!(!has_label(&harness, NAME), "the dialog closed");
+        assert_eq!(components(directory.path()), files);
+        assert!(revisions(&harness, "check_cart_price").is_empty());
+        assert_eq!(source_of(&harness, &id), before);
+    }
+
+    /// The dialog and the scenario after it beside the approved captures
+    /// `docs/qa/2026-11-02/COMP-00/comp00-q5-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux30_save_as_component() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let (mut harness, _) = open_dialog(directory.path(), size);
+            fill(&mut harness);
+            capture(&mut harness, &format!("ux30-dialog-{suffix}"), None);
+            choose(&mut harness, SAVE_AND_PUBLISH);
+            capture(&mut harness, &format!("ux30-after-{suffix}"), None);
+        }
+    }
+}
+
 // ----- UX-13: a code tab keeps its scroll across tab switches -----------------
 
 /// UX-13 (#193, decision 7 = A of 2026-11-02): a code tab keeps its scroll

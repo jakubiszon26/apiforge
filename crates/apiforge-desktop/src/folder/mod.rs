@@ -29,6 +29,7 @@ mod opening;
 mod placement;
 mod publication;
 mod runs;
+mod save_component;
 mod saving;
 mod settings;
 mod storage;
@@ -173,6 +174,8 @@ enum Prompt {
         client: Option<String>,
         role: apiforge_storage::project::HolderRole,
     },
+    /// *Save as component* for the selected steps (UX-30).
+    SaveComponent(Box<save_component::SaveComponent>),
 }
 
 /// An `.afs` file in a folder without a project, offered for registration.

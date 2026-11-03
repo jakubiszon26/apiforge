@@ -638,6 +638,7 @@ impl FolderApp {
                 self.register_prompt(context, path, kind, error)
             }
             Prompt::Handover { client, role } => self.handover_prompt(context, client, role),
+            Prompt::SaveComponent(dialog) => self.save_component_prompt(context, dialog),
         };
     }
 
