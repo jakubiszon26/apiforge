@@ -237,6 +237,7 @@ ACCEPTED = [
     "CDLA-Permissive-2.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    "Bitstream-Vera",
 ]
 TRIPLES = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 NOTICES = "licenses/THIRD-PARTY-NOTICES.md"
@@ -416,7 +417,7 @@ class AboutConfig(unittest.TestCase):
         # checksum, not only the right numbers of each.
         clarify = self.about.split("[epaint_default_fonts.clarify]", 1)[1]
         records = clarify.split("[[epaint_default_fonts.clarify.files]]")[1:]
-        expected = dict(zip(FONT_FILES, ["MIT", "Ubuntu-font-1.0", "OFL-1.1", "MIT"]))
+        expected = dict(zip(FONT_FILES, ["MIT AND Bitstream-Vera", "Ubuntu-font-1.0", "OFL-1.1", "MIT"]))
         found = {}
         for record in records:
             fields = dict(re.findall(r'(?m)^(path|license|checksum)\s*=\s*"([^"]+)"', record))
