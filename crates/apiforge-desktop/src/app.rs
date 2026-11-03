@@ -2498,8 +2498,10 @@ impl App {
         });
         match pasted {
             Ok(pasted) => {
-                let count = pasted.selection.as_ref().map_or(0, Vec::len);
+                let ids = pasted.selection.clone().unwrap_or_default();
+                let count = ids.len();
                 self.apply_edit(Ok(pasted));
+                self.canvas.show_pasted(ids);
                 self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
             }
             Err(message) => self.canvas.set_error(message),
@@ -2541,9 +2543,7 @@ impl App {
             reference: &reference,
             project: self.editor.project(),
             parameters: &parameters,
-            // The editor keeps the handles of a scenario's two graphs apart
-            // after every edit.
-            sibling: None,
+            sibling: self.editor.sibling_graph(),
         })
     }
 

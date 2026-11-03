@@ -9382,7 +9382,7 @@ mod ux31 {
     const ADD: &str = "Add input";
     const CAPTION: &str = "INPUTS";
 
-    fn by_path(harness: &FolderHarness, path: &str) -> String {
+    pub(super) fn by_path(harness: &FolderHarness, path: &str) -> String {
         folder(harness)
             .session
             .as_ref()
@@ -10608,7 +10608,7 @@ mod ux33 {
 mod ux34 {
     use super::mcp08b::contains;
     use super::ux02::hover_shows;
-    use super::ux31::window;
+    use super::ux31::{by_path, window};
     use super::*;
     use crate::canvas::Card;
     use apiforge_core::{
@@ -10621,19 +10621,6 @@ mod ux34 {
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
     const PASTE: &str = "Paste steps (Ctrl+V)";
     const ACTIONS: &str = "Selection actions";
-
-    fn document_by_path(harness: &FolderHarness, path: &str) -> String {
-        folder(harness)
-            .session
-            .as_ref()
-            .unwrap()
-            .documents()
-            .iter()
-            .find(|document| document.entry().path.as_str() == path)
-            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
-            .id()
-            .to_owned()
-    }
 
     fn model(harness: &FolderHarness, id: &str) -> Document {
         folder(harness)
@@ -10764,7 +10751,7 @@ mod ux34 {
         let (mut harness, scenario) = window(directory.path(), WIDE, SCENARIO, "Diagram");
         select(&mut harness, &scenario, false, &["active_promotion"]);
         copy(&mut harness);
-        let cart = document_by_path(&harness, CART);
+        let cart = by_path(&harness, CART);
         open(&mut harness, &cart, "Diagram");
         assert!(
             has_label(&harness, PASTE),
@@ -10851,6 +10838,54 @@ mod ux34 {
             source.contains("@label(\"Product 2\")\n  product_2 = product@1("),
             "a second Product from the library is labelled Product 2:\n{source}"
         );
+    }
+
+    /// Review round 1: the clone keeps clear of chips as well as cards. A
+    /// chip put where the clone would land sends it to the next free place.
+    #[test]
+    fn ux34_a_duplicate_lands_clear_of_chips() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        let document = model(&harness, &id);
+        let free = node(graph_of(&document, false), "add_to_cart_2")
+            .position
+            .clone();
+        undo(&mut harness);
+
+        app(&mut harness).active_board_command(Command::AddProxy {
+            source: ProxySource::Environment {
+                name: "baseUrl".into(),
+            },
+            position: free,
+        });
+        settle(&mut harness);
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        let document = model(&harness, &id);
+        let main = graph_of(&document, false);
+        let project = folder(&harness).context_project();
+        let parameters = parameters_of(&document);
+        let chip = main.proxies.last().expect("the chip");
+        let chip = crate::canvas::Chip::build(chip, main, &project, &parameters).rect();
+        let clone = Card::build(node(main, "add_to_cart_2"), main, &project).rect();
+        assert!(
+            !clone.intersects(chip),
+            "the clone overlaps the chip: {clone:?} {chip:?}"
+        );
+        for other in main
+            .nodes
+            .iter()
+            .filter(|other| other.handle != "add_to_cart_2")
+        {
+            let rect = Card::build(other, main, &project).rect();
+            assert!(
+                !rect.intersects(clone),
+                "the clone overlaps {}",
+                other.handle
+            );
+        }
     }
 
     /// Criterion 4: with only a variable chip selected, *Copy* and

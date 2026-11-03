@@ -268,8 +268,8 @@ pub struct Canvas {
     fit_pending: bool,
     camera_moved_by_user: bool,
     reveal_pending: Option<String>,
-    /// A block just pasted, to show once the board is drawn (UX-34).
-    pasted_pending: Option<String>,
+    /// The blocks just pasted, to show once the board is drawn (UX-34).
+    pasted_pending: Vec<String>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -299,7 +299,7 @@ impl Default for Canvas {
             fit_pending: true,
             camera_moved_by_user: false,
             reveal_pending: None,
-            pasted_pending: None,
+            pasted_pending: Vec::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -366,11 +366,12 @@ impl Canvas {
         self.reveal_pending = Some(node_id);
     }
 
-    /// Shows a block just pasted or duplicated (UX-34): a fitted board fits
-    /// again, around the copies and their originals; a board the user has
-    /// moved reveals the block only when it is out of view.
-    pub fn show_pasted(&mut self, node_id: String) {
-        self.pasted_pending = Some(node_id);
+    /// Shows the blocks just pasted or duplicated (UX-34): a fitted board
+    /// fits again, around the copies and their originals; a board the user
+    /// has moved brings the copies into view only when one of them is out of
+    /// it.
+    pub fn show_pasted(&mut self, node_ids: Vec<String>) {
+        self.pasted_pending = node_ids;
     }
 
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
@@ -478,17 +479,29 @@ impl Canvas {
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
 
-        if let Some(id) = self.pasted_pending.take()
-            && let Some(card) = cards.iter().find(|card| card.id == id)
+        let pasted = std::mem::take(&mut self.pasted_pending);
+        if let Some(group) = cards
+            .iter()
+            .filter(|card| pasted.contains(&card.id))
+            .map(Card::rect)
+            .reduce(Rect::union)
         {
             if !self.camera_moved_by_user {
                 // A fitted board stays fitted, now around the copies too.
                 self.fit_pending = true;
             } else if !overlays
                 .focus
-                .contains_rect(self.screen_camera(viewport).rect(card.rect()))
+                .contains_rect(self.screen_camera(viewport).rect(group))
             {
-                self.reveal_pending = Some(id);
+                // Centre the copies, zooming out only as far as they need.
+                self.camera.zoom = self
+                    .camera
+                    .zoom
+                    .min(overlays.focus.width() / group.width())
+                    .min(overlays.focus.height() / group.height())
+                    .clamp(MIN_ZOOM, MAX_ZOOM);
+                self.camera.pan = (overlays.focus.center() - viewport.min)
+                    - group.center().to_vec2() * self.camera.zoom;
             }
         }
         let focus_changed = self

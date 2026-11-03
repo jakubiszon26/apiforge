@@ -168,13 +168,19 @@ pub fn paste_selection(
     // block when it is there, otherwise one the code names the same way.
     let resolve = |node_id: &str, port: &str| -> Result<String, Missing> {
         let handle = fragment.sources.get(node_id);
+        let reads = |node: &&&Node| output_exists(node, port, target.project);
         readable
             .iter()
+            .filter(reads)
             .find(|node| node.id == node_id)
             .or_else(|| {
-                handle.and_then(|handle| readable.iter().find(|node| &node.handle == handle))
+                handle.and_then(|handle| {
+                    readable
+                        .iter()
+                        .filter(reads)
+                        .find(|node| &node.handle == handle)
+                })
             })
-            .filter(|node| output_exists(node, port, target.project))
             .map(|node| node.id.clone())
             .ok_or_else(|| Missing::Step(handle.map_or(node_id, String::as_str).to_owned()))
     };
@@ -619,6 +625,36 @@ mod tests {
                 ("actual", Missing::Step("product".into())),
                 ("expected", Missing::Input("quantity".into())),
             ]
+        );
+    }
+
+    /// A block with the copied identity but without the output read gives
+    /// way to the block the code names the same way.
+    #[test]
+    fn a_reference_falls_back_to_the_handle_when_the_identity_cannot_serve() {
+        let project = empty_project();
+        let product = named(NodeKind::Value, "product", None);
+        let mut check = named(NodeKind::Assert, "check", None);
+        check.inputs.insert(
+            "actual".into(),
+            Binding::reference(&product.id, "value", ""),
+        );
+        let source = graph(vec![product.clone(), check.clone()]);
+        let fragment = copy_selection(&source, &source, &HashSet::from([check.id.as_str()]));
+        let mut start = named(NodeKind::Start, "begin", None);
+        start.id.clone_from(&product.id);
+        let other = named(NodeKind::Value, "product", None);
+        let document = graph(vec![start, other.clone()]);
+        let pasted = paste_selection(
+            &PasteTarget::graph(&document, &project),
+            &fragment,
+            &PASTE_OFFSET,
+        )
+        .unwrap();
+        assert!(pasted.unresolved.is_empty());
+        assert_eq!(
+            pasted.graph.nodes[2].inputs["actual"],
+            Binding::reference(&other.id, "value", "")
         );
     }
 

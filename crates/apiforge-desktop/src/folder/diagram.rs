@@ -432,19 +432,30 @@ impl FolderApp {
                 return;
             }
         };
-        let summary = missing_summary(&paste.edit.graph, &paste.unresolved);
-        let ids = paste.edit.selection.clone().unwrap_or_default();
+        // Shown once the edit is applied, which may wait for the person to
+        // accept losing unattached comments.
+        self.pasted = Some(PastedOutcome {
+            document_id: document_id.to_owned(),
+            ids: paste.edit.selection.clone().unwrap_or_default(),
+            summary: missing_summary(&paste.edit.graph, &paste.unresolved),
+        });
         self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
-        // An applied paste selects its copies; one that was refused does not.
-        if ids.is_empty() || self.selections.get(document_id) != Some(&ids) {
+    }
+
+    /// After an applied model edit that selects `selection`: when it is the
+    /// last paste, brings the copies into view, as copies from another graph
+    /// keep their place, and reports what they lost.
+    pub(super) fn pasted_applied(&mut self, document_id: &str, selection: &[String]) {
+        let Some(pasted) = self
+            .pasted
+            .take_if(|pasted| pasted.document_id == document_id && pasted.ids == selection)
+        else {
             return;
-        }
-        // Copies from another graph keep their place, which may be outside
-        // the view.
+        };
         if let Some(canvas) = self.canvases.get_mut(document_id) {
-            canvas.show_pasted(ids[0].clone());
+            canvas.show_pasted(pasted.ids);
         }
-        if let Some(summary) = summary {
+        if let Some(summary) = pasted.summary {
             self.notify(summary, false);
         }
     }

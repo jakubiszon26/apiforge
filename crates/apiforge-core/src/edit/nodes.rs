@@ -82,21 +82,26 @@ pub fn add_node(
     node.handle = unique_handle(&node.handle, |handle| {
         graph.nodes.iter().any(|node| node.handle == handle)
     });
-    // A second instance of a component whose name a block already shows gets
-    // a numbered label (`Product 2`), as a duplicate does (UX-34).
+    // A second instance of a component, or one whose name a block already
+    // shows, gets a numbered label (`Product 2`), as a duplicate does (UX-34).
     if let Some(component) = component
         && node.label.is_none()
-        && graph
-            .nodes
-            .iter()
-            .any(|other| other.display_name() == component.name)
     {
-        node.label = Some(unique_label(&component.name, |label| {
+        let shown = |label: &str| {
             graph
                 .nodes
                 .iter()
                 .any(|other| other.display_name() == label)
-        }));
+        };
+        let called = graph
+            .nodes
+            .iter()
+            .any(|other| other.config.component_id.as_deref() == Some(component.id.as_str()));
+        if called || shown(&component.name) {
+            node.label = Some(unique_label(&component.name, |label| {
+                label == component.name || shown(label)
+            }));
+        }
     }
 
     let mut next = graph.clone();
@@ -282,9 +287,8 @@ mod tests {
         let empty = Graph::default();
         let first = add_node(&empty, Block::Component, AT, Some(product), None).unwrap();
         assert_eq!(first.graph.nodes[0].label, None, "nothing to tell apart");
-        let mut named = first.graph.clone();
-        named.nodes[0].label = Some("Product".into());
-        let second = add_node(&named, Block::Component, AT, Some(product), None).unwrap();
+        // The first instance shows its handle and is still the same component.
+        let second = add_node(&first.graph, Block::Component, AT, Some(product), None).unwrap();
         let added = second.graph.nodes.last().unwrap();
         assert_eq!(added.handle, format!("{}_2", product.handle));
         assert_eq!(added.label.as_deref(), Some("Product 2"));

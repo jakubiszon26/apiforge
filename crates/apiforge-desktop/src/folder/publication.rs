@@ -76,6 +76,7 @@ impl FolderApp {
                     ..
                 } = action
                 {
+                    self.pasted_applied(id, &selection);
                     self.selections.insert(id.to_owned(), selection);
                 }
                 if let Some(message) = message {

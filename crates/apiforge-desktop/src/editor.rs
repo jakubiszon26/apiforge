@@ -214,6 +214,19 @@ impl Editor {
         }
     }
 
+    /// The other graph of the scenario (main or cleanup), whose handles and
+    /// labels a pasted block must not repeat. A component graph has none.
+    pub fn sibling_graph(&self) -> Option<&Graph> {
+        if !self.drafts.is_empty() {
+            return None;
+        }
+        let scenario = self.scenario();
+        Some(match self.phase {
+            Phase::Main => &scenario.cleanup,
+            Phase::Cleanup => &scenario.graph,
+        })
+    }
+
     /// Handles a block of the current board must not take: those of the other graph
     /// of the scenario (main or cleanup). A component graph has its own namespace.
     pub fn sibling_handles(&self) -> HashSet<String> {
