@@ -11500,6 +11500,293 @@ mod ux30 {
     }
 }
 
+// ----- UX-13: a code tab keeps its scroll across tab switches -----------------
+
+/// UX-13 (#193, decision 7 = A of 2026-11-02): a code tab keeps its scroll
+/// when the person switches to another tab and back; the caret is restored
+/// without moving the view, unless the tab changed meanwhile and the caret
+/// is now out of view, when the view moves the least that shows it. MCP-16's
+/// gentle follow (criterion 3) is the regression test in `code::tests`.
+mod ux13 {
+    use super::mcp08b::{PRODUCT, SCENARIO};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_storage::project::TabState;
+    use std::ops::RangeInclusive;
+
+    /// The scenario's tab name in the tab strip.
+    const SCENARIO_TAB: &str = "promotion-and-cart-price.afs";
+    /// The code view's font size.
+    const CODE_FONT: f32 = 13.0;
+
+    fn id_of(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn tab<'a>(harness: &'a FolderHarness, document_id: &str) -> &'a TabState {
+        folder(harness)
+            .workbench
+            .tabs()
+            .iter()
+            .find(|tab| tab.document_id == document_id)
+            .unwrap_or_else(|| panic!("{document_id} has a tab"))
+    }
+
+    fn scroll_of(harness: &FolderHarness, document_id: &str) -> f32 {
+        tab(harness, document_id).scroll
+    }
+
+    /// The line, counted from one, the caret of `document_id`'s tab is on.
+    fn caret_line(harness: &FolderHarness, document_id: &str) -> usize {
+        let caret = tab(harness, document_id).selection.caret;
+        let text = source_of(harness, document_id);
+        text[..caret.min(text.len())].matches('\n').count() + 1
+    }
+
+    /// The lines of `document_id` drawn whole, counted from one.
+    fn in_view(harness: &FolderHarness, document_id: &str) -> RangeInclusive<usize> {
+        let (document, lines) = folder(harness)
+            .code_lines_in_view()
+            .expect("the code is drawn");
+        assert_eq!(document, document_id, "the code shows {document_id}");
+        lines
+    }
+
+    /// `text` with `count` comment lines after its first line.
+    fn padded(text: &str, count: usize) -> String {
+        let (first, rest) = text.split_once('\n').unwrap();
+        let pad: String = (1..=count)
+            .map(|line| format!("  // Note {line} of the person.\n"))
+            .collect();
+        format!("{first}\n{pad}{rest}")
+    }
+
+    /// The demo shop at the minimum window, its scenario long enough to
+    /// scroll, shown in Code.
+    fn long_shop() -> (tempfile::TempDir, FolderHarness) {
+        let project = shop();
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, padded(&text, 80)).unwrap();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        choose(&mut harness, "Code");
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// A click near the start of the `line`th line of the code, counted from
+    /// one, with the code at its top: the caret goes there and the editor
+    /// has the keyboard.
+    fn click_line(harness: &mut FolderHarness, document_id: &str, line: usize) {
+        assert_eq!(
+            *in_view(harness, document_id).start(),
+            1,
+            "the code at its top"
+        );
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        let row = harness
+            .ctx
+            .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)));
+        // The text starts below the editor's 2 px margin.
+        let at = code.left_top() + egui::vec2(120.0, 2.0 + row * (line as f32 - 0.5));
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        settle(harness);
+        assert_eq!(
+            caret_line(harness, document_id),
+            line,
+            "the click put the caret on line {line}"
+        );
+    }
+
+    /// Scrolls the code of `document_id` down with the mouse wheel.
+    fn wheel_down(harness: &mut FolderHarness, document_id: &str) {
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        harness.hover_at(code.left_top() + egui::vec2(120.0, 60.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -160.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(harness);
+    }
+
+    /// Clicks the tab of `name` in the tab strip: the explorer's row has the
+    /// same name, lower in the window.
+    fn click_tab(harness: &mut FolderHarness, name: &str) {
+        harness
+            .query_all_by_label(name)
+            .min_by(|left, right| left.rect().top().total_cmp(&right.rect().top()))
+            .unwrap_or_else(|| panic!("{name} is shown"))
+            .click();
+        settle(harness);
+    }
+
+    /// Criterion 1: a code tab scrolled away from its caret keeps that
+    /// scroll when the person switches to another tab and back.
+    #[test]
+    fn ux13_criterion_1_a_tab_scrolled_away_from_its_caret_keeps_its_scroll() {
+        let (_project, mut harness) = long_shop();
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 3);
+        for _ in 0..3 {
+            wheel_down(&mut harness, &scenario);
+        }
+        let scroll = scroll_of(&harness, &scenario);
+        let lines = in_view(&harness, &scenario);
+        assert!(scroll > 100.0, "the wheel scrolled the code: {scroll}");
+        assert!(
+            !lines.contains(&3),
+            "the caret's line 3 is out of view: {lines:?}"
+        );
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert_eq!(caret_line(&harness, &scenario), 3, "the caret is restored");
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        // The first line in view is the scroll's; the last depends on the
+        // height of the Problems section, which is each document's own.
+        assert_eq!(
+            in_view(&harness, &scenario).start(),
+            lines.start(),
+            "the same first line in view"
+        );
+
+        // And once more, there and back by the tab strip.
+        click_tab(&mut harness, "product.afs");
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept the second time, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        assert_eq!(in_view(&harness, &scenario).start(), lines.start());
+    }
+
+    /// Criterion 1 with the caret in a statement: the board selects that
+    /// statement's block, as the caret asks, and the block selected with the
+    /// caret in it is not revealed again on return, which would centre it.
+    #[test]
+    fn ux13_criterion_1_a_caret_in_a_statement_keeps_the_scroll_too() {
+        let project = shop();
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let (first, rest) = text.split_once('\n').unwrap();
+        let values: String = (1..=80)
+            .map(|value| format!("  value_{value} = {value}\n"))
+            .collect();
+        fs::write(&path, format!("{first}\n{values}{rest}")).unwrap();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        choose(&mut harness, "Code");
+        settle(&mut harness);
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 3);
+        assert!(
+            folder(&harness)
+                .selections
+                .get(&scenario)
+                .is_some_and(|selected| selected.len() == 1),
+            "the board follows the caret to value_2"
+        );
+        for _ in 0..3 {
+            wheel_down(&mut harness, &scenario);
+        }
+        let scroll = scroll_of(&harness, &scenario);
+        let lines = in_view(&harness, &scenario);
+        assert!(scroll > 100.0, "the wheel scrolled the code: {scroll}");
+        assert!(!lines.contains(&3), "line 3 is out of view: {lines:?}");
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        assert_eq!(in_view(&harness, &scenario).start(), lines.start());
+        assert_eq!(caret_line(&harness, &scenario), 3, "the caret is restored");
+    }
+
+    /// Criterion 2: a caret that was in view when the person left the tab
+    /// and is out of view on return, because the text changed meanwhile, is
+    /// brought into view by the least scroll: its line at the bottom edge,
+    /// not in the middle.
+    #[test]
+    fn ux13_criterion_2_a_caret_moved_out_of_view_gets_the_least_scroll() {
+        let (project, mut harness) = long_shop();
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 8);
+        assert_eq!(scroll_of(&harness, &scenario), 0.0, "the code at its top");
+        let lines = in_view(&harness, &scenario);
+        assert!(lines.contains(&8), "the caret in view: {lines:?}");
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        // An edit elsewhere: blank lines under the first line move the
+        // caret's place in the text down, out of the view the tab kept.
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let (first, rest) = text.split_once('\n').unwrap();
+        let changed = format!("{first}\n{}{rest}", "\n".repeat(400));
+        fs::write(&path, &changed).unwrap();
+        follow_disk(&mut harness);
+        assert_eq!(
+            source_of(&harness, &scenario),
+            changed,
+            "the edit is followed"
+        );
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+
+        click_tab(&mut harness, SCENARIO_TAB);
+        let line = caret_line(&harness, &scenario);
+        assert!(
+            line > *lines.end() + 20,
+            "the caret is now far below the kept view: line {line}, {lines:?}"
+        );
+        let shown = in_view(&harness, &scenario);
+        assert!(
+            shown.contains(&line),
+            "the caret's line {line} is in view: {shown:?}"
+        );
+        assert!(
+            *shown.end() <= line + 1,
+            "the view moved the least, the caret's line {line} at its bottom, not centred: \
+             {shown:?}"
+        );
+    }
+}
+
 /// UX-12 (#222): a notice that is not an error clears itself five seconds
 /// after it is raised or at the next action, whichever comes first; an error
 /// stays until it is dismissed and belongs to the tab it was raised on. The
