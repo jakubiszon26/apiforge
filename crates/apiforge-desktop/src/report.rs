@@ -133,6 +133,10 @@ pub enum DetailTab {
 }
 
 const MIN_REPORT_HEIGHT: f32 = 160.0;
+/// The least height in a short workspace: what the bar, the run's header and
+/// one step row take whole, the height egui used to hold the panel at
+/// (owner, 2026-11-03, on UX-05).
+const MIN_COMPACT_REPORT_HEIGHT: f32 = 185.0;
 const MAX_REPORT_HEIGHT: f32 = 560.0;
 const KEYBOARD_RESIZE_STEP: f32 = 32.0;
 /// How near the workspace's top a dragged panel's top is released to fill
@@ -303,7 +307,11 @@ impl ReportPanel {
         let workspace = ui.available_rect_before_wrap();
         let full = workspace.height();
         let compact = full < 460.0;
-        let min_height = if compact { 120.0 } else { MIN_REPORT_HEIGHT };
+        let min_height = if compact {
+            MIN_COMPACT_REPORT_HEIGHT
+        } else {
+            MIN_REPORT_HEIGHT
+        };
         let maximum = (full - 200.0).clamp(min_height, MAX_REPORT_HEIGHT);
         let panel_id = if maximised {
             egui::Id::new("report-maximised")

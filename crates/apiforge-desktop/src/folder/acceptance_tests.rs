@@ -8054,12 +8054,12 @@ mod ux05 {
         )
     }
 
-    /// Run results' normal height range in `workspace`: at least 120 px
+    /// Run results' normal height range in `workspace`: at least 185 px
     /// (160 px when the workspace is 460 px or more), at most 560 px or the
     /// workspace less 200 px.
     fn normal_range(workspace: egui::Rect) -> (f32, f32) {
         let full = workspace.height();
-        let min = if full < 460.0 { 120.0 } else { 160.0 };
+        let min = if full < 460.0 { 185.0 } else { 160.0 };
         (min, (full - 200.0).clamp(min, 560.0))
     }
 
@@ -8579,6 +8579,48 @@ mod ux05 {
                 panel_top(&harness)
             );
             assert!(!maximised(&harness) && zone(&harness, ZONE).is_none());
+        }
+    }
+
+    /// The owner's decision of 2026-11-03: at its least height Run results
+    /// clip nothing of the bar, the run's header and the first step row, at
+    /// 960 × 540 and at 1600 × 1000.
+    #[test]
+    fn ux05_the_least_height_clips_no_control() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = ran(size);
+            harness.get_by_label(GRIP).focus();
+            harness.step();
+            harness.key_press(Key::Home);
+            settle(&mut harness);
+            let first = {
+                let app = folder(&harness);
+                let steps = &app.run_result(&scenario).unwrap().steps;
+                let row = &crate::report::flatten_steps(steps)[0];
+                format!(
+                    "{} · {} · {} ms",
+                    row.step.display_name(),
+                    row.step.status.label(),
+                    row.step.duration_ms
+                )
+            };
+            let top = panel_top(&harness);
+            let bottom = workspace(&harness).bottom();
+            for label in [
+                GRIP,
+                "Run results",
+                "PASSED",
+                POLICY,
+                MAXIMISE,
+                "Export",
+                first.as_str(),
+            ] {
+                let rect = harness.get_all_by_label(label).next().unwrap().rect();
+                assert!(
+                    rect.top() >= top - 1.0 && rect.bottom() <= bottom + 0.5,
+                    "{size:?}: at the least height ({top}..{bottom}) {label:?} at {rect:?} is cut"
+                );
+            }
         }
     }
 
