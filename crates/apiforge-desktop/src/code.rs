@@ -217,18 +217,18 @@ impl Completions {
         // Offers come from analysing the whole source, so a large one waits to
         // be asked; a popup already open keeps following the typing, until
         // the typing goes into a comment (UX-11).
-        if typed
-            && self.popup.is_some()
-            && cursor.is_some_and(|cursor| in_comment(&text[..cursor.min(text.len())]))
-        {
-            self.popup = None;
-        }
+        // The comment is asked about last: it lexes the text before the
+        // caret, which only a keystroke that could open the popup needs.
         let wants_popup = keys.open
             || (typed
                 && cursor.is_some_and(|cursor| {
-                    self.popup.is_some()
-                        || (text.len() <= MAX_COLOURED_BYTES && opens_completion(text, cursor))
+                    (self.popup.is_some()
+                        || (text.len() <= MAX_COLOURED_BYTES && opens_completion(text, cursor)))
+                        && !in_comment(&text[..cursor.min(text.len())], context.mode)
                 }));
+        if typed && !keys.open && !wants_popup {
+            self.popup = None;
+        }
         if wants_popup && let Some(cursor) = cursor {
             let found = complete::complete(&Request {
                 source: text,
@@ -856,26 +856,43 @@ fn apply(text: &mut String, completion: &Completion) {
     text.replace_range(range, &completion.insert);
 }
 
-/// Whether what was just typed should open the popup by itself. A comment
-/// is prose, so nothing typed in one does (UX-11).
+/// Whether what was just typed should open the popup by itself.
 fn opens_completion(text: &str, cursor: usize) -> bool {
     let before = &text[..cursor.min(text.len())];
-    !in_comment(before)
-        && (before.ends_with('.')
-            || before.ends_with("{{")
-            || before
-                .chars()
-                .next_back()
-                .is_some_and(|last| last.is_alphanumeric() || last == '_'))
+    before.ends_with('.')
+        || before.ends_with("{{")
+        || before
+            .chars()
+            .next_back()
+            .is_some_and(|last| last.is_alphanumeric() || last == '_')
 }
 
-/// Whether the end of `before` is inside a `//` comment. The text is lexed
-/// from its start, so a `//` inside a string is not taken for one.
-fn in_comment(before: &str) -> bool {
-    lex(before)
-        .0
-        .last()
-        .is_some_and(|token| token.kind == TokenKind::Comment)
+/// Whether the end of `before` is inside a `//` comment of the code, which
+/// is prose: nothing typed there opens the popup (UX-11).
+///
+/// Script is lexed from its start, so a `//` inside a string is not taken
+/// for one, while a comment in a string's open `{{ }}` is. A template is
+/// text, and only its open `{{ }}` is code: the `//` of `https://` is not a
+/// comment. Holes are found as the completion engine finds them.
+fn in_comment(before: &str, mode: Mode) -> bool {
+    if mode == Mode::Template {
+        return comment_in_hole(before);
+    }
+    match lex(before).0.last() {
+        Some(token) if token.kind == TokenKind::Comment => true,
+        Some(token) if token.kind == TokenKind::String && token.range.end == before.len() => {
+            comment_in_hole(&before[token.range.clone()])
+        }
+        _ => false,
+    }
+}
+
+/// Whether `text` ends inside a comment of an open `{{ }}`.
+fn comment_in_hole(text: &str) -> bool {
+    let Some(open) = text.rfind("{{") else {
+        return false;
+    };
+    !text[open..].contains("}}") && in_comment(&text[open + 2..], Mode::Script)
 }
 
 /// One level of indentation, the width the language is printed at.
