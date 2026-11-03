@@ -66,6 +66,7 @@ is selected, ignores pins and clears them. It is one undoable edit.
 
 **Spline style** renders the same polyline with rounded corners (radius up to
 24 px, limited by half of each adjacent segment) blended into cubic segments.
+Withdrawn by UX-28 (see *Settings*): the board offers only the orthogonal style.
 
 ### Guarantees
 
@@ -104,7 +105,8 @@ in CI with a regression margin.
 
 ### Settings
 
-*Wire style* (orthogonal / spline, default orthogonal) and *Bridges at crossings*
+*Wire style* (orthogonal / spline, default orthogonal; spline withdrawn by the
+amendment below) and *Bridges at crossings*
 (default on) live in application settings, not in the document.
 
 Amended by UX-28 (2026-11-03, owner decision 18 = A of the UX-1 plan): the
@@ -113,7 +115,8 @@ orthogonal route with 24 px fillets, which the *Wire style* menu called
 *Curves*; the menu now offers *Right angles* and *Bridges at crossings*. A
 preferences file that stores `spline` still loads, as orthogonal, and the next
 save of preferences writes `orthogonal`. The rounding in `apiforge-layout`
-(`smooth`) stays, with its guarantees, for the style that replaces it.
+(`smooth`) stays, with its guarantees and tests, for a future curved style;
+no style the board offers uses it today.
 
 ## As implemented
 
