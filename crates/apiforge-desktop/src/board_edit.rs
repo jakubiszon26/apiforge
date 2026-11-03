@@ -129,27 +129,32 @@ impl Board<'_> {
     }
 
     /// An *Export* passes values out of a component, so it is a sink: the
-    /// left edge one gap right of the rightmost card, when `x` is not already
-    /// there (UX-21). Being right of every card, it overlaps none; the
-    /// layout's free slot keeps the height it chose.
+    /// left edge one gap right of the rightmost card or chip, when `x` is not
+    /// already there (UX-21). Being right of everything on the board, it
+    /// overlaps nothing; the layout's free slot keeps the height it chose.
+    /// `None` on a board without cards, where there is no flow to follow.
     fn right_of_the_flow(&self, x: f64) -> Option<f64> {
         /// The gap *Add step* leaves after a card, as the menu places a step
         /// 340 right of a 280 wide card.
         const GAP: f64 = 60.0;
-        let rightmost = self
+        let cards = self
             .graph
             .nodes
             .iter()
             .map(|node| {
-                f64::from(
-                    canvas::Card::build(node, self.reference, self.project)
-                        .rect()
-                        .max
-                        .x,
-                )
+                canvas::Card::build(node, self.reference, self.project)
+                    .rect()
+                    .max
+                    .x
             })
-            .reduce(f64::max)?;
-        (x < rightmost + GAP).then_some(rightmost + GAP)
+            .reduce(f32::max)?;
+        let chips = self
+            .chip_obstacles(self.graph)
+            .iter()
+            .map(|chip| chip.rect().max.x)
+            .fold(cards, f32::max);
+        let edge = f64::from(chips) + GAP;
+        (x < edge).then_some(edge)
     }
 
     /// Adds a node and selects it, keeping it clear of occupied positions.
@@ -333,4 +338,40 @@ fn layout_edges(graph: &Graph) -> Vec<apiforge_layout::Edge> {
             ))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apiforge_core::format::{Proxy, ProxySource};
+
+    /// UX-21: an *Export* lands one gap right of the rightmost card or chip,
+    /// so a chip beyond the cards is not covered.
+    #[test]
+    fn an_export_lands_right_of_the_cards_and_the_chips() {
+        let project = apiforge_core::demos::shop_project();
+        let mut value = Block::Value.create(Position { x: 0.0, y: 0.0 }, None);
+        value.id = "value".into();
+        let graph = Graph {
+            nodes: vec![value],
+            edges: Vec::new(),
+            proxies: vec![Proxy {
+                id: "chip".into(),
+                source: ProxySource::Parameter { name: "id".into() },
+                position: Position { x: 900.0, y: 300.0 },
+            }],
+        };
+        let parameters = vec!["id".to_owned()];
+        let board = Board {
+            graph: &graph,
+            reference: &graph,
+            project: &project,
+            parameters: &parameters,
+        };
+        let chip = board.chip_obstacles(&graph)[0].rect();
+        let at = Position { x: 0.0, y: 300.0 };
+        let added = board.add_node(Block::Export, None, at, None).unwrap();
+        let export = added.graph.nodes.last().unwrap();
+        assert_eq!(export.position.x, f64::from(chip.max.x) + 60.0);
+    }
 }
