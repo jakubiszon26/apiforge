@@ -350,6 +350,12 @@ impl CodeEditor {
         self.focus_stroke
     }
 
+    /// Whether the completion popup is open: a test seam (UX-11).
+    #[cfg(test)]
+    pub fn popup_open(&self) -> bool {
+        self.completions.popup.is_some()
+    }
+
     /// Puts the caret at a byte offset on the next frame, for a selection made
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
