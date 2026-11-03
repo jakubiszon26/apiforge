@@ -8,6 +8,7 @@
 mod clipboard;
 mod component;
 mod connect;
+mod extract;
 mod fold;
 mod inputs;
 mod inspect;
@@ -21,6 +22,10 @@ pub use component::{
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use extract::{
+    Extraction, Replaced, extraction_component, propose_extraction, replace_with_call,
+    unkept_outputs,
+};
 pub use inputs::{
     InputNameError, add_input, check_input_name, delete_input, rename_input, replace_input,
     set_action,
@@ -87,6 +92,12 @@ pub enum EditError {
     InvalidOperandPath,
     #[error("The component to revise does not exist.")]
     ComponentNotFound,
+    #[error("A step after the selection reads {0}. Keep it as an output.")]
+    OutputNotKept(String),
+    #[error(
+        "An IF/ELSE branch leaves the selection. Select the steps of the branch as well, or leave the IF/ELSE out."
+    )]
+    BranchLeavesSelection,
     #[error("{0}")]
     InvalidProject(#[from] ImportError),
 }
