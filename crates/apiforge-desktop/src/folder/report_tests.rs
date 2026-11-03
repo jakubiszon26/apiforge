@@ -23,7 +23,7 @@ fn ran(size: egui::Vec2, mode: &str) -> (tempfile::TempDir, FolderHarness) {
     click(&mut harness, "Diagram");
     click(&mut harness, BLOCK);
     click(&mut harness, mode);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     let deadline = Instant::now() + Duration::from_secs(30);
     while folder(&harness).runs.handle.is_some() {
         assert!(Instant::now() < deadline, "the run must finish");

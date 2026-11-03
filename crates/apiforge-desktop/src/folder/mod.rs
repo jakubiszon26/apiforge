@@ -319,6 +319,8 @@ pub struct FolderApp {
     /// The person's consent to an agent's live requests, per project
     /// (MCP-09).
     consent: crate::consent::AgentConsent,
+    /// The run mode the header's Run button runs, per project (UX-02).
+    run_mode: crate::run_mode::RunModeStore,
     /// Following the holder's commits while observing (MCP-16).
     follow: follow::Follow,
     /// The document the code view drew last and the lines it showed whole.
@@ -483,6 +485,7 @@ impl FolderApp {
             saved_settings: None,
             last_change: None,
             consent: crate::consent::AgentConsent::load(),
+            run_mode: crate::run_mode::RunModeStore::load(),
             follow: follow::Follow::default(),
             #[cfg(test)]
             lines_in_view: None,
@@ -737,11 +740,42 @@ impl FolderApp {
             .and_then(|(.., wait)| *wait)
     }
 
+    /// Opens the document at `path` in its tab and, when `edit` is given,
+    /// replaces the first `edit.0` in its code with `edit.1`, unsaved, as
+    /// typing would: a seam for design review views outside this module
+    /// (UX-04).
+    #[cfg(test)]
+    pub(crate) fn review_open(&mut self, path: &str, edit: Option<(&str, &str)>) {
+        let id = self
+            .session
+            .as_ref()
+            .and_then(|session| {
+                session
+                    .documents()
+                    .iter()
+                    .find(|document| document.entry().path.as_str() == path)
+            })
+            .unwrap_or_else(|| panic!("no document {path}"))
+            .id()
+            .to_owned();
+        self.activate_tab(&id);
+        if let Some((from, to)) = edit {
+            let session = self.session.as_mut().unwrap();
+            let text = session.document(&id).unwrap().text().to_owned();
+            let edited = text.replacen(from, to, 1);
+            assert_ne!(edited, text, "{from:?} is in {path}");
+            session.edit_source(&id, &edited, CODE).unwrap();
+            self.analyser.typed(&id, Instant::now());
+        }
+    }
+
     /// Keeps the person's per-project settings in `directory`, as
-    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09).
+    /// `XDG_CONFIG_HOME` names it, instead of nowhere: a test seam (MCP-09,
+    /// UX-02).
     #[cfg(test)]
     pub(crate) fn use_configuration_directory(&mut self, directory: &std::path::Path) {
         self.consent = crate::consent::AgentConsent::in_configuration(directory);
+        self.run_mode = crate::run_mode::RunModeStore::in_configuration(directory);
         self.say_consent();
     }
 

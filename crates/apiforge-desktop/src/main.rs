@@ -2,6 +2,35 @@
 //!
 //! Opening a document never executes a request.
 
+// REL-04: on Windows a release build is a windowed program, so a start from
+// Explorer opens no console window; `windows_console` says where its output
+// goes. Debug builds and tests keep their console.
+#![cfg_attr(
+    all(windows, not(debug_assertions), not(test)),
+    windows_subsystem = "windows"
+)]
+
+/// A line for standard output: `println!` through [`windows_console::write`],
+/// so that a windowed start without that handle writes it to the log (REL-04).
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        $crate::windows_console::write(
+            $crate::windows_console::Stream::Out,
+            format_args!($($arg)*),
+        )
+    };
+}
+
+/// A line for standard error: `eprintln!` through [`windows_console::write`].
+macro_rules! errln {
+    ($($arg:tt)*) => {
+        $crate::windows_console::write(
+            $crate::windows_console::Stream::Err,
+            format_args!($($arg)*),
+        )
+    };
+}
+
 mod app;
 mod board_edit;
 mod buffers;
@@ -22,12 +51,14 @@ mod navigator;
 mod persistence;
 mod preferences;
 mod report;
+mod run_mode;
 mod shapes;
 mod stop;
 #[cfg(test)]
 mod testing;
 mod theme;
 mod widgets;
+mod windows_console;
 
 use apiforge_storage::WorkspaceStore;
 use std::{
@@ -183,7 +214,7 @@ fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
         folder::Start::Managed => Ok(Opening::Managed(data)),
         folder::Start::Legacy(reason) => {
             if let Some(reason) = reason {
-                eprintln!("Opening the workspace instead: {reason}");
+                errln!("Opening the workspace instead: {reason}");
             }
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
@@ -191,7 +222,7 @@ fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
         // Nothing opens by itself after a refusal (KTLO-03, decision 1): the
         // stop window offers the previous workspace and quitting.
         folder::Start::Refused(refusal) => {
-            eprintln!("Migration stopped: {refusal}.");
+            errln!("Migration stopped: {refusal}.");
             Ok(Opening::Stopped(refusal))
         }
     }
@@ -216,25 +247,26 @@ const HELP: &str = "API Forge
 Opening a document never executes requests.";
 
 fn main() -> ExitCode {
+    windows_console::prepare();
     let arguments = match arguments(env::args_os().skip(1)) {
         Ok(arguments) => arguments,
         Err(message) => {
-            eprintln!("{message}");
+            errln!("{message}");
             return ExitCode::from(2);
         }
     };
     match arguments {
         Arguments::Help => {
-            println!("{HELP}");
+            outln!("{HELP}");
             ExitCode::SUCCESS
         }
         Arguments::Version => {
-            println!("apiforge-desktop {}", env!("CARGO_PKG_VERSION"));
+            outln!("apiforge-desktop {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Arguments::Check(path) => match files::read_document(&path) {
             Ok(document) => {
-                println!(
+                outln!(
                     "Valid v{} document: {} project(s)",
                     document.workspace().version,
                     document.workspace().projects.len()
@@ -242,14 +274,14 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(message) => {
-                eprintln!("{message}");
+                errln!("{message}");
                 ExitCode::FAILURE
             }
         },
         Arguments::Legacy => match WorkspaceStore::default_location() {
             Ok(store) => run_window(Opening::Workspace(app::Source::Storage(store)), Probe::None),
             Err(error) => {
-                eprintln!("{error}");
+                errln!("{error}");
                 ExitCode::FAILURE
             }
         },
@@ -258,7 +290,7 @@ fn main() -> ExitCode {
         Arguments::Managed => match managed_opening() {
             Ok(opening) => run_window(opening, Probe::None),
             Err(error) => {
-                eprintln!("{error}");
+                errln!("{error}");
                 ExitCode::FAILURE
             }
         },
@@ -285,7 +317,7 @@ fn main() -> ExitCode {
                 Some(project) => match files::read_document(&project) {
                     Ok(document) => document.into_workspace(),
                     Err(message) => {
-                        eprintln!("{message}");
+                        errln!("{message}");
                         return ExitCode::FAILURE;
                     }
                 },
@@ -313,7 +345,7 @@ fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
             probe,
         ),
         Err(message) => {
-            eprintln!("{message}");
+            errln!("{message}");
             ExitCode::FAILURE
         }
     }
@@ -447,7 +479,7 @@ impl eframe::App for Window {
         if let Some(capture) = &mut self.capture {
             if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
                 if let Err(message) = &result {
-                    eprintln!("{message}");
+                    errln!("{message}");
                 }
                 self.completed.store(result.is_ok(), Ordering::Release);
                 ui.ctx()
@@ -546,7 +578,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
         Ok(()) if observed.load(Ordering::Acquire) => ExitCode::SUCCESS,
         Ok(()) => ExitCode::FAILURE,
         Err(_) => {
-            eprintln!(
+            errln!(
                 "Cannot initialise the native window. Check GPU drivers and the display session."
             );
             ExitCode::FAILURE

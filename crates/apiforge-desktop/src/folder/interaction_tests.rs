@@ -13,8 +13,8 @@ const HEADER: [&str; 8] = [
     "Split",
     "Save",
     "Save all",
+    "Run simulation",
     "Run options",
-    "Run",
 ];
 
 const CARDS: [&str; 6] = [

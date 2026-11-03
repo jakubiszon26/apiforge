@@ -19,7 +19,8 @@ use std::{
 
 /// The demo's component whose only input has a default (`id` = 123).
 const PRODUCT: &str = "components/product.afs";
-/// The header from the mode tabs to *Run*, as a component tab shows it.
+/// The header from the mode tabs to *Run options*, as a component tab shows
+/// it.
 const HEADER: [&str; 8] = [
     "Code",
     "Diagram",
@@ -27,8 +28,8 @@ const HEADER: [&str; 8] = [
     "Save",
     "Save all",
     "Publish",
+    "Run simulation",
     "Run options",
-    "Run",
 ];
 
 /// The demo shop at `size` in `mode` with the component at `path` active.
@@ -77,7 +78,7 @@ fn finish(harness: &mut FolderHarness) -> RunResult {
 }
 
 fn run(harness: &mut FolderHarness) -> RunResult {
-    choose(harness, "Run");
+    choose(harness, "Run simulation");
     finish(harness)
 }
 
@@ -118,20 +119,21 @@ fn ktlo23_a_component_tab_holds_run_and_run_options_beside_publish() {
             assert_within_window(&harness, &HEADER);
             assert_disjoint(&harness, &HEADER);
             let rect = |label| harness.get_by_label(label).rect();
+            // UX-02: the chevron *Run options* is at the Run button's right.
             assert!(
-                rect("Publish").right() <= rect("Run options").left()
-                    && rect("Run options").right() <= rect("Run").left(),
-                "{mode} at {size:?}: Publish, Run options, Run, in this order"
+                rect("Publish").right() <= rect("Run simulation").left()
+                    && rect("Run simulation").right() <= rect("Run options").left(),
+                "{mode} at {size:?}: Publish, Run simulation, Run options, in this order"
             );
         }
     }
     let (mut harness, _) = on(&project, PRODUCT, WIDE, "Diagram");
-    harness.get_by_label("Run").hover();
+    harness.get_by_label("Run simulation").hover();
     settle(&mut harness);
     harness.run_steps(60);
     assert!(has(
         &harness,
-        "Simulate the selected scenario or component, including unsaved valid code"
+        "Simulate the selected scenario or component with sample responses, including unsaved valid code"
     ));
 }
 
@@ -299,7 +301,7 @@ fn ktlo23_invalid_component_code_offers_the_last_valid_version() {
     let project = shop();
     let (mut harness, id) = on(&project, PRODUCT, WIDE, "Code");
     edit(&mut harness, &id, "{", "{ broken");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert!(has(&harness, "Run the last valid version?"));
     assert!(has(&harness, "Component: Product"));
     assert!(folder(&harness).runs.handle.is_none(), "nothing runs yet");
@@ -408,11 +410,13 @@ fn live(harness: &mut FolderHarness, base: &str) {
         )
         .unwrap();
     settle(harness);
+    // UX-02: Live is the window's mode; the Run button then runs it.
     choose(harness, "Run options");
-    choose(harness, "Run live requests");
+    choose(harness, "Live");
+    choose(harness, "Run live");
 }
 
-/// Criterion 8: *Run options → Run live requests* runs the component live; the
+/// Criterion 8: *Run live* (UX-02: *Run options → Live*) runs the component live; the
 /// journal names the run after the component, and a run interrupted mid-request
 /// is listed at the next start. While no step has finished, the empty report
 /// speaks of the component, not of a scenario.
@@ -504,7 +508,7 @@ fn asks_for_inputs(harness: &FolderHarness) -> bool {
     harness.query_by_label("Run inputs").is_some()
 }
 
-/// The dialog's own *Run*, on *Cancel*'s row: the header has a *Run* too.
+/// The dialog's own *Run*, on *Cancel*'s row.
 fn dialog_run(harness: &FolderHarness) -> egui_kittest::Node<'_> {
     let cancel = harness.get_by_label("Cancel").rect();
     harness
@@ -554,7 +558,7 @@ fn ktlo23b_an_input_without_a_default_asks_for_the_run_inputs() {
     for size in [MINIMUM, WIDE] {
         let project = shop();
         let (mut harness, id) = on(&project, COMPONENT, size, "Diagram");
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         assert!(asks_for_inputs(&harness), "{size:?}: the dialog opens");
         assert!(folder(&harness).runs.handle.is_none(), "nothing runs yet");
         assert!(folder(&harness).run_result(&id).is_none());
@@ -615,7 +619,7 @@ fn ktlo23b_the_entered_values_run_and_are_kept_for_the_component() {
     drop(session);
 
     let (mut harness, id) = on(&project, COMPONENT, WIDE, "Diagram");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     enter(&mut harness, PRODUCT_FIELD, r#"{"id": 124}"#);
     enter(&mut harness, QUANTITY_FIELD, "2");
     dialog_run(&harness).click();
@@ -636,7 +640,7 @@ fn ktlo23b_the_entered_values_run_and_are_kept_for_the_component() {
         "no input is missing"
     );
 
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert!(asks_for_inputs(&harness), "asked again, pre-filled");
     let product: serde_json::Value = serde_json::from_str(&field(&harness, PRODUCT_FIELD)).unwrap();
     assert_eq!(product, serde_json::json!({ "id": 124 }));
@@ -654,7 +658,7 @@ fn ktlo23b_the_entered_values_run_and_are_kept_for_the_component() {
     let other = document(folder(&harness), "components/other-cart.afs");
     app(&mut harness).activate_tab(&other);
     settle(&mut harness);
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert!(asks_for_inputs(&harness));
     assert_eq!(
         field(&harness, PRODUCT_FIELD),
@@ -669,14 +673,14 @@ fn ktlo23b_the_entered_values_run_and_are_kept_for_the_component() {
 fn ktlo23b_cancel_runs_nothing() {
     let project = shop();
     let (mut harness, id) = on(&project, COMPONENT, WIDE, "Diagram");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     enter(&mut harness, PRODUCT_FIELD, r#"{"id": 124}"#);
     click(&mut harness, "Cancel");
     assert!(!asks_for_inputs(&harness), "the dialog closes");
     harness.run_steps(5);
     assert!(folder(&harness).runs.handle.is_none(), "nothing runs");
     assert!(folder(&harness).run_result(&id).is_none(), "no report");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert_eq!(
         field(&harness, PRODUCT_FIELD),
         "",
@@ -693,7 +697,7 @@ fn ktlo23b_cancel_runs_nothing() {
 fn ktlo23b_a_component_whose_inputs_all_have_defaults_runs_with_no_dialog() {
     let project = shop();
     let (mut harness, _) = on(&project, PRODUCT, WIDE, "Diagram");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert!(!asks_for_inputs(&harness), "no dialog");
     let report = finish(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
@@ -707,7 +711,7 @@ fn review_run_inputs() {
     for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
         let project = shop();
         let (mut harness, _) = on(&project, COMPONENT, size, "Diagram");
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         crate::testing::capture(&mut harness, &format!("run-inputs-{suffix}"), None);
         enter(&mut harness, PRODUCT_FIELD, r#"{ "id": 123 }"#);
         enter(&mut harness, QUANTITY_FIELD, "2");
@@ -776,7 +780,7 @@ fn ktlo27_an_empty_optional_input_does_not_block_run() {
     for size in [MINIMUM, WIDE] {
         let project = shop_with_notes();
         let (mut harness, _) = on(&project, NOTES, size, "Diagram");
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         assert!(asks_for_inputs(&harness), "{size:?}: the dialog opens");
         assert_eq!(field(&harness, ITEM_FIELD), "");
         assert_eq!(field(&harness, NOTE_FIELD), "");
@@ -810,7 +814,7 @@ fn ktlo27_an_empty_optional_input_does_not_block_run() {
 fn ktlo27_an_empty_optional_input_passes_no_value() {
     let project = shop_with_notes();
     let (mut harness, _) = on(&project, NOTES, WIDE, "Diagram");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     enter(&mut harness, ITEM_FIELD, r#"{"id": 7}"#);
     let report = run_dialog(&mut harness);
     assert!(passed(&report, "id"), "{:?}", report.steps);
@@ -837,7 +841,7 @@ fn ktlo27_an_empty_optional_input_passes_no_value() {
 fn ktlo27_a_typed_optional_value_is_passed_and_kept() {
     let project = shop_with_notes();
     let (mut harness, _) = on(&project, NOTES, WIDE, "Diagram");
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     enter(&mut harness, ITEM_FIELD, r#"{"id": 7}"#);
     enter(&mut harness, NOTE_FIELD, "hello");
     let report = run_dialog(&mut harness);
@@ -846,7 +850,7 @@ fn ktlo27_a_typed_optional_value_is_passed_and_kept() {
     assert_eq!(step(&report, "size").unwrap().outputs["value"], 5);
     assert!(!passed(&report, "fallback"));
 
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert!(asks_for_inputs(&harness), "asked again, pre-filled");
     assert_eq!(field(&harness, NOTE_FIELD), "hello", "kept");
     assert!(has(&harness, "optional · kept from the last run"));
@@ -854,7 +858,7 @@ fn ktlo27_a_typed_optional_value_is_passed_and_kept() {
     let report = run_dialog(&mut harness);
     assert!(passed(&report, "fallback"), "emptied, it is absent");
 
-    choose(&mut harness, "Run");
+    choose(&mut harness, "Run simulation");
     assert_eq!(field(&harness, NOTE_FIELD), "", "kept as absent");
     let item: serde_json::Value = serde_json::from_str(&field(&harness, ITEM_FIELD)).unwrap();
     assert_eq!(item, serde_json::json!({ "id": 7 }));
@@ -868,7 +872,7 @@ fn review_run_inputs_optional() {
     for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
         let project = shop_with_notes();
         let (mut harness, _) = on(&project, NOTES, size, "Diagram");
-        choose(&mut harness, "Run");
+        choose(&mut harness, "Run simulation");
         enter(&mut harness, ITEM_FIELD, r#"{ "id": 7 }"#);
         crate::testing::capture(&mut harness, &format!("run-inputs-optional-{suffix}"), None);
     }

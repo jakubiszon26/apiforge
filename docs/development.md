@@ -50,6 +50,28 @@ without `--folder`, because the workspace window has no modes. `--size WxH`
 sets the window's logical size for either window (default 1600x1000, at least
 960x540); the PNG is that size times the display scale.
 
+On Windows the release `apiforge-desktop.exe` is a windowed program
+([REL-04](tickets/REL-04.md)): started from Explorer, the Start menu or the
+release ZIP, it opens no console window, and it never attaches to one. What it
+prints (`--version`, `--help`, `--check`, the control channel's diagnostics,
+an error that ends the start, the text of a crash) reaches whoever started it
+only through a redirection: `apiforge-desktop.exe --check FILE > out.txt` in `cmd`,
+or `$out = apiforge-desktop.exe --check FILE | Write-Output` in PowerShell,
+which waits for it only when the output goes on down a pipeline. Typed in a
+terminal without redirection, it prints nothing there: the output goes to
+`%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects,
+as after a start from Explorer. `cmd` does not wait for a windowed program,
+and `%ERRORLEVEL%` is set only under `start /wait apiforge-desktop.exe …`;
+`Start-Process -Wait` waits too, but returns the output only with
+`-RedirectStandardOutput` or `-RedirectStandardError`. The log is opened when
+the first line needs it: each start that writes there appends a line
+`--- apiforge-desktop <version> <date time> ---` first, and a log over 1 MiB
+at that moment is renamed to `apiforge-desktop.log.1`, unless another running
+window holds it, in which case this start appends to it. If the log cannot be
+created, the window still starts and the output is lost. When the log could
+be opened, a crash of the window also shows a dialog that names it. Debug
+builds (`cargo run`) and `apiforge.exe` remain console programs.
+
 ### Demo API
 
 The demo projects send requests to `http://127.0.0.1:4318/demo`:

@@ -524,7 +524,7 @@ mod review {
             let project = shop_project();
             let mut harness = folder_harness(project.path(), size);
             click(&mut harness, "Split");
-            click(&mut harness, "Run");
+            click(&mut harness, "Run simulation");
             let deadline = Instant::now() + Duration::from_secs(30);
             while harness.query_by_label("PASSED").is_none() {
                 assert!(Instant::now() < deadline, "the run must pass");
@@ -532,8 +532,6 @@ mod review {
                 std::thread::sleep(Duration::from_millis(5));
             }
             settle(&mut harness);
-            // The mock-up has no notice under the header.
-            click(&mut harness, "Dismiss");
             if size == MINIMUM {
                 click(&mut harness, "Maximise run results");
             } else {
@@ -564,6 +562,225 @@ mod review {
                 click(&mut harness, "Restore run results");
                 capture(&mut harness, "ux01-two-checks-restored-960x540", None);
             }
+        }
+    }
+
+    /// UX-02: the Run button in either mode, beside MCP-09's *Live
+    /// allowed*, after a simulation so the SIMULATION badge is in view; the
+    /// chevron's menu in either mode; a component's tab, with *Publish*, the
+    /// fullest header. Compare with `docs/qa/2026-11-02/UX-00/ux02-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux02_run_mode() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            // The pointer leaves for the header's empty top margin, so no
+            // control is captured hovered.
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        fn explorer_row(harness: &mut FolderHarness, name: &str) {
+            let tree = harness.get_by_label("Project files").rect();
+            harness
+                .query_all_by_label(name)
+                .find(|node| tree.contains(node.rect().center()))
+                .unwrap_or_else(|| panic!("no explorer row {name:?}"))
+                .click();
+            settle(harness);
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let configuration = tempfile::tempdir().unwrap();
+            // MCP-09's consent, so *Live allowed* shares the header.
+            let manifest = apiforge_project::ProjectManifest::from_bytes(
+                &std::fs::read(project.path().join("apiforge.project.json")).unwrap(),
+            )
+            .unwrap();
+            let consent = configuration.path().join("apiforge/agent-consent.json");
+            std::fs::create_dir_all(consent.parent().unwrap()).unwrap();
+            std::fs::write(
+                &consent,
+                format!(
+                    r#"{{"version": 1, "projects": {{"{}": {{"live": true, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#,
+                    manifest.id
+                ),
+            )
+            .unwrap();
+            let mut harness = folder_harness(project.path(), size);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Diagram");
+            click(&mut harness, "Run simulation");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("Cancel run").is_some() {
+                assert!(Instant::now() < deadline, "the run must finish");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            let header = [
+                "Code",
+                "Diagram",
+                "Split",
+                "Save",
+                "Save all",
+                "Run options",
+            ];
+            for run in ["Run simulation", "Run live"] {
+                let mode = if run == "Run live" {
+                    "live"
+                } else {
+                    "simulation"
+                };
+                let mut labels = header.to_vec();
+                labels.extend(["Live allowed", run]);
+                assert_within_window(&harness, &labels);
+                assert_disjoint(&harness, &labels);
+                capture(&mut harness, &format!("ux02-run-{mode}-{suffix}"), None);
+                click(&mut harness, "Run options");
+                capture(
+                    &mut harness,
+                    &format!("ux02-run-options-{mode}-{suffix}"),
+                    None,
+                );
+                click(
+                    &mut harness,
+                    if run == "Run live" {
+                        "Simulation"
+                    } else {
+                        "Live"
+                    },
+                );
+            }
+            click(&mut harness, "Code");
+            explorer_row(&mut harness, "components");
+            explorer_row(&mut harness, "product.afs");
+            click(&mut harness, "Diagram");
+            let mut labels = header.to_vec();
+            labels.extend(["Live allowed", "Run simulation", "Publish"]);
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux02-component-tab-{suffix}"), None);
+        }
+    }
+
+    /// UX-04: *Running unsaved code* just left of *Cancel run* while a
+    /// live run runs, on the run's tab and, at both windows, on a
+    /// component's tab with *Publish* and *Live allowed*, where it names
+    /// the file. The API accepts and never answers, so the run is still
+    /// running when captured. Compare with
+    /// `docs/qa/2026-11-02/UX-00/ux04-beside-cancel-*` and
+    /// `ux04-component-tab-960x540`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux04_running_label() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                held.push(stream);
+            }
+        });
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let manifest_path = project.path().join("apiforge.project.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["environment"]["baseUrl"] = serde_json::json!(format!("http://{address}"));
+            std::fs::write(
+                &manifest_path,
+                serde_json::to_vec_pretty(&manifest).unwrap(),
+            )
+            .unwrap();
+            let id = manifest["id"].as_str().unwrap().to_owned();
+            // MCP-09's consent, so *Live allowed* shares the header, and the
+            // run mode Live (UX-02).
+            let configuration = tempfile::tempdir().unwrap();
+            let directory = configuration.path().join("apiforge");
+            std::fs::create_dir_all(&directory).unwrap();
+            for (file, entry) in [
+                ("agent-consent.json", r#""live": true"#),
+                ("run-mode.json", r#""mode": "live""#),
+            ] {
+                std::fs::write(
+                    directory.join(file),
+                    format!(
+                        r#"{{"version": 1, "projects": {{"{id}": {{{entry}, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#
+                    ),
+                )
+                .unwrap();
+            }
+            let mut harness = folder_harness(project.path(), size);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Split");
+            // An unsaved, valid change to the scenario's description.
+            harness.state_mut().as_mut().unwrap().review_open(
+                "scenarios/promotion-and-cart-price.afs",
+                Some(("description \"", "description \"Edited. ")),
+            );
+            settle(&mut harness);
+            click(&mut harness, "Run live");
+            assert!(
+                harness.query_by_label("Cancel run").is_some(),
+                "the run is running"
+            );
+            let header = egui::Rect::from_min_max(
+                egui::Pos2::ZERO,
+                egui::pos2(size.x, harness.get_by_label("Code").rect().bottom() + 9.0),
+            );
+            let mut labels = vec![
+                "Code",
+                "Diagram",
+                "Split",
+                "Save",
+                "Save all",
+                "Live allowed",
+                "Cancel run",
+                "Running unsaved code",
+            ];
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-beside-cancel-{suffix}"), None);
+            capture(
+                &mut harness,
+                &format!("ux04-beside-cancel-header-{suffix}"),
+                Some(header),
+            );
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .review_open("components/add-to-cart.afs", None);
+            settle(&mut harness);
+            labels.pop();
+            labels.extend(["Publish", "Running unsaved promotion-and-cart-price.afs"]);
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-component-tab-{suffix}"), None);
+            click(&mut harness, "Cancel run");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("Cancel run").is_some() {
+                assert!(Instant::now() < deadline, "the run must end");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            capture(&mut harness, &format!("ux04-after-cancel-{suffix}"), None);
         }
     }
 
