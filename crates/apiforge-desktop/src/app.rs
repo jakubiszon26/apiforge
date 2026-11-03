@@ -3508,7 +3508,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_style_is_remembered_for_the_next_session() {
+    fn the_wire_settings_are_remembered_for_the_next_session() {
         let context = egui::Context::default();
         let mut app = App::new(&context, Source::Session(default_workspace()));
         let directory = tempfile::tempdir().unwrap();
@@ -3516,12 +3516,12 @@ mod tests {
         let path = directory.path().join("preferences.json");
         app.preferences = crate::preferences::Preferences::at(Some(path.clone()));
         assert_eq!(app.canvas.wire_style, canvas::WireStyle::Orthogonal);
-        app.board_command(Command::SetWireStyle(canvas::WireStyle::Spline));
+        app.board_command(Command::SetWireStyle(canvas::WireStyle::Orthogonal));
         app.board_command(Command::SetBridges(false));
-        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Spline);
+        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Orthogonal);
         assert!(!app.canvas.bridges);
         let stored = crate::preferences::Preferences::at(Some(path));
-        assert_eq!(stored.wire_style, canvas::WireStyle::Spline);
+        assert_eq!(stored.wire_style, canvas::WireStyle::Orthogonal);
         assert!(!stored.bridges);
     }
 

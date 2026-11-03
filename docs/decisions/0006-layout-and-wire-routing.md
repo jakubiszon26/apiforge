@@ -2,7 +2,7 @@
 
 - Status: accepted and implemented, with the deviations recorded under
   *As implemented*
-- Date: 2026-10-23
+- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -106,6 +106,14 @@ in CI with a regression margin.
 
 *Wire style* (orthogonal / spline, default orthogonal) and *Bridges at crossings*
 (default on) live in application settings, not in the document.
+
+Amended by UX-28 (2026-11-03, owner decision 18 = A of the UX-1 plan): the
+spline style is withdrawn until it draws curves. What it drew was the
+orthogonal route with 24 px fillets, which the *Wire style* menu called
+*Curves*; the menu now offers *Right angles* and *Bridges at crossings*. A
+preferences file that stores `spline` still loads, as orthogonal, and the next
+save of preferences writes `orthogonal`. The rounding in `apiforge-layout`
+(`smooth`) stays, with its guarantees, for the style that replaces it.
 
 ## As implemented
 
