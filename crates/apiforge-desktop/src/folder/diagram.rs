@@ -410,10 +410,7 @@ impl FolderApp {
                 None
             }
             Command::SaveSelectionAsComponent => {
-                self.notify(
-                    "Saving a selection as a component is not available in folder projects yet.",
-                    false,
-                );
+                self.open_save_component(document_id, model, cleanup, &selection);
                 None
             }
         };
