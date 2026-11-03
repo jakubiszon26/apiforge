@@ -1312,9 +1312,6 @@ fn fits(value_type: ValueType, value: &Value) -> bool {
 const MAY_HAVE_HAPPENED: &str = "The API may have performed this request.";
 /// The runner's sentence on a failed request that never left the process.
 const NOTHING_SENT: &str = "Nothing was sent to the API.";
-/// The start of the runner's message on a step whose report was emptied,
-/// its request snapshot included, for exceeding the run data limit.
-const DATA_LIMIT: &str = "Exceeded the run data limit of ";
 
 /// The compact steps of a report.
 pub fn steps(report: &RunResult) -> Vec<Step> {
@@ -1324,8 +1321,8 @@ pub fn steps(report: &RunResult) -> Vec<Step> {
 
 /// Whether the API may have received the request of `found` (MCP-22): a
 /// live request is sent once the runner has its snapshot, unless the runner
-/// says nothing left the process; a step emptied at the data limit may have
-/// sent it.
+/// says nothing left the process. A step the runner emptied at the data
+/// limit has no snapshot and keeps the runner's sentence instead.
 fn may_have_reached_api(found: &StepResult, live: bool) -> bool {
     let message = found.message.as_deref().unwrap_or_default();
     if message.ends_with(MAY_HAVE_HAPPENED) {
@@ -1333,7 +1330,7 @@ fn may_have_reached_api(found: &StepResult, live: bool) -> bool {
     }
     live && found.kind == apiforge_core::model::NodeKind::Request
         && !message.ends_with(NOTHING_SENT)
-        && (found.request.is_some() || message.starts_with(DATA_LIMIT))
+        && found.request.is_some()
 }
 
 fn step(found: &StepResult, live: bool) -> Step {
@@ -1426,16 +1423,18 @@ mod tests {
     }
 
     /// MCP-22: a live request is marked once sent, answered or not; a step
-    /// that sent nothing is not; a step emptied at the data limit may have.
+    /// that sent nothing is not, also when the data limit emptied it.
     #[test]
     fn a_sent_live_request_may_have_reached_the_api() {
         let cut_off = format!("Timed out. {MAY_HAVE_HAPPENED}");
         let refused = format!("Connection refused. {NOTHING_SENT}");
-        let emptied = format!("{DATA_LIMIT}1 MiB.");
+        let emptied = format!("Exceeded the run data limit of 1 B. {MAY_HAVE_HAPPENED}");
+        let emptied_unsent = format!("Exceeded the run data limit of 1 B. {NOTHING_SENT}");
         for (kind, message, snapshot, live, marked) in [
             ("request", None, true, true, true),
             ("request", Some(cut_off.as_str()), true, true, true),
             ("request", Some(emptied.as_str()), false, true, true),
+            ("request", Some(emptied_unsent.as_str()), false, true, false),
             ("request", Some(refused.as_str()), true, true, false),
             ("request", None, false, true, false),
             ("request", None, true, false, false),

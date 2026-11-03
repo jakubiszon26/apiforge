@@ -712,11 +712,30 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         step.duration_ms = milliseconds(started.elapsed());
         let size = serde_json::to_vec(&step).map_or(usize::MAX, |bytes| bytes.len());
         if self.report_bytes.saturating_add(size) > self.limits.max_report_bytes {
-            step.status = StepStatus::Error;
-            step.message = Some(format!(
+            // The emptied step keeps the one fact a reader of a live run needs:
+            // whether its request can have reached the tested API (MCP-22).
+            let effect = (self.request.mode == apiforge_core::run::RunMode::Live
+                && step.request.is_some())
+            .then(|| {
+                if step
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.ends_with(NOTHING_SENT))
+                {
+                    NOTHING_SENT
+                } else {
+                    MAY_HAVE_HAPPENED
+                }
+            });
+            let exceeded = format!(
                 "Exceeded the run data limit of {}.",
                 byte_size(self.limits.max_report_bytes)
-            ));
+            );
+            step.status = StepStatus::Error;
+            step.message = Some(match effect {
+                Some(effect) => format!("{exceeded} {effect}"),
+                None => exceeded,
+            });
             step.inputs.clear();
             step.outputs.clear();
             step.children = None;
@@ -1453,6 +1472,69 @@ mod tests {
                 .status,
             StepStatus::Skipped
         );
+    }
+
+    /// MCP-22: a live request step emptied at the run data limit still says
+    /// whether the API may have performed it.
+    #[tokio::test]
+    async fn a_step_emptied_at_the_data_limit_keeps_whether_it_was_sent() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let served = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = [0; 4096];
+                let _ = stream.read(&mut buffer).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = format!("http://{}/", closed.local_addr().unwrap());
+        drop(closed);
+        for (url, effect) in [(served, MAY_HAVE_HAPPENED), (refused, NOTHING_SENT)] {
+            let mut project: Project =
+                serde_json::from_slice(include_bytes!("../../../fixtures/projects/shop.json"))
+                    .unwrap();
+            project.scenarios.truncate(1);
+            let scenario = &mut project.scenarios[0];
+            scenario.graph = serde_json::from_value(serde_json::json!({
+                "nodes": [
+                    {"id": "start", "kind": "start", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
+                    {"id": "fetch", "kind": "request", "handle": "fetch", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "literal", "value": url}}, "config": {}}
+                ],
+                "edges": [{"id": "start-fetch", "source": "start", "target": "fetch"}]
+            }))
+            .unwrap();
+            scenario.cleanup = Graph {
+                nodes: vec![],
+                edges: vec![],
+                proxies: Vec::new(),
+            };
+            let scenario_id = scenario.id.clone();
+            let mut options = RunOptions::new(http::HttpTransport::new().unwrap());
+            // The start step fits; the request step, with its snapshot, does not.
+            options.limits.max_report_bytes = 200;
+            let result = run_scenario(
+                RunRequest::new(project, scenario_id, apiforge_core::run::RunMode::Live),
+                options,
+                CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap();
+            let fetch = result.step("fetch").unwrap();
+            let message = fetch.message.as_deref().unwrap();
+            assert!(
+                message.starts_with("Exceeded the run data limit"),
+                "{message}"
+            );
+            assert!(message.ends_with(effect), "{message}");
+        }
+        server.abort();
     }
 
     #[tokio::test]
