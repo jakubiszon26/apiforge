@@ -216,17 +216,25 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], state: State<'_>) -> Opti
                     if let Some(name) = &adding {
                         widths.push(adding_width(ui, name));
                     }
+                    let room = (ui.available_width() - add_width - 2.0 * PILL_GAP).max(0.0);
+                    // The input being added never takes more than the room:
+                    // its detail is cut instead, so its name stays in view.
+                    if let (Some(name), Some(width)) = (&adding, widths.last_mut()) {
+                        let least = 2.0 * PILL_PADDING + text_width(ui, name, name_font());
+                        *width = width.min(room.max(least));
+                    }
                     let total = widths.iter().sum::<f32>()
                         + PILL_GAP * widths.len().saturating_sub(1) as f32;
-                    let room = (ui.available_width() - add_width - 2.0 * PILL_GAP).max(0.0);
                     // The selected pill is scrolled into view when it is
                     // selected and whenever the strip's room changes, as when
                     // the Inspector opens beside the board.
                     let shown_key = id.with("shown");
                     // The input being added is the one in view while it is.
-                    let focus = adding
-                        .as_ref()
-                        .map_or_else(|| selected.map(str::to_owned), |_| Some(ADDING.to_owned()));
+                    // It grows as its name is typed, so each name is shown anew.
+                    let focus = adding.as_ref().map_or_else(
+                        || selected.map(str::to_owned),
+                        |name| Some(format!("{name} {ADDING}")),
+                    );
                     let shown = (focus.clone(), room.round() as i32);
                     let reveal = ui
                         .ctx()
@@ -344,14 +352,18 @@ fn adding_pill(ui: &mut egui::Ui, name: &str, width: f32) {
         name,
         theme::TEXT,
     );
-    let detail = painter.layout_no_wrap(ADDING.to_owned(), detail_font(), theme::MUTED);
-    painter.galley(
-        pos2(
-            x + width + DETAIL_GAP,
-            rect.center().y - detail.size().y / 2.0,
+    // Cut with an ellipsis when the pill is narrower than its text.
+    let left = x + width + DETAIL_GAP;
+    widgets::paint_label(
+        painter,
+        Rect::from_min_max(
+            pos2(left, rect.top()),
+            pos2(rect.right() - PILL_PADDING, rect.bottom()),
         ),
-        detail,
+        ADDING,
+        detail_font(),
         theme::MUTED,
+        Align::Min,
     );
 }
 

@@ -20,7 +20,8 @@ pub(super) struct NewInput {
     default: String,
     required: bool,
     exposed: bool,
-    /// The name field takes the keyboard on the form's first frame.
+    /// The name field is to take the keyboard: from the form's first frame
+    /// until it has it.
     focus: bool,
 }
 
@@ -326,9 +327,14 @@ fn new_input_form(
             "Input name",
         )
     });
+    // Asked for until the field has it: in the native window the click that
+    // opened the form may still hold the focus on the frame the form opens.
     if form.focus {
-        name.request_focus();
-        form.focus = false;
+        if name.has_focus() || !ui.is_enabled() {
+            form.focus = false;
+        } else {
+            name.request_focus();
+        }
     }
     let name_problem = problem(&form.name);
     match &name_problem {

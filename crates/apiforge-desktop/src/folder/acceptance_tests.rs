@@ -10097,6 +10097,29 @@ mod ux32 {
         assert!(!contains(&harness, "Delete anyway"));
     }
 
+    /// At 960 × 540 the Inspector leaves the strip too narrow for every
+    /// pill: the input being added stays whole in view as its name grows,
+    /// between the caption and *+ Add input*.
+    #[test]
+    fn ux32_the_input_being_added_stays_in_view_as_it_is_named() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), MINIMUM, CART, "Diagram");
+        open_form(&mut harness);
+        for typed in ["c", "urrency", "Reference"] {
+            harness.get_by_label(NAME).type_text(typed);
+            settle(&mut harness);
+        }
+        let caption = harness.get_by_label("INPUTS").rect();
+        let add = harness.get_by_label(ADD).rect();
+        let pill = harness
+            .get_by_label("currencyReference being added…")
+            .rect();
+        assert!(
+            caption.right() <= pill.left() && pill.right() <= add.left(),
+            "the pill {pill:?} whole between {caption:?} and {add:?}"
+        );
+    }
+
     /// The panels beside the approved captures
     /// `docs/qa/2026-11-02/COMP-00/comp00-q2-*.png` and `comp00-q3-*.png`.
     #[test]
