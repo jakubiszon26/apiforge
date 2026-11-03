@@ -68,6 +68,22 @@ fn source_of(harness: &FolderHarness, document_id: &str) -> String {
         .to_owned()
 }
 
+/// Changes the component's description, the smallest edit that makes a
+/// next revision: one equal to its latest revision has nothing to publish
+/// (UX-25).
+fn revise(harness: &mut FolderHarness, document_id: &str) {
+    let source = source_of(harness, document_id);
+    let revised = source.replacen("description \"", "description \"Revised. ", 1);
+    assert_ne!(revised, source, "the component has a description");
+    app(harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(document_id, &revised, CODE)
+        .unwrap();
+    settle(harness);
+}
+
 fn text_of(harness: &FolderHarness, path: &str) -> String {
     folder(harness)
         .session
@@ -178,8 +194,11 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
 
     // Publish the next revision of a migrated component. The scenario keeps
     // the revision it was migrated against, so its source must not change.
+    // A component equal to its latest revision has nothing to publish
+    // (UX-25), so its description changes first.
     app(&mut harness).activate_tab(&component);
     settle(&mut harness);
+    revise(&mut harness, &component);
     choose(&mut harness, "Publish");
     assert_eq!(
         folder(&harness)
@@ -842,8 +861,15 @@ mod mcp07 {
         drop(owner);
         await_writer(&mut harness, Instant::now());
         // Typing is paused while observing (MCP-08a), so the change that
-        // makes a next revision is typed once the window is the writer.
+        // makes a next revision is typed once the window is the writer. A
+        // comment the revision would not keep is not one (UX-25): the
+        // description changes too.
         type_into(&mut harness, &label, "// next revision\n");
+        assert!(
+            disabled(&harness, "Publish"),
+            "a loose comment is no change"
+        );
+        revise(&mut harness, &component);
         assert!(!disabled(&harness, "Publish"));
     }
 
@@ -3814,6 +3840,14 @@ mod mcp05 {
         }
         assert_eq!(shared(server.path()), shared(window.path()));
 
+        // The same edit in both copies: a component equal to its latest
+        // revision has nothing to publish from the window (UX-25).
+        for copy in [window.path(), server.path()] {
+            let source = fs::read_to_string(copy.join(PRODUCT)).unwrap();
+            let revised = source.replacen("description \"", "description \"Revised. ", 1);
+            assert_ne!(revised, source);
+            fs::write(copy.join(PRODUCT), revised).unwrap();
+        }
         let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
         let saved = fs::read(server.path().join(PRODUCT)).unwrap();
         let published = agent
