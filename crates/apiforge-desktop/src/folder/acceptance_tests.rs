@@ -8453,9 +8453,7 @@ mod ux05 {
 
     /// Criterion 7: maximised, the grip dragged down 200 px and released
     /// restores the panel where it was released, within its normal range.
-    /// At 1600 × 1000 also 500 px, which lands under the ceiling (at
-    /// 960 × 540 the panel's contents after a run leave it only the 11 px
-    /// under the ceiling).
+    /// At 1600 × 1000 also 500 px, which lands under the ceiling.
     #[test]
     fn ux05_criterion_7_dragging_down_restores() {
         for (size, distance) in [(MINIMUM, 200.0), (WIDE, 200.0), (WIDE, 500.0)] {
@@ -8535,10 +8533,8 @@ mod ux05 {
 
     /// Criterion 9: the keyboard is unchanged: ↑ and End on the grip stop at
     /// the ceiling and do not maximise; ↓ lowers the panel by 32 px and Home
-    /// to its least height, as today. An arrow key also moves egui's focus
-    /// on, as it does today, so the grip is focused again before each key.
-    /// At 960 × 540 the panel's contents after a run are taller than 32 px
-    /// under the ceiling allows, so ↓ is measured exactly at 1600 × 1000.
+    /// to its least height. An arrow key also moves egui's focus on, as it
+    /// does today, so the grip is focused again before each key.
     #[test]
     fn ux05_criterion_9_the_keys_stop_at_the_ceiling() {
         fn press_on_grip(harness: &mut FolderHarness, key: Key) {
@@ -8571,26 +8567,16 @@ mod ux05 {
             press_on_grip(&mut harness, Key::ArrowDown);
             let lowered = panel_top(&harness);
             assert!(
-                lowered > ceiling + 1.0,
-                "{size:?}: ↓ does not lower the panel"
+                (lowered - (ceiling + 32.0)).abs() <= 1.0,
+                "{size:?}: ↓ lowers the panel by 32 px: {lowered}"
             );
-            if size == WIDE {
-                assert!(
-                    (lowered - (ceiling + 32.0)).abs() <= 1.0,
-                    "↓ lowers the panel by 32 px: {lowered}"
-                );
-            }
             press_on_grip(&mut harness, Key::Home);
-            // At 960 × 540 ↓ already reaches the least height the contents
-            // allow, so Home keeps it there.
-            let home = panel_top(&harness);
+            let workspace = workspace(&harness);
+            let (min, _) = normal_range(workspace);
             assert!(
-                if size == MINIMUM {
-                    (home - lowered).abs() <= 1.0
-                } else {
-                    home > lowered + 1.0
-                },
-                "{size:?}: Home puts the panel's top at {home}, ↓ at {lowered}"
+                (panel_top(&harness) - (workspace.bottom() - min)).abs() <= 1.0,
+                "{size:?}: Home gives the panel its least height: {}",
+                panel_top(&harness)
             );
             assert!(!maximised(&harness) && zone(&harness, ZONE).is_none());
         }

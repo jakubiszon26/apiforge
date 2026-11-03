@@ -333,6 +333,14 @@ impl ReportPanel {
                 ceiling: maximum,
             });
         }
+        // egui keeps the size a panel was last drawn at and prefers it to
+        // `default_size`; a workspace shorter for a frame would keep the
+        // panel short after it. Unless egui's own edge is being dragged, the
+        // panel is drawn at the height kept here.
+        if was_open && !maximised && !edge_held && !edge_let_go {
+            ui.ctx()
+                .data_mut(|data| data.remove::<egui::PanelState>(panel_id));
+        }
         let lifted = (full - DROP_ZONE_MIN).max(maximum);
         let ceiling = if self.drag.is_some() { lifted } else { maximum };
         let height = self.normal_height(compact).clamp(min_height, ceiling);
@@ -1782,6 +1790,53 @@ mod tests {
                 assert_eq!(offered, 1, "the token row still offers Check");
             }
         }
+    }
+
+    /// A workspace that is shorter for a frame (a notice under the tab strip
+    /// while storage work runs) clamps the panel for that frame only: after
+    /// it the panel is back at the height it keeps (UX-05, seen on CI).
+    #[test]
+    fn a_workspace_shorter_for_a_frame_does_not_keep_the_panel_short() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let mut panel = ReportPanel {
+            open: true,
+            ..Default::default()
+        };
+        let report_context = Context {
+            run: None,
+            selected_node_id: None,
+            error_policy: ErrorPolicy::Continue,
+            running: false,
+            stale: false,
+            checked: &[],
+            files_busy: false,
+            component: false,
+            document_locked: false,
+        };
+        let mut draw = |height: f32| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, height),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    panel.show(ui, &report_context);
+                },
+            );
+            output.textures_delta.clear();
+            panel.debug_resize_handle().2
+        };
+        for _ in 0..3 {
+            draw(600.0);
+        }
+        assert_eq!(draw(600.0), 320.0, "the default height");
+        assert_eq!(draw(500.0), 300.0, "clamped to the shorter workspace");
+        draw(600.0);
+        assert_eq!(draw(600.0), 320.0, "back at its height");
     }
 
     #[test]
