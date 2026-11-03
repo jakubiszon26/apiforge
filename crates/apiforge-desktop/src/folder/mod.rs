@@ -22,6 +22,7 @@ mod follow;
 mod handover;
 mod handover_prompt;
 mod holder;
+mod inputs;
 mod navigation;
 mod opening;
 mod placement;
@@ -272,6 +273,9 @@ pub struct FolderApp {
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
     selected_inputs: HashMap<String, String>,
+    /// The *New input* form open on a component's board, by document
+    /// (UX-32). While it is open the Inspector shows it.
+    new_inputs: HashMap<String, inputs::NewInput>,
     /// Each document's field drafts as the inspector and the session last
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
@@ -463,6 +467,7 @@ impl FolderApp {
             canvases: HashMap::new(),
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
+            new_inputs: HashMap::new(),
             agreed_fields: HashMap::new(),
             clipboard: None,
             inspector: Inspector::default(),
@@ -1615,6 +1620,7 @@ impl FolderApp {
         self.canvases.remove(document_id);
         self.selections.remove(document_id);
         self.selected_inputs.remove(document_id);
+        self.new_inputs.remove(document_id);
         if self.shown.as_deref() == Some(document_id) {
             self.shown = None;
         }

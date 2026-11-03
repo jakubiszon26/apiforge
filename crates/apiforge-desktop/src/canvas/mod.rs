@@ -47,6 +47,9 @@ pub enum Command {
     /// Select a component's input in the INPUTS strip, or clear it (UX-31).
     /// Selecting an input selects no block.
     SelectInput(Option<String>),
+    /// Open the *New input* form for a component (UX-32): *+ Add input* in
+    /// the INPUTS strip.
+    AddInput,
     /// Final positions after a drag.
     Move(Vec<(String, Position)>),
     Connect {
@@ -151,6 +154,9 @@ pub struct Input<'a> {
     pub inputs: Option<&'a [Port]>,
     /// The input selected in the strip: the steps that read it are ringed.
     pub selected_input: Option<&'a str>,
+    /// The name typed in the *New input* form while it is open (UX-32): the
+    /// strip shows the input as being added.
+    pub adding_input: Option<&'a str>,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -377,12 +383,23 @@ impl Canvas {
                 .iter()
                 .map(|port| strip::Pill::of(port, &input.project.contracts))
                 .collect();
-            if let Some(strip::Outcome::Select(name)) =
-                strip::show(ui, rect, &pills, input.selected_input)
-            {
-                self.menu = None;
-                self.selected_wires.clear();
-                commands.push(Command::SelectInput(name));
+            let state = strip::State {
+                selected: input.selected_input,
+                adding: input.adding_input,
+                can_add: !input.read_only,
+            };
+            match strip::show(ui, rect, &pills, state) {
+                Some(strip::Outcome::Select(name)) => {
+                    self.menu = None;
+                    self.selected_wires.clear();
+                    commands.push(Command::SelectInput(name));
+                }
+                Some(strip::Outcome::Add) => {
+                    self.menu = None;
+                    self.selected_wires.clear();
+                    commands.push(Command::AddInput);
+                }
+                None => {}
             }
         }
         let background = ui.allocate_rect(viewport, Sense::click_and_drag());
@@ -2393,6 +2410,7 @@ mod tests {
                                 library: None,
                                 inputs: None,
                                 selected_input: None,
+                                adding_input: None,
                             },
                         );
                     });
@@ -2441,6 +2459,7 @@ mod tests {
                                 library: None,
                                 inputs: None,
                                 selected_input: None,
+                                adding_input: None,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
