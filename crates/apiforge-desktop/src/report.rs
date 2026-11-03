@@ -389,7 +389,18 @@ impl ReportPanel {
         // moment (a notice under the tab strip while storage work runs)
         // shortened it for good. Maximised, it is kept for the restore.
         if !maximised && (edge_held || edge_let_go) {
-            self.set_normal_height(compact, actual_height);
+            // egui draws the edge no higher than this frame allows; held at
+            // that end in a frame whose workspace is shorter for a moment,
+            // the height the drag held above it is kept, up to the most the
+            // drag has seen allowed (UX-36).
+            let kept = self.normal_height(compact);
+            let ceiling = self.drag.map_or(highest, |drag| drag.ceiling.max(highest));
+            let next = if actual_height >= highest - 0.5 && kept > highest {
+                kept.min(ceiling)
+            } else {
+                actual_height
+            };
+            self.set_normal_height(compact, next);
         }
         // The grip: the panel's own handle, kept at the top of the maximised
         // panel so that it can be dragged back down (UX-05).
@@ -516,7 +527,7 @@ impl ReportPanel {
                     // draw: released in a frame whose workspace is shorter
                     // (a notice under the tab strip), the panel would keep
                     // that frame's clamp for good. Dragged by egui's edge,
-                    // the held height is the edge's, taken above.
+                    // the held height is taken above, by the same rule.
                     let held_height = self.normal_height(compact);
                     self.release(drag, compact, min_height, held_height);
                     if drag.snapped {
