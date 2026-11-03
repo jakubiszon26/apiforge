@@ -274,6 +274,10 @@ pub struct FolderApp {
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
+    /// When the editor last changed each document's text, while its error
+    /// marks wait for a pause in typing (UX-03). The analyser's own instant
+    /// cannot serve: it forgets it when the analysis starts.
+    marks_quiet_at: HashMap<String, Instant>,
     notice: Option<Notice>,
     /// The active tab last revealed in the strip, and the strip's last scroll
     /// offset, so activating a tab can scroll it into view.
@@ -322,6 +326,15 @@ pub struct FolderApp {
     /// The document the code view drew last and the lines it showed whole.
     #[cfg(test)]
     lines_in_view: Option<(String, std::ops::RangeInclusive<usize>)>,
+    /// The instant the rule of the error marks reads as now, set by a test
+    /// to step the clock by hand (UX-03); `None` reads the real clock.
+    #[cfg(test)]
+    marks_clock: Option<Instant>,
+    /// The document the code view drew last, the lines its editor was given
+    /// diagnostics for, and the wait it asked to be drawn again after for
+    /// the marks to appear (UX-03).
+    #[cfg(test)]
+    marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
 }
 
 struct Clipboard {
@@ -446,6 +459,7 @@ impl FolderApp {
             clipboard: None,
             inspector: Inspector::default(),
             changed_at: None,
+            marks_quiet_at: HashMap::new(),
             notice: None,
             followed_tab: None,
             tabs_offset: 0.0,
@@ -475,6 +489,10 @@ impl FolderApp {
             follow: follow::Follow::default(),
             #[cfg(test)]
             lines_in_view: None,
+            #[cfg(test)]
+            marks_clock: None,
+            #[cfg(test)]
+            marks_shown: None,
         }
     }
 
@@ -679,6 +697,47 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn code_lines_in_view(&self) -> Option<(String, std::ops::RangeInclusive<usize>)> {
         self.lines_in_view.clone()
+    }
+
+    /// The present for the error marks' pause (UX-03): the real clock, or
+    /// the instant a test stepped it to.
+    fn marks_now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(now) = self.marks_clock {
+            return now;
+        }
+        Instant::now()
+    }
+
+    /// Steps the clock the error marks' pause is measured by: from now on
+    /// the rule reads `now` as the present, as does a keystroke it records
+    /// (UX-03). A test seam; the window reads the real clock.
+    #[cfg(test)]
+    pub(crate) fn set_marks_clock(&mut self, now: Instant) {
+        self.marks_clock = Some(now);
+    }
+
+    /// The lines, counted from one, the code view last gave `document_id`'s
+    /// editor diagnostics for: the red numbers and dots it drew (UX-03). A
+    /// test seam.
+    #[cfg(test)]
+    pub(crate) fn marked_lines(&self, document_id: &str) -> Vec<usize> {
+        self.marks_shown
+            .as_ref()
+            .filter(|(shown, ..)| shown == document_id)
+            .map(|(_, lines, _)| lines.clone())
+            .unwrap_or_default()
+    }
+
+    /// How long the code view last asked to wait before drawing
+    /// `document_id` again for its error marks, `None` when it asked for
+    /// nothing (UX-03). A test seam.
+    #[cfg(test)]
+    pub(crate) fn marks_wait(&self, document_id: &str) -> Option<Duration> {
+        self.marks_shown
+            .as_ref()
+            .filter(|(shown, ..)| shown == document_id)
+            .and_then(|(.., wait)| *wait)
     }
 
     /// Opens the document at `path` in its tab and, when `edit` is given,

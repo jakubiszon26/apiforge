@@ -96,6 +96,10 @@ pub struct CodeEditor {
     /// The selection drawn last frame, so a moved caret is scrolled clear of
     /// the gutter that covers the left of the panel.
     caret: Option<egui::text::CCursorRange>,
+    /// The focus line the gutter painted last frame, if any: a test seam
+    /// (UX-03), since interaction tests do not read pixels.
+    #[cfg(test)]
+    focus_stroke: Option<Stroke>,
 }
 
 /// The completion popup of one text edit, whatever widget drew it.
@@ -339,6 +343,13 @@ impl Completions {
 }
 
 impl CodeEditor {
+    /// The focus line the gutter painted in the last frame it was drawn,
+    /// `None` without keyboard focus: a test seam (UX-03).
+    #[cfg(test)]
+    pub fn focus_stroke(&self) -> Option<Stroke> {
+        self.focus_stroke
+    }
+
     /// Puts the caret at a byte offset on the next frame, for a selection made
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
@@ -453,6 +464,10 @@ impl CodeEditor {
             }
             let output = edit.show(ui);
             let mut lines_in_view = None;
+            #[cfg(test)]
+            {
+                self.focus_stroke = None;
+            }
             if let Some(gutter) = gutter {
                 self.keep_caret_clear_of_gutter(ui, &output, gutter_width);
                 lines_in_view = self.paint_gutter(ui, gutter, text, &output, context);
@@ -471,7 +486,7 @@ impl CodeEditor {
     /// The y of each line comes from the galley, so a wrapped line keeps its
     /// number beside its first visual row instead of drifting out of step.
     fn paint_gutter(
-        &self,
+        &mut self,
         ui: &Ui,
         rect: Rect,
         text: &str,
@@ -489,12 +504,20 @@ impl CodeEditor {
         let band = Rect::from_x_y_ranges(rect.x_range(), visible.y_range());
         painter.rect_filled(band, 0.0, ui.visuals().panel_fill);
         // The box's coloured stroke used to be the only sign of keyboard focus.
-        if output.response.response.has_focus() {
+        // The line is grey: in the accent it read as an error beside the red
+        // marks (UX-03).
+        let focus = output
+            .response
+            .response
+            .has_focus()
+            .then(|| Stroke::new(2.0, theme::MUTED));
+        if let Some(stroke) = focus {
             let x = band.right() - 1.0;
-            painter.line_segment(
-                [pos2(x, band.top()), pos2(x, band.bottom())],
-                Stroke::new(2.0, ui.visuals().selection.stroke.color),
-            );
+            painter.line_segment([pos2(x, band.top()), pos2(x, band.bottom())], stroke);
+        }
+        #[cfg(test)]
+        {
+            self.focus_stroke = focus;
         }
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
@@ -960,7 +983,10 @@ fn diagnostic_at(diagnostics: &[Diagnostic], at: usize) -> Option<String> {
 }
 
 /// Lines a diagnostic marks, counted from one.
-fn marked_lines(text: &str, diagnostics: &[Diagnostic]) -> std::collections::HashSet<usize> {
+pub(crate) fn marked_lines(
+    text: &str,
+    diagnostics: &[Diagnostic],
+) -> std::collections::HashSet<usize> {
     diagnostics
         .iter()
         .map(|diagnostic| line_of(text, diagnostic.range.start))
