@@ -9370,7 +9370,6 @@ mod ux04 {
 /// strip stores nothing (docs/tickets/COMP-00.md).
 mod ux31 {
     use super::mcp08b::contains;
-    use super::ux02::hover_shows;
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
     use egui::accesskit::Toggled;
@@ -9397,7 +9396,7 @@ mod ux31 {
     }
 
     /// The demo shop at `size` with `path` open in `mode`.
-    fn window(
+    pub(super) fn window(
         root: &std::path::Path,
         size: egui::Vec2,
         path: &str,
@@ -9412,7 +9411,7 @@ mod ux31 {
     }
 
     /// The names of the cards the board rings, as their blocks are named.
-    fn ringed(harness: &FolderHarness, id: &str) -> Vec<String> {
+    pub(super) fn ringed(harness: &FolderHarness, id: &str) -> Vec<String> {
         let app = folder(harness);
         let Some(Document::Component(component)) =
             app.session.as_ref().unwrap().document(id).unwrap().model()
@@ -9439,7 +9438,7 @@ mod ux31 {
         names
     }
 
-    fn toggled(harness: &FolderHarness, label: &str) -> Option<Toggled> {
+    pub(super) fn toggled(harness: &FolderHarness, label: &str) -> Option<Toggled> {
         harness.get_by_label(label).accesskit_node().toggled()
     }
 
@@ -9592,20 +9591,6 @@ mod ux31 {
         assert_eq!(fs::read(&file).unwrap(), before, "byte-identical");
     }
 
-    /// Criterion 5, until UX-32 is merged: *+ Add input* is present and
-    /// disabled, and its hover says *Coming with UX-32*. UX-32 replaces this
-    /// test with its *New input* form.
-    #[test]
-    fn ux31_criterion_5_add_input_waits_for_ux32() {
-        let directory = shop();
-        let (mut harness, _) = window(directory.path(), WIDE, CART, "Diagram");
-        assert!(
-            harness.get_by_label(ADD).accesskit_node().is_disabled(),
-            "disabled"
-        );
-        assert!(hover_shows(&mut harness, ADD, "Coming with UX-32"));
-    }
-
     /// The strip beside the approved captures
     /// `docs/qa/2026-11-02/COMP-00/comp00-q1-c-*.png`: Diagram and Split at
     /// both sizes, and Diagram with `quantity` selected.
@@ -9712,5 +9697,428 @@ mod ux31 {
             last.right() > add.left(),
             "the last pill {last:?} is scrolled beyond Add input {add:?}"
         );
+    }
+}
+
+/// UX-32 (#249, COMP-00 Q2 = A, Q3): a component's inputs are added and
+/// edited in the Inspector. *+ Add input* on the INPUTS strip opens a *New
+/// input* form; a selected pill opens the input's panel, whose edits are
+/// live: each change is written to the code as it is typed, and an invalid
+/// name stays in the field with an inline error while the code keeps the
+/// last valid name (docs/tickets/COMP-00.md).
+mod ux32 {
+    use super::mcp08b::contains;
+    use super::ux31::{ringed, toggled, window};
+    use super::*;
+    use crate::testing::{MINIMUM, assert_within_window};
+    use egui::accesskit::Toggled;
+    use egui::epaint::Shape;
+    use egui_kittest::kittest::NodeT;
+
+    const CART: &str = "components/add-to-cart.afs";
+    const QUANTITY: &str = "quantity * number = 1";
+    const PRODUCT: &str = "product * object · Product";
+    const ADD: &str = "Add input";
+    const CONFIRM_ADD: &str = "Add the new input";
+    const NAME: &str = "Input name";
+    const LABEL: &str = "Label on the block";
+    const DEFAULT: &str = "Default value";
+    const TYPE: &str = "Value type";
+    const REQUIRED: &str = "Required";
+    const EDITABLE: &str = "Editable on the block";
+    const ACTION: &str = "Fed by the previous block (action)";
+    const QUANTITY_LINE: &str = "  input quantity: number = 1\n";
+
+    fn field_value(harness: &FolderHarness, label: &str) -> String {
+        harness
+            .get_by_label(label)
+            .accesskit_node()
+            .value()
+            .unwrap_or_default()
+    }
+
+    /// Selects everything in the focused field `label` and types `text` over
+    /// it, one keystroke at a time: each character is its own frame.
+    fn type_over(harness: &mut FolderHarness, label: &str, text: &str) {
+        harness.get_by_label(label).focus();
+        harness.step();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.key_press(egui::Key::Backspace);
+        settle(harness);
+        for character in text.chars() {
+            harness
+                .get_by_label(label)
+                .type_text(&character.to_string());
+            settle(harness);
+        }
+    }
+
+    /// Whether text containing `text` is painted on the board.
+    fn painted_on_board(harness: &FolderHarness, text: &str) -> bool {
+        fn any(shape: &Shape, board: egui::Rect, text: &str) -> bool {
+            match shape {
+                Shape::Vec(shapes) => shapes.iter().any(|shape| any(shape, board, text)),
+                Shape::Text(shape) => {
+                    shape.galley.job.text.contains(text)
+                        && board.contains_rect(shape.visual_bounding_rect())
+                }
+                _ => false,
+            }
+        }
+        let board = harness.get_by_label("Diagram board").rect();
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|clipped| any(&clipped.shape, board, text))
+    }
+
+    fn open_form(harness: &mut FolderHarness) {
+        assert!(
+            !harness.get_by_label(ADD).accesskit_node().is_disabled(),
+            "+ Add input is enabled"
+        );
+        choose(harness, ADD);
+    }
+
+    /// Criterion 1: *+ Add input* opens *New input* with the name field
+    /// focused, and the strip shows the input as being added; at both sizes.
+    #[test]
+    fn ux32_criterion_1_add_input_opens_the_new_input_form() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, CART, "Diagram");
+            open_form(&mut harness);
+            assert!(has_label(&harness, "New input"), "the form at {size:?}");
+            assert!(
+                harness.get_by_label(NAME).is_focused(),
+                "the name is focused at {size:?}"
+            );
+            assert!(
+                contains(&harness, "being added…"),
+                "the strip's pill at {size:?}"
+            );
+            harness.get_by_label(NAME).type_text("currency");
+            settle(&mut harness);
+            assert!(
+                has_label(&harness, "currency being added…"),
+                "the pill names the input at {size:?}"
+            );
+            assert_within_window(
+                &harness,
+                &[
+                    NAME,
+                    TYPE,
+                    DEFAULT,
+                    REQUIRED,
+                    EDITABLE,
+                    CONFIRM_ADD,
+                    "Cancel",
+                ],
+            );
+        }
+    }
+
+    /// Criterion 2: *Add input* with `currency`, Text, `"EUR"` and not
+    /// required writes `input currency: string = "EUR"` after the last
+    /// input, and its pill appears; *Cancel* writes nothing. Without a
+    /// default the input is required (KTLO-32): the box is forced on and
+    /// says why.
+    #[test]
+    fn ux32_criterion_2_add_input_writes_the_declaration() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        assert!(before.contains(QUANTITY_LINE), "{before}");
+
+        // Cancel writes nothing.
+        open_form(&mut harness);
+        harness.get_by_label(NAME).type_text("currency");
+        settle(&mut harness);
+        choose(&mut harness, "Cancel");
+        assert!(!has_label(&harness, "New input"), "the form is closed");
+        assert!(!contains(&harness, "being added…"), "no pill being added");
+        assert_eq!(source_of(&harness, &id), before, "Cancel writes nothing");
+
+        open_form(&mut harness);
+        harness.get_by_label(NAME).type_text("currency");
+        settle(&mut harness);
+        // No default yet: required, forced on and explained.
+        let required = harness.get_by_label(REQUIRED);
+        assert_eq!(required.accesskit_node().toggled(), Some(Toggled::True));
+        assert!(required.accesskit_node().is_disabled(), "forced on");
+        assert!(contains(&harness, "An input without a default is required"));
+        choose(&mut harness, TYPE);
+        choose(&mut harness, "Text");
+        harness.get_by_label(DEFAULT).focus();
+        harness.step();
+        harness.get_by_label(DEFAULT).type_text("\"EUR\"");
+        settle(&mut harness);
+        // With a default it may be optional; it is not required here.
+        assert!(
+            !harness
+                .get_by_label(REQUIRED)
+                .accesskit_node()
+                .is_disabled()
+        );
+        assert_eq!(toggled(&harness, REQUIRED), Some(Toggled::False));
+        assert_eq!(toggled(&harness, EDITABLE), Some(Toggled::True));
+        choose(&mut harness, CONFIRM_ADD);
+
+        let expected = before.replacen(
+            QUANTITY_LINE,
+            &format!("{QUANTITY_LINE}  input currency: string = \"EUR\"\n"),
+            1,
+        );
+        assert_eq!(source_of(&harness, &id), expected);
+        assert!(
+            has_label(&harness, "currency string = \"EUR\""),
+            "the new input's pill"
+        );
+        assert!(!contains(&harness, "being added…"));
+        assert!(!has_label(&harness, "New input"), "the form is closed");
+    }
+
+    /// Criterion 3: renaming `quantity` to `qty` renames the declaration and
+    /// every `param.quantity` as typed; the pill and the *Cart item* card
+    /// follow each keystroke.
+    #[test]
+    fn ux32_criterion_3_a_rename_is_written_as_it_is_typed() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        assert!(before.contains("param.quantity"), "{before}");
+        choose(&mut harness, QUANTITY);
+        assert_eq!(field_value(&harness, NAME), "quantity");
+        harness.get_by_label(NAME).focus();
+        harness.step();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        for typed in ["q", "qt", "qty"] {
+            let character = &typed[typed.len() - 1..];
+            harness.get_by_label(NAME).type_text(character);
+            settle(&mut harness);
+            let source = source_of(&harness, &id);
+            assert!(
+                source.contains(&format!("  input {typed}: number = 1\n")),
+                "the declaration reads {typed}: {source}"
+            );
+            assert!(
+                source.contains(&format!("param.{typed}")) && !source.contains("param.quantity"),
+                "every reading follows {typed}: {source}"
+            );
+            assert!(
+                has_label(&harness, &format!("{typed} * number = 1")),
+                "the pill reads {typed}"
+            );
+            assert!(
+                painted_on_board(&harness, &format!("→ {typed}"))
+                    && !painted_on_board(&harness, "→ quantity"),
+                "the Cart item card reads {typed}"
+            );
+            assert_eq!(ringed(&harness, &id), ["Cart item"], "still selected");
+            assert!(harness.get_by_label(NAME).is_focused(), "still typing");
+        }
+        assert_eq!(
+            source_of(&harness, &id),
+            before
+                .replace("input quantity:", "input qty:")
+                .replace("param.quantity", "param.qty")
+        );
+    }
+
+    /// Criterion 4: an invalid or taken name stays in the field with an
+    /// inline error and the code keeps the last valid name; leaving the
+    /// field puts the valid name back.
+    #[test]
+    fn ux32_criterion_4_an_invalid_name_stays_in_the_field() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        choose(&mut harness, QUANTITY);
+        type_over(&mut harness, NAME, "1 bad");
+        assert_eq!(field_value(&harness, NAME), "1 bad", "the text stays");
+        assert!(contains(&harness, "Not a valid name"), "the inline error");
+        assert_eq!(source_of(&harness, &id), before, "the code keeps quantity");
+        assert!(has_label(&harness, QUANTITY), "the board keeps quantity");
+
+        type_over(&mut harness, NAME, "product");
+        assert_eq!(field_value(&harness, NAME), "product");
+        assert!(
+            contains(&harness, "Another input is already named product"),
+            "the duplicate's error"
+        );
+        assert_eq!(source_of(&harness, &id), before, "the code keeps quantity");
+
+        // Leaving the field restores the valid name.
+        harness.get_by_label(LABEL).focus();
+        settle(&mut harness);
+        assert_eq!(field_value(&harness, NAME), "quantity");
+        assert!(!contains(&harness, "Not a valid name"));
+        assert!(!contains(&harness, "Another input is already named"));
+        assert_eq!(source_of(&harness, &id), before);
+    }
+
+    /// Criterion 5: the type, the default, *Required*, *Editable on the
+    /// block* and *Fed by the previous block (action)* each write their
+    /// attribute, and the panel reads it back. The action belongs to one
+    /// input at a time: the component's single `action` line.
+    #[test]
+    fn ux32_criterion_5_each_attribute_is_written_and_read_back() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        choose(&mut harness, QUANTITY);
+
+        type_over(&mut harness, DEFAULT, "2");
+        assert!(source_of(&harness, &id).contains("  input quantity: number = 2\n"));
+        assert!(has_label(&harness, "quantity * number = 2"), "the pill");
+
+        choose(&mut harness, TYPE);
+        choose(&mut harness, "Text");
+        assert!(source_of(&harness, &id).contains("  input quantity: string = 2\n"));
+        assert!(
+            harness
+                .query_by_label_contains("quantity * string")
+                .is_some()
+        );
+
+        // `quantity` is declared `@required(true)` with a default: without
+        // the mark it is optional, which needs no attribute.
+        assert_eq!(toggled(&harness, REQUIRED), Some(Toggled::True));
+        choose(&mut harness, REQUIRED);
+        assert_eq!(toggled(&harness, REQUIRED), Some(Toggled::False));
+        assert!(
+            source_of(&harness, &id).contains(
+                "  @label(\"Quantity\")\n  @exposed(true)\n  input quantity: string = 2\n"
+            )
+        );
+        assert!(has_label(&harness, "quantity string = 2"), "the pill");
+        choose(&mut harness, REQUIRED);
+        assert_eq!(toggled(&harness, REQUIRED), Some(Toggled::True));
+        assert!(source_of(&harness, &id).contains(
+            "  @label(\"Quantity\")\n  @required(true)\n  @exposed(true)\n  input quantity:"
+        ));
+
+        choose(&mut harness, EDITABLE);
+        assert_eq!(toggled(&harness, EDITABLE), Some(Toggled::False));
+        assert!(
+            source_of(&harness, &id).contains("  @required(true)\n  @hidden\n  input quantity:")
+        );
+        choose(&mut harness, EDITABLE);
+        assert_eq!(toggled(&harness, EDITABLE), Some(Toggled::True));
+        assert!(source_of(&harness, &id).contains("  @required(true)\n  input quantity:"));
+
+        replace_text(&mut harness, LABEL, "Amount");
+        assert!(source_of(&harness, &id).contains("  @label(\"Amount\")\n  @required(true)\n"));
+        replace_text(&mut harness, LABEL, "");
+        assert!(source_of(&harness, &id).contains("  @required(true)\n  input quantity:"));
+        assert!(!source_of(&harness, &id).contains("@label(\"Amount\")"));
+
+        // `product` is the action; it moves to `quantity`, then goes.
+        assert!(source_of(&harness, &id).contains("  action product"));
+        assert_eq!(toggled(&harness, ACTION), Some(Toggled::False));
+        choose(&mut harness, ACTION);
+        assert_eq!(toggled(&harness, ACTION), Some(Toggled::True));
+        let source = source_of(&harness, &id);
+        assert!(source.contains("  action quantity: string\n"), "{source}");
+        assert!(!source.contains("action product"), "{source}");
+        choose(&mut harness, PRODUCT);
+        assert_eq!(toggled(&harness, ACTION), Some(Toggled::False), "product");
+        choose(&mut harness, "quantity * string = 2");
+        assert_eq!(toggled(&harness, ACTION), Some(Toggled::True));
+        choose(&mut harness, ACTION);
+        assert!(!source_of(&harness, &id).contains("  action "));
+    }
+
+    /// Criterion 6: *Used by* lists the steps that read the input; clicking
+    /// one selects its card.
+    #[test]
+    fn ux32_criterion_6_used_by_selects_the_reading_card() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        choose(&mut harness, QUANTITY);
+        assert!(has_label(&harness, "Used by"));
+        choose(&mut harness, "Select the step Cart item");
+        let selected = folder(&harness).selections.get(&id).cloned();
+        let body = {
+            let app = folder(&harness);
+            let Some(Document::Component(component)) =
+                app.session.as_ref().unwrap().document(&id).unwrap().model()
+            else {
+                panic!("a component");
+            };
+            component
+                .graph
+                .nodes
+                .iter()
+                .find(|node| node.label.as_deref() == Some("Cart item"))
+                .unwrap()
+                .id
+                .clone()
+        };
+        assert_eq!(selected, Some(vec![body]), "the card is selected");
+        assert!(!has_label(&harness, NAME), "the block's Inspector");
+    }
+
+    /// Criterion 7: deleting a read input asks first and names its readers;
+    /// an unread one goes at once; undo brings it back.
+    #[test]
+    fn ux32_criterion_7_delete_input_confirms_when_it_is_read() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        let before = source_of(&harness, &id);
+        choose(&mut harness, QUANTITY);
+        choose(&mut harness, "Delete input");
+        assert_eq!(source_of(&harness, &id), before, "nothing yet");
+        assert!(
+            contains(&harness, "Cart item reads quantity"),
+            "the confirmation names the reader"
+        );
+        choose(&mut harness, "Delete anyway");
+        let source = source_of(&harness, &id);
+        assert!(!source.contains("input quantity"), "{source}");
+        assert!(!source.contains("param.quantity"), "{source}");
+        assert!(!has_label(&harness, QUANTITY), "the pill is gone");
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness);
+        assert_eq!(source_of(&harness, &id), before, "undo restores it");
+        assert!(has_label(&harness, QUANTITY));
+
+        // An input nothing reads is deleted at once.
+        open_form(&mut harness);
+        harness.get_by_label(NAME).type_text("note");
+        settle(&mut harness);
+        choose(&mut harness, CONFIRM_ADD);
+        assert!(source_of(&harness, &id).contains("  input note: string\n"));
+        choose(&mut harness, "note * string");
+        assert!(contains(&harness, "No step reads this input yet"));
+        choose(&mut harness, "Delete input");
+        assert_eq!(source_of(&harness, &id), before, "deleted at once");
+        assert!(!contains(&harness, "Delete anyway"));
+    }
+
+    /// The panels beside the approved captures
+    /// `docs/qa/2026-11-02/COMP-00/comp00-q2-*.png` and `comp00-q3-*.png`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux32_inputs_in_the_inspector() {
+        use crate::testing::capture;
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, CART, "Diagram");
+            open_form(&mut harness);
+            harness.get_by_label(NAME).type_text("currency");
+            settle(&mut harness);
+            capture(&mut harness, &format!("ux32-form-{suffix}"), None);
+            harness.get_by_label(DEFAULT).focus();
+            harness.step();
+            harness.get_by_label(DEFAULT).type_text("\"EUR\"");
+            settle(&mut harness);
+            choose(&mut harness, CONFIRM_ADD);
+            capture(&mut harness, &format!("ux32-added-{suffix}"), None);
+            choose(&mut harness, QUANTITY);
+            capture(&mut harness, &format!("ux32-edit-{suffix}"), None);
+            type_over(&mut harness, NAME, "product");
+            capture(&mut harness, &format!("ux32-duplicate-{suffix}"), None);
+        }
     }
 }
