@@ -191,6 +191,32 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                     let total = widths.iter().sum::<f32>()
                         + PILL_GAP * widths.len().saturating_sub(1) as f32;
                     let room = (ui.available_width() - add_width - 2.0 * PILL_GAP).max(0.0);
+                    // The selected pill is scrolled into view when it is
+                    // selected and whenever the strip's room changes, as when
+                    // the Inspector opens beside the board.
+                    let shown_key = id.with("shown");
+                    let shown = (selected.map(str::to_owned), room.round() as i32);
+                    let reveal = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<(Option<String>, i32)>(shown_key))
+                        .as_ref()
+                        != Some(&shown);
+                    if reveal {
+                        ui.ctx().data_mut(|data| data.insert_temp(shown_key, shown));
+                    }
+                    // Where the selected pill starts and ends among the pills:
+                    // the offset that shows it whole at the right edge.
+                    let reveal_offset = reveal
+                        .then(|| {
+                            let index = pills
+                                .iter()
+                                .position(|pill| selected == Some(pill.name.as_str()))?;
+                            let left: f32 =
+                                widths[..index].iter().map(|width| width + PILL_GAP).sum();
+                            let right = left + widths[index];
+                            Some((right - room).max(0.0).min(left))
+                        })
+                        .flatten();
                     let mut row = |ui: &mut egui::Ui| {
                         for (pill, width) in pills.iter().zip(&widths) {
                             let on = selected == Some(pill.name.as_str());
@@ -202,15 +228,18 @@ pub fn show(ui: &egui::Ui, rect: Rect, pills: &[Pill], selected: Option<&str>) -
                     if total <= room {
                         row(ui);
                     } else {
-                        egui::ScrollArea::horizontal()
+                        let mut area = egui::ScrollArea::horizontal()
                             .id_salt("board-inputs-pills")
-                            .max_width(room)
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = PILL_GAP;
-                                    row(ui);
-                                });
+                            .max_width(room);
+                        if let Some(offset) = reveal_offset {
+                            area = area.horizontal_scroll_offset(offset);
+                        }
+                        area.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = PILL_GAP;
+                                row(ui);
                             });
+                        });
                     }
                     ui.add_space(4.0);
                     let add = ui

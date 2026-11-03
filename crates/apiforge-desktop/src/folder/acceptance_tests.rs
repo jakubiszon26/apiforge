@@ -9633,6 +9633,28 @@ mod ux31 {
         }
     }
 
+    /// At 960 × 540 the Inspector that opens for a selected pill leaves the
+    /// strip too narrow for both pills: the selected one is scrolled into
+    /// view, between the caption and *+ Add input*.
+    #[test]
+    fn ux31_a_selected_pill_stays_in_view_when_the_inspector_opens() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), MINIMUM, CART, "Diagram");
+        choose(&mut harness, QUANTITY);
+        assert!(
+            has_label(&harness, "COMPONENT INPUT"),
+            "the Inspector opened"
+        );
+        let caption = harness.get_by_label(CAPTION).rect();
+        let add = harness.get_by_label(ADD).rect();
+        let quantity = harness.get_by_label(QUANTITY).rect();
+        assert!(
+            caption.right() <= quantity.left() && quantity.right() <= add.left(),
+            "quantity {quantity:?} in view between {caption:?} and {add:?}"
+        );
+        assert_eq!(toggled(&harness, QUANTITY), Some(Toggled::True));
+    }
+
     /// Criterion 6: at 960 × 540, inputs that do not fit beside one another
     /// scroll in the strip, and *+ Add input* stays whole in view.
     #[test]
