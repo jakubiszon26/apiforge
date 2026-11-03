@@ -11519,3 +11519,82 @@ mod ux30 {
         }
     }
 }
+
+/// UX-28 (#236): the *Curves* wire style leaves the *Wire style* menu until
+/// it draws curves (owner decision 18 = A); a saved `spline` preference, which
+/// is how *Curves* was stored, falls back to *Right angles*.
+mod ux28 {
+    use super::*;
+    use crate::canvas::WireStyle;
+    use crate::preferences::Preferences;
+    use crate::testing::MINIMUM;
+    use std::path::Path;
+
+    const WIRE_STYLE: &str = "Wire style";
+    const RIGHT_ANGLES: &str = "Right angles";
+    const CURVES: &str = "Curves";
+    const BRIDGES: &str = "Bridges at crossings";
+
+    /// The demo shop's scenario in Diagram, its preferences read from
+    /// `preferences` when there is a file to read them from.
+    fn diagram(root: &Path, preferences: Option<&Path>) -> (FolderHarness, String) {
+        let mut harness = folder_harness(root, MINIMUM);
+        if let Some(path) = preferences {
+            app(&mut harness).preferences = Preferences::at(Some(path.to_path_buf()));
+        }
+        let id = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, "Diagram");
+        (harness, id)
+    }
+
+    /// Criterion 1: the *Wire style* menu lists the current set minus
+    /// *Curves*: *Right angles*, and *Bridges at crossings* below the line.
+    #[test]
+    fn ux28_criterion_1_the_menu_has_no_curves() {
+        let directory = shop();
+        let (mut harness, _) = diagram(directory.path(), None);
+        choose(&mut harness, WIRE_STYLE);
+        assert!(
+            has_label(&harness, RIGHT_ANGLES),
+            "{RIGHT_ANGLES} is listed"
+        );
+        assert!(has_label(&harness, BRIDGES), "{BRIDGES} is listed");
+        assert!(!has_label(&harness, CURVES), "{CURVES} is not listed");
+    }
+
+    /// Criterion 2: a preferences file that names *Curves* loads as *Right
+    /// angles*, keeps the person's other preferences, and is written back as
+    /// *Right angles* on the next save of preferences.
+    #[test]
+    fn ux28_criterion_2_a_saved_curves_preference_falls_back() {
+        let directory = shop();
+        let configuration = tempfile::tempdir().unwrap();
+        let path = configuration.path().join("preferences.json");
+        fs::write(
+            &path,
+            br#"{"version": 1, "wireStyle": "spline", "bridges": true, "codePanel": true}"#,
+        )
+        .unwrap();
+
+        let (mut harness, id) = diagram(directory.path(), Some(&path));
+        let loaded = &folder(&harness).preferences;
+        assert_eq!(loaded.wire_style, WireStyle::Orthogonal);
+        assert!(loaded.bridges, "the other preferences are kept");
+        assert!(loaded.code_panel, "the other preferences are kept");
+        assert_eq!(
+            folder(&harness).canvases[&id].wire_style,
+            WireStyle::Orthogonal,
+            "the board draws right angles"
+        );
+
+        // Any change of preference saves them all.
+        choose(&mut harness, WIRE_STYLE);
+        choose(&mut harness, BRIDGES);
+        let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored["wireStyle"], "orthogonal", "{stored}");
+        assert_eq!(stored["bridges"], false, "{stored}");
+        assert_eq!(stored["codePanel"], true, "{stored}");
+    }
+}
