@@ -116,7 +116,11 @@ impl FolderApp {
                 .collect::<Vec<_>>()
         });
         let graph = graph_of(&model, cleanup);
-        let reference = graph_of(&model, false);
+        // Built once per model, not every frame (UX-16).
+        let combined = cleanup.then(|| self.cleanup_reference(&model));
+        let reference = combined
+            .as_deref()
+            .unwrap_or_else(|| graph_of(&model, false));
         let parameters = parameters_of(&model);
         let selection = self
             .selections
@@ -221,6 +225,19 @@ impl FolderApp {
         }
     }
 
+    /// The steps a Cleanup card may read for `model`, from the cache while
+    /// the model is the same one.
+    fn cleanup_reference(&mut self, model: &Arc<Document>) -> Arc<Graph> {
+        if let Some((cached, graph)) = &self.cleanup_reference
+            && Arc::ptr_eq(cached, model)
+        {
+            return graph.clone();
+        }
+        let graph = Arc::new(reference_of(model, true).into_owned());
+        self.cleanup_reference = Some((model.clone(), graph.clone()));
+        graph
+    }
+
     pub(super) fn board_command(
         &mut self,
         document_id: &str,
@@ -247,11 +264,11 @@ impl FolderApp {
         }
         let project = self.context_project();
         let graph = graph_of(model, cleanup);
-        let reference = graph_of(model, false);
+        let reference = reference_of(model, cleanup);
         let parameters = parameters_of(model);
         let board = Board {
             graph,
-            reference,
+            reference: &reference,
             project: &project,
             parameters: &parameters,
         };

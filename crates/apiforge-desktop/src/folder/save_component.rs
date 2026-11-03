@@ -883,6 +883,7 @@ impl FolderApp {
                     publication::Action::Model {
                         next: Box::new(next),
                         selection: Some(vec![replaced.call]),
+                        check: None,
                     },
                 );
             }
