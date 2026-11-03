@@ -24,6 +24,13 @@ use std::ops::Range;
 /// Rows the completion popup shows at once.
 const POPUP_ROWS: usize = 8;
 
+/// The widest the completion popup's list grows.
+const POPUP_WIDTH: f32 = 420.0;
+
+/// The gutter's column for a diagnostic's dot, left of the line numbers, so
+/// a dot never overlaps a number of two or more digits (UX-20).
+const DOT_COLUMN: f32 = 10.0;
+
 /// A source above this size is large: work that reads the whole text costs
 /// more per frame or keystroke than it is worth, and the editor has to stay
 /// responsive at 1 MB. Such text is laid out plainly, completion opens only on
@@ -125,8 +132,14 @@ pub struct Completions {
 struct Popup {
     completions: Vec<Completion>,
     selected: usize,
-    /// Where the popup is anchored, in screen coordinates.
+    /// Where the popup is anchored, in screen coordinates: under the caret.
     at: egui::Pos2,
+    /// The top of the caret's line, which a popup opened above it sits on.
+    line_top: f32,
+    /// The area the popup stays inside, the code's visible part, if the
+    /// editor has one: near the bottom it opens above the caret instead of
+    /// over what lies below the code (UX-20).
+    bounds: Option<Rect>,
     /// The caret the popup was opened for; a caret elsewhere closes it.
     cursor: usize,
 }
@@ -259,6 +272,8 @@ impl Completions {
                 Popup {
                     selected: 0,
                     at,
+                    line_top: at.y,
+                    bounds: None,
                     cursor,
                     completions: found,
                 }
@@ -266,15 +281,18 @@ impl Completions {
         }
 
         if let Some(popup) = &mut self.popup {
-            popup.at = output.galley_pos
-                + output
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
-                        text,
-                        cursor.unwrap_or(popup.cursor),
-                    ))))
-                    .left_bottom()
-                    .to_vec2();
+            let caret = output
+                .galley
+                .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
+                    text,
+                    cursor.unwrap_or(popup.cursor),
+                ))))
+                .translate(output.galley_pos.to_vec2());
+            popup.at = caret.left_bottom();
+            popup.line_top = caret.top();
+            // The code editor's popup stays in the code's visible part; a
+            // small field's popup may reach past its one line.
+            popup.bounds = context.line_numbers.then(|| ui.clip_rect());
             let count = popup.completions.len();
             if keys.down {
                 popup.selected = (popup.selected + 1) % count;
@@ -319,21 +337,19 @@ impl Completions {
         let mut chosen = None;
         let selected = popup.selected;
         let completions = popup.completions.clone();
-        let at = popup.at;
+        let (at, pivot, list_height) = placement(ui, popup_id, popup);
         let area = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
+            .pivot(pivot)
             .fixed_pos(at)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
                     .fill(theme::WHITE)
                     .stroke(Stroke::new(1.0, theme::BORDER))
                     .show(ui, |ui| {
-                        ui.set_max_width(420.0);
+                        ui.set_max_width(POPUP_WIDTH);
                         egui::ScrollArea::vertical()
-                            .max_height(
-                                ui.text_style_height(&egui::TextStyle::Body) * POPUP_ROWS as f32
-                                    + 8.0,
-                            )
+                            .max_height(list_height)
                             .show(ui, |ui| {
                                 for (index, completion) in completions.iter().enumerate() {
                                     let row = row_label(completion, context.font_size);
@@ -355,6 +371,47 @@ impl Completions {
         #[cfg(not(test))]
         let _ = area;
         chosen
+    }
+}
+
+/// Where the popup goes: its anchor, which corner of it the anchor is, and
+/// how tall its list may grow.
+///
+/// It opens under the caret. Inside bounds, where there is not room for it
+/// below but more above, it opens above the caret's line instead, and its
+/// list shortens to the room on the side it took; it moves left rather than
+/// past the right edge (UX-20). Its size is last frame's, or the largest it
+/// can be before it has been drawn.
+fn placement(ui: &Ui, popup_id: egui::Id, popup: &Popup) -> (egui::Pos2, egui::Align2, f32) {
+    let style = ui.style();
+    let list = ui.text_style_height(&egui::TextStyle::Body) * POPUP_ROWS as f32 + 8.0;
+    let Some(bounds) = popup.bounds else {
+        return (popup.at, egui::Align2::LEFT_TOP, list);
+    };
+    // The frame's margin and stroke around the list.
+    let frame = style.spacing.menu_margin.sum() + vec2(2.0, 2.0);
+    let size = ui
+        .ctx()
+        .memory(|memory| memory.area_rect(popup_id))
+        .map_or(vec2(POPUP_WIDTH, list) + frame, |rect| rect.size());
+    let below = bounds.bottom() - popup.at.y;
+    let above = popup.line_top - bounds.top();
+    let x = popup.at.x.min(bounds.right() - size.x).max(bounds.left());
+    let row = ui.text_style_height(&egui::TextStyle::Body);
+    if size.y <= below || below >= above {
+        let room = (below - frame.y).max(row);
+        (
+            egui::pos2(x, popup.at.y),
+            egui::Align2::LEFT_TOP,
+            list.min(room),
+        )
+    } else {
+        let room = (above - frame.y).max(row);
+        (
+            egui::pos2(x, popup.line_top),
+            egui::Align2::LEFT_BOTTOM,
+            list.min(room),
+        )
     }
 }
 
@@ -455,7 +512,9 @@ impl CodeEditor {
             // gutter does number.
             let lines = text.bytes().filter(|byte| *byte == b'\n').count() + 1;
             let digits = lines.to_string().len().max(2);
-            ui.ctx().fonts_mut(|fonts| fonts.glyph_width(&font, '0')) * digits as f32 + 12.0
+            ui.ctx().fonts_mut(|fonts| fonts.glyph_width(&font, '0')) * digits as f32
+                + 12.0
+                + DOT_COLUMN
         } else {
             0.0
         };
@@ -550,7 +609,7 @@ impl CodeEditor {
         }
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
-        let marked = marked_lines(text, context.diagnostics);
+        let marked = line_severities(text, context.diagnostics);
         // The galley's own rows are walked rather than the text's lines. Asking
         // the galley where a line begins scans the text up to it and then every
         // row before it, which a long scenario pays once per line and per frame:
@@ -574,13 +633,18 @@ impl CodeEditor {
             // A wrapped line keeps its number beside its first visual row
             // instead of repeating it under itself.
             if begins_a_line && top + row_height >= visible.top() {
-                let flagged = marked.contains(&number);
+                // A warning is amber and an error red, number and dot
+                // alike (UX-20).
+                let flagged = marked.get(&number).map(|severity| match severity {
+                    Severity::Error => theme::DANGER,
+                    Severity::Warning => theme::WARNING,
+                });
                 painter.text(
                     pos2(rect.right() - 8.0, top),
                     egui::Align2::RIGHT_TOP,
                     number.to_string(),
                     font.clone(),
-                    if flagged { theme::DANGER } else { theme::MUTED },
+                    flagged.unwrap_or(theme::MUTED),
                 );
                 // A changed line: an accent bar at the gutter's right edge,
                 // clear of the diagnostic's dot and the number (MCP-16).
@@ -598,11 +662,11 @@ impl CodeEditor {
                         theme::ACCENT,
                     );
                 }
-                if flagged {
+                if let Some(colour) = flagged {
                     painter.circle_filled(
-                        pos2(rect.left() + 4.0, top + row_height * 0.5),
+                        pos2(rect.left() + DOT_COLUMN * 0.5, top + row_height * 0.5),
                         3.0,
-                        theme::DANGER,
+                        colour,
                     );
                 }
             }
@@ -1039,15 +1103,31 @@ fn diagnostic_at(diagnostics: &[Diagnostic], at: usize) -> Option<String> {
         .map(|diagnostic| diagnostic.message.clone())
 }
 
-/// Lines a diagnostic marks, counted from one.
+/// Lines a diagnostic marks, counted from one: a test seam.
+#[cfg(test)]
 pub(crate) fn marked_lines(
     text: &str,
     diagnostics: &[Diagnostic],
 ) -> std::collections::HashSet<usize> {
-    diagnostics
-        .iter()
-        .map(|diagnostic| line_of(text, diagnostic.range.start))
-        .collect()
+    line_severities(text, diagnostics).into_keys().collect()
+}
+
+/// Lines a diagnostic marks, counted from one, each with the most severe
+/// of its diagnostics: an error outranks a warning on the same line.
+fn line_severities(
+    text: &str,
+    diagnostics: &[Diagnostic],
+) -> std::collections::HashMap<usize, Severity> {
+    let mut lines = std::collections::HashMap::new();
+    for diagnostic in diagnostics {
+        let severity = lines
+            .entry(line_of(text, diagnostic.range.start))
+            .or_insert(diagnostic.severity);
+        if diagnostic.severity == Severity::Error {
+            *severity = Severity::Error;
+        }
+    }
+    lines
 }
 
 /// The line a byte offset is on, counted from one.

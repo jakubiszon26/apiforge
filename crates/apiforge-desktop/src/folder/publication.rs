@@ -56,12 +56,20 @@ impl FolderApp {
             Action::Model { next, .. } => session
                 .apply_model_edit(id, *next.clone(), DIAGRAM)
                 .map(|()| None),
-            Action::History { undo } => if *undo {
-                session.undo(id, DIAGRAM)
-            } else {
-                session.redo(id, DIAGRAM)
+            Action::History { undo } => {
+                let stepped = if *undo {
+                    session.undo(id, DIAGRAM)
+                } else {
+                    session.redo(id, DIAGRAM)
+                };
+                // The board's history waits for code that analyses; the
+                // session's own error names its internals (UX-20).
+                if let Err(apiforge_project::Error::ModelLocked) = stepped {
+                    self.notify("Fix the code first: the board follows the source.", true);
+                    return;
+                }
+                stepped.map(|_| None)
             }
-            .map(|_| None),
         };
         self.finish_component_action(id, action, result);
     }
