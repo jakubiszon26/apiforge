@@ -10522,6 +10522,25 @@ mod ux33 {
         assert_eq!(field_value(&harness, "Input name"), "product");
     }
 
+    /// Found in the native QA run: the icon showed its own label as a
+    /// tooltip beside the longer one. It shows one tooltip.
+    #[test]
+    fn ux33_the_icon_shows_one_tooltip() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), MINIMUM, CART, "Diagram");
+        open_settings(&mut harness);
+        assert!(hover_shows(
+            &mut harness,
+            SETTINGS,
+            "Component settings: name, description, action, inputs and outputs"
+        ));
+        assert_eq!(
+            harness.query_all_by_label(SETTINGS).count(),
+            1,
+            "only the button is named Component settings"
+        );
+    }
+
     /// The button and the panel beside the approved capture
     /// `docs/qa/2026-11-02/COMP-00/comp00-q4-settings-*.png`.
     #[test]

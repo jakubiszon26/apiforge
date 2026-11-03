@@ -1645,18 +1645,25 @@ impl Canvas {
                         ui.horizontal(|ui| {
                             let editable = !input.read_only;
                             if let Some(settings) = input.settings {
-                                let button = if shape == SettingsShape::Labelled {
+                                let labelled = shape == SettingsShape::Labelled;
+                                // An icon's own tooltip is its label: there
+                                // the longer text, under the button's name.
+                                let button = if labelled {
                                     widgets::action(Icon::Settings, SETTINGS).compact().quiet()
                                 } else {
-                                    widgets::icon_button(Icon::Settings, SETTINGS).compact()
+                                    widgets::icon_button(Icon::Settings, SETTINGS_HOVER)
+                                        .named(SETTINGS)
+                                        .compact()
                                 };
-                                let response = ui
+                                let mut response = ui
                                     .add_enabled(
                                         settings.available,
                                         button.toggle(settings.open && settings.available),
                                     )
-                                    .on_hover_text(SETTINGS_HOVER)
                                     .on_disabled_hover_text(SETTINGS_UNAVAILABLE);
+                                if labelled {
+                                    response = response.on_hover_text(SETTINGS_HOVER);
+                                }
                                 if response.clicked() {
                                     self.menu = None;
                                     commands.push(Command::ComponentSettings);
