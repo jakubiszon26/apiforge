@@ -215,7 +215,14 @@ impl Completions {
         }
 
         // Offers come from analysing the whole source, so a large one waits to
-        // be asked; a popup already open keeps following the typing.
+        // be asked; a popup already open keeps following the typing, until
+        // the typing goes into a comment (UX-11).
+        if typed
+            && self.popup.is_some()
+            && cursor.is_some_and(|cursor| in_comment(&text[..cursor.min(text.len())]))
+        {
+            self.popup = None;
+        }
         let wants_popup = keys.open
             || (typed
                 && cursor.is_some_and(|cursor| {
@@ -849,15 +856,26 @@ fn apply(text: &mut String, completion: &Completion) {
     text.replace_range(range, &completion.insert);
 }
 
-/// Whether what was just typed should open the popup by itself.
+/// Whether what was just typed should open the popup by itself. A comment
+/// is prose, so nothing typed in one does (UX-11).
 fn opens_completion(text: &str, cursor: usize) -> bool {
     let before = &text[..cursor.min(text.len())];
-    before.ends_with('.')
-        || before.ends_with("{{")
-        || before
-            .chars()
-            .next_back()
-            .is_some_and(|last| last.is_alphanumeric() || last == '_')
+    !in_comment(before)
+        && (before.ends_with('.')
+            || before.ends_with("{{")
+            || before
+                .chars()
+                .next_back()
+                .is_some_and(|last| last.is_alphanumeric() || last == '_'))
+}
+
+/// Whether the end of `before` is inside a `//` comment. The text is lexed
+/// from its start, so a `//` inside a string is not taken for one.
+fn in_comment(before: &str) -> bool {
+    lex(before)
+        .0
+        .last()
+        .is_some_and(|token| token.kind == TokenKind::Comment)
 }
 
 /// One level of indentation, the width the language is printed at.

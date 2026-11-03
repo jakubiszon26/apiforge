@@ -316,6 +316,26 @@ fn what_was_typed_decides_whether_the_popup_opens_by_itself() {
 }
 
 #[test]
+fn nothing_typed_in_a_comment_opens_the_popup_by_itself() {
+    // UX-11: a comment is prose; the line after it and a `//` inside a
+    // string are code again.
+    assert!(!opens_completion("x = 1 // prod", 13));
+    assert!(!opens_completion("// products.", 12));
+    assert!(opens_completion("// note\nprod", 12));
+    assert!(opens_completion("x = \"a // b\" + prod", 19));
+}
+
+#[test]
+fn typing_into_a_comment_closes_an_open_popup() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+    harness.type_text(" // p");
+    assert!(harness.editor.completions.popup.is_none());
+}
+
+#[test]
 fn typing_a_name_offers_it_and_enter_chooses_it() {
     // The caret sits at the end of the text, where a name is being typed.
     let mut harness = Harness::new("scenario \"S\" {\n  total = pro");
