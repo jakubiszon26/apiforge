@@ -7472,6 +7472,9 @@ mod ux01 {
                 .clone()
         };
         let before = position(harness);
+        // Run results opening beside the board leaves its camera as it was
+        // (UX-18), so the board is fitted to bring the card into view.
+        choose(harness, "Fit the view");
         let start = harness.get_by_label(card).rect().center();
         harness.hover_at(start);
         harness.step();

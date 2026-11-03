@@ -163,6 +163,11 @@ pub struct Input<'a> {
     /// *Component settings* in the header row (UX-33); `None` on a board
     /// without it, a scenario's.
     pub settings: Option<SettingsButton>,
+    /// How the window is arranged around the board, such as the folder
+    /// window's mode. A change fits a camera the person has not moved again,
+    /// as a resized window does; a panel opening or closing beside the
+    /// board does not (UX-18).
+    pub arrangement: &'a str,
 }
 
 /// The state of the *Component settings* button in a component board's
@@ -230,6 +235,18 @@ impl Camera {
     }
 }
 
+/// How far a span on screen moves, the least, to lie inside `room`; one
+/// larger than the room moves its start to the room's start.
+fn least_shift(span: egui::Rangef, room: egui::Rangef) -> f32 {
+    if span.span() > room.span() || span.min < room.min {
+        room.min - span.min
+    } else if span.max > room.max {
+        room.max - span.max
+    } else {
+        0.0
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Drag {
     /// Moving the selected cards and proxies; `offset` is in world units.
@@ -265,6 +282,17 @@ pub struct Canvas {
     fit_pending: bool,
     camera_moved_by_user: bool,
     reveal_pending: Option<String>,
+    /// The board size the camera was last fitted to, while nothing has
+    /// panned it since: only such a camera is fitted again when the board's
+    /// own header settles.
+    fitted_for: Option<Vec2>,
+    /// The selected card last kept in view, so that a newly selected or
+    /// added card is panned into view once (UX-18).
+    kept_in_view: Option<String>,
+    /// The window's size and arrangement in the last frame: only their
+    /// change fits the board again (UX-18).
+    last_window: Vec2,
+    last_arrangement: String,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -297,6 +325,10 @@ impl Default for Canvas {
             fit_pending: true,
             camera_moved_by_user: false,
             reveal_pending: None,
+            fitted_for: None,
+            kept_in_view: None,
+            last_window: Vec2::ZERO,
+            last_arrangement: String::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -433,6 +465,7 @@ impl Canvas {
             self.fit_pending = true;
             self.camera_moved_by_user = false;
             self.last_focus = None;
+            self.kept_in_view = None;
             self.drag = None;
             self.menu = None;
             self.inline = None;
@@ -490,44 +523,25 @@ impl Canvas {
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
 
-        let focus_changed = self
-            .last_focus
-            .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);
-        if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
-            self.fit(viewport, overlays.focus, shapes(&cards, &chips));
-        } else if focus_changed {
-            if !self.camera_moved_by_user {
-                self.fit(viewport, overlays.focus, shapes(&cards, &chips));
-            } else if let Some(prev) = self.last_focus {
-                let delta = (overlays.focus.center() - viewport.min)
-                    - (prev.center() - self.last_viewport.min);
-                self.camera.pan += delta;
-                if let Some(selected_id) = input.selection.first()
-                    && let Some(card) = cards.iter().find(|c| &c.id == selected_id)
-                {
-                    let screen_card = self.screen_camera(viewport).rect(card.rect());
-                    if screen_card.width() <= overlays.focus.width()
-                        && screen_card.height() <= overlays.focus.height()
-                    {
-                        let mut shift = Vec2::ZERO;
-                        if screen_card.left() < overlays.focus.left() {
-                            shift.x = overlays.focus.left() - screen_card.left();
-                        } else if screen_card.right() > overlays.focus.right() {
-                            shift.x = overlays.focus.right() - screen_card.right();
-                        }
-                        if screen_card.top() < overlays.focus.top() {
-                            shift.y = overlays.focus.top() - screen_card.top();
-                        } else if screen_card.bottom() > overlays.focus.bottom() {
-                            shift.y = overlays.focus.bottom() - screen_card.bottom();
-                        }
-                        self.camera.pan += shift;
-                    }
-                }
-            }
-        }
+        let window = ui.ctx().content_rect().size();
+        let rearranged = (window - self.last_window).length() > 1.0
+            || input.arrangement != self.last_arrangement;
+        let board_changed =
+            self.place_camera(viewport, overlays.focus, rearranged, shapes(&cards, &chips));
+        self.keep_selection_in_view(
+            viewport,
+            overlays.focus,
+            input.selection,
+            &cards,
+            board_changed,
+        );
         self.last_size = viewport.size();
         self.last_focus = Some(overlays.focus);
         self.last_viewport = viewport;
+        self.last_window = window;
+        if input.arrangement != self.last_arrangement {
+            input.arrangement.clone_into(&mut self.last_arrangement);
+        }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
@@ -1037,9 +1051,105 @@ impl Canvas {
         layout::board_overlays(Self::viewport(ui), &measures).leading
     }
 
+    /// Places the camera for this frame's board, and says whether the board
+    /// changed size or place since the last frame.
+    ///
+    /// A new board is fitted. A resized or rearranged window fits a camera
+    /// the person has not moved again, and keeps the middle of the board in
+    /// the middle of a moved one. A panel opening, closing or resized beside
+    /// the board (the Inspector, the library, Run results, Split's code)
+    /// leaves the board where it is on screen and its zoom as it is: the
+    /// panel covers the edge it opens from (UX-18). The board's own header
+    /// settling, with nothing else changed, fits a fitted camera again and
+    /// keeps the middle of a moved one.
+    fn place_camera(
+        &mut self,
+        viewport: Rect,
+        focus: Rect,
+        rearranged: bool,
+        shapes: Shapes<'_>,
+    ) -> bool {
+        if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
+            self.fit(viewport, focus, shapes);
+            return false;
+        }
+        let Some(previous) = self.last_focus else {
+            return false;
+        };
+        let moved = (viewport.min - self.last_viewport.min).length() > 0.5;
+        let resized = (viewport.size() - self.last_viewport.size()).length() > 0.5;
+        let refocused = (focus.size() - previous.size()).length() > 1.0;
+        if !(moved || resized || refocused) {
+            return false;
+        }
+        let kept_middle =
+            (focus.center() - viewport.min) - (previous.center() - self.last_viewport.min);
+        if rearranged {
+            if self.camera_moved_by_user {
+                self.camera.pan += kept_middle;
+            } else {
+                self.fit(viewport, focus, shapes);
+            }
+        } else if moved || resized {
+            self.camera.pan += self.last_viewport.min - viewport.min;
+            self.fitted_for = None;
+        } else if self.camera_moved_by_user {
+            self.camera.pan += kept_middle;
+        } else if self.fitted_for == Some(viewport.size()) {
+            self.fit(viewport, focus, shapes);
+        }
+        true
+    }
+
+    /// Pans the least that shows the one selected card whole in the focus,
+    /// once when it is selected or added and again whenever the board
+    /// changes size, so the Inspector it opens never covers it (UX-18). A
+    /// card larger than the focus shows its top left corner. Nothing pans
+    /// while a drag is under way: the card stays under the pointer.
+    fn keep_selection_in_view(
+        &mut self,
+        viewport: Rect,
+        focus: Rect,
+        selection: &[String],
+        cards: &[Card],
+        board_changed: bool,
+    ) {
+        let selected = match selection {
+            [one] => Some(one),
+            _ => None,
+        };
+        if self.drag.is_some() {
+            self.kept_in_view = selected.cloned();
+            return;
+        }
+        let Some(id) = selected else {
+            self.kept_in_view = None;
+            return;
+        };
+        if !board_changed && self.kept_in_view.as_ref() == Some(id) {
+            return;
+        }
+        // A card being added is not on the board until its edit applies:
+        // it is kept in view in the first frame that draws it.
+        let Some(card) = cards.iter().find(|card| &card.id == id) else {
+            return;
+        };
+        self.kept_in_view = Some(id.clone());
+        let on_screen = self.screen_camera(viewport).rect(card.rect());
+        let shift = vec2(
+            least_shift(on_screen.x_range(), focus.x_range()),
+            least_shift(on_screen.y_range(), focus.y_range()),
+        );
+        if shift != Vec2::ZERO {
+            self.camera.pan += shift;
+            self.fitted_for = None;
+        }
+    }
+
     fn fit(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
         self.fit_pending = false;
         self.camera_moved_by_user = false;
+        self.fitted_for = Some(viewport.size());
         let local_focus_center = focus.center() - viewport.min;
         let Some(bounds) = shapes.bounds() else {
             self.camera = Camera {
@@ -2574,6 +2684,7 @@ mod tests {
                                 selected_input: None,
                                 adding_input: None,
                                 settings: None,
+                                arrangement: "",
                             },
                         );
                     });
@@ -2624,6 +2735,7 @@ mod tests {
                                 selected_input: None,
                                 adding_input: None,
                                 settings: None,
+                                arrangement: "",
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -2702,6 +2814,7 @@ mod tests {
                                 available: true,
                                 header_width: 200.0,
                             }),
+                            arrangement: "",
                         };
                         let room = canvas.header_room(ui, &input);
                         input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));

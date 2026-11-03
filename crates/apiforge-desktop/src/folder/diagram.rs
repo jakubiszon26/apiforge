@@ -173,6 +173,7 @@ impl FolderApp {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
         }
+        let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         let mut chosen = cleanup;
         let commands = ui
@@ -199,6 +200,10 @@ impl FolderApp {
                     selected_input: input_selected.as_deref(),
                     adding_input: adding_input.as_deref(),
                     settings,
+                    arrangement: match mode {
+                        Mode::Split => "split",
+                        Mode::Code | Mode::Diagram => "diagram",
+                    },
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
