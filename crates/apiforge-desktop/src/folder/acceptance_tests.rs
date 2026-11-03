@@ -1605,7 +1605,8 @@ mod mcp08a {
 
     /// The carry-over from the review of #106: *Project settings* opens with
     /// the project's own controls disabled (since MCP-09 the agent's toggle
-    /// and *Cancel* stay enabled and *Apply settings* is hidden) and
+    /// and *Cancel* stay enabled; since MCP-26 *Apply settings* is shown,
+    /// disabled until the toggle changes) and
     /// *Environment* with its public part disabled while observing; neither leaves configuration behind that
     /// would stop the take-back.
     #[test]
@@ -1616,8 +1617,10 @@ mod mcp08a {
         open_project_menu(&mut harness, "Project settings…");
         assert!(has_label(&harness, "Project name"), "the dialog opens");
         assert!(disabled(&harness, "Project name"));
-        // Hidden while observing since MCP-09 (owner decision on M3).
-        assert!(!has_label(&harness, "Apply settings"));
+        // Hidden while observing in MCP-09 (owner decision on M3); shown
+        // since MCP-26, for the toggle only (owner decision 4 = A of
+        // 2026-11-02).
+        assert!(disabled(&harness, "Apply settings"));
         choose(&mut harness, "Cancel");
         open_project_menu(&mut harness, "Test environment…");
         assert!(
@@ -3878,11 +3881,14 @@ mod mcp09 {
     };
 
     pub(super) const TOGGLE: &str = "Allow the MCP agent to send live requests";
-    const OFF: &str = "Off — the agent can only simulate.";
-    const ON: &str = "On — the agent may send real requests to ";
+    pub(super) const OFF: &str = "Off — the agent can only simulate.";
+    pub(super) const ON: &str = "On — the agent may send real requests to ";
     const IN_PROGRESS: &str = "A live run is in progress; it will finish. No new one starts.";
-    const BADGE: &str = "Live allowed";
-    const NOTE: &str = "Apply changes, then use Save all to save the project settings.";
+    pub(super) const BADGE: &str = "Live allowed";
+    pub(super) const NOTE: &str = "Apply changes, then use Save all to save the project settings.";
+    /// The button that applies the toggle since MCP-26 (owner decision 4 =
+    /// A of 2026-11-02).
+    pub(super) const APPLY: &str = "Apply settings";
     const SETTINGS_OFF: &str = "live requests are off in this project's settings";
     const ALLOW_LIVE: &str = "APIFORGE_MCP12_ALLOW_LIVE";
     const STEP_DELAY: &str = "APIFORGE_MCP_TEST_STEP_DELAY_MS";
@@ -3893,7 +3899,7 @@ mod mcp09 {
 
     /// Where the application keeps its preferences: the test's own
     /// configuration directory, as `XDG_CONFIG_HOME` names it.
-    fn consent_file(configuration: &Path) -> PathBuf {
+    pub(super) fn consent_file(configuration: &Path) -> PathBuf {
         configuration.join("apiforge").join("agent-consent.json")
     }
 
@@ -3907,7 +3913,7 @@ mod mcp09 {
 
     /// The demo shop pointed at a demo API of its own, its scenario one
     /// that passes live and has a cleanup.
-    fn live_shop() -> (tempfile::TempDir, apiforge_demo_api::DemoServerHandle) {
+    pub(super) fn live_shop() -> (tempfile::TempDir, apiforge_demo_api::DemoServerHandle) {
         let directory = shop();
         let root = directory.path();
         let api = apiforge_demo_api::spawn("127.0.0.1:0".parse().unwrap()).unwrap();
@@ -3919,21 +3925,21 @@ mod mcp09 {
         (directory, api)
     }
 
-    fn toggle(harness: &FolderHarness) -> bool {
+    pub(super) fn toggle(harness: &FolderHarness) -> bool {
         harness.get_by_label(TOGGLE).accesskit_node().toggled()
             == Some(egui::accesskit::Toggled::True)
     }
 
-    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+    pub(super) fn enabled(harness: &FolderHarness, label: &str) -> bool {
         !harness.get_by_label(label).accesskit_node().is_disabled()
     }
 
-    fn open_settings(harness: &mut FolderHarness) {
+    pub(super) fn open_settings(harness: &mut FolderHarness) {
         open_project_menu(harness, "Project settings…");
         assert!(has_label(harness, TOGGLE), "the dialog has the toggle");
     }
 
-    fn close_settings(harness: &mut FolderHarness) {
+    pub(super) fn close_settings(harness: &mut FolderHarness) {
         harness
             .get_by_role_and_label(egui::accesskit::Role::Button, "Close")
             .click();
@@ -3941,25 +3947,35 @@ mod mcp09 {
         assert!(!has_label(harness, TOGGLE), "the dialog closed");
     }
 
-    /// Sets the box through *Project settings* and closes the dialog.
+    /// Sets the box through *Project settings*: a change applies with
+    /// *Apply settings* (MCP-26), an unchanged box closes the dialog.
     pub(super) fn set_box(harness: &mut FolderHarness, live: bool) {
         open_settings(harness);
-        if toggle(harness) != live {
-            choose(harness, TOGGLE);
+        if toggle(harness) == live {
+            close_settings(harness);
+            return;
         }
+        choose(harness, TOGGLE);
         assert_eq!(toggle(harness), live);
-        close_settings(harness);
+        apply_settings(harness);
+    }
+
+    /// Presses *Apply settings*, which closes the dialog.
+    pub(super) fn apply_settings(harness: &mut FolderHarness) {
+        assert!(enabled(harness, APPLY), "Apply settings is enabled");
+        choose(harness, APPLY);
+        assert!(!has_label(harness, TOGGLE), "the dialog closed");
     }
 
     /// The box as *Project settings* shows it.
-    fn box_ticked(harness: &mut FolderHarness) -> bool {
+    pub(super) fn box_ticked(harness: &mut FolderHarness) -> bool {
         open_settings(harness);
         let ticked = toggle(harness);
         close_settings(harness);
         ticked
     }
 
-    fn live_run(harness: &mut FolderHarness, server: &mut StdioServer) -> Value {
+    pub(super) fn live_run(harness: &mut FolderHarness, server: &mut StdioServer) -> Value {
         call(
             harness,
             server,
@@ -3968,14 +3984,14 @@ mod mcp09 {
         )
     }
 
-    fn live_requests(server: &mut StdioServer) -> Value {
+    pub(super) fn live_requests(server: &mut StdioServer) -> Value {
         let overview = server.call("project_overview", json!({}));
         structured(&overview)["live_requests"].clone()
     }
 
     /// Steps the window until the agent's overview reports `expected`, and
     /// returns how long that took after `since`.
-    fn await_live_requests(
+    pub(super) fn await_live_requests(
         harness: Option<&mut FolderHarness>,
         server: &mut StdioServer,
         since: Instant,
@@ -3999,13 +4015,13 @@ mod mcp09 {
         }
     }
 
-    fn assert_refused_in_settings(result: &Value) {
+    pub(super) fn assert_refused_in_settings(result: &Value) {
         let error = tool_error(result);
         assert_eq!(error["code"], "live_disabled", "{result}");
         assert_eq!(error["message"], SETTINGS_OFF, "{result}");
     }
 
-    fn assert_sent(result: &Value) {
+    pub(super) fn assert_sent(result: &Value) {
         let report = structured(result);
         assert_eq!(report["live"], true, "{result}");
         assert_eq!(report["status"], "passed", "{result}");
@@ -4094,10 +4110,12 @@ mod mcp09 {
 
     /// Criterion 2: *Project settings* opens while observing with only the
     /// toggle, *Close* and *Cancel* enabled (owner decision of 2026-10-28);
-    /// the footer note and *Apply settings* are hidden; the box applies at
-    /// once with nothing to save.
+    /// the footer note is hidden; the box applies with nothing to save.
+    /// Since MCP-26 (owner decision 4 = A of 2026-11-02) *Apply settings* is
+    /// shown while observing, enabled only once the box changed, and the box
+    /// applies with it, not at once.
     #[test]
-    fn mcp09_criterion_2_settings_open_while_observing_and_the_box_applies_at_once() {
+    fn mcp09_criterion_2_settings_open_while_observing_and_the_box_applies_with_apply() {
         let configuration = tempfile::tempdir().unwrap();
         let directory = shop();
         let root = directory.path();
@@ -4116,21 +4134,22 @@ mod mcp09 {
                 .accesskit_node()
                 .is_disabled()
         );
-        assert!(!has_label(&harness, "Apply settings"), "Apply is hidden");
+        assert!(has_label(&harness, APPLY), "Apply is shown (MCP-26)");
+        assert!(!enabled(&harness, APPLY), "nothing to apply yet (MCP-26)");
         assert!(!contains(&harness, NOTE), "the footer note is hidden");
         assert!(contains(&harness, OFF));
 
         choose(&mut harness, TOGGLE);
         assert!(toggle(&harness));
-        assert!(contains(&harness, ON), "the line says what applies now");
+        assert!(contains(&harness, ON), "the line says what the box allows");
         assert!(
-            has_label(&harness, BADGE),
-            "applied while the dialog is open"
+            !has_label(&harness, BADGE),
+            "not applied while the dialog is open (MCP-26)"
         );
+        apply_settings(&mut harness);
+        assert!(has_label(&harness, BADGE), "Apply settings applied it");
         let stored = fs::read_to_string(consent_file(configuration.path())).unwrap();
         assert!(stored.contains(&manifest_id(root)), "{stored}");
-        choose(&mut harness, "Cancel");
-        assert!(has_label(&harness, BADGE), "Cancel keeps what applied");
         assert!(
             !folder(&harness)
                 .session
@@ -4164,8 +4183,10 @@ mod mcp09 {
             json!({ "allowed": false, "source": "off in the project's settings" })
         );
 
+        // Since MCP-26 the box applies with *Apply settings*.
         open_settings(&mut harness);
-        harness.get_by_label(TOGGLE).click();
+        choose(&mut harness, TOGGLE);
+        harness.get_by_label(APPLY).click();
         let changed = Instant::now();
         let took = await_live_requests(
             Some(&mut harness),
@@ -4174,7 +4195,8 @@ mod mcp09 {
             json!({ "allowed": true, "source": "window setting" }),
         );
         assert!(took < SEEN, "the agent saw the change after {took:?}");
-        close_settings(&mut harness);
+        settle(&mut harness);
+        assert!(!has_label(&harness, TOGGLE), "the dialog closed");
         assert_sent(&live_run(&mut harness, &mut server));
         drop(harness);
         drop(server);
@@ -4421,8 +4443,13 @@ mod mcp09 {
             assert!(Instant::now() < deadline, "the run never started: {probe}");
             std::thread::sleep(Duration::from_millis(20));
         }
+        // Since MCP-26 the box applies with *Apply settings*, which closes
+        // the dialog; reopened, it says the run goes on.
         open_settings(&mut harness);
         choose(&mut harness, TOGGLE);
+        assert!(!toggle(&harness));
+        apply_settings(&mut harness);
+        open_settings(&mut harness);
         assert!(!toggle(&harness));
         await_until(
             &mut harness,
@@ -4518,7 +4545,7 @@ mod mcp09 {
             capture(&mut harness, &format!("mcp09-settings-off-{suffix}"), None);
             choose(&mut harness, TOGGLE);
             capture(&mut harness, &format!("mcp09-settings-on-{suffix}"), None);
-            close_settings(&mut harness);
+            apply_settings(&mut harness);
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
                 capture(
@@ -4529,6 +4556,241 @@ mod mcp09 {
             }
             drop(harness);
             drop(owner);
+        }
+    }
+}
+
+// ----- MCP-26: the live toggle applies with Apply settings -------------------
+
+/// *Allow the MCP agent to send live requests* takes effect on *Apply
+/// settings* only, and *Cancel* discards it (MCP-26, #214; owner decision 4
+/// = A of 2026-11-02). While the window observes an agent, *Apply settings*
+/// is shown for the toggle alone.
+mod mcp26 {
+    use super::mcp08b::{agent, await_endpoint, hand_over, read_only};
+    use super::mcp09::{
+        APPLY, BADGE, OFF, TOGGLE, agent_holds, apply_settings, assert_refused_in_settings,
+        assert_sent, await_live_requests, box_ticked, consent_file, enabled, files, live_requests,
+        live_run, live_shop, manifest_id, open_settings, set_box, toggle, window,
+    };
+    use super::*;
+    use apiforge_project::HolderRole;
+    use serde_json::{Value, json};
+    use std::path::Path;
+
+    /// Criterion 4: the line under a ticked box states the reach.
+    const SENTENCE: &str =
+        "On — the agent may send real requests to any URL the project's documents name.";
+    /// Longer than the second within which the agent sees a change (MCP-09
+    /// criterion 3).
+    const WAIT: Duration = Duration::from_millis(1500);
+
+    fn off() -> Value {
+        json!({ "allowed": false, "source": "off in the project's settings" })
+    }
+
+    fn on() -> Value {
+        json!({ "allowed": true, "source": "window setting" })
+    }
+
+    /// The project's consent as kept in the preferences directory; `None`
+    /// when nothing was ever kept for it.
+    fn stored_live(configuration: &Path, root: &Path) -> Option<bool> {
+        let bytes = fs::read(consent_file(configuration)).ok()?;
+        let stored: Value = serde_json::from_slice(&bytes).unwrap();
+        stored["projects"][manifest_id(root)]["live"].as_bool()
+    }
+
+    /// Steps the window for `how_long`, as a person would leave it open.
+    fn wait(harness: &mut FolderHarness, how_long: Duration) {
+        let start = Instant::now();
+        while start.elapsed() < how_long {
+            harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Criterion 1: with the agent connected and the window observing,
+    /// ticking the box changes nothing until *Apply settings*: no *Live
+    /// allowed* in the header, the server still refuses with `live_disabled`
+    /// and nothing is kept. *Apply settings* is shown while observing,
+    /// enabled only while the box differs from what applies.
+    #[test]
+    fn mcp26_criterion_1_ticking_changes_nothing_until_apply_settings() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+        assert!(read_only(&harness), "the window observes the agent");
+        assert_eq!(live_requests(&mut server), off());
+
+        open_settings(&mut harness);
+        assert!(has_label(&harness, APPLY), "Apply settings is shown");
+        assert!(!enabled(&harness, APPLY), "nothing to apply yet");
+        choose(&mut harness, TOGGLE);
+        assert!(toggle(&harness), "the box shows the choice");
+        assert!(enabled(&harness, APPLY), "the choice can be applied");
+        wait(&mut harness, WAIT);
+        assert!(has_label(&harness, TOGGLE), "the dialog is still open");
+        assert!(!has_label(&harness, BADGE), "no Live allowed before Apply");
+        assert_eq!(live_requests(&mut server), off(), "the server was not told");
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+        assert_eq!(
+            stored_live(configuration.path(), root),
+            None,
+            "nothing kept"
+        );
+
+        choose(&mut harness, TOGGLE);
+        assert!(!toggle(&harness));
+        assert!(
+            !enabled(&harness, APPLY),
+            "back as it applies: nothing to apply"
+        );
+        choose(&mut harness, "Cancel");
+        drop(harness);
+        drop(server);
+    }
+
+    /// Criterion 2: *Cancel* after changing the box closes the dialog with
+    /// the box and the header as they were, observing or not, from off and
+    /// from on; the dialog's *Close* does the same.
+    #[test]
+    fn mcp26_criterion_2_cancel_leaves_the_box_and_the_header_as_they_were() {
+        for observing in [false, true] {
+            for live in [false, true] {
+                for leave in ["Cancel", "Close"] {
+                    let case = format!("observing {observing}, live {live}, {leave}");
+                    let configuration = tempfile::tempdir().unwrap();
+                    let directory = shop();
+                    let root = directory.path();
+                    if live {
+                        let mut first = window(root, WIDE, configuration.path());
+                        set_box(&mut first, true);
+                        drop(first);
+                    }
+                    let kept = fs::read(consent_file(configuration.path())).ok();
+                    let owner = observing.then(|| agent_holds(root));
+                    let mut harness = window(root, WIDE, configuration.path());
+                    assert_eq!(has_label(&harness, "Observing"), observing, "{case}");
+                    assert_eq!(has_label(&harness, BADGE), live, "{case}");
+
+                    open_settings(&mut harness);
+                    choose(&mut harness, TOGGLE);
+                    assert_eq!(toggle(&harness), !live, "{case}");
+                    harness
+                        .get_by_role_and_label(egui::accesskit::Role::Button, leave)
+                        .click();
+                    settle(&mut harness);
+                    assert!(!has_label(&harness, TOGGLE), "{case}: the dialog closed");
+                    assert_eq!(has_label(&harness, BADGE), live, "{case}: the header");
+                    assert_eq!(
+                        fs::read(consent_file(configuration.path())).ok(),
+                        kept,
+                        "{case}: the kept consent"
+                    );
+                    assert_eq!(box_ticked(&mut harness), live, "{case}: the box");
+                    drop(harness);
+                    drop(owner);
+                }
+            }
+        }
+    }
+
+    /// Criterion 3: *Apply settings* applies the box: the header's badge,
+    /// the server's answer and the consent file, both ways. While observing
+    /// it applies the box alone; otherwise the project folder and its
+    /// settings stay untouched as well.
+    #[test]
+    fn mcp26_criterion_3_apply_settings_applies_the_box() {
+        let configuration = tempfile::tempdir().unwrap();
+        let (directory, _api) = live_shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let mut server = agent(root, "Claude Code");
+        hand_over(&mut harness, &mut server, "The agent is connected.");
+        assert!(read_only(&harness), "the window observes the agent");
+
+        open_settings(&mut harness);
+        choose(&mut harness, TOGGLE);
+        assert!(enabled(&harness, APPLY));
+        harness.get_by_label(APPLY).click();
+        let applied = Instant::now();
+        await_live_requests(Some(&mut harness), &mut server, applied, on());
+        settle(&mut harness);
+        assert!(
+            !has_label(&harness, TOGGLE),
+            "Apply settings closed the dialog"
+        );
+        assert!(has_label(&harness, BADGE), "the header says Live allowed");
+        assert_eq!(stored_live(configuration.path(), root), Some(true));
+        assert_sent(&live_run(&mut harness, &mut server));
+
+        open_settings(&mut harness);
+        assert!(toggle(&harness), "the box shows what applies");
+        choose(&mut harness, TOGGLE);
+        apply_settings(&mut harness);
+        await_live_requests(Some(&mut harness), &mut server, Instant::now(), off());
+        assert!(!has_label(&harness, BADGE));
+        assert_eq!(stored_live(configuration.path(), root), Some(false));
+        assert_refused_in_settings(&live_run(&mut harness, &mut server));
+        drop(harness);
+        drop(server);
+
+        // Not observing: the box applies with the project's settings, and
+        // an unchanged project leaves nothing to save.
+        let configuration = tempfile::tempdir().unwrap();
+        let directory = shop();
+        let root = directory.path();
+        let mut harness = window(root, WIDE, configuration.path());
+        let before = files(root);
+        open_settings(&mut harness);
+        choose(&mut harness, TOGGLE);
+        assert!(!has_label(&harness, BADGE), "not before Apply");
+        apply_settings(&mut harness);
+        settle(&mut harness);
+        assert!(has_label(&harness, BADGE));
+        assert_eq!(stored_live(configuration.path(), root), Some(true));
+        assert_eq!(files(root), before, "the project folder is byte-identical");
+        assert!(
+            !folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .is_manifest_dirty(),
+            "nothing to save"
+        );
+    }
+
+    /// Criterion 4: under a ticked box the line states the real reach, any
+    /// URL the project's documents name, with or without a base URL.
+    #[test]
+    fn mcp26_criterion_4_the_sentence_states_the_reach() {
+        let (with_base, _api) = live_shop();
+        let without_base = shop();
+        let manifest = without_base.path().join("apiforge.project.json");
+        let mut config: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        config["environment"]["baseUrl"] = json!("");
+        fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        for root in [with_base.path(), without_base.path()] {
+            let configuration = tempfile::tempdir().unwrap();
+            let mut harness = window(root, WIDE, configuration.path());
+            open_settings(&mut harness);
+            assert!(has_label(&harness, OFF));
+            choose(&mut harness, TOGGLE);
+            assert!(
+                has_label(&harness, SENTENCE),
+                "the line under the ticked box"
+            );
+            apply_settings(&mut harness);
+            open_settings(&mut harness);
+            assert!(has_label(&harness, SENTENCE), "the line once applied");
+            choose(&mut harness, "Cancel");
+            drop(harness);
         }
     }
 }

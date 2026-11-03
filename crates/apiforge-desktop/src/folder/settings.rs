@@ -1,6 +1,7 @@
 //! Project configuration stays dirty until an explicit manifest/source save.
 //! The person's consent to the agent's live requests is not configuration:
-//! it applies at once and is kept outside the project (MCP-09).
+//! it is kept outside the project (MCP-09) and applies with *Apply settings*,
+//! which *Cancel* discards (MCP-26).
 use super::*;
 
 impl FolderApp {
@@ -12,8 +13,8 @@ impl FolderApp {
             .is_some_and(|session| self.consent.live(&session.manifest().id))
     }
 
-    /// The person ticked or unticked the box: kept at once, and said to the
-    /// agent's server over the channel.
+    /// The person applied the ticked or unticked box: kept at once, and said
+    /// to the agent's server over the channel.
     fn set_live_allowed(&mut self, live: bool) {
         let Some(session) = &self.session else { return };
         let project = session.manifest().id.clone();
@@ -34,11 +35,6 @@ impl FolderApp {
         dialogs::AgentSection {
             live: self.live_allowed(),
             running: self.handover.agent_runs_live(),
-            base_url: self
-                .session
-                .as_ref()
-                .map(|session| session.manifest().environment.base_url.clone())
-                .unwrap_or_default(),
         }
     }
 
@@ -83,7 +79,8 @@ impl FolderApp {
         dialog.set_read_only(read_only);
         dialog.set_agent(self.agent_section());
         let outcome = dialog.show(context);
-        // The toggle applies at once, whatever else the dialog does.
+        // The box applies with *Apply settings*: while observing alone, and
+        // otherwise with the project's settings (MCP-26).
         if let Some(live) = dialog.take_agent_change() {
             self.set_live_allowed(live);
         }
@@ -92,6 +89,12 @@ impl FolderApp {
             dialogs::Outcome::Applied(change) => {
                 let session = self.session.as_mut()?;
                 if session.is_read_only() {
+                    return None;
+                }
+                // An unchanged project, as when only the agent's box
+                // changed, has nothing to apply and nothing to save.
+                let manifest = session.manifest();
+                if manifest.name == change.project_name && manifest.contracts == change.contracts {
                     return None;
                 }
                 self.working_project(

@@ -1,7 +1,8 @@
 //! Project and scenario settings: names, description, error policy, scenario
 //! parameters and the project's data contracts; in a folder project also the
 //! person's consent to an MCP agent's live requests (MCP-09), which is not a
-//! setting of the project and applies at once.
+//! setting of the project and applies with *Apply settings*, also while the
+//! window observes an agent (MCP-26).
 //!
 //! Unlike the reference editor, which applied every keystroke, the dialog edits a
 //! working copy and applies it as a whole, so an unparsable JSON field can never
@@ -81,32 +82,27 @@ impl SettingsChange {
 /// The toggle's label: what the person allows.
 pub const AGENT_TOGGLE: &str = "Allow the MCP agent to send live requests";
 
-/// The *Agent* section: the person's consent in the open project and what
+/// The *Agent* section: the person's consent in the open project as it
 /// applies now.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentSection {
-    /// The box is ticked.
+    /// The agent's live requests are allowed.
     pub live: bool,
     /// The agent's live run is in progress.
     pub running: bool,
-    /// The project's base URL, which live requests go to.
-    pub base_url: String,
 }
 
 impl AgentSection {
-    /// The line under the toggle: what applies now (mock-up M3).
-    fn line(&self) -> String {
-        if self.live {
-            let base_url = self.base_url.trim();
-            if base_url.is_empty() {
-                "On — the agent may send real requests to the project's base URL.".to_owned()
-            } else {
-                format!("On — the agent may send real requests to {base_url}.")
-            }
+    /// The line under the toggle: what the box allows as it is ticked or not
+    /// (mock-up M3). A live request goes to any URL a document names, not
+    /// only to the base URL (MCP-26).
+    fn line(&self, ticked: bool) -> &'static str {
+        if ticked {
+            "On — the agent may send real requests to any URL the project's documents name."
         } else if self.running {
-            "A live run is in progress; it will finish. No new one starts.".to_owned()
+            "A live run is in progress; it will finish. No new one starts."
         } else {
-            "Off — the agent can only simulate.".to_owned()
+            "Off — the agent can only simulate."
         }
     }
 }
@@ -205,7 +201,11 @@ pub struct SettingsDialog {
     error: Option<String>,
     /// A folder project's *Agent* section (MCP-09).
     agent: Option<AgentSection>,
-    /// The toggle's new state, until the window takes it.
+    /// The box as the person left it in this dialog; it applies with *Apply
+    /// settings* and *Cancel* discards it (MCP-26).
+    agent_choice: Option<bool>,
+    /// The box's change once *Apply settings* applied it, until the window
+    /// takes it.
     agent_change: Option<bool>,
 }
 
@@ -234,6 +234,7 @@ impl SettingsDialog {
             read_only: false,
             error: None,
             agent: None,
+            agent_choice: None,
             agent_change: None,
         }
     }
@@ -251,13 +252,33 @@ impl SettingsDialog {
         }
     }
 
-    /// The toggle's new state once the person changed it; the window keeps
-    /// it at once.
+    /// The box's new state once *Apply settings* applied it (MCP-26). The
+    /// window takes it after every frame, whatever the outcome: while
+    /// observing, *Apply settings* applies the box alone and the dialog then
+    /// closes as after *Cancel*.
     pub fn take_agent_change(&mut self) -> Option<bool> {
         self.agent_change.take()
     }
 
-    /// Every control disabled; Cancel closes it.
+    /// The box as shown: the person's choice, or what applies.
+    fn agent_ticked(&self) -> Option<bool> {
+        let agent = self.agent.as_ref()?;
+        Some(self.agent_choice.unwrap_or(agent.live))
+    }
+
+    /// The box's state to apply, when it differs from what applies now.
+    fn agent_pending(&self) -> Option<bool> {
+        let agent = self.agent.as_ref()?;
+        self.agent_choice.filter(|choice| *choice != agent.live)
+    }
+
+    /// Observing, only the agent's box can change; *Apply settings* is
+    /// there for it alone (MCP-26, owner decision 4 = A of 2026-11-02).
+    fn toggle_only(&self) -> bool {
+        self.read_only && self.agent.is_some()
+    }
+
+    /// Every control disabled but the agent's box; Cancel closes it.
     pub fn read_only(mut self) -> Self {
         self.read_only = true;
         self
@@ -357,9 +378,10 @@ impl SettingsDialog {
                 "Project and scenario"
             },
             width: 600.0,
-            // Observing, nothing applies but the toggle, which needs no
-            // button (owner decision of 2026-10-27 on M3).
-            apply_label: if self.read_only {
+            // Observing, nothing applies but the agent's box, with *Apply
+            // settings* since MCP-26 (on M3 the button was hidden, owner
+            // decision of 2026-10-27; decision 4 = A of 2026-11-02 shows it).
+            apply_label: if self.read_only && !self.toggle_only() {
                 ""
             } else if self.project_only {
                 "Apply settings"
@@ -379,12 +401,31 @@ impl SettingsDialog {
                     dialog.agent_section(ui);
                 }
             },
-            |dialog| !dialog.read_only && dialog.problems().is_empty(),
+            |dialog| {
+                if dialog.read_only {
+                    dialog.agent_pending().is_some()
+                } else {
+                    dialog.problems().is_empty()
+                }
+            },
         );
         match action {
             super::Action::Cancel => Outcome::Cancelled,
-            super::Action::Apply if self.read_only => Outcome::Open,
-            super::Action::Apply => self.result().map_or(Outcome::Open, Outcome::Applied),
+            // Observing, the box applies alone and the dialog closes.
+            super::Action::Apply if self.read_only => match self.agent_pending() {
+                Some(live) => {
+                    self.agent_change = Some(live);
+                    Outcome::Cancelled
+                }
+                None => Outcome::Open,
+            },
+            super::Action::Apply => match self.result() {
+                Some(change) => {
+                    self.agent_change = self.agent_pending();
+                    Outcome::Applied(change)
+                }
+                None => Outcome::Open,
+            },
             super::Action::None => Outcome::Open,
         }
     }
@@ -421,9 +462,10 @@ impl SettingsDialog {
         }
     }
 
-    /// The person's consent, enabled even while observing (MCP-09).
+    /// The person's consent, enabled even while observing (MCP-09); a change
+    /// waits for *Apply settings* (MCP-26).
     fn agent_section(&mut self, ui: &mut Ui) {
-        let Some(agent) = &mut self.agent else {
+        let Some(mut live) = self.agent_ticked() else {
             return;
         };
         ui.add_space(8.0);
@@ -435,12 +477,12 @@ impl SettingsDialog {
                 .family(crate::theme::bold_family()),
         );
         ui.add_space(4.0);
-        let mut live = agent.live;
         if ui.checkbox(&mut live, AGENT_TOGGLE).changed() {
-            agent.live = live;
-            self.agent_change = Some(live);
+            self.agent_choice = Some(live);
         }
-        widgets::hint(ui, agent.line());
+        if let Some(agent) = &self.agent {
+            widgets::hint(ui, agent.line(live));
+        }
     }
 
     fn scenario_tab(&mut self, ui: &mut Ui, problems: &Problems) {
