@@ -273,6 +273,9 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The steps the Cleanup board's cards read, kept while the model is the
+    /// same: building them copies the Main graph (UX-16).
+    cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
     selections: HashMap<String, Vec<String>>,
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
@@ -473,6 +476,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            cleanup_reference: None,
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
             new_inputs: HashMap::new(),
