@@ -25,6 +25,7 @@ mod handover_prompt;
 mod holder;
 mod inputs;
 mod navigation;
+mod notices;
 mod opening;
 mod placement;
 mod publication;
@@ -294,6 +295,8 @@ pub struct FolderApp {
     /// cannot serve: it forgets it when the analysis starts.
     marks_quiet_at: HashMap<String, Instant>,
     notice: Option<Notice>,
+    /// The time notices age by (UX-12).
+    clock: notices::Clock,
     /// The active tab last revealed in the strip, and the strip's last scroll
     /// offset, so activating a tab can scroll it into view.
     followed_tab: Option<String>,
@@ -480,6 +483,7 @@ impl FolderApp {
             changed_at: None,
             marks_quiet_at: HashMap::new(),
             notice: None,
+            clock: notices::Clock::default(),
             followed_tab: None,
             tabs_offset: 0.0,
             tabs_width: 0.0,
@@ -690,6 +694,18 @@ impl FolderApp {
             text: text.into(),
             error,
         });
+    }
+
+    /// The notice under the tabs as the active tab shows it: a test seam.
+    #[cfg(test)]
+    fn notice(&self) -> Option<&Notice> {
+        self.notice.as_ref()
+    }
+
+    /// Moves the clock notices age by on by `by`: a test seam (UX-12).
+    #[cfg(test)]
+    fn step_clock(&mut self, by: Duration) {
+        self.clock.step(by);
     }
 
     /// Shows a dismissable notice, as an action that reports its outcome

@@ -8920,7 +8920,7 @@ mod ux04 {
     use egui_kittest::kittest::NodeT;
 
     const SIMULATE: &str = "Run simulation";
-    const LIVE: &str = "Run live";
+    pub(super) const LIVE: &str = "Run live";
     const LIVE_ITEM: &str = "Live";
     const CANCEL: &str = "Cancel run";
     const BADGE: &str = "Live allowed";
@@ -8935,7 +8935,7 @@ mod ux04 {
 
     /// A loopback API that accepts every connection and never answers, so a
     /// live run against it stays in progress until its step times out.
-    fn silent_api() -> String {
+    pub(super) fn silent_api() -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
@@ -8962,7 +8962,7 @@ mod ux04 {
 
     /// The window over `root` at `size`, the run mode Live, the scenario's
     /// tab active.
-    fn live_window(
+    pub(super) fn live_window(
         root: &std::path::Path,
         size: egui::Vec2,
         configuration: &std::path::Path,
@@ -8991,7 +8991,7 @@ mod ux04 {
     }
 
     /// An unsaved, valid change to the scenario: its description.
-    fn edit_validly(harness: &mut FolderHarness) {
+    pub(super) fn edit_validly(harness: &mut FolderHarness) {
         let scenario = only(harness, DocumentKind::Scenario);
         edit(
             harness,
@@ -9003,7 +9003,7 @@ mod ux04 {
 
     /// The header's *Running …* label: its text and rect. The header is the
     /// window's top band, above the tab strip.
-    fn running(harness: &FolderHarness) -> Option<(String, egui::Rect)> {
+    pub(super) fn running(harness: &FolderHarness) -> Option<(String, egui::Rect)> {
         let strip = harness.get_by_label("Code").rect().bottom();
         let found: Vec<(String, egui::Rect)> = harness
             .query_all_by_label_contains("Running ")
@@ -9064,7 +9064,7 @@ mod ux04 {
     }
 
     /// Clicks *Cancel run* and steps until the run has ended.
-    fn cancel(harness: &mut FolderHarness) {
+    pub(super) fn cancel(harness: &mut FolderHarness) {
         harness.get_by_label(CANCEL).click();
         let deadline = Instant::now() + Duration::from_secs(30);
         while folder(harness).runs.handle.is_some() {
@@ -10596,5 +10596,197 @@ mod ux33 {
                 );
             }
         }
+    }
+}
+
+/// UX-12 (#222): a notice that is not an error clears itself five seconds
+/// after it is raised or at the next action, whichever comes first; an error
+/// stays until it is dismissed and belongs to the tab it was raised on. The
+/// window's clock is held still in tests and stepped, so no test waits.
+mod ux12 {
+    use super::ux02::shop_at;
+    use super::ux04::{LIVE, cancel, edit_validly, live_window, running, silent_api};
+    use super::*;
+    use crate::testing::MINIMUM;
+
+    const SAVED: &str = "Saved 1 file.";
+    const ERROR: &str = "Could not save the project: the disk is full.";
+    const OTHER_ERROR: &str = "Cannot run this component: it has no steps.";
+
+    /// The demo shop at 960 × 540, the component's tab open and the
+    /// scenario's active with an unsaved, valid change to its description.
+    fn edited() -> (tempfile::TempDir, FolderHarness, String, String) {
+        let directory = crate::testing::shop_project();
+        let mut harness = folder_harness(directory.path(), MINIMUM);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let component = only(&harness, DocumentKind::Component);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        let source = source_of(&harness, &scenario);
+        let changed = source.replacen("description \"", "description \"Edited. ", 1);
+        assert_ne!(changed, source, "the scenario has a description");
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&scenario, &changed, CODE)
+            .unwrap();
+        settle(&mut harness);
+        (directory, harness, scenario, component)
+    }
+
+    /// Whether the band under the tabs shows `text`, by the window's state
+    /// and by the accessibility tree.
+    fn shows(harness: &FolderHarness, text: &str) -> bool {
+        let state = folder(harness)
+            .notice()
+            .is_some_and(|notice| notice.text == text);
+        let tree = harness.query_all_by_label(text).next().is_some();
+        assert_eq!(state, tree, "{text:?}: the state and the tree agree");
+        state
+    }
+
+    /// *Save all* from the header, which says what it saved.
+    fn save_all(harness: &mut FolderHarness) {
+        choose(harness, "Save all");
+        assert!(shows(harness, SAVED), "Save all says what it saved");
+    }
+
+    /// Moves the window's clock on by `by` and draws a frame with no input.
+    fn wait(harness: &mut FolderHarness, by: Duration) {
+        app(harness).step_clock(by);
+        harness.step();
+        settle(harness);
+    }
+
+    /// Raises an error on the active tab, as a failed action does.
+    fn fail(harness: &mut FolderHarness, text: &str) {
+        app(harness).notify(text, true);
+        settle(harness);
+        assert!(shows(harness, text), "the error is shown");
+    }
+
+    /// Criterion 1: *Saved 1 file.* is still shown 4.9 seconds after *Save
+    /// all* and gone at five, with no input in between.
+    #[test]
+    fn ux12_criterion_1_a_confirmation_is_gone_five_seconds_later() {
+        let (_directory, mut harness, _, _) = edited();
+        save_all(&mut harness);
+        wait(&mut harness, Duration::from_millis(4_900));
+        assert!(shows(&harness, SAVED), "at 4.9 s the notice is still shown");
+        wait(&mut harness, Duration::from_millis(100));
+        assert!(!shows(&harness, SAVED), "at 5 s the notice is gone");
+        assert!(
+            folder(&harness).notice().is_none(),
+            "nothing else took its place"
+        );
+    }
+
+    /// Criterion 2: an edit typed in the code clears the confirmation at
+    /// once; the clock has not moved.
+    #[test]
+    fn ux12_criterion_2_an_edit_clears_the_confirmation() {
+        let (_directory, mut harness, scenario, _) = edited();
+        save_all(&mut harness);
+        let before = source_of(&harness, &scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert_ne!(source_of(&harness, &scenario), before, "the edit landed");
+        assert!(!shows(&harness, SAVED), "the edit cleared the notice");
+    }
+
+    /// Criterion 2: starting a run clears the confirmation at once.
+    #[test]
+    fn ux12_criterion_2_a_run_clears_the_confirmation() {
+        let (_directory, mut harness, _, _) = edited();
+        save_all(&mut harness);
+        choose(&mut harness, "Run simulation");
+        assert!(!shows(&harness, SAVED), "the run cleared the notice");
+    }
+
+    /// Criterion 2: switching to another tab clears the confirmation, and
+    /// switching back does not bring it back.
+    #[test]
+    fn ux12_criterion_2_a_tab_switch_clears_the_confirmation() {
+        let (_directory, mut harness, scenario, component) = edited();
+        save_all(&mut harness);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(!shows(&harness, SAVED), "the switch cleared the notice");
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(!shows(&harness, SAVED), "it does not come back");
+    }
+
+    /// Criterion 3: an error stays through five seconds and more, and
+    /// through an edit, until it is dismissed with ×.
+    #[test]
+    fn ux12_criterion_3_an_error_stays_until_dismissed() {
+        let (_directory, mut harness, scenario, _) = edited();
+        fail(&mut harness, ERROR);
+        wait(&mut harness, Duration::from_secs(5));
+        wait(&mut harness, Duration::from_secs(60));
+        assert!(shows(&harness, ERROR), "a minute later the error stays");
+        let before = source_of(&harness, &scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert_ne!(source_of(&harness, &scenario), before, "the edit landed");
+        assert!(shows(&harness, ERROR), "the error stays through an edit");
+        choose(&mut harness, "Dismiss");
+        assert!(!shows(&harness, ERROR), "× dismisses it");
+        assert!(folder(&harness).notice().is_none());
+    }
+
+    /// Criterion 4: an error raised on the scenario is not shown while the
+    /// component's tab is active and is shown again on the scenario; the
+    /// component's own error is shown on the component only.
+    #[test]
+    fn ux12_criterion_4_an_error_belongs_to_its_tab() {
+        let (_directory, mut harness, scenario, component) = edited();
+        fail(&mut harness, ERROR);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(!shows(&harness, ERROR), "not on the component's tab");
+        assert!(
+            folder(&harness).notice().is_none(),
+            "the component has none"
+        );
+        fail(&mut harness, OTHER_ERROR);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(shows(&harness, ERROR), "the scenario's error is back");
+        assert!(!shows(&harness, OTHER_ERROR), "the component's is not here");
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(shows(&harness, OTHER_ERROR), "the component's own error");
+        choose(&mut harness, "Dismiss");
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(
+            shows(&harness, ERROR),
+            "dismissing one tab's error leaves the other's"
+        );
+    }
+
+    /// Criterion 5: the header's *Running …* words (UX-04) are not a notice:
+    /// they stay while the run runs, past five seconds and through an edit.
+    #[test]
+    fn ux12_criterion_5_the_running_words_are_not_affected() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        wait(&mut harness, Duration::from_secs(6));
+        assert!(running(&harness).is_some(), "past five seconds");
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert!(running(&harness).is_some(), "through an edit");
+        cancel(&mut harness);
     }
 }
