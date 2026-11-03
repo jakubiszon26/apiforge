@@ -12,13 +12,13 @@ Closes #<!-- issue number -->
 
 <!-- New / changed / removed, in the owner's words. Link the approved mock-up if there was one. -->
 
-## QA report
+## QA
 
-<!-- docs/qa/<date>/<ticket>/report.md — captures per platform and the "not verified" section -->
+<!-- Criteria → tests table; for an interface change, 2–4 captures committed under docs/qa/<date>/<ticket>/ and linked here; regression smoke results. See docs/process/testing.md §2 -->
 
 ## Not verified
 
-<!-- Copied from the report so it is visible here -->
+<!-- At most five lines; part of the QA section -->
 
 ## Checklist
 
@@ -26,7 +26,7 @@ Closes #<!-- issue number -->
 - [ ] Acceptance tests were committed before the implementation
 - [ ] `cargo fmt`, clippy with `-D warnings`, the workspace tests and the fixture check pass
 - [ ] Interface change: interaction tests and design review per `docs/gui-testing.md`
-- [ ] Regression smoke list run on the release binary; results in the report
+- [ ] Regression smoke list run on the release binary; results in the QA section above
 - [ ] No `#[ignore]` without a ticket ID, other than a design-review view or a spawned helper
 - [ ] WIP after this pull request: at most four awaiting acceptance, within 60 estimated review minutes
 - [ ] The issue is labelled `awaiting-acceptance` and `docs/backlog.md` still lists it
