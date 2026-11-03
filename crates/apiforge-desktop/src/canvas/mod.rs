@@ -281,6 +281,10 @@ pub struct Canvas {
     /// The blocks the last frame ringed for the selected input.
     #[cfg(test)]
     ringed: Vec<String>,
+    /// What the last frame's cards wrote in their source rows: the card's
+    /// name and the row's text (UX-16).
+    #[cfg(test)]
+    sources: Vec<(String, String)>,
 }
 
 impl Default for Canvas {
@@ -307,6 +311,8 @@ impl Default for Canvas {
             error: None,
             #[cfg(test)]
             ringed: Vec::new(),
+            #[cfg(test)]
+            sources: Vec::new(),
         }
     }
 }
@@ -345,6 +351,12 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ringed(&self) -> Vec<String> {
         self.ringed.clone()
+    }
+
+    /// What the last frame's cards wrote in their source rows (UX-16).
+    #[cfg(test)]
+    pub(crate) fn debug_sources(&self) -> Vec<(String, String)> {
+        self.sources.clone()
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -450,6 +462,18 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
+        #[cfg(test)]
+        {
+            self.sources = cards
+                .iter()
+                .flat_map(|card| {
+                    card.inputs.iter().filter_map(|row| match &row.value {
+                        RowValue::Source(text) => Some((card.name.clone(), text.clone())),
+                        _ => None,
+                    })
+                })
+                .collect();
+        }
         let mut chips: Vec<Chip> = input
             .graph
             .proxies
