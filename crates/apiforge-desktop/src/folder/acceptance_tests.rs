@@ -11590,14 +11590,26 @@ mod ux18 {
             .unwrap_or_else(|| panic!("{node_id} is on the board"))
     }
 
-    /// Clicks the card named `name`, as a person selects it on the board.
+    /// Clicks the card named `name` on its title, as a person selects it on
+    /// the board. Its middle may hold a field, which a click edits instead.
     fn click_card(harness: &mut FolderHarness, name: &str) {
         let prefix = format!("{name} (");
-        harness
+        let rect = harness
             .get(By::new().role(Role::Button).predicate(move |node| {
                 node.label().is_some_and(|label| label.starts_with(&prefix))
             }))
-            .click();
+            .rect();
+        let at = egui::pos2(rect.center().x, rect.top() + rect.height() * 0.1);
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
         settle(harness);
     }
 
@@ -11774,14 +11786,16 @@ mod ux18 {
     }
 
     /// Criterion 4: resizing the window still re-fits a camera the person has
-    /// not moved, with the Inspector open.
+    /// not moved, with the Inspector open. The smaller window is one the
+    /// demo still fits beside the Inspector above the smallest zoom.
     #[test]
     fn resizing_the_window_still_refits_an_unmoved_camera() {
         let (_project, mut harness, scenario) = diagram(WIDE);
         click_card(&mut harness, PRODUCT.1);
+        assert!(has_label(&harness, CLOSE_INSPECTOR), "the Inspector opens");
         let wide = canvas(&harness, &scenario).debug_zoom();
 
-        harness.set_size(MINIMUM);
+        harness.set_size(egui::vec2(1280.0, 800.0));
         settle(&mut harness);
 
         let resized = canvas(&harness, &scenario).debug_zoom();
