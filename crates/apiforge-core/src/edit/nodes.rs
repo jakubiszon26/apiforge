@@ -8,7 +8,7 @@ use crate::{
     block::Block,
     format::{Binding, Component, Graph, Node, Position, Project},
     graph::{VALUE_INPUT, condition_inputs, create_node, has_cycle, output_ports, position_after},
-    handle::{handle_base, unique_handle},
+    handle::{handle_base, unique_handle, unique_label},
     js,
     model::NodeKind,
 };
@@ -58,7 +58,8 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
 /// - Without a source, a request or component gets an ordering edge from Start
 ///   when Start has no outgoing edge yet, so the first step is visibly connected.
 ///
-/// Handles are numbered when taken (`request_2`). A board can hold only one Start.
+/// Handles are numbered when taken (`request_2`), and so is the label of a component
+/// whose name a block already shows (`Product 2`). A board can hold only one Start.
 pub fn add_node(
     graph: &Graph,
     block: Block,
@@ -81,6 +82,22 @@ pub fn add_node(
     node.handle = unique_handle(&node.handle, |handle| {
         graph.nodes.iter().any(|node| node.handle == handle)
     });
+    // A second instance of a component whose name a block already shows gets
+    // a numbered label (`Product 2`), as a duplicate does (UX-34).
+    if let Some(component) = component
+        && node.label.is_none()
+        && graph
+            .nodes
+            .iter()
+            .any(|other| other.display_name() == component.name)
+    {
+        node.label = Some(unique_label(&component.name, |label| {
+            graph
+                .nodes
+                .iter()
+                .any(|other| other.display_name() == label)
+        }));
+    }
 
     let mut next = graph.clone();
     match source {
@@ -251,6 +268,32 @@ mod tests {
     use serde_json::json;
 
     const AT: Position = Position { x: 0.0, y: 0.0 };
+
+    /// UX-34: a second instance of a component a block already shows by its
+    /// name is labelled with the next number; the first keeps no label.
+    #[test]
+    fn a_second_component_instance_gets_a_numbered_label() {
+        let project = crate::demos::shop_project();
+        let product = project
+            .components
+            .iter()
+            .find(|component| component.name == "Product")
+            .expect("the shop has a Product component");
+        let empty = Graph::default();
+        let first = add_node(&empty, Block::Component, AT, Some(product), None).unwrap();
+        assert_eq!(first.graph.nodes[0].label, None, "nothing to tell apart");
+        let mut named = first.graph.clone();
+        named.nodes[0].label = Some("Product".into());
+        let second = add_node(&named, Block::Component, AT, Some(product), None).unwrap();
+        let added = second.graph.nodes.last().unwrap();
+        assert_eq!(added.handle, format!("{}_2", product.handle));
+        assert_eq!(added.label.as_deref(), Some("Product 2"));
+        let third = add_node(&second.graph, Block::Component, AT, Some(product), None).unwrap();
+        assert_eq!(
+            third.graph.nodes.last().unwrap().label.as_deref(),
+            Some("Product 3")
+        );
+    }
 
     #[test]
     fn new_requests_have_only_a_url() {

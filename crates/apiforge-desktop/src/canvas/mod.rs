@@ -39,6 +39,9 @@ const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
 const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
+/// Why *Copy* and *Duplicate* are disabled with only chips selected (UX-34).
+const CHIP_NOT_COPIED: &str =
+    "Select a step to copy or duplicate. A variable chip shows a value; it is not copied.";
 
 /// A change requested on the board.
 #[derive(Clone, Debug, PartialEq)]
@@ -1774,17 +1777,31 @@ impl Canvas {
                                                 Command::SaveSelectionAsComponent,
                                             ),
                                         ];
+                                        // A variable chip is a view of a value, not
+                                        // a step, so a chip alone has nothing to
+                                        // copy (UX-34).
+                                        let has_block = input.selection.iter().any(|id| {
+                                            input.graph.nodes.iter().any(|node| &node.id == id)
+                                        });
                                         for (icon, label, shortcut, command) in items {
+                                            let copies = matches!(
+                                                command,
+                                                Command::Copy | Command::Duplicate
+                                            );
                                             let allowed = has_selection
-                                                && (editable || matches!(command, Command::Copy));
-                                            if ui
+                                                && (editable || matches!(command, Command::Copy))
+                                                && (has_block || !copies);
+                                            let mut response = ui
                                                 .add_enabled(
                                                     allowed,
                                                     widgets::action(icon, label).quiet(),
                                                 )
-                                                .on_hover_text(shortcut)
-                                                .clicked()
-                                            {
+                                                .on_hover_text(shortcut);
+                                            if copies && has_selection && !has_block {
+                                                response = response
+                                                    .on_disabled_hover_text(CHIP_NOT_COPIED);
+                                            }
+                                            if response.clicked() {
                                                 commands.push(command);
                                                 ui.close();
                                             }

@@ -643,6 +643,7 @@ impl FolderApp {
                         reference: graph_of(&model, false),
                         project: &context,
                         parameters: &parameters,
+                        sibling: sibling_of(&model, cleanup),
                     };
                     self.apply_edit(
                         id,

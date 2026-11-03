@@ -39,7 +39,7 @@ mod workbench;
 
 use crate::icons::Icon;
 use crate::{
-    board_edit::{Board, Edit},
+    board_edit::{self, Board, Edit},
     canvas::{self, Canvas, Command},
     code, dialogs,
     inspector::{self, Inspector},
@@ -285,7 +285,9 @@ pub struct FolderApp {
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
     agreed_fields: HashMap<String, Vec<FieldRecovery>>,
-    clipboard: Option<Clipboard>,
+    /// The blocks last copied on any board, ready to paste into any graph of
+    /// any document (UX-34).
+    clipboard: Option<edit::Fragment>,
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
@@ -350,12 +352,6 @@ pub struct FolderApp {
     /// the marks to appear (UX-03).
     #[cfg(test)]
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
-}
-
-struct Clipboard {
-    context: String,
-    fragment: Graph,
-    pastes: u32,
 }
 
 /// The statement found under the caret, for one source version.
@@ -1706,6 +1702,56 @@ fn graph_of(model: &Document, cleanup: bool) -> &Graph {
         Document::Scenario(scenario) => &scenario.graph,
         Document::Component(component) => &component.graph,
     }
+}
+
+/// The other graph of a scenario, whose handles a block of this one must not
+/// take; a component has one graph.
+fn sibling_of(model: &Document, cleanup: bool) -> Option<&Graph> {
+    match model {
+        Document::Scenario(scenario) => Some(if cleanup {
+            &scenario.graph
+        } else {
+            &scenario.cleanup
+        }),
+        Document::Component(_) => None,
+    }
+}
+
+/// What a paste left unconnected, one sentence per step or input the board
+/// lacks (UX-34): `Missing step “product”: the input of Active promotion
+/// that read it is left unconnected.`
+fn missing_summary(graph: &Graph, unresolved: &[edit::Unresolved]) -> Option<String> {
+    let mut lost: std::collections::BTreeMap<&edit::Missing, Vec<&str>> = Default::default();
+    for item in unresolved {
+        let block = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == item.node_id)
+            .map_or(item.node_id.as_str(), |node| node.display_name());
+        let blocks = lost.entry(&item.missing).or_default();
+        if !blocks.contains(&block) {
+            blocks.push(block);
+        }
+    }
+    let sentences: Vec<String> = lost
+        .iter()
+        .map(|(missing, blocks)| {
+            let (kind, name) = match missing {
+                edit::Missing::Step(handle) => ("step", handle),
+                edit::Missing::Input(name) => ("input", name),
+            };
+            let (inputs, that) = if blocks.len() == 1 {
+                ("the input", "that read it is")
+            } else {
+                ("the inputs", "that read it are")
+            };
+            format!(
+                "Missing {kind} “{name}”: {inputs} of {} {that} left unconnected.",
+                blocks.join(", ")
+            )
+        })
+        .collect();
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 fn with_graph(model: &Document, cleanup: bool, graph: Graph) -> Document {

@@ -69,8 +69,7 @@ struct History {
 #[derive(Clone, Debug)]
 pub struct BlockClipboard {
     pub context: String,
-    pub fragment: Graph,
-    pub pastes: u32,
+    pub fragment: apiforge_core::edit::Fragment,
 }
 
 pub struct Editor {
