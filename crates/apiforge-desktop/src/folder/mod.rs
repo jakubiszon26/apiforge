@@ -67,6 +67,7 @@ use apiforge_storage::{
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
+use notices::{Notice, Notices};
 use placement::CardPlacer;
 use std::{
     collections::{HashMap, HashSet},
@@ -211,12 +212,6 @@ fn describe_commit(changes: &[apiforge_project::CommitChange]) -> Option<String>
     })
 }
 
-/// A message under the tabs; errors stay until dismissed.
-struct Notice {
-    text: String,
-    error: bool,
-}
-
 pub struct FolderApp {
     ui_context: egui::Context,
     root: PathBuf,
@@ -294,9 +289,8 @@ pub struct FolderApp {
     /// marks wait for a pause in typing (UX-03). The analyser's own instant
     /// cannot serve: it forgets it when the analysis starts.
     marks_quiet_at: HashMap<String, Instant>,
-    notice: Option<Notice>,
-    /// The time notices age by (UX-12).
-    clock: notices::Clock,
+    /// The notices under the tabs (UX-12).
+    notices: Notices,
     /// The active tab last revealed in the strip, and the strip's last scroll
     /// offset, so activating a tab can scroll it into view.
     followed_tab: Option<String>,
@@ -482,8 +476,7 @@ impl FolderApp {
             inspector: Inspector::default(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
-            notice: None,
-            clock: notices::Clock::default(),
+            notices: Notices::default(),
             followed_tab: None,
             tabs_offset: 0.0,
             tabs_width: 0.0,
@@ -689,23 +682,36 @@ impl FolderApp {
         self.changed_at = Some(Instant::now());
     }
 
+    /// Shows a notice under the tabs, on the active tab (UX-12).
     fn notify(&mut self, text: impl Into<String>, error: bool) {
-        self.notice = Some(Notice {
-            text: text.into(),
-            error,
-        });
+        self.notices
+            .raise(self.workbench.active(), text.into(), error);
     }
 
-    /// The notice under the tabs as the active tab shows it: a test seam.
-    #[cfg(test)]
+    /// The notice under the tabs as the active tab shows it.
     fn notice(&self) -> Option<&Notice> {
-        self.notice.as_ref()
+        self.notices.shown(self.workbench.active())
+    }
+
+    /// Before anything acts this frame: a notice that is not an error goes
+    /// after five seconds, at an action or at a switch of tab (UX-12).
+    fn tend_notices(&mut self, ctx: &egui::Context) {
+        let acted = ctx.input(notices::acted);
+        let tabs = self.workbench.tabs();
+        let wait = self.notices.tend(
+            self.workbench.active(),
+            |id| tabs.iter().any(|tab| tab.document_id == id),
+            acted,
+        );
+        if let Some(wait) = wait {
+            ctx.request_repaint_after(wait);
+        }
     }
 
     /// Moves the clock notices age by on by `by`: a test seam (UX-12).
     #[cfg(test)]
     fn step_clock(&mut self, by: Duration) {
-        self.clock.step(by);
+        self.notices.clock.step(by);
     }
 
     /// Shows a dismissable notice, as an action that reports its outcome
@@ -817,6 +823,8 @@ impl FolderApp {
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // First, so a notice raised this frame outlives the input of this frame.
+        self.tend_notices(ui.ctx());
         self.poll_storage();
         self.poll_run();
         self.follow_dialogs();

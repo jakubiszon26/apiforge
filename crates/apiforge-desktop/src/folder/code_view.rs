@@ -336,10 +336,9 @@ impl FolderApp {
                     }
                 }
                 Err(error) => {
-                    self.notice = Some(Notice {
-                        text: error.to_string(),
-                        error: true,
-                    });
+                    // The session is still borrowed: `notify` by its fields.
+                    self.notices
+                        .raise(self.workbench.active(), error.to_string(), true);
                     text = snapshot.text.clone();
                 }
             }

@@ -1369,12 +1369,9 @@ mod mcp08a {
         );
         assert!(taken <= FOLLOW, "listed after {taken:?}");
         assert!(
-            folder(&harness).notice.is_none(),
+            folder(&harness).notice().is_none(),
             "no notice: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert_eq!(
             folder(&harness).workbench.active().map(str::to_owned),
@@ -1430,12 +1427,9 @@ mod mcp08a {
         });
         assert!(taken <= FOLLOW, "shown after {taken:?}");
         assert!(
-            folder(&harness).notice.is_none(),
+            folder(&harness).notice().is_none(),
             "followed without a reload notice: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert_eq!(source_of(&harness, &component), edited);
         assert_eq!(
@@ -1479,8 +1473,7 @@ mod mcp08a {
         assert!(taken <= FOLLOW, "closed after {taken:?}");
         assert!(has_tab(&harness, &scenario), "every other tab stays");
         let notice = folder(&harness)
-            .notice
-            .as_ref()
+            .notice()
             .map(|notice| notice.text.clone())
             .unwrap_or_default();
         assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
@@ -1531,10 +1524,7 @@ mod mcp08a {
         assert!(
             !document.is_dirty() && !document.is_layout_dirty(),
             "saved: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert!(document.conflict().is_none());
         let saved = path_of(&harness, &scenario);
@@ -1768,7 +1758,7 @@ mod mcp04 {
         assert_eq!(snapshot.text, written, "followed within one scan");
         assert_eq!(snapshot.conflict, None);
         assert!(
-            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            app.notice().is_none_or(|notice| !notice.error),
             "no conflict is reported"
         );
         assert!(harness.query_by_label_contains(UNSAVED).is_none());
@@ -3443,10 +3433,7 @@ mod mcp08c {
             holder(root).and_then(|holder| holder.role()),
             Some(HolderRole::Window)
         );
-        let notice = folder(&harness)
-            .notice
-            .as_ref()
-            .expect("the error is shown");
+        let notice = folder(&harness).notice().expect("the error is shown");
         assert!(notice.error, "{}", notice.text);
         assert!(
             notice.text.contains("promotion-and-cart-price.afs"),
@@ -3619,10 +3606,7 @@ mod mcp08c {
         assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved_scenario);
         assert!(!read_only(&harness), "the window keeps the project");
         assert!(folder(&harness).snapshot(&scenario).unwrap().held);
-        let notice = folder(&harness)
-            .notice
-            .as_ref()
-            .expect("the window says why");
+        let notice = folder(&harness).notice().expect("the window says why");
         assert!(notice.text.contains("earlier session"), "{}", notice.text);
         drop(harness);
         drop(server);
@@ -3750,7 +3734,7 @@ mod mcp05 {
         assert_eq!(listed(&harness), [1, 2, 3], "the new revision is listed");
         let app = folder(&harness);
         assert!(
-            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            app.notice().is_none_or(|notice| !notice.error),
             "no conflict is reported"
         );
         let session = app.session.as_ref().unwrap();
@@ -6549,8 +6533,7 @@ mod mcp16 {
             "the tab closing chose, not the product saved beside the deletion"
         );
         let notice = folder(&harness)
-            .notice
-            .as_ref()
+            .notice()
             .map(|notice| notice.text.clone())
             .unwrap_or_default();
         assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
@@ -7141,7 +7124,7 @@ mod mcp19 {
             scan.generation, generation,
             "the check reads the delete's generation"
         );
-        let notice = app.notice.as_ref().expect("the delete says what it did");
+        let notice = app.notice().expect("the delete says what it did");
         assert!(!notice.error, "the delete failed: {}", notice.text);
         assert!(
             app.workbench.tabs().iter().all(|tab| tab.document_id != id),
@@ -9026,10 +9009,7 @@ mod ux04 {
     /// No *Running …* notice in the band under the tab strip, nor anywhere
     /// below the header.
     fn assert_band_is_clear(harness: &FolderHarness, context: &str) {
-        let notice = folder(harness)
-            .notice
-            .as_ref()
-            .map(|notice| notice.text.clone());
+        let notice = folder(harness).notice().map(|notice| notice.text.clone());
         assert!(
             !notice
                 .as_deref()
@@ -10654,11 +10634,13 @@ mod ux12 {
         assert!(shows(harness, SAVED), "Save all says what it saved");
     }
 
-    /// Moves the window's clock on by `by` and draws a frame with no input.
+    /// Moves the window's clock on by `by` and draws two frames with no
+    /// input. Not `settle`: the held clock does not move while egui's own
+    /// time does, so a repaint asked for the last 100 ms comes due at once.
     fn wait(harness: &mut FolderHarness, by: Duration) {
         app(harness).step_clock(by);
         harness.step();
-        settle(harness);
+        harness.step();
     }
 
     /// Raises an error on the active tab, as a failed action does.
