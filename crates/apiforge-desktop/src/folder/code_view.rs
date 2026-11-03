@@ -231,14 +231,21 @@ impl FolderApp {
             self.code = code::CodeEditor::default();
             self.shown = Some(document_id.to_owned());
             self.revealed = None;
-            if let Some(tab) = self.workbench.tab_mut(document_id) {
+            let restored = self
+                .workbench
+                .tab_mut(document_id)
+                .map(|tab| (clamp_selection(&snapshot.text, &tab.selection), tab.scroll));
+            if let Some((selection, scroll)) = restored {
                 // The tab keeps its scroll; its caret comes back without
                 // re-centring the view (UX-13).
-                let selection = clamp_selection(&snapshot.text, &tab.selection);
                 let in_view = self.carets_in_view.contains(document_id);
                 self.code
                     .restore(selection.anchor, selection.caret, in_view);
-                self.scroll_restore = Some(tab.scroll);
+                self.scroll_restore = Some(scroll);
+                // The block the board selected for the caret's statement is
+                // the caret's own; revealing it again would centre it. A
+                // block selected on the board meanwhile is still revealed.
+                self.revealed = self.statement_at(document_id, &snapshot.text, selection.caret);
             }
         }
         // The first line the holder changed, while following (MCP-16); the
