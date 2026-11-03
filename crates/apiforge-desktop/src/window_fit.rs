@@ -3,8 +3,24 @@
 //! The first window is the smaller of its usual size and the monitor's work
 //! area less the title bar, never below the minimum size; a remembered size is
 //! clamped the same way, so the bottom bar is on screen when the window opens.
+//!
+//! winit reports a monitor only to the event loop that eframe owns, and has no
+//! work area at all, so the window opens at its usual size and is fitted on
+//! its first frame from what egui reports: the monitor's size as the work
+//! area, and the title bar as the difference between the outer and the inner
+//! height. Where the frame cannot be measured — Wayland's server-side
+//! decorations, a display without a window manager — a 36 px title bar is
+//! assumed.
 
-use eframe::egui::Vec2;
+use eframe::egui::{self, Rect, Vec2};
+
+/// The title bar assumed where the window's frame cannot be measured: the
+/// height KWin draws at 100 % scaling, where KTLO-38 was found.
+pub const ASSUMED_TITLE_BAR: f32 = 36.0;
+
+/// Frames to wait for the monitor and the window's rectangles before giving
+/// up and leaving the window at the size it opened with.
+const ATTEMPTS: u8 = 30;
 
 /// The smallest window size: [`crate::MIN_WINDOW_SIZE`].
 fn floor() -> Vec2 {
@@ -20,15 +36,75 @@ pub fn first_window_size(work_area: Vec2, title_bar: f32) -> Vec2 {
 /// A remembered inner size `size`, clamped so that the window with its title
 /// bar fits the work area, never below the minimum size.
 pub fn fit_window_size(size: Vec2, work_area: Vec2, title_bar: f32) -> Vec2 {
-    // KTLO-38 acceptance stub: the implementation follows in the next commit.
-    let _ = (work_area, title_bar, floor());
-    size
+    let room = work_area - Vec2::new(0.0, title_bar.max(0.0));
+    size.min(room).max(floor())
+}
+
+/// The title bar's height: what the frame adds above and below the inner
+/// rectangle, or [`ASSUMED_TITLE_BAR`] where the frame adds nothing.
+pub fn title_bar_height(inner: Rect, outer: Option<Rect>) -> f32 {
+    match outer.map(|outer| outer.height() - inner.height()) {
+        Some(frame) if frame >= 1.0 => frame,
+        _ => ASSUMED_TITLE_BAR,
+    }
+}
+
+/// The monitor's size and the window's title bar, or `None` while egui does
+/// not know the monitor yet.
+pub fn screen(context: &egui::Context) -> Option<(Vec2, f32)> {
+    let (monitor, inner, outer) = context.input(|input| {
+        let viewport = input.viewport();
+        (
+            viewport.monitor_size,
+            viewport.inner_rect,
+            viewport.outer_rect,
+        )
+    });
+    let monitor = monitor.filter(|monitor| monitor.x >= 1.0 && monitor.y >= 1.0)?;
+    let title_bar = inner.map_or(ASSUMED_TITLE_BAR, |inner| title_bar_height(inner, outer));
+    Some((monitor, title_bar))
+}
+
+/// Fits the window that has just opened to its monitor, once.
+#[derive(Debug, Default)]
+pub struct FirstFit {
+    attempts: u8,
+    done: bool,
+}
+
+impl FirstFit {
+    /// Resizes the window if its size, opened or restored by the window
+    /// manager, does not fit the monitor; waits a few frames for the monitor
+    /// to be known.
+    pub fn update(&mut self, context: &egui::Context) {
+        if self.done {
+            return;
+        }
+        self.attempts += 1;
+        let inner = context.input(|input| input.viewport().inner_rect);
+        let fitted = inner
+            .zip(screen(context))
+            .map(|(inner, (monitor, title_bar))| {
+                let size = inner.size();
+                (size, fit_window_size(size, monitor, title_bar))
+            });
+        match fitted {
+            Some((size, fitted)) => {
+                self.done = true;
+                if (fitted - size).abs().max_elem() >= 1.0 {
+                    context.send_viewport_cmd(egui::ViewportCommand::InnerSize(fitted));
+                }
+            }
+            None if self.attempts >= ATTEMPTS => self.done = true,
+            None => context.request_repaint(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::vec2;
+    use eframe::egui::{pos2, vec2};
 
     /// Criterion 1: a 1600 × 1000 work area under a 36 px title bar gives a
     /// 1600 × 964 window, whose frame is exactly the screen's height.
@@ -92,5 +168,50 @@ mod tests {
             fit_window_size(vec2(700.0, 400.0), work_area, 36.0),
             vec2(960.0, 540.0)
         );
+    }
+
+    /// The title bar is measured where the frame is known, and assumed where
+    /// the window manager reports no frame.
+    #[test]
+    fn the_title_bar_is_measured_or_assumed() {
+        let inner = Rect::from_min_size(pos2(0.0, 31.0), vec2(1600.0, 964.0));
+        let outer = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 995.0));
+        assert_eq!(title_bar_height(inner, Some(outer)), 31.0);
+        assert_eq!(title_bar_height(inner, Some(inner)), ASSUMED_TITLE_BAR);
+        assert_eq!(title_bar_height(inner, None), ASSUMED_TITLE_BAR);
+    }
+
+    /// A window that already fits gets no command; one that does not is
+    /// resized once the monitor is known.
+    #[test]
+    fn the_first_frame_resizes_only_a_window_that_does_not_fit() {
+        let commands = |inner: Vec2, monitor: Option<Vec2>| {
+            let context = egui::Context::default();
+            let mut input = egui::RawInput::default();
+            let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+            viewport.inner_rect = Some(Rect::from_min_size(pos2(0.0, 0.0), inner));
+            viewport.monitor_size = monitor;
+            let mut fit = FirstFit::default();
+            let mut output = context.run_ui(input, |ui| fit.update(ui.ctx()));
+            output.textures_delta.clear();
+            // egui adds a theme command of its own on a first pass.
+            let resizes = output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .filter(|command| matches!(command, egui::ViewportCommand::InnerSize(_)))
+                .cloned()
+                .collect::<Vec<_>>();
+            (fit.done, resizes)
+        };
+        let (done, sent) = commands(vec2(1600.0, 1000.0), Some(vec2(1600.0, 1000.0)));
+        assert!(done);
+        assert_eq!(
+            sent,
+            [egui::ViewportCommand::InnerSize(vec2(1600.0, 964.0))]
+        );
+        let (done, sent) = commands(vec2(1600.0, 1000.0), Some(vec2(2560.0, 1400.0)));
+        assert!(done && sent.is_empty());
+        let (done, sent) = commands(vec2(1600.0, 1000.0), None);
+        assert!(!done && sent.is_empty(), "it waits for the monitor");
     }
 }
