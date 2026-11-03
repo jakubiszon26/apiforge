@@ -112,7 +112,7 @@ pub struct RevisionSummary {
 #[schemars(transform = require_allowed)]
 pub struct LiveRequests {
     /// Whether a live run may send now; null while a window holding the
-    /// project decides when the run starts.
+    /// project decides: its live setting is read when the run starts.
     pub allowed: Option<bool>,
     /// Why live requests are allowed or not.
     pub source: String,
@@ -652,9 +652,11 @@ pub struct Step {
     /// What it got.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actual: Option<Value>,
-    /// The request was on its way when the step ended: the API may have
-    /// received it. Always sent, `false` included: the output schema
-    /// requires it (MCP-14).
+    /// `true` for every request of a live run that was sent, answered or
+    /// not: the API may have performed it. `false` for a step that sent
+    /// nothing: any step of a simulation, a step that is not a request, a
+    /// request that never left this process. Always sent, `false` included:
+    /// the output schema requires it (MCP-14, MCP-22).
     pub may_have_reached_api: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
@@ -1306,15 +1308,35 @@ fn fits(value_type: ValueType, value: &Value) -> bool {
     }
 }
 
-/// The runner's sentence on a request that may have reached the API.
+/// The runner's sentence on a failed request that may have reached the API.
 const MAY_HAVE_HAPPENED: &str = "The API may have performed this request.";
+/// The runner's sentence on a failed request that never left the process.
+const NOTHING_SENT: &str = "Nothing was sent to the API.";
+/// The start of the runner's message on a step whose report was emptied,
+/// its request snapshot included, for exceeding the run data limit.
+const DATA_LIMIT: &str = "Exceeded the run data limit of ";
 
 /// The compact steps of a report.
 pub fn steps(report: &RunResult) -> Vec<Step> {
-    report.steps.iter().map(step).collect()
+    let live = report.mode == apiforge_core::run::RunMode::Live;
+    report.steps.iter().map(|found| step(found, live)).collect()
 }
 
-fn step(found: &StepResult) -> Step {
+/// Whether the API may have received the request of `found` (MCP-22): a
+/// live request is sent once the runner has its snapshot, unless the runner
+/// says nothing left the process; a step emptied at the data limit may have
+/// sent it.
+fn may_have_reached_api(found: &StepResult, live: bool) -> bool {
+    let message = found.message.as_deref().unwrap_or_default();
+    if message.ends_with(MAY_HAVE_HAPPENED) {
+        return true;
+    }
+    live && found.kind == apiforge_core::model::NodeKind::Request
+        && !message.ends_with(NOTHING_SENT)
+        && (found.request.is_some() || message.starts_with(DATA_LIMIT))
+}
+
+fn step(found: &StepResult, live: bool) -> Step {
     use apiforge_core::{format::OptionalJson, run::StepStatus as Status};
     let (expected, actual) = match (&found.expected, &found.actual) {
         (OptionalJson::Present(expected), OptionalJson::Present(actual))
@@ -1342,14 +1364,11 @@ fn step(found: &StepResult) -> Step {
         message: found.message.clone(),
         expected,
         actual,
-        may_have_reached_api: found
-            .message
-            .as_deref()
-            .is_some_and(|message| message.ends_with(MAY_HAVE_HAPPENED)),
+        may_have_reached_api: may_have_reached_api(found, live),
         steps: found
             .children
             .as_ref()
-            .map(|children| children.iter().map(step).collect()),
+            .map(|children| children.iter().map(|child| step(child, live)).collect()),
     }
 }
 
@@ -1390,6 +1409,44 @@ mod tests {
         let sink = told.clone();
         runs.observe(move |message| sink.lock().unwrap().push(message.clone()));
         (runs, told)
+    }
+
+    /// A step of `kind` with `message`, with or without its request
+    /// snapshot.
+    fn found(kind: &str, message: Option<&str>, snapshot: bool) -> StepResult {
+        let mut step = json!({
+            "nodeId": "n", "handle": "h", "kind": kind, "status": "error",
+            "phase": "main", "inputs": {}, "outputs": {}, "durationMs": 0,
+            "message": message,
+        });
+        if snapshot {
+            step["request"] = json!({ "method": "GET", "url": "http://a/", "headers": {} });
+        }
+        serde_json::from_value(step).unwrap()
+    }
+
+    /// MCP-22: a live request is marked once sent, answered or not; a step
+    /// that sent nothing is not; a step emptied at the data limit may have.
+    #[test]
+    fn a_sent_live_request_may_have_reached_the_api() {
+        let cut_off = format!("Timed out. {MAY_HAVE_HAPPENED}");
+        let refused = format!("Connection refused. {NOTHING_SENT}");
+        let emptied = format!("{DATA_LIMIT}1 MiB.");
+        for (kind, message, snapshot, live, marked) in [
+            ("request", None, true, true, true),
+            ("request", Some(cut_off.as_str()), true, true, true),
+            ("request", Some(emptied.as_str()), false, true, true),
+            ("request", Some(refused.as_str()), true, true, false),
+            ("request", None, false, true, false),
+            ("request", None, true, false, false),
+            ("value", None, false, true, false),
+        ] {
+            assert_eq!(
+                may_have_reached_api(&found(kind, message, snapshot), live),
+                marked,
+                "{kind} {message:?} snapshot {snapshot} live {live}"
+            );
+        }
     }
 
     fn state(message: &Message) -> RunState {
