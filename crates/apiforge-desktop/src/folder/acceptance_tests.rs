@@ -10598,3 +10598,333 @@ mod ux33 {
         }
     }
 }
+
+/// UX-34 (#251): copy, paste and duplicate across graphs and tabs, the
+/// owner's decision A of 2026-11-03. Paste works on any graph of any open
+/// document; clashing handles are numbered, references inside the pasted
+/// set follow the copies, and a reference to a step the target lacks is
+/// reported as a *Missing step*. A duplicate lands clear of its original with
+/// its own label.
+mod ux34 {
+    use super::mcp08b::contains;
+    use super::ux02::hover_shows;
+    use super::ux31::window;
+    use super::*;
+    use crate::canvas::Card;
+    use apiforge_core::{
+        block::Block,
+        format::{Node, Position, ProxySource},
+    };
+    use egui_kittest::kittest::NodeT;
+
+    const CART: &str = "components/add-to-cart.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PASTE: &str = "Paste steps (Ctrl+V)";
+    const ACTIONS: &str = "Selection actions";
+
+    fn document_by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned()
+    }
+
+    fn model(harness: &FolderHarness, id: &str) -> Document {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(id)
+            .unwrap()
+            .model()
+            .expect("a valid model")
+            .clone()
+    }
+
+    fn node<'a>(graph: &'a Graph, handle: &str) -> &'a Node {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a step {handle}"))
+    }
+
+    /// Selects the steps named by their handles on the board on screen.
+    fn select(harness: &mut FolderHarness, id: &str, cleanup: bool, handles: &[&str]) {
+        let document = model(harness, id);
+        let ids = handles
+            .iter()
+            .map(|handle| node(graph_of(&document, cleanup), handle).id.clone())
+            .collect();
+        app(harness).selections.insert(id.to_owned(), ids);
+        settle(harness);
+    }
+
+    fn copy(harness: &mut FolderHarness) {
+        harness.event(egui::Event::Copy);
+        harness.step();
+        settle(harness);
+    }
+
+    fn duplicate(harness: &mut FolderHarness) {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+        settle(harness);
+    }
+
+    fn undo(harness: &mut FolderHarness) {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(harness);
+    }
+
+    fn open(harness: &mut FolderHarness, id: &str, mode: &str) {
+        app(harness).activate_tab(id);
+        settle(harness);
+        choose(harness, mode);
+    }
+
+    fn notice(harness: &FolderHarness) -> String {
+        folder(harness)
+            .notice
+            .as_ref()
+            .map(|notice| notice.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The statements of the scenario's cleanup block.
+    fn cleanup_text(source: &str) -> &str {
+        let start = source.find("cleanup {").expect("a cleanup block");
+        &source[start..]
+    }
+
+    /// Criterion 1: two steps copied in *Main* paste into *Cleanup* with
+    /// their internal wire kept; their handles are numbered because the
+    /// scenario's main flow already uses them, and the reference to the main
+    /// flow's `add_to_cart` stays as it was.
+    #[test]
+    fn ux34_criterion_1_main_steps_paste_into_cleanup_with_their_wire() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        assert!(
+            has_label(&harness, PASTE),
+            "Paste steps is offered on the cleanup board"
+        );
+        choose(&mut harness, PASTE);
+
+        let source = source_of(&harness, &id);
+        let cleanup = cleanup_text(&source);
+        assert!(
+            cleanup.contains("expected_price_2 = 80 * 1"),
+            "the copy of Expected price in cleanup:\n{source}"
+        );
+        assert!(
+            cleanup.contains(
+                "promotional_price_2 = assert add_to_cart.total ~= expected_price_2 within 0.005"
+            ),
+            "the wire inside the pasted set follows the copies:\n{source}"
+        );
+        let document = model(&harness, &id);
+        assert_eq!(
+            graph_of(&document, false).nodes.len(),
+            6,
+            "main is unchanged"
+        );
+        let copies = graph_of(&document, true);
+        let price = node(copies, "expected_price_2");
+        let check = node(copies, "promotional_price_2");
+        assert!(
+            check
+                .inputs
+                .values()
+                .any(|binding| binding.references_node(&price.id)),
+            "the pasted check reads the pasted price"
+        );
+    }
+
+    /// Criterion 2: a step copied in the scenario pastes into the
+    /// `add-to-cart.afs` component. Its reference to `product`, a step the
+    /// component lacks, is reported as a *Missing step* and left unconnected;
+    /// a second paste gets a handle that does not clash with the first.
+    #[test]
+    fn ux34_criterion_2_a_step_pastes_into_another_document() {
+        let directory = shop();
+        let (mut harness, scenario) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &scenario, false, &["active_promotion"]);
+        copy(&mut harness);
+        let cart = document_by_path(&harness, CART);
+        open(&mut harness, &cart, "Diagram");
+        assert!(
+            has_label(&harness, PASTE),
+            "Paste steps is offered in another document"
+        );
+        choose(&mut harness, PASTE);
+
+        let source = source_of(&harness, &cart);
+        assert!(
+            source.contains("active_promotion = active_promotion@1("),
+            "the step is pasted into the component:\n{source}"
+        );
+        let text = notice(&harness);
+        assert!(
+            text.contains("Missing step") && text.contains("product"),
+            "the reference to the step the component lacks is reported: {text:?}"
+        );
+        let document = model(&harness, &cart);
+        let pasted = node(graph_of(&document, false), "active_promotion");
+        assert!(
+            !pasted.inputs.contains_key("product"),
+            "the missing reference is left unconnected: {:?}",
+            pasted.inputs
+        );
+
+        choose(&mut harness, PASTE);
+        let source = source_of(&harness, &cart);
+        assert!(
+            source.contains("active_promotion_2 = active_promotion@1("),
+            "a second paste does not clash with the first:\n{source}"
+        );
+        // The scenario the step came from is unchanged.
+        assert!(!source_of(&harness, &scenario).contains("active_promotion_2"));
+    }
+
+    /// Criterion 3: *Duplicate* on *Add to cart* places the clone right of or
+    /// below the original without overlapping any card, labelled
+    /// `Add to cart 2`; a second *Product* added from the library is
+    /// labelled `Product 2`.
+    #[test]
+    fn ux34_criterion_3_a_duplicate_lands_clear_with_its_own_label() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+
+        let source = source_of(&harness, &id);
+        assert!(
+            source.contains("@label(\"Add to cart 2\")\n  add_to_cart_2 = add_to_cart@1("),
+            "the clone has its own label:\n{source}"
+        );
+        let document = model(&harness, &id);
+        let main = graph_of(&document, false);
+        let project = folder(&harness).context_project();
+        let rect = |node: &Node| Card::build(node, main, &project).rect();
+        let original = rect(node(main, "add_to_cart"));
+        let clone_node = node(main, "add_to_cart_2");
+        let clone = rect(clone_node);
+        let right = clone.left() >= original.right() && (clone.top() - original.top()).abs() < 0.5;
+        let below =
+            clone.top() >= original.bottom() && (clone.left() - original.left()).abs() < 0.5;
+        assert!(
+            right || below,
+            "right of or below the original: {original:?} {clone:?}"
+        );
+        for other in main.nodes.iter().filter(|other| other.id != clone_node.id) {
+            assert!(
+                !rect(other).intersects(clone),
+                "the clone overlaps {}: {:?} {clone:?}",
+                other.handle,
+                rect(other)
+            );
+        }
+
+        app(&mut harness).active_board_command(Command::AddNode {
+            block: Block::Component,
+            component: Some(("get-product".into(), 1)),
+            position: Position { x: 900.0, y: 900.0 },
+            source: None,
+        });
+        settle(&mut harness);
+        let source = source_of(&harness, &id);
+        assert!(
+            source.contains("@label(\"Product 2\")\n  product_2 = product@1("),
+            "a second Product from the library is labelled Product 2:\n{source}"
+        );
+    }
+
+    /// Criterion 4: with only a variable chip selected, *Copy* and
+    /// *Duplicate* are disabled and say why on hover.
+    #[test]
+    fn ux34_criterion_4_a_chip_alone_cannot_be_copied() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        app(&mut harness).active_board_command(Command::AddProxy {
+            source: ProxySource::Parameter {
+                name: "quantity".into(),
+            },
+            position: Position { x: 40.0, y: 600.0 },
+        });
+        settle(&mut harness);
+        let Document::Component(component) = model(&harness, &id) else {
+            panic!("add-to-cart is a component");
+        };
+        let chip = component.graph.proxies.last().expect("the chip").id.clone();
+        app(&mut harness).selections.insert(id.clone(), vec![chip]);
+        settle(&mut harness);
+        choose(&mut harness, ACTIONS);
+        for item in ["Copy", "Duplicate"] {
+            assert!(
+                harness
+                    .get_by_role_and_label(egui::accesskit::Role::Button, item)
+                    .accesskit_node()
+                    .is_disabled(),
+                "{item} is disabled with a chip alone"
+            );
+        }
+        assert!(
+            hover_shows(&mut harness, "Copy", "Select a step"),
+            "the disabled item says why"
+        );
+    }
+
+    /// Criterion 5: one undo removes a paste, and one undo removes a
+    /// duplicate.
+    #[test]
+    fn ux34_criterion_5_undo_removes_a_paste_or_a_duplicate_in_one_step() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        let before = source_of(&harness, &id);
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        choose(&mut harness, PASTE);
+        assert_ne!(source_of(&harness, &id), before, "pasted");
+        undo(&mut harness);
+        assert_eq!(
+            source_of(&harness, &id),
+            before,
+            "one undo removes the paste"
+        );
+
+        choose(&mut harness, "Main");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        assert!(
+            source_of(&harness, &id).contains("add_to_cart_2"),
+            "duplicated"
+        );
+        undo(&mut harness);
+        assert_eq!(
+            source_of(&harness, &id),
+            before,
+            "one undo removes the duplicate"
+        );
+        assert!(!contains(&harness, "Add to cart 2"));
+    }
+}
