@@ -1,6 +1,7 @@
 # COMP-00: Component authoring in Diagram, the mock-up and its decisions
 
-- Size: S (mock-up) · Risk: `visible UI`, `format` · issue #239
+- Size: S (mock-up) · Risk: `visible UI`, `format` (resolved by decision 1:
+  nothing is stored) · issue #239
 - State: decided by the owner on 2026-11-02 in a quiz; the mock-up is
   **approved as a whole**
 - Mock-up: throwaway branch `mock/comp-00` at `5ea3b9c`; captures under
@@ -8,7 +9,7 @@
   strip (Q1 = C) are copied here with UX-31.
 - Source issues: #174 (confirmed in real work on 2026-11-02: a component's
   inputs were hard or impossible to find and edit graphically), #161 part 2,
-  #172 parts 1–2, #173
+  #172 parts 1–2, #173, #170 part 1, #165
 
 ## Decisions
 

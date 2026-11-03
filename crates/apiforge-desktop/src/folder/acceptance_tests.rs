@@ -9703,5 +9703,14 @@ mod ux31 {
             harness.get_by_label(PRODUCT).rect().right() <= add.left(),
             "the first pill before Add input"
         );
+        // The row is wider than the strip leaves it: the last pill lies past
+        // Add input, scrolled out of view, rather than pushing it away.
+        let last = harness
+            .get_by_label("warehouseLocation string = \"none\"")
+            .rect();
+        assert!(
+            last.right() > add.left(),
+            "the last pill {last:?} is scrolled beyond Add input {add:?}"
+        );
     }
 }
