@@ -10702,6 +10702,33 @@ mod ux12 {
         assert!(!shows(&harness, SAVED), "it does not come back");
     }
 
+    /// Criterion 2, what an action is: moving the pointer over the code and
+    /// scrolling it keep the confirmation; text pasted into the code clears
+    /// it.
+    #[test]
+    fn ux12_criterion_2_moving_or_scrolling_keeps_the_confirmation_a_paste_clears_it() {
+        let (_directory, mut harness, scenario, _) = edited();
+        save_all(&mut harness);
+        let label = editor(&harness, &scenario);
+        let code = harness.get_by_label(&label).rect().center();
+        harness.hover_at(code);
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -40.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(&mut harness);
+        assert!(shows(&harness, SAVED), "moving and scrolling keep it");
+        let before = source_of(&harness, &scenario);
+        harness.get_by_label(&label).focus();
+        harness.step();
+        harness.event(egui::Event::Paste(" ".into()));
+        settle(&mut harness);
+        assert_ne!(source_of(&harness, &scenario), before, "the paste landed");
+        assert!(!shows(&harness, SAVED), "the paste cleared it");
+    }
+
     /// Criterion 3: an error stays through five seconds and more, and
     /// through an edit, until it is dismissed with ×.
     #[test]

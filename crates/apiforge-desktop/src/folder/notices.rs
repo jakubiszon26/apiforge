@@ -89,6 +89,13 @@ impl Notices {
         }
     }
 
+    /// A tab renamed or moved keeps its banner.
+    pub(super) fn rename(&mut self, from: &str, to: &str) {
+        if let Some(notice) = self.banners.remove(&Some(from.to_owned())) {
+            self.banners.insert(Some(to.to_owned()), notice);
+        }
+    }
+
     /// Every banner goes, as when another project is opened.
     pub(super) fn clear(&mut self) {
         self.banners.clear();
@@ -107,8 +114,8 @@ impl Notices {
         acted: bool,
     ) -> Option<Duration> {
         let now = self.clock.now();
-        // A closed tab's error is not lost: the window shows it, unless it
-        // already shows one of its own.
+        // A closed tab's error is not lost: the window shows it in place of a
+        // confirmation, unless it already shows an error of its own.
         let closed: Vec<Option<String>> = self
             .banners
             .iter()
@@ -116,8 +123,10 @@ impl Notices {
             .map(|(tab, _)| tab.clone())
             .collect();
         for tab in closed {
-            if let Some(notice) = self.banners.remove(&tab) {
-                self.banners.entry(None).or_insert(notice);
+            if let Some(notice) = self.banners.remove(&tab)
+                && self.banners.get(&None).is_none_or(|window| !window.error)
+            {
+                self.banners.insert(None, notice);
             }
         }
         self.banners.retain(|tab, notice| {
@@ -205,6 +214,28 @@ mod tests {
             notices.shown(None).unwrap().text,
             "a",
             "the window keeps its own"
+        );
+    }
+
+    #[test]
+    fn a_closed_tabs_error_takes_the_place_of_the_windows_confirmation() {
+        let mut notices = notices();
+        notices.raise(None, "Created a project.".into(), false);
+        notices.raise(Some("a"), "a".into(), true);
+        notices.tend(None, |_| false, false);
+        assert_eq!(notices.shown(None).unwrap().text, "a");
+    }
+
+    #[test]
+    fn a_renamed_tab_keeps_its_error() {
+        let mut notices = notices();
+        notices.raise(Some("a"), "a".into(), true);
+        notices.rename("a", "b");
+        notices.tend(Some("b"), |tab| tab == "b", false);
+        assert_eq!(notices.shown(Some("b")).unwrap().text, "a");
+        assert!(
+            notices.banners.contains_key(&Some("b".to_owned())),
+            "still the tab's own"
         );
     }
 
