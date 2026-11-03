@@ -285,6 +285,13 @@ impl Canvas {
         self.menu.is_some()
     }
 
+    /// The blocks the last frame ringed for the selected input (UX-31): a
+    /// stub of the acceptance tests' commit.
+    #[cfg(test)]
+    pub(crate) fn debug_ringed(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);

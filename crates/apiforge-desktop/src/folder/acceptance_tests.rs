@@ -9363,3 +9363,292 @@ mod ux04 {
         cancel(&mut harness);
     }
 }
+
+/// UX-31 (#248, COMP-00 Q1 = C): a component's board shows its inputs in an
+/// INPUTS strip under the board's header row, one pill per input and
+/// *+ Add input*; selecting a pill rings the steps that read the input. The
+/// strip stores nothing (docs/tickets/COMP-00.md).
+mod ux31 {
+    use super::mcp08b::contains;
+    use super::ux02::hover_shows;
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui::accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+
+    const CART: &str = "components/add-to-cart.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "product * object · Product";
+    const QUANTITY: &str = "quantity * number = 1";
+    const ADD: &str = "Add input";
+    const CAPTION: &str = "INPUTS";
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned()
+    }
+
+    /// The demo shop at `size` with `path` open in `mode`.
+    fn window(
+        root: &std::path::Path,
+        size: egui::Vec2,
+        path: &str,
+        mode: &str,
+    ) -> (FolderHarness, String) {
+        let mut harness = folder_harness(root, size);
+        let id = by_path(&harness, path);
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, mode);
+        (harness, id)
+    }
+
+    /// The names of the cards the board rings, as their blocks are named.
+    fn ringed(harness: &FolderHarness, id: &str) -> Vec<String> {
+        let app = folder(harness);
+        let Some(Document::Component(component)) =
+            app.session.as_ref().unwrap().document(id).unwrap().model()
+        else {
+            panic!("{id} is a component");
+        };
+        let mut names: Vec<String> = app
+            .canvases
+            .get(id)
+            .expect("the board was drawn")
+            .debug_ringed()
+            .iter()
+            .map(|ringed| {
+                let node = component
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == ringed)
+                    .unwrap_or_else(|| panic!("{ringed} is a block of the component"));
+                node.label.clone().unwrap_or_else(|| node.handle.clone())
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn toggled(harness: &FolderHarness, label: &str) -> Option<Toggled> {
+        harness.get_by_label(label).accesskit_node().toggled()
+    }
+
+    fn click_at(harness: &mut FolderHarness, at: egui::Pos2) {
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        settle(harness);
+    }
+
+    /// A point on the empty board just under the strip, at its left edge:
+    /// inside the margin that fitting the view leaves free of cards.
+    fn empty_board(harness: &FolderHarness) -> egui::Pos2 {
+        let board = harness.get_by_label("Diagram board").rect();
+        let pill = harness.get_by_label(PRODUCT).rect();
+        egui::pos2(board.left() + 8.0, pill.bottom() + 20.0)
+    }
+
+    /// Criterion 1: in Diagram, the component's board shows the strip with
+    /// `product` and `quantity` in declaration order, each with its required
+    /// mark, its type and its contract or default, and *+ Add input* last;
+    /// all of it under the board's header row, at both sizes.
+    #[test]
+    fn ux31_criterion_1_the_strip_shows_the_inputs_in_order() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (harness, _) = window(directory.path(), size, CART, "Diagram");
+            assert!(
+                has_label(&harness, CAPTION),
+                "the strip's caption at {size:?}"
+            );
+            let product = harness.get_by_label(PRODUCT).rect();
+            let quantity = harness.get_by_label(QUANTITY).rect();
+            let add = harness.get_by_label(ADD).rect();
+            assert!(
+                product.right() <= quantity.left() && quantity.right() <= add.left(),
+                "product, quantity, then Add input: {product:?} {quantity:?} {add:?}"
+            );
+            assert!(
+                (product.center().y - quantity.center().y).abs() < 1.0
+                    && (quantity.center().y - add.center().y).abs() < 2.0,
+                "one row"
+            );
+            let header = harness.get_by_label("add-to-cart.afs").rect();
+            assert!(header.bottom() <= product.top(), "under the header row");
+            let toolbar = harness.get_by_label("Add step").rect();
+            assert!(toolbar.bottom() <= product.top(), "under the toolbar");
+            assert_within_window(&harness, &[CAPTION, PRODUCT, QUANTITY, ADD]);
+            assert_disjoint(&harness, &[CAPTION, PRODUCT, QUANTITY, ADD, "Add step"]);
+        }
+    }
+
+    /// Criterion 1, Split: the strip is on the component's board beside the
+    /// code too.
+    #[test]
+    fn ux31_criterion_1_the_strip_is_on_the_board_in_split() {
+        let directory = shop();
+        let (harness, _) = window(directory.path(), WIDE, CART, "Split");
+        let board = harness.get_by_label("Diagram board").rect();
+        for label in [CAPTION, PRODUCT, QUANTITY, ADD] {
+            let rect = harness.get_by_label(label).rect();
+            assert!(board.contains_rect(rect), "{label} on the board: {rect:?}");
+        }
+    }
+
+    /// Criterion 2: a scenario's board has no strip.
+    #[test]
+    fn ux31_criterion_2_a_scenario_has_no_strip() {
+        let directory = shop();
+        for mode in ["Diagram", "Split"] {
+            let (harness, _) = window(directory.path(), WIDE, SCENARIO, mode);
+            assert!(harness.query_by_label("Diagram board").is_some(), "a board");
+            assert!(!has_label(&harness, CAPTION), "no strip in {mode}");
+            assert!(!has_label(&harness, ADD), "no Add input in {mode}");
+            assert!(!contains(&harness, " * "), "no pill in {mode}");
+        }
+    }
+
+    /// Criterion 3: clicking `quantity` rings the pill and *Cart item*, the
+    /// one step that reads `param.quantity`, and no other card; a click on
+    /// the empty board clears the ring.
+    #[test]
+    fn ux31_criterion_3_a_pill_rings_the_steps_that_read_it() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        assert!(ringed(&harness, &id).is_empty(), "nothing ringed at first");
+        assert_eq!(toggled(&harness, QUANTITY), Some(Toggled::False));
+        choose(&mut harness, QUANTITY);
+        assert_eq!(ringed(&harness, &id), ["Cart item"]);
+        assert_eq!(toggled(&harness, QUANTITY), Some(Toggled::True), "the pill");
+        assert_eq!(toggled(&harness, PRODUCT), Some(Toggled::False));
+        assert!(
+            folder(&harness)
+                .selections
+                .get(&id)
+                .is_none_or(Vec::is_empty),
+            "no block is selected"
+        );
+        // Another pill moves the ring: `product` is read by *Product ID*.
+        choose(&mut harness, PRODUCT);
+        assert_eq!(ringed(&harness, &id), ["Product ID"]);
+        assert_eq!(toggled(&harness, QUANTITY), Some(Toggled::False));
+        let at = empty_board(&harness);
+        click_at(&mut harness, at);
+        assert!(
+            ringed(&harness, &id).is_empty(),
+            "the empty board clears it"
+        );
+        assert_eq!(toggled(&harness, PRODUCT), Some(Toggled::False));
+    }
+
+    /// Criterion 4: the strip adds nothing to the saved file; saving after
+    /// clicks on the pills and the board leaves the `.afs` byte-identical.
+    #[test]
+    fn ux31_criterion_4_the_strip_stores_nothing() {
+        let directory = shop();
+        let file = directory.path().join(CART);
+        let before = fs::read(&file).unwrap();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        choose(&mut harness, QUANTITY);
+        choose(&mut harness, PRODUCT);
+        let at = empty_board(&harness);
+        click_at(&mut harness, at);
+        choose(&mut harness, QUANTITY);
+        {
+            let document = folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .document(&id)
+                .unwrap();
+            assert!(
+                !document.is_dirty() && !document.is_layout_dirty(),
+                "unchanged"
+            );
+        }
+        app(&mut harness).save_document(&id).unwrap();
+        settle(&mut harness);
+        assert_eq!(fs::read(&file).unwrap(), before, "byte-identical");
+    }
+
+    /// Criterion 5, until UX-32 is merged: *+ Add input* is present and
+    /// disabled, and its hover says *Coming with UX-32*. UX-32 replaces this
+    /// test with its *New input* form.
+    #[test]
+    fn ux31_criterion_5_add_input_waits_for_ux32() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, CART, "Diagram");
+        assert!(
+            harness.get_by_label(ADD).accesskit_node().is_disabled(),
+            "disabled"
+        );
+        assert!(hover_shows(&mut harness, ADD, "Coming with UX-32"));
+    }
+
+    /// Criterion 6: at 960 × 540, inputs that do not fit beside one another
+    /// scroll in the strip, and *+ Add input* stays whole in view.
+    #[test]
+    fn ux31_criterion_6_add_input_stays_in_view_when_the_strip_overflows() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), MINIMUM, CART, "Diagram");
+        let source = source_of(&harness, &id);
+        let at = source
+            .match_indices("\n  input ")
+            .last()
+            .map(|(at, _)| at + 1)
+            .expect("an input line");
+        let end = at + source[at..].find('\n').expect("a line end") + 1;
+        let extra: String = [
+            "customerReference",
+            "deliveryInstructions",
+            "preferredCurrency",
+            "loyaltyProgrammeNumber",
+            "promotionalCode",
+            "warehouseLocation",
+        ]
+        .iter()
+        .map(|name| format!("  input {name}: string = \"none\"\n"))
+        .collect();
+        let edited = format!("{}{extra}{}", &source[..end], &source[end..]);
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&id, &edited, CODE)
+            .unwrap();
+        app(&mut harness).analyser.typed(&id, Instant::now());
+        settle(&mut harness);
+        assert!(
+            has_label(&harness, "warehouseLocation string = \"none\""),
+            "the board follows the code"
+        );
+        let board = harness.get_by_label("Diagram board").rect();
+        let add = harness.get_by_label(ADD).rect();
+        assert!(
+            board.contains_rect(add),
+            "Add input whole on the board: {add:?}"
+        );
+        assert_within_window(&harness, &[ADD, PRODUCT]);
+        assert!(
+            harness.get_by_label(PRODUCT).rect().right() <= add.left(),
+            "the first pill before Add input"
+        );
+    }
+}
