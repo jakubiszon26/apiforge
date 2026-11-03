@@ -115,34 +115,35 @@ mod tests {
     use super::*;
     use eframe::egui::{pos2, vec2};
 
-    /// Criterion 1: a 1600 × 1000 work area under a 36 px title bar gives a
-    /// 1600 × 964 window, whose frame is exactly the screen's height.
+    /// Criterion 1 with the owner's panel allowance (2026-11-03): a
+    /// 1600 × 1000 monitor under a 36 px title bar and a 48 px panel gives a
+    /// 1600 × 916 window, whose frame ends above a bottom panel.
     #[test]
     fn the_first_window_fits_a_1600_by_1000_work_area_under_its_title_bar() {
         assert_eq!(
             first_window_size(vec2(1600.0, 1000.0), 36.0),
-            vec2(1600.0, 964.0)
+            vec2(1600.0, 916.0)
         );
     }
 
-    /// Criterion 1: a larger work area keeps the usual 1600 × 1000.
+    /// Criterion 1: a larger monitor keeps the usual 1600 × 1000.
     #[test]
     fn the_first_window_keeps_1600_by_1000_on_a_larger_screen() {
-        assert_eq!(
-            first_window_size(vec2(2560.0, 1400.0), 36.0),
-            vec2(1600.0, 1000.0)
-        );
+        for monitor in [vec2(2560.0, 1400.0), vec2(2560.0, 1440.0)] {
+            assert_eq!(first_window_size(monitor, 36.0), vec2(1600.0, 1000.0));
+        }
     }
 
-    /// Criterion 1 on a 1024 × 700 work area. The ticket's case reads
+    /// Criterion 1 on a 1024 × 700 monitor. The ticket's case reads
     /// "→ 960 × 540 floor noted", but its own rule — the smaller of
-    /// 1600 × 1000 and the work area less the title bar, never below
-    /// 960 × 540 — gives 1024 × 664, above the floor; the floor is the next test.
+    /// 1600 × 1000 and the monitor less the title bar and the panel, never
+    /// below 960 × 540 — gives 1024 × 616, above the floor; the floor is the
+    /// next test.
     #[test]
     fn the_first_window_fits_a_1024_by_700_work_area_above_the_floor() {
         assert_eq!(
             first_window_size(vec2(1024.0, 700.0), 36.0),
-            vec2(1024.0, 664.0)
+            vec2(1024.0, 616.0)
         );
     }
 
@@ -163,11 +164,11 @@ mod tests {
         let work_area = vec2(1600.0, 1000.0);
         assert_eq!(
             fit_window_size(vec2(1920.0, 1150.0), work_area, 36.0),
-            vec2(1600.0, 964.0)
+            vec2(1600.0, 916.0)
         );
         assert_eq!(
             fit_window_size(vec2(1600.0, 1000.0), work_area, 36.0),
-            vec2(1600.0, 964.0)
+            vec2(1600.0, 916.0)
         );
         assert_eq!(
             fit_window_size(vec2(1200.0, 800.0), work_area, 36.0),
@@ -216,7 +217,7 @@ mod tests {
         assert!(done);
         assert_eq!(
             sent,
-            [egui::ViewportCommand::InnerSize(vec2(1600.0, 964.0))]
+            [egui::ViewportCommand::InnerSize(vec2(1600.0, 916.0))]
         );
         let (done, sent) = commands(vec2(1600.0, 1000.0), Some(vec2(2560.0, 1400.0)));
         assert!(done && sent.is_empty());
@@ -248,7 +249,7 @@ mod tests {
         assert!(frame(None).is_empty(), "it waits for the monitor");
         assert_eq!(
             frame(Some(vec2(1600.0, 1000.0))),
-            [egui::ViewportCommand::InnerSize(vec2(1600.0, 964.0))]
+            [egui::ViewportCommand::InnerSize(vec2(1600.0, 916.0))]
         );
         assert!(frame(Some(vec2(1600.0, 1000.0))).is_empty(), "once");
     }
