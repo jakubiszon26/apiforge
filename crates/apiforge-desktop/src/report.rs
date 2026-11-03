@@ -462,7 +462,11 @@ impl ReportPanel {
             }
         } else {
             if let Some(wanted) = wanted {
-                self.set_normal_height(compact, wanted.clamp(min_height, highest));
+                // Up to the most height the drag has seen allowed: a frame
+                // whose workspace is shorter for a moment draws the panel
+                // lower, but does not lower the height the drag holds.
+                let ceiling = self.drag.map_or(highest, |drag| drag.ceiling.max(highest));
+                self.set_normal_height(compact, wanted.clamp(min_height, ceiling));
                 ui.ctx().request_repaint();
             }
             if handle.has_focus() && self.drag.is_none() {
@@ -508,7 +512,13 @@ impl ReportPanel {
                     // A drag that ends without a release (the panel went
                     // away under it) maximises nothing.
                     drag.snapped &= let_go;
-                    self.release(drag, compact, min_height, actual_height);
+                    // The height the drag held, not the one this frame could
+                    // draw: released in a frame whose workspace is shorter
+                    // (a notice under the tab strip), the panel would keep
+                    // that frame's clamp for good. Dragged by egui's edge,
+                    // the held height is the edge's, taken above.
+                    let held_height = self.normal_height(compact);
+                    self.release(drag, compact, min_height, held_height);
                     if drag.snapped {
                         // The grip moves to the top under a released pointer;
                         // the maximised panel is shown as the button leaves it.
