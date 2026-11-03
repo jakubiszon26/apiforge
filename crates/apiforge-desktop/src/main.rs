@@ -58,6 +58,7 @@ mod stop;
 mod testing;
 mod theme;
 mod widgets;
+mod window_fit;
 mod windows_console;
 
 use apiforge_storage::WorkspaceStore;
@@ -448,6 +449,9 @@ struct Window {
     frames: u8,
     completed: Arc<AtomicBool>,
     closing_since: Option<Instant>,
+    /// Fits the first window to its monitor, and the workspace window the stop
+    /// window grows into; `None` where its size is fixed.
+    fit: Option<window_fit::FirstFit>,
 }
 
 /// Cleanup has a bounded runner budget. Leave a little time for its final report
@@ -456,6 +460,9 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(fit) = &mut self.fit {
+            fit.update(ui.ctx());
+        }
         if ui.ctx().input(|input| input.viewport().close_requested()) {
             self.closing_since.get_or_insert_with(Instant::now);
         }
@@ -475,7 +482,13 @@ impl eframe::App for Window {
                 ui.ctx().request_repaint_after(Duration::from_millis(16));
             }
         }
+        let stopped = matches!(self.app, Front::Stopped(_));
         ui.add_enabled_ui(self.closing_since.is_none(), |ui| self.app.ui(ui));
+        if stopped && !matches!(self.app, Front::Stopped(_)) {
+            // The stop window grew into the workspace window: fit it once the
+            // monitor is known, should it not have been when it grew.
+            self.fit = Some(window_fit::FirstFit::toward(DEFAULT_WINDOW_SIZE.into()));
+        }
         if let Some(capture) = &mut self.capture {
             if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
                 if let Err(message) = &result {
@@ -498,7 +511,8 @@ impl eframe::App for Window {
     }
 }
 
-/// The window's logical size when it opens.
+/// The window's logical size when it opens, on a monitor large enough for it;
+/// a smaller one fits it to its work area ([`window_fit`]).
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [1600.0, 1000.0];
 
 /// Minimum logical window size: 1920×1080 at 200 % scaling (G6).
@@ -507,15 +521,18 @@ const MIN_WINDOW_SIZE: [f32; 2] = [960.0, 540.0];
 fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     let automated = !matches!(probe, Probe::None);
     let completed = Arc::new(AtomicBool::new(!automated));
-    let size = match probe {
-        Probe::Screenshot(_, _, Some((width, height))) => [width as f32, height as f32],
-        _ => DEFAULT_WINDOW_SIZE,
+    let (size, explicit) = match probe {
+        Probe::Screenshot(_, _, Some((width, height))) => ([width as f32, height as f32], true),
+        _ => (DEFAULT_WINDOW_SIZE, false),
     };
     let observed = Arc::clone(&completed);
     let viewport = window_viewport();
     // The stop window has one size and is centred, like a dialog; it grows
     // into the workspace window if the person opens the previous workspace.
     let stopped = matches!(opening, Opening::Stopped(_));
+    // The window opens at its usual size and is fitted to the monitor on its
+    // first frames (KTLO-38); a capture at a size asked for keeps that size.
+    let fit = (!stopped && !explicit).then(window_fit::FirstFit::default);
     let options = eframe::NativeOptions {
         viewport: if stopped {
             let size = stop::WINDOW_SIZE;
@@ -571,6 +588,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                 frames: 0,
                 completed,
                 closing_since: None,
+                fit,
             }))
         }),
     );
