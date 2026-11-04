@@ -834,6 +834,7 @@ impl Canvas {
             self.empty_state(ui, overlays.board, input, &mut commands);
         }
         self.error_banner(ui, &overlays);
+        crate::mock_ws00::set_board(overlays.board);
         if let Some(menu) = &mut self.menu {
             match menu.show(ui.ctx(), input.graph, input.project, input.library) {
                 menu::Outcome::Open => {}

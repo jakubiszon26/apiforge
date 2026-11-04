@@ -37,6 +37,8 @@ mod text_view;
 mod transaction_view;
 mod watcher;
 mod workbench;
+#[cfg(test)]
+mod ws00_review;
 
 use crate::icons::Icon;
 use crate::{
@@ -913,6 +915,12 @@ impl FolderApp {
         // results' bar.
         ui.set_clip_rect(ui.clip_rect().intersect(ui.available_rect_before_wrap()));
         match self.workbench.mode {
+            Mode::Code if crate::mock_ws00::sidebar() != crate::mock_ws00::Sidebar::Off => {
+                self.library_panel(ui, active.as_deref());
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::new().fill(theme::WHITE))
+                    .show(ui, |ui| self.main_code_area(ui, active.as_deref()));
+            }
             Mode::Code => {
                 egui::Panel::left("folder-documents")
                     .default_size(self.workbench.panels.documents)
@@ -947,6 +955,10 @@ impl FolderApp {
             }
             Mode::Split => {
                 let width = ui.ctx().content_rect().width();
+                let shared = crate::mock_ws00::sidebar() != crate::mock_ws00::Sidebar::Off;
+                if shared {
+                    self.library_panel(ui, active.as_deref());
+                }
                 egui::Panel::left("folder-split-code")
                     .default_size(self.workbench.panels.split_code)
                     .size_range(300.0..=(width - 360.0).max(300.0))
@@ -961,7 +973,9 @@ impl FolderApp {
                     "Resize code",
                 );
                 if width >= SPLIT_INSPECTOR_WIDTH {
-                    self.library_panel(ui, active.as_deref());
+                    if !shared {
+                        self.library_panel(ui, active.as_deref());
+                    }
                     self.inspector_panel(ui, active.as_deref());
                 }
                 egui::CentralPanel::default()
@@ -1393,7 +1407,12 @@ impl FolderApp {
     /// Collapsed, it is a rail with a button per tab that brings it back
     /// (KTLO-17).
     fn library_panel(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
-        let tabs = self.workbench.mode == Mode::Diagram;
+        let mock = crate::mock_ws00::get();
+        let shared = mock.sidebar != crate::mock_ws00::Sidebar::Off;
+        let in_code = shared && self.workbench.mode == Mode::Code;
+        // B: Code has no Library tab, only Files.
+        let files_only = in_code && mock.sidebar == crate::mock_ws00::Sidebar::LibraryHiddenInCode;
+        let tabs = self.workbench.mode == Mode::Diagram || shared;
         let board = active.and_then(|document_id| {
             let snapshot = self.snapshot(document_id)?;
             let model = snapshot.model.clone()?;
@@ -1402,7 +1421,30 @@ impl FolderApp {
         if board.is_none() && !tabs {
             return;
         }
-        if self.workbench.panels.library_collapsed {
+        let width = ui.ctx().content_rect().width();
+        let inspector_open = active.is_some_and(|document_id| {
+            self.selections
+                .get(document_id)
+                .is_some_and(|selection| selection.len() == 1)
+        }) && match self.workbench.mode {
+            Mode::Diagram => true,
+            Mode::Split => width >= SPLIT_INSPECTOR_WIDTH,
+            Mode::Code => false,
+        };
+        // Q2: Split folds the sidebar while the Inspector is open.
+        let fold_for_inspector =
+            mock.fold_for_inspector && self.workbench.mode == Mode::Split && inspector_open;
+        // Q3 A: the sidebar folds when the board would be narrower than 480 px.
+        let fold_for_board = mock.fold_for_board && self.workbench.mode == Mode::Diagram && {
+            let inspector = if inspector_open {
+                crate::mock_ws00::inspector_width(width).unwrap_or(360.0)
+            } else {
+                0.0
+            };
+            width - self.workbench.panels.library.clamp(200.0, 420.0) - inspector
+                < crate::mock_ws00::MIN_BOARD
+        };
+        if self.workbench.panels.library_collapsed || fold_for_inspector || fold_for_board {
             // Folded to a rail (KTLO-17); the board takes the panel's width, and
             // the panel's own width is kept for when it comes back.
             egui::Panel::left("folder-library-rail")
@@ -1415,7 +1457,7 @@ impl FolderApp {
                 )
                 .show(ui, |ui| {
                     let library = widgets::icon_button(Icon::Panel, "Show block library").compact();
-                    if ui.add(library).clicked() {
+                    if !files_only && ui.add(library).clicked() {
                         self.expand_library(tabs.then_some(false));
                     }
                     let files = widgets::icon_button(Icon::Folder, "Show project files").compact();
@@ -1425,7 +1467,7 @@ impl FolderApp {
                 });
             return;
         }
-        let mut files = tabs && self.workbench.panels.library_files;
+        let mut files = files_only || (tabs && self.workbench.panels.library_files);
         // Diagram's panel is wider, for the explorer's names (KTLO-11). Split
         // keeps the library's range under its own name, so that showing it never
         // narrows the width Diagram comes back to.
@@ -1475,13 +1517,24 @@ impl FolderApp {
                 // The caption row: the tabs, drawn as *Main | Cleanup* above the
                 // board are, and the chevron.
                 ui.horizontal(|ui| {
-                    widgets::tab_value(ui, &mut chosen, false, "Library");
+                    if !files_only {
+                        widgets::tab_value(ui, &mut chosen, false, "Library");
+                    }
                     widgets::tab_value(ui, &mut chosen, true, "Files");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), chevron);
                 });
                 ui.add_space(theme::SPACE_SM);
                 if files {
                     ui.add_enabled_ui(enabled, |ui| self.explorer_panel(ui));
+                    return Vec::new();
+                }
+                // A: in Code the blocks are there but disabled, with a hint.
+                if in_code {
+                    widgets::hint(ui, "Drag blocks onto the diagram");
+                    ui.add_space(theme::SPACE_SM);
+                    if let Some((context, _)) = &library {
+                        self.library.show_sections(ui, context, false);
+                    }
                     return Vec::new();
                 }
                 match &library {
@@ -1516,7 +1569,7 @@ impl FolderApp {
                 "Resize block library"
             },
         );
-        if chosen != files {
+        if chosen != files && !files_only {
             files = chosen;
             self.workbench.panels.library_files = files;
             self.touched();
@@ -1550,6 +1603,9 @@ impl FolderApp {
     /// Whether the window has room for the block library, as a panel or a rail,
     /// beside the board: always in Diagram, in Split only when wide enough.
     fn library_room(&self, context: &egui::Context) -> bool {
+        if crate::mock_ws00::sidebar() != crate::mock_ws00::Sidebar::Off {
+            return true;
+        }
         match self.workbench.mode {
             Mode::Diagram => true,
             Mode::Split => context.content_rect().width() >= SPLIT_INSPECTOR_WIDTH,

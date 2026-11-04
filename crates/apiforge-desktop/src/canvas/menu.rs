@@ -154,9 +154,23 @@ impl ActionMenu {
             .as_ref()
             .and_then(|(id, _)| graph.nodes.iter().find(|node| &node.id == id));
         let actions = self.actions(graph, project);
+        // WS-00 mock-up, Q4: the popup stays inside the board, 12 px from its
+        // edges, and only its list scrolls.
+        let board = crate::mock_ws00::get()
+            .capped_popup
+            .then(crate::mock_ws00::board)
+            .flatten();
+        let at = board.map_or(self.screen, |board| {
+            egui::pos2(
+                // 300 px wide, plus the frame's margins and stroke.
+                self.screen.x.min(board.right() - 12.0 - 326.0),
+                self.screen.y.max(board.top() + 12.0),
+            )
+        });
+        let cap = board.map(|board| board.bottom() - 12.0 - at.y);
         let area = egui::Area::new(egui::Id::new("board-action-menu"))
             .order(egui::Order::Foreground)
-            .fixed_pos(self.screen)
+            .fixed_pos(at)
             .constrain(true)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style())
@@ -166,6 +180,10 @@ impl ActionMenu {
                     .inner_margin(12)
                     .show(ui, |ui| {
                         ui.set_width(300.0);
+                        if let Some(cap) = cap {
+                            // The frame's margins and stroke are outside this ui.
+                            ui.set_max_height(cap - 26.0);
+                        }
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.label(
@@ -236,7 +254,7 @@ impl ActionMenu {
                         }
                         let query = self.search.to_lowercase();
                         egui::ScrollArea::vertical()
-                            .max_height(320.0)
+                            .max_height(cap.map_or(320.0, |_| ui.available_height()))
                             .show(ui, |ui| {
                                 for action in actions.iter().filter(|action| {
                                     format!("{} {}", action.name, action.description)

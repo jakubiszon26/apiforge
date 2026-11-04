@@ -537,9 +537,11 @@ impl FolderApp {
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
+        // Q3 B: the Inspector narrows at the minimum window (WS-00 mock-up).
+        let narrow = crate::mock_ws00::inspector_width(ui.ctx().content_rect().width());
         let actions = egui::Panel::right("folder-inspector")
-            .default_size(360.0)
-            .size_range(300.0..=520.0)
+            .default_size(narrow.unwrap_or(360.0))
+            .size_range(narrow.unwrap_or(300.0)..=520.0)
             .frame(egui::Frame::new().fill(theme::WHITE).inner_margin(16))
             .show(ui, |ui| {
                 inspector::drafts::set_document_owner(ui.ctx(), &project_id, document_id);
