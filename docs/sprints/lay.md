@@ -440,7 +440,7 @@ extends 4.3 and answers Q7, Q13–Q15 with evidence.
 The reviewer's second note names the largest remaining gain as **local
 context**: for one step, what feeds it, what it waits for and what happens
 after it — which smaller cards and straighter wires do not give. Seven
-ideas, three for this sprint:
+ideas; three features (1–3) and one task-sheet entry (7) for this sprint:
 
 1. **A hidden check shows when it runs, not only where it belongs.** A
    shared check (`receipt_total` reads `cart` and `receipt`) sits under
@@ -662,7 +662,7 @@ verified at Fit 0.33 in round 3, [4.6](#46-round-3-the-coherent-d-measured)).
 
 | Class | Tickets | Minutes |
 | --- | --- | --- |
-| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list with timing · LAY-02 auto-layout and chips · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-14 wire and input tracing, clearance · LAY-15 off-screen relations · LAY-06 the shape · LAY-04 ports decide rows | 10 + 20 + 15 + 15 + 15 + 30 + 15 + 20 + 20 + 30 + 20 = **210** |
+| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list with timing · LAY-02 auto-layout and chips · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-14 wire and input tracing · LAY-15 off-screen relations · LAY-06 the shape · LAY-04 ports decide rows | 10 + 20 + 15 + 15 + 15 + 30 + 15 + 20 + 20 + 30 + 20 = **210** |
 | **Should** — geometry after the shape | LAY-13 branch bands · LAY-03 nudge · LAY-05 lanes (measured first) · LAY-12 acceptance and demo | 20 + 15 + 15 + 10 = **60** |
 | **Deferred** (LAY-2 candidates, [4.5](#45-second-opinion-part-two-local-context)) | wrapping by dependencies (4.5 item 4); Compact's data-in-use summary with W11's taps (item 5); failure consequences by cause (item 6, a RUN ticket); DIAG-01 descriptions (`format`); C vertical if not chosen; a component summary on the parent board; MCP-13 layout tool; arrowheads (#167 (3)); wire length and collision metrics beyond LAY-01 | — |
 
