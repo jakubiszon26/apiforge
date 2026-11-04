@@ -712,8 +712,9 @@ restored, selection and Inspector kept), at 1600 × 1000 and 960 × 540.
 `docs/qa/2026-11-04/LAY-00/lay00r4-*`, numbers in `lay00r4-metrics.txt`,
 posted on #37.
 
-**Proof 1 — the compact request card.** The box is 280 × 190 at every
-zoom; name, number and result line keep their minimum on-screen sizes
+**Proof 1 — the compact request card.** A card's box is the same at every
+zoom (`cart` 280 × 190, `login` 280 × 166: the height follows the rows
+shown); name, number and result line keep their minimum on-screen sizes
 across 0.44 / 0.46 and 0.74 / 0.76; configured inputs keep their summary
 (`Body · 2 fields`, `Query · 1 parameter`); unconnected outputs are
 hidden; two result lines (`HTTP 201 · 107 ms`, `3 checks ✓ · 1 shared`).
@@ -747,8 +748,10 @@ check on `checkout`, the gate passed), 23 `order` running, 24–34 pending
 running `order` keep full strength outside the focus; relations carry a
 teal halo and ringed ports; the selection has the accent frame. The brief's
 "`address` running while `checkout` failed" was impossible (`checkout` is
-step 19 after `address`), which the mock caught. The stale look is the
-mock's own: UX-25's bar was not found in the code.
+step 19 after `address`), which the mock caught. Stale versus current
+results is **not verified** by this proof: the stale look is the mock's
+own, UX-25's bar was not found in the code; LAY-07's acceptance covers it
+with the real runner.
 
 **Proof 4 — the walk by clicks.** At 1600 × 1000 and 960 × 540: four
 clicks, zero pans and zero zoom changes by the person; after *Back* the
