@@ -335,6 +335,13 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 
 ### Layout and wire routing readability
 
+The owner's brief of 2026-11-03 widened the line from geometry to
+comprehension — what runs after what, what checks what, where data comes
+from — and asked for a sprint after UX-1. Its audit, UX model, decisions and
+proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md) (proposed;
+the decisions are the owner's quiz of 2026-11-04). The rows below are the
+2026-10-26 tickets it re-audits.
+
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
 code stacks in one column, no tidied wire is straight, wires are drawn on top
 of each other, and ordering wires cross data wires by construction. Owner
