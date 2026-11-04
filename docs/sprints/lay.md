@@ -1,12 +1,14 @@
 # LAY: the diagram comprehension sprint — audit and proposed plan
 
 - State: **proposed** — the owner's decisions of [section 5](#5-owner-decisions)
-  are asked in a quiz on the morning of 2026-11-04 and recorded in
-  [section 6](#6-decisions-taken) afterwards. No LAY ticket starts, and no
-  new issue is created, before that.
+  (Q1–Q15) are asked in a quiz on the evening of 2026-11-04, after the
+  second opinion of [4.4](#44-second-opinion-2026-11-04-and-what-it-changes)
+  and round 3 of the mock-ups, and recorded in section 5 afterwards. No
+  LAY ticket starts, and no new issue is created, before that.
 - Analysis model: Fable. Mock-ups rendered by Opus on the throwaway branches
-  `mock/lay-00-shapes` and `mock/lay-00-cards` (captures under
-  `docs/qa/2026-11-03/LAY-00/` on those branches, posted to #37).
+  `mock/lay-00-shapes`, `mock/lay-00-cards`, `mock/lay-00-shapes-2` and
+  `mock/lay-00-round-3` (captures under `docs/qa/2026-11-0{3,4}/LAY-00/`
+  on those branches, posted to #37 and #241).
 - Inputs: the owner's brief of 2026-11-03 ([section 0](#0-the-owners-brief-2026-11-03));
   [LAY-00](../tickets/LAY-00.md) and LAY-01..06 (#32–#37) with their
   comments; #167, #168, #170 (4), #144, #145, #161 (1), #149; the UX-1 plan
@@ -220,23 +222,34 @@ reference scenario.
   every edit (pure function of the graph) and shown at every detail level.
 - **P2 Collapse checks (LAY-11).** A toolbar toggle *Checks* (expanded /
   collapsed). Collapsed: check cards with a subject and their wires are not
-  drawn; each subject shows the aggregate in its footer, red and bold with a
-  failure; a click on the aggregate opens the Inspector's *Checks* list for
-  that step (predicate in words, sources, status) with *Expand checks here*
-  (a per-step, session-only override). Standalone checks stay cards.
+  drawn; each subject shows the aggregate in its footer as a second
+  statement after the request's own result (`HTTP 201 · ✓ 2 checks`,
+  `HTTP 200 · ✕ 1/3 failed · 1 skipped`, a neutral grey `3 checks` before a
+  run, never a tick for a check that did not run); a click on the aggregate
+  opens the Inspector's *Checks* list for that step (predicate in words,
+  sources, status) with *Expand checks here* (a per-step, session-only
+  override). Standalone checks stay cards.
   Navigation from Run results to a collapsed check selects its subject and
   opens the list. Tidy up in collapsed mode lays out the visible cards and
   hangs the hidden checks under their subject, so expanding never needs a
   second tidy. The toggle never moves the camera.
-- **P3 Semantic zoom (LAY-09).** The thresholds stay (0.45 / 0.75, Q7); the
-  content changes. Overview: status band, name, badge, aggregate pill.
-  Compact: plus subtitle and status text; a failed or blocked card has a
-  2 px red or amber border at every level. Full: as today plus the badge; a
-  check's subtitle names its subject and predicate (`cart.total ≈ total`).
+- **P3 Semantic zoom (LAY-09).** The thresholds are decided after round 3
+  (Q7); the content changes. Overview: status band, badge, the name drawn at
+  a minimum on-screen size (11 px whatever the zoom, clipped to the card),
+  aggregate pill. Compact: plus method and short path, the result line and
+  the ports in use (Q13); a failed or blocked card has a 2 px red or amber
+  border at every level. Full: as today plus the badge; a check's subtitle
+  names its subject and predicate (`cart.total ≈ total`). Zooming never
+  moves a card: the card's box is its rows, the same at every zoom.
 - **P4 Focus on selection (LAY-10).** Direct producers and consumers ring;
-  unrelated cards and wires dim to about 35 %; a selected request also rings
-  its checks; a selected check rings its subjects and value sources in the
-  check colour. No mode, no toggle; the full chain is reached by clicking
+  unrelated cards dim to about 60 % (names and statuses stay legible) and
+  unrelated wires to about 25 %; a selected request also rings its checks; a
+  selected check rings its subjects and value sources in the check colour.
+  Four signals are told apart without reading the footer: the selection
+  (strong accent frame and handles), the related cards (a lighter outline in
+  another hue), the running step (an activity glyph in its badge and
+  *Running…*), a failure (red mark and status, independent of the
+  selection). No mode, no toggle; the full chain is reached by clicking
   along it (Q6).
 - **P5 Run status (LAY-12).** P1 and P3 cover the states; LAY-12 is the
   acceptance: simulation and live, the states follow the engine, a result
@@ -251,8 +264,15 @@ reference scenario.
   their subject and the board is bounded in width, at the cost of long data
   wires from satellites read later (the token, W11).
 - **P7 Branch bands (LAY-13).** A tinted band behind the cards of each branch
-  with one dashed wire from the `if` into the band (rendering only; edges
-  unchanged).
+  with one dashed orthogonal wire from the `if` into the band (rendering
+  only; edges unchanged). The band's tint is neutral, not a status colour;
+  its header names the condition and the branch (`created → Yes`); a branch
+  that wraps gets a band on each row, joined by the continuation mark.
+- **P9 Wire tracing (LAY-14).** The hovered or selected wire is drawn at
+  full strength with both end ports ringed and its field label
+  (`login.body.token`) on a pill at its midpoint; the other wires dim. A
+  router clearance keeps every wire 12 px from the borders of cards it does
+  not end on.
 - **P8 Auto-layout on open and chips (LAY-02).** A scenario without
   positions is laid out when opened; chips are placed beside their first
   reader and move with Tidy up.
@@ -342,6 +362,73 @@ on D's geometry. Rule learnt for LAY-11: an ordering dependency on a hidden
 check (`@after(cart_total)` on `order`) is drawn from the check's subject
 while collapsed, never dropped.
 
+### 4.4 Second opinion (2026-11-04) and what it changes
+
+A second reviewer read the plan and every capture of the three branches.
+Verdict: D as the direction, no branch as a finished pattern; collapsing
+checks and the Inspector list are the strongest parts; the board's height,
+the routing and the consistency of the marks are the weakest. The captures
+confirm each finding (the Fit view of D collapsed at 0.28 shows neither
+numbers nor aggregates; `✓ 1 check` appears before any run; a value card is
+an almost empty box as tall as a request; wires hug `catalogue`'s border).
+What the plan adopts, and where:
+
+1. **D's rows are as tall as their tallest satellite stack** (`first`,
+   `second`, `total` under `products` push the next row down; empty space
+   under `begin`, `login`, `order`); satellites carry no number in the
+   captures. → LAY-06: a value card is a header and one row, an expanded
+   check likewise short; a continuation mark at the end of each row
+   (`↳ 10`) and its mirror at the start of the next; five columns a layout
+   parameter, not a rule. LAY-07: every step numbered, satellites included
+   (the omission was the mock-ups', which drew badges by hand in round 1 and
+   on spine steps only in round 2).
+2. **At 60 % collapsed, row 1 and two value cards fill the viewport**, and a
+   request shows unused outputs, *Optional* and separators. Hiding text in a
+   box that keeps its height gains nothing: a card's box is its rows
+   (`Card::height`), the same at every zoom. → Q13 (what Compact shows) and
+   Q14 (whether a board-level density setting may shrink the box, repacked
+   by Tidy up; zooming itself never moves a card).
+3. **The routing baseline is not optional**: wires along card borders and a
+   trunk above row 2 whose ends cannot be told apart defeat relation C
+   whatever the shape. → LAY-04 moves to Must; a new LAY-14 (wire tracing
+   and the 12 px clearance, P9) is Must; LAY-03 and LAY-05 stay Should,
+   after the shape. Q12's figures updated.
+4. **Collapsed checks: the idea approved, the semantics corrected.** Before
+   a run the aggregate is neutral (`3 checks`, no tick); the request's
+   result and the checks' result are two statements (`HTTP 200 · ✕ 1/3
+   failed · 1 skipped`); a failed check marks its subject at every zoom
+   while the status band keeps the HTTP result (Q15 asks how loud); a check
+   with two subjects reads `shared` in each aggregate and "also checks
+   receipt" in the list, never as two assertions; an `@after` on a hidden
+   check is labelled with the check's name on the wire. → LAY-11's criteria
+   and P2.
+5. **Semantic zoom unproven**: round 2 rendered today's Overview (nothing
+   below 0.45), so the integrated promise "names, order and checks at every
+   zoom" has not been shown, and 0.45 / 0.75 cannot be approved from these
+   captures. → Q7 deferred to round 3; LAY-09 gains a minimum on-screen
+   label size (11 px) so that the promise is a rule, not a hope.
+6. **Focus and running share one orange** with the selection. → LAY-10's
+   four signals (P4); LAY-07's capture shows a running step other than the
+   selected one; dimming keeps names and statuses legible.
+7. **Branch bands: the concept approved, the sample too easy.** *Yes/No* too
+   small and stuck to the entry, diagonal wires, green and orange competing
+   with the status colours, no wrapped or nested branch. → LAY-13 (P7) and a
+   two-row band in round 3 before the ticket is written.
+
+On substance the plan and the second opinion do not disagree. One
+correction of emphasis: the reviewer reads D's remaining cost (satellite
+height, row continuation) as a condition on the shape, and the plan agrees
+that D is approved only with the short satellites of item 1.
+
+**Round 3** (commissioned 2026-11-04 on `mock/lay-00-round-3`, posted on
+#37) renders the one coherent D the reviewer asked for, on `shop-30`:
+collapsed after a run with one failed and one skipped check, a shared
+check, the running step other than the selected one, a labelled `@after`
+on a hidden check, the hovered wire traced, short satellites with the
+continuation mark, the proposed Overview and Compact at Fit, 35 % and
+60 %, a branch band across two rows, and `shop-50` at 960 × 540. Its table
+extends 4.3 and answers Q7, Q13–Q15 with evidence.
+
 ## 5. Owner decisions
 
 Asked 2026-11-04; the recommended option is first.
@@ -377,9 +464,11 @@ Asked 2026-11-04; the recommended option is first.
 
 **Reading the board**
 
-7. **Semantic zoom thresholds (LAY-09).** A. Keep 0.45 / 0.75 and change what
-   each level shows. B. Lower Full to 0.60 (#161's suggestion); cards hold
-   less at 60 % and inline fields shrink.
+7. **Semantic zoom thresholds (LAY-09).** A. Decide after round 3 shows D
+   with collapsed checks and the proposed Overview at 0.28, 0.35 and 0.60;
+   until then the thresholds are a parameter. B. Keep 0.45 / 0.75 now and
+   change what each level shows. C. Lower Full to 0.60 (#161's suggestion);
+   cards hold less at 60 % and inline fields shrink.
 8. **DIAG-00 (#241).** A. Moves out of UX-1 into LAY: its questions are 4, 5,
    7 and the card captures; DIAG-01 (descriptions beside blocks, a `format`
    decision) is deferred to its own analysis after LAY. B. Stays in UX-1
@@ -398,17 +487,34 @@ Asked 2026-11-04; the recommended option is first.
 
 **Scope**
 
-12. **Capacity.** A. Must and should: thirteen tickets, about 225 owner
+12. **Capacity.** A. Must and should: fifteen tickets, about 255 owner
     review minutes ([section 6](#6-scope-must-should-deferred)). B. Must
-    only: eight tickets, 145 minutes; routing follows as LAY-2. C.
-    Everything including the deferred items.
+    only: ten tickets, 180 minutes; nudge, lanes and bands follow as LAY-2.
+    C. Everything including the deferred items.
+
+**After the second opinion** (4.4)
+
+13. **What Compact shows (LAY-09).** A. Name, method and short path, the
+    result line with the aggregate, and only the ports in use; unused
+    outputs, *Optional* and separators appear at Full. B. Every port as
+    today; only the text shrinks.
+14. **Card height and density.** A. A board-level *Compact cards* setting
+    (an application preference beside the *Checks* toggle) hides the unused
+    rows and shrinks the card's box; Tidy up repacks the rows; zooming never
+    moves a card. B. The box stays as today, every row, whatever is shown;
+    only Tidy up's spacing changes.
+15. **A failed check on a successful request (LAY-11).** A. The subject's
+    footer turns red (`HTTP 200 · ✕ 1/3 failed`) and the card gets the 2 px
+    red border at every zoom; the status band keeps the HTTP colour; Run
+    results keeps the check's own row. B. Only the aggregate's text turns
+    red; the card is otherwise unchanged (round 1's capture).
 
 ## 6. Scope: must, should, deferred
 
 | Class | Tickets | Minutes |
 | --- | --- | --- |
-| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list · LAY-02 auto-layout and chips · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-06 the shape | 10 + 15 + 15 + 15 + 15 + 30 + 15 + 30 = **145** |
-| **Should** — geometry after the shape | LAY-13 branch bands · LAY-04 ports decide rows · LAY-03 nudge · LAY-05 lanes (measured first) · LAY-12 acceptance and demo | 20 + 20 + 15 + 15 + 10 = **80** |
+| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list · LAY-02 auto-layout and chips · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-14 wire tracing and clearance · LAY-06 the shape · LAY-04 ports decide rows | 10 + 15 + 15 + 15 + 15 + 30 + 15 + 15 + 30 + 20 = **180** |
+| **Should** — geometry after the shape | LAY-13 branch bands · LAY-03 nudge · LAY-05 lanes (measured first) · LAY-12 acceptance and demo | 20 + 15 + 15 + 10 = **60** |
 | **Deferred** | DIAG-01 descriptions (`format`); C vertical if not chosen; fan-out "taps" for a value read by many (W11); a component summary on the parent board; MCP-13 layout tool; arrowheads (#167 (3)); wire length and collision metrics beyond LAY-01 | — |
 
 ## 7. Dependencies and order
@@ -419,9 +525,9 @@ routes wires starts before the shape and collapse are decided and built.
 | Wave | Tickets | Why this order |
 | --- | --- | --- |
 | 0 (may start now, no decision) | LAY-01 (reference scenarios, the metric command), LAY-08 (the subject function in core and the Inspector's check list; no board change) | Pure functions and fixtures every later ticket uses |
-| 1 (after the quiz) | LAY-07, LAY-09, LAY-11, LAY-10 — rendering only, positions untouched | Four independent S/M tickets on different parts of the card and board; none moves a card |
+| 1 (after the quiz) | LAY-07, LAY-09, LAY-11, LAY-10, LAY-14 — rendering only, positions untouched | Five independent S/M tickets on different parts of the card and board; none moves a card |
 | 2 | LAY-02, LAY-06, LAY-13 | Positions change: the shape, the first placement, the bands |
-| 3 | LAY-04, LAY-03, then LAY-05 after measuring | Routing on the board as it will be; LAY-05 may be unnecessary |
+| 3 | LAY-04 (must), LAY-03, then LAY-05 after measuring | Routing on the board as it will be; LAY-05 may be unnecessary |
 | 4 | LAY-12 | The demo on the reference scenarios |
 
 Interplay to name: LAY-11 and LAY-06 share the satellite rule (a hidden
@@ -439,12 +545,13 @@ them and names the test.
 | LAY-01 | `fixtures/scenarios/lay/` (14, 30, 50 steps) parse and simulate; `cargo run -p apiforge-layout --example quality` prints the LAY-01 table plus board width and fit zoom at both sizes; the UX task sheet exists | S · 10 · — | deterministic; the dev guide names it |
 | LAY-08 | `apiforge_core::graph::check_subjects`; the Inspector of a request lists its checks in words with sources and status; a check's subtitle names subject and predicate | S · 15 · visible UI | two-subject check listed under both; standalone check listed nowhere |
 | LAY-02 | Auto-layout on open (Q10); chips placed beside their first reader and moved by Tidy up; `place` with every block fresh gives layers | S–M · 15 · default | `order-flow.afs` opens in layers; Fit view within 10 % of the cards' box |
-| LAY-07 | Sequence badges (Q2); running step's badge and border; equality with Run results row order | S · 15 · visible UI | the badge of step *k* equals its row; a running simulation shows the running step within one frame of its start |
-| LAY-09 | Overview and Compact contents (P3); failed and blocked borders at every zoom | S · 15 · visible UI | a failed card is red at 0.35; names never anonymous at 0.25 |
-| LAY-11 | The *Checks* toggle, aggregates, Inspector list, *Expand checks here*, navigation, Tidy up with hidden checks, the preference (Q4–Q6) | M · 30 · visible UI, default | a failed check is visible collapsed; toggling moves no card and no camera; two-subject check counted per Q6; an `@after` on a hidden check is drawn from its subject; Run results row of a collapsed check selects its subject |
-| LAY-10 | Focus on selection (Q9) | S · 15 · visible UI, default | selecting `cart` rings login, first, second, cart_total, order; Esc restores |
-| LAY-06 | The chosen shape in Tidy up (Q1, Q3); ADR 0006 amended | M · 30 · default | 30-step board ≤ 1800 px wide at 1600 × 1000; fit zoom ≥ 0.45 for 14 steps; no order wire through a gap |
-| LAY-13 | Branch bands (Q11) | M · 20 · visible UI | one wire per branch; a band contains exactly the branch's steps |
+| LAY-07 | Sequence badges on every step, satellites included (Q2); running step's badge glyph and *Running…*; equality with Run results row order | S · 15 · visible UI | the badge of step *k* equals its row; a running simulation shows the running step within one frame of its start; the capture shows a running step other than the selected one |
+| LAY-09 | Overview and Compact contents (P3, Q7, Q13); a minimum on-screen label size; failed and blocked borders at every zoom | S · 15 · visible UI | a failed card is red at 0.35; a name is at least 11 px on screen at 0.25; zooming moves no card |
+| LAY-11 | The *Checks* toggle, aggregates as a second statement, Inspector list, *Expand checks here*, navigation, Tidy up with hidden checks, the preference (Q4–Q6, Q15) | M · 30 · visible UI, default | a failed check is visible collapsed at every zoom; no tick before a run; toggling moves no card and no camera; two-subject check counted per Q6 and marked `shared`; an `@after` on a hidden check is drawn from its subject with the check's name; Run results row of a collapsed check selects its subject |
+| LAY-10 | Focus on selection (Q9) with the four signals of P4 | S · 15 · visible UI, default | selecting `cart` rings login, first, second, cart_total, order in a hue other than the selection; names stay legible on dimmed cards; Esc restores |
+| LAY-14 | Wire tracing and clearance (P9) | S · 15 · visible UI | hovering `login → cart` shows `login.body.token` and rings both ports; no routed segment within 12 px of a card it does not end on (LAY-01's metric) |
+| LAY-06 | The chosen shape in Tidy up (Q1, Q3) with short satellites and the row continuation mark; the column count a parameter; ADR 0006 amended | M · 30 · default | 30-step board ≤ 1800 px wide at 1600 × 1000; a row no taller than its tallest short stack; fit zoom ≥ 0.45 for 14 steps; no order wire through a gap |
+| LAY-13 | Branch bands (Q11): neutral tint, header `created → Yes`, orthogonal entry, a band per row for a wrapped branch | M · 20 · visible UI | one wire per branch; a band contains exactly the branch's steps; a wrapped branch has one band per row |
 | LAY-04 | Ports decide rows | M · 20 · — | as LAY-04 today, measured on the reference scenarios |
 | LAY-03 | Nudge | S · 15 · — | as LAY-03 today |
 | LAY-05 | Lanes | M · 15 · — | scheduled only if crossings per wire after LAY-04 exceed 0.2 on `shop-30` |
@@ -471,6 +578,8 @@ sprint and once at its end):
    *(LAY-09, LAY-06)*
 6. Open the scenario twice; switch Code → Diagram → Split. *(deterministic;
    disorienting? — LAY-02, UX-18)*
+7. Say which field of `login` feeds `payment`, by pointing at the wire.
+   *(seconds — LAY-14)*
 
 **Deterministic tests** cover what can be asserted: the badge equals the row
 (LAY-07); a failed check visible while collapsed (LAY-11); no card moved by a
