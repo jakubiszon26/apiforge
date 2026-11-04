@@ -20,6 +20,57 @@ use std::collections::HashSet;
 
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
+/// UX-19 mock-up switches (throwaway branch `mock/ux-19`). The design review
+/// views in `folder::ux19_review` turn them on for their own thread; with the
+/// switch off the panel behaves as on `main`.
+#[allow(dead_code)]
+pub(crate) mod mock_ux19 {
+    use std::cell::RefCell;
+
+    #[derive(Clone, Default, Debug)]
+    pub struct Flags {
+        pub on: bool,
+        /// The scenario's file, the breadcrumb's first segment.
+        pub file: String,
+        /// The left-hand side of the failed check in words (REP-01), which
+        /// the step result does not carry: the binding of its `actual`.
+        pub check_subject: String,
+    }
+
+    thread_local! {
+        static FLAGS: RefCell<Flags> = RefCell::new(Flags::default());
+    }
+
+    pub fn set(flags: Flags) {
+        FLAGS.with(|cell| *cell.borrow_mut() = flags);
+    }
+
+    pub fn get() -> Flags {
+        FLAGS.with(|cell| cell.borrow().clone())
+    }
+
+    pub fn on() -> bool {
+        FLAGS.with(|cell| cell.borrow().on)
+    }
+}
+
+/// Room kept right of the rows for the step list's scrollbar (UX-19 mock).
+const SCROLLBAR_ROOM: f32 = 14.0;
+
+fn failing(status: StepStatus) -> bool {
+    matches!(
+        status,
+        StepStatus::Failed | StepStatus::Blocked | StepStatus::Error
+    )
+}
+
+/// Whether `row` lies inside the component row keyed `ancestor`.
+fn is_inside(row: &StepRow<'_>, ancestor: &str) -> bool {
+    row.key
+        .strip_prefix(ancestor)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Requests from the report panel to the application.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -197,6 +248,12 @@ pub struct ReportPanel {
     selected_key: Option<String>,
     tab: DetailTab,
     expanded: HashSet<String>,
+    /// UX-19 mock: the component rows shown collapsed.
+    collapsed: HashSet<String>,
+    /// UX-19 mock: the selected row is scrolled into view on the next frame.
+    scroll_pending: bool,
+    /// UX-19 mock: the run whose end has been handled.
+    finished_run: Option<String>,
     /// This frame's `Context::checked`, for the value rows.
     checked: Vec<CheckedField>,
 }
@@ -219,6 +276,9 @@ impl Default for ReportPanel {
             selected_key: None,
             tab: DetailTab::Outputs,
             expanded: HashSet::new(),
+            collapsed: HashSet::new(),
+            scroll_pending: false,
+            finished_run: None,
             checked: Vec::new(),
         }
     }
@@ -574,6 +634,7 @@ impl ReportPanel {
             self.last_run_id = run_id.map(str::to_owned);
             self.selected_key = None;
             self.expanded.clear();
+            self.collapsed.clear();
         }
         if node_changed {
             self.last_selected_node_id = selected_node_id.map(str::to_owned);
@@ -598,6 +659,47 @@ impl ReportPanel {
                 self.selected_key = Some(item.key.clone());
             }
         }
+        if mock_ux19::on() {
+            self.mock_finish(run);
+        }
+    }
+
+    /// UX-19 mock, decisions 10 and 11: once a run has ended, components
+    /// whose steps all passed are collapsed; a run that failed selects its
+    /// first failed, blocked or errored step, the innermost, even over the
+    /// board's selection; the selected row is scrolled into view.
+    fn mock_finish(&mut self, run: Option<&RunResult>) {
+        let Some(run) = run else { return };
+        if run.status == RunStatus::Running
+            || self.finished_run.as_deref() == Some(run.id.as_str())
+        {
+            return;
+        }
+        self.finished_run = Some(run.id.clone());
+        let rows = flatten_steps(&run.steps);
+        self.collapsed = rows
+            .iter()
+            .filter(|row| row.step.children.is_some())
+            .filter(|row| {
+                !failing(row.step.status)
+                    && rows
+                        .iter()
+                        .filter(|inner| is_inside(inner, &row.key))
+                        .all(|inner| !failing(inner.step.status))
+            })
+            .map(|row| row.key.clone())
+            .collect();
+        if run.status == RunStatus::Failed
+            && let Some(first) = rows.iter().find(|row| {
+                failing(row.step.status)
+                    && !rows
+                        .iter()
+                        .any(|inner| is_inside(inner, &row.key) && failing(inner.step.status))
+            })
+        {
+            self.selected_key = Some(first.key.clone());
+        }
+        self.scroll_pending = true;
     }
 
     fn toggle_bar(&mut self, ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
@@ -730,7 +832,11 @@ impl ReportPanel {
                 egui::vec2(300.0, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    self.step_list(ui, &rows, selected.as_ref(), actions);
+                    if mock_ux19::on() {
+                        self.mock_step_list(ui, &rows, selected.as_ref(), actions);
+                    } else {
+                        self.step_list(ui, &rows, selected.as_ref(), actions);
+                    }
                 },
             );
             ui.separator();
@@ -743,6 +849,11 @@ impl ReportPanel {
                         .id_salt("report-step-details")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            if mock_ux19::on()
+                                && let Some(selected) = selected.as_ref()
+                            {
+                                self.mock_context(ui, &rows, selected, actions);
+                            }
                             self.step_details(
                                 ui,
                                 &run.id,
@@ -790,6 +901,192 @@ impl ReportPanel {
             });
     }
 
+    /// UX-19 mock: the step list with collapsible component rows, room for
+    /// the scrollbar and the selected row scrolled into view.
+    fn mock_step_list(
+        &mut self,
+        ui: &mut Ui,
+        rows: &[StepRow<'_>],
+        selected: Option<&StepRow<'_>>,
+        actions: &mut Vec<Action>,
+    ) {
+        egui::ScrollArea::vertical()
+            .id_salt("report-steps")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if rows.is_empty() {
+                    widgets::hint(ui, "Waiting for the first step…");
+                    return;
+                }
+                for (index, row) in rows.iter().enumerate() {
+                    if self.collapsed.iter().any(|key| is_inside(row, key)) {
+                        continue;
+                    }
+                    if row.step.phase == Phase::Cleanup
+                        && row.depth == 0
+                        && (index == 0 || rows[index - 1].step.phase != Phase::Cleanup)
+                    {
+                        ui.add_space(6.0);
+                        widgets::caption(ui, "AFTER TEST · CLEANUP");
+                        ui.add_space(2.0);
+                    }
+                    let is_active = selected.is_some_and(|active| active.key == row.key);
+                    let component = row.step.children.as_ref().map(|children| {
+                        (children.len(), self.collapsed.contains(&row.key))
+                    });
+                    let (response, chevron) = mock_row(ui, row, is_active, component);
+                    if is_active && self.scroll_pending {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                        self.scroll_pending = false;
+                    }
+                    if response.clicked() {
+                        let on_chevron = response
+                            .interact_pointer_pos()
+                            .is_some_and(|pos| chevron.is_some_and(|rect| rect.contains(pos)));
+                        if on_chevron {
+                            if !self.collapsed.remove(&row.key) {
+                                self.collapsed.insert(row.key.clone());
+                            }
+                        } else {
+                            self.selected_key = Some(row.key.clone());
+                            actions.push(Action::SelectNode(row.root_id.clone()));
+                        }
+                    }
+                }
+            });
+    }
+
+    /// UX-19 mock: above a nested step, the path to it; above a component
+    /// that did not pass, where it failed and why (REP-01).
+    fn mock_context(
+        &mut self,
+        ui: &mut Ui,
+        rows: &[StepRow<'_>],
+        selected: &StepRow<'_>,
+        _actions: &mut Vec<Action>,
+    ) {
+        let flags = mock_ux19::get();
+        if selected.depth > 0 {
+            let mut job = egui::text::LayoutJob::default();
+            let font = egui::FontId::proportional(11.5);
+            let link = egui::TextFormat::simple(font.clone(), theme::LINK);
+            let arrow = egui::TextFormat::simple(font.clone(), theme::MUTED);
+            job.append(&flags.file, 0.0, link.clone());
+            for ancestor in rows
+                .iter()
+                .filter(|row| is_inside(selected, &row.key))
+            {
+                job.append("  →  ", 0.0, arrow.clone());
+                job.append(ancestor.step.display_name(), 0.0, link.clone());
+            }
+            job.append("  →  ", 0.0, arrow);
+            job.append(
+                &selected.step.handle,
+                0.0,
+                egui::TextFormat::simple(font, theme::TEXT),
+            );
+            job.wrap.max_rows = 1;
+            job.wrap.max_width = ui.available_width();
+            let galley = ui.painter().layout_job(job);
+            let path = rows
+                .iter()
+                .filter(|row| is_inside(selected, &row.key))
+                .map(|row| row.step.display_name().to_owned())
+                .collect::<Vec<_>>()
+                .join(" → ");
+            ui.add(egui::Label::new(galley))
+                .on_hover_text(format!("{} → {path} → {}", flags.file, selected.step.handle));
+            ui.add_space(2.0);
+        }
+    }
+
+    /// UX-19 mock, REP-01: where a component that did not pass failed, and why.
+    fn mock_outcome(&mut self, ui: &mut Ui, selected: &StepRow<'_>, actions: &mut Vec<Action>) {
+        let flags = mock_ux19::get();
+        let Some(children) = selected.step.children.as_ref() else {
+            return;
+        };
+        let Some((position, failed)) = children
+            .iter()
+            .enumerate()
+            .find(|(_, child)| failing(child.status))
+        else {
+            return;
+        };
+        let failed_key = Some(format!("{}/{position}:{}", selected.key, failed.node_id));
+        let request = children[..=position]
+            .iter()
+            .rev()
+            .find_map(|child| child.request.as_ref());
+        let color = status_color(failed.status);
+        egui::Frame::new()
+            .fill(color.gamma_multiply(0.08))
+            .stroke(Stroke::new(1.0, color.gamma_multiply(0.25)))
+            .corner_radius(6)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(format!(
+                        "{} in {} (step {} of {})",
+                        failed.status.label(),
+                        failed.display_name(),
+                        position + 1,
+                        children.len()
+                    ))
+                    .size(13.0)
+                    .family(theme::bold_family())
+                    .color(color),
+                );
+                if let Some(request) = request {
+                    ui.horizontal(|ui| {
+                        widgets::pill(ui, &request.method, theme::ACCENT);
+                        let path = request
+                            .url
+                            .split_once("://")
+                            .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+                            .unwrap_or(&request.url);
+                        ui.label(RichText::new(path).monospace().size(12.0));
+                    });
+                }
+                if let (OptionalJson::Present(expected), OptionalJson::Present(actual)) =
+                    (&failed.expected, &failed.actual)
+                {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} == {} · got {}",
+                            flags.check_subject,
+                            json_stringify(expected),
+                            json_stringify(actual)
+                        ))
+                        .monospace()
+                        .size(12.0)
+                        .color(theme::TEXT),
+                    );
+                }
+                if let Some(key) = failed_key {
+                    let open = ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("Open {}  →", failed.display_name()))
+                                .size(12.0)
+                                .underline()
+                                .color(theme::LINK),
+                        )
+                        .sense(Sense::click()),
+                    );
+                    if open
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        self.collapsed.remove(&selected.key);
+                        self.selected_key = Some(key);
+                        self.scroll_pending = true;
+                        actions.push(Action::SelectNode(selected.root_id.clone()));
+                    }
+                }
+            });
+    }
+
     fn step_details(
         &mut self,
         ui: &mut Ui,
@@ -822,7 +1119,7 @@ impl ReportPanel {
                         .size(14.0)
                         .family(theme::bold_family()),
                 );
-                if selected.depth > 0 {
+                if selected.depth > 0 && !mock_ux19::on() {
                     widgets::hint(ui, format!("Step inside component · {}", step.node_id));
                 }
             });
@@ -831,7 +1128,15 @@ impl ReportPanel {
             });
         });
 
-        if let Some(message) = &step.message {
+        let rep01 = mock_ux19::on()
+            && step
+                .children
+                .as_ref()
+                .is_some_and(|children| children.iter().any(|child| failing(child.status)));
+        if rep01 {
+            self.mock_outcome(ui, selected, actions);
+        }
+        if let Some(message) = step.message.as_ref().filter(|_| !rep01) {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -1421,6 +1726,113 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(row.step.display_name())
+}
+
+/// UX-19 mock: a step row clear of the scrollbar, with a chevron on a
+/// component's row and its step count; returns the chevron's rect.
+fn mock_row(
+    ui: &mut Ui,
+    row: &StepRow<'_>,
+    active: bool,
+    component: Option<(usize, bool)>,
+) -> (egui::Response, Option<egui::Rect>) {
+    let indent = row.depth as f32 * 18.0;
+    let width = (ui.available_width() - SCROLLBAR_ROOM).max(80.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 42.0), Sense::click());
+    let painter = ui.painter();
+    if active {
+        painter.rect_filled(rect, 6.0, theme::ACCENT_SOFT);
+    } else if response.hovered() {
+        painter.rect_filled(rect, 6.0, theme::BG);
+    }
+    // A guide line for each level of nesting, under the parent's chevron.
+    for level in 0..row.depth {
+        let x = rect.left() + 11.0 + level as f32 * 18.0;
+        painter.line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+            Stroke::new(1.0, theme::BORDER),
+        );
+    }
+    let mut chevron = None;
+    if let Some((_, collapsed)) = component {
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 11.0 + indent, rect.center().y),
+            egui::vec2(14.0, 14.0),
+        );
+        let icon = if collapsed {
+            Icon::ChevronRight
+        } else {
+            Icon::ChevronDown
+        };
+        icon.paint(painter, icon_rect, theme::MUTED);
+        chevron = Some(icon_rect.expand(5.0));
+    }
+
+    let status_color = status_color(row.step.status);
+    let badge_center = egui::pos2(rect.left() + 30.0 + indent, rect.center().y);
+    painter.circle_filled(badge_center, 8.0, status_color.gamma_multiply(0.15));
+    painter.text(
+        badge_center,
+        egui::Align2::CENTER_CENTER,
+        status_mark(row.step.status),
+        egui::FontId::proportional(11.0),
+        status_color,
+    );
+
+    let text_left = rect.left() + 44.0 + indent;
+    let name_color = if active { theme::ACCENT } else { theme::TEXT };
+    let mut name = egui::text::LayoutJob::simple_singleline(
+        row.step.display_name().to_owned(),
+        egui::FontId::new(12.5, theme::bold_family()),
+        name_color,
+    );
+    name.wrap.max_width = (rect.right() - text_left - 56.0).max(16.0);
+    name.wrap.max_rows = 1;
+    let galley = painter.layout_job(name);
+    painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
+    let sub = match component {
+        Some((count, _)) => format!(
+            "{count} {} · {}",
+            if count == 1 { "step" } else { "steps" },
+            row.step.status.label()
+        ),
+        None => row.step.status.label().to_owned(),
+    };
+    painter.text(
+        egui::pos2(text_left, rect.top() + 29.0),
+        egui::Align2::LEFT_CENTER,
+        sub,
+        egui::FontId::proportional(11.0),
+        theme::MUTED,
+    );
+    painter.text(
+        egui::pos2(rect.right() - 8.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        format!("{} ms", row.step.duration_ms),
+        egui::FontId::monospace(10.5),
+        theme::MUTED,
+    );
+    let a11y_label = match component {
+        Some((count, _)) => format!(
+            "{} · {count} steps · {} · {} ms",
+            row.step.display_name(),
+            row.step.status.label(),
+            row.step.duration_ms
+        ),
+        None => format!(
+            "{} · {} · {} ms",
+            row.step.display_name(),
+            row.step.status.label(),
+            row.step.duration_ms
+        ),
+    };
+    response.widget_info(move || {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+    });
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(row.step.display_name());
+    (response, chevron)
 }
 
 fn run_pill(status: RunStatus) -> (&'static str, Color32) {
