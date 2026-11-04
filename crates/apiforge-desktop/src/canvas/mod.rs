@@ -458,6 +458,9 @@ impl Canvas {
             .iter()
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
+        // LAY-00 mock-up: collapsed checks are not drawn, nor their wires.
+        #[cfg(test)]
+        lay00::hide(input.graph, &mut cards);
         // LAY-00 mock-up: the shape's positions instead of the document's.
         #[cfg(test)]
         let lay_plan = lay00::arrange(
@@ -523,16 +526,14 @@ impl Canvas {
             // or drawer resizing must preserve the chosen card, not refit all cards.
             self.camera_moved_by_user = true;
         }
+        // LAY-00 mock-up: a camera placed by hand on the board's first rows.
         #[cfg(test)]
-        if let Some(focus) = lay00::get().focus
-            && lay_plan.is_some()
-            && let Some(card) = cards
-                .iter()
-                .find(|card| card.id == focus || card.name == focus)
+        if lay_plan.is_some()
+            && let Some((zoom, pan)) =
+                lay00::placed(overlays.focus.translate(-viewport.min.to_vec2()))
         {
-            self.camera.zoom = 0.8;
-            let local_focus_center = overlays.focus.center() - viewport.min;
-            self.camera.pan = local_focus_center - card.rect().center_top().to_vec2() * 0.8;
+            self.camera.zoom = zoom;
+            self.camera.pan = pan;
             self.camera_moved_by_user = true;
         }
         self.handle_camera(ui, &background, viewport);
@@ -558,8 +559,6 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let board_wires = board_wires(input.graph, &cards, &chips);
-        #[cfg(test)]
-        let board_wires = lay00::router_wires(board_wires, lay_plan.as_ref());
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -597,8 +596,6 @@ impl Canvas {
                 drawn.push((wire.id.clone(), wire.points.clone()));
             }
         }
-        #[cfg(test)]
-        lay00::paint_rails(&board_painter, lay_plan.as_ref(), camera);
 
         let pointer = ui.input(|state| state.pointer.interact_pos());
         let modifiers = ui.input(|state| state.modifiers);
@@ -689,7 +686,7 @@ impl Canvas {
                 step,
             );
             #[cfg(test)]
-            lay00::paint_badge(&board_painter, lay_plan.as_ref(), card, camera);
+            lay00::paint_extras(&board_painter, lay_plan.as_ref(), card, camera);
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
             // controls keep their ids whichever cards are off screen.

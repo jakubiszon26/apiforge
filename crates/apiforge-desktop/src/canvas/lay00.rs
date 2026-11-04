@@ -1,34 +1,33 @@
-//! LAY-00 mock-up (throwaway branch `mock/lay-00-shapes`): four shapes of a
-//! tidied scenario board, rendered by the `review_lay00_*` views below.
+//! LAY-00 mock-up, round 2 (throwaway branch `mock/lay-00-shapes-2`): shapes
+//! B and D of a tidied scenario board, with checks expanded or collapsed,
+//! rendered by the `review_lay00r2_*` views below.
 //!
 //! A test-only switch replaces the positions of the main board's cards with
-//! the shape's positions, draws ordering wires on a rail above each row
-//! (shapes A and D) and paints a sequence badge on the cards. With the
+//! the shape's positions, hides the checks that have a subject when collapsed
+//! (their subject's footer shows the aggregate), paints a sequence badge on
+//! the cards and can place the camera by hand on the board's first two rows.
+//! Every wire, ordering wires included, goes through the real router. With the
 //! switch off the board behaves as on `main`. Nothing here is product code.
 #![allow(dead_code)]
 
 use super::Camera;
-use super::layout::{Card, WIDTH};
-use super::paint;
-use super::routing::{BoardWire, Routed};
+use super::layout::{Card, CardDetail, WIDTH};
 use crate::theme;
 use apiforge_core::{
-    format::{Graph, Project},
+    format::{Graph, Node, Project},
     graph::dependency_index,
     model::{Branch, NodeKind},
 };
-use eframe::egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, pos2, vec2};
+use eframe::egui::{
+    Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Shape {
-    /// Columns by dependency layer, one row, ordering wires on a rail above.
-    A,
-    /// The same columns wrapped into rows.
+    /// Tidy up's dependency columns wrapped into rows.
     B,
-    /// Layers top to bottom.
-    C,
     /// A spine in execution order with checks and values hanging below.
     D,
 }
@@ -36,23 +35,29 @@ pub enum Shape {
 #[derive(Clone, Default, Debug)]
 pub struct Flags {
     pub shape: Option<Shape>,
-    /// 1600 × 1000 rather than 960 × 540: wraps later.
+    /// Columns per row: 4 for B and 5 for D at 1600 × 1000.
     pub wide: bool,
-    /// Show this card at 100 % in the middle of the board instead of fitting.
-    pub focus: Option<String>,
+    /// Checks with a subject are hidden; the subject shows the aggregate.
+    pub collapsed: bool,
+    /// The camera at this zoom on the board's first two rows, not fitted.
+    pub view: Option<f32>,
 }
 
-/// What the last frame laid out, for the report.
+/// What the last fit measured, for the report.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Metrics {
     pub width: f32,
     pub height: f32,
     pub zoom: f32,
+    /// Cards and wires the collapse takes off the board.
+    pub hidden_cards: usize,
+    pub hidden_wires: usize,
 }
 
 thread_local! {
     static FLAGS: RefCell<Flags> = RefCell::new(Flags::default());
     static EXTRA: RefCell<Option<Rect>> = const { RefCell::new(None) };
+    static ROWS: RefCell<Option<Rect>> = const { RefCell::new(None) };
     static METRICS: RefCell<Metrics> = RefCell::new(Metrics::default());
 }
 
@@ -68,7 +73,7 @@ pub fn metrics() -> Metrics {
     METRICS.with(|cell| *cell.borrow())
 }
 
-/// The board's bounds for fitting: the cards and the rails above them.
+/// The board's bounds for fitting: the cards and the badges on them.
 pub fn widen(bounds: Rect) -> Rect {
     EXTRA.with(|cell| cell.borrow().map_or(bounds, |extra| bounds.union(extra)))
 }
@@ -80,33 +85,42 @@ pub fn fitted(bounds: Rect, needed: f32, clamped: f32) -> f32 {
         return clamped;
     }
     METRICS.with(|cell| {
-        *cell.borrow_mut() = Metrics {
-            width: bounds.width(),
-            height: bounds.height(),
-            zoom: needed,
-        }
+        let mut metrics = cell.borrow_mut();
+        metrics.width = bounds.width();
+        metrics.height = bounds.height();
+        metrics.zoom = needed;
     });
     needed
+}
+
+/// The hand-placed camera: zoom and pan that put the first two rows' top-left
+/// corner near the focus area's, centred across when they are narrower.
+pub fn placed(focus: Rect) -> Option<(f32, Vec2)> {
+    let zoom = get().view?;
+    let rows = ROWS.with(|cell| *cell.borrow())?;
+    let margin = 40.0;
+    let left = if rows.width() * zoom + 2.0 * margin < focus.width() {
+        focus.center().x - rows.width() * zoom / 2.0
+    } else {
+        focus.left() + margin
+    };
+    let top = focus.top() + margin;
+    Some((
+        zoom,
+        vec2(left - rows.left() * zoom, top - rows.top() * zoom),
+    ))
 }
 
 const LAYER_GAP: f32 = 96.0;
 const STACK_GAP: f32 = 24.0;
 const ROW_GAP: f32 = 120.0;
-const RAIL: f32 = 40.0;
-const LANE: f32 = 10.0;
-
-/// A rail wire: its points in board coordinates.
-pub struct RailWire {
-    pub points: Vec<Pos2>,
-    pub branch: Option<Branch>,
-}
 
 /// What the shape adds to one frame of the board.
 pub struct Plan {
     /// Sequence number and branch of each badged card.
     pub badges: HashMap<String, (usize, Option<Branch>)>,
-    pub rail: bool,
-    pub rails: Vec<RailWire>,
+    /// The aggregate of each subject whose checks are hidden.
+    pub aggregates: HashMap<String, String>,
 }
 
 /// The engine's static order: ready steps in document order.
@@ -148,10 +162,76 @@ fn on_spine(kind: NodeKind) -> bool {
     )
 }
 
+// Collapse, copied from `mock/lay-00-cards`.
+
+fn is_check(kind: NodeKind) -> bool {
+    matches!(kind, NodeKind::Assert | NodeKind::Condition)
+}
+
+/// The request or component-call steps a check references directly.
+fn subjects(graph: &Graph, node: &Node) -> Vec<String> {
+    let mut result: Vec<String> = Vec::new();
+    for binding in node.inputs.values() {
+        for reference in binding.references() {
+            let subject = graph.nodes.iter().find(|n| n.id == reference.node_id);
+            if subject.is_some_and(|n| matches!(n.kind, NodeKind::Request | NodeKind::Component))
+                && !result.iter().any(|id| id == reference.node_id)
+            {
+                result.push(reference.node_id.to_owned());
+            }
+        }
+    }
+    result
+}
+
+/// Each subject's checks, in document order.
+fn checks_of(graph: &Graph) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for node in graph.nodes.iter().filter(|node| is_check(node.kind)) {
+        for subject in subjects(graph, node) {
+            result.entry(subject).or_default().push(node.id.clone());
+        }
+    }
+    result
+}
+
+/// The checks a collapsed board does not draw: those with a subject.
+pub fn folded(graph: &Graph) -> HashSet<String> {
+    graph
+        .nodes
+        .iter()
+        .filter(|node| is_check(node.kind) && !subjects(graph, node).is_empty())
+        .map(|node| node.id.clone())
+        .collect()
+}
+
+/// Takes the folded checks off a main board when collapsed.
+pub fn hide(graph: &Graph, cards: &mut Vec<Card>) {
+    let flags = get();
+    if flags.shape.is_none()
+        || !flags.collapsed
+        || !graph.nodes.iter().any(|node| node.kind == NodeKind::Start)
+    {
+        return;
+    }
+    let hidden = folded(graph);
+    cards.retain(|card| !hidden.contains(&card.id));
+}
+
+/// The graph without the folded checks, for laying out what is visible.
+fn visible(graph: &Graph, hidden: &HashSet<String>) -> Graph {
+    let mut result = graph.clone();
+    result.nodes.retain(|node| !hidden.contains(&node.id));
+    result
+        .edges
+        .retain(|edge| !hidden.contains(&edge.source) && !hidden.contains(&edge.target));
+    result
+}
+
 /// Lays out the main board in the switched-on shape. `None` when the switch is
 /// off or the board is not a scenario's main flow.
 pub fn arrange(
-    graph: &Graph,
+    full: &Graph,
     reference: &Graph,
     project: &Project,
     parameters: &[String],
@@ -159,63 +239,76 @@ pub fn arrange(
 ) -> Option<Plan> {
     let flags = get();
     let shape = flags.shape?;
-    if !graph.nodes.iter().any(|node| node.kind == NodeKind::Start) {
+    if !full.nodes.iter().any(|node| node.kind == NodeKind::Start) {
         EXTRA.with(|cell| *cell.borrow_mut() = None);
+        ROWS.with(|cell| *cell.borrow_mut() = None);
         return None;
     }
-    let order = sequence(graph);
-    let seq: HashMap<&str, usize> = order
+    let hidden = if flags.collapsed {
+        folded(full)
+    } else {
+        HashSet::new()
+    };
+    let shown = visible(full, &hidden);
+    let hidden_wires = apiforge_core::graph::wires(full)
         .iter()
+        .filter(|wire| hidden.contains(&wire.source) || hidden.contains(&wire.target))
+        .count();
+    METRICS.with(|cell| {
+        let mut metrics = cell.borrow_mut();
+        metrics.hidden_cards = hidden.len();
+        metrics.hidden_wires = hidden_wires;
+    });
+    let graph = &shown;
+    // Numbers and the spine's order come from the whole scenario: what the
+    // engine runs does not change when checks are folded.
+    let order: Vec<String> = sequence(full)
+        .into_iter()
+        .filter(|id| !hidden.contains(id))
+        .collect();
+    let seq: HashMap<String, usize> = sequence(full)
+        .into_iter()
         .enumerate()
-        .map(|(index, id)| (id.as_str(), index + 1))
+        .map(|(index, id)| (id, index + 1))
         .collect();
     let index_of: HashMap<String, usize> = cards
         .iter()
         .enumerate()
         .map(|(index, card)| (card.id.clone(), index))
         .collect();
-
-    // Today's Tidy up gives the columns.
-    let tidied = crate::board_edit::Board {
-        graph,
-        reference,
-        project,
-        parameters,
-    }
-    .tidy_up(&[])
-    .unwrap_or_else(|| graph.clone());
-    let tidy: HashMap<&str, Pos2> = tidied
-        .nodes
-        .iter()
-        .map(|node| {
-            (
-                node.id.as_str(),
-                pos2(node.position.x as f32, node.position.y as f32),
-            )
-        })
-        .collect();
-    let xs: BTreeSet<i64> = tidy.values().map(|p| p.x.round() as i64).collect();
-    let xs: Vec<i64> = xs.into_iter().collect();
-    let column = |id: &str| xs.binary_search(&(tidy[id].x.round() as i64)).unwrap();
     let heights: HashMap<String, f32> = cards
         .iter()
         .map(|card| (card.id.clone(), card.height()))
         .collect();
     let height = |id: &str| heights[id];
 
-    // Row of each card and the rows' tops, for the rails.
     let mut row_of: HashMap<String, usize> = HashMap::new();
     let mut badged: HashSet<String> = HashSet::new();
     let pitch = WIDTH + LAYER_GAP;
     match shape {
-        Shape::A => {
-            for card in cards.iter_mut() {
-                card.origin = tidy[card.id.as_str()];
-                row_of.insert(card.id.clone(), 0);
-                badged.insert(card.id.clone());
-            }
-        }
         Shape::B => {
+            // Tidy up's columns over the visible graph.
+            let tidied = crate::board_edit::Board {
+                graph,
+                reference,
+                project,
+                parameters,
+            }
+            .tidy_up(&[])
+            .unwrap_or_else(|| graph.clone());
+            let tidy: HashMap<&str, Pos2> = tidied
+                .nodes
+                .iter()
+                .map(|node| {
+                    (
+                        node.id.as_str(),
+                        pos2(node.position.x as f32, node.position.y as f32),
+                    )
+                })
+                .collect();
+            let xs: BTreeSet<i64> = tidy.values().map(|p| p.x.round() as i64).collect();
+            let xs: Vec<i64> = xs.into_iter().collect();
+            let column = |id: &str| xs.binary_search(&(tidy[id].x.round() as i64)).unwrap();
             let per = if flags.wide { 4 } else { 3 };
             let rows = xs.len().div_ceil(per);
             let mut top = 0.0;
@@ -239,31 +332,6 @@ pub fn arrange(
                     badged.insert(id.clone());
                 }
                 top += bottom + ROW_GAP;
-            }
-        }
-        Shape::C => {
-            let gap = LAYER_GAP;
-            let mut layers: Vec<Vec<String>> = vec![Vec::new(); xs.len()];
-            for card in cards.iter() {
-                layers[column(&card.id)].push(card.id.clone());
-            }
-            for layer in &mut layers {
-                layer.sort_by(|a, b| tidy[a.as_str()].y.total_cmp(&tidy[b.as_str()].y));
-            }
-            let widest = layers.iter().map(Vec::len).max().unwrap_or(1) as f32;
-            let full = widest * WIDTH + (widest - 1.0) * gap;
-            let mut top = 0.0;
-            for (row, layer) in layers.iter().enumerate() {
-                let n = layer.len() as f32;
-                let left = (full - (n * WIDTH + (n - 1.0) * gap)) / 2.0;
-                let mut bottom: f32 = 0.0;
-                for (i, id) in layer.iter().enumerate() {
-                    cards[index_of[id]].origin = pos2(left + i as f32 * (WIDTH + gap), top);
-                    bottom = bottom.max(height(id));
-                    row_of.insert(id.clone(), row);
-                    badged.insert(id.clone());
-                }
-                top += bottom + LAYER_GAP;
             }
         }
         Shape::D => {
@@ -335,208 +403,75 @@ pub fn arrange(
     let badges = badged
         .into_iter()
         .map(|id| {
-            let number = seq[id.as_str()];
-            let branch = branch_of(graph, &id);
+            let number = seq[&id];
+            let branch = branch_of(full, &id);
             (id, (number, branch))
         })
         .collect();
-    let rail = matches!(shape, Shape::A | Shape::D);
-    let rails = if rail {
-        rails(graph, cards, &row_of)
-    } else {
-        Vec::new()
-    };
-    let extra = rails
-        .iter()
-        .flat_map(|wire| wire.points.iter().copied())
-        .fold(None::<Rect>, |acc, point| {
-            let rect = Rect::from_center_size(point, vec2(1.0, 1.0));
-            Some(acc.map_or(rect, |acc| acc.union(rect)))
-        });
-    // The badges stick out of the cards' top-left corners.
-    let badges_bounds = cards
-        .iter()
-        .map(|card| Rect::from_center_size(card.origin, vec2(24.0, 24.0)))
-        .reduce(Rect::union);
-    let extra = match (extra, badges_bounds) {
-        (Some(a), Some(b)) => Some(a.union(b)),
-        (a, b) => a.or(b),
-    };
-    EXTRA.with(|cell| *cell.borrow_mut() = extra);
-    Some(Plan {
-        badges,
-        rail,
-        rails,
-    })
-}
-
-/// Ordering wires along a rail above each row.
-fn rails(graph: &Graph, cards: &[Card], row_of: &HashMap<String, usize>) -> Vec<RailWire> {
-    let card = |id: &str| cards.iter().find(|card| card.id == id);
-    let rows = row_of.values().copied().max().map_or(1, |max| max + 1);
-    let row_top: Vec<f32> = (0..rows)
-        .map(|row| {
-            cards
-                .iter()
-                .filter(|card| row_of.get(&card.id) == Some(&row))
-                .map(|card| card.origin.y)
-                .fold(f32::INFINITY, f32::min)
-        })
-        .collect();
-    let right_edge = cards
-        .iter()
-        .map(|card| card.rect().right())
-        .fold(f32::NEG_INFINITY, f32::max);
-    // Whether the top centre of a card can rise to its rail without crossing
-    // another card.
-    let clear_above = |rect: Rect, rail: f32| {
-        let strip = Rect::from_min_max(
-            pos2(rect.center().x - 2.0, rail),
-            pos2(rect.center().x + 2.0, rect.top() - 1.0),
-        );
-        !cards
-            .iter()
-            .any(|other| other.rect() != rect && other.rect().intersects(strip))
-    };
-    // Spread the ends that share a card.
-    let mut outs: HashMap<&str, Vec<usize>> = HashMap::new();
-    let mut ins: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (index, edge) in graph.edges.iter().enumerate() {
-        outs.entry(edge.source.as_str()).or_default().push(index);
-        ins.entry(edge.target.as_str()).or_default().push(index);
-    }
-    let spread = |list: &[usize], index: usize| {
-        let at = list.iter().position(|i| *i == index).unwrap_or(0) as f32;
-        (at - (list.len() as f32 - 1.0) / 2.0) * 14.0
-    };
-    // Lanes: per row, intervals already taken on each lane.
-    let mut taken: Vec<Vec<Vec<(f32, f32)>>> = vec![Vec::new(); rows];
-    let mut free_lane = |spans: &[(usize, f32, f32)]| {
-        let mut lane = 0;
-        loop {
-            let fits = spans.iter().all(|(row, a, b)| {
-                taken[*row]
-                    .get(lane)
-                    .is_none_or(|list| list.iter().all(|(c, d)| *b + 8.0 < *c || *d + 8.0 < *a))
-            });
-            if fits {
-                for (row, a, b) in spans {
-                    while taken[*row].len() <= lane {
-                        taken[*row].push(Vec::new());
-                    }
-                    taken[*row][lane].push((*a, *b));
-                }
-                return lane;
-            }
-            lane += 1;
-        }
-    };
-    let mut result = Vec::new();
-    let mut side = 0usize;
-    for (index, edge) in graph.edges.iter().enumerate() {
-        let (Some(source), Some(target)) = (card(&edge.source), card(&edge.target)) else {
-            continue;
-        };
-        let (Some(&rs), Some(&rt)) = (row_of.get(&source.id), row_of.get(&target.id)) else {
-            continue;
-        };
-        let s = source.rect();
-        let t = target.rect();
-        side += 1;
-        let jog = 14.0 + (side % 4) as f32 * 7.0;
-        // Where the wire leaves the source and reaches the rail column.
-        let (s_start, sx) = if clear_above(s, row_top[rs] - RAIL - 40.0) {
-            let x = s.center().x + spread(&outs[edge.source.as_str()], index);
-            (vec![pos2(x, s.top())], x)
-        } else {
-            let x = s.right() + jog;
-            let y = s.top() + 22.0;
-            (vec![pos2(s.right(), y), pos2(x, y)], x)
-        };
-        let (t_end, tx) = if clear_above(t, row_top[rt] - RAIL - 40.0) {
-            let x = t.center().x + spread(&ins[edge.target.as_str()], index);
-            (vec![pos2(x, t.top())], x)
-        } else {
-            let x = t.left() - jog;
-            let y = t.top() + 22.0;
-            (vec![pos2(x, y), pos2(t.left(), y)], x)
-        };
-        let rail_y = |row: usize, lane: usize| row_top[row] - RAIL - lane as f32 * LANE;
-        let mut points = s_start;
-        if rs == rt {
-            let lane = free_lane(&[(rs, sx.min(tx), sx.max(tx))]);
-            let y = rail_y(rs, lane);
-            points.push(pos2(sx, y));
-            points.push(pos2(tx, y));
-        } else {
-            let lane = free_lane(&[(rs, sx, right_edge + 60.0), (rt, tx, right_edge + 60.0)]);
-            let far = right_edge + 30.0 + lane as f32 * LANE;
-            let (ys, yt) = (rail_y(rs, lane), rail_y(rt, lane));
-            points.push(pos2(sx, ys));
-            points.push(pos2(far, ys));
-            points.push(pos2(far, yt));
-            points.push(pos2(tx, yt));
-        }
-        points.extend(t_end);
-        result.push(RailWire {
-            points,
-            branch: edge.branch,
-        });
-    }
-    result
-}
-
-/// Takes the ordering wires off the router when they go on the rail.
-pub fn router_wires(wires: Vec<BoardWire>, plan: Option<&Plan>) -> Vec<BoardWire> {
-    match plan {
-        Some(plan) if plan.rail => wires.into_iter().filter(|wire| !wire.control).collect(),
-        _ => wires,
-    }
-}
-
-pub fn paint_rails(painter: &Painter, plan: Option<&Plan>, camera: Camera) {
-    let Some(plan) = plan else { return };
-    for (index, wire) in plan.rails.iter().enumerate() {
-        let point = |p: Pos2| apiforge_layout::Point::new(p.x, p.y);
-        let pieces = wire
-            .points
-            .windows(2)
-            .map(|pair| apiforge_layout::Piece::Line {
-                from: point(pair[0]),
-                to: point(pair[1]),
+    let aggregates = if flags.collapsed {
+        checks_of(full)
+            .into_iter()
+            .map(|(subject, checks)| {
+                let text = if checks.len() == 1 {
+                    "✓ 1 check".to_owned()
+                } else {
+                    format!("✓ {} checks", checks.len())
+                };
+                (subject, text)
             })
-            .collect();
-        let routed = Routed {
-            id: format!("lay00-rail-{index}"),
-            points: wire.points.clone(),
-            pieces,
-            bridges: Vec::new(),
-            control: true,
-            branch: wire.branch,
-            routed: true,
-        };
-        paint::routed_wire(painter, &routed, camera, false);
-    }
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    // The badges stick out of the cards' top-left corners a little.
+    let extra = cards
+        .iter()
+        .map(|card| Rect::from_center_size(card.origin, vec2(16.0, 16.0)))
+        .reduce(Rect::union);
+    EXTRA.with(|cell| *cell.borrow_mut() = extra);
+    let rows = cards
+        .iter()
+        .filter(|card| row_of.get(&card.id).is_some_and(|row| *row <= 1))
+        .map(Card::rect)
+        .reduce(Rect::union);
+    ROWS.with(|cell| *cell.borrow_mut() = rows);
+    Some(Plan { badges, aggregates })
 }
 
-/// The sequence badge: a circle with the number at the card's top-left corner.
-pub fn paint_badge(painter: &Painter, plan: Option<&Plan>, card: &Card, camera: Camera) {
-    let Some((number, branch)) = plan.and_then(|plan| plan.badges.get(&card.id)) else {
+/// The sequence badge and the checks' aggregate of one card.
+pub fn paint_extras(painter: &Painter, plan: Option<&Plan>, card: &Card, camera: Camera) {
+    let Some(plan) = plan else { return };
+    let z = camera.zoom;
+    // Below 30 % the card's name is all there is.
+    if z < 0.3 {
+        return;
+    }
+    let rect = camera.rect(card.rect());
+    if let Some(text) = plan.aggregates.get(&card.id) {
+        paint_aggregate(painter, card, rect, text, camera);
+    }
+    let Some((number, branch)) = plan.badges.get(&card.id) else {
         return;
     };
-    let radius = (10.0 * camera.zoom).max(8.0);
-    let center = camera.to_screen(card.origin + vec2(2.0, 2.0));
+    // At most 14 px and a third of the card's height on screen.
+    let diameter = 14.0_f32.min(rect.height() / 3.0);
+    let radius = diameter / 2.0;
+    // Astride the top-left corner, clear of the icon at (16, 16).
+    let center = rect.left_top() + vec2(2.0, 2.0);
     painter.circle(
         center,
         radius,
         theme::ACCENT,
-        Stroke::new(1.5, Color32::WHITE),
+        Stroke::new(1.0, Color32::WHITE),
     );
     painter.text(
         center,
         Align2::CENTER_CENTER,
         number.to_string(),
-        FontId::proportional(radius * if *number >= 10 { 0.95 } else { 1.15 }),
+        FontId::new(
+            diameter * if *number >= 10 { 0.6 } else { 0.7 },
+            theme::bold_family(),
+        ),
         Color32::WHITE,
     );
     if let Some(branch) = branch {
@@ -544,15 +479,49 @@ pub fn paint_badge(painter: &Painter, plan: Option<&Plan>, card: &Card, camera: 
             Branch::True => ("yes", theme::BRANCH_YES),
             Branch::False => ("no", theme::BRANCH_NO),
         };
-        let font = FontId::proportional(radius * 1.0);
-        let at = center + vec2(radius + 3.0, 0.0);
+        let font = FontId::proportional(diameter * 0.7);
         let galley = painter.layout_no_wrap(text.to_owned(), font, Color32::WHITE);
-        let rect = Rect::from_min_size(
-            at - vec2(0.0, galley.size().y / 2.0 + 1.0),
-            galley.size() + vec2(8.0, 2.0),
+        let at = center + vec2(radius + 3.0, 0.0);
+        let pill = Rect::from_min_size(
+            at - vec2(0.0, diameter / 2.0),
+            vec2(galley.size().x + 8.0, diameter),
         );
-        painter.rect_filled(rect, rect.height() / 2.0, color);
-        painter.galley(rect.min + vec2(4.0, 1.0), galley, Color32::WHITE);
+        painter.rect_filled(pill, pill.height() / 2.0, color);
+        painter.galley(pill.center() - galley.size() / 2.0, galley, Color32::WHITE);
+    }
+}
+
+/// The aggregate: right-aligned in the footer at Compact, a pill under the
+/// name at Overview.
+fn paint_aggregate(painter: &Painter, card: &Card, rect: Rect, text: &str, camera: Camera) {
+    let z = camera.zoom;
+    let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
+    let color = theme::SUCCESS;
+    let size = (11.0 * z).max(9.0);
+    let galley = clipped.layout_no_wrap(text.to_owned(), FontId::proportional(size), color);
+    match CardDetail::at_zoom(z) {
+        CardDetail::Overview => {
+            let name = (16.0 * z).max(7.5);
+            let center = rect.center() + vec2(0.0, name * 0.9 + size);
+            let pill =
+                Rect::from_center_size(center, galley.size() + vec2(size * 1.1, size * 0.45));
+            clipped.rect(
+                pill,
+                pill.height() / 2.0,
+                color.gamma_multiply(0.10),
+                Stroke::new(0.75, color.gamma_multiply(0.45)),
+                StrokeKind::Inside,
+            );
+            clipped.galley(pill.center() - galley.size() / 2.0, galley, color);
+        }
+        CardDetail::Compact | CardDetail::Full => {
+            let footer = camera.rect(card.footer());
+            let at = pos2(
+                footer.right() - 16.0 * z - galley.size().x,
+                footer.center().y - galley.size().y / 2.0,
+            );
+            clipped.galley(at, galley, color);
+        }
     }
 }
 
@@ -560,7 +529,7 @@ pub fn paint_badge(painter: &Painter, plan: Option<&Plan>, card: &Card, camera: 
 mod review {
     use super::*;
     use crate::folder::Mode;
-    use crate::testing::{MINIMUM, WIDE, capture, folder_harness_in, settle, shop_project};
+    use crate::testing::{WIDE, capture, folder_harness_in, settle, shop_project};
     use egui_kittest::kittest::Queryable;
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
@@ -572,8 +541,12 @@ mod review {
         std::fs::read_to_string(path).unwrap()
     }
 
+    /// The board's size and fit, appended next to the build, not the captures.
     fn note(line: &str) {
-        let path = crate::testing::capture_dir().join("../lay00-metrics.txt");
+        let Some(target) = std::env::var_os("CARGO_TARGET_DIR") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(target).join("lay00r2-metrics.txt");
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -583,96 +556,84 @@ mod review {
         writeln!(file, "{line}").unwrap();
     }
 
-    /// One view: the scenario in the shop project, the shape on, fitted.
-    fn view(
-        shape: Shape,
-        letter: &str,
-        scenario: &str,
-        size: eframe::egui::Vec2,
-        crop: Option<&str>,
-    ) {
-        let wide = size == WIDE;
-        set(Flags {
+    /// One shape and state on one scenario at 1600 × 1000: measured at fit,
+    /// captured on rows 1–2 at the given zooms, and at fit when asked.
+    fn view(shape: Shape, scenario: &str, collapsed: bool, zooms: &[u32], fit: bool) {
+        let letter = match shape {
+            Shape::B => "b",
+            Shape::D => "d",
+        };
+        let state = if collapsed { "collapsed" } else { "expanded" };
+        let flags = Flags {
             shape: Some(shape),
-            wide,
-            focus: None,
-        });
+            wide: true,
+            collapsed,
+            view: None,
+        };
+        set(flags.clone());
         let project = shop_project();
         // The scenario replaces the demo's, so it is the registered file the
         // window opens.
         std::fs::write(project.path().join(SCENARIO), fixture(scenario)).unwrap();
-        let mut harness = folder_harness_in(project.path(), size, Mode::Diagram);
+        let mut harness = folder_harness_in(project.path(), WIDE, Mode::Diagram);
         harness
             .state_mut()
             .as_mut()
             .unwrap()
             .review_open(SCENARIO, None);
         settle(&mut harness);
-        if let Some(fit) = harness.query_by_label("Fit the view") {
-            fit.click();
+        if let Some(button) = harness.query_by_label("Fit the view") {
+            button.click();
             settle(&mut harness);
         }
-        let suffix = if wide { "1600x1000" } else { "960x540" };
         let metrics = metrics();
         note(&format!(
-            "{letter} {scenario} {suffix}: board {:.0} x {:.0} px, fit zoom {:.3}",
-            metrics.width, metrics.height, metrics.zoom
+            "{letter} {scenario} {state}: board {:.0} x {:.0} px, fit zoom {:.3}, hidden {} cards {} wires",
+            metrics.width, metrics.height, metrics.zoom, metrics.hidden_cards, metrics.hidden_wires
         ));
-        capture(
-            &mut harness,
-            &format!("lay00-{letter}-{scenario}-{suffix}"),
-            None,
-        );
-        if let Some(check) = crop {
+        let name = format!("lay00r2-{letter}-{scenario}-{state}");
+        if fit {
+            capture(&mut harness, &format!("{name}-fit"), None);
+        }
+        for zoom in zooms {
             set(Flags {
-                shape: Some(shape),
-                wide,
-                focus: Some(check.to_owned()),
+                view: Some(*zoom as f32 / 100.0),
+                ..flags.clone()
             });
             harness.step();
             settle(&mut harness);
-            let board = harness.get_by_label("Diagram board").rect();
-            let center = board.center();
-            let region = Rect::from_center_size(center, vec2(1300.0, 760.0)).intersect(board);
-            capture(
-                &mut harness,
-                &format!("lay00-{letter}-{scenario}-crop"),
-                Some(region),
-            );
+            capture(&mut harness, &format!("{name}-{zoom}"), None);
         }
         set(Flags::default());
     }
 
-    macro_rules! views {
-        ($($name:ident: $shape:expr, $letter:literal, $scenario:literal, $size:expr, $crop:expr;)*) => {
-            $(
-                #[test]
-                #[ignore = "design review view (LAY-00 mock-up); run with tools/gui/review.sh"]
-                fn $name() {
-                    view($shape, $letter, $scenario, $size, $crop);
-                }
-            )*
-        };
+    #[test]
+    #[ignore = "design-review view"]
+    fn review_lay00r2_d_shop_30_expanded() {
+        view(Shape::D, "shop-30", false, &[60, 35], false);
     }
 
-    views! {
-        review_lay00_a_order_flow_1600x1000: Shape::A, "a", "order-flow", WIDE, None;
-        review_lay00_a_order_flow_960x540: Shape::A, "a", "order-flow", MINIMUM, None;
-        review_lay00_a_shop_30_1600x1000: Shape::A, "a", "shop-30", WIDE, Some("cart_total");
-        review_lay00_a_shop_30_960x540: Shape::A, "a", "shop-30", MINIMUM, None;
-        review_lay00_b_order_flow_1600x1000: Shape::B, "b", "order-flow", WIDE, None;
-        review_lay00_b_order_flow_960x540: Shape::B, "b", "order-flow", MINIMUM, None;
-        review_lay00_b_shop_30_1600x1000: Shape::B, "b", "shop-30", WIDE, Some("cart_total");
-        review_lay00_b_shop_30_960x540: Shape::B, "b", "shop-30", MINIMUM, None;
-        review_lay00_b_shop_50_1600x1000: Shape::B, "b", "shop-50", WIDE, None;
-        review_lay00_c_order_flow_1600x1000: Shape::C, "c", "order-flow", WIDE, None;
-        review_lay00_c_order_flow_960x540: Shape::C, "c", "order-flow", MINIMUM, None;
-        review_lay00_c_shop_30_1600x1000: Shape::C, "c", "shop-30", WIDE, Some("cart_total");
-        review_lay00_c_shop_30_960x540: Shape::C, "c", "shop-30", MINIMUM, None;
-        review_lay00_d_order_flow_1600x1000: Shape::D, "d", "order-flow", WIDE, None;
-        review_lay00_d_order_flow_960x540: Shape::D, "d", "order-flow", MINIMUM, None;
-        review_lay00_d_shop_30_1600x1000: Shape::D, "d", "shop-30", WIDE, Some("cart_total");
-        review_lay00_d_shop_30_960x540: Shape::D, "d", "shop-30", MINIMUM, None;
-        review_lay00_d_shop_50_1600x1000: Shape::D, "d", "shop-50", WIDE, None;
+    #[test]
+    #[ignore = "design-review view"]
+    fn review_lay00r2_d_shop_30_collapsed() {
+        view(Shape::D, "shop-30", true, &[60, 35], true);
+    }
+
+    #[test]
+    #[ignore = "design-review view"]
+    fn review_lay00r2_b_shop_30_expanded() {
+        view(Shape::B, "shop-30", false, &[60, 35], false);
+    }
+
+    #[test]
+    #[ignore = "design-review view"]
+    fn review_lay00r2_b_shop_30_collapsed() {
+        view(Shape::B, "shop-30", true, &[60, 35], true);
+    }
+
+    #[test]
+    #[ignore = "design-review view"]
+    fn review_lay00r2_d_order_flow_collapsed() {
+        view(Shape::D, "order-flow", true, &[60], false);
     }
 }
