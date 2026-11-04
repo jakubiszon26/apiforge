@@ -24,6 +24,7 @@ mod handover;
 mod handover_prompt;
 mod holder;
 mod inputs;
+mod lay00r3_inspector;
 mod navigation;
 mod opening;
 mod placement;

@@ -288,7 +288,13 @@ pub struct Card {
     /// Control outputs: pseudo-port and label.
     pub controls: Vec<(&'static str, &'static str)>,
     pub origin: Pos2,
+    /// LAY-00 round-3 mock-up: a satellite drawn as a header and one row.
+    pub short: bool,
 }
+
+/// LAY-00 round-3 mock-up: the height of a short satellite and its one row.
+pub const SHORT_HEIGHT: f32 = 70.0;
+pub const SHORT_ROW: f32 = 40.0;
 
 impl Card {
     pub fn build(node: &Node, reference_graph: &Graph, project: &Project) -> Self {
@@ -379,6 +385,7 @@ impl Card {
             outputs,
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
+            short: false,
         }
     }
 
@@ -400,6 +407,9 @@ impl Card {
     }
 
     pub fn height(&self) -> f32 {
+        if self.short {
+            return SHORT_HEIGHT;
+        }
         self.footer_top() + FOOTER + CONTROL
     }
 
@@ -434,6 +444,12 @@ impl Card {
     }
 
     pub fn footer(&self) -> Rect {
+        if self.short {
+            return Rect::from_min_size(
+                self.origin + vec2(0.0, SHORT_ROW),
+                vec2(WIDTH, SHORT_HEIGHT - SHORT_ROW),
+            );
+        }
         let top = self.footer_top();
         Rect::from_min_size(self.origin + vec2(0.0, top), vec2(WIDTH, FOOTER))
     }
@@ -465,6 +481,13 @@ impl Card {
         if name == ORDER_PORT {
             return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
         }
+        if self.short {
+            return self
+                .inputs
+                .iter()
+                .any(|row| row.name == name)
+                .then(|| self.origin + vec2(0.0, (SHORT_ROW + SHORT_HEIGHT) / 2.0));
+        }
         let index = self
             .inputs
             .iter()
@@ -482,6 +505,16 @@ impl Card {
 
     /// Anchor of a data output or a control pseudo-port.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if self.short {
+            if self.controls.iter().any(|(port, _)| *port == name) {
+                return Some(self.origin + vec2(WIDTH / 2.0, SHORT_HEIGHT));
+            }
+            return self
+                .outputs
+                .iter()
+                .any(|row| row.name == name)
+                .then(|| self.origin + vec2(WIDTH, (SHORT_ROW + SHORT_HEIGHT) / 2.0));
+        }
         if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
             let button = self.control_button(index);
             return Some(pos2(button.center().x, self.rect().bottom()));

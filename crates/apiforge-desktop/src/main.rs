@@ -45,6 +45,7 @@ mod files;
 mod folder;
 mod icons;
 mod inspector;
+mod mock_lay00;
 mod labels;
 mod library;
 mod navigator;

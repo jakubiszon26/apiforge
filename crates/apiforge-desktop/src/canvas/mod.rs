@@ -4,6 +4,7 @@
 //! them through the editor, which validates every change. Positions being dragged,
 //! wires being drawn and the camera are view state only.
 
+pub(crate) mod lay00r3;
 mod layout;
 mod menu;
 mod paint;
@@ -456,6 +457,8 @@ impl Canvas {
             .iter()
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
+        // LAY-00 round-3 mock-up: shape D and every proposal on this board.
+        let mock3 = lay00r3::frame(input.graph, input.selection, &mut cards);
 
         let focus_changed = self
             .last_focus
@@ -495,6 +498,28 @@ impl Canvas {
         self.last_size = viewport.size();
         self.last_focus = Some(overlays.focus);
         self.last_viewport = viewport;
+        if let Some(mock3) = &mock3 {
+            let local = overlays.focus.translate(-viewport.min.to_vec2());
+            match mock3.placed(local, &cards) {
+                Some((zoom, pan)) => {
+                    self.camera.zoom = zoom;
+                    self.camera.pan = pan;
+                }
+                None => {
+                    if let Some(bounds) = shapes(&cards, &chips).bounds() {
+                        let bounds = mock3.widen(bounds);
+                        let zoom = lay00r3::fitted(
+                            bounds,
+                            (local.width() / bounds.width()).min(local.height() / bounds.height()),
+                        );
+                        self.camera.zoom = zoom;
+                        self.camera.pan = local.center().to_vec2() - bounds.center().to_vec2() * zoom;
+                    }
+                }
+            }
+            self.camera_moved_by_user = true;
+            self.fit_pending = false;
+        }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
@@ -535,6 +560,14 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let board_wires = board_wires(input.graph, &cards, &chips);
+        let board_wires = match &mock3 {
+            Some(mock3) => {
+                lay00r3::paint_bands(&board_painter, mock3, camera);
+                mock3.wires(board_wires, &cards)
+            }
+            None => board_wires,
+        };
+        let mut mock3_routed: Vec<routing::Routed> = Vec::new();
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -562,14 +595,27 @@ impl Canvas {
                 style: self.wire_style,
                 bridges: self.bridges,
             });
+            if let Some(mock3) = &mock3 {
+                lay00r3::measure_clearance(routed, &board_wires, &cards);
+                mock3_routed = routed.to_vec();
+                let _ = mock3;
+            }
             for wire in routed {
-                paint::routed_wire(
+                let (alpha, width) = mock3
+                    .as_ref()
+                    .map_or((1.0, None), |mock3| mock3.wire_style(&wire.id));
+                paint::routed_wire_styled(
                     &board_painter,
                     wire,
                     camera,
                     selected_wires.contains(&wire.id) || related_wires.contains(&wire.id),
+                    alpha,
+                    width,
                 );
                 drawn.push((wire.id.clone(), wire.points.clone()));
+            }
+            if let Some(mock3) = &mock3 {
+                lay00r3::paint_band_wires(&board_painter, mock3, &cards, camera);
             }
         }
 
@@ -653,14 +699,30 @@ impl Canvas {
             let step = input
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
-            paint::card(
-                &board_painter,
-                card,
-                camera,
-                selection.contains(card.id.as_str()),
-                related_blocks.contains(&card.id),
-                step,
-            );
+            crate::mock_lay00::record(&card.id, rect);
+            if let Some(mock3) = &mock3 {
+                let steps = crate::mock_lay00::steps();
+                lay00r3::paint_card(
+                    &board_painter,
+                    card,
+                    camera,
+                    mock3,
+                    steps.as_deref().or(input.steps),
+                    selection.contains(card.id.as_str()),
+                );
+                if card.short || camera.zoom < INLINE_EDIT_ZOOM {
+                    continue;
+                }
+            } else {
+                paint::card(
+                    &board_painter,
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    related_blocks.contains(&card.id),
+                    step,
+                );
+            }
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
             // controls keep their ids whichever cards are off screen.
@@ -735,6 +797,11 @@ impl Canvas {
             self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
+        if let Some(mock3) = &mock3 {
+            lay00r3::paint_marks(&board_painter, mock3, camera);
+            lay00r3::paint_wire_labels(&board_painter, mock3, &mock3_routed, camera);
+            lay00r3::paint_markers(&board_painter, mock3, &cards, camera, overlays.board);
+        }
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
             &board_ui,

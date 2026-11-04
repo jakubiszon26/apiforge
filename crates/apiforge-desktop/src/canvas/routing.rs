@@ -125,6 +125,7 @@ struct Key {
     wires: Vec<(String, [i32; 4])>,
     style: WireStyle,
     bridges: bool,
+    margin: i32,
 }
 
 /// Rounded coordinates: a sub-pixel difference cannot change a route.
@@ -169,6 +170,7 @@ impl Router {
                 .collect(),
             style: request.style,
             bridges: request.bridges,
+            margin: crate::mock_lay00::routing().margin.round() as i32,
         };
         if request.moving.is_empty() {
             if self.key.as_ref() == Some(&key) {
@@ -288,7 +290,7 @@ fn rectangles(request: &Request<'_>) -> Vec<layout::Rect> {
 fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Routed> {
     let cards = rectangles(request);
     let wires: Vec<layout::Wire> = prepared.iter().map(|wire| wire.wire).collect();
-    let routes = layout::route(&cards, &wires, &layout::Routing::default());
+    let routes = layout::route(&cards, &wires, &crate::mock_lay00::routing());
     let _ = key;
     prepared
         .iter()
@@ -323,7 +325,7 @@ fn reroute_moving(request: &Request<'_>, prepared: &[Prepared], routes: &mut [Ro
             );
             continue;
         }
-        let routed = layout::route(&cards, &[wire.wire], &layout::Routing::default());
+        let routed = layout::route(&cards, &[wire.wire], &crate::mock_lay00::routing());
         routes[index] = match routed.into_iter().next() {
             Some(route) => finish(request, &cards, wire, route),
             None => Routed::direct(
@@ -359,7 +361,7 @@ fn finish(
         .iter()
         .enumerate()
         .filter(|(index, _)| *index != wire.wire.from.block && *index != wire.wire.to.block)
-        .map(|(_, card)| card.inflate(layout::Routing::default().margin))
+        .map(|(_, card)| card.inflate(crate::mock_lay00::routing().margin))
         .collect();
     let radius = match request.style {
         WireStyle::Orthogonal => 0.0,

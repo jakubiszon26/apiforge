@@ -131,13 +131,25 @@ pub fn wire(
 /// A bridge is a gap in the line with a small semicircle over it, so a crossing
 /// reads as one wire passing above the other instead of a junction.
 pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected: bool) {
-    let mut color = wire_color(selected, routed.control, routed.branch);
+    routed_wire_styled(painter, routed, camera, selected, 1.0, None);
+}
+
+/// LAY-00 mock-up: a wire dimmed or thicker.
+pub fn routed_wire_styled(
+    painter: &Painter,
+    routed: &Routed,
+    camera: Camera,
+    selected: bool,
+    alpha: f32,
+    override_width: Option<f32>,
+) {
+    let mut color = wire_color(selected, routed.control, routed.branch).gamma_multiply(alpha);
     if !routed.routed {
         // A wire drawn directly during a drag is lighter, so the board shows that
         // the route is provisional until the next idle frame.
         color = color.gamma_multiply(0.55);
     }
-    let width = if selected { 2.4 } else { 1.6 };
+    let width = override_width.unwrap_or(if selected { 2.4 } else { 1.6 });
     let zoom = camera.zoom;
     let line: Vec<Pos2> = if routed.pieces.is_empty() {
         // A direct curve: the wire has no route, or the board is mid-drag.
@@ -295,7 +307,7 @@ fn split_at_bridges(line: &[Pos2], hops: &[Pos2], radius: f32) -> Vec<Run> {
 }
 
 /// Draws a polyline as dashes, which is how an ordering wire is shown.
-fn dashes(painter: &Painter, line: &[Pos2], stroke: Stroke, zoom: f32) {
+pub(super) fn dashes(painter: &Painter, line: &[Pos2], stroke: Stroke, zoom: f32) {
     let on = 7.0 * zoom.max(0.5);
     let off = 5.0 * zoom.max(0.5);
     let mut travelled = 0.0;

@@ -1,0 +1,43 @@
+scenario "Order flow" {
+  description "A longer scenario for the layout analysis."
+  begin = start
+  @after(begin)
+  login = POST "/login" {
+    body { user: "demo", password: "demo" }
+    sample 200 { token: "t-1" }
+  }
+  logged_in = assert login.status == 200
+  products = GET "/products" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    query { limit: 10 }
+    sample 200 { items: [{ id: "p-1", price: 12.5 }, { id: "p-2", price: 3.0 }] }
+  }
+  var first = products.body.items[0]
+  var second = products.body.items[1]
+  total = first.price * 2 + second.price
+  cart = POST "/cart" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    body { items: [{ productId: first.id, quantity: 2 }, { productId: second.id, quantity: 1 }] }
+    sample 201 { id: "c-1", total: 28.0 }
+  }
+  cart_total = assert cart.body.total ~= total within 0.01
+  @after(cart_total)
+  order = POST "/orders" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    body { cartId: cart.body.id, total: total }
+    sample 201 { id: "o-1", status: "created" }
+  }
+  created = if order.status == 201 {
+    receipt = GET "/orders/{{order.body.id}}" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 200 { id: "o-1", total: 28.0 }
+    }
+    receipt_total = assert receipt.body.total == cart.body.total
+  } else {
+    failed = assert false == true
+  }
+  cleanup {
+    removed = DELETE "/orders/{{order.body.id}}"
+    gone = assert removed.status == 204
+  }
+}
