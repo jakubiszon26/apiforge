@@ -318,6 +318,30 @@ At 960 × 540 every shape fits between 0.05 and 0.13. What the captures say:
   with the Inspector open marks a saved document as changed and stales its
   results.
 
+### 4.3 Round 2: D and B with checks collapsed, real routing
+
+Round 1 compared the shapes at Fit view with hand-drawn rails — not what a
+person looks at. Round 2 (`mock/lay-00-shapes-2` at `f103710`,
+`docs/qa/2026-11-04/LAY-00/lay00r2-*`, posted on #37) renders D and B with
+checks collapsed, every wire by the real router, badges capped at 14 px,
+the camera on rows 1–2 at 60 % and 35 %.
+
+| shop-30 | board w × h | fit zoom |
+| --- | --- | --- |
+| D expanded | 1792 × 4100 | 0.19 |
+| D collapsed | 1792 × 2736 | 0.28 |
+| B expanded | 1416 × 5363 | 0.14 |
+| B collapsed | 1416 × 3280 | 0.23 |
+
+Collapsing removes 11 check cards and 24 wires from shop-30 and makes the
+board a third shorter. At 35 % D's spine reads in order with an aggregate
+on every request; B's order zigzags between rows (1, 4, 2, 30, 5 …). The
+router's trunk above row 2 (about eight overlapping wires, about eight
+crossings) and the bottom-to-top ordering wires are what LAY-03/04/05 fix
+on D's geometry. Rule learnt for LAY-11: an ordering dependency on a hidden
+check (`@after(cart_total)` on `order`) is drawn from the check's subject
+while collapsed, never dropped.
+
 ## 5. Owner decisions
 
 Asked 2026-11-04; the recommended option is first.
@@ -417,7 +441,7 @@ them and names the test.
 | LAY-02 | Auto-layout on open (Q10); chips placed beside their first reader and moved by Tidy up; `place` with every block fresh gives layers | S–M · 15 · default | `order-flow.afs` opens in layers; Fit view within 10 % of the cards' box |
 | LAY-07 | Sequence badges (Q2); running step's badge and border; equality with Run results row order | S · 15 · visible UI | the badge of step *k* equals its row; a running simulation shows the running step within one frame of its start |
 | LAY-09 | Overview and Compact contents (P3); failed and blocked borders at every zoom | S · 15 · visible UI | a failed card is red at 0.35; names never anonymous at 0.25 |
-| LAY-11 | The *Checks* toggle, aggregates, Inspector list, *Expand checks here*, navigation, Tidy up with hidden checks, the preference (Q4–Q6) | M · 30 · visible UI, default | a failed check is visible collapsed; toggling moves no card and no camera; two-subject check counted per Q6; Run results row of a collapsed check selects its subject |
+| LAY-11 | The *Checks* toggle, aggregates, Inspector list, *Expand checks here*, navigation, Tidy up with hidden checks, the preference (Q4–Q6) | M · 30 · visible UI, default | a failed check is visible collapsed; toggling moves no card and no camera; two-subject check counted per Q6; an `@after` on a hidden check is drawn from its subject; Run results row of a collapsed check selects its subject |
 | LAY-10 | Focus on selection (Q9) | S · 15 · visible UI, default | selecting `cart` rings login, first, second, cart_total, order; Esc restores |
 | LAY-06 | The chosen shape in Tidy up (Q1, Q3); ADR 0006 amended | M · 30 · default | 30-step board ≤ 1800 px wide at 1600 × 1000; fit zoom ≥ 0.45 for 14 steps; no order wire through a gap |
 | LAY-13 | Branch bands (Q11) | M · 20 · visible UI | one wire per branch; a band contains exactly the branch's steps |
