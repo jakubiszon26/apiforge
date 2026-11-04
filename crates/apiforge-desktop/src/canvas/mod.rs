@@ -504,7 +504,12 @@ impl Canvas {
                 Some((zoom, pan)) => {
                     self.camera.zoom = zoom;
                     self.camera.pan = pan;
+                    if mock3.flags.free_camera {
+                        // Placed once; from now on the camera is the person's.
+                        crate::mock_lay00::update(|f| f.view = None);
+                    }
                 }
+                None if mock3.flags.free_camera => {}
                 None => {
                     if let Some(bounds) = shapes(&cards, &chips).bounds() {
                         let bounds = mock3.widen(bounds);
@@ -538,6 +543,7 @@ impl Canvas {
             self.camera_moved_by_user = true;
         }
         self.handle_camera(ui, &background, viewport);
+        crate::mock_lay00::set_camera(self.camera.zoom, self.camera.pan);
         let origin_offset = viewport.min.to_vec2();
         // Cards are laid out in world space; the camera maps them into the viewport.
         let camera = Camera {
@@ -700,6 +706,27 @@ impl Canvas {
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
             crate::mock_lay00::record(&card.id, rect);
+            // Round 4: the checks line opens the step's checks in the
+            // Inspector without changing the selection.
+            if mock3.is_some()
+                && let Some(world) = lay00r3::checks_rect(card)
+            {
+                let line = camera.rect(world).intersect(overlays.board);
+                if line.is_positive() {
+                    let response =
+                        board_ui.interact(line, board_ui.id().with(("lay00-checks", &card.id)), Sense::click());
+                    let label = format!("Checks of {}", card.name);
+                    response.widget_info(move || {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label)
+                    });
+                    if response.clicked() {
+                        clicked_card = true;
+                        let id = card.id.clone();
+                        crate::mock_lay00::update(|f| f.inspector = Some(id));
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
             if let Some(mock3) = &mock3 {
                 let steps = crate::mock_lay00::steps();
                 lay00r3::paint_card(
@@ -710,7 +737,7 @@ impl Canvas {
                     steps.as_deref().or(input.steps),
                     selection.contains(card.id.as_str()),
                 );
-                if card.short || camera.zoom < INLINE_EDIT_ZOOM {
+                if card.short || card.dense.is_some() || camera.zoom < INLINE_EDIT_ZOOM {
                     continue;
                 }
             } else {
@@ -800,7 +827,63 @@ impl Canvas {
         if let Some(mock3) = &mock3 {
             lay00r3::paint_marks(&board_painter, mock3, camera);
             lay00r3::paint_wire_labels(&board_painter, mock3, &mock3_routed, camera);
-            lay00r3::paint_markers(&board_painter, mock3, &cards, camera, overlays.board);
+            let markers = lay00r3::paint_markers(&board_painter, mock3, &cards, camera, overlays.board);
+            for marker in markers {
+                let response = board_ui.interact(
+                    marker.rect,
+                    board_ui.id().with(("lay00-marker", &marker.label)),
+                    Sense::click(),
+                );
+                let label = marker.label.clone();
+                response.widget_info(move || {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label)
+                });
+                if !response.clicked() {
+                    continue;
+                }
+                clicked_card = true;
+                match marker.action {
+                    lay00r3::MarkerAction::Jump(target) => {
+                        if let Some(card) = cards.iter().find(|card| card.id == target) {
+                            let from = input.selection.first().cloned().unwrap_or_default();
+                            let (zoom, pan) = (self.camera.zoom, self.camera.pan);
+                            crate::mock_lay00::update_walk(|walk| {
+                                walk.back = Some((from.clone(), zoom, pan));
+                                walk.app_moves += 1;
+                            });
+                            crate::mock_lay00::update(|f| f.jumped_from = Some(from));
+                            // Same zoom; the card centred, or its header near
+                            // the top when it is taller than the board.
+                            let focus = overlays.focus.translate(-viewport.min.to_vec2());
+                            let world = card.rect();
+                            self.camera.pan = if world.height() * zoom + 96.0 < focus.height() {
+                                focus.center().to_vec2() - world.center().to_vec2() * zoom
+                            } else {
+                                vec2(
+                                    focus.center().x - world.center().x * zoom,
+                                    focus.top() + 72.0 - world.top() * zoom,
+                                )
+                            };
+                        }
+                    }
+                    lay00r3::MarkerAction::Back => {
+                        if let Some((_, zoom, pan)) = crate::mock_lay00::walk().back {
+                            self.camera.zoom = zoom;
+                            self.camera.pan = pan;
+                        }
+                        crate::mock_lay00::update_walk(|walk| {
+                            walk.back = None;
+                            walk.app_moves += 1;
+                        });
+                        crate::mock_lay00::update(|f| {
+                            f.jumped_from = None;
+                            f.inspector = None;
+                        });
+                    }
+                    lay00r3::MarkerAction::None => {}
+                }
+                ui.ctx().request_repaint();
+            }
         }
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(

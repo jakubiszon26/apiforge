@@ -9,7 +9,9 @@
 #![allow(dead_code)]
 
 use super::Camera;
-use super::layout::{Card, CardDetail, RowValue, SHORT_ROW, WIDTH};
+use super::layout::{
+    Card, CardDetail, DENSE_HEADER, DENSE_ROW, Dense, DenseRole, RowValue, SHORT_ROW, WIDTH,
+};
 use super::routing::{BoardWire, Routed, Start};
 use crate::mock_lay00::{self as mock, Anchor, Flags};
 use crate::theme;
@@ -59,6 +61,12 @@ thread_local! {
     static EMPTY: RefCell<HashMap<String, (NodeKind, f32, f32)>> = RefCell::new(HashMap::new());
     static METRICS: RefCell<Metrics> = RefCell::new(Metrics::default());
     static SPINE: RefCell<Vec<(String, usize, usize)>> = const { RefCell::new(Vec::new()) };
+    static EXPAND: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// How far the expanded stack reached past its row, in world px.
+pub fn expand_delta() -> f32 {
+    EXPAND.with(std::cell::Cell::get)
 }
 
 pub fn metrics() -> Metrics {
@@ -126,6 +134,22 @@ pub fn gates(graph: &Graph) -> HashSet<String> {
         .filter(|node| node.kind == NodeKind::Condition)
         .map(|node| node.id.clone())
         .collect()
+}
+
+/// Gates whose value a step other than a check reads: they stay visible.
+pub fn read_gates(graph: &Graph) -> HashSet<String> {
+    let gates = gates(graph);
+    let mut result = HashSet::new();
+    for node in graph.nodes.iter().filter(|node| !is_check(node.kind)) {
+        for binding in node.inputs.values() {
+            for reference in binding.references() {
+                if gates.contains(reference.node_id) {
+                    result.insert(reference.node_id.to_owned());
+                }
+            }
+        }
+    }
+    result
 }
 
 /// The engine's static order: ready steps in document order.
@@ -315,6 +339,8 @@ pub struct Frame {
     pub rows: Vec<Rect>,
     /// Input rows of the cards, for input tracing.
     pub row_rects: HashMap<(String, String), Rect>,
+    /// Data wires drawn: source, its port, target, its input.
+    pub links: Vec<(String, String, String, String)>,
 }
 
 /// Turns the main board into the round-3 board, or `None` when the switch is
@@ -324,11 +350,29 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
     if !flags.on || !graph.nodes.iter().any(|node| node.kind == NodeKind::Start) {
         return None;
     }
-    let hidden = if flags.collapsed {
+    let mut hidden = if flags.collapsed {
         folded(graph)
     } else {
         HashSet::new()
     };
+    if flags.gates_visible {
+        for gate in read_gates(graph) {
+            hidden.remove(&gate);
+        }
+    }
+    // *Expand checks here*: the step's folded checks are drawn, hung under it
+    // after the placement, which does not see them.
+    let deferred: Vec<String> = flags
+        .expand_here
+        .as_ref()
+        .and_then(|id| checks_of(graph).get(id).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| hidden.contains(id))
+        .collect();
+    for id in &deferred {
+        hidden.remove(id);
+    }
     cards.retain(|card| !hidden.contains(&card.id));
     let all_wires = wires(graph);
     let hidden_wires = all_wires
@@ -363,11 +407,74 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
         card.short = !on_spine(card.kind);
     }
 
+    // Ports in use: wires whose both ends are drawn.
+    let mut used_inputs = HashSet::new();
+    let mut used_outputs = HashSet::new();
+    let mut links = Vec::new();
+    for wire in &all_wires {
+        if wire.kind == WireKind::Data
+            && !hidden.contains(&wire.source)
+            && !hidden.contains(&wire.target)
+        {
+            if let Some(port) = &wire.source_port {
+                used_outputs.insert((wire.source.clone(), port.clone()));
+            }
+            if let Some(input) = &wire.target_input {
+                used_inputs.insert((wire.target.clone(), input.clone()));
+            }
+            links.push((
+                wire.source.clone(),
+                wire.source_port.clone().unwrap_or_default(),
+                wire.target.clone(),
+                wire.target_input.clone().unwrap_or_default(),
+            ));
+        }
+    }
+
+    // Round 4: compact cards, their box from the rows they show.
+    if flags.dense {
+        let all_checks = checks_of(graph);
+        for card in cards.iter_mut() {
+            if !matches!(card.kind, NodeKind::Request | NodeKind::Component) {
+                continue;
+            }
+            let node = graph.nodes.iter().find(|node| node.id == card.id);
+            let mut roles = Vec::new();
+            if card.subtitle.is_some() {
+                roles.push(DenseRole::Subtitle);
+            }
+            for (index, row) in card.inputs.iter().enumerate() {
+                let wired = used_inputs.contains(&(card.id.clone(), row.name.clone()));
+                let configured = row.name != "url"
+                    && row.path.is_empty()
+                    && node.is_some_and(|node| node.inputs.contains_key(&row.name));
+                if (wired && row.name != "url") || configured {
+                    roles.push(DenseRole::Input(index));
+                }
+            }
+            for (index, row) in card.outputs.iter().enumerate() {
+                if used_outputs.contains(&(card.id.clone(), row.name.clone())) {
+                    roles.push(DenseRole::Output(index));
+                }
+            }
+            roles.push(DenseRole::Result);
+            if all_checks.get(&card.id).is_some_and(|checks| {
+                checks
+                    .iter()
+                    .any(|id| hidden.contains(id) || deferred.contains(id))
+            })
+            {
+                roles.push(DenseRole::Checks);
+            }
+            card.dense = Some(Dense::new(&roles));
+        }
+    }
+
     // Shape D: the spine in engine order, satellites under the latest spine
     // step they read directly, wrapped after `columns`.
     let order: Vec<String> = order_full
         .iter()
-        .filter(|id| !hidden.contains(*id))
+        .filter(|id| !hidden.contains(*id) && !deferred.contains(*id))
         .cloned()
         .collect();
     let spine: Vec<String> = order
@@ -440,6 +547,50 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
         top += bottom + ROW_GAP;
     }
     SPINE.with(|cell| *cell.borrow_mut() = spine_layout);
+    // *Expand checks here*: the checks under their step's stack; the rows
+    // below stay, or shift down by what the stack grew past its row.
+    let mut expand_delta = 0.0;
+    if let Some(target) = flags.expand_here.as_ref().filter(|_| !deferred.is_empty())
+        && let Some(column) = stacks.iter().position(|stack| stack.contains(target))
+    {
+        let row = column / per;
+        let x = cards[index_of[target]].origin.x;
+        let mut y = stacks[column]
+            .iter()
+            .filter_map(|id| index_of.get(id))
+            .map(|index| cards[*index].rect().bottom())
+            .fold(f32::MIN, f32::max)
+            + STACK_GAP;
+        for id in &deferred {
+            let index = index_of[id];
+            cards[index].short = true;
+            cards[index].origin = pos2(x, y);
+            y += cards[index].height() + STACK_GAP;
+        }
+        let bottom = y - STACK_GAP;
+        let row_bottom = row_rects[row].bottom();
+        if bottom > row_bottom {
+            expand_delta = bottom - row_bottom;
+            if flags.expand_shift {
+                for card in cards.iter_mut() {
+                    if !deferred.contains(&card.id) && card.origin.y > row_bottom {
+                        card.origin.y += expand_delta;
+                    }
+                }
+                for rect in row_rects.iter_mut().skip(row + 1) {
+                    *rect = rect.translate(vec2(0.0, expand_delta));
+                }
+                row_rects[row].max.y = bottom;
+            }
+        }
+    }
+    EXPAND.with(|cell| cell.set(expand_delta));
+    mock::set_world(
+        cards
+            .iter()
+            .map(|card| (card.id.clone(), card.rect()))
+            .collect(),
+    );
     let rect_of = |id: &str| index_of.get(id).map(|index| cards[*index].rect());
 
     // Continuation marks: the last spine card of a row names the next step,
@@ -508,7 +659,7 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
                 let count = by_row.len();
                 for (n, (_, rect)) in by_row.into_iter().enumerate() {
                     let mut rect = rect.expand(BAND_MARGIN);
-                    if n == 0 {
+                    if n == 0 || flags.dense {
                         rect.min.y -= 22.0;
                     }
                     // A band that wraps reaches to its continuation marks.
@@ -518,13 +669,30 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
                     if count > 1 && n > 0 {
                         rect.min.x -= MARK_ROOM;
                     }
-                    let header = (n == 0).then(|| {
-                        format!(
-                            "{} → {}",
-                            node.handle,
-                            if branch == Branch::True { "Yes" } else { "No" }
-                        )
-                    });
+                    let word = if branch == Branch::True { "Yes" } else { "No" };
+                    let header = if flags.dense {
+                        // Round 4: every fragment names its branch and state.
+                        let state = mock::steps()
+                            .and_then(|steps| steps.into_iter().find(|s| s.node_id == node.id))
+                            .and_then(|step| step.outputs.get("value").cloned())
+                            .map(|value| {
+                                if value == serde_json::Value::Bool(branch == Branch::True) {
+                                    "active"
+                                } else {
+                                    "skipped"
+                                }
+                            });
+                        let mut text = format!("{} → {word}", node.handle);
+                        if n > 0 {
+                            text.push_str(" · continued");
+                        }
+                        if let Some(state) = state {
+                            text.push_str(&format!(" · {state}"));
+                        }
+                        Some(text)
+                    } else {
+                        (n == 0).then(|| format!("{} → {word}", node.handle))
+                    };
                     if n == 0 {
                         band_entries.push((node.id.clone(), branch, rect));
                     }
@@ -557,19 +725,6 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
         });
     }
 
-    // Ports in use.
-    let mut used_inputs = HashSet::new();
-    let mut used_outputs = HashSet::new();
-    for wire in &all_wires {
-        if wire.kind == WireKind::Data {
-            if let Some(port) = &wire.source_port {
-                used_outputs.insert((wire.source.clone(), port.clone()));
-            }
-            if let Some(input) = &wire.target_input {
-                used_inputs.insert((wire.target.clone(), input.clone()));
-            }
-        }
-    }
 
     // Focus: one selected step; its producers, consumers and checks.
     let focus = match selection {
@@ -624,6 +779,7 @@ pub fn frame(graph: &Graph, selection: &[String], cards: &mut Vec<Card>) -> Opti
         .collect();
     Some(Frame {
         row_rects: input_rows,
+        links,
         graph: graph.clone(),
         hidden,
         seq,
@@ -697,6 +853,16 @@ impl Frame {
                 };
                 let top = focus.top() + 24.0;
                 Some((zoom, vec2(left - rows.left() * zoom, top - rows.top() * zoom)))
+            }
+            Anchor::Top(id) => {
+                let card = cards.iter().find(|card| card.id == id)?.rect();
+                Some((
+                    zoom,
+                    vec2(
+                        focus.center().x - card.center().x * zoom,
+                        focus.top() + 64.0 - card.top() * zoom,
+                    ),
+                ))
             }
             Anchor::Cards(ids) => {
                 let bounds = cards
@@ -815,7 +981,17 @@ impl Frame {
         if !self.flags.collapsed {
             return None;
         }
-        let checks = self.checks_of.get(id)?;
+        let checks: Vec<String> = self
+            .checks_of
+            .get(id)?
+            .iter()
+            .filter(|check| self.hidden.contains(*check))
+            .cloned()
+            .collect();
+        if checks.is_empty() {
+            return None;
+        }
+        let checks = &checks;
         let visible = self.visible_steps(steps);
         Some(Aggregate::of(
             checks,
@@ -823,6 +999,36 @@ impl Frame {
             &self.subjects_of,
             &gates(&self.graph),
         ))
+    }
+
+    /// The compact card's result line, without the checks.
+    pub fn dense_result(&self, card: &Card, steps: Option<&[StepResult]>) -> (String, Color32) {
+        if self.flags.running.as_deref() == Some(card.id.as_str()) {
+            return ("Running…".to_owned(), RUNNING);
+        }
+        let step = self.step(&card.id, steps);
+        let first = match step {
+            None => "Not run".to_owned(),
+            Some(step) => {
+                let code = step
+                    .outputs
+                    .get("status")
+                    .and_then(serde_json::Value::as_u64)
+                    .or_else(|| self.node(&card.id).and_then(|n| n.config.sample_status).map(u64::from));
+                match (step.status, code) {
+                    (StepStatus::Passed, Some(code)) => format!("HTTP {code} · {} ms", step.duration_ms),
+                    (status, _) => status.label().to_owned(),
+                }
+            }
+        };
+        let color = match step.map(|s| s.status) {
+            None => theme::MUTED,
+            Some(StepStatus::Passed) => theme::SUCCESS,
+            Some(StepStatus::Failed | StepStatus::Error) => theme::DANGER,
+            Some(StepStatus::Blocked | StepStatus::Cancelled) => theme::WARNING,
+            Some(StepStatus::Skipped) => theme::MUTED,
+        };
+        (first, color)
     }
 
     /// The result line: `HTTP 201 · 2 checks ✓`.
@@ -993,8 +1199,10 @@ fn short_text(frame: &Frame, card: &Card) -> String {
 }
 
 /// The sequence badge, astride the card's top-left corner.
-fn badge(painter: &Painter, rect: Rect, number: usize, running: bool, z: f32) {
-    let diameter = (22.0 * z).clamp(10.0, 14.0);
+fn badge(painter: &Painter, rect: Rect, number: usize, running: bool, failed: bool, z: f32) {
+    // The number never drops below 9 px and grows with the zoom.
+    let font = (11.0 * z).max(9.0);
+    let diameter = font * if number >= 10 { 1.75 } else { 1.55 };
     let radius = diameter / 2.0;
     let center = rect.left_top() + vec2(3.0, 3.0);
     let fill = if running {
@@ -1017,13 +1225,20 @@ fn badge(painter: &Painter, rect: Rect, number: usize, running: bool, z: f32) {
     painter.circle(center, radius, fill, Stroke::new(1.0, Color32::WHITE));
     let galley = painter.layout_no_wrap(
         number.to_string(),
-        FontId::new(
-            diameter * if number >= 10 { 0.6 } else { 0.7 },
-            theme::bold_family(),
-        ),
+        FontId::new(font, theme::bold_family()),
         Color32::WHITE,
     );
     painter.galley(center - galley.size() / 2.0, galley, Color32::WHITE);
+    if failed {
+        // The failure glyph rides on the badge: a red disc with a cross.
+        let at = center + vec2(radius + font * 0.55, 0.0);
+        let r = font * 0.6;
+        painter.circle(at, r, theme::DANGER, Stroke::new(1.0, Color32::WHITE));
+        let d = r * 0.45;
+        let stroke = Stroke::new(1.6, Color32::WHITE);
+        painter.line_segment([at - vec2(d, d), at + vec2(d, d)], stroke);
+        painter.line_segment([at + vec2(-d, d), at + vec2(d, -d)], stroke);
+    }
 }
 
 /// One card of the round-3 board.
@@ -1045,7 +1260,7 @@ pub fn paint_card(
         || step.is_some_and(|s| matches!(s.status, StepStatus::Failed | StepStatus::Error));
     let radius = (10.0 * z).max(3.0);
 
-    if !card.short && detail == CardDetail::Full {
+    if card.dense.is_none() && !card.short && detail == CardDetail::Full {
         super::paint::card(painter, card, camera, false, false, step);
     } else {
         painter.rect_filled(
@@ -1063,7 +1278,9 @@ pub fn paint_card(
     // The name never drops below 11 px on screen.
     let name_size = (16.0 * z).max(11.0);
 
-    if card.short {
+    if let Some(dense) = &card.dense {
+        paint_dense(painter, card, dense, camera, frame, steps, failed, running);
+    } else if card.short {
         let overview = detail == CardDetail::Overview;
         if overview {
             let band = Rect::from_min_max(rect.left_top(), pos2(rect.right(), rect.top() + (8.0 * z).max(3.0)));
@@ -1080,6 +1297,10 @@ pub fn paint_card(
             Some(_) => ("–", theme::MUTED),
             None => ("", theme::MUTED),
         };
+        let gate = frame.flags.gates_visible && gates(&frame.graph).contains(&card.id);
+        if gate {
+            gate_glyph(&clipped, rect, z);
+        }
         let name_rect = if overview {
             rect.shrink2(vec2(6.0, 2.0))
         } else {
@@ -1277,17 +1498,57 @@ pub fn paint_card(
     if running && !failed {
         painter.rect_stroke(rect, radius, Stroke::new(2.0, RUNNING), StrokeKind::Inside);
     }
-    if let Some(number) = frame.seq.get(&card.id) {
-        badge(painter, rect, *number, running, z);
+    if card.dense.is_none() && frame.flags.stale.contains(&card.id) {
+        // Previous run: washed out, with a hatched band on top.
+        painter.rect_filled(rect, radius, theme::WHITE.gamma_multiply(0.45));
+        let h = (6.0 * z).max(4.0);
+        let mut x = rect.left();
+        while x < rect.right() - h {
+            painter.line_segment(
+                [pos2(x, rect.top() + h), pos2(x + h, rect.top())],
+                Stroke::new(1.6, theme::MUTED.gamma_multiply(0.6)),
+            );
+            x += 5.0;
+        }
     }
-    if frame.dimmed(&card.id) {
+    if let Some(number) = frame.seq.get(&card.id) {
+        badge(painter, rect, *number, running, failed && frame.flags.dense, z);
+    }
+    // Round 4: focus never dims a failed or a running step.
+    let keep = frame.flags.dense && (failed || running);
+    if frame.dimmed(&card.id) && !keep {
         painter.rect_filled(
             rect.expand(4.0),
             radius,
             theme::BG.gamma_multiply(1.0 - CARD_DIM),
         );
     }
-    if frame.related(&card.id) {
+    if frame.related(&card.id) && frame.flags.dense {
+        // A soft halo and ringed ports, teal: no outline like the others.
+        for (grow, alpha) in [(9.0, 0.06), (6.0, 0.10), (3.0, 0.16)] {
+            painter.rect_stroke(
+                rect.expand(grow),
+                radius + grow,
+                Stroke::new(3.0, RELATED.gamma_multiply(alpha)),
+                StrokeKind::Outside,
+            );
+        }
+        if let Some(focus) = &frame.focus {
+            for (source, port, target, input) in &frame.links {
+                let anchor = if source == &card.id && target == &focus.selected {
+                    card.output_anchor(port)
+                } else if target == &card.id && source == &focus.selected {
+                    card.input_anchor(input, &[])
+                } else {
+                    None
+                };
+                if let Some(anchor) = anchor {
+                    let at = camera.to_screen(anchor);
+                    painter.circle_stroke(at, (7.0 * z).max(5.0), Stroke::new(2.0, RELATED));
+                }
+            }
+        }
+    } else if frame.related(&card.id) {
         painter.rect_stroke(rect.expand(2.0), radius + 2.0, Stroke::new(1.5, RELATED), StrokeKind::Outside);
     }
     if selected {
@@ -1387,7 +1648,7 @@ pub fn paint_bands(painter: &Painter, frame: &Frame, camera: Camera) {
             Stroke::new(1.0, BAND.gamma_multiply(0.45)),
             StrokeKind::Inside,
         );
-        if let Some(header) = &band.header {
+        if let Some(header) = band.header.as_ref().filter(|_| !frame.flags.dense) {
             painter.text(
                 rect.left_top() + vec2(10.0 * z, 5.0 * z),
                 Align2::LEFT_TOP,
@@ -1446,6 +1707,20 @@ pub fn paint_band_wires(painter: &Painter, frame: &Frame, cards: &[Card], camera
 /// Continuation marks: `↳ 10` at a row's end, `10 ↲` at the next row's start.
 pub fn paint_marks(painter: &Painter, frame: &Frame, camera: Camera) {
     let z = camera.zoom;
+    if frame.flags.dense {
+        // Band headers over the wires, so a wire never strikes them through.
+        for band in &frame.bands {
+            if let Some(header) = &band.header {
+                let rect = camera.rect(band.rect);
+                let size = (12.0 * z).max(9.0);
+                let galley = painter.layout_no_wrap(header.clone(), FontId::new(size, theme::bold_family()), Color32::from_rgb(80, 92, 120));
+                let at = rect.left_top() + vec2(10.0 * z, 4.0 * z);
+                let back = Rect::from_min_size(at - vec2(4.0, 1.0), galley.size() + vec2(8.0, 2.0));
+                painter.rect_filled(back, 4.0, Color32::from_rgb(236, 239, 244));
+                painter.galley(at, galley, Color32::from_rgb(80, 92, 120));
+            }
+        }
+    }
     for mark in &frame.marks {
         let rect = camera.rect(mark_rect(mark));
         let label = if mark.end {
@@ -1609,9 +1884,46 @@ fn read_field(frame: &Frame, reader: &str, source: &str) -> Option<String> {
     None
 }
 
-/// Off-screen markers: a chip on the board's edge nearest each related card
-/// out of view, and `← Back to …` after a jump.
-pub fn paint_markers(painter: &Painter, frame: &Frame, cards: &[Card], camera: Camera, board: Rect) {
+/// What a click on a board chip does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MarkerAction {
+    /// Go to this card, keeping the zoom; *Back* returns.
+    Jump(String),
+    Back,
+    None,
+}
+
+/// A chip drawn over the board: where, its accessible label and its action.
+pub struct Marker {
+    pub rect: Rect,
+    pub label: String,
+    pub action: MarkerAction,
+}
+
+/// The full field one step reads from another: `login.body.token`.
+fn read_reference(frame: &Frame, reader: &str, source: &str) -> Option<String> {
+    let node = frame.node(reader)?;
+    for binding in node.inputs.values() {
+        for reference in binding.references() {
+            if reference.node_id == source {
+                return Some(reference_text(frame, source, reference.port, reference.path));
+            }
+        }
+    }
+    None
+}
+
+/// Off-screen chips for the selection's related cards, labelled by role
+/// (`Source:` for producers, `Reader:` for consumers; the arrow only says
+/// where), and `← Back to …` after a jump. A card counts as visible only
+/// when its header row is wholly inside the board.
+pub fn paint_markers(
+    painter: &Painter,
+    frame: &Frame,
+    cards: &[Card],
+    camera: Camera,
+    board: Rect,
+) -> Vec<Marker> {
     #[derive(Clone, Copy, PartialEq)]
     enum Edge {
         Up,
@@ -1619,22 +1931,24 @@ pub fn paint_markers(painter: &Painter, frame: &Frame, cards: &[Card], camera: C
         Left,
         Right,
     }
+    let mut markers = Vec::new();
     let inner = board.shrink(10.0);
+    let teal = Color32::from_rgb(20, 120, 120);
     if frame.flags.markers
         && let Some(focus) = &frame.focus
     {
-        let mut by_edge: Vec<(Edge, Vec<(Pos2, String, bool)>)> = Vec::new();
+        let mut by_edge: Vec<(Edge, Vec<(Pos2, String, String)>)> = Vec::new();
         let mut related: Vec<&String> = focus.related.iter().collect();
         related.sort_by_key(|id| frame.seq.get(*id));
         for id in related {
             let Some(card) = cards.iter().find(|card| &card.id == id) else {
                 continue;
             };
-            let rect = camera.rect(card.rect());
-            if rect.intersects(board) {
+            let header = camera.rect(Rect::from_min_size(card.origin, vec2(WIDTH, DENSE_HEADER)));
+            if board.contains_rect(header) {
                 continue;
             }
-            let center = rect.center();
+            let center = header.center();
             let edge = if center.y < board.top() {
                 Edge::Up
             } else if center.y > board.bottom() {
@@ -1644,19 +1958,16 @@ pub fn paint_markers(painter: &Painter, frame: &Frame, cards: &[Card], camera: C
             } else {
                 Edge::Right
             };
-            let producer = read_field(frame, &focus.selected, id);
-            let (field, is_source) = match producer {
-                Some(field) => (Some(field), true),
-                None => (read_field(frame, id, &focus.selected), false),
-            };
-            let name = frame.handle(id);
-            let label = match field {
-                Some(field) => format!("{name} · {field}"),
-                None => name,
+            let label = if let Some(field) = read_reference(frame, &focus.selected, id) {
+                format!("Source: {field}")
+            } else if let Some(field) = read_reference(frame, id, &focus.selected) {
+                format!("Reader: {} ({field})", frame.handle(id))
+            } else {
+                continue;
             };
             match by_edge.iter_mut().find(|(e, _)| *e == edge) {
-                Some((_, list)) => list.push((center, label, is_source)),
-                None => by_edge.push((edge, vec![(center, label, is_source)])),
+                Some((_, list)) => list.push((center, label, id.clone())),
+                None => by_edge.push((edge, vec![(center, label, id.clone())])),
             }
         }
         for (edge, list) in by_edge {
@@ -1666,51 +1977,358 @@ pub fn paint_markers(painter: &Painter, frame: &Frame, cards: &[Card], camera: C
                 Edge::Left => "←",
                 Edge::Right => "→",
             };
-            let chips: Vec<(Pos2, String)> = if list.len() > 2 {
-                let sources = list.iter().all(|(_, _, s)| *s);
-                let readers = list.iter().all(|(_, _, s)| !*s);
-                let noun = if sources {
-                    "sources"
-                } else if readers {
-                    "readers"
-                } else {
-                    "related"
-                };
-                let center = list[0].0;
-                vec![(center, format!("{arrow} {} {noun}", list.len()))]
+            let chips: Vec<(Pos2, String, MarkerAction)> = if list.len() > 3 {
+                vec![(list[0].0, format!("{} related {arrow}", list.len()), MarkerAction::None)]
             } else {
                 list.into_iter()
-                    .map(|(center, label, _)| (center, format!("{arrow} {label}")))
+                    .map(|(center, label, id)| (center, format!("{label} {arrow}"), MarkerAction::Jump(id)))
                     .collect()
             };
             let mut last: Option<Rect> = None;
-            for (center, label) in chips {
+            for (center, label, action) in chips {
+                let galley = painter.layout_no_wrap(label.clone(), FontId::proportional(12.0), teal);
+                let half = galley.size().x / 2.0 + 8.0;
                 let mut at = match edge {
-                    Edge::Up => pos2(center.x.clamp(inner.left() + 80.0, inner.right() - 80.0), inner.top() + 12.0),
-                    Edge::Down => pos2(center.x.clamp(inner.left() + 80.0, inner.right() - 80.0), inner.bottom() - 12.0),
-                    Edge::Left => pos2(inner.left() + 70.0, center.y.clamp(inner.top() + 20.0, inner.bottom() - 20.0)),
-                    Edge::Right => pos2(inner.right() - 70.0, center.y.clamp(inner.top() + 20.0, inner.bottom() - 20.0)),
+                    Edge::Up => pos2(center.x.clamp(inner.left() + half, inner.right() - half), inner.top() + 12.0),
+                    Edge::Down => pos2(center.x.clamp(inner.left() + half, inner.right() - half), inner.bottom() - 12.0),
+                    Edge::Left => pos2(inner.left() + half, center.y.clamp(inner.top() + 20.0, inner.bottom() - 20.0)),
+                    Edge::Right => pos2(inner.right() - half, center.y.clamp(inner.top() + 20.0, inner.bottom() - 20.0)),
                 };
-                if let Some(previous) = last
-                    && (previous.center().x - at.x).abs() < 170.0
-                    && matches!(edge, Edge::Up | Edge::Down)
-                {
-                    at.x = previous.right() + 90.0;
+                if let Some(previous) = last {
+                    match edge {
+                        Edge::Up | Edge::Down if previous.right() + 8.0 > at.x - half => {
+                            at.x = previous.right() + 8.0 + half;
+                        }
+                        Edge::Left | Edge::Right if previous.bottom() + 6.0 > at.y - 10.0 => {
+                            at.y = previous.bottom() + 16.0;
+                        }
+                        _ => {}
+                    }
                 }
-                let rect = pill(painter, at, &label, Color32::from_rgb(20, 120, 120), 12.0, Color32::from_rgb(232, 247, 247));
+                let rect = pill(painter, at, &label, teal, 12.0, Color32::from_rgb(232, 247, 247));
                 last = Some(rect);
+                markers.push(Marker { rect, label, action });
             }
         }
     }
     if let Some(from) = &frame.flags.jumped_from {
         let label = format!("← Back to {}", frame.handle(from));
         let galley = painter.layout_no_wrap(label.clone(), FontId::proportional(13.0), theme::ACCENT);
-        let center = inner.left_top() + vec2(galley.size().x / 2.0 + 14.0, 18.0);
-        pill(painter, center, &label, theme::ACCENT, 13.0, theme::ACCENT_SOFT);
+        let center = inner.left_top() + vec2(galley.size().x / 2.0 + 14.0, 44.0);
+        let rect = pill(painter, center, &label, theme::ACCENT, 13.0, theme::ACCENT_SOFT);
+        markers.push(Marker {
+            rect,
+            label: format!("Back to {}", frame.handle(from)),
+            action: MarkerAction::Back,
+        });
     }
+    markers
 }
 
 /// Each card drawn at Compact: kind, height and the height left empty.
 pub fn empty() -> HashMap<String, (NodeKind, f32, f32)> {
     EMPTY.with(|cell| cell.borrow().clone())
+}
+
+/// A gate's glyph: two posts and a lintel, in the short card's right corner.
+fn gate_glyph(painter: &Painter, rect: Rect, z: f32) {
+    let size = (14.0 * z).max(9.0);
+    let right = rect.right() - size * 4.2;
+    let top = rect.top() + size * 0.5;
+    let color = Color32::from_rgb(150, 100, 20);
+    let stroke = Stroke::new(1.6, color);
+    painter.line_segment([pos2(right, top), pos2(right + size, top)], Stroke::new(2.2, color));
+    painter.line_segment([pos2(right + size * 0.2, top), pos2(right + size * 0.2, top + size)], stroke);
+    painter.line_segment([pos2(right + size * 0.8, top), pos2(right + size * 0.8, top + size)], stroke);
+    painter.text(
+        pos2(right + size * 1.3, top + size * 0.5),
+        Align2::LEFT_CENTER,
+        "gate",
+        FontId::new(size * 0.8, theme::bold_family()),
+        color,
+    );
+}
+
+/// How many fields, parameters or items an input's value has.
+fn count_of(binding: &Binding, noun: &str) -> String {
+    let n = match binding {
+        Binding::Object { fields } => fields.len(),
+        Binding::Array { items } => items.len(),
+        Binding::Literal { value } => match value {
+            serde_json::Value::Object(map) => map.len(),
+            serde_json::Value::Array(items) => items.len(),
+            _ => return value.to_string(),
+        },
+        Binding::Template { .. } => return "text".to_owned(),
+        _ => 1,
+    };
+    let noun = if n == 1 { noun.to_owned() } else { format!("{noun}s") };
+    format!("{n} {noun}")
+}
+
+/// A compact input row: `Body · 2 fields`, `Headers · Authorization ←
+/// login.body.token`; at Full the value itself.
+fn input_line(frame: &Frame, card: &Card, index: usize, full: bool) -> String {
+    let row = &card.inputs[index];
+    let Some(binding) = frame.node(&card.id).and_then(|node| node.inputs.get(&row.name)) else {
+        return format!("{} ← …", row.label);
+    };
+    let noun = match row.name.as_str() {
+        "headers" => "header",
+        "query" => "parameter",
+        _ => "field",
+    };
+    let mut sources = Vec::new();
+    if let Binding::Object { fields } = binding {
+        for (name, field) in fields {
+            let refs: Vec<String> = field
+                .references()
+                .into_iter()
+                .map(|r| reference_text(frame, r.node_id, r.port, r.path))
+                .collect();
+            if !refs.is_empty() {
+                sources.push(format!("{name} ← {}", refs.join(", ")));
+            }
+        }
+    }
+    if sources.is_empty() {
+        let refs: Vec<String> = binding
+            .references()
+            .into_iter()
+            .map(|r| reference_text(frame, r.node_id, r.port, r.path))
+            .collect();
+        if !refs.is_empty() && !full {
+            return format!("{} · {} ← {}", row.label, count_of(binding, noun), refs.join(", "));
+        }
+    }
+    if full {
+        return format!("{}  {}", row.label, value_text(frame, binding));
+    }
+    match sources.as_slice() {
+        [] => format!("{} · {}", row.label, count_of(binding, noun)),
+        [one] => format!("{} · {one}", row.label),
+        many => format!("{} · {} wired", row.label, many.len()),
+    }
+}
+
+fn reference_text(frame: &Frame, node: &str, port: &str, path: &str) -> String {
+    let mut text = frame.handle(node);
+    if port != "value" {
+        text.push('.');
+        text.push_str(port);
+    }
+    if !path.is_empty() {
+        text.push('.');
+        text.push_str(path);
+    }
+    text
+}
+
+/// The world rectangle of a compact card's checks line, which a click opens
+/// in the Inspector.
+pub fn checks_rect(card: &Card) -> Option<Rect> {
+    let row = card.dense.as_ref()?.row(DenseRole::Checks)?;
+    Some(Rect::from_min_size(
+        card.origin + vec2(0.0, row.top),
+        vec2(WIDTH, row.height),
+    ))
+}
+
+/// A compact card: the same box at every zoom; text keeps its minimum size
+/// and rows are dropped when they no longer fit.
+#[allow(clippy::too_many_arguments)]
+fn paint_dense(
+    painter: &Painter,
+    card: &Card,
+    dense: &Dense,
+    camera: Camera,
+    frame: &Frame,
+    steps: Option<&[StepResult]>,
+    failed: bool,
+    running: bool,
+) {
+    let z = camera.zoom;
+    let rect = camera.rect(card.rect());
+    let radius = (10.0 * z).max(3.0);
+    let step = frame.step(&card.id, steps);
+    let stale = frame.flags.stale.contains(&card.id);
+    let full = CardDetail::at_zoom(z) == CardDetail::Full;
+    painter.rect_filled(rect.translate(vec2(0.0, 2.0 * z)), radius, Color32::from_black_alpha(8));
+    painter.rect_filled(rect, radius, theme::WHITE);
+    painter.rect_stroke(rect, radius, Stroke::new(1.0, theme::BORDER), StrokeKind::Inside);
+    let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
+    let local = |x: f32, y: f32| camera.to_screen(card.origin + vec2(x, y));
+    let cell = |l: f32, t: f32, r: f32, b: f32| Rect::from_min_max(local(l, t), local(r, b));
+
+    // The status band along the top: the run's colour, hatched when stale.
+    let band_h = (6.0 * z).max(4.0);
+    let band = Rect::from_min_max(rect.left_top(), pos2(rect.right(), rect.top() + band_h));
+    let r = radius as u8;
+    let corners = egui::CornerRadius { nw: r, ne: r, sw: 0, se: 0 };
+    if stale {
+        clipped.rect_filled(band, corners, Color32::from_rgb(226, 226, 226));
+        let color = band_color(step, false).gamma_multiply(0.55);
+        let mut x = band.left() - band_h;
+        while x < band.right() {
+            clipped.line_segment(
+                [pos2(x, band.bottom()), pos2(x + band_h, band.top())],
+                Stroke::new(1.6, color),
+            );
+            x += 5.0;
+        }
+    } else {
+        clipped.rect_filled(band, corners, band_color(step, running));
+    }
+
+    // Header: icon and name; the name never drops below 11 px.
+    let color = theme::block_color(card.block);
+    let icon = Rect::from_min_size(local(12.0, 10.0), Vec2::splat(22.0 * z));
+    clipped.rect_filled(icon, 5.0 * z, color.gamma_multiply(0.10));
+    theme::block_icon(&clipped, icon, card.block, color);
+    let name_size = (16.0 * z).max(11.0);
+    text(
+        &clipped,
+        cell(42.0, 6.0, WIDTH - 12.0, DENSE_HEADER),
+        &card.name,
+        FontId::new(name_size, theme::bold_family()),
+        theme::TEXT,
+        egui::Align::Min,
+    );
+    let small = (12.0 * z).max(9.0);
+    // A row's text needs 11 px of row; under that only the sockets stay.
+    let rows_text = DENSE_ROW * z >= 11.0;
+    for row in &dense.rows {
+        let area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
+        match row.role {
+            DenseRole::Subtitle if rows_text => text(
+                &clipped,
+                area,
+                card.subtitle.as_deref().unwrap_or_default(),
+                FontId::monospace(small),
+                theme::LINK,
+                egui::Align::Min,
+            ),
+            DenseRole::Input(index) if rows_text => text(
+                &clipped,
+                area,
+                &input_line(frame, card, index, full),
+                if full { FontId::monospace(small) } else { FontId::proportional(small) },
+                theme::MUTED,
+                egui::Align::Min,
+            ),
+            DenseRole::Output(index) if rows_text => text(
+                &clipped,
+                area,
+                &format!("{} →", card.outputs[index].label),
+                FontId::proportional(small),
+                theme::TEXT,
+                egui::Align::Max,
+            ),
+            DenseRole::Result => {
+                let top = camera.to_screen(card.origin + vec2(0.0, row.top));
+                clipped.line_segment(
+                    [pos2(rect.left(), top.y), pos2(rect.right(), top.y)],
+                    Stroke::new(0.75, theme::BORDER),
+                );
+                let (mut line, mut color) = frame.dense_result(card, steps);
+                if stale {
+                    line = format!("Previous run · {line}");
+                    color = theme::MUTED;
+                }
+                text(
+                    &clipped,
+                    area,
+                    &line,
+                    if failed && !stale {
+                        FontId::new(small, theme::bold_family())
+                    } else {
+                        FontId::proportional(small)
+                    },
+                    color,
+                    egui::Align::Min,
+                );
+            }
+            DenseRole::Checks if running => {
+                let count = frame.checks_of.get(&card.id).map_or(0, Vec::len);
+                text(
+                    &clipped,
+                    area,
+                    &format!("{count} {} · waiting", Aggregate::noun(count)),
+                    FontId::proportional(small),
+                    theme::MUTED,
+                    egui::Align::Min,
+                );
+            }
+            DenseRole::Checks if frame.flags.expand_here.as_deref() == Some(card.id.as_str()) => {
+                let count = frame
+                    .checks_of
+                    .get(&card.id)
+                    .map_or(0, |checks| checks.iter().filter(|id| !frame.hidden.contains(*id)).count());
+                text(
+                    &clipped,
+                    area,
+                    &format!("▾ {count} checks shown below · Collapse"),
+                    FontId::proportional(small),
+                    theme::LINK,
+                    egui::Align::Min,
+                );
+            }
+            DenseRole::Checks => {
+                if let Some(aggregate) = frame.aggregate(&card.id, steps) {
+                    let fill = if aggregate.failed > 0 && !stale {
+                        Color32::from_rgb(252, 234, 231)
+                    } else {
+                        theme::WHITE
+                    };
+                    let band = cell(1.0, row.top, WIDTH - 1.0, row.top + row.height);
+                    clipped.rect_filled(band, 0.0, fill);
+                    text(
+                        &clipped,
+                        area,
+                        &format!("{} ›", aggregate.text(true)),
+                        FontId::proportional(small),
+                        if stale { theme::MUTED } else { aggregate.color() },
+                        egui::Align::Min,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    if failed && !stale {
+        painter.rect_stroke(rect, radius, Stroke::new(2.0, theme::DANGER), StrokeKind::Inside);
+    }
+    sockets(painter, card, camera, frame);
+}
+
+/// A binding written out, as the code view would: `{ items: [{ productId:
+/// first.id, quantity: 2 }] }`.
+fn value_text(frame: &Frame, binding: &Binding) -> String {
+    match binding {
+        Binding::Object { fields } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(name, field)| format!("{name}: {}", value_text(frame, field)))
+                .collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        Binding::Array { items } => {
+            let parts: Vec<String> = items.iter().map(|item| value_text(frame, item)).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Binding::Template { parts } => {
+            let mut text = String::from("\"");
+            for part in parts {
+                match part {
+                    apiforge_core::format::TemplatePart::Text { text: t } => text.push_str(t),
+                    apiforge_core::format::TemplatePart::Value { binding } => {
+                        text.push_str(&format!("{{{{{}}}}}", value_text(frame, binding)));
+                    }
+                }
+            }
+            text.push('"');
+            text
+        }
+        other => describe(&frame.graph, other),
+    }
 }

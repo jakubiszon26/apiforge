@@ -290,6 +290,68 @@ pub struct Card {
     pub origin: Pos2,
     /// LAY-00 round-3 mock-up: a satellite drawn as a header and one row.
     pub short: bool,
+    /// LAY-00 round-4 mock-up: a compact request card whose box follows the
+    /// rows it shows, at every zoom.
+    pub dense: Option<Dense>,
+}
+
+/// LAY-00 round-4 mock-up: what one row of a compact card stands for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DenseRole {
+    /// The method and URL, with the URL input's socket.
+    Subtitle,
+    /// An input in use or configured (index into `inputs`).
+    Input(usize),
+    /// An output in use (index into `outputs`).
+    Output(usize),
+    Result,
+    Checks,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DenseRow {
+    pub role: DenseRole,
+    /// Top of the row, from the card's origin.
+    pub top: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dense {
+    pub rows: Vec<DenseRow>,
+    pub height: f32,
+}
+
+pub const DENSE_HEADER: f32 = 40.0;
+pub const DENSE_ROW: f32 = 24.0;
+
+impl Dense {
+    /// Rows in order after the header; the box ends 6 px under the last one.
+    pub fn new(roles: &[DenseRole]) -> Self {
+        let mut top = DENSE_HEADER;
+        let mut rows = Vec::new();
+        for role in roles {
+            let height = match role {
+                DenseRole::Subtitle => 22.0,
+                DenseRole::Result => 26.0,
+                _ => DENSE_ROW,
+            };
+            rows.push(DenseRow {
+                role: *role,
+                top,
+                height,
+            });
+            top += height;
+        }
+        Self {
+            rows,
+            height: top + 6.0,
+        }
+    }
+
+    pub fn row(&self, role: DenseRole) -> Option<&DenseRow> {
+        self.rows.iter().find(|row| row.role == role)
+    }
 }
 
 /// LAY-00 round-3 mock-up: the height of a short satellite and its one row.
@@ -386,6 +448,7 @@ impl Card {
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             short: false,
+            dense: None,
         }
     }
 
@@ -407,6 +470,9 @@ impl Card {
     }
 
     pub fn height(&self) -> f32 {
+        if let Some(dense) = &self.dense {
+            return dense.height;
+        }
         if self.short {
             return SHORT_HEIGHT;
         }
@@ -431,6 +497,9 @@ impl Card {
     }
 
     pub fn input_row(&self, index: usize) -> Rect {
+        if let Some(row) = self.dense.as_ref().and_then(|d| d.row(DenseRole::Input(index))) {
+            return Rect::from_min_size(self.origin + vec2(0.0, row.top), vec2(WIDTH, row.height));
+        }
         let top = self.input_row_top(index);
         Rect::from_min_size(self.origin + vec2(0.0, top), vec2(WIDTH, INPUT_ROW))
     }
@@ -444,6 +513,9 @@ impl Card {
     }
 
     pub fn footer(&self) -> Rect {
+        if let Some(row) = self.dense.as_ref().and_then(|d| d.row(DenseRole::Result)) {
+            return Rect::from_min_size(self.origin + vec2(0.0, row.top), vec2(WIDTH, row.height));
+        }
         if self.short {
             return Rect::from_min_size(
                 self.origin + vec2(0.0, SHORT_ROW),
@@ -481,6 +553,14 @@ impl Card {
         if name == ORDER_PORT {
             return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
         }
+        if let Some(dense) = &self.dense {
+            let row = dense.rows.iter().find(|row| match row.role {
+                DenseRole::Input(index) => self.inputs[index].name == name,
+                _ => false,
+            });
+            let row = row.or_else(|| dense.row(DenseRole::Subtitle));
+            return Some(self.origin + vec2(0.0, row.map_or(DENSE_HEADER / 2.0, |r| r.top + r.height / 2.0)));
+        }
         if self.short {
             return self
                 .inputs
@@ -505,6 +585,16 @@ impl Card {
 
     /// Anchor of a data output or a control pseudo-port.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if let Some(dense) = &self.dense {
+            if self.controls.iter().any(|(port, _)| *port == name) {
+                return Some(self.origin + vec2(WIDTH / 2.0, dense.height));
+            }
+            let index = self.outputs.iter().position(|row| row.name == name)?;
+            let y = dense
+                .row(DenseRole::Output(index))
+                .map_or(DENSE_HEADER / 2.0, |r| r.top + r.height / 2.0);
+            return Some(self.origin + vec2(WIDTH, y));
+        }
         if self.short {
             if self.controls.iter().any(|(port, _)| *port == name) {
                 return Some(self.origin + vec2(WIDTH / 2.0, SHORT_HEIGHT));

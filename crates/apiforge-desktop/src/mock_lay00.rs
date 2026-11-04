@@ -15,6 +15,8 @@ pub enum Anchor {
     Rows(usize, usize),
     /// Centred on these cards (node ids).
     Cards(Vec<String>),
+    /// This card's top near the top of the board, centred across.
+    Top(String),
 }
 
 #[derive(Clone, Default, Debug)]
@@ -47,6 +49,31 @@ pub struct Flags {
     pub markers: bool,
     /// The person jumped away from this step: a chip leads back.
     pub jumped_from: Option<String>,
+    // Round 4.
+    /// Request, component and `if` cards are compact: the box follows the
+    /// rows shown and does not change with zoom.
+    pub dense: bool,
+    /// The camera is placed once from `view`, then left to the person.
+    pub free_camera: bool,
+    /// A gate whose value a later step reads stays a short visible node.
+    pub gates_visible: bool,
+    /// *Expand checks here* on this step: its checks hang under it.
+    pub expand_here: Option<String>,
+    /// … and the rows below shift down to make room.
+    pub expand_shift: bool,
+    /// Steps drawn with the previous run's results, stale.
+    pub stale: Vec<String>,
+    /// The Inspector lists the checks of the selected step.
+    pub inspector_follows: bool,
+}
+
+/// What the person clicked on the board's mock-up widgets this session.
+#[derive(Clone, Debug, Default)]
+pub struct Walk {
+    /// The camera before a jump, and the step it was on.
+    pub back: Option<(String, f32, eframe::egui::Vec2)>,
+    /// Camera moves made by the application (jump, back).
+    pub app_moves: usize,
 }
 
 thread_local! {
@@ -54,6 +81,35 @@ thread_local! {
     static STEPS: RefCell<Option<Vec<StepResult>>> = const { RefCell::new(None) };
     static RECTS: RefCell<HashMap<String, Rect>> = RefCell::new(HashMap::new());
     static INSPECTOR: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+    static CAMERA: std::cell::Cell<(f32, eframe::egui::Vec2)> = const { std::cell::Cell::new((1.0, eframe::egui::Vec2::ZERO)) };
+    static WALK: RefCell<Walk> = RefCell::new(Walk::default());
+    static WORLD: RefCell<HashMap<String, Rect>> = RefCell::new(HashMap::new());
+}
+
+/// The camera as drawn last frame: zoom and pan.
+pub fn set_camera(zoom: f32, pan: eframe::egui::Vec2) {
+    CAMERA.with(|cell| cell.set((zoom, pan)));
+}
+
+pub fn camera() -> (f32, eframe::egui::Vec2) {
+    CAMERA.with(std::cell::Cell::get)
+}
+
+pub fn walk() -> Walk {
+    WALK.with(|cell| cell.borrow().clone())
+}
+
+pub fn update_walk(change: impl FnOnce(&mut Walk)) {
+    WALK.with(|cell| change(&mut cell.borrow_mut()));
+}
+
+/// Each card's world box, last frame.
+pub fn set_world(boxes: HashMap<String, Rect>) {
+    WORLD.with(|cell| *cell.borrow_mut() = boxes);
+}
+
+pub fn world() -> HashMap<String, Rect> {
+    WORLD.with(|cell| cell.borrow().clone())
 }
 
 pub fn get() -> Flags {

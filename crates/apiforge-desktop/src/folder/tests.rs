@@ -19,6 +19,8 @@ mod header_tests;
 mod interaction_tests;
 #[path = "lay00r3_review.rs"]
 mod lay00r3_review;
+#[path = "lay00r4_review.rs"]
+mod lay00r4_review;
 #[path = "library_tests.rs"]
 mod library_tests;
 #[path = "popup_tests.rs"]

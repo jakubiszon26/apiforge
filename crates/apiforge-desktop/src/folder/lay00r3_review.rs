@@ -14,9 +14,9 @@ use apiforge_core::{
     run::{Phase, StepResult, StepStatus},
 };
 
-const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+pub(super) const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
-fn fixture(name: &str) -> String {
+pub(super) fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/scenarios/lay")
         .join(format!("{name}.afs"));
@@ -37,11 +37,11 @@ fn note(line: &str) {
     writeln!(file, "{line}").unwrap();
 }
 
-fn app(harness: &mut FolderHarness) -> &mut FolderApp {
+pub(super) fn app(harness: &mut FolderHarness) -> &mut FolderApp {
     harness.state_mut().as_mut().unwrap()
 }
 
-fn document(harness: &FolderHarness) -> String {
+pub(super) fn document(harness: &FolderHarness) -> String {
     folder(harness)
         .session
         .as_ref()
@@ -54,13 +54,13 @@ fn document(harness: &FolderHarness) -> String {
         .to_owned()
 }
 
-fn graph(harness: &FolderHarness) -> Graph {
+pub(super) fn graph(harness: &FolderHarness) -> Graph {
     let id = document(harness);
     let model = folder(harness).snapshot(&id).unwrap().model.unwrap();
     graph_of(&model, false).clone()
 }
 
-fn id_of(graph: &Graph, handle: &str) -> String {
+pub(super) fn id_of(graph: &Graph, handle: &str) -> String {
     graph
         .nodes
         .iter()
@@ -70,14 +70,14 @@ fn id_of(graph: &Graph, handle: &str) -> String {
         .clone()
 }
 
-fn select(harness: &mut FolderHarness, ids: Vec<String>) {
+pub(super) fn select(harness: &mut FolderHarness, ids: Vec<String>) {
     let document = document(harness);
     app(harness).selections.insert(document, ids);
     settle(harness);
 }
 
 /// The scenario on the board of the demo shop at `size`.
-fn open(scenario: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, Graph) {
+pub(super) fn open(scenario: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, Graph) {
     mock::set(Flags::default());
     mock::set_steps(None);
     mock::clear_rects();
@@ -93,7 +93,7 @@ fn open(scenario: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, 
 
 /// A finished run, faked: every step passed except `failed` and `skipped`
 /// checks; the steps of an unselected branch are skipped "outside path".
-fn run(graph: &Graph, failed: &[(&str, &str, &str)], skipped: &[&str]) -> Vec<StepResult> {
+pub(super) fn run(graph: &Graph, failed: &[(&str, &str, &str)], skipped: &[&str]) -> Vec<StepResult> {
     let otherwise: Vec<&str> = graph
         .edges
         .iter()
@@ -135,13 +135,13 @@ fn run(graph: &Graph, failed: &[(&str, &str, &str)], skipped: &[&str]) -> Vec<St
         .collect()
 }
 
-fn shot(harness: &mut FolderHarness, name: &str) {
+pub(super) fn shot(harness: &mut FolderHarness, name: &str) {
     settle(harness);
     harness.step();
     capture(harness, name, None);
 }
 
-fn flags(collapsed: bool) -> Flags {
+pub(super) fn flags(collapsed: bool) -> Flags {
     Flags {
         on: true,
         collapsed,
@@ -169,7 +169,7 @@ fn measure(harness: &mut FolderHarness, label: &str) {
     ));
 }
 
-fn shop_30_run(graph: &Graph) -> (Vec<StepResult>, Vec<String>) {
+pub(super) fn shop_30_run(graph: &Graph) -> (Vec<StepResult>, Vec<String>) {
     let steps = run(
         graph,
         &[("checkout_total", "180.0", "172.5")],
@@ -349,7 +349,7 @@ fn review_lay00r3_d_order_flow() {
     mock::set_steps(None);
 }
 
-fn view(harness: &mut FolderHarness, graph: &Graph, zoom: f32, handles: &[&str]) {
+pub(super) fn view(harness: &mut FolderHarness, graph: &Graph, zoom: f32, handles: &[&str]) {
     let ids = handles.iter().map(|h| id_of(graph, h)).collect();
     mock::update(|f| f.view = Some((zoom, Anchor::Cards(ids))));
     settle(harness);

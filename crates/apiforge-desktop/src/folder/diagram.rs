@@ -494,7 +494,14 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let graph = graph_of(&model, cleanup);
-        if let Some(subject) = crate::mock_lay00::get().inspector {
+        let flags = crate::mock_lay00::get();
+        let follows = flags
+            .inspector_follows
+            .then(|| self.selections.get(document_id))
+            .flatten()
+            .filter(|selection| selection.len() == 1)
+            .map(|selection| selection[0].clone());
+        if let Some(subject) = flags.inspector.or(follows) {
             // LAY-00 mock-up: the checks of a step, after a click on its
             // aggregate.
             let steps = crate::mock_lay00::steps();
