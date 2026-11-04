@@ -115,6 +115,8 @@ impl FolderApp {
                 .cloned()
                 .collect::<Vec<_>>()
         });
+        // LAY-00 mock-up: a run in progress, faked.
+        let steps = crate::mock_lay00::steps().or(steps);
         let graph = graph_of(&model, cleanup);
         let reference = graph_of(&model, false);
         let parameters = parameters_of(&model);
@@ -492,6 +494,23 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let graph = graph_of(&model, cleanup);
+        if let Some(subject) = crate::mock_lay00::get().inspector {
+            // LAY-00 mock-up: the checks of a step, after a click on its
+            // aggregate.
+            let steps = self.fresh_run(document_id).map(|run| run.steps);
+            let response = egui::Panel::right("folder-inspector")
+                .default_size(360.0)
+                .size_range(300.0..=520.0)
+                .frame(egui::Frame::new().fill(theme::WHITE).inner_margin(16))
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.add(widgets::icon_button(Icon::Close, "Close Inspector").compact());
+                    });
+                    super::lay00_inspector::show(ui, graph, &subject, steps.as_deref());
+                });
+            crate::mock_lay00::set_inspector(Some(response.response.rect));
+            return;
+        }
         let Some(node) = self
             .selections
             .get(document_id)

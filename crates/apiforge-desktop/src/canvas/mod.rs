@@ -4,6 +4,7 @@
 //! them through the editor, which validates every change. Positions being dragged,
 //! wires being drawn and the camera are view state only.
 
+mod lay00;
 mod layout;
 mod menu;
 mod paint;
@@ -450,6 +451,9 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
+        // LAY-00 mock-up: collapsed checks are not drawn, nor their wires.
+        let mock = lay00::Frame::new(input.graph, input.selection);
+        cards.retain(|card| !mock.hidden.contains(&card.id));
         let mut chips: Vec<Chip> = input
             .graph
             .proxies
@@ -495,6 +499,20 @@ impl Canvas {
         self.last_size = viewport.size();
         self.last_focus = Some(overlays.focus);
         self.last_viewport = viewport;
+        if mock.flags.fit {
+            self.fit(viewport, overlays.focus, shapes(&cards, &chips));
+        }
+        if let Some((zoom, ids)) = &mock.flags.view
+            && let Some(bounds) = cards
+                .iter()
+                .filter(|card| ids.contains(&card.id))
+                .map(Card::rect)
+                .reduce(Rect::union)
+        {
+            self.camera.zoom = *zoom;
+            let local_focus_center = overlays.focus.center() - viewport.min;
+            self.camera.pan = local_focus_center - bounds.center().to_vec2() * *zoom;
+        }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
@@ -534,7 +552,12 @@ impl Canvas {
         // Wires go under the cards. They are routed around the cards and chips, so
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
-        let board_wires = board_wires(input.graph, &cards, &chips);
+        let bands = mock.bands(input.graph);
+        let board_wires: Vec<routing::BoardWire> = board_wires(input.graph, &cards, &chips)
+            .into_iter()
+            .filter(|wire| !mock.hides_wire(&bands, &wire.id))
+            .collect();
+        lay00::paint_bands(&board_painter, &bands, &cards, camera);
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -563,11 +586,15 @@ impl Canvas {
                 bridges: self.bridges,
             });
             for wire in routed {
-                paint::routed_wire(
+                let (color, alpha, width) = mock.wire(&wire.id);
+                paint::routed_wire_styled(
                     &board_painter,
                     wire,
                     camera,
                     selected_wires.contains(&wire.id) || related_wires.contains(&wire.id),
+                    color,
+                    alpha,
+                    width,
                 );
                 drawn.push((wire.id.clone(), wire.points.clone()));
             }
@@ -653,13 +680,15 @@ impl Canvas {
             let step = input
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
+            crate::mock_lay00::record(&card.id, rect);
             paint::card(
                 &board_painter,
                 card,
                 camera,
                 selection.contains(card.id.as_str()),
-                related_blocks.contains(&card.id),
+                related_blocks.contains(&card.id) || mock.ringed(&card.id),
                 step,
+                &mock.card(&card.id, step, input.steps),
             );
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
@@ -877,7 +906,11 @@ impl Canvas {
     /// settings button as an icon when it has one.
     fn toolbar_estimate(&self, input: &Input<'_>) -> f32 {
         let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
-        96.0 + if input.can_paste { 56.0 } else { 0.0 }
+        96.0 + if crate::mock_lay00::get().toggle {
+            100.0
+        } else {
+            0.0
+        } + if input.can_paste { 56.0 } else { 0.0 }
             + if has_selection { 108.0 } else { 0.0 }
             + if input.settings.is_some() { 44.0 } else { 0.0 }
     }
@@ -1709,6 +1742,34 @@ impl Canvas {
                                 .clicked()
                             {
                                 commands.push(Command::TidyUp(input.selection.to_vec()));
+                            }
+                            // LAY-00 mock-up: fold the checks into their subjects.
+                            let flags = crate::mock_lay00::get();
+                            if flags.toggle
+                                && ui
+                                    .add(
+                                        widgets::action(
+                                            Icon::Check,
+                                            if flags.collapsed {
+                                                "Checks ▸"
+                                            } else {
+                                                "Checks ▾"
+                                            },
+                                        )
+                                        .compact()
+                                        .quiet()
+                                        .toggle(flags.collapsed),
+                                    )
+                                    .on_hover_text(if flags.collapsed {
+                                        "Show checks as cards"
+                                    } else {
+                                        "Fold checks into the steps they check"
+                                    })
+                                    .clicked()
+                            {
+                                crate::mock_lay00::update(|flags| {
+                                    flags.collapsed = !flags.collapsed
+                                });
                             }
                             widgets::action_menu(
                                 ui,

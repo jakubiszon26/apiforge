@@ -131,13 +131,28 @@ pub fn wire(
 /// A bridge is a gap in the line with a small semicircle over it, so a crossing
 /// reads as one wire passing above the other instead of a junction.
 pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected: bool) {
-    let mut color = wire_color(selected, routed.control, routed.branch);
+    routed_wire_styled(painter, routed, camera, selected, None, 1.0, None);
+}
+
+/// LAY-00 mock-up: a wire in another colour, dimmed or thicker.
+pub fn routed_wire_styled(
+    painter: &Painter,
+    routed: &Routed,
+    camera: Camera,
+    selected: bool,
+    override_color: Option<Color32>,
+    alpha: f32,
+    override_width: Option<f32>,
+) {
+    let mut color = override_color
+        .unwrap_or_else(|| wire_color(selected, routed.control, routed.branch))
+        .gamma_multiply(alpha);
     if !routed.routed {
         // A wire drawn directly during a drag is lighter, so the board shows that
         // the route is provisional until the next idle frame.
         color = color.gamma_multiply(0.55);
     }
-    let width = if selected { 2.4 } else { 1.6 };
+    let width = override_width.unwrap_or(if selected { 2.4 } else { 1.6 });
     let zoom = camera.zoom;
     let line: Vec<Pos2> = if routed.pieces.is_empty() {
         // A direct curve: the wire has no route, or the board is mid-drag.
@@ -339,6 +354,82 @@ fn status_color(status: StepStatus) -> Color32 {
     }
 }
 
+/// LAY-00 mock-up: what the proposed cards add to a card.
+#[derive(Clone, Debug, Default)]
+pub struct CardMock {
+    pub sequence: Option<usize>,
+    /// The checks folded into this card: text, colour, bold.
+    pub aggregate: Option<(String, Color32, bool)>,
+    pub proposed: bool,
+    pub running: bool,
+    pub pending: bool,
+    pub dimmed: bool,
+}
+
+fn mock_status(step: Option<&StepResult>, mock: &CardMock) -> (String, Color32) {
+    if mock.running {
+        return ("Running…".to_owned(), theme::ACCENT);
+    }
+    if mock.pending {
+        return ("Pending".to_owned(), theme::MUTED);
+    }
+    step.map_or(("Ready".to_owned(), theme::MUTED), |s| {
+        (
+            format!("{} · {} ms", s.status.label(), s.duration_ms),
+            status_color(s.status),
+        )
+    })
+}
+
+fn band_color(step: Option<&StepResult>, mock: &CardMock) -> Color32 {
+    if mock.running {
+        return theme::ACCENT;
+    }
+    match step.map(|s| s.status) {
+        Some(StepStatus::Passed) => theme::SUCCESS,
+        Some(StepStatus::Failed | StepStatus::Error) => theme::DANGER,
+        Some(StepStatus::Blocked | StepStatus::Cancelled) => theme::WARNING,
+        Some(StepStatus::Skipped) | None => Color32::from_rgb(196, 196, 196),
+    }
+}
+
+/// A small rounded pill with `text`, centred at `center`.
+pub fn mock_pill(
+    painter: &Painter,
+    center: Pos2,
+    text: &str,
+    color: Color32,
+    bold: bool,
+    size: f32,
+) {
+    let font = if bold {
+        FontId::new(size, theme::bold_family())
+    } else {
+        FontId::proportional(size)
+    };
+    let galley = painter.layout_no_wrap(text.to_owned(), font, color);
+    let pill = Rect::from_center_size(center, galley.size() + vec2(size * 1.1, size * 0.45));
+    painter.rect(
+        pill,
+        pill.height() / 2.0,
+        color.gamma_multiply(0.10),
+        Stroke::new(0.75, color.gamma_multiply(0.45)),
+        StrokeKind::Inside,
+    );
+    painter.galley(pill.center() - galley.size() / 2.0, galley, color);
+}
+
+/// The sequence badge: the step's place in the run order.
+pub fn mock_badge(painter: &Painter, center: Pos2, number: usize, diameter: f32) {
+    let text = number.to_string();
+    let font = FontId::new(diameter * 0.58, theme::bold_family());
+    let galley = painter.layout_no_wrap(text, font, theme::WHITE);
+    let width = diameter.max(galley.size().x + diameter * 0.5);
+    let badge = Rect::from_center_size(center, vec2(width, diameter));
+    painter.rect_filled(badge, diameter / 2.0, Color32::from_rgb(92, 92, 92));
+    painter.galley(badge.center() - galley.size() / 2.0, galley, theme::WHITE);
+}
+
 pub fn card(
     painter: &Painter,
     card: &Card,
@@ -347,6 +438,7 @@ pub fn card(
     // Part of what a selected proxy stands for, or reads it.
     related: bool,
     step: Option<&StepResult>,
+    mock: &CardMock,
 ) {
     use super::layout::{CARD_PADDING, CardDetail};
     let z = camera.zoom;
@@ -363,23 +455,87 @@ pub fn card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    let border_color = if selected {
-        theme::ACCENT
+    let status = step.map(|s| s.status);
+    let (border_width, border_color) = if selected {
+        (1.7, theme::ACCENT)
+    } else if mock.running {
+        (2.0, theme::ACCENT)
     } else if related {
-        theme::VARIABLE
+        (1.7, theme::VARIABLE)
+    } else if mock.proposed
+        && detail == CardDetail::Compact
+        && matches!(status, Some(StepStatus::Failed | StepStatus::Error))
+    {
+        (2.0, theme::DANGER)
+    } else if mock.proposed
+        && detail == CardDetail::Compact
+        && matches!(status, Some(StepStatus::Blocked | StepStatus::Cancelled))
+    {
+        (2.0, theme::WARNING)
     } else {
-        theme::BORDER
+        (1.0, theme::BORDER)
     };
     painter.rect_stroke(
         rect,
         radius,
-        Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
+        Stroke::new(border_width, border_color),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
     let color = theme::block_color(card.block);
 
-    if detail == CardDetail::Overview {
+    if detail == CardDetail::Overview && mock.proposed {
+        // LAY-00 proposal: a status band, the sequence badge, the name and the
+        // checks' aggregate.
+        let band_height = (14.0 * z).max(5.0);
+        let band = Rect::from_min_max(
+            rect.left_top(),
+            egui::pos2(rect.right(), rect.top() + band_height),
+        );
+        let r = radius as u8;
+        clipped.rect_filled(
+            band,
+            egui::CornerRadius {
+                nw: r,
+                ne: r,
+                sw: 0,
+                se: 0,
+            },
+            band_color(step, mock),
+        );
+        let name_size = (16.0 * z).max(7.5);
+        let pill_size = (11.0 * z).max(9.0);
+        label(
+            &clipped,
+            Rect::from_center_size(
+                rect.center() + vec2(0.0, band_height / 2.0),
+                vec2(rect.width() - 10.0, name_size * 1.5),
+            ),
+            &card.name,
+            FontId::new(name_size, theme::bold_family()),
+            theme::TEXT,
+            egui::Align::Center,
+        );
+        if let Some(number) = mock.sequence {
+            let diameter = (24.0 * z).max(11.0);
+            mock_badge(
+                &clipped,
+                rect.left_top() + vec2(5.0 + diameter / 2.0, band_height + 4.0 + diameter / 2.0),
+                number,
+                diameter,
+            );
+        }
+        if let Some((text, color, bold)) = &mock.aggregate {
+            mock_pill(
+                &clipped,
+                rect.center() + vec2(0.0, band_height / 2.0 + name_size * 0.9 + pill_size),
+                text,
+                *color,
+                *bold,
+                pill_size,
+            );
+        }
+    } else if detail == CardDetail::Overview {
         // At 25% this is a small diagram tile, not a miniature form. Its one
         // readable title has the whole tile to itself; values live in Inspector.
         let accent = Rect::from_min_max(
@@ -395,16 +551,40 @@ pub fn card(
             theme::TEXT,
             egui::Align::Center,
         );
+        if let Some((text, color, bold)) = &mock.aggregate {
+            let pill_size = (11.0 * z).max(9.0);
+            mock_pill(
+                &clipped,
+                rect.center() + vec2(0.0, (16.0 * z).max(7.5) * 0.9 + pill_size),
+                text,
+                *color,
+                *bold,
+                pill_size,
+            );
+        }
     } else {
         let full = detail == CardDetail::Full;
         let icon = Rect::from_min_size(local(CARD_PADDING, 16.0), Vec2::splat(28.0 * z));
         clipped.rect_filled(icon, 7.0 * z, color.gamma_multiply(0.10));
         theme::block_icon(&clipped, icon, card.block, color);
-        let title_right = if full && card.kind == NodeKind::Component {
+        let mut title_right = if full && card.kind == NodeKind::Component {
             WIDTH - 48.0
         } else {
             WIDTH - CARD_PADDING
         };
+        if let Some(number) = mock.sequence {
+            title_right -= 34.0;
+            let diameter = 22.0 * z;
+            mock_badge(
+                &clipped,
+                local(
+                    title_right + 34.0 - diameter / 2.0 / z - 2.0,
+                    if full { 42.0 } else { 35.0 },
+                ),
+                number,
+                diameter,
+            );
+        }
         if full {
             label(
                 &clipped,
@@ -548,12 +728,22 @@ pub fn card(
                 footer.left_top() + vec2(CARD_PADDING * z, 0.0),
                 egui::pos2(action.left() - 8.0 * z, footer.bottom()),
             );
-            let (status, color) = step.map_or(("Ready".to_owned(), theme::MUTED), |s| {
-                (
-                    format!("{} · {} ms", s.status.label(), s.duration_ms),
-                    status_color(s.status),
-                )
-            });
+            let (status, color) = mock_status(step, mock);
+            let mut status_rect = status_rect;
+            if let Some((text, aggregate_color, bold)) = &mock.aggregate {
+                let font = if *bold {
+                    FontId::new(11.0 * z, theme::bold_family())
+                } else {
+                    FontId::proportional(11.0 * z)
+                };
+                let galley = clipped.layout_no_wrap(text.clone(), font, *aggregate_color);
+                let at = egui::pos2(
+                    status_rect.right() - galley.size().x,
+                    status_rect.center().y - galley.size().y / 2.0,
+                );
+                status_rect.max.x = at.x - 8.0 * z;
+                clipped.galley(at, galley, *aggregate_color);
+            }
             label(
                 &clipped,
                 status_rect,
@@ -582,12 +772,43 @@ pub fn card(
                     egui::Align::Center,
                 );
             }
-        } else if let Some(step) = step {
-            clipped.circle_filled(
-                footer.left_center() + vec2(CARD_PADDING * z, 0.0),
-                2.0,
-                status_color(step.status),
+        } else {
+            let size = (11.0 * z).max(8.0);
+            let mut status_rect = Rect::from_min_max(
+                footer.left_top() + vec2(CARD_PADDING * z, 0.0),
+                egui::pos2(footer.right() - CARD_PADDING * z, footer.bottom()),
             );
+            if let Some((text, aggregate_color, bold)) = &mock.aggregate {
+                let font = if *bold {
+                    FontId::new(size, theme::bold_family())
+                } else {
+                    FontId::proportional(size)
+                };
+                let galley = clipped.layout_no_wrap(text.clone(), font, *aggregate_color);
+                let at = egui::pos2(
+                    status_rect.right() - galley.size().x,
+                    status_rect.center().y - galley.size().y / 2.0,
+                );
+                status_rect.max.x = at.x - 6.0;
+                clipped.galley(at, galley, *aggregate_color);
+            }
+            if mock.proposed {
+                let (status, color) = mock_status(step, mock);
+                label(
+                    &clipped,
+                    status_rect,
+                    &status,
+                    FontId::proportional(size),
+                    color,
+                    egui::Align::Min,
+                );
+            } else if let Some(step) = step {
+                clipped.circle_filled(
+                    footer.left_center() + vec2(CARD_PADDING * z, 0.0),
+                    2.0,
+                    status_color(step.status),
+                );
+            }
         }
     }
 
@@ -607,6 +828,10 @@ pub fn card(
     }
     if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(painter, camera.to_screen(anchor), true, z);
+    }
+    if mock.dimmed || mock.pending {
+        let veil = if mock.dimmed { 0.65 } else { 0.4 };
+        painter.rect_filled(rect.expand(5.0 * z), radius, theme::BG.gamma_multiply(veil));
     }
 }
 
@@ -875,7 +1100,17 @@ mod tests {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1200.0))),
                         ..Default::default()
                     },
-                    |ui| super::card(ui.painter(), &card, camera, true, false, None),
+                    |ui| {
+                        super::card(
+                            ui.painter(),
+                            &card,
+                            camera,
+                            true,
+                            false,
+                            None,
+                            &Default::default(),
+                        )
+                    },
                 );
                 let mut labels = 0;
                 for shape in &output.shapes {
