@@ -259,10 +259,64 @@ reference scenario.
 
 ## 4. Mock-ups
 
-Rendered on `mock/lay-00-shapes` and `mock/lay-00-cards`; the captures are
-posted to #37 (shapes) and to #241 and #37 (cards) with their raw URLs at the
-commit that added them. This section is filled with the file list and the
-measured board widths when the branches land.
+Rendered on 2026-11-04 by Opus on two throwaway branches and posted with
+their raw URLs: the shapes on #37 (`mock/lay-00-shapes` at `40adfad`,
+`docs/qa/2026-11-03/LAY-00/lay00-<a|b|c|d>-<scenario>-<size>.png`, plus a
+crop per shape), the cards on #241 (`mock/lay-00-cards` at `e1a73ab`,
+`lay00-collapse-*`, `lay00-zoom-<35|60|90>-<today|proposed|proposed-collapsed>`,
+`lay00-focus-*`, `lay00-running-*`, `lay00-branch-band-*`). The reference
+scenarios `order-flow` (14 steps), `shop-30` (30) and `shop-50` (53) are on
+the shapes branch under `fixtures/scenarios/lay/`; LAY-01 takes them over.
+
+### 4.1 Shapes, measured
+
+| Board width × height, fit zoom at 1600 × 1000 | order-flow | shop-30 | shop-50 |
+| --- | --- | --- | --- |
+| A horizontal, rail | 3676 × 968, 0.31 | 5180 × 1720, 0.22 | — |
+| B wrapped rows | 1420 × 2668, 0.29 | 1420 × 5367, 0.14 | 1420 × 8799, 0.09 |
+| C vertical | 668 × 4312, 0.18 | 1420 × 6684, 0.11 | — |
+| D spine and satellites | 1806 × 2232, 0.34 | 1826 × 4132, 0.18 | 1876 × 6840, 0.11 |
+
+At 960 × 540 every shape fits between 0.05 and 0.13. What the captures say:
+
+- In A the reading direction is the dependency layer, not the order: step 9
+  (`product`, which depends on nothing) sits left of step 5. Badges make the
+  contradiction visible; without them A reads as a false order (brief, hard
+  rule). B and C are tall boards where the order zigzags between rows.
+- D is the only shape where the order is the reading direction and every
+  check sits under the step it reads; its rows are the spine's wrapped
+  rows. Its cost: data wires from a satellite read later run across rows,
+  and the rails of a branch stack into a band under a row.
+- **No shape is readable at Fit view of 30 steps.** Width is not the
+  limiting dimension once rows wrap; the card's height (every data row of a
+  request) is. Readability at Fit comes from fewer cards (collapsed checks)
+  and from what a card shows at Overview (semantic zoom), not from the
+  shape. The shape decides whether the order and the subjects can be read
+  once the person zooms to 35–60 %.
+- The router's defects (LAY-00 findings 2–5) show in every shape: parallel
+  token wires along a row in A, a shared gutter line in B, long side lines
+  in C, satellite wires overlapping spine wires in D. They are LAY-03/04/05's
+  job after the shape is chosen, on the shape's geometry.
+
+### 4.2 Cards, what was learnt
+
+- Collapsed, `order-flow` drops from 14 cards to 9; the aggregates read
+  `✓ 1 check`, `✓ 2 checks`, `✕ 1/2 failed`; a two-subject check
+  (`receipt_total` reads `cart.body.total`) is counted under both `cart`
+  and `receipt`, as Q6 = A says.
+- At 60 % the proposed Compact card reads status, subtitle and badge; the
+  failed card's red border is visible at 35 %.
+- Focus: the ring (UX-31's VARIABLE colour) and the selection border
+  (ACCENT) are both orange at a glance; LAY-10 picks a ring colour that
+  reads apart from the selection.
+- **A step in progress has no result today**: the runner publishes after a
+  step finishes, so the board shows the running step as *Ready*. LAY-07's
+  running state needs the runner's progress to name the step that started
+  (a `Running` status or a "started" event), the one engine-side change in
+  the sprint; it changes no semantics.
+- A possible defect found on the way, filed as #288: selecting a request
+  with the Inspector open marks a saved document as changed and stales its
+  results.
 
 ## 5. Owner decisions
 
