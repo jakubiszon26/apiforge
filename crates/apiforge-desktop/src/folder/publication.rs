@@ -79,6 +79,7 @@ impl FolderApp {
                 } = action
                 {
                     if let Some(selection) = selection {
+                        self.pasted_applied(id, &selection);
                         self.selections.insert(id.to_owned(), selection);
                     }
                     if let Some(check) = check {
