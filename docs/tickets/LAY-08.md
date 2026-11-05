@@ -37,6 +37,20 @@ The gate rule is part of the owner's Q4 = A (its option text: a gate whose
 result is read later is never hidden); the planning model stated it in 4.7
 item 4. LAY-08 marks gates so LAY-11 can keep them visible.
 
+Decided on acceptance (2026-11-05):
+
+- The list is a third *Checks* tab of a request's Inspector, not a section:
+  a section at the end of *Configuration* fails criterion 5, and one at its
+  top moves existing fields.
+- Criterion 5 holds before a run. After a run at 960 × 540 the Run results
+  bar takes room and the list scrolls; that is accepted.
+- `check_subjects` returns subjects and value sources separately, and a value
+  never makes a check shared. This is how criterion 1's "returns both" is
+  read: `cart` is the subject and `expected_total` a value source, as in
+  [lay.md 1.3](../sprints/lay.md#13-facts-about-the-model-that-the-design-must-respect).
+- A component call's checks and a Cleanup check reading a Main step are not
+  listed. LAY-20 (#308) covers them and must close before LAY-11.
+
 ## Mock-up
 
 Round 3 of LAY-00: `lay00r3-inspector-checks`, `lay00r3-inspector-timing`
