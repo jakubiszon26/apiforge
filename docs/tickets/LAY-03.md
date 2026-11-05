@@ -1,7 +1,8 @@
 # LAY-03: Wires are never drawn on top of each other
 
 - Size: S · Owner review: 15 min · Risk: none
-- State: Backlog (issue #34)
+- State: Backlog (issue #34) · LAY sprint, wave 3 (should), after LAY-04
+  ([lay.md](../sprints/lay.md) section 6)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

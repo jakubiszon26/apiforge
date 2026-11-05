@@ -415,8 +415,8 @@ the discussion. COMP-00 moved to wave 2 (above).
 | UX-30 | #238 (#170 (1)) | *Save as component* in a folder project, M · 30, after COMP-00 (decision 17 = C; COMP-00 Q5: the dialog offers both outcomes, publish-and-call is the default) |
 | UX-06 | #146 | Shared left sidebar, M · 30, estimated on WS-00 and implemented after it |
 
-REP-01 (#135) shares UX-19's mock-up and becomes a ticket when that mock-up
-is decided.
+REP-01 (#135) shared UX-19's mock-up; on 2026-11-05 the owner put its box
+into UX-19 (6.2), so it is no ticket of its own.
 
 ### Totals
 
@@ -636,6 +636,27 @@ implementation pull request (UX-31).
 | 6 | **B** | *Publish* disabled with *r1 · no changes* beside it; replaces UX-25's wording of decision 16 (the rule itself stands) → UX-25 (#233) |
 | 7 | its own ticket | #173 (copy, paste, duplicate) was not rendered → UX-34 (#251), after COMP-00, A/B on its captures |
 
+### 6.2 UX-19 and WS-00 decisions (2026-11-05)
+
+Asked in the same quiz as the LAY plan's ([lay.md 5.1](lay.md#51-decisions-taken-2026-11-05)),
+on the mock-ups posted to #227 (`mock/ux-19` at `e889b98`) and #240
+(`mock/ws-00` at `70f8c82`). Two differ from the recommendation.
+
+| Q | Answer | Effect |
+| --- | --- | --- |
+| UX-19 1 | A | The breadcrumb uses the names from code (`file → component → step name`) |
+| UX-19 2 | **B**, the box in UX-19 | The REP-01 box (failure line, request, check in words, *Open …*) is built in UX-19; REP-01 (#135) is closed as merged into it; UX-19 is re-estimated M · 45 |
+| UX-19 3 | A | A failed run that selects a nested step in the list also selects the component card on the board |
+| WS-00 1 | a | Code mode has the same sidebar with the Library tab present and disabled → UX-06 |
+| WS-00 2 | **stays** | In Split at 1600 × 1000 the sidebar does not fold when the Inspector opens; #161 part 4 is answered by LAY-16's compact cards instead |
+| WS-00 3 | a | At 960 × 540 the sidebar folds by itself when the board would be under 480 px → UX-41 |
+| WS-00 4 | as shown | The *Add step* popup capped to the board, list scrolls, search pinned → UX-42 |
+
+DIAG-00 (#241) moved into LAY by the owner's Q8 = A: its questions are
+LAY-09's and LAY-11's; DIAG-01 (#144, descriptions, `format`) is deferred to
+its own analysis after LAY. The decisions are recorded in
+[`docs/tickets/WS-00.md`](../tickets/WS-00.md) and on #227, #240, #241.
+
 ## 7. Tickets and issues
 
 Created 2026-11-02, labelled `sprint:ux` with their size and risk labels. A
@@ -658,7 +679,7 @@ open until the ticket is accepted.
 | UX-16 | #224 | #162 | `ready:sol` |
 | UX-17 | #225 | #163, #168 (4) | `ready:sol` |
 | UX-18 | #226 | #171, #156 (1) | `ready:opus` |
-| UX-19 | #227 | #150, #169, #135 (mock-up) | — (mock-up) |
+| UX-19 | #227 | #150, #169, #135 (merged in, 6.2) | decided 2026-11-05 (6.2) |
 | UX-20 | #228 | #176 (2), #153 (1), #170 (5) | `ready:sol` |
 | UX-21 | #229 | #164 | `ready:opus` |
 | UX-22 | #230 | #166 | `ready:sol` |

@@ -2,7 +2,12 @@
 
 - Size: S · Owner review: 15 min · Risk: none (no visible design changes;
   the first placement of a new scenario improves)
-- State: Backlog (issue #33)
+- State: Backlog (issue #33) · decided by the owner on 2026-11-05 (Q10 = A:
+  a scenario without positions is laid out when opened and the positions
+  kept until the next save writes `diagram.json`; steps added in code keep
+  today's incremental placement; chips placed beside their first reader and
+  moved by Tidy up — P8 of [lay.md](../sprints/lay.md)) · LAY sprint, wave
+  2, risk `default` added by that decision
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

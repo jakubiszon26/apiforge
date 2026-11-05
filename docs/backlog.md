@@ -303,6 +303,62 @@ findings (#167, #168 (1–3), #170 (4)); the functional gaps #125–#143 and
 #211, #212, #213); #219 (tooling, a Sonnet fix); #155 (parser); #158 (not
 reproduced); #116; #201 (docs, merge on green CI).
 
+## Sprint: LAY (in progress since 2026-11-05)
+
+Diagram comprehension. The owner's brief of 2026-11-03: a person opening a
+large scenario must understand, without effort or manual tidying, what runs
+after what, which checks verify which results and where data comes from.
+The audit, the UX model, four rounds of mock-ups with measurements, three
+second opinions and the owner's decisions Q1–Q16 of 2026-11-05 are in
+[`docs/sprints/lay.md`](sprints/lay.md). One decision widened the proposal:
+the three deferred items that change what the board says (LAY-17, LAY-18,
+LAY-19) are in (Q12 = C). DIAG-00 (#241) folded into LAY-09 and LAY-11
+(Q8 = A). Runs after UX-1's wave 3; UX-1's wave 4 continues beside it.
+
+Capacity: **365** owner review minutes over 19 tickets — must 255, should 50,
+added 60. The order of work is the work-in-progress limit of four pull
+requests within 60 minutes; waves ([plan, section 7](sprints/lay.md#7-dependencies-and-order)):
+0 LAY-01, LAY-08 (no decision, may start now) · 1 LAY-16 → 09 → 07 → 19 →
+10 → 14, 15 → 18 → 11 · 2 LAY-02, 06, 17, 13 · 3 LAY-04, 03, 05 · 4 LAY-12.
+Exit criteria:
+
+- [ ] The three reference scenarios (14, 30, 50 steps) exist and the metric
+      command prints their table (LAY-01, #32).
+- [ ] A 30-step scenario opened from code lays itself out in shape D and
+      fits a 1600 × 1000 window at 50 % or more (LAY-02, LAY-06, LAY-16).
+- [ ] Order, checks and data are read from the board: badges equal the Run
+      results rows, checks collapse into their subject's footer, focus and
+      tracing name the sources (LAY-07, LAY-11, LAY-10, LAY-14, LAY-15).
+- [ ] The UX task sheet is timed before and after; the demo plan runs end to
+      end at both window sizes (LAY-12, #296).
+
+| Issue | Ticket | Estimate · risk | Wave |
+| --- | --- | --- | --- |
+| [#32](https://github.com/jakubiszon26/apiforge/issues/32) | LAY-01 Metrics and the reference scenarios; [ticket](tickets/LAY-01.md) | S · 10 | 0 · `ready:opus` |
+| [#292](https://github.com/jakubiszon26/apiforge/issues/292) | LAY-08 Check subjects in core, the Inspector's list; [ticket](tickets/LAY-08.md) | S · 20 · `visible UI` | 0 · `ready:opus` |
+| [#300](https://github.com/jakubiszon26/apiforge/issues/300) | LAY-16 Compact request geometry; [ticket](tickets/LAY-16.md) | M · 25 · `visible UI`, `default` | 1 · `ready:opus` |
+| [#293](https://github.com/jakubiszon26/apiforge/issues/293) | LAY-09 Semantic zoom with minimum sizes; [ticket](tickets/LAY-09.md) | S–M · 20 · `visible UI` | 1 |
+| [#291](https://github.com/jakubiszon26/apiforge/issues/291) | LAY-07 Sequence badges and the running step; [ticket](tickets/LAY-07.md) | S · 15 · `visible UI` | 1 |
+| [#303](https://github.com/jakubiszon26/apiforge/issues/303) | LAY-19 Failure consequences by cause; [ticket](tickets/LAY-19.md) | M · 20 · `visible UI` | 1 |
+| [#294](https://github.com/jakubiszon26/apiforge/issues/294) | LAY-10 Focus on selection, the relation model; [ticket](tickets/LAY-10.md) | S–M · 20 · `visible UI`, `default` | 1 |
+| [#298](https://github.com/jakubiszon26/apiforge/issues/298) | LAY-14 Wire and input tracing; [ticket](tickets/LAY-14.md) | S–M · 20 · `visible UI` | 1 |
+| [#299](https://github.com/jakubiszon26/apiforge/issues/299) | LAY-15 Off-screen relations, chips and Back; [ticket](tickets/LAY-15.md) | M · 20 · `visible UI` | 1 |
+| [#302](https://github.com/jakubiszon26/apiforge/issues/302) | LAY-18 Compact shows the data in use; [ticket](tickets/LAY-18.md) | M · 20 · `visible UI` | 1 |
+| [#295](https://github.com/jakubiszon26/apiforge/issues/295) | LAY-11 Collapse checks; [ticket](tickets/LAY-11.md) | M · 30 · `visible UI`, `default` | 1 |
+| [#33](https://github.com/jakubiszon26/apiforge/issues/33) | LAY-02 Auto-layout on open, chips; [ticket](tickets/LAY-02.md) | S–M · 15 · `default` | 2 |
+| [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape: D hybrid; [ticket](tickets/LAY-06.md) | M · 30 · `default` | 2 |
+| [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 Wrapping by dependencies; [ticket](tickets/LAY-17.md) | M · 20 · `default` | 2 |
+| [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 Branch bands; [ticket](tickets/LAY-13.md) | M · 20 · `visible UI` | 2 (should) |
+| [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows; [ticket](tickets/LAY-04.md) | M · 20 | 3 |
+| [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Nudge; [ticket](tickets/LAY-03.md) | S · 15 | 3 (should) |
+| [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
+| [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
+
+Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
+(`format`), a component summary on the parent board, MCP-13, arrowheads
+(#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
+stay on origin because the issues' images point at their commits.
+
 ## Later
 
 Feature work resumes after KTLO exits. Candidates, unestimated:
@@ -338,9 +394,10 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 The owner's brief of 2026-11-03 widened the line from geometry to
 comprehension — what runs after what, what checks what, where data comes
 from — and asked for a sprint after UX-1. Its audit, UX model, decisions and
-proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md) (proposed;
-the decisions are the owner's quiz of 2026-11-04). The rows below are the
-2026-10-26 tickets it re-audits.
+proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md), decided
+by the owner's quiz of 2026-11-05 and now the
+[LAY sprint](#sprint-lay-in-progress-since-2026-11-05) above. The rows below
+are the 2026-10-26 tickets it re-audited, kept as the record.
 
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
 code stacks in one column, no tidied wire is straight, wires are drawn on top
