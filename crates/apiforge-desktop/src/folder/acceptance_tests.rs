@@ -11990,6 +11990,16 @@ mod lay08 {
         }
     }
 
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay08_inspector_checks() {
+        for (size, name) in [(MINIMUM, "960"), (WIDE, "1600")] {
+            let (_project, mut harness) = open(&shop_30(), size);
+            show_checks(&mut harness, "cart");
+            crate::testing::capture(&mut harness, &format!("lay08-checks-{name}"), None);
+        }
+    }
+
     /// Criterion 5: at the minimum window the first three rows stand whole in
     /// the Inspector, with nothing to scroll.
     #[test]
@@ -12003,7 +12013,9 @@ mod lay08 {
         ];
         assert_within_window(&harness, &rows);
         assert_disjoint(&harness, &rows);
-        let bottom = MINIMUM.y - 16.0;
+        // The list scrolls inside the panel's margin, which ends above the
+        // window's own edge.
+        let bottom = harness.get_by_label("Resize inspector").rect().bottom() - 16.0;
         for row in rows {
             let rect = harness.get_by_label(row).rect();
             assert!(rect.bottom() <= bottom, "{row} is clipped: {rect:?}");
