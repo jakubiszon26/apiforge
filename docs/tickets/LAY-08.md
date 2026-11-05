@@ -3,7 +3,7 @@
 - Size: S · Owner review: 20 min · Risk: `visible UI`
 - State: Awaiting acceptance (issue #292) · decided by the owner on 2026-11-05 (Q6 = A
   not vetoed; the gate rule of [lay.md 4.7](../sprints/lay.md#47-second-opinion-on-round-3-and-the-four-proofs)
-  item 4) · LAY sprint, wave 0 (no board change; may start now)
+  item 4) · LAY sprint, wave 0 (no board change)
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
