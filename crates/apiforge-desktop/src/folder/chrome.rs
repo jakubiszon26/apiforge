@@ -471,7 +471,7 @@ impl FolderApp {
                 .iter()
                 .any(|(status, _)| *status == apiforge_project::DraftStatus::Orphan)
             || session.registry_state() != RegistryState::Current
-            || self.notice.is_some()
+            || self.notice().is_some()
     }
 
     /// The notices under the tabs; [`Self::has_notices`] says whether any is
@@ -540,7 +540,7 @@ impl FolderApp {
         }
         self.registry_notice(ui);
         let mut dismiss = false;
-        if let Some(notice) = &self.notice {
+        if let Some(notice) = self.notice() {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     if notice.error {
@@ -556,7 +556,7 @@ impl FolderApp {
             });
         }
         if dismiss {
-            self.notice = None;
+            self.notices.dismiss(self.workbench.active());
         }
     }
 
