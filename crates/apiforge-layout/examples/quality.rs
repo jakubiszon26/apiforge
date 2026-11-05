@@ -747,7 +747,7 @@ mod tests {
 
     #[test]
     fn the_cards_measure_what_the_window_measured() {
-        // `Card::height()` in the window, LAY-00 round 4 (`lay00r4-metrics.txt`).
+        // `Card::height()` of the desktop, one step of each kind.
         let project = shop_project();
         let steps = scenario(SCENARIOS[1].1, &project).expect("the fixture lowers");
         let height = |handle: &str| {
@@ -758,9 +758,19 @@ mod tests {
                 .expect("the step");
             Card::of(node, &project).height()
         };
-        assert_eq!(height("login"), 372.0);
-        assert_eq!(height("cart"), 424.0);
-        assert_eq!(height("catalogue"), 476.0);
+        for (handle, expected) in [
+            ("begin", 132.0),
+            ("login", 372.0),
+            ("catalogue", 476.0),
+            ("listed", 264.0),
+            ("first", 236.0),
+            ("expected_total", 288.0),
+            ("product", 212.0),
+            ("valid_cart", 472.0),
+            ("paid", 316.0),
+        ] {
+            assert_eq!(height(handle), expected, "{handle}");
+        }
     }
 
     #[test]
