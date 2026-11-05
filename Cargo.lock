@@ -284,6 +284,10 @@ dependencies = [
 [[package]]
 name = "apiforge-layout"
 version = "0.1.0"
+dependencies = [
+ "apiforge-core",
+ "apiforge-script",
+]
 
 [[package]]
 name = "apiforge-mcp"
@@ -327,6 +331,7 @@ name = "apiforge-runner"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-script",
  "indexmap",
  "reqwest",
  "serde",
