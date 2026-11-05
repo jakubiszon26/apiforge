@@ -11976,11 +11976,17 @@ mod lay08 {
         assert!(requests.len() > 10, "the requests of shop-30: {requests:?}");
         for (handle, _) in &requests {
             show_checks(&mut harness, handle);
+            // The cards stay on the board; the list's rows are what counts.
             assert!(
-                harness.query_by_label_contains("standalone").is_none()
-                    && harness.query_by_label_contains("of_a_value").is_none(),
+                harness.query_by_label("Check standalone").is_none()
+                    && harness.query_by_label("Check of_a_value").is_none()
+                    && harness.query_by_label_contains("standalone —").is_none()
+                    && harness.query_by_label_contains("of_a_value —").is_none(),
                 "listed under {handle}"
             );
+            if handle == "cart" {
+                assert!(has(&harness, "Check cart_total"), "the list is shown");
+            }
         }
     }
 
