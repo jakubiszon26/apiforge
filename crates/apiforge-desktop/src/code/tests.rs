@@ -523,6 +523,68 @@ fn reveal_scrolls_an_offscreen_statement_into_view() {
     assert!(offset > 1000.0, "offset: {offset}");
 }
 
+/// UX-13 criterion 3: MCP-16's gentle reveal, which a followed document
+/// uses, is unchanged: a line in view does not move the view, and a line out
+/// of view is brought to the middle of it.
+#[test]
+fn ux13_criterion_3_show_line_moves_only_for_a_line_out_of_view_and_centres_it() {
+    let ctx = egui::Context::default();
+    let mut editor = CodeEditor::default();
+    let mut text = (0..100)
+        .map(|i| format!("value_{i} = {i}\n"))
+        .collect::<String>();
+    let font = FontId::monospace(Context::default().font_size);
+    let mut frame = |editor: &mut CodeEditor| {
+        let mut offset = 0.0;
+        let mut height = 0.0;
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(500.0, 300.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let scroll = egui::ScrollArea::both()
+                        .id_salt("gentle-scroll")
+                        .animated(false)
+                        .show(ui, |ui| {
+                            editor.show(
+                                ui,
+                                egui::Id::new("gentle-editor"),
+                                &mut text,
+                                &Context::default(),
+                            );
+                        });
+                    offset = scroll.state.offset.y;
+                    height = scroll.inner_rect.height();
+                },
+            );
+            output.textures_delta.clear();
+        }
+        (offset, height)
+    };
+    let (top, _) = frame(&mut editor);
+    assert_eq!(top, 0.0);
+    let line = |index: usize| (0..index).map(|i| format!("value_{i} = {i}\n").len()).sum();
+
+    editor.show_line(line(3));
+    let (offset, _) = frame(&mut editor);
+    assert_eq!(offset, 0.0, "a line in view does not move the view");
+
+    editor.show_line(line(90));
+    let (offset, height) = frame(&mut editor);
+    let row = ctx.fonts_mut(|fonts| fonts.row_height(&font));
+    let middle = 90.0 * row + row / 2.0 - offset;
+    assert!(
+        (middle - height / 2.0).abs() < row * 1.5,
+        "line 91 is centred: its middle at {middle} of {height}"
+    );
+
+    editor.show_line(line(88));
+    let (kept, _) = frame(&mut editor);
+    assert_eq!(kept, offset, "a line in view does not move the view");
+}
+
 #[test]
 fn moving_the_caret_forward_dismisses_a_completion_for_the_old_location() {
     let mut harness = Harness::new("scenario \"S\" { total = pro\n}");

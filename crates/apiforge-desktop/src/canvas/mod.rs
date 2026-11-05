@@ -39,6 +39,9 @@ const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
 const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
+/// Why *Copy* and *Duplicate* are disabled with only chips selected (UX-34).
+const CHIP_NOT_COPIED: &str =
+    "Select a step to copy or duplicate. A variable chip shows a value; it is not copied.";
 
 /// A change requested on the board.
 #[derive(Clone, Debug, PartialEq)]
@@ -293,6 +296,8 @@ pub struct Canvas {
     /// change fits the board again (UX-18).
     last_window: Vec2,
     last_arrangement: String,
+    /// The blocks just pasted, to show once the board is drawn (UX-34).
+    pasted_pending: Vec<String>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -329,6 +334,7 @@ impl Default for Canvas {
             kept_in_view: None,
             last_window: Vec2::ZERO,
             last_arrangement: String::new(),
+            pasted_pending: Vec::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -378,6 +384,14 @@ impl Canvas {
         self.menu.is_some()
     }
 
+    /// Whether a board rectangle was wholly in view in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_in_view(&self, world: Rect) -> bool {
+        self.last_focus.is_some_and(|focus| {
+            focus.contains_rect(self.screen_camera(self.last_viewport).rect(world))
+        })
+    }
+
     /// The blocks the last frame ringed for the selected input (UX-31).
     #[cfg(test)]
     pub(crate) fn debug_ringed(&self) -> Vec<String> {
@@ -415,6 +429,14 @@ impl Canvas {
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);
+    }
+
+    /// Shows the blocks just pasted or duplicated (UX-34): a fitted board
+    /// fits again, around the copies and their originals; a board the user
+    /// has moved brings the copies into view only when one of them is out of
+    /// it.
+    pub fn show_pasted(&mut self, node_ids: Vec<String>) {
+        self.pasted_pending = node_ids;
     }
 
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
@@ -523,6 +545,31 @@ impl Canvas {
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
 
+        let pasted = std::mem::take(&mut self.pasted_pending);
+        if let Some(group) = cards
+            .iter()
+            .filter(|card| pasted.contains(&card.id))
+            .map(Card::rect)
+            .reduce(Rect::union)
+        {
+            if !self.camera_moved_by_user {
+                // A fitted board stays fitted, now around the copies too.
+                self.fit_pending = true;
+            } else if !overlays
+                .focus
+                .contains_rect(self.screen_camera(viewport).rect(group))
+            {
+                // Centre the copies, zooming out only as far as they need.
+                self.camera.zoom = self
+                    .camera
+                    .zoom
+                    .min(overlays.focus.width() / group.width())
+                    .min(overlays.focus.height() / group.height())
+                    .clamp(MIN_ZOOM, MAX_ZOOM);
+                self.camera.pan = (overlays.focus.center() - viewport.min)
+                    - group.center().to_vec2() * self.camera.zoom;
+            }
+        }
         let window = ui.ctx().content_rect().size();
         let rearranged = (window - self.last_window).length() > 1.0
             || input.arrangement != self.last_arrangement;
@@ -1924,17 +1971,31 @@ impl Canvas {
                                                 Command::SaveSelectionAsComponent,
                                             ),
                                         ];
+                                        // A variable chip is a view of a value, not
+                                        // a step, so a chip alone has nothing to
+                                        // copy (UX-34).
+                                        let has_block = input.selection.iter().any(|id| {
+                                            input.graph.nodes.iter().any(|node| &node.id == id)
+                                        });
                                         for (icon, label, shortcut, command) in items {
+                                            let copies = matches!(
+                                                command,
+                                                Command::Copy | Command::Duplicate
+                                            );
                                             let allowed = has_selection
-                                                && (editable || matches!(command, Command::Copy));
-                                            if ui
+                                                && (editable || matches!(command, Command::Copy))
+                                                && (has_block || !copies);
+                                            let mut response = ui
                                                 .add_enabled(
                                                     allowed,
                                                     widgets::action(icon, label).quiet(),
                                                 )
-                                                .on_hover_text(shortcut)
-                                                .clicked()
-                                            {
+                                                .on_hover_text(shortcut);
+                                            if copies && has_selection && !has_block {
+                                                response = response
+                                                    .on_disabled_hover_text(CHIP_NOT_COPIED);
+                                            }
+                                            if response.clicked() {
                                                 commands.push(command);
                                                 ui.close();
                                             }

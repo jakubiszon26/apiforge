@@ -1,8 +1,10 @@
 # LAY-01: A quality measurement for layout and routing
 
 - Size: S · Owner review: 10 min · Risk: none
-- State: Backlog (issue #32)
-- Analysis model: Fable · Implementation model: —
+- State: Implemented, awaiting acceptance (issue #32, PR #305) · LAY sprint,
+  wave 0 (no decision) · re-audited in [lay.md](../sprints/lay.md) section 8
+  on 2026-11-04/05: the criteria 5–7 below were added there
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -31,6 +33,16 @@ Not applicable: no interface change.
 3. `--dump <seed> <cards>` prints one board's rectangles and routes, for
    reading a case by hand.
 4. The development guide names the command beside the benchmark.
+5. Added (LAY plan, 2026-11-05): `fixtures/scenarios/lay/` holds the three
+   reference scenarios `order-flow` (14 steps), `shop-30` (exactly 30 steps,
+   with one shared check and one used gate; round 3's grew to 34 and is
+   restored) and `shop-50`; all three parse and simulate, deterministically.
+6. Added: the command also runs on the three fixtures and prints board
+   width and height and the fit zoom at 1600 × 1000 and 960 × 540, card and
+   chip collisions, and the 12 px clearance violations (the plan's 4.6
+   metric, which LAY-14 reads but does not change).
+7. Added: rounds 2 and 3 of the LAY-00 mock-ups are re-measured on the
+   restored `shop-30` and the numbers recorded in lay.md 4.6.
 
 ## Not in scope
 
@@ -44,3 +56,16 @@ which produced the table in [LAY-00](LAY-00.md); move it to
 `examples/bench.rs`, and use the card geometry of the desktop (280 px wide,
 header 64, input row 52, output row 28, footer 36, control 28) so the boards
 look like the application's.
+
+A step, for the counts of criterion 5, is a node of the scenario's main graph:
+the start, every request, value, component, check and condition, a branch and
+both of its arms; the `cleanup` block is a second graph and is counted apart.
+That count gives `order-flow` its 14 steps and the round-3 `shop-30` its 34.
+`crates/apiforge-runner/tests/acceptance.rs` holds it, with what the later
+tickets read from `shop-30`.
+
+The UX task sheet of the plan's row is
+[lay.md section 9](../sprints/lay.md#9-metrics-and-qa); the
+[development guide](../development.md#verification) points to it beside the
+command, and that section says how to make the failed simulation it starts
+from.

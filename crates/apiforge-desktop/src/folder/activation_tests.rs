@@ -80,10 +80,7 @@ fn an_empty_data_directory_gets_one_project_to_open() {
     assert!(!data.path().join(CATALOGUE_FILE).exists());
 
     // The report says where it went.
-    let notice = crate::testing::folder(&harness)
-        .notice
-        .as_ref()
-        .expect("notice");
+    let notice = crate::testing::folder(&harness).notice().expect("notice");
     assert!(!notice.error);
     assert!(
         notice.text.contains(&root.display().to_string()),
@@ -137,7 +134,7 @@ fn a_legacy_workspace_migrates_on_startup_and_opens_what_was_active() {
     }
 
     // The report names the new location and the untouched original.
-    let notice = app.notice.as_ref().expect("notice");
+    let notice = app.notice().expect("notice");
     assert!(!notice.error);
     assert!(
         notice.text.contains("workspace.json") && notice.text.contains(PROJECTS_DIRECTORY),
@@ -199,7 +196,7 @@ fn a_restart_after_migration_opens_the_catalogue_without_migrating_again() {
         projects
     );
     // Reopening an already-managed project is not an event worth reporting.
-    assert!(crate::testing::folder(&harness).notice.is_none());
+    assert!(crate::testing::folder(&harness).notice().is_none());
 }
 
 #[test]
