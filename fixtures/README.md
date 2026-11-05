@@ -7,6 +7,20 @@
 | `runs/*.json` | Simulation runs: every demo scenario and hand-built graphs (IF branches, graphs without Start, error policies, conditions, components, cleanup, diagnostics, redaction). Each file holds the run request and the normalised report, replayed by `crates/apiforge-runner/tests/run_corpus.rs` |
 | `semantics/*.jsonl` | Expected results of operators, field paths and number formatting, one case per line, replayed by `crates/apiforge-core/tests/semantic_corpus.rs` |
 | `scripts/*.afs` | Canonical scenario and component examples of the scenario language |
+| `scenarios/lay/*.afs` | The reference scenarios of the LAY sprint, written by hand; see below |
+
+## Reference scenarios
+
+`scenarios/lay/` holds `order-flow` (14 steps), `shop-30` (30) and `shop-50`
+(56), which the [LAY tickets](../docs/sprints/lay.md) measure and test against.
+A step is a node of the scenario's main graph: the start, every request, value,
+component, check and condition, a branch and both of its arms. The `cleanup`
+block is a second graph, counted apart (two steps in each scenario).
+
+They call components of the demo shop project and open there, as
+`crates/apiforge-runner/tests/acceptance.rs` does: it holds what the later tickets
+read from `shop-30`, so a change that breaks a ticket fails there. The
+[quality command](../docs/development.md#verification) prints their board metrics.
 
 ## Generated fixtures
 
