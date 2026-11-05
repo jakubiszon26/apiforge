@@ -38,6 +38,7 @@ scenario "Order flow" {
   }
   cleanup {
     removed = DELETE "/orders/{{order.body.id}}" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
       sample 204 {}
     }
     gone = assert removed.status == 204

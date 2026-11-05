@@ -67,4 +67,5 @@ tickets read from `shop-30`.
 The UX task sheet of the plan's row is
 [lay.md section 9](../sprints/lay.md#9-metrics-and-qa); the
 [development guide](../development.md#verification) points to it beside the
-command, and it says how to make the failed simulation it starts from.
+command, and that section says how to make the failed simulation it starts
+from.

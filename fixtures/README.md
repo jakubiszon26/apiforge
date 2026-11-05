@@ -17,9 +17,9 @@ A step is a node of the scenario's main graph: the start, every request, value,
 component, check and condition, a branch and both of its arms. The `cleanup`
 block is a second graph, counted apart (two steps in each scenario).
 
-They call components of the demo shop project and open there, as
-`crates/apiforge-runner/tests/acceptance.rs` does: it holds what the later tickets
-read from `shop-30`, so a change that breaks a ticket fails there. The
+They open in the demo shop project, whose components `shop-30` and `shop-50` call,
+as `crates/apiforge-runner/tests/acceptance.rs` does: it holds what the later
+tickets read from `shop-30`, so a change that breaks a ticket fails there. The
 [quality command](../docs/development.md#verification) prints their board metrics.
 
 ## Generated fixtures

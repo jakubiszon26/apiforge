@@ -2,8 +2,8 @@
 //! ([LAY-01](../../../docs/tickets/LAY-01.md)).
 //!
 //! ```text
-//! cargo run -p apiforge-layout --example quality --release
-//! cargo run -p apiforge-layout --example quality --release -- --dump <seed> <cards>
+//! cargo run -p apiforge-layout --example quality --release --locked
+//! cargo run -p apiforge-layout --example quality --release --locked -- --dump <seed> <cards>
 //! ```
 //!
 //! It prints two tables: generated scenario-like boards of 6, 12, 25 and 50 cards,
@@ -17,7 +17,8 @@
 //! - `wires`, `crossings` (the router's bridges), `bends`, `straight` (wires without
 //!   a bend), `incomplete` (routes that found no way around the cards);
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
-//!   other for at least 20 px; `coincident`: the same within 0.5 px;
+//!   other for at least 20 px; `coincident`: the same within 0.5 px, counted there
+//!   and not under `close`;
 //! - `long`: edges spanning more than one layer;
 //! - `width`, `height`: the board's bounds; `fit_1600`, `fit_960`: the zoom that
 //!   shows all of it at 1600 × 1000 and 960 × 540, not limited to the zoom the
@@ -25,8 +26,8 @@
 //! - `card_hits`: pairs of cards that overlap; `chip_hits`: pairs with a proxy chip
 //!   in them. A scenario read from code has no chips yet: they are placed by hand
 //!   and live in the document, so `chips` says how many were measured;
-//! - `clearance`: route segments closer than 12 px to a card the wire does not end
-//!   on, the router's `Routing::margin`.
+//! - `clearance`: route segments closer than 12 px to a card or chip the wire does
+//!   not end on, the router's `Routing::margin`.
 //!
 //! The card geometry is the desktop's (`canvas/layout.rs`), which this crate cannot
 //! depend on. A test holds it against heights the window measured.
@@ -445,8 +446,8 @@ fn distance(point: Point, rectangle: &Rect) -> f32 {
     dx.hypot(dy)
 }
 
-/// Route segments closer than the clearance to a card their wire does not end on,
-/// sampled every 2 px. A route that found no way around the cards is not judged.
+/// Route segments closer than the clearance to a rectangle their wire does not end
+/// on, sampled every 2 px. A route that found no way around the cards is not judged.
 fn clearance_violations(routes: &[Route], wires: &[Wire], rectangles: &[Rect]) -> usize {
     let mut violations = 0;
     for (route, wire) in routes.iter().zip(wires).filter(|(route, _)| route.complete) {

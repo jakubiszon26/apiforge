@@ -112,7 +112,7 @@ How readable the boards are is measured beside it, before and after a layout
 ticket, and the numbers go into the ticket's pull request:
 
 ```bash
-cargo run -p apiforge-layout --example quality --release [-- --dump <seed> <cards>]
+cargo run -p apiforge-layout --example quality --release --locked [-- --dump <seed> <cards>]
 ```
 
 It prints wires, crossings, bends, straight wires, close and coincident pairs,

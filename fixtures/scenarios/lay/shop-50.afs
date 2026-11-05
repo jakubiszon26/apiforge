@@ -111,7 +111,7 @@ scenario "Shop 50" {
       sample 202 { queued: true }
     }
   } else {
-    not_created = assert order.body.status == "created"
+    not_created = assert order.body.status != "created"
     cancel = POST "/orders/{{order.body.id}}/cancel" {
       headers { Authorization: "Bearer {{login.body.token}}" }
       sample 200 { cancelled: true }

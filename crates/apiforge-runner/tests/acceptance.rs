@@ -178,22 +178,15 @@ fn lay01_criterion_5_shop_30_keeps_the_steps_the_later_tickets_name() {
     // LAY-09 criterion 3 reads `2 checks` on `login`; LAY-18 criterion 1 reads
     // `status → 1 check` there.
     assert_eq!(checks_of(&scenario, "login").len(), 2);
-    assert_eq!(
-        checks(&scenario)
-            .filter(|check| {
-                check.inputs.values().any(|binding| {
-                    binding
-                        .references()
-                        .iter()
-                        .any(|reference| reference.node_id == node(&scenario, "login").id)
-                        && serde_json::to_string(binding)
-                            .expect("a binding serialises")
-                            .contains("status")
-                })
-            })
-            .count(),
-        1
-    );
+    let login = &node(&scenario, "login").id;
+    let reads_status = |check: &&Node| {
+        check
+            .inputs
+            .values()
+            .flat_map(|binding| binding.references())
+            .any(|reference| reference.node_id == login && reference.port == "status")
+    };
+    assert_eq!(checks(&scenario).filter(reads_status).count(), 1);
     // LAY-09 criterion 4, LAY-11 and the UX task sheet: `checkout` has three checks.
     assert_eq!(checks_of(&scenario, "checkout").len(), 3);
     // LAY-10 criterion 1 rings these around `cart`.
