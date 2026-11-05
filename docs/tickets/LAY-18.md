@@ -30,11 +30,11 @@ found from its source.
 
 ## Mock-up
 
-Not rendered: the line replaces a row LAY-16 already sizes, in LAY-16's
-captures (`lay00r4-card-60`, `mock/lay-00-round-4` at `df6305b`); the QA
-captures of `login` and `cart` at 60 % and 100 % show it, and the owner
-judges the wording there. If the wording needs a second look, one capture
-round before the pull request.
+Not yet approved: the item was added by the owner without a capture
+(Q12 = C). Before the acceptance tests, a design-review view on the ticket's
+branch renders `login` and `cart` at 60 % and 100 % with the line, in
+LAY-16's box (`lay00r4-card-60`, `mock/lay-00-round-4` at `df6305b`),
+posted to the issue and approved by the owner in one quiz (the wording).
 
 ## Acceptance criteria
 

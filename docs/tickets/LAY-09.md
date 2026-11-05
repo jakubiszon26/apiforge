@@ -30,8 +30,12 @@ level.
 - Changed: the thresholds 0.45 / 0.75 stay the working assumption (Q7 =
   A); this ticket verifies them with the minimum sizes and may move them,
   recording the final values here. Zooming never moves a card (the box is
-  LAY-16's). Removed or hidden: nothing. Default behaviour that changes: what
-  a card shows below 0.75.
+  LAY-16's). Removed or hidden: below Full, the unconnected output ports,
+  *Optional* and the separators; at extreme zoom the labels yield to the
+  signals (owner's Q13 = A). Default behaviour that changes: what a card
+  shows below 0.75.
+- New: a check card's subtitle names its subject and predicate
+  (`cart.total ≈ total`), from LAY-08's subjects.
 
 ## Decisions taken (owner, 2026-11-05)
 
@@ -74,7 +78,9 @@ lay09`, on `shop-30.afs` after a failed simulation.
    `lay09_criterion_4_a_failed_check_on_a_green_request`.
 5. Zooming from 0.2 to 1.0 moves no card: every card's world rectangle is
    identical at each zoom. Test: `lay09_criterion_5_zooming_moves_no_card`.
-6. The final thresholds are recorded in this file with the measurement that
+6. A check card's subtitle reads subject and predicate at Compact and Full.
+   Test: `lay09_criterion_6_a_check_names_its_subject`.
+7. The final thresholds are recorded in this file with the measurement that
    fixed them; if they differ from 0.45 / 0.75 the QA captures show the
    boundary frames.
 

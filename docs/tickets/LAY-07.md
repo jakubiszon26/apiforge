@@ -3,7 +3,7 @@
 - Size: S · Owner review: 15 min · Risk: `visible UI`
 - State: Backlog (issue #291) · decided by the owner on 2026-11-05 (Q2 = A)
   in the LAY plan ([lay.md 5.1](../sprints/lay.md#51-decisions-taken-2026-11-05))
-  · LAY sprint, wave 1, after LAY-09
+  · LAY sprint, wave 1, after LAY-09 and after UX-25 (#233) is merged
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -62,9 +62,10 @@ lay07`, on the LAY-01 reference scenarios.
    frame of the runner's "started" event, while the selected step is a
    different card and keeps the selection frame. Test:
    `lay07_criterion_3_the_running_step_is_marked_apart_from_the_selection`.
-4. The results of a previous run are told from the current run's: a card
-   whose result is from a previous run shows it with UX-25's stale mark,
-   and the capture names both states. Test:
+4. The results of a previous run are told from the current run's: while a
+   run is on, a card not yet reached shows its previous result muted with
+   UX-25's stale mark (UX-25, #233, is a prerequisite: this ticket starts
+   after it is merged), and the capture names both states. Test:
    `lay07_criterion_4_stale_results_are_told_from_current_ones`.
 5. At Fit view of `shop-30.afs` at 1600 × 1000 a two-digit badge is at
    least 9 px high on screen and does not overlap the name. Test:
@@ -80,10 +81,13 @@ What the Overview and Compact levels show (LAY-09); the rows of Run results
 
 ## Technical appendix
 
-- Sequence: a static scheduler in `apiforge-core` (or exposed by the
-  runner's `plan`) replays the engine's rule without executing
-  (`crates/apiforge-runner/src/engine.rs:518–560` is the reference); a test
-  asserts both agree on the fixtures.
+- Sequence: LAY-08's `apiforge_core::graph::sequence` (wave 0) gives the
+  numbers; LAY-07 only draws them.
+- Running: the runner today emits a snapshot when a step finishes and
+  `StepStatus` has no running variant, so this ticket adds a step-started
+  event to the runner's sink (`engine.rs:692`, where the step's clock
+  starts) and the window marks the step running from it until its result
+  arrives; the CLI ignores the event.
 - Badge: `canvas/paint.rs::card` draws the circle at the card's top-left
   from `canvas/layout.rs` geometry; the minimum on-screen size follows
   LAY-09's rule (`(size * zoom).max(min)`); the running state comes from

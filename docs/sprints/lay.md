@@ -907,7 +907,7 @@ The same quiz decided UX-19's three and WS-00's four questions
 | 9 | A | Focus is selection behaviour: direct producers, consumers and checks ring, the rest dims, Esc clears → LAY-10 |
 | 10 | A | Auto-layout only for a scenario without positions, on open; code edits keep incremental placement → LAY-02 |
 | 11 | A | One band per branch, one wire into the band → LAY-13 |
-| 12 | **C** | Must, should **and three deferred items** join the sprint as tickets: wrapping by dependencies (LAY-17), Compact's data-in-use summary (LAY-18), failure consequences by cause (LAY-19, a runner-side ticket kept in LAY by this decision). DIAG-01, the component summary, MCP-13, arrowheads and the wire-length metrics stay deferred. 19 tickets, 365 review minutes ([section 6](#6-scope-must-should-deferred)) |
+| 12 | **C**, then narrowed | The owner chose C (everything including the deferred items) and, asked which deferred items become tickets, named the three that change what the board says: must, should **and three deferred items** join the sprint as tickets: wrapping by dependencies (LAY-17), Compact's data-in-use summary (LAY-18), failure consequences by cause (LAY-19, a runner-side ticket kept in LAY by this decision). DIAG-01, the component summary, MCP-13, arrowheads and the wire-length metrics stay deferred. 19 tickets, 365 review minutes ([section 6](#6-scope-must-should-deferred)) |
 | 13 | A | Compact shows name, method, short path, two result lines, the ports in use and one summary line per configured input (`Body · 2 fields`) → LAY-16, LAY-09 |
 | 14 | A | A board-level *Compact cards* application preference; Tidy up repacks; zooming never moves a card → LAY-16 |
 | 15 | A | A failed check on a successful request: red footer `HTTP 200 · ✕ 1/3 failed`, 2 px red border at every zoom, the band keeps the HTTP colour → LAY-11, LAY-09 |
@@ -970,7 +970,7 @@ them and names the test.
 | LAY-03 | Nudge | S · 15 · — | as LAY-03 today |
 | LAY-05 | Lanes | M · 15 · — | scheduled only if crossings per wire after LAY-04 exceed 0.2 on `shop-30` |
 | LAY-12 | The demo (must): the three reference scenarios opened cold, read, run (simulation and live loopback), a failure found; the UX task sheet timed, task 8 by clicks; the two small-window goals of 4.7 item 9 checked | S · 10 · — | the demo plan of [section 10](#10-demo-plan) runs end to end at 1600 × 1000 and 960 × 540 |
-| LAY-17 | Wrapping by dependencies (Q12, 4.5 item 4): D's row break is chosen among the neighbouring column boundaries (four to six columns) by the wires that would cross rows, a request split from its satellites, a cut branch and the rows' heights; order unchanged; at first layout and Tidy up, never on resize | M · 20 · default | on `shop-30` the wires crossing a row boundary are no more than with the fixed wrap, and no request is split from its satellites; deterministic; the board stays ≤ 1920 px wide |
+| LAY-17 | Wrapping by dependencies (Q12, 4.5 item 4): D's row break is chosen among the neighbouring column boundaries (four or five columns; six would exceed the 1920 px bound) by the wires that would cross rows, a request split from its satellites, a cut branch and the rows' heights; order unchanged; at first layout and Tidy up, never on resize | M · 20 · default | on `shop-30` the wires crossing a row boundary are no more than with the fixed wrap, and no request is split from its satellites; deterministic; the board stays ≤ 1920 px wide |
 | LAY-18 | Compact's data-in-use summary (Q12, 4.5 item 5; W11): at the compact density an output line reads `body.token → 6 readers`, `status → 1 check` instead of unused output rows; a click starts LAY-14's trace of those wires; no port-model change | M · 20 · visible UI | `login` at Compact reads `body.token → N readers` with N equal to its wires; clicking the line pins the trace to every reader; a field nothing reads is not listed; the card's box is unchanged by the line's wording |
 | LAY-19 | Failure consequences by cause (Q12, 4.5 item 6): a failed step's footer counts the steps it kept from running (`✕ failed · 4 steps not run`); a not-run card names its cause as the engine knows it — *Stopped* (error policy), *Blocked: cart failed* or *condition unmet*, *Skipped: outside path*; Run results' summary uses the same words | M · 20 · visible UI | after a failed simulation of `shop-30` the failed card's count equals the Blocked and Stopped rows of Run results; each not-run card's cause equals its `StepResult` message class; a card on an unselected branch reads *Skipped*, never *Blocked* |
 
@@ -1008,8 +1008,10 @@ hides the selection (LAY-10).
 
 ## 10. Demo plan
 
-On the reference scenarios, in the demo shop project, at 1600 × 1000 and
-960 × 540:
+On the three reference scenarios (`order-flow`, `shop-30`, `shop-50`), in
+the demo shop project, at 1600 × 1000 and 960 × 540, in simulation and
+against the live loopback sample (the steps name `shop-30` and `shop-50`;
+`order-flow` runs the same steps as the small case):
 
 1. Open `shop-30.afs` from code with no positions: it lays itself out
    (LAY-02) in the chosen shape (LAY-06); the badges read 1…30 (LAY-07).

@@ -380,7 +380,7 @@ slot early. COMP-00's mock-up ran in parallel with (a) and is decided.
 | UX-16 | #162 | Cleanup cards resolve references to Cleanup steps | S · 10 | board cards | — |
 | UX-17 | #163, #168 (4) | *Tidy up* with one card or a chip selected tidies the diagram | S · 10 | board toolbar | — (decision 9) |
 | UX-18 | #171, #156 (1) | The Inspector opening does not re-fit the board; the selected or new card stays visible | M · 20 | board camera | — |
-| UX-19 | #150, #169 | Run results navigation: scroll to the selected row, selection on a failed run, collapsible component rows, breadcrumb, scrollbar padding | M · 30 | Run results | UX-05 (decisions 10, 11; mock-up) |
+| UX-19 | #150, #169, #135 | Run results navigation: scroll to the selected row, selection on a failed run, collapsible component rows, breadcrumb, scrollbar padding, the REP-01 box (6.2) | M · 45 | Run results | UX-05 (decisions 10, 11; mock-up decided 2026-11-05) |
 | UX-20 | #176 (2), #153 (1), #170 (5) | Gutter room for the dot, amber for warnings; a plain message for undo on invalid source; the popup clears the Problems header | S · 10 | editor gutter | UX-13 |
 
 ### Wave 3 — components, Explorer, dialogs and polish (180 min)
@@ -423,10 +423,10 @@ into UX-19 (6.2), so it is no ticket of its own.
 | Wave | Tickets | Review minutes |
 | --- | --- | --- |
 | 1 | 8: UX-01, 02, 03, 04, 05, 08, 09, 10 | 30+20+10+15+20+15+15+10 = **135** |
-| 2 | 13: COMP-00, UX-31, UX-32, UX-11, 12, 13, 14, 15, 16, 17, 18, 19, 20 | 30+30+30+15+10+15+10+10+10+10+20+30+10 = **230** |
+| 2 | 13: COMP-00, UX-31, UX-32, UX-11, 12, 13, 14, 15, 16, 17, 18, 19, 20 | 30+30+30+15+10+15+10+10+10+10+20+45+10 = **245** (UX-19 re-estimated 2026-11-05, 6.2) |
 | 3 | 12: UX-21, 22, 23, 24, 25, 26, 27, 28, UX-07, UX-29, UX-33, UX-34 | 15+15+10+30+15+10+10+10+15+10+20+20 = **180** |
-| 4 | 6: WS-00, DIAG-00, RUN-00, MCP-20, UX-30, UX-06 | 30+30+30+15+30+30 = **165** |
-| All | 39 | **710** |
+| 4 | 5: WS-00, RUN-00, MCP-20, UX-30, UX-06 | 30+30+15+30+30 = **135** (DIAG-00 moved to LAY on 2026-11-05, 6.2) |
+| All | 38 | **695** |
 
 The quiz asked 565 for option C: the difference is COMP-00's four
 implementation tickets (100), UX-30 (30) and UX-06 (30), which the proposal
@@ -696,8 +696,8 @@ open until the ticket is accepted.
 | UX-33 | #250 | #161 (2) (COMP-00 Q4) | `ready:opus` |
 | UX-34 | #251 | #173 (COMP-00 Q7) | `decision-needed` (A/B on captures) |
 | COMP-00 | #239 | #174, #161 (2), #172 (1, 2), #173, #170 (1), #165 | decided 2026-11-02 |
-| WS-00 | #240 | #146, #157, #161 (4) | `decision-needed` |
-| DIAG-00 | #241 | #144, #145, #161 (1), #170 (2) | `decision-needed` |
+| WS-00 | #240 | #146, #157, #161 (4) | decided 2026-11-05 (6.2; `docs/tickets/WS-00.md`) |
+| DIAG-00 | #241 | #144, #145, #161 (1), #170 (2) | closed 2026-11-05: folded into LAY-09 and LAY-11 (6.2) |
 | RUN-00 | #242 | #148, #161 (3, 5) | `decision-needed` |
 | MCP-20 | #192 | — | — (mock-up) |
 

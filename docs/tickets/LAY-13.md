@@ -2,7 +2,7 @@
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`
 - State: Backlog (issue #297) · decided by the owner on 2026-11-05 (Q11 = A)
-  · LAY sprint, wave 2, after LAY-17
+  · LAY sprint, wave 2, after LAY-17, on LAY-16's card sizes
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal

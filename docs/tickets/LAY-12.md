@@ -32,13 +32,14 @@ Not applicable: no interface change.
 
 1. The demo plan's eight steps run at 1600 × 1000 and 960 × 540 on
    `order-flow.afs`, `shop-30.afs` and `shop-50.afs` in the demo shop
-   project, in simulation and against the live loopback sample; each step
-   has one capture in the pull request body.
+   project, in simulation and against the live loopback sample; each
+   combination has one capture under `docs/qa/<date>/LAY-12/` named
+   `lay12-<scenario>-<step>-<size>-<mode>` and the pull request body lists
+   the matrix (3 scenarios × 2 sizes × 2 modes).
 2. The UX task sheet's eight tasks are timed before the sprint (on `main`
    at the sprint's start) and at its end, by the owner or an agent at the
-   window; the two columns are in the pull request body. Task 8 is also
-   `lay12_task_8_the_walk_by_clicks` in
-   `crates/apiforge-desktop/src/folder/acceptance_tests.rs`.
+   window; the two columns are in the pull request body. Task 8 is LAY-15's
+   `lay15_criterion_4_the_walk_by_clicks`, re-run here.
 3. The two small-window goals of 4.7 item 9 hold at 960 × 540 on
    `shop-50.afs` after a failed run: at Fit the failures and the selection's
    row are found without zooming; at 60 % the producers and readers of the

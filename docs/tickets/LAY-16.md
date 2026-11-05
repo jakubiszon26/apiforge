@@ -36,6 +36,10 @@ instead of 33 %, and zooming never moves a card.
 > Q13 = A: Compact's content. Q14 = A: a *Compact cards* application
 > preference, Tidy up repacks, zooming never moves a card. Q16 = A: the
 > compact box at every zoom; editing in the Inspector or by double-click.
+> Q16's option C ("compact only as a density the person switches on;
+> today's geometry stays the default") was offered and not chosen, so the
+> compact density is the default and *Compact cards* off restores today's
+> geometry.
 
 ## Mock-up
 

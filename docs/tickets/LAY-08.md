@@ -16,13 +16,15 @@ subjects is counted under both.
 ## What the owner will see
 
 - New, in `apiforge-core`: a function that names the subjects of a check —
-  the steps whose outputs it reads directly. Not visible.
+  the steps whose outputs it reads directly — and a `sequence` function that
+  replays the engine's order without executing (the static scheduler of the
+  plan's appendix), which the moment word and LAY-07's badges read. Not
+  visible.
 - New, in the Inspector of a request: a *Checks* section listing its checks
   in words — the predicate (`cart.total ≈ total`), the sources, the status
   and the moment (`Waiting for receipt · Shared` for a check that also reads
   a later step). Gates (a *Data condition* whose value another step reads)
   are counted apart, as *Gate*.
-- New: a check card's subtitle names its subject and predicate.
 - Changed, removed, hidden: nothing. Default behaviour that changes: none.
 
 ## Decisions taken (owner, 2026-11-05)
@@ -31,9 +33,9 @@ subjects is counted under both.
 > counted under every subject it reads directly; the Inspector list shows
 > it under each with "also checks receipt" (one line *Shared with: cart*).
 
-Decided by the planning model as a rule of the model (4.7 item 4): a gate
-whose result is read later is never hidden by collapsing; LAY-08 marks it so
-LAY-11 can keep it visible.
+The gate rule is part of the owner's Q4 = A (its option text: a gate whose
+result is read later is never hidden); the planning model stated it in 4.7
+item 4. LAY-08 marks gates so LAY-11 can keep them visible.
 
 ## Mock-up
 
@@ -59,23 +61,29 @@ lay08`, on `shop-30.afs`.
 3. A *Data condition* whose value a later step reads is listed as *Gate*
    under its subject and is not counted among the checks. Test:
    `lay08_criterion_3_a_gate_is_counted_apart`.
-4. A standalone check is listed under no step; the check card's subtitle
-   reads subject and predicate. Test:
-   `lay08_criterion_4_standalone_and_subtitle`.
+4. A standalone check is listed under no step. Test:
+   `lay08_criterion_4_a_standalone_check_is_listed_nowhere`.
+6. `sequence` agrees with the runner's order on the three fixtures (the
+   runner's loop, `engine.rs:518–560`, is the reference). Test:
+   `sequence_agrees_with_the_engine_on_the_fixtures` in core.
 5. The list fits the Inspector at 960 × 540 without clipping its first
    three rows. Test: `lay08_criterion_5_fits_the_small_window`.
 
 ## Not in scope
 
-Hiding checks (LAY-11); the footer aggregate (LAY-11); timing rows in the
-list beyond the moment word; MCP's check tool using the function (later).
+Hiding checks (LAY-11); the footer aggregate (LAY-11); the check card's
+subtitle (LAY-09); the badges (LAY-07); timing rows in the list beyond the
+moment word; MCP's check tool using the function (later).
 
 ## Technical appendix
 
 - Subjects: `Binding::references()` over `node.inputs`, filtered by node
   kind, beside `dependencies` in `apiforge-core::graph`; a `Subject { step,
   shared: bool, gate: bool }` result.
+- Sequence: `apiforge_core::graph::sequence` orders the steps by the
+  engine's rule (dependencies, `@after`, branches) without executing;
+  `dependencies` alone gives no order, so the function is this ticket's.
 - Inspector: a section in `folder/inspector.rs` for request nodes, built
-  from `check_subjects` of every check in the graph; the moment word comes
-  from the engine order (LAY-07's sequence function once merged; until then
-  from `dependencies`).
+  from `check_subjects` of every check in the graph; the moment word
+  (*Waiting for receipt*) compares the check's `sequence` position with its
+  subjects'.

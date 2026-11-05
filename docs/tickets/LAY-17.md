@@ -16,8 +16,8 @@ from its satellites, and a branch is not split in two by the break.
 ## What the owner will see
 
 - Changed: where Tidy up starts a new row. The break is chosen among the
-  neighbouring column boundaries (four to six columns at the default row
-  width) by four costs: the wires that would cross rows, a request split
+  neighbouring column boundaries (four or five columns at the default row
+  width; six would exceed the 1920 px bound) by four costs: the wires that would cross rows, a request split
   from its satellites, a cut branch and the rows' heights; the order is
   unchanged. It runs at the first layout and at Tidy up, never on a resize
   of the window. Default behaviour that changes: the positions Tidy up
@@ -59,6 +59,6 @@ a parameter); routing (LAY-03, LAY-04, LAY-05).
 ## Technical appendix
 
 `layered`'s spine mode (LAY-06) gives rows after the columns are known; this
-ticket inserts a choice of the break column among `default - 1 ..= default +
-1` minimising a weighted sum of the four costs, computed from the edges and
+ticket inserts a choice of the break column minimising a weighted sum of the four costs, over `default - 1 ..= default`
+columns (never above the width bound), computed from the edges and
 the satellites' subjects; ties keep the default.

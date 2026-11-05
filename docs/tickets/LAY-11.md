@@ -104,8 +104,11 @@ what a failed step's consequences read (LAY-19); descriptions.
 ## Technical appendix
 
 - A filter over cards and wires in `canvas/mod.rs` before routing, from the
-  run-independent set of checks with a subject (LAY-08); hidden cards are
-  not obstacles either. Tidy up in collapsed mode passes the visible set to
+  run-independent set of checks with a subject (LAY-08), **excluding** the
+  gates LAY-08 marks (a *Data condition* whose value is read stays a short
+  node with its wire); an `@after` edge whose source is hidden is re-drawn
+  from the subject with the check's name; hidden cards are not obstacles
+  either. Tidy up in collapsed mode passes the visible set to
   the layout and places hidden checks under their subject with
   `layered::place`.
 - The preference lives beside the wire style in the application settings;

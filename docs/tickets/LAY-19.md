@@ -17,23 +17,30 @@ grey "did not run".
 
 ## What the owner will see
 
-- New: a failed step's footer reads `✕ failed · 4 steps not run` (the count
-  of steps whose cause is that failure). A not-run card's footer names its
+- New: a failed step's footer reads `✕ failed · 4 steps not run` — the
+  steps whose not-run cause traces to that failure (blocked by it directly
+  or through another blocked step, or stopped by the policy it triggered);
+  a step blocked by an unrelated false *Data condition* is not counted. A not-run card's footer names its
   cause: *Stopped* (the error policy *Stop* ended the run), *Blocked: cart
   failed* (a source failed) or *Blocked: condition unmet* (a *Data
-  condition* was false), *Skipped: outside path* (an unselected branch).
-  Run results' summary uses the same words.
+  condition* was false), *Skipped: outside path* (an unselected branch), *Cancelled* (the person
+  stopped the run). Run results' summary uses the same words.
 - Changed: the footer of not-run cards (today one muted status) and the Run
   results summary's wording. Removed or hidden: nothing. Default behaviour
-  that changes: none. The runner already distinguishes the causes in
-  `StepResult.message`; no engine behaviour changes.
+  that changes: none. The runner knows the cause where it builds each result
+  (`engine.rs:545–600`: "outside path", "stopped", "unavailable", a false
+  *Data condition*, cancellation) but today writes one message for a failed
+  source and an unmet condition; this ticket records the cause as an enum
+  there. No engine behaviour changes.
 
 ## Mock-up
 
-Not rendered: the footer line sits in LAY-16's box and uses LAY-07's states;
-round 4's `lay00r4-run-60` (`mock/lay-00-round-4` at `df6305b`) shows the
-partial run the wording applies to. The owner judges the words on the QA
-captures of `shop-30` after a failed simulation at 60 % and at Fit.
+Not yet approved: the item was added by the owner without a capture
+(Q12 = C). Before the acceptance tests, a design-review view on the ticket's
+branch renders `shop-30` after a failed simulation at 60 % and at Fit with
+the footers and the summary, posted to the issue and approved by the owner
+in one quiz (the wording and the count); round 4's `lay00r4-run-60`
+(`mock/lay-00-round-4` at `df6305b`) is the partial run it builds on.
 
 ## Acceptance criteria
 
@@ -41,8 +48,10 @@ Tests in `acceptance_tests.rs`, `mod lay19`, on `shop-30.afs`, and a
 runner test.
 
 1. After a failed simulation of `shop-30` with the policy *Stop*, the
-   failed card's count equals the number of *Stopped* and *Blocked* rows in
-   Run results. Test: `lay19_criterion_1_the_count_equals_the_rows`.
+   failed card's count equals the number of *Stopped* rows plus the
+   *Blocked* rows whose cause chain contains the failed step; a step
+   blocked by an unrelated false *Data condition* is not counted. Test:
+   `lay19_criterion_1_the_count_equals_the_caused_rows`.
 2. Each not-run card's cause equals its `StepResult` message class: a step
    reading the failed step's output is *Blocked: <step> failed*; a step
    behind a false *Data condition* is *Blocked: condition unmet*; a step
@@ -56,10 +65,13 @@ runner test.
 5. The footer fits LAY-16's box at Compact and Overview (the count and the
    cause word are at least 9 px on screen at Fit, LAY-09's rule). Test:
    `lay19_criterion_5_fits_the_box`.
-6. Runner: the message classes are an enum the window reads, not strings it
-   parses; a test asserts the mapping of every `engine.rs` branch
-   (`crates/apiforge-runner/src/engine.rs:545–600`). Test:
+6. Runner: the causes are an enum the window reads, not strings it parses
+   — `Stopped`, `BlockedBy(step)`, `ConditionUnmet`, `OutsidePath`,
+   `Cancelled` — and a test asserts the mapping of every `engine.rs`
+   branch that builds a Skipped, Blocked or Cancelled result. Test:
    `not_run_causes_are_an_enum_with_one_variant_per_branch`.
+7. A run cancelled by the person marks the unreached steps *Cancelled*, not
+   *Stopped*. Test: `lay19_criterion_7_cancelled_is_its_own_cause`.
 
 ## Not in scope
 
@@ -69,8 +81,10 @@ the colours of the statuses (LAY-09's borders: red failed, amber blocked).
 ## Technical appendix
 
 `StepResult` gains a `cause: Option<NotRunCause>` set where `engine.rs`
-builds Skipped ("outside path", "stopped") and Blocked ("unavailable", a
-Data condition unmet) results; the message strings are kept for the CLI. The
-failed step's count is the number of results whose cause names it (directly
-or by the stop it triggered). `paint::card`'s footer and the Run results
+builds Skipped ("outside path", "stopped"), Blocked ("unavailable" — which
+today covers both a failed source and a false Data condition, so the two
+branches set different variants) and Cancelled results; the message strings
+are kept for the CLI. The failed step's count is the number of results whose
+cause chain reaches it (`BlockedBy` transitively, or `Stopped` when that
+failure triggered the stop). `paint::card`'s footer and the Run results
 summary read the enum.

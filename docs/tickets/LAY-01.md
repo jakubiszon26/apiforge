@@ -39,7 +39,8 @@ Not applicable: no interface change.
    restored) and `shop-50`; all three parse and simulate, deterministically.
 6. Added: the command also runs on the three fixtures and prints board
    width and height and the fit zoom at 1600 × 1000 and 960 × 540, card and
-   chip collisions, and the 12 px clearance violations (LAY-14's metric).
+   chip collisions, and the 12 px clearance violations (the plan's 4.6
+   metric, which LAY-14 reads but does not change).
 7. Added: rounds 2 and 3 of the LAY-00 mock-ups are re-measured on the
    restored `shop-30` and the numbers recorded in lay.md 4.6.
 

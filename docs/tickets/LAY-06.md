@@ -5,8 +5,8 @@
 - State: Backlog (issue #37) · **decided by the owner on 2026-11-05: D
   hybrid** (Q1 = A) with `@after` wires drawn dashed on the rail (Q3 = A),
   in the LAY plan ([lay.md 5.1](../sprints/lay.md#51-decisions-taken-2026-11-05))
-  · LAY sprint, wave 2, after LAY-02; LAY-17 (the dependency-aware row
-  break) follows it
+  · LAY sprint, wave 2, after LAY-02 and on LAY-16's card heights
+  (criterion 2); LAY-17 (the dependency-aware row break) follows it
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -33,9 +33,10 @@ Options to mock up, each as a capture of `order-flow.afs` tidied:
   wires are straight; data wires go right, down and back left into the next
   step's inputs, with bends where today they are straight.
 
-Recommendation: A for scenarios without branches, measured against B on the
-demo and `order-flow.afs`; C only if the owner prefers reading a scenario
-downwards, which also changes where new blocks land.
+Recommendation of 2026-10-26, **superseded**: A for scenarios without
+branches, measured against B; C only if the owner prefers reading
+downwards. The LAY plan added D (the hybrid) after the brief of 2026-11-03,
+and the owner chose D on 2026-11-05 (below).
 
 - Removed or hidden: nothing.
 - Default behaviour that changes: the positions *Tidy up* produces.
