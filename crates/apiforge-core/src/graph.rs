@@ -539,6 +539,92 @@ pub fn dependency_index(graph: &Graph) -> HashMap<&str, IndexSet<&str>> {
     index
 }
 
+/// The steps in the order the engine reaches them, without executing anything.
+///
+/// The runner's loop takes the first step of the document whose dependencies
+/// have finished, and every step finishes whatever its result: a skipped branch
+/// or a stopped run still takes its turn. So the order is static. Dependencies
+/// outside `graph` do not hold a step back, as a Cleanup step reading the main
+/// graph. Steps of a cycle, which the engine refuses, keep their document order
+/// at the end, so every step has a place.
+pub fn sequence(graph: &Graph) -> Vec<&str> {
+    let index = dependency_index(graph);
+    let mut pending: Vec<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let known: HashSet<&str> = pending.iter().copied().collect();
+    let mut done: HashSet<&str> = HashSet::with_capacity(pending.len());
+    let mut order = Vec::with_capacity(pending.len());
+    while let Some(ready) = pending.iter().position(|id| {
+        index[id]
+            .iter()
+            .all(|source| !known.contains(source) || done.contains(source))
+    }) {
+        let id = pending.remove(ready);
+        done.insert(id);
+        order.push(id);
+    }
+    order.extend(pending);
+    order
+}
+
+/// A step a check verifies: a request or a component call it reads directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Subject<'a> {
+    /// The node id of the step.
+    pub step: &'a str,
+    /// The check has another subject too, and counts under each.
+    pub shared: bool,
+    /// The check is a gate: a Data condition whose value another step reads.
+    pub gate: bool,
+}
+
+/// What a check reads directly, by role.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CheckSubjects<'a> {
+    /// The steps it verifies; none for a standalone check.
+    pub subjects: Vec<Subject<'a>>,
+    /// The Value blocks it reads: its sources, which it does not verify.
+    pub values: Vec<&'a str>,
+}
+
+/// The subjects of a Comparison or a Data condition, and its value sources; of
+/// any other node, nothing. Only references written in the check count: a
+/// step read through a value is that value's source, not the check's subject.
+pub fn check_subjects<'a>(graph: &'a Graph, check: &'a Node) -> CheckSubjects<'a> {
+    if !matches!(check.kind, NodeKind::Assert | NodeKind::Condition) {
+        return CheckSubjects::default();
+    }
+    let mut steps: IndexSet<&str> = IndexSet::new();
+    let mut values: IndexSet<&str> = IndexSet::new();
+    for binding in check.inputs.values() {
+        for reference in binding.references() {
+            let source = graph.nodes.iter().find(|node| node.id == reference.node_id);
+            match source.map(|node| node.kind) {
+                Some(NodeKind::Request | NodeKind::Component) => {
+                    steps.insert(reference.node_id);
+                }
+                Some(NodeKind::Value) => {
+                    values.insert(reference.node_id);
+                }
+                _ => {}
+            }
+        }
+    }
+    let gate = check.kind == NodeKind::Condition
+        && graph.nodes.iter().any(|node| {
+            node.inputs
+                .values()
+                .any(|binding| binding.references_node(&check.id))
+        });
+    let shared = steps.len() > 1;
+    CheckSubjects {
+        subjects: steps
+            .into_iter()
+            .map(|step| Subject { step, shared, gate })
+            .collect(),
+        values: values.into_iter().collect(),
+    }
+}
+
 /// Whether ordering and data dependencies together form a cycle.
 pub fn has_cycle(graph: &Graph) -> bool {
     let index = dependency_index(graph);
