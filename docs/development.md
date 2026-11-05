@@ -108,6 +108,23 @@ cargo run -p apiforge-layout --example bench --release --locked [-- --strict]
 It prints each measurement against its budget. `--strict` makes an exceeded budget
 an error, which only makes sense on a machine whose speed is known.
 
+How readable the boards are is measured beside it, before and after a layout
+ticket, and the numbers go into the ticket's pull request:
+
+```bash
+cargo run -p apiforge-layout --example quality --release [-- --dump <seed> <cards>]
+```
+
+It prints wires, crossings, bends, straight wires, close and coincident pairs,
+long edges and incomplete routes for generated boards of 6, 12, 25 and 50 cards
+with and without an ordering chain, then the same for the reference scenarios of
+`fixtures/scenarios/lay/`, with their board size, fit zoom at 1600 × 1000 and
+960 × 540, card and chip collisions and 12 px clearance violations. Two runs print
+the same; the example's header defines each column. `--dump` prints one generated
+board's rectangles and routes. What these numbers cannot say is timed by hand with
+the [UX task sheet](sprints/lay.md#9-metrics-and-qa), on `shop-30.afs` after a
+failed simulation.
+
 Changes to analysis, the code view or folder sessions also check the source
 budgets of the [Stage II plan](stage-ii-code-workspace.md#delivery-and-acceptance)
 in release mode: parse, lower and validate a 1000-line scenario in 5 ms, and keep

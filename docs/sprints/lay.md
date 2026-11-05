@@ -985,7 +985,11 @@ boards and on the three fixtures.
 **UX task sheet** (manual, the owner or an agent at the window, on
 `shop-30.afs` after a failed simulation; the time and the number of
 zoom/pan actions are recorded in the LAY-12 pull request, once before the
-sprint and once at its end):
+sprint and once at its end). The failure is made by changing `total: 172.5`
+in `checkout`'s sample to `total: 170`: `checkout_total` fails and the run
+stops there, under the policy *Stop* (a test in
+`crates/apiforge-runner/tests/acceptance.rs` holds this and what the tasks
+below read from the scenario):
 
 1. Say in what order steps 8–12 run. *(Unambiguous? — LAY-07)*
 2. Name every check of the `checkout` request. *(seconds — LAY-08, LAY-11)*
