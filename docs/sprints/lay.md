@@ -1,14 +1,16 @@
 # LAY: the diagram comprehension sprint — audit and proposed plan
 
-- State: **proposed** — the owner's decisions of [section 5](#5-owner-decisions)
-  (Q1–Q16) are asked in a quiz once the owner has seen round 3 and the
-  four proofs of round 4 ([4.8](#48-round-4-the-four-proofs-measured)),
-  and recorded in section 5 afterwards. No LAY ticket starts, and no new
-  issue is created, before that.
+- State: **decided** — the owner answered Q1–Q16 in a quiz on 2026-11-05
+  after seeing round 3 and the four proofs of round 4
+  ([4.8](#48-round-4-the-four-proofs-measured)); the answers are in
+  [5.1](#51-decisions-taken-2026-11-05). The sprint is LAY in the
+  [backlog](../backlog.md#sprint-lay-in-progress-since-2026-11-05): issues
+  LAY-01..19 with their ticket files under `docs/tickets/`.
 - Analysis model: Fable. Mock-ups rendered by Opus on the throwaway branches
-  `mock/lay-00-shapes`, `mock/lay-00-cards`, `mock/lay-00-shapes-2` and
-  `mock/lay-00-round-3` (captures under `docs/qa/2026-11-0{3,4}/LAY-00/`
-  on those branches, posted to #37 and #241).
+  `mock/lay-00-shapes`, `mock/lay-00-cards`, `mock/lay-00-shapes-2`,
+  `mock/lay-00-round-3` and `mock/lay-00-round-4` (captures under
+  `docs/qa/2026-11-0{3,4}/LAY-00/` on those branches, posted to #37 and
+  #241).
 - Inputs: the owner's brief of 2026-11-03 ([section 0](#0-the-owners-brief-2026-11-03));
   [LAY-00](../tickets/LAY-00.md) and LAY-01..06 (#32–#37) with their
   comments; #167, #168, #170 (4), #144, #145, #161 (1), #149; the UX-1 plan
@@ -884,13 +886,46 @@ looks: a gate whose result is read later is never hidden by collapsing
     0.75, Tidy up keeps both layouts. C. Compact only as a board density
     the person switches on; today's geometry stays the default.
 
+### 5.1 Decisions taken (2026-11-05)
+
+Answered by the owner in an interactive quiz in six rounds, each question
+with the recommended option first. One answer differs from the
+recommendation (12, wider); the recommendations 5, 6 and 7 were not vetoed.
+The same quiz decided UX-19's three and WS-00's four questions
+([ux-1.md 6.2](ux-1.md#62-ux-19-and-ws-00-decisions-2026-11-05)).
+
+| Q | Answer | Effect |
+| --- | --- | --- |
+| 1 | A | Tidy up produces **D hybrid**: a spine in engine order, satellites under their subject, wrapped rows → LAY-06; ADR 0006 amended |
+| 2 | A | Badges on every step including checks, equal to the Run results row → LAY-07 |
+| 3 | A | `@after` wires drawn, dashed, on the rail → LAY-06 |
+| 4 | A | Checks collapsed by default as an application preference; *Expand checks here* is session-only; a gate whose result is read later is never hidden → LAY-11 |
+| 5 | A (not vetoed) | The aggregate sits in the subject's footer; a pill under the name at Overview → LAY-11, LAY-09 |
+| 6 | A (not vetoed) | A multi-subject check is counted under every subject it reads, marked *shared* → LAY-08, LAY-11 |
+| 7 | A (not vetoed) | 0.45 / 0.75 stay the working assumption; LAY-09 verifies them with the minimum sizes and may move them → LAY-09 |
+| 8 | A | DIAG-00 (#241) folds into LAY: its questions are 4, 5, 7 and the card captures; DIAG-01 (descriptions, `format`) deferred to its own analysis after LAY |
+| 9 | A | Focus is selection behaviour: direct producers, consumers and checks ring, the rest dims, Esc clears → LAY-10 |
+| 10 | A | Auto-layout only for a scenario without positions, on open; code edits keep incremental placement → LAY-02 |
+| 11 | A | One band per branch, one wire into the band → LAY-13 |
+| 12 | **C**, then narrowed | The owner chose C (everything including the deferred items) and, asked which deferred items become tickets, named the three that change what the board says: must, should **and three deferred items** join the sprint as tickets: wrapping by dependencies (LAY-17), Compact's data-in-use summary (LAY-18), failure consequences by cause (LAY-19, a runner-side ticket kept in LAY by this decision). DIAG-01, the component summary, MCP-13, arrowheads and the wire-length metrics stay deferred. 19 tickets, 365 review minutes ([section 6](#6-scope-must-should-deferred)) |
+| 13 | A | Compact shows name, method, short path, two result lines, the ports in use and one summary line per configured input (`Body · 2 fields`) → LAY-16, LAY-09 |
+| 14 | A | A board-level *Compact cards* application preference; Tidy up repacks; zooming never moves a card → LAY-16 |
+| 15 | A | A failed check on a successful request: red footer `HTTP 200 · ✕ 1/3 failed`, 2 px red border at every zoom, the band keeps the HTTP colour → LAY-11, LAY-09 |
+| 16 | A | The compact box is the card at every zoom; at Full it writes the input values and editing happens in the Inspector or by double-click → LAY-16 |
+
 ## 6. Scope: must, should, deferred
 
 | Class | Tickets | Minutes |
 | --- | --- | --- |
-| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list with timing · LAY-02 auto-layout and chips · LAY-16 compact request geometry · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-14 wire and input tracing · LAY-15 off-screen relations · LAY-06 the shape · LAY-04 ports decide rows · LAY-12 acceptance and demo | 10 + 20 + 15 + 25 + 15 + 15 + 30 + 15 + 20 + 20 + 30 + 20 + 10 = **245** |
+| **Must** — the comprehension goal | LAY-01 metrics and reference scenarios · LAY-08 check subjects and the Inspector list with timing · LAY-02 auto-layout and chips · LAY-16 compact request geometry · LAY-07 badges and running · LAY-09 semantic zoom · LAY-11 collapse checks · LAY-10 focus · LAY-14 wire and input tracing · LAY-15 off-screen relations · LAY-06 the shape · LAY-04 ports decide rows · LAY-12 acceptance and demo | 10 + 20 + 15 + 25 + 15 + 20 + 30 + 20 + 20 + 20 + 30 + 20 + 10 = **255** |
 | **Should** — geometry after the shape | LAY-13 branch bands · LAY-03 nudge · LAY-05 lanes (measured first) | 20 + 15 + 15 = **50** |
-| **Deferred** (LAY-2 candidates, [4.5](#45-second-opinion-part-two-local-context)) | wrapping by dependencies (4.5 item 4); Compact's data-in-use summary with W11's taps (item 5); failure consequences by cause (item 6, a RUN ticket); DIAG-01 descriptions (`format`); C vertical if not chosen; a component summary on the parent board; MCP-13 layout tool; arrowheads (#167 (3)); wire length and collision metrics beyond LAY-01 | — |
+| **Added by the owner** (Q12 = C, 2026-11-05; the three deferred items of [4.5](#45-second-opinion-part-two-local-context) that change what the board says) | LAY-17 wrapping by dependencies (4.5 item 4) · LAY-18 Compact's data-in-use summary with W11's navigation (item 5) · LAY-19 failure consequences by cause (item 6; runner-side, kept in LAY by the decision) | 20 + 20 + 20 = **60** |
+| **Deferred** (LAY-2 candidates) | DIAG-01 descriptions (`format`); a component summary on the parent board; MCP-13 layout tool; arrowheads (#167 (3)); wire length and collision metrics beyond LAY-01 | — |
+
+Sprint capacity: 19 tickets, **365** owner review minutes (the section 8
+minutes; LAY-09 and LAY-10 were re-estimated at 20 when their criteria grew
+in 4.7). The order of work is the work-in-progress limit, four pull requests
+within 60 minutes, as in UX-1.
 
 ## 7. Dependencies and order
 
@@ -900,8 +935,8 @@ routes wires starts before the shape and collapse are decided and built.
 | Wave | Tickets | Why this order |
 | --- | --- | --- |
 | 0 (may start now, no decision) | LAY-01 (reference scenarios, the metric command), LAY-08 (the subject function in core and the Inspector's check list; no board change) | Pure functions and fixtures every later ticket uses |
-| 1 (after the quiz), in this order | LAY-16 (the compact card geometry every later ticket renders into) → LAY-09 (what each level shows, minimum sizes) → LAY-07 (badges, running) → LAY-10 (the selection state and the relation model: focus) → LAY-14 and LAY-15 (tracing and chips build on LAY-10's relation model and selection) → LAY-11 (collapse, after LAY-08's subjects and the gate rule) | These share the card geometry, the selection state and the relation model; none moves a card, but each builds on the previous one's types |
-| 2 | LAY-02, LAY-06, LAY-13 | Positions change: the shape, the first placement, the bands — on LAY-16's card sizes |
+| 1 (after the quiz), in this order | LAY-16 (the compact card geometry every later ticket renders into) → LAY-09 (what each level shows, minimum sizes) → LAY-07 (badges, running) → LAY-19 (the not-run causes on the cards, on LAY-07's running state) → LAY-10 (the selection state and the relation model: focus) → LAY-14 and LAY-15 (tracing and chips build on LAY-10's relation model and selection) → LAY-18 (the data-in-use line on LAY-16's card, starting LAY-14's trace) → LAY-11 (collapse, after LAY-08's subjects and the gate rule) | These share the card geometry, the selection state and the relation model; none moves a card, but each builds on the previous one's types |
+| 2 | LAY-02, LAY-06, LAY-17, LAY-13 | Positions change: the shape, the first placement, the dependency-aware wrap on the shape, the bands — on LAY-16's card sizes |
 | 3 | LAY-04 (must), LAY-03, then LAY-05 after measuring | Routing on the board as it will be; LAY-05 may be unnecessary |
 | 4 | LAY-12 (must) | The whole workflow on the reference scenarios, the task sheet timed |
 
@@ -935,6 +970,9 @@ them and names the test.
 | LAY-03 | Nudge | S · 15 · — | as LAY-03 today |
 | LAY-05 | Lanes | M · 15 · — | scheduled only if crossings per wire after LAY-04 exceed 0.2 on `shop-30` |
 | LAY-12 | The demo (must): the three reference scenarios opened cold, read, run (simulation and live loopback), a failure found; the UX task sheet timed, task 8 by clicks; the two small-window goals of 4.7 item 9 checked | S · 10 · — | the demo plan of [section 10](#10-demo-plan) runs end to end at 1600 × 1000 and 960 × 540 |
+| LAY-17 | Wrapping by dependencies (Q12, 4.5 item 4): D's row break is chosen among the neighbouring column boundaries (four or five columns; six would exceed the 1920 px bound) by the wires that would cross rows, a request split from its satellites, a cut branch and the rows' heights; order unchanged; at first layout and Tidy up, never on resize | M · 20 · default | on `shop-30` the wires crossing a row boundary are no more than with the fixed wrap, and no request is split from its satellites; deterministic; the board stays ≤ 1920 px wide |
+| LAY-18 | Compact's data-in-use summary (Q12, 4.5 item 5; W11): at the compact density an output line reads `body.token → 6 readers`, `status → 1 check` instead of unused output rows; a click starts LAY-14's trace of those wires; no port-model change | M · 20 · visible UI | `login` at Compact reads `body.token → N readers` with N equal to its wires; clicking the line pins the trace to every reader; a field nothing reads is not listed; the card's box is unchanged by the line's wording |
+| LAY-19 | Failure consequences by cause (Q12, 4.5 item 6): a failed step's footer counts the steps it kept from running (`✕ failed · 4 steps not run`); a not-run card names its cause as the engine knows it — *Stopped* (error policy), *Blocked: cart failed* or *condition unmet*, *Skipped: outside path*; Run results' summary uses the same words | M · 20 · visible UI | after a failed simulation of `shop-30` the failed card's count equals the Blocked and Stopped rows of Run results; each not-run card's cause equals its `StepResult` message class; a card on an unselected branch reads *Skipped*, never *Blocked* |
 
 ## 9. Metrics and QA
 
@@ -970,8 +1008,10 @@ hides the selection (LAY-10).
 
 ## 10. Demo plan
 
-On the reference scenarios, in the demo shop project, at 1600 × 1000 and
-960 × 540:
+On the three reference scenarios (`order-flow`, `shop-30`, `shop-50`), in
+the demo shop project, at 1600 × 1000 and 960 × 540, in simulation and
+against the live loopback sample (the steps name `shop-30` and `shop-50`;
+`order-flow` runs the same steps as the small case):
 
 1. Open `shop-30.afs` from code with no positions: it lays itself out
    (LAY-02) in the chosen shape (LAY-06); the badges read 1…30 (LAY-07).

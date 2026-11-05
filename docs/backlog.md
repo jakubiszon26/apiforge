@@ -224,10 +224,11 @@ component mock-up COMP-00 is the sprint's first, made in parallel with wave
 1, after the owner confirmed #174 from real work. LAY follows UX-1
 (decision 2 = A); MCP-11 was closed without a report (decision 3 = C).
 
-Capacity: **710** owner review minutes — wave 1 135, wave 2 230 (COMP-00,
-decided 2026-11-02, and its two input tickets), wave 3 180 (with the
-*Component settings* button and the clipboard ticket), wave 4 165 (WS-00,
-DIAG-00, RUN-00, MCP-20's mock-up, UX-30, UX-06). The tickets the remaining
+Capacity: **695** owner review minutes — wave 1 135, wave 2 245 (COMP-00,
+decided 2026-11-02, and its two input tickets; UX-19 re-estimated M · 45 on
+2026-11-05 with the REP-01 box), wave 3 180 (with the *Component settings*
+button and the clipboard ticket), wave 4 135 (WS-00, RUN-00, MCP-20's
+mock-up, UX-30, UX-06; DIAG-00 moved to the LAY sprint on 2026-11-05). The tickets the remaining
 mock-ups produce are estimated on the mock-ups and added here then. The
 work-in-progress limit of four pull requests within 60 minutes is the order
 of work; the owner allows UX-1 to exceed it except for `L` tickets, which
@@ -243,7 +244,8 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
       (#216, #217, #218, #193).
 - [ ] The verified automated defects without a design question are
       accepted (wave 2) and the wave-3 tickets as decided.
-- [ ] The four shared mock-ups (COMP-00, WS-00, DIAG-00, RUN-00) and
+- [ ] The shared mock-ups COMP-00 (decided 2026-11-02), WS-00 (decided
+      2026-11-05), RUN-00 (DIAG-00 moved to the LAY sprint on 2026-11-05) and
       MCP-20's are decided by the owner and their tickets estimated;
       *Save as component* (UX-30) is accepted.
 - [ ] The UX-1 retrospective is written with the WIP measures KTLO-30 asked
@@ -270,7 +272,7 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
 | [#224](https://github.com/jakubiszon26/apiforge/issues/224) | UX-16 Cleanup cards resolve references to Cleanup steps | S · 10 min |
 | [#225](https://github.com/jakubiszon26/apiforge/issues/225) | UX-17 *Tidy up* with one card or a chip selected tidies the board (with #168 (4)); decision 9 | S · 10 min · `default` |
 | [#226](https://github.com/jakubiszon26/apiforge/issues/226) | UX-18 The Inspector opening does not re-fit the board; the selected or new card stays visible (with #156 (1)) | M · 20 min · `default` |
-| [#227](https://github.com/jakubiszon26/apiforge/issues/227) | UX-19 Run results navigation: scroll to the selected row, selection on a failed run, collapsible component rows, breadcrumb; decisions 10, 11; mock-up; after UX-05 | M · 30 min · `visible UI`, `default` |
+| [#227](https://github.com/jakubiszon26/apiforge/issues/227) | UX-19 Run results navigation: scroll to the selected row, selection on a failed run, collapsible component rows, breadcrumb, the REP-01 box (#135); decided 2026-11-05 ([ux-1.md 6.2](sprints/ux-1.md#62-ux-19-and-ws-00-decisions-2026-11-05)); after UX-05 | M · 45 min · `visible UI`, `default` |
 | [#228](https://github.com/jakubiszon26/apiforge/issues/228) | UX-20 Gutter room for the dot, amber for warnings; a plain message for undo on invalid source (#153 (1)); the popup clears the Problems header (#170 (5)); after UX-13 | S · 10 min · `visible UI` |
 | [#229](https://github.com/jakubiszon26/apiforge/issues/229) | UX-21 *Export* in *Add step* inside components; *Start* not offered there; *No matching steps*; decision 12 | S · 15 min · `visible UI`, `removal` |
 | [#230](https://github.com/jakubiszon26/apiforge/issues/230) | UX-22 A component is not offered inside itself; *New component* lands in `components/`; decision 13; after UX-15 | S · 15 min · `default` |
@@ -285,8 +287,8 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
 | [#250](https://github.com/jakubiszon26/apiforge/issues/250) | UX-33 A *Component settings* button in the board header opens the component's settings (#161 (2); COMP-00 Q4, button not rendered, judged on QA captures); after UX-32 | S · 20 min · `visible UI` |
 | [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · `decision-needed` |
 
-| [#240](https://github.com/jakubiszon26/apiforge/issues/240) | WS-00 The workspace — one mock-up: a shared left sidebar (UX-06 #146), what folds at 960 × 540 (#157), Split's four columns (#161 (4)); after UX-05 | S · 30 min plus the discussion · `visible UI`, `default` · `decision-needed` |
-| [#241](https://github.com/jakubiszon26/apiforge/issues/241) | DIAG-00 Card readability — one mock-up: detail by zoom, the failed state, descriptions beside blocks (DIAG-01 #144), readable checks (DIAG-02 #145), #161 (1), #170 (2) | S · 30 min plus the discussion · `visible UI`, `format` · `decision-needed` |
+| [#240](https://github.com/jakubiszon26/apiforge/issues/240) | WS-00 The workspace — one mock-up: a shared left sidebar (UX-06 #146), what folds at 960 × 540 (#157), Split's four columns (#161 (4)); decided 2026-11-05, [ticket](tickets/WS-00.md) | S · 30 min plus the discussion · `visible UI`, `default` |
+| [#241](https://github.com/jakubiszon26/apiforge/issues/241) | DIAG-00 Card readability — closed 2026-11-05, folded into the LAY sprint (LAY-09 #293, LAY-11 #295; the owner's Q8 = A); DIAG-01 #144 deferred to its own analysis after LAY | — |
 | [#242](https://github.com/jakubiszon26/apiforge/issues/242) | RUN-00 Run inputs, settings and the JSON response view — one mock-up (#161 (3, 5), REP-04 #148); after UX-01, UX-02 | S · 30 min plus the discussion · `visible UI`, `default` · `decision-needed` |
 | [#192](https://github.com/jakubiszon26/apiforge/issues/192) | MCP-20 A command's live run shows its status in the observing window's bar; mock-up first | S · 15 min · `visible UI` |
 | [#238](https://github.com/jakubiszon26/apiforge/issues/238) | UX-30 *Save as component* in a folder project (#170 (1)); decision 17 = C; COMP-00 Q5: both outcomes offered, publish-and-call the default; after COMP-00 | M · 30 min · `visible UI` |
@@ -302,6 +304,65 @@ findings (#167, #168 (1–3), #170 (4)); the functional gaps #125–#143 and
 #124; the MCP and language issues that are not critical (#207, #209, #210,
 #211, #212, #213); #219 (tooling, a Sonnet fix); #155 (parser); #158 (not
 reproduced); #116; #201 (docs, merge on green CI).
+
+## Sprint: LAY (in progress since 2026-11-05)
+
+Diagram comprehension. The owner's brief of 2026-11-03: a person opening a
+large scenario must understand, without effort or manual tidying, what runs
+after what, which checks verify which results and where data comes from.
+The audit, the UX model, four rounds of mock-ups with measurements, three
+second opinions and the owner's decisions Q1–Q16 of 2026-11-05 are in
+[`docs/sprints/lay.md`](sprints/lay.md). One decision widened the proposal:
+the three deferred items that change what the board says (LAY-17, LAY-18,
+LAY-19) are in (Q12 = C). DIAG-00 (#241) folded into LAY-09 and LAY-11
+(Q8 = A). Runs after UX-1's wave 3; UX-1's wave 4 continues beside it.
+
+Capacity: **365** owner review minutes over 19 tickets — must 255, should 50,
+added 60. The order of work is the work-in-progress limit of four pull
+requests within 60 minutes; waves ([plan, section 7](sprints/lay.md#7-dependencies-and-order)):
+0 LAY-01, LAY-08 (no decision, may start now) · 1 LAY-16 → 09 → 07 → 19 →
+10 → 14, 15 → 18 → 11 · 2 LAY-02, 06, 17, 13 · 3 LAY-04, 03, 05 · 4 LAY-12.
+Exit criteria:
+
+- [ ] The three reference scenarios (14, 30, 50 steps) exist and the metric
+      command prints their table (LAY-01, #32).
+- [ ] A 30-step scenario opened from code lays itself out in shape D and
+      fits a 1600 × 1000 window at 50 % or more (LAY-02, LAY-06, LAY-16).
+- [ ] Order, checks and data are read from the board: badges equal the Run
+      results rows, checks collapse into their subject's footer, focus and
+      tracing name the sources (LAY-07, LAY-11, LAY-10, LAY-14, LAY-15).
+- [ ] The three items the owner added (Q12 = C) are in: the row break
+      respects the wires, a request's card says which fields are read and
+      a failure says what it cost (LAY-17 #301, LAY-18 #302, LAY-19 #303).
+- [ ] The UX task sheet is timed before and after; the demo plan runs end to
+      end at both window sizes (LAY-12, #296).
+
+| Issue | Ticket | Estimate · risk | Wave |
+| --- | --- | --- | --- |
+| [#32](https://github.com/jakubiszon26/apiforge/issues/32) | LAY-01 Metrics and the reference scenarios; [ticket](tickets/LAY-01.md) | S · 10 | 0 · `ready:opus` |
+| [#292](https://github.com/jakubiszon26/apiforge/issues/292) | LAY-08 Check subjects in core, the Inspector's list; [ticket](tickets/LAY-08.md) | S · 20 · `visible UI` | 0 · `ready:opus` |
+| [#300](https://github.com/jakubiszon26/apiforge/issues/300) | LAY-16 Compact request geometry; [ticket](tickets/LAY-16.md) | M · 25 · `visible UI`, `default` | 1 · `ready:opus` |
+| [#293](https://github.com/jakubiszon26/apiforge/issues/293) | LAY-09 Semantic zoom with minimum sizes; [ticket](tickets/LAY-09.md) | S–M · 20 · `visible UI` | 1 |
+| [#291](https://github.com/jakubiszon26/apiforge/issues/291) | LAY-07 Sequence badges and the running step; [ticket](tickets/LAY-07.md) | S · 15 · `visible UI` | 1 |
+| [#303](https://github.com/jakubiszon26/apiforge/issues/303) | LAY-19 Failure consequences by cause; [ticket](tickets/LAY-19.md) | M · 20 · `visible UI` | 1 |
+| [#294](https://github.com/jakubiszon26/apiforge/issues/294) | LAY-10 Focus on selection, the relation model; [ticket](tickets/LAY-10.md) | S–M · 20 · `visible UI`, `default` | 1 |
+| [#298](https://github.com/jakubiszon26/apiforge/issues/298) | LAY-14 Wire and input tracing; [ticket](tickets/LAY-14.md) | S–M · 20 · `visible UI` | 1 |
+| [#299](https://github.com/jakubiszon26/apiforge/issues/299) | LAY-15 Off-screen relations, chips and Back; [ticket](tickets/LAY-15.md) | M · 20 · `visible UI` | 1 |
+| [#302](https://github.com/jakubiszon26/apiforge/issues/302) | LAY-18 Compact shows the data in use; [ticket](tickets/LAY-18.md) | M · 20 · `visible UI` | 1 |
+| [#295](https://github.com/jakubiszon26/apiforge/issues/295) | LAY-11 Collapse checks; [ticket](tickets/LAY-11.md) | M · 30 · `visible UI`, `default` | 1 |
+| [#33](https://github.com/jakubiszon26/apiforge/issues/33) | LAY-02 Auto-layout on open, chips; [ticket](tickets/LAY-02.md) | S–M · 15 · `default` | 2 |
+| [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape: D hybrid; [ticket](tickets/LAY-06.md) | M · 30 · `default` | 2 |
+| [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 Wrapping by dependencies; [ticket](tickets/LAY-17.md) | M · 20 · `default` | 2 |
+| [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 Branch bands; [ticket](tickets/LAY-13.md) | M · 20 · `visible UI` | 2 (should) |
+| [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows; [ticket](tickets/LAY-04.md) | M · 20 | 3 |
+| [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Nudge; [ticket](tickets/LAY-03.md) | S · 15 | 3 (should) |
+| [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
+| [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
+
+Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
+(`format`), a component summary on the parent board, MCP-13, arrowheads
+(#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
+stay on origin because the issues' images point at their commits.
 
 ## Later
 
@@ -338,9 +399,10 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
 The owner's brief of 2026-11-03 widened the line from geometry to
 comprehension — what runs after what, what checks what, where data comes
 from — and asked for a sprint after UX-1. Its audit, UX model, decisions and
-proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md) (proposed;
-the decisions are the owner's quiz of 2026-11-04). The rows below are the
-2026-10-26 tickets it re-audits.
+proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md), decided
+by the owner's quiz of 2026-11-05 and now the
+[LAY sprint](#sprint-lay-in-progress-since-2026-11-05) above. The rows below
+are the 2026-10-26 tickets it re-audited, kept as the record.
 
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from
 code stacks in one column, no tidied wire is straight, wires are drawn on top
