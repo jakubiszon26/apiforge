@@ -1,7 +1,9 @@
 # LAY-01: A quality measurement for layout and routing
 
 - Size: S · Owner review: 10 min · Risk: none
-- State: Backlog (issue #32)
+- State: Backlog (issue #32) · LAY sprint, wave 0 (may start now, no
+  decision) · re-audited in [lay.md](../sprints/lay.md) section 8 on
+  2026-11-04/05: the criteria 5–7 below were added there
 - Analysis model: Fable · Implementation model: —
 
 ## Goal
@@ -31,6 +33,16 @@ Not applicable: no interface change.
 3. `--dump <seed> <cards>` prints one board's rectangles and routes, for
    reading a case by hand.
 4. The development guide names the command beside the benchmark.
+5. Added (LAY plan, 2026-11-05): `fixtures/scenarios/lay/` holds the three
+   reference scenarios `order-flow` (14 steps), `shop-30` (exactly 30 steps,
+   with one shared check and one used gate; round 3's grew to 34 and is
+   restored) and `shop-50`; all three parse and simulate, deterministically.
+6. Added: the command also runs on the three fixtures and prints board
+   width and height and the fit zoom at 1600 × 1000 and 960 × 540, card and
+   chip collisions, and the 12 px clearance violations (the plan's 4.6
+   metric, which LAY-14 reads but does not change).
+7. Added: rounds 2 and 3 of the LAY-00 mock-ups are re-measured on the
+   restored `shop-30` and the numbers recorded in lay.md 4.6.
 
 ## Not in scope
 

@@ -2,7 +2,9 @@
 
 - Size: M · Owner review: 20 min · Risk: none (positions after *Tidy up*
   change; the cards and wires do not)
-- State: Backlog (issue #35)
+- State: Backlog (issue #35) · LAY sprint, wave 3 (must, by the second
+  opinion of 2026-11-04), measured on the LAY-01 reference scenarios after
+  LAY-06 and LAY-17 ([lay.md](../sprints/lay.md) section 6)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal
