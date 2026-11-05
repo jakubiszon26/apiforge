@@ -378,6 +378,12 @@ nothing to the sprint's review minutes.
 | [#228](https://github.com/jakubiszon26/apiforge/issues/228) | UX-20 The gutter and diagnostics | #281 | S · 10 |
 | [#223](https://github.com/jakubiszon26/apiforge/issues/223) | UX-15 The unsaved dot | #273 | S · 10 |
 
+[#308](https://github.com/jakubiszon26/apiforge/issues/308) LAY-20, found in
+LAY-08, joined the sprint on 2026-11-05: the *Checks* list covers a component
+call's checks and a Cleanup check that reads a Main step. It closes before
+LAY-11, which hides the cards those checks would otherwise be seen on. Its
+estimate follows its analysis.
+
 Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads
 (#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
