@@ -12235,7 +12235,24 @@ mod lay08 {
             "  cleanup {",
             "  standalone = assert 1 == 1\n  of_a_value = assert expected_total > 0\n  cleanup {",
         );
+        // `replace` does nothing when its anchor is gone, and the loop below
+        // would then pass with no standalone check to find.
+        for line in [
+            "standalone = assert 1 == 1",
+            "of_a_value = assert expected_total > 0",
+        ] {
+            assert!(source.contains(line), "the source holds {line}");
+        }
         let (_project, mut harness) = open(&source, WIDE);
+        let id = document(&harness);
+        let model = folder(&harness).snapshot(&id).unwrap().model.unwrap();
+        let graph = graph_of(&model, false);
+        for handle in ["standalone", "of_a_value"] {
+            assert!(
+                graph.nodes.iter().any(|node| node.handle == handle),
+                "{handle} is in the loaded model"
+            );
+        }
         let requests = requests(&harness);
         assert!(requests.len() > 10, "the requests of shop-30: {requests:?}");
         for (handle, _) in &requests {
