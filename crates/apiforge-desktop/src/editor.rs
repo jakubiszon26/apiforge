@@ -69,8 +69,7 @@ struct History {
 #[derive(Clone, Debug)]
 pub struct BlockClipboard {
     pub context: String,
-    pub fragment: Graph,
-    pub pastes: u32,
+    pub fragment: apiforge_core::edit::Fragment,
 }
 
 pub struct Editor {
@@ -213,6 +212,19 @@ impl Editor {
                 .collect(),
             None => self.scenario().parameters.keys().cloned().collect(),
         }
+    }
+
+    /// The other graph of the scenario (main or cleanup), whose handles and
+    /// labels a pasted block must not repeat. A component graph has none.
+    pub fn sibling_graph(&self) -> Option<&Graph> {
+        if !self.drafts.is_empty() {
+            return None;
+        }
+        let scenario = self.scenario();
+        Some(match self.phase {
+            Phase::Main => &scenario.cleanup,
+            Phase::Cleanup => &scenario.graph,
+        })
     }
 
     /// Handles a block of the current board must not take: those of the other graph

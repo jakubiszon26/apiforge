@@ -41,7 +41,7 @@ mod workbench;
 
 use crate::icons::Icon;
 use crate::{
-    board_edit::{Board, Edit},
+    board_edit::{self, Board, Edit},
     canvas::{self, Canvas, Command},
     code, dialogs,
     inspector::{self, Inspector},
@@ -288,7 +288,11 @@ pub struct FolderApp {
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
     agreed_fields: HashMap<String, Vec<FieldRecovery>>,
-    clipboard: Option<Clipboard>,
+    /// The blocks last copied on any board, ready to paste into any graph of
+    /// any document (UX-34).
+    clipboard: Option<edit::Fragment>,
+    /// The last paste, until its edit is applied (UX-34).
+    pasted: Option<PastedOutcome>,
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
@@ -356,10 +360,12 @@ pub struct FolderApp {
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
 }
 
-struct Clipboard {
-    context: String,
-    fragment: Graph,
-    pastes: u32,
+/// What a paste shows once its edit is applied: its copies, and what they
+/// read that the board lacks (UX-34).
+struct PastedOutcome {
+    document_id: String,
+    ids: Vec<String>,
+    summary: Option<String>,
 }
 
 /// The statement found under the caret, for one source version.
@@ -481,6 +487,7 @@ impl FolderApp {
             component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
             clipboard: None,
+            pasted: None,
             inspector: Inspector::default(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
@@ -1745,6 +1752,63 @@ fn graph_of(model: &Document, cleanup: bool) -> &Graph {
         Document::Scenario(scenario) => &scenario.graph,
         Document::Component(component) => &component.graph,
     }
+}
+
+/// The other graph of a scenario, whose handles a block of this one must not
+/// take; a component has one graph.
+fn sibling_of(model: &Document, cleanup: bool) -> Option<&Graph> {
+    match model {
+        Document::Scenario(scenario) => Some(if cleanup {
+            &scenario.graph
+        } else {
+            &scenario.cleanup
+        }),
+        Document::Component(_) => None,
+    }
+}
+
+/// What a paste left unconnected, one sentence per step or input the board
+/// lacks (UX-34): `Missing step “product”: the input of Active promotion
+/// that read it is left unconnected.`
+fn missing_summary(graph: &Graph, unresolved: &[edit::Unresolved]) -> Option<String> {
+    // Per missing item: the blocks that lost it, and how many of their
+    // inputs did.
+    type Lost<'a> = (Vec<&'a str>, Vec<(&'a str, &'a str)>);
+    let mut lost: std::collections::BTreeMap<&edit::Missing, Lost<'_>> = Default::default();
+    for item in unresolved {
+        let block = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == item.node_id)
+            .map_or(item.node_id.as_str(), |node| node.display_name());
+        let (blocks, inputs) = lost.entry(&item.missing).or_default();
+        if !blocks.contains(&block) {
+            blocks.push(block);
+        }
+        let input = (item.node_id.as_str(), item.input.as_str());
+        if !inputs.contains(&input) {
+            inputs.push(input);
+        }
+    }
+    let sentences: Vec<String> = lost
+        .iter()
+        .map(|(missing, (blocks, inputs))| {
+            let (kind, name) = match missing {
+                edit::Missing::Step(handle) => ("step", handle),
+                edit::Missing::Input(name) => ("input", name),
+            };
+            let (inputs, that) = if inputs.len() == 1 {
+                ("the input", "that read it is")
+            } else {
+                ("the inputs", "that read it are")
+            };
+            format!(
+                "Missing {kind} “{name}”: {inputs} of {} {that} left unconnected.",
+                blocks.join(", ")
+            )
+        })
+        .collect();
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 fn with_graph(model: &Document, cleanup: bool, graph: Graph) -> Document {
