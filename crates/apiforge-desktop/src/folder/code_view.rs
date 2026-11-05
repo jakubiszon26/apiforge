@@ -231,10 +231,21 @@ impl FolderApp {
             self.code = code::CodeEditor::default();
             self.shown = Some(document_id.to_owned());
             self.revealed = None;
-            if let Some(tab) = self.workbench.tab_mut(document_id) {
-                let selection = clamp_selection(&snapshot.text, &tab.selection);
-                self.code.select(selection.anchor, selection.caret);
-                self.scroll_restore = Some(tab.scroll);
+            let restored = self
+                .workbench
+                .tab_mut(document_id)
+                .map(|tab| (clamp_selection(&snapshot.text, &tab.selection), tab.scroll));
+            if let Some((selection, scroll)) = restored {
+                // The tab keeps its scroll; its caret comes back without
+                // re-centring the view (UX-13).
+                let in_view = self.carets_in_view.contains(document_id);
+                self.code
+                    .restore(selection.anchor, selection.caret, in_view);
+                self.scroll_restore = Some(scroll);
+                // The block the board selected for the caret's statement is
+                // the caret's own; revealing it again would centre it. A
+                // block selected on the board meanwhile is still revealed.
+                self.revealed = self.statement_at(document_id, &snapshot.text, selection.caret);
             }
         }
         // The first line the holder changed, while following (MCP-16); the
@@ -330,6 +341,11 @@ impl FolderApp {
             .inner;
         self.completion_names = Some(completion);
         widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
+        if output.inner.caret_in_view == Some(true) {
+            self.carets_in_view.insert(document_id.to_owned());
+        } else {
+            self.carets_in_view.remove(document_id);
+        }
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }
@@ -372,10 +388,9 @@ impl FolderApp {
                     }
                 }
                 Err(error) => {
-                    self.notice = Some(Notice {
-                        text: error.to_string(),
-                        error: true,
-                    });
+                    // The session is still borrowed: `notify` by its fields.
+                    self.notices
+                        .raise(self.workbench.active(), error.to_string(), true);
                     text = snapshot.text.clone();
                 }
             }

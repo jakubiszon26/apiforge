@@ -57,7 +57,10 @@ time; a second window opens it read-only, says so, and can still export its work
   Right-click, or the buttons above the tree, create, rename, move and delete files
   and folders. Deleted files go to the project's **Trash**, which restores them.
 - **Tabs**: one per open file. A dot marks unsaved work; the close button asks
-  before discarding it.
+  before discarding it. A tab keeps its scroll: switching back shows the code
+  where it was left, with the caret in place. If the text changed meanwhile and
+  moved a caret that was in view out of it, the code scrolls only as far as
+  needed to show it.
 - **Code, Diagram and Split** (top): the same document as text, as a board of
   blocks, or both side by side. Edits in either form update the other once the
   code is valid; invalid code keeps the last valid diagram read-only.

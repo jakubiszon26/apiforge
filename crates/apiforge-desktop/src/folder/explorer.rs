@@ -812,6 +812,7 @@ impl FolderApp {
                 state.store(&self.ui_context, editor_id(&new));
             }
             self.workbench.rename_tab(&old, &new);
+            self.notices.rename(&old, &new);
             if self.shown.as_deref() == Some(old.as_str()) {
                 self.shown = None;
             }
