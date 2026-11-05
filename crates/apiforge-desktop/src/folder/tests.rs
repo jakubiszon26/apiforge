@@ -1023,7 +1023,7 @@ fn renaming_an_open_document_keeps_its_tab_unsaved_text_and_history() {
     std::fs::write(directory.path().join("taken.afs"), "x").unwrap();
     app.relocate("flows/renamed.afs", "taken.afs").unwrap();
     wait_storage(&mut app, &context);
-    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
+    assert!(app.notice().is_some_and(|notice| notice.error));
     assert_eq!(app.snapshot(&id).unwrap().path, "flows/renamed.afs");
 }
 
@@ -1087,7 +1087,7 @@ fn external_edits_reload_clean_tabs_and_pause_saving_unsaved_ones() {
         app.snapshot(&scenario).unwrap().conflict,
         Some(ExternalConflict::Changed)
     );
-    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
+    assert!(app.notice().is_some_and(|notice| notice.error));
     frame(&mut app, &context, vec![key(Key::S, COMMAND)]);
     wait_storage(&mut app, &context);
     assert_eq!(
@@ -1593,7 +1593,7 @@ fn a_text_file_has_no_diagram_and_cannot_be_registered_as_one() {
             .text_file(".apiforge/diagram.json")
             .is_none()
     );
-    assert!(app.notice.as_ref().is_some_and(|notice| notice.error));
+    assert!(app.notice().is_some_and(|notice| notice.error));
 }
 
 #[test]
@@ -1890,11 +1890,10 @@ fn continue_in_the_comment_prompt_publishes_while_an_exclusive_check_is_in_fligh
         revisions + 1
     );
     assert!(
-        app.notice
-            .as_ref()
+        app.notice()
             .is_some_and(|notice| !notice.error && notice.text.starts_with("Published revision")),
         "notice: {:?}",
-        app.notice.as_ref().map(|notice| &notice.text)
+        app.notice().map(|notice| &notice.text)
     );
     assert_eq!(text(&app, &id), original);
 }
@@ -1920,7 +1919,7 @@ fn a_stale_comment_dialog_cannot_authorise_an_edit_of_newer_source() {
         revisions
     );
     frame(&mut app, &context, vec![]);
-    assert!(app.notice.as_ref().unwrap().text.contains("changed"));
+    assert!(app.notice().unwrap().text.contains("changed"));
 }
 
 #[test]
@@ -2111,10 +2110,7 @@ fn close_export_keeps_read_only_and_failed_recovery_work_until_export_succeeds()
     assert!(
         reader.session.is_none(),
         "{}; {:?}; busy={}",
-        reader
-            .notice
-            .as_ref()
-            .map_or("", |notice| notice.text.as_str()),
+        reader.notice().map_or("", |notice| notice.text.as_str()),
         reader.close_error,
         reader.storage.is_busy()
     );
@@ -2297,9 +2293,7 @@ fn exporting_after_failed_recovery_keeps_the_foreign_recovery_file_intact() {
     assert!(
         app.session.is_none(),
         "{}; {:?}; busy={}",
-        app.notice
-            .as_ref()
-            .map_or("", |notice| notice.text.as_str()),
+        app.notice().map_or("", |notice| notice.text.as_str()),
         app.close_error,
         app.storage.is_busy()
     );

@@ -18,6 +18,9 @@ struct Queued {
     label: &'static str,
     blocks_edits: bool,
     session_work: bool,
+    /// The tab that was active when the operation was asked for: the notices
+    /// its outcome raises belong there (UX-12).
+    origin: Option<String>,
     start: Start,
 }
 
@@ -25,6 +28,7 @@ struct Active {
     label: &'static str,
     blocks_edits: bool,
     session_work: bool,
+    origin: Option<String>,
     apply: Apply,
     started: Instant,
 }
@@ -97,7 +101,7 @@ impl Storage {
             .map(|active| active.label)
     }
 
-    fn finish(&mut self) -> Option<(Apply, Reply)> {
+    fn finish(&mut self) -> Option<(Apply, Reply, Option<String>)> {
         self.active.as_ref()?;
         let result = if self.unavailable {
             Err(())
@@ -109,7 +113,7 @@ impl Storage {
             }
         };
         let active = self.active.take()?;
-        Some((active.apply, result))
+        Some((active.apply, result, active.origin))
     }
 
     fn launch(
@@ -117,6 +121,7 @@ impl Storage {
         label: &'static str,
         blocks_edits: bool,
         session_work: bool,
+        origin: Option<String>,
         work: Work,
         apply: Apply,
     ) {
@@ -131,6 +136,7 @@ impl Storage {
             label,
             blocks_edits,
             session_work,
+            origin,
             apply,
             started: Instant::now(),
         });
@@ -190,8 +196,9 @@ impl FolderApp {
         let generation = self.open_generation;
         let identity = self.session.as_ref().map(ProjectSession::storage_identity);
         self.prompt = Some(Prompt::Working { ticket, label });
+        let origin = self.workbench.active().map(str::to_owned);
         self.storage.queue.push_back(Queued {
-            label, blocks_edits: true, session_work: true,
+            label, blocks_edits: true, session_work: true, origin,
             start: Box::new(move |_| {
                 let work: Work = Box::new(move || Box::new(run()));
                 let apply: Apply = Box::new(move |app, reply| {
@@ -209,8 +216,10 @@ impl FolderApp {
 
     /// Polling never waits on a channel, joins a thread or locks project I/O.
     pub(super) fn poll_storage(&mut self) {
-        if let Some((apply, result)) = self.storage.finish() {
+        if let Some((apply, result, origin)) = self.storage.finish() {
+            self.notices.origin = Some(origin);
             apply(self, result);
+            self.notices.origin = None;
         }
         for _ in 0..16 {
             if self.storage.active.is_some() {
@@ -223,11 +232,16 @@ impl FolderApp {
                 label,
                 blocks_edits,
                 session_work,
+                origin,
                 start,
             } = queued;
-            if let Some((work, apply)) = start(self) {
+            // A start that cannot begin reports at once, on the same tab.
+            self.notices.origin = Some(origin.clone());
+            let started = start(self);
+            self.notices.origin = None;
+            if let Some((work, apply)) = started {
                 self.storage
-                    .launch(label, blocks_edits, session_work, work, apply);
+                    .launch(label, blocks_edits, session_work, origin, work, apply);
             }
         }
         if self.storage.is_busy() {
@@ -245,10 +259,12 @@ impl FolderApp {
         complete: impl FnOnce(&mut Self, apiforge_project::Result<T>) + 'static,
     ) {
         let identity = self.session.as_ref().map(ProjectSession::storage_identity);
+        let origin = self.workbench.active().map(str::to_owned);
         self.storage.queue.push_back(Queued {
             label,
             blocks_edits,
             session_work: true,
+            origin,
             start: Box::new(move |app| {
                 let Some(session) = app.session.as_ref() else {
                     complete(app, Err(apiforge_project::Error::StaleStorage));
@@ -289,10 +305,12 @@ impl FolderApp {
         run: impl FnOnce() -> T + Send + 'static,
         complete: impl FnOnce(&mut Self, Result<T, String>) + 'static,
     ) {
+        let origin = self.workbench.active().map(str::to_owned);
         self.storage.queue.push_back(Queued {
             label,
             blocks_edits: false,
             session_work: false,
+            origin,
             start: Box::new(move |_| {
                 let work: Work = Box::new(move || Box::new(run()));
                 let apply: Apply = Box::new(move |app, reply| {
