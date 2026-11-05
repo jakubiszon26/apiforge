@@ -277,6 +277,10 @@ pub struct FolderApp {
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
     selected_inputs: HashMap<String, String>,
+    /// Whether the active component equals its latest revision, kept while
+    /// its text, analysis and the project's context are the same: finding
+    /// out prints the component (UX-25).
+    unchanged: Option<(publication::UnchangedKey, Option<u32>)>,
     /// The *New input* form open on a component's board, by document
     /// (UX-32). While it is open the Inspector shows it.
     new_inputs: HashMap<String, inputs::NewInput>,
@@ -442,6 +446,13 @@ struct Snapshot {
     /// Editing is paused while this window observes another holder (MCP-08a):
     /// the board stays legible and selectable, without the read-only notice.
     paused: bool,
+    /// A save, a publication or another storage job holds the board, or
+    /// the window is closing: brief, and said by the header, so the board
+    /// shows no notice for it (UX-25).
+    busy: bool,
+    /// The model describes the current text: an analysis pending since a
+    /// publication changed the context checks code that did not change.
+    model_describes_text: bool,
     held: bool,
     dirty: bool,
     layout_dirty: bool,
@@ -483,6 +494,7 @@ impl FolderApp {
             canvases: HashMap::new(),
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
+            unchanged: None,
             new_inputs: HashMap::new(),
             component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
@@ -670,6 +682,7 @@ impl FolderApp {
             .iter()
             .any(|(_, draft)| draft.document_id == document_id);
         let paused = self.observing();
+        let busy = self.persistence.closing || self.storage.blocks_edits();
         Some(Snapshot {
             path: document.entry().path.as_str().to_owned(),
             kind: document.entry().kind,
@@ -680,11 +693,9 @@ impl FolderApp {
             model_state: document.model_state(),
             unavailable: document.unavailable(),
             paused,
-            editable: document.accepts_model_edits()
-                && !paused
-                && !held
-                && !self.persistence.closing
-                && !self.storage.blocks_edits(),
+            busy,
+            model_describes_text: document.model_describes_text(),
+            editable: document.accepts_model_edits() && !paused && !held && !busy,
             held,
             dirty: document.is_dirty(),
             layout_dirty: document.is_layout_dirty(),
