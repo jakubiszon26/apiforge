@@ -520,6 +520,23 @@ moment of each check, and the task-8 walk in four captures.
 | expanded | 1792 × 4100, 0.19 / — | 1900 × 2926, 0.26 / 0.10 |
 | shop-50 collapsed | — | 1960 × 3564, 0.21 / 0.084 |
 
+Each column above is that round's own fixture: 30 steps in round 2, 34 in
+round 3. LAY-01 restored `shop-30` to 30 steps (a step is a node of the main
+graph, the cleanup counted apart) and re-measured both rounds on it,
+running the mock branches' own views on the restored file. The same run
+reproduces the table above on the original fixtures, so the difference is
+the fixture alone:
+
+| restored shop-30, board w × h, fit zoom at 1600 × 1000 / 960 × 540 | round 2 (D) | round 3 |
+| --- | --- | --- |
+| collapsed | 1792 × 2376, 0.32 / 0.13 | 1900 × 1828, 0.42 / 0.16 |
+| expanded | 1792 × 3740, 0.20 / 0.08 | 1900 × 2226, 0.34 / 0.14 |
+
+On equal fixtures round 3's short satellites take 23 % off the height
+collapsed and 40 % expanded (the 16 % and 29 % below compare a 30-step
+board with a 34-step one). `shop-50` is round 3's, 56 steps, and is
+unchanged.
+
 What the captures settle:
 
 - **The integrated promise holds at Fit (0.33)**: every name reads (the
@@ -578,7 +595,9 @@ Facts about the code learnt in round 3, and where they land:
 - **Fixtures changed** for the captures (a shared check `checkout_cart`,
   three checks on `checkout` and `refund`, `@after(cart_total)` on
   `address`; `shop-50`'s *Yes* branch has four steps and *No* has
-  `cancel`); LAY-01 takes the round-3 fixtures over.
+  `cancel`); LAY-01 takes the round-3 fixtures over, with `shop-30`
+  restored to 30 steps and `checkout_cart` replaced, as `receipt_total`
+  is now the one shared check.
 
 ### 4.7 Second opinion on round 3, and the four proofs
 
@@ -985,7 +1004,11 @@ boards and on the three fixtures.
 **UX task sheet** (manual, the owner or an agent at the window, on
 `shop-30.afs` after a failed simulation; the time and the number of
 zoom/pan actions are recorded in the LAY-12 pull request, once before the
-sprint and once at its end):
+sprint and once at its end). The failure is made by changing `total: 172.5`
+in `checkout`'s sample to `total: 170`: `checkout_total` fails and the run
+stops there, under the policy *Stop* (a test in
+`crates/apiforge-runner/tests/acceptance.rs` holds this and what the tasks
+below read from the scenario):
 
 1. Say in what order steps 8–12 run. *(Unambiguous? — LAY-07)*
 2. Name every check of the `checkout` request. *(seconds — LAY-08, LAY-11)*
