@@ -74,8 +74,16 @@ impl FolderApp {
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
         };
-        // While observing, the bar at the bottom says why (MCP-08a, M1).
-        if !snapshot.editable && !snapshot.paused {
+        // While observing, the bar at the bottom says why (MCP-08a, M1). A
+        // save or a publication holds the board for a moment, and the
+        // analysis a publication starts checks code that did not change:
+        // neither puts a notice above the board (UX-25).
+        let rechecking = snapshot.analysis == AnalysisState::Pending
+            && snapshot.model_describes_text
+            && !snapshot.held
+            && snapshot.conflict.is_none()
+            && snapshot.unavailable.is_none();
+        if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
             let text = if snapshot.held {
                 "Unsaved work from an earlier session needs a decision in the code first."
             } else if snapshot.analysis == AnalysisState::Pending {

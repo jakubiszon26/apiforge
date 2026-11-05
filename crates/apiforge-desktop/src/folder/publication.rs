@@ -16,7 +16,40 @@ pub(super) enum Action {
     },
 }
 
+/// What [`FolderApp::unchanged_revision`]'s answer depends on.
+#[derive(Clone, PartialEq)]
+pub(super) struct UnchangedKey {
+    session: apiforge_project::SessionIdentity,
+    document_id: String,
+    source_version: u64,
+    analysis: AnalysisState,
+    context_generation: u64,
+}
+
 impl FolderApp {
+    /// The component's latest revision while publishing it would write that
+    /// revision again, for the header's disabled *Publish* and its *rN · no
+    /// changes* (UX-25, COMP-00 Q6 = B).
+    pub(super) fn unchanged_revision(&mut self, id: &str) -> Option<u32> {
+        let session = self.session.as_ref()?;
+        let document = session.document(id)?;
+        let key = UnchangedKey {
+            session: session.storage_identity(),
+            document_id: id.to_owned(),
+            source_version: document.source_version(),
+            analysis: document.analysis(),
+            context_generation: session.context_generation(),
+        };
+        if let Some((cached, revision)) = &self.unchanged
+            && *cached == key
+        {
+            return *revision;
+        }
+        let revision = session.unchanged_revision(id);
+        self.unchanged = Some((key, revision));
+        revision
+    }
+
     pub(super) fn component_action(&mut self, id: &str, action: Action) {
         if self.watcher.recovery_required {
             self.notify(

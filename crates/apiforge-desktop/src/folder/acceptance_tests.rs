@@ -68,6 +68,22 @@ fn source_of(harness: &FolderHarness, document_id: &str) -> String {
         .to_owned()
 }
 
+/// Changes the component's description, the smallest edit that makes a
+/// next revision: one equal to its latest revision has nothing to publish
+/// (UX-25).
+fn revise(harness: &mut FolderHarness, document_id: &str) {
+    let source = source_of(harness, document_id);
+    let revised = source.replacen("description \"", "description \"Revised. ", 1);
+    assert_ne!(revised, source, "the component has a description");
+    app(harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(document_id, &revised, CODE)
+        .unwrap();
+    settle(harness);
+}
+
 fn text_of(harness: &FolderHarness, path: &str) -> String {
     folder(harness)
         .session
@@ -178,8 +194,11 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
 
     // Publish the next revision of a migrated component. The scenario keeps
     // the revision it was migrated against, so its source must not change.
+    // A component equal to its latest revision has nothing to publish
+    // (UX-25), so its description changes first.
     app(&mut harness).activate_tab(&component);
     settle(&mut harness);
+    revise(&mut harness, &component);
     choose(&mut harness, "Publish");
     assert_eq!(
         folder(&harness)
@@ -842,8 +861,15 @@ mod mcp07 {
         drop(owner);
         await_writer(&mut harness, Instant::now());
         // Typing is paused while observing (MCP-08a), so the change that
-        // makes a next revision is typed once the window is the writer.
+        // makes a next revision is typed once the window is the writer. A
+        // comment the revision would not keep is not one (UX-25): the
+        // description changes too.
         type_into(&mut harness, &label, "// next revision\n");
+        assert!(
+            disabled(&harness, "Publish"),
+            "a loose comment is no change"
+        );
+        revise(&mut harness, &component);
         assert!(!disabled(&harness, "Publish"));
     }
 
@@ -3798,6 +3824,14 @@ mod mcp05 {
         }
         assert_eq!(shared(server.path()), shared(window.path()));
 
+        // The same edit in both copies: a component equal to its latest
+        // revision has nothing to publish from the window (UX-25).
+        for copy in [window.path(), server.path()] {
+            let source = fs::read_to_string(copy.join(PRODUCT)).unwrap();
+            let revised = source.replacen("description \"", "description \"Revised. ", 1);
+            assert_ne!(revised, source);
+            fs::write(copy.join(PRODUCT), revised).unwrap();
+        }
         let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
         let saved = fs::read(server.path().join(PRODUCT)).unwrap();
         let published = agent
@@ -8000,26 +8034,52 @@ mod ux02 {
         }
     }
 
-    /// Criterion 2: on a scenario's tab at 960 × 540, with *Live allowed*
-    /// beside it and *Run simulation*, the widest label, the project name is
-    /// whole.
+    /// Criterion 2, as amended by UX-25 (#233, the owner's decision A of
+    /// 2026-11-03): on a scenario's tab at 960 × 540 with *Run simulation*,
+    /// the widest label, the project name is whole. With *Live allowed*
+    /// beside it in a project with a published component, the header also
+    /// keeps room for *rN · no changes*: the name then ends in an ellipsis
+    /// and shows whole on hover.
     #[test]
     fn ux02_criterion_2_the_project_name_is_whole_at_960() {
         let configuration = tempfile::tempdir().unwrap();
         let directory = shop();
         let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        let whole = whole_width(&harness, NAME, theme::FONT_BODY);
+        assert!(has_label(&harness, SIMULATE));
+        assert!(!has_label(&harness, BADGE));
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            let width = title(&harness).width();
+            assert!(
+                width + 1.0 >= whole,
+                "{mode}: the name is {width} px wide, whole it is {whole} px"
+            );
+        }
+
         set_box(&mut harness, true);
         assert!(has_label(&harness, BADGE));
         assert!(has_label(&harness, SIMULATE));
         for mode in ["Code", "Diagram", "Split"] {
             choose(&mut harness, mode);
             let width = title(&harness).width();
-            let whole = whole_width(&harness, NAME, theme::FONT_BODY);
             assert!(
-                width + 1.0 >= whole,
-                "{mode}: the name is {width} px wide, whole it is {whole} px"
+                width + 1.0 < whole,
+                "{mode}: with Live allowed the name gives way: {width} px of {whole} px"
             );
         }
+        let names = harness.query_all_by_label(NAME).count();
+        harness
+            .query_all_by_label(NAME)
+            .find(|node| node.rect().top() < 40.0)
+            .expect("the project name in the header")
+            .hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert!(
+            harness.query_all_by_label(NAME).count() > names,
+            "hovering the shortened name shows it whole"
+        );
     }
 
     /// Criterion 3: the mode is kept in `apiforge/run-mode.json` in the
@@ -12464,6 +12524,294 @@ mod ux34 {
             "one undo removes the duplicate"
         );
         assert!(!contains(&harness, "Add to cart 2"));
+    }
+}
+
+/// UX-25 (#233; plan decision 16 = A, COMP-00 Q6 = B): *Publish* is
+/// disabled while the component equals its latest published revision, with
+/// *rN · no changes* beside it on its left; a save or a publication shows no
+/// read-only banner above the board while it runs; and publishing a
+/// component makes stale only the run results of the documents that call it.
+mod ux25 {
+    use super::ux31::window;
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui_kittest::kittest::NodeT;
+
+    const PUBLISH: &str = "Publish";
+    const HELPER: &str = "components/helper.afs";
+    const HELPER_SOURCE: &str = "component helper \"Helper\" {\n  export result: number = 2\n}\n";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const OTHER: &str = "scenarios/other.afs";
+    const OTHER_SOURCE: &str = "scenario \"Other\" {\n  @label(\"Answer\")\n  answer = 40 + 2\n}\n";
+    const PRODUCT: &str = "components/product.afs";
+    const STALE: &str = "Graph changed · results from an earlier version";
+    /// What the bar above the board can say while the board takes no edits.
+    const BANNERS: [&str; 2] = ["This diagram is read-only.", "Checking the latest code…"];
+
+    /// The demo shop with `path` registered beside it holding `text`, a
+    /// definition no revision has been published from yet.
+    fn shop_with(path: &str, kind: DocumentKind, text: &str) -> tempfile::TempDir {
+        let project = crate::testing::shop_project();
+        let mut session = apiforge_project::ProjectSession::open(project.path()).unwrap();
+        session.create_document(kind, path, text).unwrap();
+        project
+    }
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+        !harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    fn rect(harness: &FolderHarness, label: &str) -> egui::Rect {
+        harness.get_by_label(label).rect()
+    }
+
+    fn revisions(harness: &FolderHarness, handle: &str) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == handle)
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// Replaces the document's source, as typing it would, and waits for
+    /// its analysis.
+    fn edit(harness: &mut FolderHarness, id: &str, text: &str) {
+        app(harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(id, text, CODE)
+            .unwrap();
+        settle(harness);
+    }
+
+    /// Asserts that `caption` sits beside *Publish* on its left, on the same
+    /// row, right of *Save all*, inside the window and over no other control.
+    fn caption_beside_publish(harness: &FolderHarness, caption: &str) {
+        let shown = rect(harness, caption);
+        let publish = rect(harness, PUBLISH);
+        let save_all = rect(harness, "Save all");
+        assert!(
+            (shown.center().y - publish.center().y).abs() <= 4.0,
+            "{caption} is on Publish's row: {shown:?}, {publish:?}"
+        );
+        assert!(
+            shown.right() <= publish.left() && publish.left() - shown.right() <= 16.0,
+            "{caption} is right beside Publish, on its left: {shown:?}, {publish:?}"
+        );
+        assert!(
+            save_all.right() <= shown.left(),
+            "{caption} lies between Save all and Publish: {save_all:?}, {shown:?}"
+        );
+        let labels = [caption, PUBLISH, "Save all", "Save", "Run simulation"];
+        assert_within_window(harness, &labels);
+        assert_disjoint(harness, &labels);
+    }
+
+    /// Criterion 1: right after publishing r1 with no edit, *Publish* is
+    /// disabled and *r1 · no changes* stands at its left, at 960 × 540 and
+    /// 1600 × 1000.
+    #[test]
+    fn criterion_1_after_publishing_r1_publish_is_disabled_with_r1_no_changes() {
+        for size in [MINIMUM, WIDE] {
+            let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+            let (mut harness, _) = window(project.path(), size, HELPER, "Diagram");
+            assert!(revisions(&harness, "helper").is_empty(), "never published");
+            assert!(enabled(&harness, PUBLISH), "a first revision to publish");
+            assert!(!has_label(&harness, "r1 · no changes"));
+
+            choose(&mut harness, PUBLISH);
+            assert_eq!(revisions(&harness, "helper"), [1], "r1 is published");
+            assert!(
+                !enabled(&harness, PUBLISH),
+                "nothing to publish at {size:?}"
+            );
+            assert!(
+                has_label(&harness, "r1 · no changes"),
+                "the caption names the latest revision at {size:?}"
+            );
+            caption_beside_publish(&harness, "r1 · no changes");
+        }
+    }
+
+    /// Criterion 1 for a component the project opens with: the demo's
+    /// *product* equals its r1, so its tab opens with nothing to publish.
+    #[test]
+    fn criterion_1_a_component_equal_to_its_revision_opens_with_nothing_to_publish() {
+        let project = crate::testing::shop_project();
+        let (harness, _) = window(project.path(), MINIMUM, PRODUCT, "Diagram");
+        assert!(!enabled(&harness, PUBLISH));
+        caption_beside_publish(&harness, "r1 · no changes");
+    }
+
+    /// Criterion 2: one edit enables *Publish* again and takes the caption
+    /// away; an edit back to the published text disables it again, and the
+    /// next publication names its own revision.
+    #[test]
+    fn criterion_2_one_edit_enables_publish_again() {
+        let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+        let (mut harness, id) = window(project.path(), MINIMUM, HELPER, "Diagram");
+        choose(&mut harness, PUBLISH);
+        assert!(!enabled(&harness, PUBLISH));
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        assert!(enabled(&harness, PUBLISH), "one edit enables Publish");
+        assert!(!has_label(&harness, "r1 · no changes"), "the caption goes");
+
+        edit(&mut harness, &id, HELPER_SOURCE);
+        assert!(!enabled(&harness, PUBLISH), "equal to r1 again");
+        assert!(has_label(&harness, "r1 · no changes"));
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        choose(&mut harness, PUBLISH);
+        assert_eq!(revisions(&harness, "helper"), [1, 2]);
+        assert!(!enabled(&harness, PUBLISH));
+        assert!(!has_label(&harness, "r1 · no changes"));
+        caption_beside_publish(&harness, "r2 · no changes");
+    }
+
+    /// The banner texts drawn this frame.
+    fn banners(harness: &FolderHarness) -> Vec<&'static str> {
+        BANNERS
+            .into_iter()
+            .filter(|text| has_label(harness, text))
+            .collect()
+    }
+
+    /// Steps frame by frame until storage and analysis are done, collecting
+    /// every banner a frame drew on the way.
+    fn frames_until_settled(harness: &mut FolderHarness, seen: &mut Vec<&'static str>) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            harness.step();
+            seen.extend(banners(harness));
+            if folder(harness).is_analysed() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the window must settle");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        settle(harness);
+        seen.extend(banners(harness));
+    }
+
+    /// Criterion 3: no frame of a save or a publication shows the banner
+    /// above the board: while a storage job that holds the board runs, nor
+    /// over the frames of a real save and a real publication.
+    #[test]
+    fn criterion_3_no_frame_of_a_save_or_publish_shows_the_read_only_banner() {
+        let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+        let (mut harness, id) = window(project.path(), MINIMUM, HELPER, "Diagram");
+        assert!(banners(&harness).is_empty(), "no banner before");
+        let mut seen = Vec::new();
+
+        // A save that takes its time: the job holds the board, as a save and
+        // a publication do, until it is released.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        app(&mut harness).storage_project(
+            "Saving…",
+            apiforge_project::StorageMode::Exclusive,
+            true,
+            move |_| {
+                let _ = held.recv();
+                Ok(())
+            },
+            |_, _: apiforge_project::Result<()>| {},
+        );
+        for _ in 0..5 {
+            harness.step();
+            seen.extend(banners(&harness));
+        }
+        assert!(
+            folder(&harness).storage.blocks_edits(),
+            "the held job holds the board"
+        );
+        release.send(()).unwrap();
+        frames_until_settled(&mut harness, &mut seen);
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        harness.get_by_label("Save").click();
+        frames_until_settled(&mut harness, &mut seen);
+        assert!(
+            !folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .document(&id)
+                .unwrap()
+                .is_dirty(),
+            "saved"
+        );
+
+        harness.get_by_label(PUBLISH).click();
+        frames_until_settled(&mut harness, &mut seen);
+        assert_eq!(revisions(&harness, "helper"), [1], "published");
+        assert!(seen.is_empty(), "no frame shows the banner: {seen:?}");
+    }
+
+    fn fresh(harness: &FolderHarness, id: &str) -> bool {
+        folder(harness).fresh_run(id).is_some()
+    }
+
+    fn run_active(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run simulation");
+        finish_run(harness)
+    }
+
+    /// Criterion 4: publishing `product` makes the demo scenario's fresh
+    /// results stale, since it calls `product`, and leaves the results of a
+    /// scenario that does not call it fresh.
+    #[test]
+    fn criterion_4_publishing_product_makes_stale_only_the_scenarios_that_call_it() {
+        let project = shop_with(OTHER, DocumentKind::Scenario, OTHER_SOURCE);
+        let (mut harness, demo) = window(project.path(), MINIMUM, SCENARIO, "Split");
+        let report = run_active(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        let other = by_path(&harness, OTHER);
+        app(&mut harness).activate_tab(&other);
+        settle(&mut harness);
+        let report = run_active(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        assert!(fresh(&harness, &demo), "the demo's results are fresh");
+        assert!(fresh(&harness, &other), "Other's results are fresh");
+
+        let product = by_path(&harness, PRODUCT);
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        let text = source_of(&harness, &product);
+        let edited = text.replacen("together with its promotion", "with its promotion", 1);
+        assert_ne!(edited, text, "one edit");
+        edit(&mut harness, &product, &edited);
+        choose(&mut harness, PUBLISH);
+        assert_eq!(revisions(&harness, "product"), [1, 2], "product r2");
+
+        assert!(!fresh(&harness, &demo), "the demo scenario calls product");
+        assert!(fresh(&harness, &other), "Other calls no component");
+        app(&mut harness).activate_tab(&demo);
+        settle(&mut harness);
+        assert!(has_label(&harness, STALE), "the demo's bar says stale");
+        app(&mut harness).activate_tab(&other);
+        settle(&mut harness);
+        assert!(!has_label(&harness, STALE), "Other's results stay fresh");
     }
 }
 

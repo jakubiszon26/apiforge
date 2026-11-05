@@ -1785,7 +1785,12 @@ fn publishing_from_the_header_requires_a_comment_decision_and_cancel_keeps_sourc
     let (context, mut app) = open(directory.path());
     let id = document(&app, COMPONENT);
     app.workbench.open(&id);
-    let original = format!("// loose comment\n\n{}", text(&app, &id));
+    // A loose comment alone publishes nothing new (UX-25), so the
+    // description changes too.
+    let original = format!(
+        "// loose comment\n\n{}",
+        text(&app, &id).replacen("description \"", "description \"Revised. ", 1)
+    );
     app.session
         .as_mut()
         .unwrap()
@@ -1829,7 +1834,12 @@ fn continue_in_the_comment_prompt_publishes_while_an_exclusive_check_is_in_fligh
     let (context, mut app) = open(directory.path());
     let id = document(&app, COMPONENT);
     app.workbench.open(&id);
-    let original = format!("// loose comment\n\n{}", text(&app, &id));
+    // A loose comment alone publishes nothing new (UX-25), so the
+    // description changes too.
+    let original = format!(
+        "// loose comment\n\n{}",
+        text(&app, &id).replacen("description \"", "description \"Revised. ", 1)
+    );
     app.session
         .as_mut()
         .unwrap()
