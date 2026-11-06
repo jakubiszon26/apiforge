@@ -230,11 +230,15 @@ dependencies = [
 name = "apiforge-core"
 version = "0.1.0"
 dependencies = [
+ "apiforge-runner",
+ "apiforge-script",
  "indexmap",
  "libm",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
  "uuid",
 ]
 

@@ -4,6 +4,7 @@
 //! applies them as undoable edits.
 
 mod binding;
+mod checks;
 pub mod drafts;
 mod fields;
 mod response;
@@ -64,6 +65,7 @@ pub struct Context<'a> {
 enum Tab {
     Configuration,
     Outputs,
+    Checks,
 }
 
 #[derive(Clone, Debug)]
@@ -112,10 +114,27 @@ impl Inspector {
                 .family(theme::bold_family()),
         );
         ui.add_space(theme::SPACE_SM);
+        // Only a request lists its checks. In the narrowest panel the third tab
+        // takes a row of its own rather than running past the edge.
+        let checks = context.node.kind == NodeKind::Request;
+        let tabs = ["Configuration", "Output data", "Checks"];
+        let width: f32 = tabs
+            .iter()
+            .map(|tab| widgets::tab_value_width(ui, tab) + ui.spacing().item_spacing.x)
+            .sum();
+        let one_row = width <= ui.available_width();
         ui.horizontal(|ui| {
-            widgets::tab_value(ui, &mut self.tab, Tab::Configuration, "Configuration");
-            widgets::tab_value(ui, &mut self.tab, Tab::Outputs, "Output data");
+            widgets::tab_value(ui, &mut self.tab, Tab::Configuration, tabs[0]);
+            widgets::tab_value(ui, &mut self.tab, Tab::Outputs, tabs[1]);
+            if checks && one_row {
+                widgets::tab_value(ui, &mut self.tab, Tab::Checks, tabs[2]);
+            }
         });
+        if checks && !one_row {
+            ui.horizontal(|ui| {
+                widgets::tab_value(ui, &mut self.tab, Tab::Checks, tabs[2]);
+            });
+        }
         ui.separator();
 
         egui::ScrollArea::vertical()
@@ -125,6 +144,7 @@ impl Inspector {
                 match self.tab {
                     Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
                     Tab::Outputs => outputs(ui, context, &mut actions),
+                    Tab::Checks => checks::show(ui, context),
                 }
             });
         self.response_choice(ui.ctx(), context, &mut node);

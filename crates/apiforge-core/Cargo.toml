@@ -14,5 +14,11 @@ thiserror.workspace = true
 libm.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+apiforge-runner.workspace = true
+apiforge-script.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
 [lints]
 workspace = true
