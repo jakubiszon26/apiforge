@@ -12818,6 +12818,248 @@ mod ux25 {
     }
 }
 
+/// LAY-08: the Inspector of a request lists the checks that read it, in words,
+/// on the reference scenario `shop-30`.
+mod lay08 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window, folder_harness_in};
+    use std::time::{Duration, Instant};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    fn shop_30() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/scenarios/lay/shop-30.afs");
+        fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("the fixture {}: {error}", path.display()))
+    }
+
+    /// `source` on the board of the demo shop, whose components it calls.
+    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        fs::write(project.path().join(SCENARIO), source).unwrap();
+        let mut harness = folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    fn document(harness: &FolderHarness) -> String {
+        only(harness, DocumentKind::Scenario)
+    }
+
+    fn requests(harness: &FolderHarness) -> Vec<(String, String)> {
+        let id = document(harness);
+        let model = folder(harness).snapshot(&id).unwrap().model.unwrap();
+        let graph = graph_of(&model, false);
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == apiforge_core::model::NodeKind::Request)
+            .map(|node| (node.handle.clone(), node.id.clone()))
+            .collect()
+    }
+
+    /// Selects the request `handle` and opens its checks.
+    fn show_checks(harness: &mut FolderHarness, handle: &str) {
+        let id = requests(harness)
+            .into_iter()
+            .find(|(name, _)| name == handle)
+            .unwrap_or_else(|| panic!("no request {handle}"))
+            .1;
+        let document = document(harness);
+        app(harness).selections.insert(document, vec![id]);
+        settle(harness);
+        harness.get_by_label("Checks").click();
+        settle(harness);
+    }
+
+    fn has(harness: &FolderHarness, label: &str) -> bool {
+        harness.query_by_label(label).is_some()
+    }
+
+    fn assert_lists(harness: &FolderHarness, labels: &[&str]) {
+        for label in labels {
+            assert!(has(harness, label), "the list says: {label}");
+        }
+    }
+
+    fn simulate(harness: &mut FolderHarness) {
+        choose(harness, "Run simulation");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Criterion 2: the checks of `cart` in words, each with its predicate,
+    /// sources, status and moment; the check that reads `cart` and `receipt`
+    /// under both, waiting for the later one.
+    #[test]
+    fn lay08_criterion_2_the_inspector_lists_the_checks_in_words() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+
+        show_checks(&mut harness, "cart");
+        assert_lists(
+            &harness,
+            &[
+                "cart_created — Waiting for cart",
+                "cart.status equals 201",
+                "Sources: cart.status",
+                "cart_total — Waiting for cart",
+                "cart.body.total is approximately expected_total",
+                "Sources: cart.body.total, expected_total",
+                "receipt_total — Waiting for receipt · Shared",
+                "receipt.body.total is approximately cart.body.total",
+                "Sources: receipt.body.total, cart.body.total",
+                "Shared with: receipt",
+            ],
+        );
+        assert_eq!(harness.query_all_by_label("Not run yet").count(), 3);
+
+        show_checks(&mut harness, "receipt");
+        assert_lists(
+            &harness,
+            &[
+                "receipt_total — Waiting for receipt",
+                "receipt.body.total is approximately cart.body.total",
+                "Sources: receipt.body.total, cart.body.total",
+                "Shared with: cart",
+                "Not run yet",
+            ],
+        );
+
+        // After a run the moment gives way to the status.
+        simulate(&mut harness);
+        show_checks(&mut harness, "cart");
+        assert_lists(
+            &harness,
+            &["cart_created — Passed", "receipt_total — Passed · Shared"],
+        );
+        assert!(
+            harness.query_all_by_label("✓ Passed").count() >= 2,
+            "the status reads Passed"
+        );
+        assert!(harness.query_by_label("Not run yet").is_none());
+    }
+
+    /// Criterion 3: `valid_cart` feeds `checkout`, so it is a gate of
+    /// `cart_view`: listed as one, and counted apart from the checks.
+    #[test]
+    fn lay08_criterion_3_a_gate_is_counted_apart() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        show_checks(&mut harness, "cart_view");
+        assert_lists(
+            &harness,
+            &["valid_cart — Waiting for cart_view · Gate", "1 gate"],
+        );
+
+        // A condition nothing reads is a check like any other.
+        let unread = shop_30().replace(
+            "  cleanup {",
+            "  still = condition all {\n    cart_view.status == 200,\n  }\n  cleanup {",
+        );
+        let (_project, mut harness) = open(&unread, WIDE);
+        show_checks(&mut harness, "cart_view");
+        assert_lists(
+            &harness,
+            &[
+                "valid_cart — Waiting for cart_view · Gate",
+                "still — Waiting for cart_view",
+                "1 check · 1 gate",
+            ],
+        );
+    }
+
+    /// Criterion 4: `shop-30` has no standalone check and stays at 30 steps,
+    /// so this test adds two: one reads no step, one reads only a value.
+    #[test]
+    fn lay08_criterion_4_a_standalone_check_is_listed_nowhere() {
+        let source = shop_30().replace(
+            "  cleanup {",
+            "  standalone = assert 1 == 1\n  of_a_value = assert expected_total > 0\n  cleanup {",
+        );
+        // `replace` does nothing when its anchor is gone, and the loop below
+        // would then pass with no standalone check to find.
+        for line in [
+            "standalone = assert 1 == 1",
+            "of_a_value = assert expected_total > 0",
+        ] {
+            assert!(source.contains(line), "the source holds {line}");
+        }
+        let (_project, mut harness) = open(&source, WIDE);
+        let id = document(&harness);
+        let model = folder(&harness).snapshot(&id).unwrap().model.unwrap();
+        let graph = graph_of(&model, false);
+        for handle in ["standalone", "of_a_value"] {
+            assert!(
+                graph.nodes.iter().any(|node| node.handle == handle),
+                "{handle} is in the loaded model"
+            );
+        }
+        let requests = requests(&harness);
+        assert!(requests.len() > 10, "the requests of shop-30: {requests:?}");
+        for (handle, _) in &requests {
+            show_checks(&mut harness, handle);
+            // The cards stay on the board; the list's rows are what counts.
+            assert!(
+                harness.query_by_label("Check standalone").is_none()
+                    && harness.query_by_label("Check of_a_value").is_none()
+                    && harness.query_by_label_contains("standalone —").is_none()
+                    && harness.query_by_label_contains("of_a_value —").is_none(),
+                "listed under {handle}"
+            );
+            if handle == "cart" {
+                assert!(has(&harness, "Check cart_total"), "the list is shown");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay08_inspector_checks() {
+        for (size, name) in [(MINIMUM, "960"), (WIDE, "1600")] {
+            let (_project, mut harness) = open(&shop_30(), size);
+            show_checks(&mut harness, "cart");
+            crate::testing::capture(&mut harness, &format!("lay08-checks-{name}"), None);
+        }
+    }
+
+    /// Criterion 5: at the minimum window the first three rows stand whole in
+    /// the Inspector, with nothing to scroll.
+    #[test]
+    fn lay08_criterion_5_fits_the_small_window() {
+        let (_project, mut harness) = open(&shop_30(), MINIMUM);
+        show_checks(&mut harness, "cart");
+        let rows = [
+            "Check cart_created",
+            "Check cart_total",
+            "Check receipt_total",
+        ];
+        assert_within_window(&harness, &rows);
+        assert_disjoint(&harness, &rows);
+        // The list scrolls inside the panel's margin, which ends above the
+        // window's own edge.
+        let bottom = harness.get_by_label("Resize inspector").rect().bottom() - 16.0;
+        for row in rows {
+            let rect = harness.get_by_label(row).rect();
+            assert!(rect.bottom() <= bottom, "{row} is clipped: {rect:?}");
+        }
+        let right = harness.get_by_label("Check cart_total").rect().right();
+        for line in [
+            "cart_total — Waiting for cart",
+            "cart.body.total is approximately expected_total",
+            "Sources: cart.body.total, expected_total",
+        ] {
+            let rect = harness.get_by_label(line).rect();
+            assert!(rect.right() <= right, "{line} runs past its row: {rect:?}");
+        }
+    }
+}
+
 /// UX-18 (#226): opening the Inspector does not re-fit the board. Selecting a
 /// card keeps the zoom, and the selected or newly added card is panned the
 /// least into view when the Inspector would cover it. A resize of the window
