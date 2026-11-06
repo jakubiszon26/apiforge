@@ -2019,4 +2019,6 @@ fn file_stem(name: &str) -> String {
 }
 
 #[cfg(test)]
+mod lay16_review;
+#[cfg(test)]
 mod tests;

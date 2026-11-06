@@ -47,6 +47,7 @@ mod icons;
 mod inspector;
 mod labels;
 mod library;
+mod mock_lay16;
 mod navigator;
 mod persistence;
 mod preferences;

@@ -330,7 +330,7 @@ fn dashes(painter: &Painter, line: &[Pos2], stroke: Stroke, zoom: f32) {
     }
 }
 
-fn status_color(status: StepStatus) -> Color32 {
+pub(super) fn status_color(status: StepStatus) -> Color32 {
     match status {
         StepStatus::Passed => theme::SUCCESS,
         StepStatus::Failed | StepStatus::Error => theme::DANGER,
@@ -676,7 +676,7 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
 }
 
 /// Data sockets are round, control sockets square, so they differ beyond colour.
-fn socket(painter: &Painter, center: Pos2, control: bool, zoom: f32) {
+pub(super) fn socket(painter: &Painter, center: Pos2, control: bool, zoom: f32) {
     let radius = (4.5 * zoom).max(1.25);
     let stroke = Stroke::new((1.0 * zoom).clamp(0.6, 1.0), theme::SOCKET);
     if control {

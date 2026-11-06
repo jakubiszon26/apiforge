@@ -4,6 +4,7 @@
 //! them through the editor, which validates every change. Positions being dragged,
 //! wires being drawn and the camera are view state only.
 
+pub(crate) mod lay16;
 mod layout;
 mod menu;
 mod paint;
@@ -544,6 +545,15 @@ impl Canvas {
             .iter()
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
+        // LAY-16 mock-up: the compact box of the chosen option, and the cards
+        // the view places by hand.
+        lay16::apply(
+            &mut cards,
+            input.graph,
+            input.project,
+            crate::mock_lay16::option(),
+        );
+        lay16::place(&mut cards);
 
         let pasted = std::mem::take(&mut self.pasted_pending);
         if let Some(group) = cards
@@ -588,6 +598,20 @@ impl Canvas {
         self.last_window = window;
         if input.arrangement != self.last_arrangement {
             input.arrangement.clone_into(&mut self.last_arrangement);
+        }
+        if let Some((zoom, ids)) = crate::mock_lay16::get().camera {
+            // LAY-16 mock-up: the camera placed by the view, every frame.
+            let local = overlays.focus.translate(-viewport.min.to_vec2());
+            let bounds = ids
+                .iter()
+                .filter_map(|id| cards.iter().find(|card| &card.id == id).map(Card::rect))
+                .reduce(|a, b| a.union(b));
+            if let Some(bounds) = bounds {
+                self.camera.zoom = zoom;
+                self.camera.pan = local.center().to_vec2() - bounds.center().to_vec2() * zoom;
+                self.camera_moved_by_user = true;
+                self.fit_pending = false;
+            }
         }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
@@ -687,6 +711,8 @@ impl Canvas {
 
         for card in &cards {
             let rect = camera.rect(card.rect());
+            crate::mock_lay16::record(&card.id, rect, camera.zoom, camera.pan);
+            crate::mock_lay16::record_world(&card.id, card.rect());
             if !rect.intersects(overlays.board) {
                 continue;
             }
@@ -754,14 +780,35 @@ impl Canvas {
             let step = input
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
-            paint::card(
-                &board_painter,
-                card,
-                camera,
-                selection.contains(card.id.as_str()),
-                related_blocks.contains(&card.id),
-                step,
-            );
+            if card.compact.is_some() {
+                let dragging = matches!(self.drag, Some(Drag::Wire { .. }))
+                    || egui::DragAndDrop::has_any_payload(ui.ctx());
+                let reveal = lay16::reveal(
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    dragging,
+                    pointer,
+                );
+                lay16::paint_card(
+                    &board_painter,
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    related_blocks.contains(&card.id),
+                    step,
+                );
+                lay16::paint_affordances(&board_painter, card, camera, reveal);
+            } else {
+                paint::card(
+                    &board_painter,
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    related_blocks.contains(&card.id),
+                    step,
+                );
+            }
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
             // controls keep their ids whichever cards are off screen.
@@ -1270,6 +1317,24 @@ impl Canvas {
             card.output_anchor(port)
                 .map(|anchor| (port.to_string(), anchor))
         }));
+        if card.compact.is_some() {
+            // LAY-16 mock-up: the hidden outputs the option reveals.
+            let pointer = ui.input(|state| state.pointer.interact_pos());
+            let dragging = matches!(self.drag, Some(Drag::Wire { .. }));
+            let reveal = lay16::reveal(
+                card,
+                camera,
+                input.selection.contains(&card.id),
+                dragging,
+                pointer,
+            );
+            if reveal.outputs {
+                outputs.extend(lay16::hidden_outputs(card).into_iter().filter_map(|index| {
+                    lay16::hidden_output_anchor(card, index)
+                        .map(|anchor| (card.outputs[index].name.clone(), anchor))
+                }));
+            }
+        }
         let editable = !input.read_only;
         for (port, anchor) in outputs {
             let center = camera.to_screen(anchor);
@@ -1305,7 +1370,7 @@ impl Canvas {
             }
         }
 
-        if layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full {
+        if layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full || card.compact.is_some() {
             return;
         }
 
@@ -1563,6 +1628,30 @@ impl Canvas {
                         .map(|anchor| (ORDER_PORT.to_owned(), Vec::new(), anchor))
                         .into_iter()
                         .collect()
+                } else if card.compact.is_some() {
+                    // LAY-16 mock-up: the shown rows, and the hidden inputs
+                    // the option reveals during a drag.
+                    let reveal = lay16::reveal(
+                        card,
+                        camera,
+                        input.selection.contains(&card.id),
+                        true,
+                        Some(pointer),
+                    );
+                    card.inputs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, row)| {
+                            card.shown_row_anchor(index)
+                                .or_else(|| {
+                                    reveal
+                                        .inputs
+                                        .then(|| lay16::hidden_input_anchor(card, index))
+                                        .flatten()
+                                })
+                                .map(|anchor| (row.name.clone(), row.path.clone(), anchor))
+                        })
+                        .collect()
                 } else {
                     card.inputs
                         .iter()
@@ -1579,6 +1668,11 @@ impl Canvas {
             .min_by(|a, b| a.3.distance(pointer).total_cmp(&b.3.distance(pointer)))
             .filter(|(.., anchor)| anchor.distance(pointer) <= SOCKET_HIT * 2.0);
 
+        crate::mock_lay16::set_target(
+            target
+                .as_ref()
+                .map(|(card, name, ..)| (card.clone(), name.clone())),
+        );
         let end = target.as_ref().map_or(pointer, |(.., anchor)| *anchor);
         let painter = ui.painter();
         paint::wire(

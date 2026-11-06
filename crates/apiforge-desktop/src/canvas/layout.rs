@@ -288,6 +288,103 @@ pub struct Card {
     /// Control outputs: pseudo-port and label.
     pub controls: Vec<(&'static str, &'static str)>,
     pub origin: Pos2,
+    /// LAY-16 mock-up: the compact box, from the rows the card shows.
+    pub compact: Option<Compact>,
+}
+
+/// LAY-16 mock-up: what one row of a compact card stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactRole {
+    /// The method and path, carrying the URL input's socket.
+    Subtitle,
+    /// An input shown: configured, wired, or required and missing.
+    Input(usize),
+    /// An output some step reads.
+    Output(usize),
+    Result,
+    /// The checks reading this step, counted.
+    Checks(usize),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompactRow {
+    pub role: CompactRole,
+    /// Top of the row, from the card's origin.
+    pub top: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Compact {
+    pub rows: Vec<CompactRow>,
+    pub height: f32,
+}
+
+pub const COMPACT_HEADER: f32 = 40.0;
+pub const COMPACT_ROW: f32 = 24.0;
+
+impl Compact {
+    /// Rows in order after the header; the box ends 6 px under the last one.
+    pub fn new(roles: &[CompactRole]) -> Self {
+        let mut top = COMPACT_HEADER;
+        let mut rows = Vec::new();
+        for role in roles {
+            let height = match role {
+                CompactRole::Subtitle => 22.0,
+                CompactRole::Result => 26.0,
+                _ => COMPACT_ROW,
+            };
+            rows.push(CompactRow {
+                role: *role,
+                top,
+                height,
+            });
+            top += height;
+        }
+        Self {
+            rows,
+            height: top + 6.0,
+        }
+    }
+
+    pub fn row(&self, role: CompactRole) -> Option<&CompactRow> {
+        self.rows.iter().find(|row| row.role == role)
+    }
+
+    /// The row of input `index`, or the subtitle row for the URL.
+    fn input(&self, index: usize, url: bool) -> Option<&CompactRow> {
+        self.row(CompactRole::Input(index))
+            .or_else(|| url.then(|| self.row(CompactRole::Subtitle)).flatten())
+    }
+
+    fn rect(&self, row: &CompactRow, origin: Pos2) -> Rect {
+        Rect::from_min_size(origin + vec2(0.0, row.top), vec2(WIDTH, row.height))
+    }
+}
+
+impl Card {
+    /// LAY-16 mock-up: whether input `index` has a row in the compact box.
+    pub fn compact_shows_input(&self, index: usize) -> bool {
+        self.compact.as_ref().is_some_and(|compact| {
+            compact
+                .input(index, self.inputs[index].name == URL_INPUT)
+                .is_some()
+        })
+    }
+
+    /// LAY-16 mock-up: whether output `index` has a row in the compact box.
+    pub fn compact_shows_output(&self, index: usize) -> bool {
+        self.compact
+            .as_ref()
+            .is_some_and(|compact| compact.row(CompactRole::Output(index)).is_some())
+    }
+
+    /// LAY-16 mock-up: the socket of a shown input row, left edge, row centre.
+    pub fn shown_row_anchor(&self, index: usize) -> Option<Pos2> {
+        let compact = self.compact.as_ref()?;
+        let row = compact.input(index, self.inputs[index].name == URL_INPUT)?;
+        Some(self.origin + vec2(0.0, row.top + row.height / 2.0))
+    }
 }
 
 impl Card {
@@ -379,6 +476,7 @@ impl Card {
             outputs,
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
+            compact: None,
         }
     }
 
@@ -400,6 +498,9 @@ impl Card {
     }
 
     pub fn height(&self) -> f32 {
+        if let Some(compact) = &self.compact {
+            return compact.height;
+        }
         self.footer_top() + FOOTER + CONTROL
     }
 
@@ -421,6 +522,12 @@ impl Card {
     }
 
     pub fn input_row(&self, index: usize) -> Rect {
+        if let Some(compact) = &self.compact {
+            return match compact.input(index, self.inputs[index].name == URL_INPUT) {
+                Some(row) => compact.rect(row, self.origin),
+                None => super::lay16::hidden_input_rect(self, index),
+            };
+        }
         let top = self.input_row_top(index);
         Rect::from_min_size(self.origin + vec2(0.0, top), vec2(WIDTH, INPUT_ROW))
     }
@@ -434,6 +541,11 @@ impl Card {
     }
 
     pub fn footer(&self) -> Rect {
+        if let Some(compact) = &self.compact
+            && let Some(row) = compact.row(CompactRole::Result)
+        {
+            return compact.rect(row, self.origin);
+        }
         let top = self.footer_top();
         Rect::from_min_size(self.origin + vec2(0.0, top), vec2(WIDTH, FOOTER))
     }
@@ -465,6 +577,16 @@ impl Card {
         if name == ORDER_PORT {
             return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
         }
+        if self.compact.is_some() {
+            let index = self
+                .inputs
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.name == name && path.starts_with(&row.path))
+                .max_by_key(|(_, row)| row.path.len())?
+                .0;
+            return self.shown_row_anchor(index);
+        }
         let index = self
             .inputs
             .iter()
@@ -482,6 +604,14 @@ impl Card {
 
     /// Anchor of a data output or a control pseudo-port.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if let Some(compact) = &self.compact {
+            if self.controls.iter().any(|(port, _)| *port == name) {
+                return Some(self.origin + vec2(WIDTH / 2.0, compact.height));
+            }
+            let index = self.outputs.iter().position(|row| row.name == name)?;
+            let row = compact.row(CompactRole::Output(index))?;
+            return Some(self.origin + vec2(WIDTH, row.top + row.height / 2.0));
+        }
         if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
             let button = self.control_button(index);
             return Some(pos2(button.center().x, self.rect().bottom()));

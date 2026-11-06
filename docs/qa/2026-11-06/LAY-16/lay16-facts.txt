@@ -1,0 +1,23 @@
+today at 0.6: '+' button on cart: false; Next button on cart: false; output socket body of cart: true; output socket body of probe: true
+today at 1.0: '+' button on cart: true; Next button on cart: true; output socket body of cart: true; output socket body of probe: true
+today heights (world px): login 372, cart 424, probe 372
+today data drag cart.body → probe Body row: snapped target Some(("node-529bb903", "body")); probe.body after release: reference cart.body
+today order drag cart → probe: snapped target Some(("node-529bb903", "__order")); edge cart→probe after release: true; error banner: false
+today right-click on probe at 0.6: Add step menu open: true
+today probe selected: Inspector 'Next: connect to a step' true; 'Body value source' true; 'Body step' (source step combo) false
+option A heights (world px): login 190, cart 214, probe 94
+option A at rest: output socket body of probe: false; output socket body of cart: true
+option A data drag cart.body → probe: snapped target Some(("node-4e4d9678", "body")); probe.body after release: reference cart.body; probe.url after release: literal "/probe"; error banner: false
+option A probe selected: output socket body of probe: true; status of probe: true; Inspector 'Next: connect to a step' true
+option B heights (world px): login 190, cart 214, probe 94
+option B at rest: output socket body of probe: false; output socket body of cart: true
+option B data drag cart.body → probe: snapped target Some(("node-73bba9a6", "url")); probe.body after release: none; probe.url after release: reference cart.body; error banner: false
+option B probe selected: output socket body of probe: false; status of probe: false; Inspector 'Next: connect to a step' true
+option C heights (world px): login 190, cart 214, probe 142
+option C at rest: output socket body of probe: true; output socket body of cart: true
+option C data drag cart.body → probe: snapped target Some(("node-bb00c1f3", "body")); probe.body after release: reference cart.body; probe.url after release: literal "/probe"; error banner: false
+option C probe selected: output socket body of probe: true; status of probe: false; Inspector 'Next: connect to a step' true
+option D heights (world px): login 190, cart 214, probe 94
+option D at rest: output socket body of probe: false; output socket body of cart: true
+option D data drag cart.body → probe: snapped target Some(("node-be00cb9a", "body")); probe.body after release: reference cart.body; probe.url after release: literal "/probe"; error banner: false
+option D probe selected: output socket body of probe: true; status of probe: true; Inspector 'Next: connect to a step' true
