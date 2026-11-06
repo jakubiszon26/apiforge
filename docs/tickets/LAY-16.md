@@ -9,8 +9,9 @@
 
 A request card is as tall as what it says, not as tall as every port it
 could have: at the compact density `login` and `cart` are at least 40 %
-shorter than today, a 30-step board fits a 1600 × 1000 window at 52 %
-instead of 33 %, and zooming never moves a card.
+shorter than today, zooming never moves a card, and the 30-step board's fit
+at 1600 × 1000 is measured and reported here; the fit of 50 % or more is
+LAY-06's, on this geometry, because the fit is bounded by the board's width.
 
 ## What the owner will see
 
@@ -73,13 +74,71 @@ Tests in `crates/apiforge-desktop/src/canvas/layout.rs` (`mod tests`) and
    (UX-32's form); the card itself has no inline field. Test:
    `lay16_criterion_5_editing_moves_to_the_inspector`.
 6. Routing receives the final sizes: the LAY-01 metrics on `shop-30` at the
-   compact density show no card collision and a fit zoom of at least 0.50
-   at 1600 × 1000. Test: `lay16_criterion_6_fit_at_least_half`.
+   compact density show no card collision, and the measured fit zoom at
+   1600 × 1000 is reported with the heights. Test:
+   `lay16_criterion_6_no_collision_and_the_fit_reported`. Decided on
+   2026-11-06: the fit of at least 0.50 moved to LAY-06, because Tidy up on
+   `main` gives `shop-30` fifteen columns of 376 px (5544 px wide, fit
+   0.205), so no card height can raise the fit; the mock-up's 0.52 came
+   from shape D with checks collapsed.
 
 ## Not in scope
 
 What each zoom level shows (LAY-09, on this geometry); the data-in-use line
-(LAY-18); the positions Tidy up produces (LAY-06).
+(LAY-18); the positions Tidy up produces and the fit zoom of at least 0.50 at
+1600 × 1000 (LAY-06, with LAY-11's collapse).
+
+## Analysis: the ports a compact card hides (2026-11-06, open)
+
+The approved rendering also leaves out the unconfigured input rows (the
+drop targets for wires and variables), the `+` button and the *Next* row.
+Facts, run in the harness on `main` (`mock/lay-16-inputs` at `f11ff31`,
+`docs/qa/2026-11-06/LAY-16/lay16-facts.txt`):
+
+- Today a request offers, at every zoom, four output sockets (Response,
+  HTTP status, Headers, Duration) and one input socket per row (URL, Body;
+  Headers and Query once configured; each named argument). The `+` button
+  and *Next* exist only at Full (≥ 0.75): at 0.6 they are already absent,
+  and right-click opens the same *Add step* menu. A wire from Response to a
+  Body row binds it; a wire from the square socket to a card's top adds the
+  order edge; the Inspector connects both (*Body value source*, *Execution
+  order*) and is the only keyboard route — no key starts a wire. A variable
+  from the library drops on an input row (read, not run).
+- At the compact density on `main`: `login` 372 → 190, `cart` 424 → 214,
+  a new request 372 → 94 (A, B, D) or 142 (C); the box is the same at every
+  zoom under all four. A new request has no output socket and no Body row;
+  its URL socket stays on the subtitle row, and under B a wire aimed at the
+  card's edge snapped to it and silently replaced the URL by `cart.body`.
+- Under every option `+` and *Next* leave the card (Q16 = A already removed
+  them at Full); right-click, the order-socket drag to empty board and the
+  Inspector keep the function; the keyboard loses its only on-card button
+  (the toolbar's *Add step* and the Inspector remain). A configured input
+  never disappears in any option; *Compact cards* off restores today.
+
+Options, each rendered at rest, selected and during a wire drag, beside
+`cart`, at 1600 × 1000 and 960 × 540 (`lay16-<option>-<state>-<width>.png`
+and `-cards.png` crops; today's card in `lay16-today-*`):
+
+- **A. Edge sockets**: the hidden sockets on the card's edge during a drag
+  and on selection, labelled inside the box. The drag binds Body; on a 94 px
+  card the four output labels fall on the rows (`Respo…`, `HTTP sta…`) and a
+  component call with six inputs does not fit. Works, not readable at 0.6.
+- **B. Nothing**: wiring a hidden port needs *Compact cards* off or the
+  Inspector; the most natural drag on a fresh request rebinds its URL.
+- **C. Rows kept**: every input row and the first output row stay: a new
+  request reads `Body · optional`, `Response →` (142 px); `login` and `cart`
+  are unchanged, so criterion 1 holds; GET requests without a body gain
+  24 px; HTTP status, Headers and Duration still need the Inspector; LAY-14
+  keeps a row to hover and LAY-18 a line to replace.
+- **D. Tray** (new): a labelled tray outside the box — the hidden inputs on
+  the left while a wire is dragged within 120 px of the card, inputs and
+  outputs when the card is selected. The drag binds Body; the tray is view
+  state, so the box, routing, Tidy up and LAY-06 are untouched; it takes 88
+  of the 96 px column gap. LAY-14 and LAY-18 see only the shown rows.
+
+For every option: the URL socket on the subtitle row must take a wire only
+when the pointer is on it, never by the 20 px snap, or a drop meant for the
+card rewrites its address. The decision is the owner's; see issue #300.
 
 ## Technical appendix
 
