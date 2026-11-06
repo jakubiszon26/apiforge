@@ -12,6 +12,7 @@ use apiforge_core::{
     format::{Binding, Graph, Node, Position, Project},
     graph::delete_nodes,
 };
+use eframe::egui;
 use std::collections::HashSet;
 
 /// The graph on the board and everything its cards are drawn from.
@@ -21,6 +22,10 @@ pub struct Board<'a> {
     pub reference: &'a Graph,
     pub project: &'a Project,
     pub parameters: &'a [String],
+    /// The other graph of a scenario, which shares its handles: cleanup on the
+    /// main board, main on the cleanup board. `None` where the caller keeps
+    /// handles apart itself, or for a component.
+    pub sibling: Option<&'a Graph>,
 }
 
 /// A graph edit and the selection that should follow it.
@@ -28,6 +33,16 @@ pub struct Edit {
     pub graph: Graph,
     pub selection: Option<Vec<String>>,
 }
+
+/// A paste: the edit that adds the copies, and the references among them the
+/// board could not keep, each left unconnected.
+pub struct Paste {
+    pub edit: Edit,
+    pub unresolved: Vec<edit::Unresolved>,
+}
+
+/// The space kept between pasted cards and the cards they clear.
+const PASTE_GAP: f32 = 40.0;
 
 impl From<Graph> for Edit {
     fn from(graph: Graph) -> Self {
@@ -241,21 +256,87 @@ impl Board<'_> {
         .map_err(|error| error.to_string())
     }
 
-    /// Copies the selection and pastes it at an offset, keeping references to
-    /// nodes outside this graph (main-graph outputs read by cleanup) exact.
-    pub fn paste(&self, fragment: &Graph, offset: &Position) -> Result<Edit, String> {
-        let external: Vec<&str> = self
-            .reference
+    /// The selected blocks as a fragment to paste, or `None` when the
+    /// selection holds no block (a variable chip alone is not copied).
+    pub fn copy(&self, selection: &[String]) -> Option<edit::Fragment> {
+        let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
+        let fragment = edit::copy_selection(self.graph, self.reference, &selected);
+        (!fragment.graph.nodes.is_empty()).then_some(fragment)
+    }
+
+    /// Pastes a copied fragment onto this board (UX-34): references between
+    /// the copies follow them, references to blocks this board can read (the
+    /// main graph's outputs on the cleanup board) are kept, and the rest are
+    /// left unconnected and returned. The copies keep their arrangement and
+    /// land clear of every card and chip, where they were copied or at the
+    /// first free place right of or below it.
+    pub fn paste(&self, fragment: &edit::Fragment) -> Result<Paste, String> {
+        let sibling: Vec<&Graph> = self.sibling.into_iter().collect();
+        let target = edit::PasteTarget {
+            graph: self.graph,
+            visible: &[self.reference],
+            reserved: &sibling,
+            parameters: Some(self.parameters),
+            project: self.project,
+        };
+        let pasted = edit::paste_selection(&target, fragment, &Position { x: 0.0, y: 0.0 })
+            .map_err(|error| error.to_string())?;
+        Ok(Paste {
+            edit: Edit {
+                graph: self.land_clear(pasted.graph, &pasted.ids),
+                selection: Some(pasted.ids),
+            },
+            unresolved: pasted.unresolved,
+        })
+    }
+
+    /// Moves the blocks `ids` together, by the first offset that leaves each
+    /// of their cards clear of every other card and chip: none, then one
+    /// width of the group to the right, one height down, two to the right,
+    /// two down, and so on.
+    fn land_clear(&self, mut graph: Graph, ids: &[String]) -> Graph {
+        let moving = |node: &Node| ids.contains(&node.id);
+        let rect = |node: &Node| canvas::Card::build(node, self.reference, self.project).rect();
+        let pasted: Vec<egui::Rect> = graph
             .nodes
             .iter()
-            .map(|node| node.id.as_str())
+            .filter(|node| moving(node))
+            .map(rect)
             .collect();
-        let pasted = edit::paste_selection(self.graph, fragment, offset, &external)
-            .map_err(|error| error.to_string())?;
-        Ok(Edit {
-            graph: pasted.graph,
-            selection: Some(pasted.ids),
-        })
+        let Some(group) = pasted.iter().copied().reduce(egui::Rect::union) else {
+            return graph;
+        };
+        let fixed: Vec<egui::Rect> = graph
+            .nodes
+            .iter()
+            .filter(|node| !moving(node))
+            .map(rect)
+            .chain(graph.proxies.iter().map(|proxy| {
+                canvas::Chip::build(proxy, &graph, self.project, self.parameters).rect()
+            }))
+            .collect();
+        let clear = |shift: egui::Vec2| {
+            pasted.iter().all(|card| {
+                let card = card.translate(shift).expand(PASTE_GAP / 2.0);
+                fixed.iter().all(|other| !card.intersects(*other))
+            })
+        };
+        let (across, down) = (group.width() + PASTE_GAP, group.height() + PASTE_GAP);
+        // The places to the right do not overlap one another and a card or
+        // chip can block at most two of them, so one of these is free.
+        let steps = 2 * fixed.len() + 1;
+        let shift = std::iter::once(egui::Vec2::ZERO)
+            .chain((1..=steps).flat_map(|step| {
+                let step = step as f32;
+                [egui::vec2(across * step, 0.0), egui::vec2(0.0, down * step)]
+            }))
+            .find(|shift| clear(*shift))
+            .unwrap_or_else(|| egui::vec2(across * (steps + 1) as f32, 0.0));
+        for node in graph.nodes.iter_mut().filter(|node| moving(node)) {
+            node.position.x += f64::from(shift.x);
+            node.position.y += f64::from(shift.y);
+        }
+        graph
     }
 
     /// Moves a freshly added block to the nearest free slot when the position it
@@ -363,6 +444,7 @@ mod tests {
         };
         let parameters = vec!["id".to_owned()];
         let board = Board {
+            sibling: None,
             graph: &graph,
             reference: &graph,
             project: &project,
