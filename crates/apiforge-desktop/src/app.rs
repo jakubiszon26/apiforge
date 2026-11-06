@@ -2345,6 +2345,7 @@ impl App {
                 selected_input: None,
                 adding_input: None,
                 settings: None,
+                arrangement: "",
             };
             self.canvas.show(ui, &input)
         };

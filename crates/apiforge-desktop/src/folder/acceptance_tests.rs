@@ -7489,6 +7489,9 @@ mod ux01 {
                 .clone()
         };
         let before = position(harness);
+        // Run results opening beside the board leaves its camera as it was
+        // (UX-18), so the board is fitted to bring the card into view.
+        choose(harness, "Fit the view");
         let start = harness.get_by_label(card).rect().center();
         harness.hover_at(start);
         harness.step();
@@ -13053,6 +13056,345 @@ mod lay08 {
         ] {
             let rect = harness.get_by_label(line).rect();
             assert!(rect.right() <= right, "{line} runs past its row: {rect:?}");
+        }
+    }
+}
+
+/// UX-18 (#226): opening the Inspector does not re-fit the board. Selecting a
+/// card keeps the zoom, and the selected or newly added card is panned the
+/// least into view when the Inspector would cover it. A resize of the window
+/// and *Fit the view* still fit.
+mod ux18 {
+    use super::*;
+    use crate::testing::MINIMUM;
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{By, NodeT};
+
+    const CLOSE_INSPECTOR: &str = "Close Inspector";
+    const FIT: &str = "Fit the view";
+    /// The leftmost card of the demo scenario, clear of the Inspector.
+    const PRODUCT: (&str, &str) = ("product", "Product");
+    /// The rightmost card: the Inspector covers it when it opens.
+    const PRICE: (&str, &str) = ("price", "Promotional price");
+    /// Rounding slack for positions on screen.
+    const EPSILON: f32 = 0.5;
+
+    /// The demo shop's scenario in Diagram at `size`, as fitted on opening.
+    fn diagram(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        choose(&mut harness, "Diagram");
+        assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
+        (project, harness, scenario)
+    }
+
+    fn canvas<'a>(harness: &'a FolderHarness, document_id: &str) -> &'a crate::canvas::Canvas {
+        folder(harness).canvases.get(document_id).unwrap()
+    }
+
+    /// The zoom the board's bottom bar shows, such as `91%`.
+    fn zoom_shown(harness: &FolderHarness) -> String {
+        fn percent(text: &str) -> bool {
+            text.strip_suffix('%').is_some_and(|digits| {
+                !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+            })
+        }
+        let shown: Vec<String> = harness
+            .query_all(By::new().predicate(|node| {
+                node.value().is_some_and(|text| percent(&text))
+                    || node.label().is_some_and(|text| percent(&text))
+            }))
+            .filter_map(|node| {
+                let node = node.accesskit_node();
+                node.value().or_else(|| node.label())
+            })
+            .collect();
+        let first = shown
+            .first()
+            .expect("the bottom bar shows the zoom")
+            .clone();
+        assert!(
+            shown.iter().all(|text| *text == first),
+            "one zoom in the bottom bar: {shown:?}"
+        );
+        first
+    }
+
+    /// The card's whole rectangle on screen.
+    fn card(harness: &FolderHarness, document_id: &str, node_id: &str) -> egui::Rect {
+        canvas(harness, document_id)
+            .debug_card_rect(node_id)
+            .unwrap_or_else(|| panic!("{node_id} is on the board"))
+    }
+
+    /// Clicks the card named `name` on its title, as a person selects it on
+    /// the board. Its middle may hold a field, which a click edits instead.
+    fn click_card(harness: &mut FolderHarness, name: &str) {
+        let prefix = format!("{name} (");
+        let rect = harness
+            .get(By::new().role(Role::Button).predicate(move |node| {
+                node.label().is_some_and(|label| label.starts_with(&prefix))
+            }))
+            .rect();
+        let at = egui::pos2(rect.center().x, rect.top() + rect.height() * 0.1);
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        settle(harness);
+    }
+
+    fn contains(outer: egui::Rect, inner: egui::Rect) -> bool {
+        outer.expand(EPSILON).contains_rect(inner)
+    }
+
+    fn same(a: egui::Rect, b: egui::Rect) -> bool {
+        (a.min - b.min).length() < EPSILON && (a.max - b.max).length() < EPSILON
+    }
+
+    /// Every card of the board lies inside the camera's focus.
+    fn all_in_focus(harness: &FolderHarness, document_id: &str) {
+        let canvas = canvas(harness, document_id);
+        let focus = canvas.debug_focus();
+        for (id, rect) in canvas.debug_cards() {
+            assert!(
+                contains(focus, *rect),
+                "{id} at {rect:?} is outside the focus {focus:?}"
+            );
+        }
+    }
+
+    /// Criterion 1: on the fitted demo board, clicking a card opens the
+    /// Inspector and leaves the zoom as it was; a card the Inspector does not
+    /// cover does not move.
+    #[test]
+    fn clicking_a_card_on_the_fitted_board_keeps_the_zoom() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let shown = zoom_shown(&harness);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            let before = card(&harness, &scenario, PRODUCT.0);
+
+            click_card(&mut harness, PRODUCT.1);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector opens"
+            );
+            assert_eq!(
+                zoom_shown(&harness),
+                shown,
+                "{size:?}: the bottom bar's zoom"
+            );
+            assert_eq!(
+                canvas(&harness, &scenario).debug_zoom(),
+                zoom,
+                "{size:?}: the zoom"
+            );
+            let after = card(&harness, &scenario, PRODUCT.0);
+            assert!(
+                same(after, before),
+                "{size:?}: the clicked card stays where it was, {before:?}, not {after:?}"
+            );
+        }
+    }
+
+    /// Criterion 2: the card the Inspector would cover is panned the least
+    /// that shows it whole: sideways only, to the focus's edge, at the same
+    /// zoom.
+    #[test]
+    fn a_card_the_inspector_would_cover_is_panned_the_least_into_view() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            let before = card(&harness, &scenario, PRICE.0);
+
+            click_card(&mut harness, PRICE.1);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector opens"
+            );
+            let board = canvas(&harness, &scenario).debug_viewport();
+            assert!(
+                before.right() > board.right(),
+                "{size:?}: the Inspector, from {}, would cover the card at {before:?}",
+                board.right()
+            );
+            assert_eq!(
+                canvas(&harness, &scenario).debug_zoom(),
+                zoom,
+                "{size:?}: the zoom"
+            );
+            let focus = canvas(&harness, &scenario).debug_focus();
+            let after = card(&harness, &scenario, PRICE.0);
+            assert!(
+                contains(focus, after),
+                "{size:?}: the card at {after:?} is whole in the focus {focus:?}"
+            );
+            assert!(
+                (after.right() - focus.right()).abs() < EPSILON,
+                "{size:?}: the least pan leaves the card at the focus's edge {}, not {}",
+                focus.right(),
+                after.right()
+            );
+            assert!(
+                (after.top() - before.top()).abs() < EPSILON,
+                "{size:?}: the pan is sideways only, {before:?} to {after:?}"
+            );
+        }
+    }
+
+    /// Clicks the first *Check* of Run results, under the board, scrolled
+    /// into view; the Inspector's own *Check* is beside the board.
+    fn check_in_run_results(harness: &mut FolderHarness, document_id: &str) {
+        fn first(harness: &FolderHarness, right: f32) -> egui_kittest::Node<'_> {
+            harness
+                .query_all(By::new().role(Role::Button).label("Check"))
+                .find(|node| node.rect().center().x < right)
+                .expect("Run results offer a Check on the step's outputs")
+        }
+        let right = canvas(harness, document_id).debug_viewport().right();
+        first(harness, right).scroll_to_me();
+        settle(harness);
+        first(harness, right).click();
+    }
+
+    /// Criterion 3: *Check* on the rightmost step in Run results adds a card
+    /// that is whole in view with the Inspector open. At 960 × 540, Run
+    /// results and the Inspector leave a board lower than a card at the
+    /// fitted zoom, so the criterion is checked at the default window.
+    #[test]
+    fn a_check_added_to_the_rightmost_step_is_in_view() {
+        {
+            let size = WIDE;
+            let (_project, mut harness, scenario) = diagram(size);
+            choose(&mut harness, "Run simulation");
+            let report = finish_run(&mut harness);
+            assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+            let step = format!("{} · ", PRICE.1);
+            harness.get_by_label_contains(&step).scroll_to_me();
+            settle(&mut harness);
+            harness.get_by_label_contains(&step).click();
+            settle(&mut harness);
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the step's Inspector"
+            );
+            let before: Vec<String> = canvas(&harness, &scenario)
+                .debug_cards()
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            check_in_run_results(&mut harness, &scenario);
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(&mut harness);
+
+            let canvas = canvas(&harness, &scenario);
+            let added: Vec<&(String, egui::Rect)> = canvas
+                .debug_cards()
+                .iter()
+                .filter(|(id, _)| !before.contains(id))
+                .collect();
+            assert_eq!(added.len(), 1, "{size:?}: one check card is added");
+            let (id, rect) = added[0];
+            assert_eq!(
+                folder(&harness).selections.get(&scenario),
+                Some(&vec![id.clone()]),
+                "{size:?}: the check is selected"
+            );
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: its Inspector is open"
+            );
+            let focus = canvas.debug_focus();
+            assert!(
+                contains(focus, *rect),
+                "{size:?}: the check card at {rect:?} is whole in the focus {focus:?}"
+            );
+        }
+    }
+
+    /// Criterion 4: resizing the window still re-fits a camera the person has
+    /// not moved, with the Inspector open. The smaller window is one the
+    /// demo still fits beside the Inspector above the smallest zoom.
+    #[test]
+    fn resizing_the_window_still_refits_an_unmoved_camera() {
+        let (_project, mut harness, scenario) = diagram(WIDE);
+        click_card(&mut harness, PRODUCT.1);
+        assert!(has_label(&harness, CLOSE_INSPECTOR), "the Inspector opens");
+        let wide = canvas(&harness, &scenario).debug_zoom();
+
+        harness.set_size(egui::vec2(1280.0, 800.0));
+        settle(&mut harness);
+
+        let resized = canvas(&harness, &scenario).debug_zoom();
+        assert!(
+            resized < wide,
+            "the smaller window fits again: {wide} to {resized}"
+        );
+        all_in_focus(&harness, &scenario);
+        choose(&mut harness, FIT);
+        assert_eq!(
+            canvas(&harness, &scenario).debug_zoom(),
+            resized,
+            "the resize fitted exactly as Fit the view does"
+        );
+    }
+
+    /// Criterion 4: *Fit the view* still fits the board, beside the Inspector.
+    #[test]
+    fn fit_the_view_still_fits_beside_the_inspector() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            click_card(&mut harness, PRICE.1);
+
+            choose(&mut harness, FIT);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector stays"
+            );
+            let fitted = canvas(&harness, &scenario).debug_zoom();
+            assert!(
+                fitted < zoom,
+                "{size:?}: the narrower board fits: {zoom} to {fitted}"
+            );
+            if size == WIDE {
+                all_in_focus(&harness, &scenario);
+            } else {
+                // At 960 × 540 the board beside the Inspector is narrower
+                // than the demo at the smallest zoom: the fit stops there,
+                // centres the cards on the focus and keeps them whole in
+                // its height.
+                assert_eq!(fitted, 0.25, "the smallest zoom");
+                let canvas = canvas(&harness, &scenario);
+                let focus = canvas.debug_focus();
+                let cards = canvas
+                    .debug_cards()
+                    .iter()
+                    .fold(egui::Rect::NOTHING, |all, (_, rect)| all.union(*rect));
+                assert!(
+                    (cards.center() - focus.center()).length() < 1.0,
+                    "the cards {cards:?} are centred on the focus {focus:?}"
+                );
+                assert!(
+                    cards.top() >= focus.top() - EPSILON
+                        && cards.bottom() <= focus.bottom() + EPSILON,
+                    "the cards {cards:?} are whole in the focus's height {focus:?}"
+                );
+            }
         }
     }
 }
