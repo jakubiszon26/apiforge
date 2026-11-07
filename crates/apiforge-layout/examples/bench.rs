@@ -12,35 +12,13 @@
 //! what a developer wants on an unknown machine. With `--strict` it fails when a
 //! budget is exceeded, for a machine whose speed is known.
 
+mod support;
+
 use apiforge_layout::{
     Block, Edge, Graph, Point, Port, Rect, Routing, Side, Size, Wire, place, route, smooth, tidy,
 };
 use std::time::{Duration, Instant};
-
-/// The same small generator the tests use, so the boards are comparable.
-struct Random(u64);
-
-impl Random {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    fn below(&mut self, limit: usize) -> usize {
-        if limit == 0 {
-            0
-        } else {
-            (self.next() % limit as u64) as usize
-        }
-    }
-
-    fn float(&mut self, low: f32, high: f32) -> f32 {
-        let unit = (self.next() >> 11) as f32 / (1u64 << 53) as f32;
-        low + (high - low) * unit
-    }
-}
+use support::Random;
 
 /// How far back a wire reaches for its source.
 #[derive(Clone, Copy)]

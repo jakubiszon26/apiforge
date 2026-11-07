@@ -1,10 +1,10 @@
 # LAY-01: A quality measurement for layout and routing
 
 - Size: S · Owner review: 10 min · Risk: none
-- State: Backlog (issue #32) · LAY sprint, wave 0 (may start now, no
-  decision) · re-audited in [lay.md](../sprints/lay.md) section 8 on
-  2026-11-04/05: the criteria 5–7 below were added there
-- Analysis model: Fable · Implementation model: —
+- State: Implemented, awaiting acceptance (issue #32, PR #305) · LAY sprint,
+  wave 0 (no decision) · re-audited in [lay.md](../sprints/lay.md) section 8
+  on 2026-11-04/05: the criteria 5–7 below were added there
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -56,3 +56,16 @@ which produced the table in [LAY-00](LAY-00.md); move it to
 `examples/bench.rs`, and use the card geometry of the desktop (280 px wide,
 header 64, input row 52, output row 28, footer 36, control 28) so the boards
 look like the application's.
+
+A step, for the counts of criterion 5, is a node of the scenario's main graph:
+the start, every request, value, component, check and condition, a branch and
+both of its arms; the `cleanup` block is a second graph and is counted apart.
+That count gives `order-flow` its 14 steps and the round-3 `shop-30` its 34.
+`crates/apiforge-runner/tests/acceptance.rs` holds it, with what the later
+tickets read from `shop-30`.
+
+The UX task sheet of the plan's row is
+[lay.md section 9](../sprints/lay.md#9-metrics-and-qa); the
+[development guide](../development.md#verification) points to it beside the
+command, and that section says how to make the failed simulation it starts
+from.

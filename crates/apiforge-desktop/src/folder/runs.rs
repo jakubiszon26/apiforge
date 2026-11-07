@@ -649,9 +649,10 @@ impl FolderApp {
                     let parameters = parameters_of(&model);
                     let board = Board {
                         graph,
-                        reference: graph_of(&model, false),
+                        reference: &reference_of(&model, cleanup),
                         project: &context,
                         parameters: &parameters,
+                        sibling: sibling_of(&model, cleanup),
                     };
                     let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
                     // The check is counted when its edit applies, which may

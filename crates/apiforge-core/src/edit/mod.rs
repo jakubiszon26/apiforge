@@ -16,7 +16,10 @@ mod nodes;
 mod proxies;
 mod storage;
 
-pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
+pub use clipboard::{
+    Fragment, Missing, PASTE_OFFSET, PasteTarget, Pasted, Unresolved, copy_selection,
+    duplicate_selection, paste_selection,
+};
 pub use component::{
     ComponentDraft, DraftError, DraftSection, InputRow, InputTarget, OutputRow, add_component,
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
