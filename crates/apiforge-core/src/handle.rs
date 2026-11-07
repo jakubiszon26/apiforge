@@ -135,6 +135,29 @@ pub fn unique_handle(base: &str, taken: impl Fn(&str) -> bool) -> String {
         .expect("an unused numbered handle exists")
 }
 
+/// `label`, or `label 2`, `label 3`, … – the first one `taken` does not report
+/// (UX-34). A taken label that already ends in a number counts on from it, so
+/// the copy of `Add to cart 2` is `Add to cart 3` and that of `Room 101` is
+/// `Room 102`, never `Add to cart 2 2`.
+pub fn unique_label(label: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(label) {
+        return label.to_owned();
+    }
+    let (stem, first) = label
+        .rsplit_once(' ')
+        .filter(|(stem, number)| {
+            !stem.is_empty()
+                && !number.is_empty()
+                && number.bytes().all(|byte| byte.is_ascii_digit())
+        })
+        .and_then(|(stem, number)| Some((stem, number.parse::<u64>().ok()?.checked_add(1)?)))
+        .unwrap_or((label, 2));
+    (first..)
+        .map(|number| format!("{stem} {number}"))
+        .find(|candidate| !taken(candidate))
+        .expect("an unused numbered label exists")
+}
+
 /// Handles of every node in `graph`.
 pub fn graph_handles(graph: &Graph) -> HashSet<String> {
     graph.nodes.iter().map(|node| node.handle.clone()).collect()
@@ -178,6 +201,16 @@ mod tests {
         let mut sorted = RESERVED_WORDS.to_vec();
         sorted.sort_unstable();
         assert_eq!(sorted, RESERVED_WORDS, "keep the list sorted");
+    }
+
+    #[test]
+    fn labels_are_numbered_from_their_stem() {
+        let taken = ["Add to cart", "Add to cart 2", "Room 101"];
+        let taken = |label: &str| taken.contains(&label);
+        assert_eq!(unique_label("Product", taken), "Product");
+        assert_eq!(unique_label("Add to cart", taken), "Add to cart 3");
+        assert_eq!(unique_label("Add to cart 2", taken), "Add to cart 3");
+        assert_eq!(unique_label("Room 101", taken), "Room 102");
     }
 
     #[test]

@@ -23,7 +23,9 @@ const SEPARATOR: f32 = 1.0;
 const CODE_HINT_MARGIN: f32 = 24.0;
 const CODE_HINT: &str = "Open a scenario or component from the document list.";
 const BOARD_HINT: &str = "Open a scenario or component to see its diagram.";
-const NOTICE: &str = "Moved to the trash.";
+/// An error, which stays until it is dismissed: a confirmation would clear
+/// at the next click (UX-12).
+const NOTICE: &str = "Could not delete: the file is in use.";
 const BACKUP: &str = "Unsaved work from an earlier session is in the recovery backup.";
 
 fn open(project: &tempfile::TempDir, size: egui::Vec2, mode: &str) -> FolderHarness {
@@ -317,7 +319,7 @@ fn a_dismissable_notice_brings_the_band_back_until_it_is_dismissed() {
         let project = shop();
         let mut harness = open(&project, size, "Code");
         close_every_tab(&mut harness);
-        harness.state_mut().as_mut().unwrap().notify(NOTICE, false);
+        harness.state_mut().as_mut().unwrap().notify(NOTICE, true);
         settle(&mut harness);
         for mode in MODES {
             click(&mut harness, mode);
@@ -519,7 +521,7 @@ fn with_tabs_open_the_strip_and_its_notices_are_as_before() {
         settle(&mut harness);
         for notice in [false, true] {
             if notice {
-                harness.state_mut().as_mut().unwrap().notify(NOTICE, false);
+                harness.state_mut().as_mut().unwrap().notify(NOTICE, true);
             }
             for mode in MODES {
                 click(&mut harness, mode);

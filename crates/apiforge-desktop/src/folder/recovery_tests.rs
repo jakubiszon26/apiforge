@@ -89,8 +89,7 @@ fn native_conflict_decision_requires_refresh_after_another_foreign_change() {
     assert_eq!(text(&app, &id), latest);
     assert!(app.prompt.is_none());
     assert!(
-        app.notice
-            .as_ref()
+        app.notice()
             .is_some_and(|notice| !notice.error && notice.text.contains("reviewed version"))
     );
 }
@@ -202,7 +201,7 @@ fn interrupted_project_opens_a_native_preview_and_preserves_foreign_bytes_before
         app.has_document(),
         "open error: {:?}; notice: {:?}",
         app.open_error,
-        app.notice.as_ref().map(|notice| &notice.text)
+        app.notice().map(|notice| &notice.text)
     );
     assert!(
         !app.session.as_ref().unwrap().is_read_only(),

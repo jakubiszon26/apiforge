@@ -1,7 +1,9 @@
 # LAY-05: Lanes between columns — a short wire does not cross a long one
 
 - Size: M · Owner review: 15 min · Risk: none
-- State: Backlog (issue #36) — measured again after LAY-04 before scheduling
+- State: Backlog (issue #36) · LAY sprint, wave 3 (should) — scheduled only
+  if crossings per wire after LAY-04 exceed 0.2 on `shop-30`
+  ([lay.md](../sprints/lay.md) section 8)
 - Analysis model: Fable · Implementation model: —
 
 ## Goal

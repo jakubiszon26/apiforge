@@ -19,6 +19,7 @@ tokio-util.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+apiforge-script.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }
 
 [lints]

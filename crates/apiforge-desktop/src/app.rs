@@ -26,7 +26,7 @@ use apiforge_core::{
 use apiforge_runner::{RunHandle, RunRequest, RunnerService};
 use apiforge_storage::{JournalStore, WorkspaceStore};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 /// Where the workspace comes from and whether edits are saved.
 pub enum Source {
@@ -2339,12 +2339,14 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 read_only: false,
+                component: self.editor.draft().is_some(),
                 header_leading: None,
                 library: None,
                 inputs: None,
                 selected_input: None,
                 adding_input: None,
                 settings: None,
+                arrangement: "",
             };
             self.canvas.show(ui, &input)
         };
@@ -2434,18 +2436,14 @@ impl App {
             Command::Copy => self.copy_selection(),
             Command::Paste => self.paste(),
             Command::Duplicate => {
-                let selected: HashSet<&str> =
-                    self.editor.selection.iter().map(String::as_str).collect();
-                if selected.is_empty() {
-                    return;
-                }
                 // Cleanup bindings may read main-graph outputs. Preserve those
                 // references exactly as a regular paste does.
-                let fragment = edit::copy_selection(self.editor.graph(), &selected);
-                match self.with_board(|board| board.paste(&fragment, &edit::PASTE_OFFSET)) {
-                    Ok(edit) => self.insert_pasted(edit),
-                    Err(message) => self.canvas.set_error(message),
-                }
+                let selection = self.editor.selection.clone();
+                let Some(fragment) = self.with_board(|board| board.copy(&selection)) else {
+                    return;
+                };
+                let result = self.with_board(|board| board.paste(&fragment));
+                self.insert_pasted(result);
             }
             Command::SaveSelectionAsComponent => {
                 if !self.editor.selection.is_empty() {
@@ -2461,16 +2459,14 @@ impl App {
     }
 
     fn copy_selection(&mut self) {
-        let selected: HashSet<&str> = self.editor.selection.iter().map(String::as_str).collect();
-        let fragment = edit::copy_selection(self.editor.graph(), &selected);
-        if fragment.nodes.is_empty() {
+        let selection = self.editor.selection.clone();
+        let Some(fragment) = self.with_board(|board| board.copy(&selection)) else {
             return;
-        }
-        let count = fragment.nodes.len();
+        };
+        let count = fragment.graph.nodes.len();
         self.editor.clipboard = Some(BlockClipboard {
             context: self.editor.context_key(),
             fragment,
-            pastes: 0,
         });
         self.notice = Some(format!(
             "Copied {count} step(s) with their configuration. Paste with Ctrl+V."
@@ -2487,27 +2483,31 @@ impl App {
         else {
             return;
         };
-        let count = f64::from(clipboard.pastes + 1);
-        let offset = Position {
-            x: edit::PASTE_OFFSET.x * count,
-            y: edit::PASTE_OFFSET.y * count,
-        };
-        let result = self.with_board(|board| board.paste(&clipboard.fragment, &offset));
-        match result {
-            Ok(edit) => {
-                if let Some(stored) = &mut self.editor.clipboard {
-                    stored.pastes += 1;
-                }
-                self.insert_pasted(edit);
+        let result = self.with_board(|board| board.paste(&clipboard.fragment));
+        self.insert_pasted(result);
+    }
+
+    /// The workspace window pastes only into the board that copied, so a
+    /// reference it cannot keep means its source was deleted since: the paste
+    /// is refused, as before UX-34.
+    fn insert_pasted(&mut self, pasted: Result<board_edit::Paste, String>) {
+        let pasted = pasted.and_then(|paste| {
+            if paste.unresolved.is_empty() {
+                Ok(paste.edit)
+            } else {
+                Err(edit::EditError::PasteMissingSource.to_string())
+            }
+        });
+        match pasted {
+            Ok(pasted) => {
+                let ids = pasted.selection.clone().unwrap_or_default();
+                let count = ids.len();
+                self.apply_edit(Ok(pasted));
+                self.canvas.show_pasted(ids);
+                self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
             }
             Err(message) => self.canvas.set_error(message),
         }
-    }
-
-    fn insert_pasted(&mut self, pasted: board_edit::Edit) {
-        let count = pasted.selection.as_ref().map_or(0, Vec::len);
-        self.apply_edit(Ok(pasted));
-        self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
     }
 
     /// Sets a slot of a node: a whole input, or the binding at `path` inside it.
@@ -2545,6 +2545,7 @@ impl App {
             reference: &reference,
             project: self.editor.project(),
             parameters: &parameters,
+            sibling: self.editor.sibling_graph(),
         })
     }
 

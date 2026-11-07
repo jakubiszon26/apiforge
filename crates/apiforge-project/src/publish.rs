@@ -64,6 +64,36 @@ impl ProjectSession {
         Ok(working_revision(&self.manifest, &document.entry))
     }
 
+    /// The component's latest published revision when publishing now would
+    /// write that revision again: the definition its current text describes
+    /// prints exactly as the revision was published. `None` when it differs,
+    /// was never published or its text is not analysed yet (UX-25, plan
+    /// decision 16). Formatting and comments the revision does not keep are
+    /// not a difference; the layout is not part of a revision's source.
+    pub fn unchanged_revision(&self, document_id: &str) -> Option<u32> {
+        let document = &self.documents[self.index(document_id).ok()?];
+        if document.entry.kind != DocumentKind::Component
+            || document.unavailable.is_some()
+            || !document.model_describes_text()
+        {
+            return None;
+        }
+        let latest = self
+            .manifest
+            .revisions
+            .iter()
+            .filter(|revision| revision.component_id == document.entry.entity_id)
+            .max_by_key(|revision| revision.revision)?;
+        let model @ Document::Component(component) = document.model()? else {
+            return None;
+        };
+        if component.handle != latest.handle {
+            return None;
+        }
+        let source = apiforge_script::print_folder_document(&self.context, model).ok()?;
+        (hash(&source) == latest.source_hash).then_some(latest.revision)
+    }
+
     /// Publishes the working component as its next revision. Settles pending
     /// analysis first, so the revision describes the text being published.
     ///
@@ -251,6 +281,8 @@ impl ProjectSession {
         project.components = self.published.clone();
         self.context = std::sync::Arc::new(project);
         self.context_generation += 1;
+        self.publications
+            .push((self.context_generation, component.id.clone()));
         for index in 0..self.documents.len() {
             if self.documents[index].unavailable.is_none() {
                 self.documents[index].analysis = AnalysisState::Pending;

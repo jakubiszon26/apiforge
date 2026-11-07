@@ -68,6 +68,22 @@ fn source_of(harness: &FolderHarness, document_id: &str) -> String {
         .to_owned()
 }
 
+/// Changes the component's description, the smallest edit that makes a
+/// next revision: one equal to its latest revision has nothing to publish
+/// (UX-25).
+fn revise(harness: &mut FolderHarness, document_id: &str) {
+    let source = source_of(harness, document_id);
+    let revised = source.replacen("description \"", "description \"Revised. ", 1);
+    assert_ne!(revised, source, "the component has a description");
+    app(harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(document_id, &revised, CODE)
+        .unwrap();
+    settle(harness);
+}
+
 fn text_of(harness: &FolderHarness, path: &str) -> String {
     folder(harness)
         .session
@@ -178,8 +194,11 @@ fn a_migrated_project_is_edited_published_run_and_unchanged_after_a_restart() {
 
     // Publish the next revision of a migrated component. The scenario keeps
     // the revision it was migrated against, so its source must not change.
+    // A component equal to its latest revision has nothing to publish
+    // (UX-25), so its description changes first.
     app(&mut harness).activate_tab(&component);
     settle(&mut harness);
+    revise(&mut harness, &component);
     choose(&mut harness, "Publish");
     assert_eq!(
         folder(&harness)
@@ -842,8 +861,15 @@ mod mcp07 {
         drop(owner);
         await_writer(&mut harness, Instant::now());
         // Typing is paused while observing (MCP-08a), so the change that
-        // makes a next revision is typed once the window is the writer.
+        // makes a next revision is typed once the window is the writer. A
+        // comment the revision would not keep is not one (UX-25): the
+        // description changes too.
         type_into(&mut harness, &label, "// next revision\n");
+        assert!(
+            disabled(&harness, "Publish"),
+            "a loose comment is no change"
+        );
+        revise(&mut harness, &component);
         assert!(!disabled(&harness, "Publish"));
     }
 
@@ -1369,12 +1395,9 @@ mod mcp08a {
         );
         assert!(taken <= FOLLOW, "listed after {taken:?}");
         assert!(
-            folder(&harness).notice.is_none(),
+            folder(&harness).notice().is_none(),
             "no notice: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert_eq!(
             folder(&harness).workbench.active().map(str::to_owned),
@@ -1430,12 +1453,9 @@ mod mcp08a {
         });
         assert!(taken <= FOLLOW, "shown after {taken:?}");
         assert!(
-            folder(&harness).notice.is_none(),
+            folder(&harness).notice().is_none(),
             "followed without a reload notice: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert_eq!(source_of(&harness, &component), edited);
         assert_eq!(
@@ -1479,8 +1499,7 @@ mod mcp08a {
         assert!(taken <= FOLLOW, "closed after {taken:?}");
         assert!(has_tab(&harness, &scenario), "every other tab stays");
         let notice = folder(&harness)
-            .notice
-            .as_ref()
+            .notice()
             .map(|notice| notice.text.clone())
             .unwrap_or_default();
         assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
@@ -1531,10 +1550,7 @@ mod mcp08a {
         assert!(
             !document.is_dirty() && !document.is_layout_dirty(),
             "saved: {:?}",
-            folder(&harness)
-                .notice
-                .as_ref()
-                .map(|notice| notice.text.clone())
+            folder(&harness).notice().map(|notice| notice.text.clone())
         );
         assert!(document.conflict().is_none());
         let saved = path_of(&harness, &scenario);
@@ -1768,7 +1784,7 @@ mod mcp04 {
         assert_eq!(snapshot.text, written, "followed within one scan");
         assert_eq!(snapshot.conflict, None);
         assert!(
-            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            app.notice().is_none_or(|notice| !notice.error),
             "no conflict is reported"
         );
         assert!(harness.query_by_label_contains(UNSAVED).is_none());
@@ -3443,10 +3459,7 @@ mod mcp08c {
             holder(root).and_then(|holder| holder.role()),
             Some(HolderRole::Window)
         );
-        let notice = folder(&harness)
-            .notice
-            .as_ref()
-            .expect("the error is shown");
+        let notice = folder(&harness).notice().expect("the error is shown");
         assert!(notice.error, "{}", notice.text);
         assert!(
             notice.text.contains("promotion-and-cart-price.afs"),
@@ -3619,10 +3632,7 @@ mod mcp08c {
         assert_eq!(fs::read(root.join(SCENARIO)).unwrap(), saved_scenario);
         assert!(!read_only(&harness), "the window keeps the project");
         assert!(folder(&harness).snapshot(&scenario).unwrap().held);
-        let notice = folder(&harness)
-            .notice
-            .as_ref()
-            .expect("the window says why");
+        let notice = folder(&harness).notice().expect("the window says why");
         assert!(notice.text.contains("earlier session"), "{}", notice.text);
         drop(harness);
         drop(server);
@@ -3750,7 +3760,7 @@ mod mcp05 {
         assert_eq!(listed(&harness), [1, 2, 3], "the new revision is listed");
         let app = folder(&harness);
         assert!(
-            app.notice.as_ref().is_none_or(|notice| !notice.error),
+            app.notice().is_none_or(|notice| !notice.error),
             "no conflict is reported"
         );
         let session = app.session.as_ref().unwrap();
@@ -3814,6 +3824,14 @@ mod mcp05 {
         }
         assert_eq!(shared(server.path()), shared(window.path()));
 
+        // The same edit in both copies: a component equal to its latest
+        // revision has nothing to publish from the window (UX-25).
+        for copy in [window.path(), server.path()] {
+            let source = fs::read_to_string(copy.join(PRODUCT)).unwrap();
+            let revised = source.replacen("description \"", "description \"Revised. ", 1);
+            assert_ne!(revised, source);
+            fs::write(copy.join(PRODUCT), revised).unwrap();
+        }
         let agent = AgentSession::with_environment(server.path().to_owned(), Vec::new());
         let saved = fs::read(server.path().join(PRODUCT)).unwrap();
         let published = agent
@@ -6549,8 +6567,7 @@ mod mcp16 {
             "the tab closing chose, not the product saved beside the deletion"
         );
         let notice = folder(&harness)
-            .notice
-            .as_ref()
+            .notice()
             .map(|notice| notice.text.clone())
             .unwrap_or_default();
         assert!(notice.contains("short-lived.afs"), "notice: {notice:?}");
@@ -7141,7 +7158,7 @@ mod mcp19 {
             scan.generation, generation,
             "the check reads the delete's generation"
         );
-        let notice = app.notice.as_ref().expect("the delete says what it did");
+        let notice = app.notice().expect("the delete says what it did");
         assert!(!notice.error, "the delete failed: {}", notice.text);
         assert!(
             app.workbench.tabs().iter().all(|tab| tab.document_id != id),
@@ -7472,6 +7489,9 @@ mod ux01 {
                 .clone()
         };
         let before = position(harness);
+        // Run results opening beside the board leaves its camera as it was
+        // (UX-18), so the board is fitted to bring the card into view.
+        choose(harness, "Fit the view");
         let start = harness.get_by_label(card).rect().center();
         harness.hover_at(start);
         harness.step();
@@ -8017,26 +8037,52 @@ mod ux02 {
         }
     }
 
-    /// Criterion 2: on a scenario's tab at 960 × 540, with *Live allowed*
-    /// beside it and *Run simulation*, the widest label, the project name is
-    /// whole.
+    /// Criterion 2, as amended by UX-25 (#233, the owner's decision A of
+    /// 2026-11-03): on a scenario's tab at 960 × 540 with *Run simulation*,
+    /// the widest label, the project name is whole. With *Live allowed*
+    /// beside it in a project with a published component, the header also
+    /// keeps room for *rN · no changes*: the name then ends in an ellipsis
+    /// and shows whole on hover.
     #[test]
     fn ux02_criterion_2_the_project_name_is_whole_at_960() {
         let configuration = tempfile::tempdir().unwrap();
         let directory = shop();
         let mut harness = window(directory.path(), MINIMUM, configuration.path());
+        let whole = whole_width(&harness, NAME, theme::FONT_BODY);
+        assert!(has_label(&harness, SIMULATE));
+        assert!(!has_label(&harness, BADGE));
+        for mode in ["Code", "Diagram", "Split"] {
+            choose(&mut harness, mode);
+            let width = title(&harness).width();
+            assert!(
+                width + 1.0 >= whole,
+                "{mode}: the name is {width} px wide, whole it is {whole} px"
+            );
+        }
+
         set_box(&mut harness, true);
         assert!(has_label(&harness, BADGE));
         assert!(has_label(&harness, SIMULATE));
         for mode in ["Code", "Diagram", "Split"] {
             choose(&mut harness, mode);
             let width = title(&harness).width();
-            let whole = whole_width(&harness, NAME, theme::FONT_BODY);
             assert!(
-                width + 1.0 >= whole,
-                "{mode}: the name is {width} px wide, whole it is {whole} px"
+                width + 1.0 < whole,
+                "{mode}: with Live allowed the name gives way: {width} px of {whole} px"
             );
         }
+        let names = harness.query_all_by_label(NAME).count();
+        harness
+            .query_all_by_label(NAME)
+            .find(|node| node.rect().top() < 40.0)
+            .expect("the project name in the header")
+            .hover();
+        settle(&mut harness);
+        harness.run_steps(60);
+        assert!(
+            harness.query_all_by_label(NAME).count() > names,
+            "hovering the shortened name shows it whole"
+        );
     }
 
     /// Criterion 3: the mode is kept in `apiforge/run-mode.json` in the
@@ -9440,7 +9486,7 @@ mod ux04 {
     use egui_kittest::kittest::NodeT;
 
     const SIMULATE: &str = "Run simulation";
-    const LIVE: &str = "Run live";
+    pub(super) const LIVE: &str = "Run live";
     const LIVE_ITEM: &str = "Live";
     const CANCEL: &str = "Cancel run";
     const BADGE: &str = "Live allowed";
@@ -9455,7 +9501,7 @@ mod ux04 {
 
     /// A loopback API that accepts every connection and never answers, so a
     /// live run against it stays in progress until its step times out.
-    fn silent_api() -> String {
+    pub(super) fn silent_api() -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
@@ -9482,7 +9528,7 @@ mod ux04 {
 
     /// The window over `root` at `size`, the run mode Live, the scenario's
     /// tab active.
-    fn live_window(
+    pub(super) fn live_window(
         root: &std::path::Path,
         size: egui::Vec2,
         configuration: &std::path::Path,
@@ -9511,7 +9557,7 @@ mod ux04 {
     }
 
     /// An unsaved, valid change to the scenario: its description.
-    fn edit_validly(harness: &mut FolderHarness) {
+    pub(super) fn edit_validly(harness: &mut FolderHarness) {
         let scenario = only(harness, DocumentKind::Scenario);
         edit(
             harness,
@@ -9523,7 +9569,7 @@ mod ux04 {
 
     /// The header's *Running …* label: its text and rect. The header is the
     /// window's top band, above the tab strip.
-    fn running(harness: &FolderHarness) -> Option<(String, egui::Rect)> {
+    pub(super) fn running(harness: &FolderHarness) -> Option<(String, egui::Rect)> {
         let strip = harness.get_by_label("Code").rect().bottom();
         let found: Vec<(String, egui::Rect)> = harness
             .query_all_by_label_contains("Running ")
@@ -9546,10 +9592,7 @@ mod ux04 {
     /// No *Running …* notice in the band under the tab strip, nor anywhere
     /// below the header.
     fn assert_band_is_clear(harness: &FolderHarness, context: &str) {
-        let notice = folder(harness)
-            .notice
-            .as_ref()
-            .map(|notice| notice.text.clone());
+        let notice = folder(harness).notice().map(|notice| notice.text.clone());
         assert!(
             !notice
                 .as_deref()
@@ -9584,7 +9627,7 @@ mod ux04 {
     }
 
     /// Clicks *Cancel run* and steps until the run has ended.
-    fn cancel(harness: &mut FolderHarness) {
+    pub(super) fn cancel(harness: &mut FolderHarness) {
         harness.get_by_label(CANCEL).click();
         let deadline = Instant::now() + Duration::from_secs(30);
         while folder(harness).runs.handle.is_some() {
@@ -9902,7 +9945,7 @@ mod ux31 {
     const ADD: &str = "Add input";
     const CAPTION: &str = "INPUTS";
 
-    fn by_path(harness: &FolderHarness, path: &str) -> String {
+    pub(super) fn by_path(harness: &FolderHarness, path: &str) -> String {
         folder(harness)
             .session
             .as_ref()
@@ -11517,6 +11560,1993 @@ mod ux30 {
             choose(&mut harness, SAVE_AND_PUBLISH);
             capture(&mut harness, &format!("ux30-after-{suffix}"), None);
         }
+    }
+}
+
+// ----- UX-13: a code tab keeps its scroll across tab switches -----------------
+
+/// UX-13 (#193, decision 7 = A of 2026-11-02): a code tab keeps its scroll
+/// when the person switches to another tab and back; the caret is restored
+/// without moving the view, unless the tab changed meanwhile and the caret
+/// is now out of view, when the view moves the least that shows it. MCP-16's
+/// gentle follow (criterion 3) is the regression test in `code::tests`.
+mod ux13 {
+    use super::mcp08b::{PRODUCT, SCENARIO};
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_storage::project::TabState;
+    use std::ops::RangeInclusive;
+
+    /// The scenario's tab name in the tab strip.
+    const SCENARIO_TAB: &str = "promotion-and-cart-price.afs";
+    /// The code view's font size.
+    const CODE_FONT: f32 = 13.0;
+
+    fn id_of(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn tab<'a>(harness: &'a FolderHarness, document_id: &str) -> &'a TabState {
+        folder(harness)
+            .workbench
+            .tabs()
+            .iter()
+            .find(|tab| tab.document_id == document_id)
+            .unwrap_or_else(|| panic!("{document_id} has a tab"))
+    }
+
+    fn scroll_of(harness: &FolderHarness, document_id: &str) -> f32 {
+        tab(harness, document_id).scroll
+    }
+
+    /// The line, counted from one, the caret of `document_id`'s tab is on.
+    fn caret_line(harness: &FolderHarness, document_id: &str) -> usize {
+        let caret = tab(harness, document_id).selection.caret;
+        let text = source_of(harness, document_id);
+        text[..caret.min(text.len())].matches('\n').count() + 1
+    }
+
+    /// The lines of `document_id` drawn whole, counted from one.
+    fn in_view(harness: &FolderHarness, document_id: &str) -> RangeInclusive<usize> {
+        let (document, lines) = folder(harness)
+            .code_lines_in_view()
+            .expect("the code is drawn");
+        assert_eq!(document, document_id, "the code shows {document_id}");
+        lines
+    }
+
+    /// `text` with `count` comment lines after its first line.
+    fn padded(text: &str, count: usize) -> String {
+        let (first, rest) = text.split_once('\n').unwrap();
+        let pad: String = (1..=count)
+            .map(|line| format!("  // Note {line} of the person.\n"))
+            .collect();
+        format!("{first}\n{pad}{rest}")
+    }
+
+    /// The demo shop at the minimum window, its scenario long enough to
+    /// scroll, shown in Code.
+    fn long_shop() -> (tempfile::TempDir, FolderHarness) {
+        let project = shop();
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, padded(&text, 80)).unwrap();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        choose(&mut harness, "Code");
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    /// A click near the start of the `line`th line of the code, counted from
+    /// one, with the code at its top: the caret goes there and the editor
+    /// has the keyboard.
+    fn click_line(harness: &mut FolderHarness, document_id: &str, line: usize) {
+        assert_eq!(
+            *in_view(harness, document_id).start(),
+            1,
+            "the code at its top"
+        );
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        let row = harness
+            .ctx
+            .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)));
+        // The text starts below the editor's 2 px margin.
+        let at = code.left_top() + egui::vec2(120.0, 2.0 + row * (line as f32 - 0.5));
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        settle(harness);
+        assert_eq!(
+            caret_line(harness, document_id),
+            line,
+            "the click put the caret on line {line}"
+        );
+    }
+
+    /// Scrolls the code of `document_id` down with the mouse wheel.
+    fn wheel_down(harness: &mut FolderHarness, document_id: &str) {
+        let code = harness.get_by_label(&editor(harness, document_id)).rect();
+        harness.hover_at(code.left_top() + egui::vec2(120.0, 60.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -160.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(harness);
+    }
+
+    /// Clicks the tab of `name` in the tab strip: the explorer's row has the
+    /// same name, lower in the window.
+    fn click_tab(harness: &mut FolderHarness, name: &str) {
+        harness
+            .query_all_by_label(name)
+            .min_by(|left, right| left.rect().top().total_cmp(&right.rect().top()))
+            .unwrap_or_else(|| panic!("{name} is shown"))
+            .click();
+        settle(harness);
+    }
+
+    /// Criterion 1: a code tab scrolled away from its caret keeps that
+    /// scroll when the person switches to another tab and back.
+    #[test]
+    fn ux13_criterion_1_a_tab_scrolled_away_from_its_caret_keeps_its_scroll() {
+        let (_project, mut harness) = long_shop();
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 3);
+        for _ in 0..3 {
+            wheel_down(&mut harness, &scenario);
+        }
+        let scroll = scroll_of(&harness, &scenario);
+        let lines = in_view(&harness, &scenario);
+        assert!(scroll > 100.0, "the wheel scrolled the code: {scroll}");
+        assert!(
+            !lines.contains(&3),
+            "the caret's line 3 is out of view: {lines:?}"
+        );
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert_eq!(caret_line(&harness, &scenario), 3, "the caret is restored");
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        // The first line in view is the scroll's; the last depends on the
+        // height of the Problems section, which is each document's own.
+        assert_eq!(
+            in_view(&harness, &scenario).start(),
+            lines.start(),
+            "the same first line in view"
+        );
+
+        // And once more, there and back by the tab strip.
+        click_tab(&mut harness, "product.afs");
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept the second time, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        assert_eq!(in_view(&harness, &scenario).start(), lines.start());
+    }
+
+    /// Criterion 1 with the caret in a statement: the board selects that
+    /// statement's block, as the caret asks, and the block selected with the
+    /// caret in it is not revealed again on return, which would centre it.
+    #[test]
+    fn ux13_criterion_1_a_caret_in_a_statement_keeps_the_scroll_too() {
+        let project = shop();
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let (first, rest) = text.split_once('\n').unwrap();
+        let values: String = (1..=80)
+            .map(|value| format!("  value_{value} = {value}\n"))
+            .collect();
+        fs::write(&path, format!("{first}\n{values}{rest}")).unwrap();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        choose(&mut harness, "Code");
+        settle(&mut harness);
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 3);
+        assert!(
+            folder(&harness)
+                .selections
+                .get(&scenario)
+                .is_some_and(|selected| selected.len() == 1),
+            "the board follows the caret to value_2"
+        );
+        for _ in 0..3 {
+            wheel_down(&mut harness, &scenario);
+        }
+        let scroll = scroll_of(&harness, &scenario);
+        let lines = in_view(&harness, &scenario);
+        assert!(scroll > 100.0, "the wheel scrolled the code: {scroll}");
+        assert!(!lines.contains(&3), "line 3 is out of view: {lines:?}");
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        click_tab(&mut harness, SCENARIO_TAB);
+        assert_eq!(folder(&harness).workbench.active(), Some(scenario.as_str()));
+        assert!(
+            (scroll_of(&harness, &scenario) - scroll).abs() < 0.5,
+            "the scroll {scroll} is kept, not {}",
+            scroll_of(&harness, &scenario)
+        );
+        assert_eq!(in_view(&harness, &scenario).start(), lines.start());
+        assert_eq!(caret_line(&harness, &scenario), 3, "the caret is restored");
+    }
+
+    /// Criterion 2: a caret that was in view when the person left the tab
+    /// and is out of view on return, because the text changed meanwhile, is
+    /// brought into view by the least scroll: its line at the bottom edge,
+    /// not in the middle.
+    #[test]
+    fn ux13_criterion_2_a_caret_moved_out_of_view_gets_the_least_scroll() {
+        let (project, mut harness) = long_shop();
+        let scenario = id_of(&harness, SCENARIO);
+        let product = id_of(&harness, PRODUCT);
+        click_line(&mut harness, &scenario, 8);
+        assert_eq!(scroll_of(&harness, &scenario), 0.0, "the code at its top");
+        let lines = in_view(&harness, &scenario);
+        assert!(lines.contains(&8), "the caret in view: {lines:?}");
+
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        // An edit elsewhere: blank lines under the first line move the
+        // caret's place in the text down, out of the view the tab kept.
+        let path = project.path().join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let (first, rest) = text.split_once('\n').unwrap();
+        let changed = format!("{first}\n{}{rest}", "\n".repeat(400));
+        fs::write(&path, &changed).unwrap();
+        follow_disk(&mut harness);
+        assert_eq!(
+            source_of(&harness, &scenario),
+            changed,
+            "the edit is followed"
+        );
+        assert_eq!(folder(&harness).workbench.active(), Some(product.as_str()));
+
+        click_tab(&mut harness, SCENARIO_TAB);
+        let line = caret_line(&harness, &scenario);
+        assert!(
+            line > *lines.end() + 20,
+            "the caret is now far below the kept view: line {line}, {lines:?}"
+        );
+        let shown = in_view(&harness, &scenario);
+        assert!(
+            shown.contains(&line),
+            "the caret's line {line} is in view: {shown:?}"
+        );
+        assert!(
+            *shown.end() <= line + 1,
+            "the view moved the least, the caret's line {line} at its bottom, not centred: \
+             {shown:?}"
+        );
+    }
+}
+
+/// UX-12 (#222): a notice that is not an error clears itself five seconds
+/// after it is raised or at the next action, whichever comes first; an error
+/// stays until it is dismissed and belongs to the tab it was raised on. The
+/// window's clock is held still in tests and stepped, so no test waits.
+mod ux12 {
+    use super::ux02::shop_at;
+    use super::ux04::{LIVE, cancel, edit_validly, live_window, running, silent_api};
+    use super::*;
+    use crate::testing::MINIMUM;
+
+    const SAVED: &str = "Saved 1 file.";
+    const ERROR: &str = "Could not save the project: the disk is full.";
+    const OTHER_ERROR: &str = "Cannot run this component: it has no steps.";
+
+    /// The demo shop at 960 × 540, the component's tab open and the
+    /// scenario's active with an unsaved, valid change to its description.
+    fn edited() -> (tempfile::TempDir, FolderHarness, String, String) {
+        let directory = crate::testing::shop_project();
+        let mut harness = folder_harness(directory.path(), MINIMUM);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let component = only(&harness, DocumentKind::Component);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        let source = source_of(&harness, &scenario);
+        let changed = source.replacen("description \"", "description \"Edited. ", 1);
+        assert_ne!(changed, source, "the scenario has a description");
+        app(&mut harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&scenario, &changed, CODE)
+            .unwrap();
+        settle(&mut harness);
+        (directory, harness, scenario, component)
+    }
+
+    /// Whether the band under the tabs shows `text`, by the window's state
+    /// and by the accessibility tree.
+    fn shows(harness: &FolderHarness, text: &str) -> bool {
+        let state = folder(harness)
+            .notice()
+            .is_some_and(|notice| notice.text == text);
+        let tree = harness.query_all_by_label(text).next().is_some();
+        assert_eq!(state, tree, "{text:?}: the state and the tree agree");
+        state
+    }
+
+    /// *Save all* from the header, which says what it saved.
+    fn save_all(harness: &mut FolderHarness) {
+        choose(harness, "Save all");
+        assert!(shows(harness, SAVED), "Save all says what it saved");
+    }
+
+    /// Moves the window's clock on by `by` and draws two frames with no
+    /// input. Not `settle`: the held clock does not move while egui's own
+    /// time does, so a repaint asked for the last 100 ms comes due at once.
+    fn wait(harness: &mut FolderHarness, by: Duration) {
+        app(harness).step_clock(by);
+        harness.step();
+        harness.step();
+    }
+
+    /// Raises an error on the active tab, as a failed action does.
+    fn fail(harness: &mut FolderHarness, text: &str) {
+        app(harness).notify(text, true);
+        settle(harness);
+        assert!(shows(harness, text), "the error is shown");
+    }
+
+    /// Criterion 1: *Saved 1 file.* is still shown 4.9 seconds after *Save
+    /// all* and gone at five, with no input in between.
+    #[test]
+    fn ux12_criterion_1_a_confirmation_is_gone_five_seconds_later() {
+        let (_directory, mut harness, _, _) = edited();
+        save_all(&mut harness);
+        wait(&mut harness, Duration::from_millis(4_900));
+        assert!(shows(&harness, SAVED), "at 4.9 s the notice is still shown");
+        wait(&mut harness, Duration::from_millis(100));
+        assert!(!shows(&harness, SAVED), "at 5 s the notice is gone");
+        assert!(
+            folder(&harness).notice().is_none(),
+            "nothing else took its place"
+        );
+    }
+
+    /// Criterion 2: an edit typed in the code clears the confirmation at
+    /// once; the clock has not moved.
+    #[test]
+    fn ux12_criterion_2_an_edit_clears_the_confirmation() {
+        let (_directory, mut harness, scenario, _) = edited();
+        save_all(&mut harness);
+        let before = source_of(&harness, &scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert_ne!(source_of(&harness, &scenario), before, "the edit landed");
+        assert!(!shows(&harness, SAVED), "the edit cleared the notice");
+    }
+
+    /// Criterion 2: starting a run clears the confirmation at once.
+    #[test]
+    fn ux12_criterion_2_a_run_clears_the_confirmation() {
+        let (_directory, mut harness, _, _) = edited();
+        save_all(&mut harness);
+        choose(&mut harness, "Run simulation");
+        assert!(!shows(&harness, SAVED), "the run cleared the notice");
+    }
+
+    /// Clicks the tab of `document_id` in the tab strip, the topmost widget
+    /// named after its file.
+    fn click_tab(harness: &mut FolderHarness, document_id: &str) {
+        let path = path_of(harness, document_id);
+        let name = path.rsplit('/').next().unwrap().to_owned();
+        harness
+            .query_all_by_label(&name)
+            .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+            .unwrap_or_else(|| panic!("a tab named {name}"))
+            .click();
+        settle(harness);
+        assert_eq!(
+            folder(harness).workbench.active(),
+            Some(document_id),
+            "the click switched to {name}"
+        );
+    }
+
+    /// Criterion 2: the user switching to another tab clears the
+    /// confirmation, and switching back does not bring it back. A tab the
+    /// window activates by itself only hides it: that is no action.
+    #[test]
+    fn ux12_criterion_2_a_tab_switch_clears_the_confirmation() {
+        let (_directory, mut harness, scenario, component) = edited();
+        save_all(&mut harness);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(!shows(&harness, SAVED), "not shown on another tab");
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(
+            shows(&harness, SAVED),
+            "a switch the window made cleared nothing"
+        );
+        click_tab(&mut harness, &component);
+        assert!(!shows(&harness, SAVED), "the user's switch cleared it");
+        click_tab(&mut harness, &scenario);
+        assert!(!shows(&harness, SAVED), "it does not come back");
+    }
+
+    /// Criterion 2, what an action is: moving the pointer over the code and
+    /// scrolling it keep the confirmation; text pasted into the code clears
+    /// it.
+    #[test]
+    fn ux12_criterion_2_moving_or_scrolling_keeps_the_confirmation_a_paste_clears_it() {
+        let (_directory, mut harness, scenario, _) = edited();
+        save_all(&mut harness);
+        let label = editor(&harness, &scenario);
+        let code = harness.get_by_label(&label).rect().center();
+        harness.hover_at(code);
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -40.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        settle(&mut harness);
+        assert!(shows(&harness, SAVED), "moving and scrolling keep it");
+        let before = source_of(&harness, &scenario);
+        harness.get_by_label(&label).focus();
+        harness.step();
+        harness.event(egui::Event::Paste(" ".into()));
+        settle(&mut harness);
+        assert_ne!(source_of(&harness, &scenario), before, "the paste landed");
+        assert!(!shows(&harness, SAVED), "the paste cleared it");
+    }
+
+    /// Criterion 3: an error stays through five seconds and more, and
+    /// through an edit, until it is dismissed with ×.
+    #[test]
+    fn ux12_criterion_3_an_error_stays_until_dismissed() {
+        let (_directory, mut harness, scenario, _) = edited();
+        fail(&mut harness, ERROR);
+        wait(&mut harness, Duration::from_secs(5));
+        wait(&mut harness, Duration::from_secs(60));
+        assert!(shows(&harness, ERROR), "a minute later the error stays");
+        let before = source_of(&harness, &scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert_ne!(source_of(&harness, &scenario), before, "the edit landed");
+        assert!(shows(&harness, ERROR), "the error stays through an edit");
+        choose(&mut harness, "Dismiss");
+        assert!(!shows(&harness, ERROR), "× dismisses it");
+        assert!(folder(&harness).notice().is_none());
+    }
+
+    /// Criterion 4: an error raised on the scenario is not shown while the
+    /// component's tab is active and is shown again on the scenario; the
+    /// component's own error is shown on the component only.
+    #[test]
+    fn ux12_criterion_4_an_error_belongs_to_its_tab() {
+        let (_directory, mut harness, scenario, component) = edited();
+        fail(&mut harness, ERROR);
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(!shows(&harness, ERROR), "not on the component's tab");
+        assert!(
+            folder(&harness).notice().is_none(),
+            "the component has none"
+        );
+        fail(&mut harness, OTHER_ERROR);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(shows(&harness, ERROR), "the scenario's error is back");
+        assert!(!shows(&harness, OTHER_ERROR), "the component's is not here");
+        app(&mut harness).activate_tab(&component);
+        settle(&mut harness);
+        assert!(shows(&harness, OTHER_ERROR), "the component's own error");
+        choose(&mut harness, "Dismiss");
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(
+            shows(&harness, ERROR),
+            "dismissing one tab's error leaves the other's"
+        );
+    }
+
+    /// Criterion 3: a confirmation raised over an error shows for its five
+    /// seconds and the error is shown again after it, still undismissed.
+    #[test]
+    fn ux12_criterion_3_a_confirmation_does_not_take_the_place_of_an_error() {
+        let (_directory, mut harness, _, _) = edited();
+        fail(&mut harness, ERROR);
+        save_all(&mut harness);
+        wait(&mut harness, Duration::from_secs(5));
+        assert!(shows(&harness, ERROR), "the error is back after it");
+    }
+
+    /// Criterion 4: the error of an operation asked for on the scenario that
+    /// ends while the component's tab is active belongs to the scenario.
+    #[test]
+    fn ux12_criterion_4_an_operations_error_belongs_to_the_tab_it_was_asked_on() {
+        let (_directory, mut harness, scenario, component) = edited();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        app(&mut harness).storage_io(
+            "Checking…",
+            move || {
+                let _ = held.recv();
+            },
+            |app, _| app.notify(ERROR, true),
+        );
+        app(&mut harness).activate_tab(&component);
+        harness.step();
+        release.send(()).unwrap();
+        settle(&mut harness);
+        assert!(
+            !shows(&harness, ERROR),
+            "not on the component's tab, active when it ended"
+        );
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        assert!(shows(&harness, ERROR), "on the scenario's tab");
+    }
+
+    /// Criterion 5: the header's *Running …* words (UX-04) are not a notice:
+    /// they stay while the run runs, past five seconds and through an edit.
+    #[test]
+    fn ux12_criterion_5_the_running_words_are_not_affected() {
+        let configuration = tempfile::tempdir().unwrap();
+        let base = silent_api();
+        let directory = shop_at(&base);
+        let mut harness = live_window(directory.path(), MINIMUM, configuration.path());
+        edit_validly(&mut harness);
+        choose(&mut harness, LIVE);
+        assert!(folder(&harness).runs.handle.is_some(), "the run runs");
+        wait(&mut harness, Duration::from_secs(6));
+        assert!(running(&harness).is_some(), "past five seconds");
+        let scenario = only(&harness, DocumentKind::Scenario);
+        let label = editor(&harness, &scenario);
+        type_into(&mut harness, &label, " ");
+        assert!(running(&harness).is_some(), "through an edit");
+        cancel(&mut harness);
+    }
+}
+
+/// UX-34 (#251): copy, paste and duplicate across graphs and tabs, the
+/// owner's decision A of 2026-11-03. Paste works on any graph of any open
+/// document; clashing handles are numbered, references inside the pasted
+/// set follow the copies, and a reference to a step the target lacks is
+/// reported as a *Missing step*. A duplicate lands clear of its original with
+/// its own label.
+mod ux34 {
+    use super::mcp08b::contains;
+    use super::ux02::hover_shows;
+    use super::ux31::{by_path, window};
+    use super::*;
+    use crate::canvas::Card;
+    use apiforge_core::{
+        block::Block,
+        format::{Node, Position, ProxySource},
+    };
+    use egui_kittest::kittest::NodeT;
+
+    const CART: &str = "components/add-to-cart.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PASTE: &str = "Paste steps (Ctrl+V)";
+    const ACTIONS: &str = "Selection actions";
+
+    fn model(harness: &FolderHarness, id: &str) -> Document {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(id)
+            .unwrap()
+            .model()
+            .expect("a valid model")
+            .clone()
+    }
+
+    fn node<'a>(graph: &'a Graph, handle: &str) -> &'a Node {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a step {handle}"))
+    }
+
+    /// Selects the steps named by their handles on the board on screen.
+    fn select(harness: &mut FolderHarness, id: &str, cleanup: bool, handles: &[&str]) {
+        let document = model(harness, id);
+        let ids = handles
+            .iter()
+            .map(|handle| node(graph_of(&document, cleanup), handle).id.clone())
+            .collect();
+        app(harness).selections.insert(id.to_owned(), ids);
+        settle(harness);
+    }
+
+    fn copy(harness: &mut FolderHarness) {
+        harness.event(egui::Event::Copy);
+        harness.step();
+        settle(harness);
+    }
+
+    fn duplicate(harness: &mut FolderHarness) {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+        settle(harness);
+    }
+
+    fn undo(harness: &mut FolderHarness) {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(harness);
+    }
+
+    fn open(harness: &mut FolderHarness, id: &str, mode: &str) {
+        app(harness).activate_tab(id);
+        settle(harness);
+        choose(harness, mode);
+    }
+
+    fn notice(harness: &FolderHarness) -> String {
+        folder(harness)
+            .notice()
+            .map(|notice| notice.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The statements of the scenario's cleanup block.
+    fn cleanup_text(source: &str) -> &str {
+        let start = source.find("cleanup {").expect("a cleanup block");
+        &source[start..]
+    }
+
+    /// Criterion 1: two steps copied in *Main* paste into *Cleanup* with
+    /// their internal wire kept; their handles are numbered because the
+    /// scenario's main flow already uses them, and the reference to the main
+    /// flow's `add_to_cart` stays as it was.
+    #[test]
+    fn ux34_criterion_1_main_steps_paste_into_cleanup_with_their_wire() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        assert!(
+            has_label(&harness, PASTE),
+            "Paste steps is offered on the cleanup board"
+        );
+        choose(&mut harness, PASTE);
+
+        let source = source_of(&harness, &id);
+        let cleanup = cleanup_text(&source);
+        assert!(
+            cleanup.contains("expected_price_2 = 80 * 1"),
+            "the copy of Expected price in cleanup:\n{source}"
+        );
+        assert!(
+            cleanup.contains(
+                "promotional_price_2 = assert add_to_cart.total ~= expected_price_2 within 0.005"
+            ),
+            "the wire inside the pasted set follows the copies:\n{source}"
+        );
+        let document = model(&harness, &id);
+        assert_eq!(
+            graph_of(&document, false).nodes.len(),
+            6,
+            "main is unchanged"
+        );
+        let copies = graph_of(&document, true);
+        let price = node(copies, "expected_price_2");
+        let check = node(copies, "promotional_price_2");
+        assert!(
+            check
+                .inputs
+                .values()
+                .any(|binding| binding.references_node(&price.id)),
+            "the pasted check reads the pasted price"
+        );
+    }
+
+    /// Criterion 2: a step copied in the scenario pastes into the
+    /// `add-to-cart.afs` component. Its reference to `product`, a step the
+    /// component lacks, is reported as a *Missing step* and left unconnected;
+    /// a second paste gets a handle that does not clash with the first.
+    #[test]
+    fn ux34_criterion_2_a_step_pastes_into_another_document() {
+        let directory = shop();
+        let (mut harness, scenario) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &scenario, false, &["active_promotion"]);
+        copy(&mut harness);
+        let cart = by_path(&harness, CART);
+        open(&mut harness, &cart, "Diagram");
+        assert!(
+            has_label(&harness, PASTE),
+            "Paste steps is offered in another document"
+        );
+        choose(&mut harness, PASTE);
+
+        let source = source_of(&harness, &cart);
+        assert!(
+            source.contains("active_promotion = active_promotion@1("),
+            "the step is pasted into the component:\n{source}"
+        );
+        let text = notice(&harness);
+        assert!(
+            text.contains("Missing step") && text.contains("product"),
+            "the reference to the step the component lacks is reported: {text:?}"
+        );
+        let document = model(&harness, &cart);
+        let pasted = node(graph_of(&document, false), "active_promotion");
+        assert!(
+            !pasted.inputs.contains_key("product"),
+            "the missing reference is left unconnected: {:?}",
+            pasted.inputs
+        );
+
+        choose(&mut harness, PASTE);
+        let source = source_of(&harness, &cart);
+        assert!(
+            source.contains("active_promotion_2 = active_promotion@1("),
+            "a second paste does not clash with the first:\n{source}"
+        );
+        // The scenario the step came from is unchanged.
+        assert!(!source_of(&harness, &scenario).contains("active_promotion_2"));
+    }
+
+    /// Criterion 3: *Duplicate* on *Add to cart* places the clone right of or
+    /// below the original without overlapping any card, labelled
+    /// `Add to cart 2`; a second *Product* added from the library is
+    /// labelled `Product 2`.
+    #[test]
+    fn ux34_criterion_3_a_duplicate_lands_clear_with_its_own_label() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+
+        let source = source_of(&harness, &id);
+        assert!(
+            source.contains("@label(\"Add to cart 2\")\n  add_to_cart_2 = add_to_cart@1("),
+            "the clone has its own label:\n{source}"
+        );
+        let document = model(&harness, &id);
+        let main = graph_of(&document, false);
+        let project = folder(&harness).context_project();
+        let rect = |node: &Node| Card::build(node, main, &project).rect();
+        let original = rect(node(main, "add_to_cart"));
+        let clone_node = node(main, "add_to_cart_2");
+        let clone = rect(clone_node);
+        let right = clone.left() >= original.right() && (clone.top() - original.top()).abs() < 0.5;
+        let below =
+            clone.top() >= original.bottom() && (clone.left() - original.left()).abs() < 0.5;
+        assert!(
+            right || below,
+            "right of or below the original: {original:?} {clone:?}"
+        );
+        for other in main.nodes.iter().filter(|other| other.id != clone_node.id) {
+            assert!(
+                !rect(other).intersects(clone),
+                "the clone overlaps {}: {:?} {clone:?}",
+                other.handle,
+                rect(other)
+            );
+        }
+
+        app(&mut harness).active_board_command(Command::AddNode {
+            block: Block::Component,
+            component: Some(("get-product".into(), 1)),
+            position: Position { x: 900.0, y: 900.0 },
+            source: None,
+        });
+        settle(&mut harness);
+        let source = source_of(&harness, &id);
+        assert!(
+            source.contains("@label(\"Product 2\")\n  product_2 = product@1("),
+            "a second Product from the library is labelled Product 2:\n{source}"
+        );
+    }
+
+    /// Review round 1: the clone keeps clear of chips as well as cards. A
+    /// chip put where the clone would land sends it to the next free place.
+    #[test]
+    fn ux34_a_duplicate_lands_clear_of_chips() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        let document = model(&harness, &id);
+        let free = node(graph_of(&document, false), "add_to_cart_2")
+            .position
+            .clone();
+        undo(&mut harness);
+
+        app(&mut harness).active_board_command(Command::AddProxy {
+            source: ProxySource::Environment {
+                name: "baseUrl".into(),
+            },
+            position: free,
+        });
+        settle(&mut harness);
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        let document = model(&harness, &id);
+        let main = graph_of(&document, false);
+        let project = folder(&harness).context_project();
+        let parameters = parameters_of(&document);
+        let chip = main.proxies.last().expect("the chip");
+        let chip = crate::canvas::Chip::build(chip, main, &project, &parameters).rect();
+        let clone = Card::build(node(main, "add_to_cart_2"), main, &project).rect();
+        assert!(
+            !clone.intersects(chip),
+            "the clone overlaps the chip: {clone:?} {chip:?}"
+        );
+        for other in main
+            .nodes
+            .iter()
+            .filter(|other| other.handle != "add_to_cart_2")
+        {
+            let rect = Card::build(other, main, &project).rect();
+            assert!(
+                !rect.intersects(clone),
+                "the clone overlaps {}",
+                other.handle
+            );
+        }
+    }
+
+    /// Criterion 4: with only a variable chip selected, *Copy* and
+    /// *Duplicate* are disabled and say why on hover.
+    #[test]
+    fn ux34_criterion_4_a_chip_alone_cannot_be_copied() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, CART, "Diagram");
+        app(&mut harness).active_board_command(Command::AddProxy {
+            source: ProxySource::Parameter {
+                name: "quantity".into(),
+            },
+            position: Position { x: 40.0, y: 600.0 },
+        });
+        settle(&mut harness);
+        let Document::Component(component) = model(&harness, &id) else {
+            panic!("add-to-cart is a component");
+        };
+        let chip = component.graph.proxies.last().expect("the chip").id.clone();
+        app(&mut harness).selections.insert(id.clone(), vec![chip]);
+        settle(&mut harness);
+        choose(&mut harness, ACTIONS);
+        for item in ["Copy", "Duplicate"] {
+            assert!(
+                harness
+                    .get_by_role_and_label(egui::accesskit::Role::Button, item)
+                    .accesskit_node()
+                    .is_disabled(),
+                "{item} is disabled with a chip alone"
+            );
+        }
+        assert!(
+            hover_shows(&mut harness, "Copy", "Select a step"),
+            "the disabled item says why"
+        );
+    }
+
+    /// Found in the native QA run: steps pasted into another graph keep the
+    /// place they were copied from, which can be outside the view; the board
+    /// brings them into view.
+    #[test]
+    fn ux34_steps_pasted_from_another_graph_are_brought_into_view() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        choose(&mut harness, PASTE);
+        harness.run_steps(5);
+        settle(&mut harness);
+        let document = model(&harness, &id);
+        let project = folder(&harness).context_project();
+        let main = graph_of(&document, false);
+        let cleanup = graph_of(&document, true);
+        let canvas = folder(&harness).canvases.get(&id).expect("the board");
+        for handle in ["expected_price_2", "promotional_price_2", "delete_cart"] {
+            let card = Card::build(node(cleanup, handle), main, &project).rect();
+            assert!(
+                canvas.debug_in_view(card),
+                "{handle} is in view after the paste: {card:?}"
+            );
+        }
+    }
+
+    /// Criterion 5: one undo removes a paste, and one undo removes a
+    /// duplicate.
+    #[test]
+    fn ux34_criterion_5_undo_removes_a_paste_or_a_duplicate_in_one_step() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        let before = source_of(&harness, &id);
+        select(
+            &mut harness,
+            &id,
+            false,
+            &["expected_price", "promotional_price"],
+        );
+        copy(&mut harness);
+        choose(&mut harness, "Cleanup");
+        choose(&mut harness, PASTE);
+        assert_ne!(source_of(&harness, &id), before, "pasted");
+        undo(&mut harness);
+        assert_eq!(
+            source_of(&harness, &id),
+            before,
+            "one undo removes the paste"
+        );
+
+        choose(&mut harness, "Main");
+        select(&mut harness, &id, false, &["add_to_cart"]);
+        duplicate(&mut harness);
+        assert!(
+            source_of(&harness, &id).contains("add_to_cart_2"),
+            "duplicated"
+        );
+        undo(&mut harness);
+        assert_eq!(
+            source_of(&harness, &id),
+            before,
+            "one undo removes the duplicate"
+        );
+        assert!(!contains(&harness, "Add to cart 2"));
+    }
+}
+
+/// UX-25 (#233; plan decision 16 = A, COMP-00 Q6 = B): *Publish* is
+/// disabled while the component equals its latest published revision, with
+/// *rN · no changes* beside it on its left; a save or a publication shows no
+/// read-only banner above the board while it runs; and publishing a
+/// component makes stale only the run results of the documents that call it.
+mod ux25 {
+    use super::ux31::window;
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
+    use egui_kittest::kittest::NodeT;
+
+    const PUBLISH: &str = "Publish";
+    const HELPER: &str = "components/helper.afs";
+    const HELPER_SOURCE: &str = "component helper \"Helper\" {\n  export result: number = 2\n}\n";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const OTHER: &str = "scenarios/other.afs";
+    const OTHER_SOURCE: &str = "scenario \"Other\" {\n  @label(\"Answer\")\n  answer = 40 + 2\n}\n";
+    const PRODUCT: &str = "components/product.afs";
+    const STALE: &str = "Graph changed · results from an earlier version";
+    /// What the bar above the board can say while the board takes no edits.
+    const BANNERS: [&str; 2] = ["This diagram is read-only.", "Checking the latest code…"];
+
+    /// The demo shop with `path` registered beside it holding `text`, a
+    /// definition no revision has been published from yet.
+    fn shop_with(path: &str, kind: DocumentKind, text: &str) -> tempfile::TempDir {
+        let project = crate::testing::shop_project();
+        let mut session = apiforge_project::ProjectSession::open(project.path()).unwrap();
+        session.create_document(kind, path, text).unwrap();
+        project
+    }
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is registered"))
+            .id()
+            .to_owned()
+    }
+
+    fn enabled(harness: &FolderHarness, label: &str) -> bool {
+        !harness.get_by_label(label).accesskit_node().is_disabled()
+    }
+
+    fn rect(harness: &FolderHarness, label: &str) -> egui::Rect {
+        harness.get_by_label(label).rect()
+    }
+
+    fn revisions(harness: &FolderHarness, handle: &str) -> Vec<u32> {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == handle)
+            .map(|revision| revision.revision)
+            .collect()
+    }
+
+    /// Replaces the document's source, as typing it would, and waits for
+    /// its analysis.
+    fn edit(harness: &mut FolderHarness, id: &str, text: &str) {
+        app(harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(id, text, CODE)
+            .unwrap();
+        settle(harness);
+    }
+
+    /// Asserts that `caption` sits beside *Publish* on its left, on the same
+    /// row, right of *Save all*, inside the window and over no other control.
+    fn caption_beside_publish(harness: &FolderHarness, caption: &str) {
+        let shown = rect(harness, caption);
+        let publish = rect(harness, PUBLISH);
+        let save_all = rect(harness, "Save all");
+        assert!(
+            (shown.center().y - publish.center().y).abs() <= 4.0,
+            "{caption} is on Publish's row: {shown:?}, {publish:?}"
+        );
+        assert!(
+            shown.right() <= publish.left() && publish.left() - shown.right() <= 16.0,
+            "{caption} is right beside Publish, on its left: {shown:?}, {publish:?}"
+        );
+        assert!(
+            save_all.right() <= shown.left(),
+            "{caption} lies between Save all and Publish: {save_all:?}, {shown:?}"
+        );
+        let labels = [caption, PUBLISH, "Save all", "Save", "Run simulation"];
+        assert_within_window(harness, &labels);
+        assert_disjoint(harness, &labels);
+    }
+
+    /// Criterion 1: right after publishing r1 with no edit, *Publish* is
+    /// disabled and *r1 · no changes* stands at its left, at 960 × 540 and
+    /// 1600 × 1000.
+    #[test]
+    fn criterion_1_after_publishing_r1_publish_is_disabled_with_r1_no_changes() {
+        for size in [MINIMUM, WIDE] {
+            let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+            let (mut harness, _) = window(project.path(), size, HELPER, "Diagram");
+            assert!(revisions(&harness, "helper").is_empty(), "never published");
+            assert!(enabled(&harness, PUBLISH), "a first revision to publish");
+            assert!(!has_label(&harness, "r1 · no changes"));
+
+            choose(&mut harness, PUBLISH);
+            assert_eq!(revisions(&harness, "helper"), [1], "r1 is published");
+            assert!(
+                !enabled(&harness, PUBLISH),
+                "nothing to publish at {size:?}"
+            );
+            assert!(
+                has_label(&harness, "r1 · no changes"),
+                "the caption names the latest revision at {size:?}"
+            );
+            caption_beside_publish(&harness, "r1 · no changes");
+        }
+    }
+
+    /// Criterion 1 for a component the project opens with: the demo's
+    /// *product* equals its r1, so its tab opens with nothing to publish.
+    #[test]
+    fn criterion_1_a_component_equal_to_its_revision_opens_with_nothing_to_publish() {
+        let project = crate::testing::shop_project();
+        let (harness, _) = window(project.path(), MINIMUM, PRODUCT, "Diagram");
+        assert!(!enabled(&harness, PUBLISH));
+        caption_beside_publish(&harness, "r1 · no changes");
+    }
+
+    /// Criterion 2: one edit enables *Publish* again and takes the caption
+    /// away; an edit back to the published text disables it again, and the
+    /// next publication names its own revision.
+    #[test]
+    fn criterion_2_one_edit_enables_publish_again() {
+        let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+        let (mut harness, id) = window(project.path(), MINIMUM, HELPER, "Diagram");
+        choose(&mut harness, PUBLISH);
+        assert!(!enabled(&harness, PUBLISH));
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        assert!(enabled(&harness, PUBLISH), "one edit enables Publish");
+        assert!(!has_label(&harness, "r1 · no changes"), "the caption goes");
+
+        edit(&mut harness, &id, HELPER_SOURCE);
+        assert!(!enabled(&harness, PUBLISH), "equal to r1 again");
+        assert!(has_label(&harness, "r1 · no changes"));
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        choose(&mut harness, PUBLISH);
+        assert_eq!(revisions(&harness, "helper"), [1, 2]);
+        assert!(!enabled(&harness, PUBLISH));
+        assert!(!has_label(&harness, "r1 · no changes"));
+        caption_beside_publish(&harness, "r2 · no changes");
+    }
+
+    /// The banner texts drawn this frame.
+    fn banners(harness: &FolderHarness) -> Vec<&'static str> {
+        BANNERS
+            .into_iter()
+            .filter(|text| has_label(harness, text))
+            .collect()
+    }
+
+    /// Steps frame by frame until storage and analysis are done, collecting
+    /// every banner a frame drew on the way.
+    fn frames_until_settled(harness: &mut FolderHarness, seen: &mut Vec<&'static str>) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            harness.step();
+            seen.extend(banners(harness));
+            if folder(harness).is_analysed() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the window must settle");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        settle(harness);
+        seen.extend(banners(harness));
+    }
+
+    /// Criterion 3: no frame of a save or a publication shows the banner
+    /// above the board: while a storage job that holds the board runs, nor
+    /// over the frames of a real save and a real publication.
+    #[test]
+    fn criterion_3_no_frame_of_a_save_or_publish_shows_the_read_only_banner() {
+        let project = shop_with(HELPER, DocumentKind::Component, HELPER_SOURCE);
+        let (mut harness, id) = window(project.path(), MINIMUM, HELPER, "Diagram");
+        assert!(banners(&harness).is_empty(), "no banner before");
+        let mut seen = Vec::new();
+
+        // A save that takes its time: the job holds the board, as a save and
+        // a publication do, until it is released.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        app(&mut harness).storage_project(
+            "Saving…",
+            apiforge_project::StorageMode::Exclusive,
+            true,
+            move |_| {
+                let _ = held.recv();
+                Ok(())
+            },
+            |_, _: apiforge_project::Result<()>| {},
+        );
+        for _ in 0..5 {
+            harness.step();
+            seen.extend(banners(&harness));
+        }
+        assert!(
+            folder(&harness).storage.blocks_edits(),
+            "the held job holds the board"
+        );
+        release.send(()).unwrap();
+        frames_until_settled(&mut harness, &mut seen);
+
+        edit(&mut harness, &id, &HELPER_SOURCE.replace("= 2", "= 3"));
+        harness.get_by_label("Save").click();
+        frames_until_settled(&mut harness, &mut seen);
+        assert!(
+            !folder(&harness)
+                .session
+                .as_ref()
+                .unwrap()
+                .document(&id)
+                .unwrap()
+                .is_dirty(),
+            "saved"
+        );
+
+        harness.get_by_label(PUBLISH).click();
+        frames_until_settled(&mut harness, &mut seen);
+        assert_eq!(revisions(&harness, "helper"), [1], "published");
+        assert!(seen.is_empty(), "no frame shows the banner: {seen:?}");
+    }
+
+    fn fresh(harness: &FolderHarness, id: &str) -> bool {
+        folder(harness).fresh_run(id).is_some()
+    }
+
+    fn run_active(harness: &mut FolderHarness) -> RunResult {
+        choose(harness, "Run simulation");
+        finish_run(harness)
+    }
+
+    /// Criterion 4: publishing `product` makes the demo scenario's fresh
+    /// results stale, since it calls `product`, and leaves the results of a
+    /// scenario that does not call it fresh.
+    #[test]
+    fn criterion_4_publishing_product_makes_stale_only_the_scenarios_that_call_it() {
+        let project = shop_with(OTHER, DocumentKind::Scenario, OTHER_SOURCE);
+        let (mut harness, demo) = window(project.path(), MINIMUM, SCENARIO, "Split");
+        let report = run_active(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        let other = by_path(&harness, OTHER);
+        app(&mut harness).activate_tab(&other);
+        settle(&mut harness);
+        let report = run_active(&mut harness);
+        assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+        assert!(fresh(&harness, &demo), "the demo's results are fresh");
+        assert!(fresh(&harness, &other), "Other's results are fresh");
+
+        let product = by_path(&harness, PRODUCT);
+        app(&mut harness).activate_tab(&product);
+        settle(&mut harness);
+        let text = source_of(&harness, &product);
+        let edited = text.replacen("together with its promotion", "with its promotion", 1);
+        assert_ne!(edited, text, "one edit");
+        edit(&mut harness, &product, &edited);
+        choose(&mut harness, PUBLISH);
+        assert_eq!(revisions(&harness, "product"), [1, 2], "product r2");
+
+        assert!(!fresh(&harness, &demo), "the demo scenario calls product");
+        assert!(fresh(&harness, &other), "Other calls no component");
+        app(&mut harness).activate_tab(&demo);
+        settle(&mut harness);
+        assert!(has_label(&harness, STALE), "the demo's bar says stale");
+        app(&mut harness).activate_tab(&other);
+        settle(&mut harness);
+        assert!(!has_label(&harness, STALE), "Other's results stay fresh");
+    }
+}
+
+/// LAY-08: the Inspector of a request lists the checks that read it, in words,
+/// on the reference scenario `shop-30`.
+mod lay08 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_disjoint, assert_within_window, folder_harness_in};
+    use std::time::{Duration, Instant};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    fn shop_30() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/scenarios/lay/shop-30.afs");
+        fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("the fixture {}: {error}", path.display()))
+    }
+
+    /// `source` on the board of the demo shop, whose components it calls.
+    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        fs::write(project.path().join(SCENARIO), source).unwrap();
+        let mut harness = folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    fn document(harness: &FolderHarness) -> String {
+        only(harness, DocumentKind::Scenario)
+    }
+
+    fn requests(harness: &FolderHarness) -> Vec<(String, String)> {
+        let id = document(harness);
+        let model = folder(harness).snapshot(&id).unwrap().model.unwrap();
+        let graph = graph_of(&model, false);
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == apiforge_core::model::NodeKind::Request)
+            .map(|node| (node.handle.clone(), node.id.clone()))
+            .collect()
+    }
+
+    /// Selects the request `handle` and opens its checks.
+    fn show_checks(harness: &mut FolderHarness, handle: &str) {
+        let id = requests(harness)
+            .into_iter()
+            .find(|(name, _)| name == handle)
+            .unwrap_or_else(|| panic!("no request {handle}"))
+            .1;
+        let document = document(harness);
+        app(harness).selections.insert(document, vec![id]);
+        settle(harness);
+        harness.get_by_label("Checks").click();
+        settle(harness);
+    }
+
+    fn has(harness: &FolderHarness, label: &str) -> bool {
+        harness.query_by_label(label).is_some()
+    }
+
+    fn assert_lists(harness: &FolderHarness, labels: &[&str]) {
+        for label in labels {
+            assert!(has(harness, label), "the list says: {label}");
+        }
+    }
+
+    fn simulate(harness: &mut FolderHarness) {
+        choose(harness, "Run simulation");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Criterion 2: the checks of `cart` in words, each with its predicate,
+    /// sources, status and moment; the check that reads `cart` and `receipt`
+    /// under both, waiting for the later one.
+    #[test]
+    fn lay08_criterion_2_the_inspector_lists_the_checks_in_words() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+
+        show_checks(&mut harness, "cart");
+        assert_lists(
+            &harness,
+            &[
+                "cart_created — Waiting for cart",
+                "cart.status equals 201",
+                "Sources: cart.status",
+                "cart_total — Waiting for cart",
+                "cart.body.total is approximately expected_total",
+                "Sources: cart.body.total, expected_total",
+                "receipt_total — Waiting for receipt · Shared",
+                "receipt.body.total is approximately cart.body.total",
+                "Sources: receipt.body.total, cart.body.total",
+                "Shared with: receipt",
+            ],
+        );
+        assert_eq!(harness.query_all_by_label("Not run yet").count(), 3);
+
+        show_checks(&mut harness, "receipt");
+        assert_lists(
+            &harness,
+            &[
+                "receipt_total — Waiting for receipt",
+                "receipt.body.total is approximately cart.body.total",
+                "Sources: receipt.body.total, cart.body.total",
+                "Shared with: cart",
+                "Not run yet",
+            ],
+        );
+
+        // After a run the moment gives way to the status.
+        simulate(&mut harness);
+        show_checks(&mut harness, "cart");
+        assert_lists(
+            &harness,
+            &["cart_created — Passed", "receipt_total — Passed · Shared"],
+        );
+        assert!(
+            harness.query_all_by_label("✓ Passed").count() >= 2,
+            "the status reads Passed"
+        );
+        assert!(harness.query_by_label("Not run yet").is_none());
+    }
+
+    /// Criterion 3: `valid_cart` feeds `checkout`, so it is a gate of
+    /// `cart_view`: listed as one, and counted apart from the checks.
+    #[test]
+    fn lay08_criterion_3_a_gate_is_counted_apart() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        show_checks(&mut harness, "cart_view");
+        assert_lists(
+            &harness,
+            &["valid_cart — Waiting for cart_view · Gate", "1 gate"],
+        );
+
+        // A condition nothing reads is a check like any other.
+        let unread = shop_30().replace(
+            "  cleanup {",
+            "  still = condition all {\n    cart_view.status == 200,\n  }\n  cleanup {",
+        );
+        let (_project, mut harness) = open(&unread, WIDE);
+        show_checks(&mut harness, "cart_view");
+        assert_lists(
+            &harness,
+            &[
+                "valid_cart — Waiting for cart_view · Gate",
+                "still — Waiting for cart_view",
+                "1 check · 1 gate",
+            ],
+        );
+    }
+
+    /// Criterion 4: `shop-30` has no standalone check and stays at 30 steps,
+    /// so this test adds two: one reads no step, one reads only a value.
+    #[test]
+    fn lay08_criterion_4_a_standalone_check_is_listed_nowhere() {
+        let source = shop_30().replace(
+            "  cleanup {",
+            "  standalone = assert 1 == 1\n  of_a_value = assert expected_total > 0\n  cleanup {",
+        );
+        // `replace` does nothing when its anchor is gone, and the loop below
+        // would then pass with no standalone check to find.
+        for line in [
+            "standalone = assert 1 == 1",
+            "of_a_value = assert expected_total > 0",
+        ] {
+            assert!(source.contains(line), "the source holds {line}");
+        }
+        let (_project, mut harness) = open(&source, WIDE);
+        let id = document(&harness);
+        let model = folder(&harness).snapshot(&id).unwrap().model.unwrap();
+        let graph = graph_of(&model, false);
+        for handle in ["standalone", "of_a_value"] {
+            assert!(
+                graph.nodes.iter().any(|node| node.handle == handle),
+                "{handle} is in the loaded model"
+            );
+        }
+        let requests = requests(&harness);
+        assert!(requests.len() > 10, "the requests of shop-30: {requests:?}");
+        for (handle, _) in &requests {
+            show_checks(&mut harness, handle);
+            // The cards stay on the board; the list's rows are what counts.
+            assert!(
+                harness.query_by_label("Check standalone").is_none()
+                    && harness.query_by_label("Check of_a_value").is_none()
+                    && harness.query_by_label_contains("standalone —").is_none()
+                    && harness.query_by_label_contains("of_a_value —").is_none(),
+                "listed under {handle}"
+            );
+            if handle == "cart" {
+                assert!(has(&harness, "Check cart_total"), "the list is shown");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay08_inspector_checks() {
+        for (size, name) in [(MINIMUM, "960"), (WIDE, "1600")] {
+            let (_project, mut harness) = open(&shop_30(), size);
+            show_checks(&mut harness, "cart");
+            crate::testing::capture(&mut harness, &format!("lay08-checks-{name}"), None);
+        }
+    }
+
+    /// Criterion 5: at the minimum window the first three rows stand whole in
+    /// the Inspector, with nothing to scroll.
+    #[test]
+    fn lay08_criterion_5_fits_the_small_window() {
+        let (_project, mut harness) = open(&shop_30(), MINIMUM);
+        show_checks(&mut harness, "cart");
+        let rows = [
+            "Check cart_created",
+            "Check cart_total",
+            "Check receipt_total",
+        ];
+        assert_within_window(&harness, &rows);
+        assert_disjoint(&harness, &rows);
+        // The list scrolls inside the panel's margin, which ends above the
+        // window's own edge.
+        let bottom = harness.get_by_label("Resize inspector").rect().bottom() - 16.0;
+        for row in rows {
+            let rect = harness.get_by_label(row).rect();
+            assert!(rect.bottom() <= bottom, "{row} is clipped: {rect:?}");
+        }
+        let right = harness.get_by_label("Check cart_total").rect().right();
+        for line in [
+            "cart_total — Waiting for cart",
+            "cart.body.total is approximately expected_total",
+            "Sources: cart.body.total, expected_total",
+        ] {
+            let rect = harness.get_by_label(line).rect();
+            assert!(rect.right() <= right, "{line} runs past its row: {rect:?}");
+        }
+    }
+}
+
+/// UX-18 (#226): opening the Inspector does not re-fit the board. Selecting a
+/// card keeps the zoom, and the selected or newly added card is panned the
+/// least into view when the Inspector would cover it. A resize of the window
+/// and *Fit the view* still fit.
+mod ux18 {
+    use super::*;
+    use crate::testing::MINIMUM;
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{By, NodeT};
+
+    const CLOSE_INSPECTOR: &str = "Close Inspector";
+    const FIT: &str = "Fit the view";
+    /// The leftmost card of the demo scenario, clear of the Inspector.
+    const PRODUCT: (&str, &str) = ("product", "Product");
+    /// The rightmost card: the Inspector covers it when it opens.
+    const PRICE: (&str, &str) = ("price", "Promotional price");
+    /// Rounding slack for positions on screen.
+    const EPSILON: f32 = 0.5;
+
+    /// The demo shop's scenario in Diagram at `size`, as fitted on opening.
+    fn diagram(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), size);
+        let scenario = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&scenario);
+        settle(&mut harness);
+        choose(&mut harness, "Diagram");
+        assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
+        (project, harness, scenario)
+    }
+
+    fn canvas<'a>(harness: &'a FolderHarness, document_id: &str) -> &'a crate::canvas::Canvas {
+        folder(harness).canvases.get(document_id).unwrap()
+    }
+
+    /// The zoom the board's bottom bar shows, such as `91%`.
+    fn zoom_shown(harness: &FolderHarness) -> String {
+        fn percent(text: &str) -> bool {
+            text.strip_suffix('%').is_some_and(|digits| {
+                !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+            })
+        }
+        let shown: Vec<String> = harness
+            .query_all(By::new().predicate(|node| {
+                node.value().is_some_and(|text| percent(&text))
+                    || node.label().is_some_and(|text| percent(&text))
+            }))
+            .filter_map(|node| {
+                let node = node.accesskit_node();
+                node.value().or_else(|| node.label())
+            })
+            .collect();
+        let first = shown
+            .first()
+            .expect("the bottom bar shows the zoom")
+            .clone();
+        assert!(
+            shown.iter().all(|text| *text == first),
+            "one zoom in the bottom bar: {shown:?}"
+        );
+        first
+    }
+
+    /// The card's whole rectangle on screen.
+    fn card(harness: &FolderHarness, document_id: &str, node_id: &str) -> egui::Rect {
+        canvas(harness, document_id)
+            .debug_card_rect(node_id)
+            .unwrap_or_else(|| panic!("{node_id} is on the board"))
+    }
+
+    /// Clicks the card named `name` on its title, as a person selects it on
+    /// the board. Its middle may hold a field, which a click edits instead.
+    fn click_card(harness: &mut FolderHarness, name: &str) {
+        let prefix = format!("{name} (");
+        let rect = harness
+            .get(By::new().role(Role::Button).predicate(move |node| {
+                node.label().is_some_and(|label| label.starts_with(&prefix))
+            }))
+            .rect();
+        let at = egui::pos2(rect.center().x, rect.top() + rect.height() * 0.1);
+        harness.hover_at(at);
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        settle(harness);
+    }
+
+    fn contains(outer: egui::Rect, inner: egui::Rect) -> bool {
+        outer.expand(EPSILON).contains_rect(inner)
+    }
+
+    fn same(a: egui::Rect, b: egui::Rect) -> bool {
+        (a.min - b.min).length() < EPSILON && (a.max - b.max).length() < EPSILON
+    }
+
+    /// Every card of the board lies inside the camera's focus.
+    fn all_in_focus(harness: &FolderHarness, document_id: &str) {
+        let canvas = canvas(harness, document_id);
+        let focus = canvas.debug_focus();
+        for (id, rect) in canvas.debug_cards() {
+            assert!(
+                contains(focus, *rect),
+                "{id} at {rect:?} is outside the focus {focus:?}"
+            );
+        }
+    }
+
+    /// Criterion 1: on the fitted demo board, clicking a card opens the
+    /// Inspector and leaves the zoom as it was; a card the Inspector does not
+    /// cover does not move.
+    #[test]
+    fn clicking_a_card_on_the_fitted_board_keeps_the_zoom() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let shown = zoom_shown(&harness);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            let before = card(&harness, &scenario, PRODUCT.0);
+
+            click_card(&mut harness, PRODUCT.1);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector opens"
+            );
+            assert_eq!(
+                zoom_shown(&harness),
+                shown,
+                "{size:?}: the bottom bar's zoom"
+            );
+            assert_eq!(
+                canvas(&harness, &scenario).debug_zoom(),
+                zoom,
+                "{size:?}: the zoom"
+            );
+            let after = card(&harness, &scenario, PRODUCT.0);
+            assert!(
+                same(after, before),
+                "{size:?}: the clicked card stays where it was, {before:?}, not {after:?}"
+            );
+        }
+    }
+
+    /// Criterion 2: the card the Inspector would cover is panned the least
+    /// that shows it whole: sideways only, to the focus's edge, at the same
+    /// zoom.
+    #[test]
+    fn a_card_the_inspector_would_cover_is_panned_the_least_into_view() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            let before = card(&harness, &scenario, PRICE.0);
+
+            click_card(&mut harness, PRICE.1);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector opens"
+            );
+            let board = canvas(&harness, &scenario).debug_viewport();
+            assert!(
+                before.right() > board.right(),
+                "{size:?}: the Inspector, from {}, would cover the card at {before:?}",
+                board.right()
+            );
+            assert_eq!(
+                canvas(&harness, &scenario).debug_zoom(),
+                zoom,
+                "{size:?}: the zoom"
+            );
+            let focus = canvas(&harness, &scenario).debug_focus();
+            let after = card(&harness, &scenario, PRICE.0);
+            assert!(
+                contains(focus, after),
+                "{size:?}: the card at {after:?} is whole in the focus {focus:?}"
+            );
+            assert!(
+                (after.right() - focus.right()).abs() < EPSILON,
+                "{size:?}: the least pan leaves the card at the focus's edge {}, not {}",
+                focus.right(),
+                after.right()
+            );
+            assert!(
+                (after.top() - before.top()).abs() < EPSILON,
+                "{size:?}: the pan is sideways only, {before:?} to {after:?}"
+            );
+        }
+    }
+
+    /// Clicks the first *Check* of Run results, under the board, scrolled
+    /// into view; the Inspector's own *Check* is beside the board.
+    fn check_in_run_results(harness: &mut FolderHarness, document_id: &str) {
+        fn first(harness: &FolderHarness, right: f32) -> egui_kittest::Node<'_> {
+            harness
+                .query_all(By::new().role(Role::Button).label("Check"))
+                .find(|node| node.rect().center().x < right)
+                .expect("Run results offer a Check on the step's outputs")
+        }
+        let right = canvas(harness, document_id).debug_viewport().right();
+        first(harness, right).scroll_to_me();
+        settle(harness);
+        first(harness, right).click();
+    }
+
+    /// Criterion 3: *Check* on the rightmost step in Run results adds a card
+    /// that is whole in view with the Inspector open. At 960 × 540, Run
+    /// results and the Inspector leave a board lower than a card at the
+    /// fitted zoom, so the criterion is checked at the default window.
+    #[test]
+    fn a_check_added_to_the_rightmost_step_is_in_view() {
+        {
+            let size = WIDE;
+            let (_project, mut harness, scenario) = diagram(size);
+            choose(&mut harness, "Run simulation");
+            let report = finish_run(&mut harness);
+            assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+            let step = format!("{} · ", PRICE.1);
+            harness.get_by_label_contains(&step).scroll_to_me();
+            settle(&mut harness);
+            harness.get_by_label_contains(&step).click();
+            settle(&mut harness);
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the step's Inspector"
+            );
+            let before: Vec<String> = canvas(&harness, &scenario)
+                .debug_cards()
+                .iter()
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            check_in_run_results(&mut harness, &scenario);
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(&mut harness);
+
+            let canvas = canvas(&harness, &scenario);
+            let added: Vec<&(String, egui::Rect)> = canvas
+                .debug_cards()
+                .iter()
+                .filter(|(id, _)| !before.contains(id))
+                .collect();
+            assert_eq!(added.len(), 1, "{size:?}: one check card is added");
+            let (id, rect) = added[0];
+            assert_eq!(
+                folder(&harness).selections.get(&scenario),
+                Some(&vec![id.clone()]),
+                "{size:?}: the check is selected"
+            );
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: its Inspector is open"
+            );
+            let focus = canvas.debug_focus();
+            assert!(
+                contains(focus, *rect),
+                "{size:?}: the check card at {rect:?} is whole in the focus {focus:?}"
+            );
+        }
+    }
+
+    /// Criterion 4: resizing the window still re-fits a camera the person has
+    /// not moved, with the Inspector open. The smaller window is one the
+    /// demo still fits beside the Inspector above the smallest zoom.
+    #[test]
+    fn resizing_the_window_still_refits_an_unmoved_camera() {
+        let (_project, mut harness, scenario) = diagram(WIDE);
+        click_card(&mut harness, PRODUCT.1);
+        assert!(has_label(&harness, CLOSE_INSPECTOR), "the Inspector opens");
+        let wide = canvas(&harness, &scenario).debug_zoom();
+
+        harness.set_size(egui::vec2(1280.0, 800.0));
+        settle(&mut harness);
+
+        let resized = canvas(&harness, &scenario).debug_zoom();
+        assert!(
+            resized < wide,
+            "the smaller window fits again: {wide} to {resized}"
+        );
+        all_in_focus(&harness, &scenario);
+        choose(&mut harness, FIT);
+        assert_eq!(
+            canvas(&harness, &scenario).debug_zoom(),
+            resized,
+            "the resize fitted exactly as Fit the view does"
+        );
+    }
+
+    /// Criterion 4: *Fit the view* still fits the board, beside the Inspector.
+    #[test]
+    fn fit_the_view_still_fits_beside_the_inspector() {
+        for size in [MINIMUM, WIDE] {
+            let (_project, mut harness, scenario) = diagram(size);
+            let zoom = canvas(&harness, &scenario).debug_zoom();
+            click_card(&mut harness, PRICE.1);
+
+            choose(&mut harness, FIT);
+
+            assert!(
+                has_label(&harness, CLOSE_INSPECTOR),
+                "{size:?}: the Inspector stays"
+            );
+            let fitted = canvas(&harness, &scenario).debug_zoom();
+            assert!(
+                fitted < zoom,
+                "{size:?}: the narrower board fits: {zoom} to {fitted}"
+            );
+            if size == WIDE {
+                all_in_focus(&harness, &scenario);
+            } else {
+                // At 960 × 540 the board beside the Inspector is narrower
+                // than the demo at the smallest zoom: the fit stops there,
+                // centres the cards on the focus and keeps them whole in
+                // its height.
+                assert_eq!(fitted, 0.25, "the smallest zoom");
+                let canvas = canvas(&harness, &scenario);
+                let focus = canvas.debug_focus();
+                let cards = canvas
+                    .debug_cards()
+                    .iter()
+                    .fold(egui::Rect::NOTHING, |all, (_, rect)| all.union(*rect));
+                assert!(
+                    (cards.center() - focus.center()).length() < 1.0,
+                    "the cards {cards:?} are centred on the focus {focus:?}"
+                );
+                assert!(
+                    cards.top() >= focus.top() - EPSILON
+                        && cards.bottom() <= focus.bottom() + EPSILON,
+                    "the cards {cards:?} are whole in the focus's height {focus:?}"
+                );
+            }
+        }
+    }
+}
+
+/// UX-21 (#229): inside a component, *Add step* offers *Export* and neither
+/// *Start* nor *Data condition*, and says it adds to the component (owner
+/// decision 12 = A); a search with no match says so; an *Export* added
+/// from the library lands to the right of the flow.
+mod ux21 {
+    use super::ux31::window;
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_core::model::NodeKind;
+
+    const PRODUCT: &str = "components/product.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const IN_COMPONENT: &str = "Add a step to the component";
+    const IN_SCENARIO: &str = "Add a step to the scenario";
+    const SEARCH: &str = "Find an action";
+    const NO_MATCH: &str = "No matching steps";
+    const NAMES: [&str; 4] = ["Export", "Start", "Data condition", "HTTP request"];
+
+    fn count(harness: &FolderHarness, label: &str) -> usize {
+        harness.query_all_by_label(label).count()
+    }
+
+    /// How many more widgets each of [`NAMES`] has once *Add step* is open:
+    /// the popup's rows, whatever the library panel beside it shows.
+    fn offered(harness: &mut FolderHarness) -> Vec<(&'static str, usize)> {
+        let before: Vec<usize> = NAMES.iter().map(|name| count(harness, name)).collect();
+        choose(harness, "Add step");
+        assert!(has_label(harness, SEARCH), "the popup is open");
+        NAMES
+            .into_iter()
+            .zip(before)
+            .map(|(name, before)| (name, count(harness, name) - before))
+            .collect()
+    }
+
+    /// Criterion 1: in `components/product.afs`, *Add step* lists *Export*
+    /// and not *Start* or *Data condition*, under *Add a step to the
+    /// component*; at the minimum window, where the popup may carry the
+    /// library's sections, and beside the library panel.
+    #[test]
+    fn ux21_criterion_1_add_step_in_a_component_offers_export_not_start() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, PRODUCT, "Diagram");
+            assert_eq!(
+                offered(&mut harness),
+                [
+                    ("Export", 1),
+                    ("Start", 0),
+                    ("Data condition", 0),
+                    ("HTTP request", 1)
+                ],
+                "at {size:?}"
+            );
+            assert!(has_label(&harness, IN_COMPONENT), "at {size:?}");
+            assert!(!has_label(&harness, IN_SCENARIO), "at {size:?}");
+        }
+    }
+
+    /// Criterion 2: in a scenario the menu is unchanged: *Start* and *Data
+    /// condition* are offered, *Export* is not, under *Add a step to the
+    /// scenario*.
+    #[test]
+    fn ux21_criterion_2_add_step_in_a_scenario_is_unchanged() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        assert_eq!(
+            offered(&mut harness),
+            [
+                ("Export", 0),
+                ("Start", 1),
+                ("Data condition", 1),
+                ("HTTP request", 1)
+            ]
+        );
+        assert!(has_label(&harness, IN_SCENARIO));
+        assert!(!has_label(&harness, IN_COMPONENT));
+    }
+
+    /// Criterion 3: searching *zzz* shows *No matching steps*; a search that
+    /// matches a step does not.
+    #[test]
+    fn ux21_criterion_3_a_search_with_no_match_says_so() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        choose(&mut harness, "Add step");
+        type_into(&mut harness, SEARCH, "exp");
+        assert!(!has_label(&harness, NO_MATCH), "Export matches");
+        replace_text(&mut harness, SEARCH, "zzz");
+        assert!(has_label(&harness, NO_MATCH));
+    }
+
+    /// Criterion 4: *Export* dragged from the library onto the left of the
+    /// board lands right of the rightmost card.
+    #[test]
+    fn ux21_criterion_4_an_export_from_the_library_lands_right_of_the_flow() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        let project = folder(&harness).context_project();
+        let graph = |harness: &FolderHarness| graph_of(&model(folder(harness), &id), false).clone();
+        let before = graph(&harness);
+        let rightmost = before
+            .nodes
+            .iter()
+            .map(|node| f64::from(canvas::Card::build(node, &before, &project).rect().max.x))
+            .fold(f64::MIN, f64::max);
+        let board = harness.get_by_label("Diagram board").rect();
+        let drop = board.left_center() + egui::vec2(160.0, 0.0);
+        let dropped_at = folder(&harness)
+            .canvases
+            .get(&id)
+            .unwrap()
+            .debug_board_position(drop);
+        assert!(
+            dropped_at.x < rightmost,
+            "the drop {dropped_at:?} is left of the flow's right edge {rightmost}"
+        );
+        let start = harness
+            .query_all_by_label("Export")
+            .map(|node| node.rect())
+            .find(|rect| !board.intersects(*rect))
+            .expect("the library offers Export in a component")
+            .center();
+
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + (drop - start) * (step as f32 / 8.0));
+            harness.step();
+        }
+        harness.drop_at(drop);
+        settle(&mut harness);
+
+        let after = graph(&harness);
+        assert_eq!(after.nodes.len(), before.nodes.len() + 1, "one block added");
+        let export = after
+            .nodes
+            .iter()
+            .find(|node| !before.nodes.iter().any(|old| old.id == node.id))
+            .unwrap();
+        assert_eq!(export.kind, NodeKind::Export, "the added block");
+        assert!(
+            export.position.x > rightmost,
+            "the Export at {:?} is right of the rightmost card's edge {rightmost}",
+            export.position
+        );
     }
 }
 
