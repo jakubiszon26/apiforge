@@ -152,6 +152,10 @@ pub struct ProjectSession {
     published: Vec<apiforge_core::format::Component>,
     context: Arc<Project>,
     context_generation: u64,
+    /// The context generations a publication produced, with the component
+    /// published: a run that calls none of them stays fresh across them
+    /// (UX-25, plan decision 16).
+    publications: Vec<(u64, String)>,
     documents: Vec<DocumentSession>,
     /// Project files open as plain text; they are not definitions.
     texts: Vec<TextFileSession>,
@@ -411,6 +415,7 @@ impl ProjectSession {
             published: context.components.clone(),
             context: Arc::new(context),
             context_generation: 1,
+            publications: Vec::new(),
             documents: Vec::new(),
             texts: Vec::new(),
             sequence: 0,

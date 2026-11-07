@@ -84,7 +84,7 @@ impl FolderApp {
                 }
                 if self.runs.handle.is_some() && ui.button("Cancel run").clicked() && let Some(handle) = &self.runs.handle { handle.cancel(); }
             });
-            if let Some(notice) = &self.notice { widgets::hint(ui, &notice.text); }
+            if let Some(notice) = self.notice() { widgets::hint(ui, &notice.text); }
         });
     }
 
