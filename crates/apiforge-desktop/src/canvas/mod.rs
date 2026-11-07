@@ -1920,27 +1920,24 @@ impl Canvas {
                                 ui,
                                 widgets::icon_button(Icon::Wire, "Wire style").compact(),
                                 |ui| {
-                                    for (style, label) in [
-                                        (WireStyle::Orthogonal, "Right angles"),
-                                        (WireStyle::Spline, "Curves"),
-                                    ] {
-                                        if ui
-                                            .add(
-                                                widgets::action(
-                                                    if self.wire_style == style {
-                                                        Icon::Check
-                                                    } else {
-                                                        Icon::Wire
-                                                    },
-                                                    label,
-                                                )
-                                                .quiet(),
+                                    // *Curves* returns when it draws curves (UX-28).
+                                    let style = WireStyle::Orthogonal;
+                                    if ui
+                                        .add(
+                                            widgets::action(
+                                                if self.wire_style == style {
+                                                    Icon::Check
+                                                } else {
+                                                    Icon::Wire
+                                                },
+                                                "Right angles",
                                             )
-                                            .clicked()
-                                        {
-                                            commands.push(Command::SetWireStyle(style));
-                                            ui.close();
-                                        }
+                                            .quiet(),
+                                        )
+                                        .clicked()
+                                    {
+                                        commands.push(Command::SetWireStyle(style));
+                                        ui.close();
                                     }
                                     ui.separator();
                                     if ui

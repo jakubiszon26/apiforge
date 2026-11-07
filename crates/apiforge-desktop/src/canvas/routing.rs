@@ -19,13 +19,15 @@ use std::{
 };
 
 /// How wires are drawn. A user setting, not part of the document.
+///
+/// The spline style, which only rounded the corners of the same route, was
+/// withdrawn until it draws curves (UX-28); a stored `spline` loads as
+/// [`WireStyle::Orthogonal`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WireStyle {
     /// Right angles, with a bridge where two wires cross.
     #[default]
     Orthogonal,
-    /// The same route with rounded corners.
-    Spline,
 }
 
 /// What a frame may spend on rerouting the wires of dragged cards.
@@ -363,7 +365,6 @@ fn finish(
         .collect();
     let radius = match request.style {
         WireStyle::Orthogonal => 0.0,
-        WireStyle::Spline => layout::DEFAULT_RADIUS,
     };
     Routed {
         id: wire.id.clone(),
