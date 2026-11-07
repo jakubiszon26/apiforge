@@ -374,25 +374,33 @@ impl FolderApp {
         // where the active tab is and can reveal it in this same frame.
         let labels = tab_labels(&tabs);
         let font = egui::FontId::proportional(theme::FONT_BODY);
-        let galleys: Vec<Arc<egui::Galley>> = tabs
+        let texts: Vec<TabText> = tabs
             .iter()
             .zip(&labels)
             .map(|(tab, label)| {
-                let mut job = egui::text::LayoutJob::single_section(
-                    if tab.unsaved {
-                        format!("{label}  \u{25cf}")
-                    } else {
-                        label.clone()
-                    },
-                    egui::TextFormat::simple(font.clone(), tab.colour()),
-                );
-                job.wrap = egui::text::TextWrapping::truncate_at_width(TAB_LABEL_WIDTH);
-                ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+                let format = egui::TextFormat::simple(font.clone(), tab.colour());
+                let layout = |job| ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+                // The dot is laid out apart from the name, and the name is
+                // shortened to leave it room, so that a long name cannot
+                // truncate it away (UX-15).
+                let dot = tab.unsaved.then(|| {
+                    layout(egui::text::LayoutJob::single_section(
+                        UNSAVED_DOT.to_owned(),
+                        format.clone(),
+                    ))
+                });
+                let room = TAB_LABEL_WIDTH - dot.as_ref().map_or(0.0, |dot| dot.size().x);
+                let mut job = egui::text::LayoutJob::single_section(label.clone(), format);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+                TabText {
+                    name: layout(job),
+                    dot,
+                }
             })
             .collect();
-        let widths: Vec<f32> = galleys
+        let widths: Vec<f32> = texts
             .iter()
-            .map(|galley| TAB_PADDING * 2.0 + galley.size().x + TAB_GAP + TAB_CLOSE)
+            .map(|text| TAB_PADDING * 2.0 + text.width() + TAB_GAP + TAB_CLOSE)
             .collect();
         let mut scroll = egui::ScrollArea::horizontal()
             .id_salt("folder-tab-strip")
@@ -423,9 +431,9 @@ impl FolderApp {
         let output = scroll.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = TAB_SPACING;
-                for ((tab, galley), width) in tabs.iter().zip(galleys).zip(&widths) {
+                for ((tab, text), width) in tabs.iter().zip(texts).zip(&widths) {
                     let selected = active.as_deref() == Some(tab.key.as_str());
-                    match tab_face(ui, tab, galley, *width, selected) {
+                    match tab_face(ui, tab, text, *width, selected) {
                         Some(true) => close = Some(tab.key.clone()),
                         Some(false) => activate = Some(tab.key.clone()),
                         None => {}
@@ -979,6 +987,21 @@ const TAB_HEIGHT: f32 = 26.0;
 /// A long name is bounded so that the other tabs and controls stay reachable;
 /// the full path is on hover.
 pub(super) const TAB_LABEL_WIDTH: f32 = 160.0;
+/// What follows the name of a tab with unsaved changes.
+const UNSAVED_DOT: &str = "  \u{25cf}";
+
+/// A tab's text, laid out: the name, shortened to fit, and the unsaved dot
+/// after it, which the shortening never reaches.
+struct TabText {
+    name: Arc<egui::Galley>,
+    dot: Option<Arc<egui::Galley>>,
+}
+
+impl TabText {
+    fn width(&self) -> f32 {
+        self.name.size().x + self.dot.as_ref().map_or(0.0, |dot| dot.size().x)
+    }
+}
 
 /// What one tab shows this frame.
 pub(super) struct TabFace {
@@ -1033,7 +1056,7 @@ fn tab_labels(tabs: &[TabFace]) -> Vec<String> {
 fn tab_face(
     ui: &mut egui::Ui,
     tab: &TabFace,
-    galley: Arc<egui::Galley>,
+    text: TabText,
     width: f32,
     selected: bool,
 ) -> Option<bool> {
@@ -1083,14 +1106,16 @@ fn tab_face(
             egui::StrokeKind::Inside,
         );
     }
-    painter.galley(
-        egui::pos2(
-            rect.left() + TAB_PADDING,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        tab.colour(),
-    );
+    let mut x = rect.left() + TAB_PADDING;
+    for galley in std::iter::once(text.name).chain(text.dot) {
+        let width = galley.size().x;
+        painter.galley(
+            egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+            galley,
+            tab.colour(),
+        );
+        x += width;
+    }
     Icon::Close.paint(
         &painter,
         close_rect,
