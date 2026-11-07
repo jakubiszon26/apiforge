@@ -226,3 +226,138 @@ fn ktlo23_a_component_prepares_a_run_of_its_working_text_and_its_pinned_calls() 
         "preparing a run writes nothing"
     );
 }
+
+/// UX-25 (plan decision 16 = A): publishing a component makes stale the run
+/// results of a document that calls it, directly or through another
+/// component, and leaves the others fresh; any other change of the
+/// project's context still makes every result stale.
+#[test]
+fn ux25_a_publication_makes_stale_only_the_runs_that_call_the_component() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Components").unwrap();
+    let helper = session
+        .create_document(
+            DocumentKind::Component,
+            "components/helper.afs",
+            "component Helper \"Helper\" {\n  export result: number = 2\n}\n",
+        )
+        .unwrap();
+    session.publish(&helper, Origin::SESSION).unwrap();
+    let outer = session
+        .create_document(
+            DocumentKind::Component,
+            "components/outer.afs",
+            "component Outer \"Outer\" {\n  call = (Helper@1())\n  export inner: number = call.result\n}\n",
+        )
+        .unwrap();
+    session.publish(&outer, Origin::SESSION).unwrap();
+    let uses = session
+        .create_document(
+            DocumentKind::Scenario,
+            "uses.afs",
+            "scenario \"Uses\" {\n  outer = (Outer@1())\n}\n",
+        )
+        .unwrap();
+    let plain = session
+        .create_document(
+            DocumentKind::Scenario,
+            "plain.afs",
+            "scenario \"Plain\" {\n  answer = 1\n}\n",
+        )
+        .unwrap();
+    let through_outer = session.prepare_run(&uses).unwrap();
+    let calls_nothing = session.prepare_run(&plain).unwrap();
+    let helper_itself = session.prepare_run(&helper).unwrap();
+    assert!(!session.run_is_stale(&through_outer));
+    assert!(!session.run_is_stale(&calls_nothing));
+
+    let edited = session
+        .document(&helper)
+        .unwrap()
+        .text()
+        .replace("= 2", "= 3");
+    session
+        .edit_source(&helper, &edited, Origin::SESSION)
+        .unwrap();
+    session.publish(&helper, Origin::SESSION).unwrap();
+    assert!(
+        session.run_is_stale(&through_outer),
+        "Uses calls Helper through Outer"
+    );
+    assert!(!session.run_is_stale(&calls_nothing), "Plain calls nothing");
+    assert!(
+        !session.run_is_stale_beyond_text(&calls_nothing),
+        "nor beyond its text"
+    );
+    assert!(
+        session.run_is_stale(&helper_itself),
+        "the helper's own run ran the text before the edit"
+    );
+
+    session.invalidate_runtime_inputs(Origin::SESSION);
+    assert!(
+        session.run_is_stale(&calls_nothing),
+        "a change that is not a publication makes every result stale"
+    );
+}
+
+/// UX-25: a call pins its revision, so only what that revision calls
+/// counts. `Outer@1` calls nothing; `Outer@2` calls `Inner`. Publishing
+/// `Inner` again leaves a run of `Outer@1` fresh.
+#[test]
+fn ux25_only_the_pinned_revision_of_a_call_counts() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut session = ProjectSession::create(directory.path(), "Components").unwrap();
+    let inner = session
+        .create_document(
+            DocumentKind::Component,
+            "components/inner.afs",
+            "component Inner \"Inner\" {\n  export result: number = 2\n}\n",
+        )
+        .unwrap();
+    session.publish(&inner, Origin::SESSION).unwrap();
+    let outer = session
+        .create_document(
+            DocumentKind::Component,
+            "components/outer.afs",
+            "component Outer \"Outer\" {\n  export result: number = 1\n}\n",
+        )
+        .unwrap();
+    session.publish(&outer, Origin::SESSION).unwrap();
+    session
+        .edit_source(
+            &outer,
+            "component Outer \"Outer\" {\n  call = (Inner@1())\n  export result: number = call.result\n}\n",
+            Origin::SESSION,
+        )
+        .unwrap();
+    session.publish(&outer, Origin::SESSION).unwrap();
+    let pinned = session
+        .create_document(
+            DocumentKind::Scenario,
+            "pinned.afs",
+            "scenario \"Pinned\" {\n  outer = (Outer@1())\n}\n",
+        )
+        .unwrap();
+    let latest = session
+        .create_document(
+            DocumentKind::Scenario,
+            "latest.afs",
+            "scenario \"Latest\" {\n  outer = (Outer@2())\n}\n",
+        )
+        .unwrap();
+    let first = session.prepare_run(&pinned).unwrap();
+    let second = session.prepare_run(&latest).unwrap();
+
+    let edited = session
+        .document(&inner)
+        .unwrap()
+        .text()
+        .replace("= 2", "= 3");
+    session
+        .edit_source(&inner, &edited, Origin::SESSION)
+        .unwrap();
+    session.publish(&inner, Origin::SESSION).unwrap();
+    assert!(!session.run_is_stale(&first), "Outer@1 calls no Inner");
+    assert!(session.run_is_stale(&second), "Outer@2 calls Inner@1");
+}

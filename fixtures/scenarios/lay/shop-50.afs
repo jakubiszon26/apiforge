@@ -1,0 +1,161 @@
+scenario "Shop 50" {
+  description "LAY-00 reference: the shop flow extended to about fifty steps, with a second product search, a coupon branch and order history."
+  begin = start
+  @after(begin)
+  login = POST "/login" {
+    body { user: "demo", password: "demo" }
+    sample 200 { token: "t-1", userId: "u-1" }
+  }
+  logged_in = assert login.status == 200
+  @after(logged_in)
+  health = GET "/health" {
+    sample 200 { status: "ok" }
+  }
+  catalogue = GET "/products" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    query { limit: 20 }
+    sample 200 { items: [{ id: 123, price: 100 }, { id: 124, price: 12.5 }] }
+  }
+  listed = assert nonempty catalogue.body.items
+  var first = catalogue.body.items[0]
+  var second = catalogue.body.items[1]
+  search = GET "/products/search" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    query { q: "coffee" }
+    sample 200 { items: [{ id: 125, price: 7.5 }] }
+  }
+  found = assert nonempty search.body.items
+  var third = search.body.items[0]
+  stock = GET "/stock/{{first.id}}" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { productId: 123, available: 5 }
+  }
+  in_stock = assert stock.body.available > 2
+  same_product = assert stock.body.productId == first.id
+  product = product@1(id: first.id)
+  promoted = active_promotion@1(product: product)
+  expected_total = promoted.promotion.price * 2 + second.price + third.price
+  cart = POST "/cart" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    body { items: [{ productId: first.id, quantity: 2 }, { productId: second.id, quantity: 1 }, { productId: third.id, quantity: 1 }] }
+    sample 201 { id: "c-1", total: 180 }
+  }
+  cart_created = assert cart.status == 201
+  cart_total = assert cart.body.total ~= expected_total within 0.01
+  cart_view = GET "/cart/{{cart.body.id}}" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { id: "c-1", total: 180, items: [{ productId: 123 }, { productId: 124 }, { productId: 125 }] }
+  }
+  same_total = assert cart_view.body.total == cart.body.total
+  has_third = assert cart_view.body.items contains { productId: 125 }
+  valid_cart = condition all {
+    cart_view.status == 200,
+    nonempty cart_view.body.items,
+  } with cart_view.body
+  coupon = GET "/coupons/AUTUMN" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { code: "AUTUMN", valid: true, discount: 10 }
+  }
+  discounted = if coupon.body.valid == true {
+    applied = POST "/cart/{{cart.body.id}}/coupon" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      body { code: coupon.body.code }
+      sample 200 { total: 170, discount: 10 }
+    }
+    discount_ok = assert applied.body.discount == coupon.body.discount
+  } else {
+    no_coupon = assert coupon.body.valid == false
+  }
+  shipping = GET "/shipping/options" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { options: [{ id: "post", price: 5 }, { id: "courier", price: 12 }] }
+  }
+  var cheapest = shipping.body.options[0]
+  cheap_enough = assert cheapest.price < 50
+  address = PUT "/cart/{{cart.body.id}}/address" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    body { street: "Main 1", city: "Gdansk", shipping: cheapest.id }
+    sample 200 { ok: true }
+  }
+  @after(address)
+  checkout = POST "/checkout" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    body { cartId: valid_cart.value.id, total: applied.body.total }
+    sample 201 { orderId: "o-1", status: "created", total: 170 }
+  }
+  checkout_total = assert checkout.body.total == applied.body.total
+  order = GET "/orders/{{checkout.body.orderId}}" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { id: "o-1", status: "created", total: 170 }
+  }
+  order_status = assert order.body.status == checkout.body.status
+  paid = if order.body.status == "created" {
+    payment = POST "/orders/{{order.body.id}}/pay" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      body { amount: order.body.total }
+      sample 200 { paid: true, receiptId: "r-1" }
+    }
+    receipt = GET "/receipts/{{payment.body.receiptId}}" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 200 { id: "r-1", total: 170 }
+    }
+    receipt_total = assert receipt.body.total == order.body.total
+    confirmation = POST "/orders/{{order.body.id}}/confirm" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      body { receiptId: receipt.body.id }
+      sample 200 { confirmed: true }
+    }
+    notify = POST "/notifications" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      body { orderId: order.body.id, kind: "paid" }
+      sample 202 { queued: true }
+    }
+  } else {
+    not_created = assert order.body.status != "created"
+    cancel = POST "/orders/{{order.body.id}}/cancel" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 200 { cancelled: true }
+    }
+  }
+  @after(receipt_total)
+  invoice = GET "/orders/{{order.body.id}}/invoice" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { total: 170, currency: "EUR" }
+  }
+  invoice_total = assert invoice.body.total == receipt.body.total
+  history = GET "/orders" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { items: [{ id: "o-1" }] }
+  }
+  in_history = assert history.body.items contains { id: "o-1" }
+  @after(invoice_total)
+  refund = POST "/orders/{{order.body.id}}/refund" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { refunded: true, amount: 170 }
+  }
+  refund_amount = assert refund.body.amount == receipt.body.total
+  @after(refund)
+  refunded_order = GET "/orders/{{order.body.id}}" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 200 { id: "o-1", status: "refunded" }
+  }
+  refunded = assert refunded_order.body.status == "refunded"
+  @after(refund_amount, refunded)
+  logout = POST "/logout" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 204 {}
+  }
+  @after(logout)
+  logged_out = GET "/me" {
+    headers { Authorization: "Bearer {{login.body.token}}" }
+    sample 401 {}
+  }
+  rejected = assert logged_out.status == 401
+  cleanup {
+    removed = DELETE "/cart/{{cart.body.id}}" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 204 {}
+    }
+    gone = assert removed.status == 204
+  }
+}

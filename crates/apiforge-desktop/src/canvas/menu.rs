@@ -65,7 +65,10 @@ impl ActionMenu {
         }
     }
 
-    fn actions(&self, graph: &Graph, project: &Project) -> Vec<Action> {
+    /// The steps offered on a scenario's board, or on a component's with
+    /// `component`: there *Export* is offered, and *Start* and *Data
+    /// condition*, which only a scenario runs, are not (UX-21, decision 12).
+    fn actions(&self, graph: &Graph, project: &Project, component: bool) -> Vec<Action> {
         let source_port: Option<Port> = self.source.as_ref().and_then(|(node, port)| {
             let node = graph.nodes.iter().find(|candidate| &candidate.id == node)?;
             output_ports(node, project)
@@ -94,10 +97,14 @@ impl ActionMenu {
                 Block::Variable,
             ]
         };
+        let export = component.then_some(Block::Export);
         let mut actions: Vec<Action> = blocks
             .iter()
+            .copied()
+            .filter(|block| !component || !matches!(block, Block::Start | Block::Condition))
+            .chain(export)
             .map(|block| Action {
-                block: *block,
+                block,
                 name: block.label().to_owned(),
                 description: block.description().to_owned(),
                 component: None,
@@ -137,13 +144,15 @@ impl ActionMenu {
     }
 
     /// Shows the popup. With `library`, the steps are followed by the block
-    /// library's Variables and Operators sections (KTLO-05d).
+    /// library's Variables and Operators sections (KTLO-05d). `component`
+    /// offers a component's steps (UX-21).
     pub fn show(
         &mut self,
         ctx: &egui::Context,
         graph: &Graph,
         project: &Project,
         library: Option<&library::Context<'_>>,
+        component: bool,
     ) -> Outcome {
         // The opening click belongs to the toolbar/card, outside the new popup.
         // Preserve this before requesting search focus clears the initial flag.
@@ -153,7 +162,7 @@ impl ActionMenu {
             .source
             .as_ref()
             .and_then(|(id, _)| graph.nodes.iter().find(|node| &node.id == id));
-        let actions = self.actions(graph, project);
+        let actions = self.actions(graph, project, component);
         let area = egui::Area::new(egui::Id::new("board-action-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(self.screen)
@@ -181,6 +190,8 @@ impl ActionMenu {
                                 ui.label(
                                     RichText::new(if source_node.is_some() {
                                         "What should happen next?"
+                                    } else if component {
+                                        "Add a step to the component"
                                     } else {
                                         "Add a step to the scenario"
                                     })
@@ -238,11 +249,21 @@ impl ActionMenu {
                         egui::ScrollArea::vertical()
                             .max_height(320.0)
                             .show(ui, |ui| {
-                                for action in actions.iter().filter(|action| {
-                                    format!("{} {}", action.name, action.description)
-                                        .to_lowercase()
-                                        .contains(&query)
-                                }) {
+                                let matching: Vec<&Action> = actions
+                                    .iter()
+                                    .filter(|action| {
+                                        format!("{} {}", action.name, action.description)
+                                            .to_lowercase()
+                                            .contains(&query)
+                                    })
+                                    .collect();
+                                if matching.is_empty() {
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        RichText::new("No matching steps").color(theme::MUTED),
+                                    );
+                                }
+                                for action in matching {
                                     if action_row(ui, action).clicked() {
                                         let position = source_node.map_or(
                                             Position {
@@ -348,6 +369,48 @@ mod tests {
         );
     }
 
+    /// UX-21: a card's *+* and a dropped wire, which open the menu from an
+    /// output, offer a component *Export* and not *Data condition*; a
+    /// scenario's menu from the same output is unchanged.
+    #[test]
+    fn a_components_menu_from_an_output_offers_export_and_no_condition() {
+        let project = apiforge_core::demos::shop_project();
+        let graph = &project.scenarios[0].graph;
+        let source = (graph.nodes[0].id.clone(), ORDER_PORT.to_owned());
+        let menu = ActionMenu::new(Pos2::ZERO, Pos2::ZERO, Some(source));
+        let blocks = |component| {
+            menu.actions(graph, &project, component)
+                .into_iter()
+                .filter(|action| action.component.is_none())
+                .map(|action| action.block)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            blocks(true),
+            [
+                Block::Request,
+                Block::Branch,
+                Block::Value,
+                Block::Comparison,
+                Block::Object,
+                Block::Variable,
+                Block::Export,
+            ]
+        );
+        assert_eq!(
+            blocks(false),
+            [
+                Block::Request,
+                Block::Branch,
+                Block::Value,
+                Block::Comparison,
+                Block::Condition,
+                Block::Object,
+                Block::Variable,
+            ]
+        );
+    }
+
     #[test]
     fn opening_click_keeps_step_menu_open_but_a_later_outside_click_closes_it() {
         let context = egui::Context::default();
@@ -377,7 +440,10 @@ mod tests {
                         ));
                     }
                     if let Some(menu) = &mut popup
-                        && matches!(menu.show(&context, graph, &project, None), Outcome::Close)
+                        && matches!(
+                            menu.show(&context, graph, &project, None, false),
+                            Outcome::Close
+                        )
                     {
                         popup = None;
                     }

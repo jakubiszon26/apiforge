@@ -299,7 +299,7 @@ fn component_dag(
     heights.insert(index, height);
     Ok(height)
 }
-fn output_exists(node: &Node, port: &str, project: &Project) -> bool {
+pub(crate) fn output_exists(node: &Node, port: &str, project: &Project) -> bool {
     match node.kind {
         NodeKind::Start => false,
         NodeKind::Request => ["body", "status", "headers", "duration"].contains(&port),
