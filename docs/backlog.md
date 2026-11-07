@@ -359,6 +359,31 @@ Exit criteria:
 | [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
 | [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
 
+Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
+keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
+the quizzes of 2026-11-03, on condition of merging `main` and a green CI, and
+eight had fallen into conflict with `main`. They merge one at a time before
+LAY-16, because they change the same board files. Accepted already, they add
+nothing to the sprint's review minutes.
+
+| Issue | Ticket | Pull request | Estimate |
+| --- | --- | --- | --- |
+| [#222](https://github.com/jakubiszon26/apiforge/issues/222) | UX-12 Notices clear | #267 | S · 10 |
+| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate | #268 | M · 20 |
+| [#233](https://github.com/jakubiszon26/apiforge/issues/233) | UX-25 Publish with nothing to publish | #278 | S · 15 |
+| [#226](https://github.com/jakubiszon26/apiforge/issues/226) | UX-18 The Inspector does not re-fit the board | #283 | M · 20 |
+| [#229](https://github.com/jakubiszon26/apiforge/issues/229) | UX-21 Add step inside a component | #280 | S · 15 |
+| [#224](https://github.com/jakubiszon26/apiforge/issues/224) | UX-16 Cleanup references | #277 | S · 10 |
+| [#236](https://github.com/jakubiszon26/apiforge/issues/236) | UX-28 Curves removed | #282 | S · 10 |
+| [#228](https://github.com/jakubiszon26/apiforge/issues/228) | UX-20 The gutter and diagnostics | #281 | S · 10 |
+| [#223](https://github.com/jakubiszon26/apiforge/issues/223) | UX-15 The unsaved dot | #273 | S · 10 |
+
+[#308](https://github.com/jakubiszon26/apiforge/issues/308) LAY-20, found in
+LAY-08, joined the sprint on 2026-11-05: the *Checks* list covers a component
+call's checks and a Cleanup check that reads a Main step. It closes before
+LAY-11, which hides the cards those checks would otherwise be seen on. Its
+estimate follows its analysis.
+
 Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads
 (#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
