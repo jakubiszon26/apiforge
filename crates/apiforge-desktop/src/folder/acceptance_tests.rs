@@ -13398,3 +13398,154 @@ mod ux18 {
         }
     }
 }
+
+/// UX-21 (#229): inside a component, *Add step* offers *Export* and neither
+/// *Start* nor *Data condition*, and says it adds to the component (owner
+/// decision 12 = A); a search with no match says so; an *Export* added
+/// from the library lands to the right of the flow.
+mod ux21 {
+    use super::ux31::window;
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_core::model::NodeKind;
+
+    const PRODUCT: &str = "components/product.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const IN_COMPONENT: &str = "Add a step to the component";
+    const IN_SCENARIO: &str = "Add a step to the scenario";
+    const SEARCH: &str = "Find an action";
+    const NO_MATCH: &str = "No matching steps";
+    const NAMES: [&str; 4] = ["Export", "Start", "Data condition", "HTTP request"];
+
+    fn count(harness: &FolderHarness, label: &str) -> usize {
+        harness.query_all_by_label(label).count()
+    }
+
+    /// How many more widgets each of [`NAMES`] has once *Add step* is open:
+    /// the popup's rows, whatever the library panel beside it shows.
+    fn offered(harness: &mut FolderHarness) -> Vec<(&'static str, usize)> {
+        let before: Vec<usize> = NAMES.iter().map(|name| count(harness, name)).collect();
+        choose(harness, "Add step");
+        assert!(has_label(harness, SEARCH), "the popup is open");
+        NAMES
+            .into_iter()
+            .zip(before)
+            .map(|(name, before)| (name, count(harness, name) - before))
+            .collect()
+    }
+
+    /// Criterion 1: in `components/product.afs`, *Add step* lists *Export*
+    /// and not *Start* or *Data condition*, under *Add a step to the
+    /// component*; at the minimum window, where the popup may carry the
+    /// library's sections, and beside the library panel.
+    #[test]
+    fn ux21_criterion_1_add_step_in_a_component_offers_export_not_start() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, PRODUCT, "Diagram");
+            assert_eq!(
+                offered(&mut harness),
+                [
+                    ("Export", 1),
+                    ("Start", 0),
+                    ("Data condition", 0),
+                    ("HTTP request", 1)
+                ],
+                "at {size:?}"
+            );
+            assert!(has_label(&harness, IN_COMPONENT), "at {size:?}");
+            assert!(!has_label(&harness, IN_SCENARIO), "at {size:?}");
+        }
+    }
+
+    /// Criterion 2: in a scenario the menu is unchanged: *Start* and *Data
+    /// condition* are offered, *Export* is not, under *Add a step to the
+    /// scenario*.
+    #[test]
+    fn ux21_criterion_2_add_step_in_a_scenario_is_unchanged() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        assert_eq!(
+            offered(&mut harness),
+            [
+                ("Export", 0),
+                ("Start", 1),
+                ("Data condition", 1),
+                ("HTTP request", 1)
+            ]
+        );
+        assert!(has_label(&harness, IN_SCENARIO));
+        assert!(!has_label(&harness, IN_COMPONENT));
+    }
+
+    /// Criterion 3: searching *zzz* shows *No matching steps*; a search that
+    /// matches a step does not.
+    #[test]
+    fn ux21_criterion_3_a_search_with_no_match_says_so() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        choose(&mut harness, "Add step");
+        type_into(&mut harness, SEARCH, "exp");
+        assert!(!has_label(&harness, NO_MATCH), "Export matches");
+        replace_text(&mut harness, SEARCH, "zzz");
+        assert!(has_label(&harness, NO_MATCH));
+    }
+
+    /// Criterion 4: *Export* dragged from the library onto the left of the
+    /// board lands right of the rightmost card.
+    #[test]
+    fn ux21_criterion_4_an_export_from_the_library_lands_right_of_the_flow() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        let project = folder(&harness).context_project();
+        let graph = |harness: &FolderHarness| graph_of(&model(folder(harness), &id), false).clone();
+        let before = graph(&harness);
+        let rightmost = before
+            .nodes
+            .iter()
+            .map(|node| f64::from(canvas::Card::build(node, &before, &project).rect().max.x))
+            .fold(f64::MIN, f64::max);
+        let board = harness.get_by_label("Diagram board").rect();
+        let drop = board.left_center() + egui::vec2(160.0, 0.0);
+        let dropped_at = folder(&harness)
+            .canvases
+            .get(&id)
+            .unwrap()
+            .debug_board_position(drop);
+        assert!(
+            dropped_at.x < rightmost,
+            "the drop {dropped_at:?} is left of the flow's right edge {rightmost}"
+        );
+        let start = harness
+            .query_all_by_label("Export")
+            .map(|node| node.rect())
+            .find(|rect| !board.intersects(*rect))
+            .expect("the library offers Export in a component")
+            .center();
+
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + (drop - start) * (step as f32 / 8.0));
+            harness.step();
+        }
+        harness.drop_at(drop);
+        settle(&mut harness);
+
+        let after = graph(&harness);
+        assert_eq!(after.nodes.len(), before.nodes.len() + 1, "one block added");
+        let export = after
+            .nodes
+            .iter()
+            .find(|node| !before.nodes.iter().any(|old| old.id == node.id))
+            .unwrap();
+        assert_eq!(export.kind, NodeKind::Export, "the added block");
+        assert!(
+            export.position.x > rightmost,
+            "the Export at {:?} is right of the rightmost card's edge {rightmost}",
+            export.position
+        );
+    }
+}
