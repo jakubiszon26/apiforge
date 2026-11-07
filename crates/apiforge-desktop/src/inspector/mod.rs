@@ -59,6 +59,9 @@ pub struct Context<'a> {
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
     pub step: Option<&'a StepResult>,
+    /// The scenario's Cleanup graph while the board shows Main: its checks
+    /// that read a Main step are listed under that step (LAY-20 mock).
+    pub cleanup: Option<&'a Graph>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,7 +119,7 @@ impl Inspector {
         ui.add_space(theme::SPACE_SM);
         // Only a request lists its checks. In the narrowest panel the third tab
         // takes a row of its own rather than running past the edge.
-        let checks = context.node.kind == NodeKind::Request;
+        let checks = matches!(context.node.kind, NodeKind::Request | NodeKind::Component);
         let tabs = ["Configuration", "Output data", "Checks"];
         let width: f32 = tabs
             .iter()

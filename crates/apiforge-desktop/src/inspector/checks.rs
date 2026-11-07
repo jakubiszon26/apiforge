@@ -6,6 +6,7 @@
 //! nowhere. Nothing here edits the document.
 
 use super::Context;
+use crate::mock_lay20::{self, Variant};
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson},
@@ -57,6 +58,8 @@ struct Row {
     sources: Vec<String>,
     shared_with: Vec<String>,
     gate: bool,
+    /// The check runs in Cleanup, after every Main step.
+    cleanup: bool,
 }
 
 /// Names a step by its handle, wherever the check found it: a Cleanup check
@@ -216,12 +219,41 @@ fn moment(check: &Node, latest: &str, names: &Names<'_>, run: Option<&RunResult>
     }
 }
 
-/// The checks of the step `subject`, in the order the engine reaches them.
-fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) -> Vec<Row> {
+/// The checks of the step `subject`, in the order the engine reaches them:
+/// the checks of the board shown, then, for a Main step, those of Cleanup.
+fn rows(
+    board: &Graph,
+    graph: &Graph,
+    cleanup: Option<&Graph>,
+    subject: &str,
+    run: Option<&RunResult>,
+) -> Vec<Row> {
+    let mut rows = phase_rows(board, board, graph, subject, run, false);
+    if let Some(cleanup) = cleanup {
+        // A Cleanup check names Main steps, so its subjects are looked up in
+        // both graphs at once.
+        let mut combined = board.clone();
+        combined.nodes.extend(cleanup.nodes.iter().cloned());
+        combined.edges.extend(cleanup.edges.iter().cloned());
+        rows.extend(phase_rows(cleanup, &combined, graph, subject, run, true));
+    }
+    rows
+}
+
+/// The checks of `phase` that read `subject`, in the engine's order within
+/// the phase; `lookup` holds every step a check of the phase may name.
+fn phase_rows(
+    phase: &Graph,
+    lookup: &Graph,
+    graph: &Graph,
+    subject: &str,
+    run: Option<&RunResult>,
+    cleanup: bool,
+) -> Vec<Row> {
     let names = Names {
-        graphs: [board, graph],
+        graphs: [lookup, graph],
     };
-    let order = sequence(board);
+    let order = sequence(phase);
     let position: HashMap<&str, usize> = order
         .iter()
         .enumerate()
@@ -229,18 +261,27 @@ fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) ->
         .collect();
     order
         .iter()
-        .filter_map(|id| board.nodes.iter().find(|node| node.id == *id))
+        .filter_map(|id| phase.nodes.iter().find(|node| node.id == *id))
         .filter_map(|check| {
-            let subjects = check_subjects(board, check).subjects;
+            let subjects = check_subjects(lookup, check).subjects;
             let own = subjects
                 .iter()
                 .find(|candidate| candidate.step == subject)?;
+            // A Main step is earlier than every Cleanup step.
             let latest = subjects
                 .iter()
                 .map(|candidate| candidate.step)
-                .max_by_key(|step| position.get(step))?;
+                .max_by_key(|step| position.get(step).copied().unwrap_or(0))?;
             let (status, tone, outcome) = status(run.and_then(|run| run.step(&check.id)));
-            let mut title = format!("{} — {}", check.handle, moment(check, latest, &names, run));
+            let when = if cleanup && run.and_then(|run| run.step(&check.id)).is_none() {
+                "Cleanup".to_owned()
+            } else {
+                moment(check, latest, &names, run)
+            };
+            let mut title = format!("{} — {when}", check.handle);
+            if cleanup && mock_lay20::variant() == Variant::Counted && when != "Cleanup" {
+                title.push_str(" · Cleanup");
+            }
             // Under its latest subject the line *Shared with* says it alone.
             if own.shared && latest != subject {
                 title.push_str(" · Shared");
@@ -262,6 +303,7 @@ fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) ->
                     .map(|candidate| names.step(candidate.step))
                     .collect(),
                 gate: own.gate,
+                cleanup,
             })
         })
         .collect()
@@ -278,7 +320,11 @@ fn plural(count: usize, one: &str) -> String {
 /// The line above the list. Gates are counted apart from the checks; a run
 /// turns the count of checks into what became of them.
 fn summary(rows: &[Row], run: bool) -> (String, Tone) {
-    let checks: Vec<&Row> = rows.iter().filter(|row| !row.gate).collect();
+    let apart = mock_lay20::variant() == Variant::Apart;
+    let checks: Vec<&Row> = rows
+        .iter()
+        .filter(|row| !row.gate && !(apart && row.cleanup))
+        .collect();
     let count = |outcome: Outcome| checks.iter().filter(|row| row.outcome == outcome).count();
     let (failed, passed) = (count(Outcome::Failed), count(Outcome::Passed));
     let (not_run, waiting) = (count(Outcome::NotRun), count(Outcome::Waiting));
@@ -303,9 +349,13 @@ fn summary(rows: &[Row], run: bool) -> (String, Tone) {
     if shared > 0 {
         parts.push(format!("{shared} shared"));
     }
-    let gates = rows.len() - checks.len();
+    let gates = rows.iter().filter(|row| row.gate).count();
     if gates > 0 {
         parts.push(plural(gates, "gate"));
+    }
+    let in_cleanup = rows.iter().filter(|row| row.cleanup && !row.gate).count();
+    if apart && in_cleanup > 0 {
+        parts.push(format!("{in_cleanup} in Cleanup"));
     }
     let tone = if rows.iter().any(|row| row.tone == Tone::Failed) {
         Tone::Failed
@@ -371,21 +421,48 @@ fn row(ui: &mut Ui, row: &Row) {
 
 /// The list of the selected request.
 pub(super) fn show(ui: &mut Ui, context: &Context<'_>) {
-    let rows = rows(context.board, context.graph, &context.node.id, context.run);
+    let rows = rows(
+        context.board,
+        context.graph,
+        context.cleanup,
+        &context.node.id,
+        context.run,
+    );
     if rows.is_empty() {
         widgets::hint(ui, "No check reads this step yet.");
         return;
     }
     // Three rows, one of them shared, fit the Inspector of the smallest window.
     ui.spacing_mut().item_spacing.y = 3.0;
-    let (text, tone) = summary(&rows, context.run.is_some());
+    let run = context.run.is_some();
+    if mock_lay20::variant() == Variant::Section {
+        let (main, cleanup): (Vec<Row>, Vec<Row>) = rows.into_iter().partition(|row| !row.cleanup);
+        if !main.is_empty() {
+            list(ui, &main, run);
+        }
+        if !cleanup.is_empty() {
+            ui.add_space(theme::SPACE_SM);
+            ui.label(
+                RichText::new("CLEANUP")
+                    .size(11.0)
+                    .color(theme::MUTED),
+            );
+            list(ui, &cleanup, run);
+        }
+        return;
+    }
+    list(ui, &rows, run);
+}
+
+fn list(ui: &mut Ui, rows: &[Row], run: bool) {
+    let (text, tone) = summary(rows, run);
     ui.label(
         RichText::new(text)
             .family(theme::bold_family())
             .size(theme::FONT_LABEL)
             .color(tone.color()),
     );
-    for line in &rows {
+    for line in rows {
         row(ui, line);
     }
 }
@@ -453,7 +530,7 @@ mod tests {
     }
 
     fn title(board: &Graph, subject: &str, run: Option<&RunResult>) -> String {
-        rows(board, board, subject, run)[0].title.clone()
+        rows(board, board, None, subject, run)[0].title.clone()
     }
 
     /// The moment follows a run under way: a shared check still waits for its
@@ -497,6 +574,7 @@ mod tests {
                 Vec::new()
             },
             gate,
+            cleanup: false,
         };
         let passed = line(false, Outcome::Passed, Tone::Passed, false);
         let waiting = line(false, Outcome::Waiting, Tone::Quiet, true);

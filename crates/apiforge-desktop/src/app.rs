@@ -2239,6 +2239,7 @@ impl App {
                 parameters: &parameters,
                 run,
                 step,
+                cleanup: None,
             };
             self.inspector.show(ui, &context)
         };

@@ -1,0 +1,9 @@
+LAY-20 mock (mock/lay-20-checks), shop-30 plus `promo_priced = assert promoted.promotion.price > 0` (Main) and `cart_id_kept = assert cart.body.id == "c-1"` (Cleanup).
+main today: the Checks tab is shown for NodeKind::Request only; check_subjects already counts a NodeKind::Component source as a subject.
+main today: the list reads the board shown, so a Cleanup check reading `cart` is not listed under `cart`; on the Cleanup board it is a card without a wire (its subject is on Main).
+mock: the Checks tab on the component call `promoted` lists `promo_priced — Waiting for promoted`, summary `1 check`; the sources line names the export port: `promoted.product.promotion.price`.
+mock, counted: `cart` reads `4 checks · 1 shared`, fourth row `cart_id_kept — Cleanup`.
+mock, apart: `cart` reads `3 checks · 1 shared · 1 in Cleanup`, same rows.
+mock, section: `cart` reads `3 checks · 1 shared`, then a CLEANUP heading with `1 check` and the row.
+At 960 x 540 the fourth row is below the fold (the list scrolls); at 1600 x 1000 all four rows are visible.
+inspector::checks unit tests and the lay08 acceptance tests pass on the mock.

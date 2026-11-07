@@ -628,6 +628,12 @@ impl FolderApp {
                             parameters: &parameters,
                             run: run.as_ref(),
                             step,
+                            cleanup: match &*model {
+                                Document::Scenario(scenario) if !cleanup => {
+                                    Some(&scenario.cleanup)
+                                }
+                                _ => None,
+                            },
                         },
                     )
                 })
