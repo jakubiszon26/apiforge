@@ -357,6 +357,7 @@ impl Default for Canvas {
             ringed: Vec::new(),
             #[cfg(test)]
             sources: Vec::new(),
+            #[cfg(test)]
             on_screen: Vec::new(),
         }
     }
