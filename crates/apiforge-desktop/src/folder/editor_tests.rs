@@ -7,7 +7,8 @@
 //! `problems_top`. The KTLO-32 test after them reads the board's painted
 //! text the same way (docs/tickets/KTLO-32.md). `mod ux03` at the end turns
 //! the focus line grey and holds the error marks back while typing
-//! (docs/tickets/UX-03.md).
+//! (docs/tickets/UX-03.md). `mod ux20` after it gives undo on invalid source
+//! a plain sentence and keeps the completion popup inside the code (#228).
 use super::project_interaction_tests::{app, replace_text};
 use super::*;
 use crate::testing::{
@@ -1434,6 +1435,152 @@ mod ux11 {
             line_at(&harness, index),
             expected,
             "the letter went to the clicked character"
+        );
+    }
+}
+
+// ---- UX-20: undo on invalid source says so plainly; the popup clears PROBLEMS ----
+
+mod ux20 {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// What Ctrl+Z on a board whose source is invalid or still being
+    /// analysed says, instead of the session's own error (#153 part 1).
+    const FIX_THE_CODE_FIRST: &str = "Fix the code first: the board follows the source.";
+
+    /// The demo shop in Code at the minimum size.
+    fn shop_in_code() -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        let mut harness = folder_harness(project.path(), MINIMUM);
+        show(&mut harness, "Code");
+        (project, harness)
+    }
+
+    fn analysis(harness: &FolderHarness) -> AnalysisState {
+        let app = folder(harness);
+        app.snapshot(app.workbench.active().unwrap())
+            .unwrap()
+            .analysis
+    }
+
+    /// Settles until the analysis of the active document has a result: the
+    /// analyser's own pause is real time.
+    fn settle_analysed(harness: &mut FolderHarness) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            settle(harness);
+            if analysis(harness) != AnalysisState::Pending {
+                return;
+            }
+            assert!(Instant::now() < deadline, "the analysis never finished");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// The source made invalid by typing a half statement on a new line 3.
+    fn make_invalid(harness: &mut FolderHarness) {
+        let at = editor(harness).left_top() + egui::vec2(120.0, 24.0);
+        click_at(harness, at);
+        harness.key_press(egui::Key::End);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text("total = cart.body.".into()));
+        settle_analysed(harness);
+        assert_eq!(analysis(harness), AnalysisState::Invalid);
+    }
+
+    fn undo(harness: &mut FolderHarness) {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(harness);
+    }
+
+    /// The notice is the plain sentence, and the session's own error is
+    /// neither painted nor in the accessibility tree.
+    fn assert_plain_notice(harness: &FolderHarness, when: &str) {
+        let notice = folder(harness).notice().map(|notice| notice.text.clone());
+        assert_eq!(
+            notice.as_deref(),
+            Some(FIX_THE_CODE_FIRST),
+            "{when}: the notice"
+        );
+        let raw = apiforge_project::Error::ModelLocked.to_string();
+        let painted = shapes(harness).into_iter().any(|(_, shape)| match shape {
+            Shape::Text(text) => text.galley.job.text.contains(&raw),
+            _ => false,
+        });
+        assert!(!painted, "{when}: the raw error {raw:?} is painted");
+        assert!(
+            harness.query_by_label_contains(&raw).is_none(),
+            "{when}: the raw error is in the accessibility tree"
+        );
+    }
+
+    /// Criterion 3: Ctrl+Z on the board with invalid source, and in Code
+    /// without the editor's focus (decision 20 = A sends it to the model's
+    /// history there too), shows the plain sentence and no raw error text.
+    #[test]
+    fn ux20_criterion_3_undo_on_invalid_source_says_so_plainly() {
+        let (_project, mut harness) = shop_in_code();
+        make_invalid(&mut harness);
+
+        show(&mut harness, "Diagram");
+        undo(&mut harness);
+        assert_plain_notice(&harness, "Ctrl+Z on the board");
+
+        app(&mut harness).notices.clear();
+        show(&mut harness, "Code");
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+        assert!(
+            !harness.get_by_label_contains("Contents of").is_focused(),
+            "the editor gave up the keyboard"
+        );
+        undo(&mut harness);
+        assert_plain_notice(&harness, "Ctrl+Z in Code without the editor's focus");
+    }
+
+    /// Criterion 4: completion opened on a new line at the bottom of the
+    /// view, just above PROBLEMS, is drawn fully inside the editor's area,
+    /// clear of the Problems header.
+    #[test]
+    fn ux20_criterion_4_the_popup_stays_inside_the_editor() {
+        let (_project, mut harness) = shop_in_code();
+        let row = row_height(&mut harness);
+        let top = editor(&harness).top() + 2.0;
+        let bottom = problems_top(&harness) - 6.0;
+        // The last line wholly in view, then a new line under it, which
+        // scrolls the code so the caret sits at the bottom of the view.
+        let y = top + row * (((bottom - top) / row).floor() - 0.5);
+        let x = editor(&harness).left() + 40.0;
+        click_at(&mut harness, egui::pos2(x, y));
+        harness.key_press(egui::Key::End);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text("total = p".into()));
+        settle(&mut harness);
+        assert!(folder(&harness).code.popup_open(), "completion opened");
+
+        let popup = folder(&harness)
+            .code
+            .popup_rect()
+            .expect("the popup was drawn");
+        let header = harness.get_by_label("PROBLEMS").rect();
+        let area = editor(&harness);
+        assert!(
+            popup.bottom() <= problems_top(&harness),
+            "the popup {popup:?} reaches below the code into PROBLEMS at {}",
+            problems_top(&harness)
+        );
+        assert!(
+            !popup.intersects(header),
+            "the popup {popup:?} covers the PROBLEMS header {header:?}"
+        );
+        assert!(
+            popup.left() >= area.left() && popup.right() <= area.right(),
+            "the popup {popup:?} is outside the editor {area:?}"
+        );
+        assert!(
+            popup.top() >= top - 2.0,
+            "the popup {popup:?} is above the editor"
         );
     }
 }

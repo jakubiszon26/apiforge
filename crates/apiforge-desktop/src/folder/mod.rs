@@ -273,6 +273,9 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The steps the Cleanup board's cards read, kept while the model is the
+    /// same: building them copies the Main graph (UX-16).
+    cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
     selections: HashMap<String, Vec<String>>,
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
@@ -492,6 +495,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            cleanup_reference: None,
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
             unchanged: None,
@@ -1762,6 +1766,20 @@ fn graph_of(model: &Document, cleanup: bool) -> &Graph {
         Document::Scenario(scenario) if cleanup => &scenario.cleanup,
         Document::Scenario(scenario) => &scenario.graph,
         Document::Component(component) => &component.graph,
+    }
+}
+
+/// The steps a binding on the board may name: on the Cleanup board, the Main
+/// steps and the Cleanup steps, as the scenario editor's board reads them.
+fn reference_of(model: &Document, cleanup: bool) -> std::borrow::Cow<'_, Graph> {
+    match model {
+        Document::Scenario(scenario) if cleanup => {
+            let mut graph = scenario.graph.clone();
+            graph.nodes.extend(scenario.cleanup.nodes.iter().cloned());
+            graph.edges.extend(scenario.cleanup.edges.iter().cloned());
+            std::borrow::Cow::Owned(graph)
+        }
+        _ => std::borrow::Cow::Borrowed(graph_of(model, false)),
     }
 }
 
