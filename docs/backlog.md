@@ -362,9 +362,9 @@ Exit criteria:
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
 keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
 the quizzes of 2026-11-03, on condition of merging `main` and a green CI, and
-eight had fallen into conflict with `main`. They merge one at a time before
-LAY-16, because they change the same board files. Accepted already, they add
-nothing to the sprint's review minutes.
+eight had fallen into conflict with `main`. They merged one at a time before
+LAY-16, because they change the same board files; the last went in on
+2026-11-07. Accepted already, they add nothing to the sprint's review minutes.
 
 | Issue | Ticket | Pull request | Estimate |
 | --- | --- | --- | --- |
