@@ -285,7 +285,7 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
 | [#147](https://github.com/jakubiszon26/apiforge/issues/147) | UX-07 A wider Inspector; one capture per size; after UX-24 | S · 15 min · `visible UI` |
 | [#237](https://github.com/jakubiszon26/apiforge/issues/237) | UX-29 Card controls clipped to the board (#172 (3)); after UX-18 | S · 10 min |
 | [#250](https://github.com/jakubiszon26/apiforge/issues/250) | UX-33 A *Component settings* button in the board header opens the component's settings (#161 (2); COMP-00 Q4, button not rendered, judged on QA captures); after UX-32 | S · 20 min · `visible UI` |
-| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · `decision-needed` |
+| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · merged in #268 (2026-11-05) |
 
 | [#240](https://github.com/jakubiszon26/apiforge/issues/240) | WS-00 The workspace — one mock-up: a shared left sidebar (UX-06 #146), what folds at 960 × 540 (#157), Split's four columns (#161 (4)); decided 2026-11-05, [ticket](tickets/WS-00.md) | S · 30 min plus the discussion · `visible UI`, `default` |
 | [#241](https://github.com/jakubiszon26/apiforge/issues/241) | DIAG-00 Card readability — closed 2026-11-05, folded into the LAY sprint (LAY-09 #293, LAY-11 #295; the owner's Q8 = A); DIAG-01 #144 deferred to its own analysis after LAY | — |
