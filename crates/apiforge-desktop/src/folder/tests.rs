@@ -2818,3 +2818,23 @@ fn frame_budgets() {
     }
     assert!(over.is_empty(), "over budget: {over:?}");
 }
+
+/// UX-16: the Cleanup board reads the Main steps and its own; the Main board
+/// and a component read their own graph only.
+#[test]
+fn the_cleanup_board_references_main_and_cleanup_steps() {
+    let project = apiforge_core::demos::shop_project();
+    let scenario = project.scenarios[0].clone();
+    let ids =
+        |graph: &Graph| -> Vec<String> { graph.nodes.iter().map(|node| node.id.clone()).collect() };
+    let model = Document::Scenario(scenario.clone());
+    let mut both = ids(&scenario.graph);
+    both.extend(ids(&scenario.cleanup));
+    assert_eq!(ids(&reference_of(&model, true)), both);
+    assert_eq!(ids(&reference_of(&model, false)), ids(&scenario.graph));
+    let component = Document::Component(project.components[0].clone());
+    assert_eq!(
+        ids(&reference_of(&component, false)),
+        ids(graph_of(&component, false))
+    );
+}

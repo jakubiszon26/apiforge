@@ -13628,3 +13628,97 @@ mod ux28 {
         assert_eq!(stored["codePanel"], true, "{stored}");
     }
 }
+
+/// UX-16: a Cleanup card that reads an earlier Cleanup step names that step,
+/// a Main step still resolves, and a step in neither board reads *Missing
+/// step*.
+mod ux16 {
+    use super::ux31::window;
+    use super::*;
+    use crate::{canvas, testing::MINIMUM};
+    use apiforge_core::format::Binding;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    /// A scenario whose Cleanup reads a Cleanup step and a Main step.
+    const BOTH: &str = "scenario \"UX-16\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
+
+    /// The demo shop, its scenario replaced by `text` when one is given,
+    /// with the scenario's Cleanup board chosen through *Cleanup*: what each
+    /// card's source rows read, as `(card, row)`.
+    fn cleanup_sources(text: Option<&str>) -> Vec<(String, String)> {
+        let directory = shop();
+        if let Some(text) = text {
+            fs::write(directory.path().join(SCENARIO), text).unwrap();
+        }
+        let (mut harness, id) = window(directory.path(), MINIMUM, SCENARIO, "Diagram");
+        harness.get_by_label("Cleanup").click();
+        settle(&mut harness);
+        folder(&harness).canvases[&id].debug_sources()
+    }
+
+    fn row(card: &str, text: &str) -> (String, String) {
+        (card.to_owned(), text.to_owned())
+    }
+
+    /// Criterion 1: on the demo scenario's Cleanup board, *Cart was deleted*
+    /// reads *Delete cart → status*.
+    #[test]
+    fn the_demo_cleanup_card_names_the_cleanup_step_it_reads() {
+        let sources = cleanup_sources(None);
+        assert!(
+            sources.contains(&row("Cart was deleted", "Delete cart → status")),
+            "{sources:?}"
+        );
+        assert!(
+            !sources
+                .iter()
+                .any(|(_, text)| text.starts_with("Missing step")),
+            "{sources:?}"
+        );
+    }
+
+    /// Criterion 2: a Cleanup card that reads a Main step still resolves it,
+    /// beside one that reads a Cleanup step.
+    #[test]
+    fn a_cleanup_card_still_names_the_main_step_it_reads() {
+        assert_eq!(
+            cleanup_sources(Some(BOTH)),
+            vec![
+                row("Cart was deleted", "Delete cart → status"),
+                row("Product was read", "Product → status"),
+            ]
+        );
+    }
+
+    /// Criterion 3: a reference to a step that is in neither board reads
+    /// *Missing step → …*. Valid source cannot name such a step, so the
+    /// demo's Cleanup card is pointed at one and built against the steps of
+    /// both boards.
+    #[test]
+    fn a_reference_to_a_step_in_neither_board_reads_missing_step() {
+        let project = apiforge_core::demos::shop_project();
+        let scenario = &project.scenarios[0];
+        let mut both = scenario.graph.clone();
+        both.nodes.extend(scenario.cleanup.nodes.iter().cloned());
+        let mut card = scenario
+            .cleanup
+            .nodes
+            .iter()
+            .find(|node| node.display_name() == "Cart was deleted")
+            .unwrap()
+            .clone();
+        card.inputs
+            .insert("actual".into(), Binding::reference("ghost", "status", ""));
+        let built = canvas::Card::build(&card, &both, &project);
+        let actual = built
+            .inputs
+            .iter()
+            .find(|input| input.name == "actual")
+            .unwrap();
+        assert_eq!(
+            format!("{:?}", actual.value),
+            r#"Source("Missing step → status")"#
+        );
+    }
+}
