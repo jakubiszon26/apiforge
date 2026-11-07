@@ -694,7 +694,7 @@ open until the ticket is accepted.
 | UX-31 | #248 | #174, #161 (2) (COMP-00 Q1) | `ready:opus` |
 | UX-32 | #249 | #174, #172 (1, 2) (COMP-00 Q2, Q3) | `ready:opus` |
 | UX-33 | #250 | #161 (2) (COMP-00 Q4) | `ready:opus` |
-| UX-34 | #251 | #173 (COMP-00 Q7) | `decision-needed` (A/B on captures) |
+| UX-34 | #251 | #173 (COMP-00 Q7) | merged in #268 (A/B decided in the 2026-11-03 quiz) |
 | COMP-00 | #239 | #174, #161 (2), #172 (1, 2), #173, #170 (1), #165 | decided 2026-11-02 |
 | WS-00 | #240 | #146, #157, #161 (4) | decided 2026-11-05 (6.2; `docs/tickets/WS-00.md`) |
 | DIAG-00 | #241 | #144, #145, #161 (1), #170 (2) | closed 2026-11-05: folded into LAY-09 and LAY-11 (6.2) |
