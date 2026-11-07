@@ -1497,10 +1497,7 @@ mod ux20 {
     /// The notice is the plain sentence, and the session's own error is
     /// neither painted nor in the accessibility tree.
     fn assert_plain_notice(harness: &FolderHarness, when: &str) {
-        let notice = folder(harness)
-            .notice
-            .as_ref()
-            .map(|notice| notice.text.clone());
+        let notice = folder(harness).notice().map(|notice| notice.text.clone());
         assert_eq!(
             notice.as_deref(),
             Some(FIX_THE_CODE_FIRST),
@@ -1530,7 +1527,7 @@ mod ux20 {
         undo(&mut harness);
         assert_plain_notice(&harness, "Ctrl+Z on the board");
 
-        app(&mut harness).notice = None;
+        app(&mut harness).notices.clear();
         show(&mut harness, "Code");
         harness.key_press(egui::Key::Escape);
         settle(&mut harness);
