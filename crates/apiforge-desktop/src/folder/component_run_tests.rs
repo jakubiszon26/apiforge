@@ -71,7 +71,7 @@ fn finish(harness: &mut FolderHarness) -> RunResult {
         .unwrap_or_else(|| {
             panic!(
                 "a run from the component's tab leaves a report: {:?}",
-                folder(harness).notice.as_ref().map(|notice| &notice.text)
+                folder(harness).notice().map(|notice| &notice.text)
             )
         })
         .clone()

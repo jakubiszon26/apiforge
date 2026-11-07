@@ -25,6 +25,7 @@ mod handover_prompt;
 mod holder;
 mod inputs;
 mod navigation;
+mod notices;
 mod opening;
 mod placement;
 mod publication;
@@ -40,7 +41,7 @@ mod workbench;
 
 use crate::icons::Icon;
 use crate::{
-    board_edit::{Board, Edit},
+    board_edit::{self, Board, Edit},
     canvas::{self, Canvas, Command},
     code, dialogs,
     inspector::{self, Inspector},
@@ -67,6 +68,7 @@ use apiforge_storage::{
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
 use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
+use notices::{Notice, Notices};
 use placement::CardPlacer;
 use std::{
     collections::{HashMap, HashSet},
@@ -213,12 +215,6 @@ fn describe_commit(changes: &[apiforge_project::CommitChange]) -> Option<String>
     })
 }
 
-/// A message under the tabs; errors stay until dismissed.
-struct Notice {
-    text: String,
-    error: bool,
-}
-
 pub struct FolderApp {
     ui_context: egui::Context,
     root: PathBuf,
@@ -250,6 +246,10 @@ pub struct FolderApp {
     /// The document the code editor last showed; its caret is restored on entry.
     shown: Option<String>,
     scroll_restore: Option<f32>,
+    /// The documents whose caret was in view the last time their code was
+    /// drawn: returning to one shows a caret an edit moved away meanwhile,
+    /// while a caret the person scrolled away from stays where it is (UX-13).
+    carets_in_view: HashSet<String>,
     /// The Problems section is expanded over the code (KTLO-18). Deliberately
     /// not in the view state: a window reopens with the section at the height
     /// it was dragged to, not expanded.
@@ -280,6 +280,10 @@ pub struct FolderApp {
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
     selected_inputs: HashMap<String, String>,
+    /// Whether the active component equals its latest revision, kept while
+    /// its text, analysis and the project's context are the same: finding
+    /// out prints the component (UX-25).
+    unchanged: Option<(publication::UnchangedKey, Option<u32>)>,
     /// The *New input* form open on a component's board, by document
     /// (UX-32). While it is open the Inspector shows it.
     new_inputs: HashMap<String, inputs::NewInput>,
@@ -291,7 +295,11 @@ pub struct FolderApp {
     /// agreed on them. A session-side change (a kept, discarded or restored
     /// draft, or a revert) shows as a difference and wins over the inspector.
     agreed_fields: HashMap<String, Vec<FieldRecovery>>,
-    clipboard: Option<Clipboard>,
+    /// The blocks last copied on any board, ready to paste into any graph of
+    /// any document (UX-34).
+    clipboard: Option<edit::Fragment>,
+    /// The last paste, until its edit is applied (UX-34).
+    pasted: Option<PastedOutcome>,
     inspector: Inspector,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
@@ -299,7 +307,8 @@ pub struct FolderApp {
     /// marks wait for a pause in typing (UX-03). The analyser's own instant
     /// cannot serve: it forgets it when the analysis starts.
     marks_quiet_at: HashMap<String, Instant>,
-    notice: Option<Notice>,
+    /// The notices under the tabs (UX-12).
+    notices: Notices,
     /// The active tab last revealed in the strip, and the strip's last scroll
     /// offset, so activating a tab can scroll it into view.
     followed_tab: Option<String>,
@@ -358,10 +367,12 @@ pub struct FolderApp {
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
 }
 
-struct Clipboard {
-    context: String,
-    fragment: Graph,
-    pastes: u32,
+/// What a paste shows once its edit is applied: its copies, and what they
+/// read that the board lacks (UX-34).
+struct PastedOutcome {
+    document_id: String,
+    ids: Vec<String>,
+    summary: Option<String>,
 }
 
 /// The statement found under the caret, for one source version.
@@ -438,6 +449,13 @@ struct Snapshot {
     /// Editing is paused while this window observes another holder (MCP-08a):
     /// the board stays legible and selectable, without the read-only notice.
     paused: bool,
+    /// A save, a publication or another storage job holds the board, or
+    /// the window is closing: brief, and said by the header, so the board
+    /// shows no notice for it (UX-25).
+    busy: bool,
+    /// The model describes the current text: an analysis pending since a
+    /// publication changed the context checks code that did not change.
+    model_describes_text: bool,
     held: bool,
     dirty: bool,
     layout_dirty: bool,
@@ -468,6 +486,7 @@ impl FolderApp {
             code: code::CodeEditor::default(),
             shown: None,
             scroll_restore: None,
+            carets_in_view: HashSet::new(),
             problems_expanded: false,
             problems_epoch: 0,
             problems_dragged: false,
@@ -479,14 +498,16 @@ impl FolderApp {
             cleanup_reference: None,
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
+            unchanged: None,
             new_inputs: HashMap::new(),
             component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
             clipboard: None,
+            pasted: None,
             inspector: Inspector::default(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
-            notice: None,
+            notices: Notices::default(),
             followed_tab: None,
             tabs_offset: 0.0,
             tabs_width: 0.0,
@@ -665,6 +686,7 @@ impl FolderApp {
             .iter()
             .any(|(_, draft)| draft.document_id == document_id);
         let paused = self.observing();
+        let busy = self.persistence.closing || self.storage.blocks_edits();
         Some(Snapshot {
             path: document.entry().path.as_str().to_owned(),
             kind: document.entry().kind,
@@ -675,11 +697,9 @@ impl FolderApp {
             model_state: document.model_state(),
             unavailable: document.unavailable(),
             paused,
-            editable: document.accepts_model_edits()
-                && !paused
-                && !held
-                && !self.persistence.closing
-                && !self.storage.blocks_edits(),
+            busy,
+            model_describes_text: document.model_describes_text(),
+            editable: document.accepts_model_edits() && !paused && !held && !busy,
             held,
             dirty: document.is_dirty(),
             layout_dirty: document.is_layout_dirty(),
@@ -692,11 +712,38 @@ impl FolderApp {
         self.changed_at = Some(Instant::now());
     }
 
+    /// Shows a notice under the tabs, on the active tab, or on the tab the
+    /// operation whose outcome it reports was asked for on (UX-12).
     fn notify(&mut self, text: impl Into<String>, error: bool) {
-        self.notice = Some(Notice {
-            text: text.into(),
-            error,
-        });
+        let tab = match &self.notices.origin {
+            Some(origin) => origin.clone(),
+            None => self.workbench.active().map(str::to_owned),
+        };
+        self.notices.raise(tab.as_deref(), text.into(), error);
+    }
+
+    /// The notice under the tabs as the active tab shows it.
+    fn notice(&self) -> Option<&Notice> {
+        self.notices.shown(self.workbench.active())
+    }
+
+    /// Before anything acts this frame: a notice that is not an error goes
+    /// after five seconds or at an action (UX-12).
+    fn tend_notices(&mut self, ctx: &egui::Context) {
+        let acted = ctx.input(notices::acted);
+        let tabs = self.workbench.tabs();
+        let wait = self
+            .notices
+            .tend(|id| tabs.iter().any(|tab| tab.document_id == id), acted);
+        if let Some(wait) = wait {
+            ctx.request_repaint_after(wait);
+        }
+    }
+
+    /// Moves the clock notices age by on by `by`: a test seam (UX-12).
+    #[cfg(test)]
+    fn step_clock(&mut self, by: Duration) {
+        self.notices.clock.step(by);
     }
 
     /// Shows a dismissable notice, as an action that reports its outcome
@@ -808,6 +855,8 @@ impl FolderApp {
     // ----- Frame -----------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // First, so a notice raised this frame outlives the input of this frame.
+        self.tend_notices(ui.ctx());
         self.poll_storage();
         self.poll_run();
         self.follow_dialogs();
@@ -1732,6 +1781,63 @@ fn reference_of(model: &Document, cleanup: bool) -> std::borrow::Cow<'_, Graph> 
         }
         _ => std::borrow::Cow::Borrowed(graph_of(model, false)),
     }
+}
+
+/// The other graph of a scenario, whose handles a block of this one must not
+/// take; a component has one graph.
+fn sibling_of(model: &Document, cleanup: bool) -> Option<&Graph> {
+    match model {
+        Document::Scenario(scenario) => Some(if cleanup {
+            &scenario.graph
+        } else {
+            &scenario.cleanup
+        }),
+        Document::Component(_) => None,
+    }
+}
+
+/// What a paste left unconnected, one sentence per step or input the board
+/// lacks (UX-34): `Missing step “product”: the input of Active promotion
+/// that read it is left unconnected.`
+fn missing_summary(graph: &Graph, unresolved: &[edit::Unresolved]) -> Option<String> {
+    // Per missing item: the blocks that lost it, and how many of their
+    // inputs did.
+    type Lost<'a> = (Vec<&'a str>, Vec<(&'a str, &'a str)>);
+    let mut lost: std::collections::BTreeMap<&edit::Missing, Lost<'_>> = Default::default();
+    for item in unresolved {
+        let block = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == item.node_id)
+            .map_or(item.node_id.as_str(), |node| node.display_name());
+        let (blocks, inputs) = lost.entry(&item.missing).or_default();
+        if !blocks.contains(&block) {
+            blocks.push(block);
+        }
+        let input = (item.node_id.as_str(), item.input.as_str());
+        if !inputs.contains(&input) {
+            inputs.push(input);
+        }
+    }
+    let sentences: Vec<String> = lost
+        .iter()
+        .map(|(missing, (blocks, inputs))| {
+            let (kind, name) = match missing {
+                edit::Missing::Step(handle) => ("step", handle),
+                edit::Missing::Input(name) => ("input", name),
+            };
+            let (inputs, that) = if inputs.len() == 1 {
+                ("the input", "that read it is")
+            } else {
+                ("the inputs", "that read it are")
+            };
+            format!(
+                "Missing {kind} “{name}”: {inputs} of {} {that} left unconnected.",
+                blocks.join(", ")
+            )
+        })
+        .collect();
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 fn with_graph(model: &Document, cleanup: bool, graph: Graph) -> Document {

@@ -74,8 +74,16 @@ impl FolderApp {
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
         };
-        // While observing, the bar at the bottom says why (MCP-08a, M1).
-        if !snapshot.editable && !snapshot.paused {
+        // While observing, the bar at the bottom says why (MCP-08a, M1). A
+        // save or a publication holds the board for a moment, and the
+        // analysis a publication starts checks code that did not change:
+        // neither puts a notice above the board (UX-25).
+        let rechecking = snapshot.analysis == AnalysisState::Pending
+            && snapshot.model_describes_text
+            && !snapshot.held
+            && snapshot.conflict.is_none()
+            && snapshot.unavailable.is_none();
+        if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
             let text = if snapshot.held {
                 "Unsaved work from an earlier session needs a decision in the code first."
             } else if snapshot.analysis == AnalysisState::Pending {
@@ -164,10 +172,7 @@ impl FolderApp {
         let adding_input = inputs
             .and_then(|_| self.new_inputs.get(document_id))
             .map(|form| form.name.clone());
-        let can_paste = self
-            .clipboard
-            .as_ref()
-            .is_some_and(|clipboard| clipboard.context == context);
+        let can_paste = self.clipboard.is_some();
         let library_in_view = self.library_in_view(ui.ctx());
         // Without the panel, the Add step popup carries its sections (KTLO-05d),
         // also while it is folded to its rail (KTLO-17).
@@ -177,6 +182,7 @@ impl FolderApp {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
         }
+        let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         let mut chosen = cleanup;
         let commands = ui
@@ -199,10 +205,15 @@ impl FolderApp {
                     header_leading: None,
                     library: library.as_ref(),
                     read_only: !snapshot.editable,
+                    component: matches!(*model, Document::Component(_)),
                     inputs,
                     selected_input: input_selected.as_deref(),
                     adding_input: adding_input.as_deref(),
                     settings,
+                    arrangement: match mode {
+                        Mode::Split => "split",
+                        Mode::Code | Mode::Diagram => "diagram",
+                    },
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -271,6 +282,7 @@ impl FolderApp {
             reference: &reference,
             project: &project,
             parameters: &parameters,
+            sibling: sibling_of(model, cleanup),
         };
         let selection = self
             .selections
@@ -391,37 +403,29 @@ impl FolderApp {
                     .connect(&source, &source_port, &target, &target_input, &target_path)
                     .map(Into::into),
             ),
+            // The clipboard belongs to the window, not to a board: what is
+            // copied pastes into any graph of any document (UX-34).
             Command::Copy => {
-                let selected = selection.iter().map(String::as_str).collect();
-                let fragment = edit::copy_selection(graph, &selected);
-                if !fragment.nodes.is_empty() {
-                    self.clipboard = Some(Clipboard {
-                        context: context_key(document_id, cleanup),
-                        fragment,
-                        pastes: 0,
-                    });
+                if let Some(fragment) = board.copy(&selection) {
+                    self.clipboard = Some(fragment);
                 }
                 None
             }
-            Command::Paste => self
-                .clipboard
-                .as_mut()
-                .filter(|clipboard| clipboard.context == context_key(document_id, cleanup))
-                .map(|clipboard| {
-                    clipboard.pastes += 1;
-                    let count = f64::from(clipboard.pastes);
-                    board.paste(
-                        &clipboard.fragment,
-                        &Position {
-                            x: edit::PASTE_OFFSET.x * count,
-                            y: edit::PASTE_OFFSET.y * count,
-                        },
-                    )
-                }),
-            Command::Duplicate => (!selection.is_empty()).then(|| {
-                let selected = selection.iter().map(String::as_str).collect();
-                board.paste(&edit::copy_selection(graph, &selected), &edit::PASTE_OFFSET)
-            }),
+            Command::Paste => {
+                let pasted = self
+                    .clipboard
+                    .as_ref()
+                    .map(|fragment| board.paste(fragment));
+                self.apply_paste(document_id, model, cleanup, pasted);
+                None
+            }
+            Command::Duplicate => {
+                let pasted = board
+                    .copy(&selection)
+                    .map(|fragment| board.paste(&fragment));
+                self.apply_paste(document_id, model, cleanup, pasted);
+                None
+            }
             Command::EditComponent(node_id) => {
                 self.open_component(graph, &node_id);
                 None
@@ -433,6 +437,54 @@ impl FolderApp {
         };
         if let Some(result) = result {
             self.apply_edit(document_id, model, cleanup, result);
+        }
+    }
+
+    /// Applies a paste or a duplicate as one model edit, so one undo removes
+    /// it, brings the copies into view, and names what they read that this
+    /// board lacks: each such reference is left unconnected (UX-34).
+    fn apply_paste(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        pasted: Option<Result<board_edit::Paste, String>>,
+    ) {
+        let Some(pasted) = pasted else {
+            return;
+        };
+        let paste = match pasted {
+            Ok(paste) => paste,
+            Err(message) => {
+                self.apply_edit(document_id, model, cleanup, Err(message));
+                return;
+            }
+        };
+        // Shown once the edit is applied, which may wait for the person to
+        // accept losing unattached comments.
+        self.pasted = Some(PastedOutcome {
+            document_id: document_id.to_owned(),
+            ids: paste.edit.selection.clone().unwrap_or_default(),
+            summary: missing_summary(&paste.edit.graph, &paste.unresolved),
+        });
+        self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
+    }
+
+    /// After an applied model edit that selects `selection`: when it is the
+    /// last paste, brings the copies into view, as copies from another graph
+    /// keep their place, and reports what they lost.
+    pub(super) fn pasted_applied(&mut self, document_id: &str, selection: &[String]) {
+        let Some(pasted) = self
+            .pasted
+            .take_if(|pasted| pasted.document_id == document_id && pasted.ids == selection)
+        else {
+            return;
+        };
+        if let Some(canvas) = self.canvases.get_mut(document_id) {
+            canvas.show_pasted(pasted.ids);
+        }
+        if let Some(summary) = pasted.summary {
+            self.notify(summary, false);
         }
     }
 
