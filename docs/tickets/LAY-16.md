@@ -1,8 +1,10 @@
 # LAY-16: Compact request geometry — the card's box follows what it shows
 
 - Size: M · Owner review: 25 min · Risk: `visible UI`, `default`
-- State: Backlog (issue #300) · decided by the owner on 2026-11-05 (Q13 = A,
-  Q14 = A, Q16 = A) · LAY sprint, wave 1, first
+- State: Implementation (issue #300) · decided by the owner on 2026-11-05
+  (Q13 = A, Q14 = A, Q16 = A), on 2026-11-06 (decision 1 = A) and on
+  2026-11-07 (decision 2 = D, the footer row hidden) · LAY sprint, wave 1,
+  first
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -26,11 +28,18 @@ LAY-06's, on this geometry, because the fit is bounded by the board's width.
 - The compact box is the card at every zoom (Q16 = A): at Full it writes
   the input values, and editing happens in the Inspector or by double-click
   on the row; the box never changes with the zoom.
-- Changed: the request card's height and the inline editing at Full (moved
-  to the Inspector and double-click). Removed or hidden: unconnected output
-  port rows at the compact density; inline fields on the card. Default
-  behaviour that changes: the card geometry and the editing place — the
-  owner's decisions Q14 and Q16.
+- New: a labelled tray outside the card's left and right edges carries the
+  ports the compact box does not show (decision 2 = D). It appears only
+  while the card is selected — inputs and outputs — or while a wire is
+  dragged near it — the hidden inputs. It is view state: the card's box,
+  the routing, Tidy up and LAY-06 do not see it.
+- Changed: the request card's height, the inline editing at Full (moved
+  to the Inspector and double-click) and the footer row, which the compact
+  card does not show — `+` and *Next* stay on the right-click menu, the
+  toolbar's *Add step* and the Inspector. Removed or hidden: unconnected
+  output port rows at the compact density; inline fields on the card.
+  Default behaviour that changes: the card geometry and the editing place —
+  the owner's decisions Q14 and Q16.
 
 ## Decisions taken (owner, 2026-11-05)
 
@@ -41,6 +50,22 @@ LAY-06's, on this geometry, because the fit is bounded by the board's width.
 > today's geometry stays the default") was offered and not chosen, so the
 > compact density is the default and *Compact cards* off restores today's
 > geometry.
+
+## Decisions taken (owner, 2026-11-06 and 2026-11-07)
+
+> **Decision 1 (2026-11-06) = A.** Criterion 6 keeps "no card collision"
+> and reports the measured fit; the fit of 50 % or more moved to LAY-06,
+> because Tidy up on `main` gives `shop-30` fifteen columns of 376 px, so
+> no card height can raise it.
+>
+> **Decision 2 (2026-11-07) = D.** The ports a compact card hides are
+> reached through a labelled tray outside the card's edge, shown only while
+> the card is selected or a wire is being dragged near it. The card's box
+> does not change. Taken on the captures of `mock/lay-16-inputs`
+> (`f11ff31`), recorded on #300.
+>
+> **The footer row (2026-11-07): hidden at the compact density.** `+` and
+> *Next* stay available through the right-click menu and the Inspector.
 
 ## Mock-up
 
@@ -81,6 +106,16 @@ Tests in `crates/apiforge-desktop/src/canvas/layout.rs` (`mod tests`) and
    `main` gives `shop-30` fifteen columns of 376 px (5544 px wide, fit
    0.205), so no card height can raise the fit; the mock-up's 0.52 came
    from shape D with checks collapsed.
+7. The tray (decision 2 = D) reaches what the box hides. A fresh request
+   shows no output socket at rest; selected, its hidden inputs and outputs
+   stand in a labelled tray outside the card's edge and its world rectangle
+   is unchanged. A wire dragged from `cart.body` to that tray's Body binds
+   the Body input and leaves the URL as it was — the URL's socket on the
+   subtitle row takes a wire only under the pointer, never by the snap.
+   Test: `lay16_criterion_7_the_tray_reaches_hidden_ports`.
+8. The compact card has no footer row: `+` and *Next* are not on it, and
+   the right-click menu still opens *Add step*. Test:
+   `lay16_criterion_8_the_footer_leaves_the_compact_card`.
 
 ## Not in scope
 
@@ -88,7 +123,8 @@ What each zoom level shows (LAY-09, on this geometry); the data-in-use line
 (LAY-18); the positions Tidy up produces and the fit zoom of at least 0.50 at
 1600 × 1000 (LAY-06, with LAY-11's collapse).
 
-## Analysis: the ports a compact card hides (2026-11-06, open)
+## Analysis: the ports a compact card hides (2026-11-06; decided D on
+2026-11-07)
 
 The approved rendering also leaves out the unconfigured input rows (the
 drop targets for wires and variables), the `+` button and the *Next* row.
@@ -138,13 +174,24 @@ and `-cards.png` crops; today's card in `lay16-today-*`):
 
 For every option: the URL socket on the subtitle row must take a wire only
 when the pointer is on it, never by the 20 px snap, or a drop meant for the
-card rewrites its address. The decision is the owner's; see issue #300.
+card rewrites its address. The owner chose **D** on 2026-11-07, with the
+footer row hidden; criterion 7 holds the rule to that choice.
 
 ## Technical appendix
 
 `canvas/layout.rs`: `Card::height()` becomes a function of the card's shown
 rows at the density (`CardDensity::{Compact, Full}` on the canvas settings),
 `WIDTH = 280` kept; `CardDetail::at_zoom` no longer changes the box, only
-the paint. The inline field editing in `paint::card` at Full is removed in
-favour of the Inspector (UX-32) and a double-click handler. The mock code of
-`mock/lay-00-round-4` is not merged.
+the paint. The row rule the mock-up proved: the subtitle carries the URL's
+socket; an input has a row when it is configured, wired, or required and
+missing; an output has a row when a step reads it; then the result row, and
+a checks row when a check reads the step. Heights `COMPACT_HEADER = 40`,
+row 24, subtitle 22, result 26, the box ending 6 px below the last row give
+the mock-up's measurements (`login` 190, `cart` 214, a fresh request 94).
+
+The tray is `canvas` view state beside the cards, 88 px wide with a 4 px
+gap, inside the 96 px column gap, shown within 120 px of a dragged wire or
+while the card is selected; it takes part in wire snapping and in nothing
+else. The inline field editing in `paint::card` at Full is removed in
+favour of the Inspector (UX-32) and a double-click handler. The mock code
+of `mock/lay-00-round-4` and `mock/lay-16-inputs` is not merged.
