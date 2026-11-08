@@ -55,6 +55,9 @@ pub struct Context<'a> {
     pub graph: &'a Graph,
     /// The board graph, for ordering connections.
     pub board: &'a Graph,
+    /// The scenario's Cleanup graph while the board shows Main: its checks are
+    /// listed under the Main steps they read (LAY-20). `None` anywhere else.
+    pub cleanup: Option<&'a Graph>,
     pub project: &'a Project,
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
@@ -114,9 +117,10 @@ impl Inspector {
                 .family(theme::bold_family()),
         );
         ui.add_space(theme::SPACE_SM);
-        // Only a request lists its checks. In the narrowest panel the third tab
-        // takes a row of its own rather than running past the edge.
-        let checks = context.node.kind == NodeKind::Request;
+        // A request and a call of a component list their checks; both are
+        // subjects of one (LAY-20). In the narrowest panel the third tab takes
+        // a row of its own rather than running past the edge.
+        let checks = matches!(context.node.kind, NodeKind::Request | NodeKind::Component);
         let tabs = ["Configuration", "Output data", "Checks"];
         let width: f32 = tabs
             .iter()
