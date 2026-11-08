@@ -13293,6 +13293,9 @@ mod lay20 {
             let (_project, mut harness) = open(&source(), size);
             show_checks(&mut harness, "cart", false);
             crate::testing::capture(&mut harness, &format!("lay20-cleanup-apart-{name}"), None);
+            simulate(&mut harness);
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, &format!("lay20-cleanup-run-{name}"), None);
         }
     }
 }
