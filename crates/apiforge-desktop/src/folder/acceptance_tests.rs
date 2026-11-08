@@ -13398,3 +13398,564 @@ mod ux18 {
         }
     }
 }
+
+/// UX-21 (#229): inside a component, *Add step* offers *Export* and neither
+/// *Start* nor *Data condition*, and says it adds to the component (owner
+/// decision 12 = A); a search with no match says so; an *Export* added
+/// from the library lands to the right of the flow.
+mod ux21 {
+    use super::ux31::window;
+    use super::*;
+    use crate::testing::MINIMUM;
+    use apiforge_core::model::NodeKind;
+
+    const PRODUCT: &str = "components/product.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const IN_COMPONENT: &str = "Add a step to the component";
+    const IN_SCENARIO: &str = "Add a step to the scenario";
+    const SEARCH: &str = "Find an action";
+    const NO_MATCH: &str = "No matching steps";
+    const NAMES: [&str; 4] = ["Export", "Start", "Data condition", "HTTP request"];
+
+    fn count(harness: &FolderHarness, label: &str) -> usize {
+        harness.query_all_by_label(label).count()
+    }
+
+    /// How many more widgets each of [`NAMES`] has once *Add step* is open:
+    /// the popup's rows, whatever the library panel beside it shows.
+    fn offered(harness: &mut FolderHarness) -> Vec<(&'static str, usize)> {
+        let before: Vec<usize> = NAMES.iter().map(|name| count(harness, name)).collect();
+        choose(harness, "Add step");
+        assert!(has_label(harness, SEARCH), "the popup is open");
+        NAMES
+            .into_iter()
+            .zip(before)
+            .map(|(name, before)| (name, count(harness, name) - before))
+            .collect()
+    }
+
+    /// Criterion 1: in `components/product.afs`, *Add step* lists *Export*
+    /// and not *Start* or *Data condition*, under *Add a step to the
+    /// component*; at the minimum window, where the popup may carry the
+    /// library's sections, and beside the library panel.
+    #[test]
+    fn ux21_criterion_1_add_step_in_a_component_offers_export_not_start() {
+        for size in [MINIMUM, WIDE] {
+            let directory = shop();
+            let (mut harness, _) = window(directory.path(), size, PRODUCT, "Diagram");
+            assert_eq!(
+                offered(&mut harness),
+                [
+                    ("Export", 1),
+                    ("Start", 0),
+                    ("Data condition", 0),
+                    ("HTTP request", 1)
+                ],
+                "at {size:?}"
+            );
+            assert!(has_label(&harness, IN_COMPONENT), "at {size:?}");
+            assert!(!has_label(&harness, IN_SCENARIO), "at {size:?}");
+        }
+    }
+
+    /// Criterion 2: in a scenario the menu is unchanged: *Start* and *Data
+    /// condition* are offered, *Export* is not, under *Add a step to the
+    /// scenario*.
+    #[test]
+    fn ux21_criterion_2_add_step_in_a_scenario_is_unchanged() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, SCENARIO, "Diagram");
+        assert_eq!(
+            offered(&mut harness),
+            [
+                ("Export", 0),
+                ("Start", 1),
+                ("Data condition", 1),
+                ("HTTP request", 1)
+            ]
+        );
+        assert!(has_label(&harness, IN_SCENARIO));
+        assert!(!has_label(&harness, IN_COMPONENT));
+    }
+
+    /// Criterion 3: searching *zzz* shows *No matching steps*; a search that
+    /// matches a step does not.
+    #[test]
+    fn ux21_criterion_3_a_search_with_no_match_says_so() {
+        let directory = shop();
+        let (mut harness, _) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        choose(&mut harness, "Add step");
+        type_into(&mut harness, SEARCH, "exp");
+        assert!(!has_label(&harness, NO_MATCH), "Export matches");
+        replace_text(&mut harness, SEARCH, "zzz");
+        assert!(has_label(&harness, NO_MATCH));
+    }
+
+    /// Criterion 4: *Export* dragged from the library onto the left of the
+    /// board lands right of the rightmost card.
+    #[test]
+    fn ux21_criterion_4_an_export_from_the_library_lands_right_of_the_flow() {
+        let directory = shop();
+        let (mut harness, id) = window(directory.path(), WIDE, PRODUCT, "Diagram");
+        let project = folder(&harness).context_project();
+        let graph = |harness: &FolderHarness| graph_of(&model(folder(harness), &id), false).clone();
+        let before = graph(&harness);
+        let rightmost = before
+            .nodes
+            .iter()
+            .map(|node| f64::from(canvas::Card::build(node, &before, &project).rect().max.x))
+            .fold(f64::MIN, f64::max);
+        let board = harness.get_by_label("Diagram board").rect();
+        let drop = board.left_center() + egui::vec2(160.0, 0.0);
+        let dropped_at = folder(&harness)
+            .canvases
+            .get(&id)
+            .unwrap()
+            .debug_board_position(drop);
+        assert!(
+            dropped_at.x < rightmost,
+            "the drop {dropped_at:?} is left of the flow's right edge {rightmost}"
+        );
+        let start = harness
+            .query_all_by_label("Export")
+            .map(|node| node.rect())
+            .find(|rect| !board.intersects(*rect))
+            .expect("the library offers Export in a component")
+            .center();
+
+        harness.hover_at(start);
+        harness.step();
+        harness.drag_at(start);
+        harness.step();
+        for step in 1..=8 {
+            harness.hover_at(start + (drop - start) * (step as f32 / 8.0));
+            harness.step();
+        }
+        harness.drop_at(drop);
+        settle(&mut harness);
+
+        let after = graph(&harness);
+        assert_eq!(after.nodes.len(), before.nodes.len() + 1, "one block added");
+        let export = after
+            .nodes
+            .iter()
+            .find(|node| !before.nodes.iter().any(|old| old.id == node.id))
+            .unwrap();
+        assert_eq!(export.kind, NodeKind::Export, "the added block");
+        assert!(
+            export.position.x > rightmost,
+            "the Export at {:?} is right of the rightmost card's edge {rightmost}",
+            export.position
+        );
+    }
+}
+
+/// UX-28 (#236): the *Curves* wire style leaves the *Wire style* menu until
+/// it draws curves (owner decision 18 = A); a saved `spline` preference, which
+/// is how *Curves* was stored, falls back to *Right angles*.
+mod ux28 {
+    use super::*;
+    use crate::canvas::WireStyle;
+    use crate::preferences::Preferences;
+    use crate::testing::MINIMUM;
+    use std::path::Path;
+
+    const WIRE_STYLE: &str = "Wire style";
+    const RIGHT_ANGLES: &str = "Right angles";
+    const CURVES: &str = "Curves";
+    const BRIDGES: &str = "Bridges at crossings";
+
+    /// The demo shop's scenario in Diagram, its preferences read from
+    /// `preferences` when there is a file to read them from.
+    fn diagram(root: &Path, preferences: Option<&Path>) -> (FolderHarness, String) {
+        let mut harness = folder_harness(root, MINIMUM);
+        if let Some(path) = preferences {
+            app(&mut harness).preferences = Preferences::at(Some(path.to_path_buf()));
+        }
+        let id = only(&harness, DocumentKind::Scenario);
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, "Diagram");
+        (harness, id)
+    }
+
+    /// Criterion 1: the *Wire style* menu lists the current set minus
+    /// *Curves*: *Right angles*, and *Bridges at crossings* below the line.
+    #[test]
+    fn ux28_criterion_1_the_menu_has_no_curves() {
+        let directory = shop();
+        let (mut harness, _) = diagram(directory.path(), None);
+        choose(&mut harness, WIRE_STYLE);
+        assert!(
+            has_label(&harness, RIGHT_ANGLES),
+            "{RIGHT_ANGLES} is listed"
+        );
+        assert!(has_label(&harness, BRIDGES), "{BRIDGES} is listed");
+        assert!(!has_label(&harness, CURVES), "{CURVES} is not listed");
+    }
+
+    /// Criterion 2: a preferences file that names *Curves* loads as *Right
+    /// angles*, keeps the person's other preferences, and is written back as
+    /// *Right angles* on the next save of preferences.
+    #[test]
+    fn ux28_criterion_2_a_saved_curves_preference_falls_back() {
+        let directory = shop();
+        let configuration = tempfile::tempdir().unwrap();
+        let path = configuration.path().join("preferences.json");
+        fs::write(
+            &path,
+            br#"{"version": 1, "wireStyle": "spline", "bridges": true, "codePanel": true}"#,
+        )
+        .unwrap();
+
+        let (mut harness, id) = diagram(directory.path(), Some(&path));
+        let loaded = &folder(&harness).preferences;
+        assert_eq!(loaded.wire_style, WireStyle::Orthogonal);
+        assert!(loaded.bridges, "the other preferences are kept");
+        assert!(loaded.code_panel, "the other preferences are kept");
+        assert_eq!(
+            folder(&harness).canvases[&id].wire_style,
+            WireStyle::Orthogonal,
+            "the board draws right angles"
+        );
+
+        // Any change of preference saves them all.
+        choose(&mut harness, WIRE_STYLE);
+        choose(&mut harness, BRIDGES);
+        let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored["wireStyle"], "orthogonal", "{stored}");
+        assert_eq!(stored["bridges"], false, "{stored}");
+        assert_eq!(stored["codePanel"], true, "{stored}");
+    }
+}
+
+/// UX-16: a Cleanup card that reads an earlier Cleanup step names that step,
+/// a Main step still resolves, and a step in neither board reads *Missing
+/// step*.
+mod ux16 {
+    use super::ux31::window;
+    use super::*;
+    use crate::{canvas, testing::MINIMUM};
+    use apiforge_core::format::Binding;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    /// A scenario whose Cleanup reads a Cleanup step and a Main step.
+    const BOTH: &str = "scenario \"UX-16\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
+
+    /// The demo shop, its scenario replaced by `text` when one is given,
+    /// with the scenario's Cleanup board chosen through *Cleanup*: what each
+    /// card's source rows read, as `(card, row)`.
+    fn cleanup_sources(text: Option<&str>) -> Vec<(String, String)> {
+        let directory = shop();
+        if let Some(text) = text {
+            fs::write(directory.path().join(SCENARIO), text).unwrap();
+        }
+        let (mut harness, id) = window(directory.path(), MINIMUM, SCENARIO, "Diagram");
+        harness.get_by_label("Cleanup").click();
+        settle(&mut harness);
+        folder(&harness).canvases[&id].debug_sources()
+    }
+
+    fn row(card: &str, text: &str) -> (String, String) {
+        (card.to_owned(), text.to_owned())
+    }
+
+    /// Criterion 1: on the demo scenario's Cleanup board, *Cart was deleted*
+    /// reads *Delete cart → status*.
+    #[test]
+    fn the_demo_cleanup_card_names_the_cleanup_step_it_reads() {
+        let sources = cleanup_sources(None);
+        assert!(
+            sources.contains(&row("Cart was deleted", "Delete cart → status")),
+            "{sources:?}"
+        );
+        assert!(
+            !sources
+                .iter()
+                .any(|(_, text)| text.starts_with("Missing step")),
+            "{sources:?}"
+        );
+    }
+
+    /// Criterion 2: a Cleanup card that reads a Main step still resolves it,
+    /// beside one that reads a Cleanup step.
+    #[test]
+    fn a_cleanup_card_still_names_the_main_step_it_reads() {
+        assert_eq!(
+            cleanup_sources(Some(BOTH)),
+            vec![
+                row("Cart was deleted", "Delete cart → status"),
+                row("Product was read", "Product → status"),
+            ]
+        );
+    }
+
+    /// Criterion 3: a reference to a step that is in neither board reads
+    /// *Missing step → …*. Valid source cannot name such a step, so the
+    /// demo's Cleanup card is pointed at one and built against the steps of
+    /// both boards.
+    #[test]
+    fn a_reference_to_a_step_in_neither_board_reads_missing_step() {
+        let project = apiforge_core::demos::shop_project();
+        let scenario = &project.scenarios[0];
+        let mut both = scenario.graph.clone();
+        both.nodes.extend(scenario.cleanup.nodes.iter().cloned());
+        let mut card = scenario
+            .cleanup
+            .nodes
+            .iter()
+            .find(|node| node.display_name() == "Cart was deleted")
+            .unwrap()
+            .clone();
+        card.inputs
+            .insert("actual".into(), Binding::reference("ghost", "status", ""));
+        let built = canvas::Card::build(&card, &both, &project);
+        let actual = built
+            .inputs
+            .iter()
+            .find(|input| input.name == "actual")
+            .unwrap();
+        assert_eq!(
+            format!("{:?}", actual.value),
+            r#"Source("Missing step → status")"#
+        );
+    }
+}
+
+// ----- UX-15: the unsaved dot survives a truncated tab name -------------------
+
+/// UX-15 (#223, from #151 and #176 part 1): the unsaved dot on a document tab
+/// stays visible however long the file name is. The tab is found by its
+/// accessible name, and what it shows is read from the glyphs painted inside
+/// it, since truncation happens in layout and the label's text keeps the
+/// whole name.
+mod ux15 {
+    use super::*;
+    use crate::testing::{MINIMUM, shop_project};
+    use egui::accesskit::Role;
+
+    /// The demo scenario: its name does not fit the tab's 160 points.
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const LONG: &str = "promotion-and-cart-price.afs";
+    /// A component whose name fits.
+    const COMPONENT: &str = "components/add-to-cart.afs";
+    const SHORT: &str = "add-to-cart.afs";
+    const DOT: char = '\u{25cf}';
+    const ELLIPSIS: char = '\u{2026}';
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned()
+    }
+
+    /// The demo shop at `size` with `path` open and active in Code.
+    fn window(root: &std::path::Path, size: egui::Vec2, path: &str) -> (FolderHarness, String) {
+        let mut harness = folder_harness(root, size);
+        let id = by_path(&harness, path);
+        app(&mut harness).workbench.open(&id);
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, "Code");
+        (harness, id)
+    }
+
+    fn document<'a>(harness: &'a FolderHarness, id: &str) -> &'a apiforge_project::DocumentSession {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .document(id)
+            .unwrap()
+    }
+
+    /// Appends `tail` to the document's text without saving it, as typing
+    /// would, and lets analysis finish.
+    fn edit(harness: &mut FolderHarness, id: &str, tail: &str) {
+        let text = format!("{}{tail}", document(harness, id).text());
+        let session = app(harness).session.as_mut().unwrap();
+        session.edit_source(id, &text, CODE).unwrap();
+        session.settle(id).unwrap();
+        settle(harness);
+        assert!(
+            document(harness, id).needs_recovery(),
+            "the edit is unsaved"
+        );
+    }
+
+    /// The tab named `name` and its close control: of the controls with that
+    /// accessible name (the project files row has it too), the one that holds
+    /// *Close `name`*.
+    fn tab(harness: &FolderHarness, name: &str) -> (egui::Rect, egui::Rect) {
+        let close = harness.get_by_label(&format!("Close {name}")).rect();
+        let tab = harness
+            .query_all_by_role_and_label(Role::Button, name)
+            .map(|node| node.rect())
+            .find(|rect| rect.contains(close.center()))
+            .unwrap_or_else(|| panic!("no tab named {name} holds its close control"));
+        (tab, close)
+    }
+
+    /// The visible characters painted inside `area` and not clipped away,
+    /// left to right, each with its rect on screen.
+    fn glyphs_in(harness: &FolderHarness, area: egui::Rect) -> Vec<(char, egui::Rect)> {
+        fn walk(
+            clip: egui::Rect,
+            shape: &egui::Shape,
+            area: egui::Rect,
+            into: &mut Vec<(char, egui::Rect)>,
+        ) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(clip, shape, area, into);
+                    }
+                }
+                egui::Shape::Text(text) => {
+                    for row in &text.galley.rows {
+                        let offset = text.pos.to_vec2() + row.pos.to_vec2();
+                        for glyph in &row.glyphs {
+                            let rect = glyph.logical_rect().translate(offset);
+                            let centre = rect.center();
+                            if !glyph.chr.is_whitespace()
+                                && area.contains(centre)
+                                && clip.contains(centre)
+                            {
+                                into.push((glyph.chr, rect));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut glyphs = Vec::new();
+        for clipped in &harness.output().shapes {
+            walk(clipped.clip_rect, &clipped.shape, area, &mut glyphs);
+        }
+        glyphs.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+        glyphs
+    }
+
+    fn shown(glyphs: &[(char, egui::Rect)]) -> String {
+        glyphs.iter().map(|(chr, _)| *chr).collect()
+    }
+
+    /// The tab shows the unsaved dot at its right: the last character drawn
+    /// in it, whole between the name and the close control.
+    fn assert_dot_at_the_right(harness: &FolderHarness, name: &str, context: &str) {
+        let (tab, close) = tab(harness, name);
+        let glyphs = glyphs_in(harness, tab);
+        let (last, dot) = glyphs
+            .last()
+            .unwrap_or_else(|| panic!("{context}: the tab {name} shows no text"));
+        assert_eq!(
+            *last,
+            DOT,
+            "{context}: the unsaved tab {name} shows {:?}, with no dot at its right",
+            shown(&glyphs)
+        );
+        assert!(
+            dot.left() >= tab.left() && dot.right() <= close.left() + 0.5,
+            "{context}: the dot {dot:?} is not whole between the name and the close \
+             control {close:?} in the tab {tab:?}"
+        );
+    }
+
+    /// Criterion 1: an unsaved document whose name exceeds the tab width shows
+    /// the dot at the tab's right, after the shortened name, at both sizes.
+    #[test]
+    fn a_long_unsaved_name_keeps_its_dot_at_the_tab_right() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, SCENARIO);
+            edit(&mut harness, &id, "// edited\n");
+            assert_eq!(document(&harness, &id).analysis(), AnalysisState::Valid);
+            let (tab, _) = tab(&harness, LONG);
+            let glyphs = glyphs_in(&harness, tab);
+            assert!(
+                glyphs.iter().any(|(chr, _)| *chr == ELLIPSIS),
+                "{context}: the name {LONG} is expected not to fit its tab, shown {:?}",
+                shown(&glyphs)
+            );
+            assert_dot_at_the_right(&harness, LONG, &context);
+        }
+    }
+
+    /// Criterion 2: a name that fits keeps today's rendering: the whole name,
+    /// then the dot where the one-piece label `name  ●` put it; saved, the
+    /// name alone.
+    #[test]
+    fn a_short_name_keeps_todays_rendering() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, COMPONENT);
+            let (saved, _) = tab(&harness, SHORT);
+            assert_eq!(
+                shown(&glyphs_in(&harness, saved)),
+                SHORT,
+                "{context}: a saved tab"
+            );
+
+            edit(&mut harness, &id, "// edited\n");
+            let (unsaved, _) = tab(&harness, SHORT);
+            let glyphs = glyphs_in(&harness, unsaved);
+            assert_eq!(
+                shown(&glyphs),
+                format!("{SHORT}{DOT}"),
+                "{context}: an unsaved tab"
+            );
+            assert_dot_at_the_right(&harness, SHORT, &context);
+
+            // Where today's one-piece label places the dot.
+            let expected = harness.ctx.fonts_mut(|fonts| {
+                let galley = fonts.layout_no_wrap(
+                    format!("{SHORT}  {DOT}"),
+                    egui::FontId::proportional(theme::FONT_BODY),
+                    theme::TEXT,
+                );
+                galley.rows[0]
+                    .glyphs
+                    .iter()
+                    .find(|glyph| glyph.chr == DOT)
+                    .map(|glyph| glyph.pos.x)
+                    .unwrap()
+            });
+            let start = glyphs[0].1.left();
+            let dot = glyphs.last().unwrap().1.left();
+            assert!(
+                (dot - start - expected).abs() <= 1.0,
+                "{context}: the dot is {} points after the name's start, {expected} before",
+                dot - start
+            );
+        }
+    }
+
+    /// Criterion 3: an invalid and unsaved document shows the unsaved dot, not
+    /// only the error colour, with the long name of the demo scenario.
+    #[test]
+    fn an_invalid_unsaved_document_shows_the_dot() {
+        for size in [MINIMUM, WIDE] {
+            let context = format!("{size:?}");
+            let directory = shop_project();
+            let (mut harness, id) = window(directory.path(), size, SCENARIO);
+            edit(&mut harness, &id, "}}}\n");
+            assert_eq!(
+                document(&harness, &id).analysis(),
+                AnalysisState::Invalid,
+                "{context}: the edit is invalid"
+            );
+            assert_dot_at_the_right(&harness, LONG, &context);
+        }
+    }
+}

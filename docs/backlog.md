@@ -285,7 +285,7 @@ are never scheduled. In flight from MCP while open: REL-04 (#205), KTLO-33
 | [#147](https://github.com/jakubiszon26/apiforge/issues/147) | UX-07 A wider Inspector; one capture per size; after UX-24 | S · 15 min · `visible UI` |
 | [#237](https://github.com/jakubiszon26/apiforge/issues/237) | UX-29 Card controls clipped to the board (#172 (3)); after UX-18 | S · 10 min |
 | [#250](https://github.com/jakubiszon26/apiforge/issues/250) | UX-33 A *Component settings* button in the board header opens the component's settings (#161 (2); COMP-00 Q4, button not rendered, judged on QA captures); after UX-32 | S · 20 min · `visible UI` |
-| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · `decision-needed` |
+| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate across graphs and tabs; duplicates land clear with their own label (#173; COMP-00 Q7); A/B on its captures; after COMP-00 | M · 20 min · `default` · merged in #268 (2026-11-05) |
 
 | [#240](https://github.com/jakubiszon26/apiforge/issues/240) | WS-00 The workspace — one mock-up: a shared left sidebar (UX-06 #146), what folds at 960 × 540 (#157), Split's four columns (#161 (4)); decided 2026-11-05, [ticket](tickets/WS-00.md) | S · 30 min plus the discussion · `visible UI`, `default` |
 | [#241](https://github.com/jakubiszon26/apiforge/issues/241) | DIAG-00 Card readability — closed 2026-11-05, folded into the LAY sprint (LAY-09 #293, LAY-11 #295; the owner's Q8 = A); DIAG-01 #144 deferred to its own analysis after LAY | — |
@@ -358,6 +358,31 @@ Exit criteria:
 | [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Nudge; [ticket](tickets/LAY-03.md) | S · 15 | 3 (should) |
 | [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
 | [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
+
+Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
+keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
+the quizzes of 2026-11-03, on condition of merging `main` and a green CI, and
+eight had fallen into conflict with `main`. They merged one at a time before
+LAY-16, because they change the same board files; the last went in on
+2026-11-07. Accepted already, they add nothing to the sprint's review minutes.
+
+| Issue | Ticket | Pull request | Estimate |
+| --- | --- | --- | --- |
+| [#222](https://github.com/jakubiszon26/apiforge/issues/222) | UX-12 Notices clear | #267 | S · 10 |
+| [#251](https://github.com/jakubiszon26/apiforge/issues/251) | UX-34 Copy, paste and duplicate | #268 | M · 20 |
+| [#233](https://github.com/jakubiszon26/apiforge/issues/233) | UX-25 Publish with nothing to publish | #278 | S · 15 |
+| [#226](https://github.com/jakubiszon26/apiforge/issues/226) | UX-18 The Inspector does not re-fit the board | #283 | M · 20 |
+| [#229](https://github.com/jakubiszon26/apiforge/issues/229) | UX-21 Add step inside a component | #280 | S · 15 |
+| [#224](https://github.com/jakubiszon26/apiforge/issues/224) | UX-16 Cleanup references | #277 | S · 10 |
+| [#236](https://github.com/jakubiszon26/apiforge/issues/236) | UX-28 Curves removed | #282 | S · 10 |
+| [#228](https://github.com/jakubiszon26/apiforge/issues/228) | UX-20 The gutter and diagnostics | #281 | S · 10 |
+| [#223](https://github.com/jakubiszon26/apiforge/issues/223) | UX-15 The unsaved dot | #273 | S · 10 |
+
+[#308](https://github.com/jakubiszon26/apiforge/issues/308) LAY-20, found in
+LAY-08, joined the sprint on 2026-11-05: the *Checks* list covers a component
+call's checks and a Cleanup check that reads a Main step. It closes before
+LAY-11, which hides the cards those checks would otherwise be seen on. Its
+estimate follows its analysis.
 
 Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads

@@ -155,6 +155,9 @@ pub struct Input<'a> {
     /// moves, nothing is added, moved, wired or changed. An observing folder
     /// window shows it so (MCP-08a); a disabled board needs nothing more.
     pub read_only: bool,
+    /// The board is a component's: *Add step* offers *Export* and neither
+    /// *Start* nor *Data condition* (UX-21, decision 12).
+    pub component: bool,
     /// A component's declared inputs, shown in the INPUTS strip under the
     /// header row (UX-31); `None` for a board without the strip.
     pub inputs: Option<&'a [Port]>,
@@ -314,6 +317,10 @@ pub struct Canvas {
     /// The blocks the last frame ringed for the selected input.
     #[cfg(test)]
     ringed: Vec<String>,
+    /// What the last frame's cards wrote in their source rows: the card's
+    /// name and the row's text (UX-16).
+    #[cfg(test)]
+    sources: Vec<(String, String)>,
     /// Each card's whole rectangle on screen in the last frame, unclipped.
     #[cfg(test)]
     on_screen: Vec<(String, Rect)>,
@@ -348,6 +355,8 @@ impl Default for Canvas {
             error: None,
             #[cfg(test)]
             ringed: Vec::new(),
+            #[cfg(test)]
+            sources: Vec::new(),
             #[cfg(test)]
             on_screen: Vec::new(),
         }
@@ -396,6 +405,12 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ringed(&self) -> Vec<String> {
         self.ringed.clone()
+    }
+
+    /// What the last frame's cards wrote in their source rows (UX-16).
+    #[cfg(test)]
+    pub(crate) fn debug_sources(&self) -> Vec<(String, String)> {
+        self.sources.clone()
     }
 
     /// The camera's zoom in the last frame.
@@ -538,6 +553,18 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
+        #[cfg(test)]
+        {
+            self.sources = cards
+                .iter()
+                .flat_map(|card| {
+                    card.inputs.iter().filter_map(|row| match &row.value {
+                        RowValue::Source(text) => Some((card.name.clone(), text.clone())),
+                        _ => None,
+                    })
+                })
+                .collect();
+        }
         let mut chips: Vec<Chip> = input
             .graph
             .proxies
@@ -936,7 +963,13 @@ impl Canvas {
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
-            match menu.show(ui.ctx(), input.graph, input.project, input.library) {
+            match menu.show(
+                ui.ctx(),
+                input.graph,
+                input.project,
+                input.library,
+                input.component,
+            ) {
                 menu::Outcome::Open => {}
                 menu::Outcome::Close => self.menu = None,
                 menu::Outcome::Add(command) => {
@@ -1911,27 +1944,24 @@ impl Canvas {
                                 ui,
                                 widgets::icon_button(Icon::Wire, "Wire style").compact(),
                                 |ui| {
-                                    for (style, label) in [
-                                        (WireStyle::Orthogonal, "Right angles"),
-                                        (WireStyle::Spline, "Curves"),
-                                    ] {
-                                        if ui
-                                            .add(
-                                                widgets::action(
-                                                    if self.wire_style == style {
-                                                        Icon::Check
-                                                    } else {
-                                                        Icon::Wire
-                                                    },
-                                                    label,
-                                                )
-                                                .quiet(),
+                                    // *Curves* returns when it draws curves (UX-28).
+                                    let style = WireStyle::Orthogonal;
+                                    if ui
+                                        .add(
+                                            widgets::action(
+                                                if self.wire_style == style {
+                                                    Icon::Check
+                                                } else {
+                                                    Icon::Wire
+                                                },
+                                                "Right angles",
                                             )
-                                            .clicked()
-                                        {
-                                            commands.push(Command::SetWireStyle(style));
-                                            ui.close();
-                                        }
+                                            .quiet(),
+                                        )
+                                        .clicked()
+                                    {
+                                        commands.push(Command::SetWireStyle(style));
+                                        ui.close();
                                     }
                                     ui.separator();
                                     if ui
@@ -2739,6 +2769,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -2790,6 +2821,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -2865,6 +2897,7 @@ mod tests {
                             context: "test",
                             library_in_view: true,
                             read_only: false,
+                            component: false,
                             header_leading: None,
                             library: None,
                             inputs: Some(&component.inputs),

@@ -26,6 +26,8 @@ const MAX_BYTES: u64 = 64 * 1024;
 enum StoredWireStyle {
     #[default]
     Orthogonal,
+    /// *Curves*, withdrawn until it draws curves (UX-28). A file that stores it
+    /// still loads, as orthogonal, and is never written with it again.
     Spline,
 }
 
@@ -99,8 +101,7 @@ impl Preferences {
             return preferences;
         }
         preferences.wire_style = match stored.wire_style {
-            StoredWireStyle::Orthogonal => WireStyle::Orthogonal,
-            StoredWireStyle::Spline => WireStyle::Spline,
+            StoredWireStyle::Orthogonal | StoredWireStyle::Spline => WireStyle::Orthogonal,
         };
         preferences.bridges = stored.bridges;
         preferences.code_panel = stored.code_panel;
@@ -116,7 +117,6 @@ impl Preferences {
             version: VERSION,
             wire_style: match self.wire_style {
                 WireStyle::Orthogonal => StoredWireStyle::Orthogonal,
-                WireStyle::Spline => StoredWireStyle::Spline,
             },
             bridges: self.bridges,
             code_panel: self.code_panel,
@@ -150,12 +150,11 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("preferences.json");
         let mut preferences = Preferences::at(Some(path.clone()));
-        preferences.wire_style = WireStyle::Spline;
         preferences.bridges = false;
         preferences.code_panel = true;
         preferences.save();
         let reloaded = Preferences::at(Some(path));
-        assert_eq!(reloaded.wire_style, WireStyle::Spline);
+        assert_eq!(reloaded.wire_style, WireStyle::Orthogonal);
         assert!(!reloaded.bridges);
         assert!(reloaded.code_panel);
     }
@@ -195,19 +194,18 @@ mod tests {
                 .to_vec();
         padded.resize(MAX_BYTES as usize + 1, b' ');
         std::fs::write(&path, padded).unwrap();
-        assert_eq!(
-            Preferences::at(Some(path)).wire_style,
-            WireStyle::Orthogonal
-        );
+        let preferences = Preferences::at(Some(path));
+        assert!(preferences.bridges);
+        assert!(!preferences.code_panel);
     }
 
     #[test]
     fn a_missing_configuration_directory_keeps_preferences_for_the_session() {
         let mut session = Preferences::at(None);
-        session.wire_style = WireStyle::Spline;
+        session.bridges = false;
         // Saving does nothing and must not panic.
         session.save();
-        assert_eq!(session.wire_style, WireStyle::Spline);
-        assert_eq!(Preferences::at(None).wire_style, WireStyle::Orthogonal);
+        assert!(!session.bridges);
+        assert!(Preferences::at(None).bridges);
     }
 }
