@@ -382,7 +382,8 @@ LAY-16, because they change the same board files; the last went in on
 LAY-08, joined the sprint on 2026-11-05: the *Checks* list covers a component
 call's checks and a Cleanup check that reads a Main step. It closes before
 LAY-11, which hides the cards those checks would otherwise be seen on;
-[ticket](tickets/LAY-20.md), S · 15, decisions pending.
+[ticket](tickets/LAY-20.md), S · 15, decided on 2026-11-07 (Q20.1 = A,
+Q20.2 = A) and awaiting acceptance in #309.
 
 Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads
