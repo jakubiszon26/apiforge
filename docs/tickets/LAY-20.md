@@ -1,8 +1,8 @@
 # LAY-20: The Checks list covers a component call and a Cleanup check that reads a Main step
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis (issue #308) · decisions pending (Q20.1, Q20.2 below) ·
-  LAY sprint, wave 1, before LAY-11
+- State: Implemented, awaiting acceptance (issue #308) · decisions taken
+  2026-11-07 · LAY sprint, wave 1, before LAY-11
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -19,8 +19,8 @@ the moment word *Cleanup*.
   moment, the count line (`1 check`).
 - New: the list of a Main step (`cart`) also names the Cleanup checks that
   read it, after its Main checks, titled `cart_id_kept — Cleanup` before the
-  check has a result and with the result after a run. How it is counted is
-  Q20.2.
+  check has a result and with the result after a run. It is counted apart,
+  like a gate: `3 checks · 1 shared · 1 in Cleanup` (decision Q20.2 = A).
 - Rule for LAY-11, recorded here: a check collapses only under a subject on
   its own board. A Cleanup check whose subjects are all Main steps stays a
   card on the Cleanup board (it has no wire there to fold into) and is
@@ -42,19 +42,19 @@ the moment word *Cleanup*.
   (`promoted.product.promotion.price` for the code's
   `promoted.promotion.price`): LAY-08's rule, unchanged here.
 
-## Decisions pending (owner)
+## Decisions (owner, 2026-11-07)
 
-> **Q20.1 — The tab on a component call.** A (recommended): the same
-> *Checks* tab and list as a request; under LAY-11 its checks collapse under
-> the call. B: no tab; a component call's checks stay cards under LAY-11.
->
-> **Q20.2 — A Cleanup check under its Main step.** A (recommended): in the
-> same list, counted apart like gates — `3 checks · 1 shared · 1 in
-> Cleanup`; the Main step's footer aggregate (LAY-11) leaves it out; its
-> card stays on the Cleanup board. B: counted in — `4 checks`, the row
-> marked *Cleanup*; LAY-11 hides its card and the Main footer includes its
-> result. C: under a *CLEANUP* heading of its own with its own count line;
-> otherwise as A.
+Taken on the captures of `mock/lay-20-checks` (`d253fed`), recorded on #308.
+
+- **Q20.1 = A — The tab on a component call.** The same *Checks* tab and
+  list as a request's. Under LAY-11 a call's checks collapse under the call.
+- **Q20.2 = A — A Cleanup check under its Main step.** In the same list,
+  counted apart like a gate: the count reads `3 checks · 1 in Cleanup` and
+  the row reads `cart_id_kept — Cleanup`. The Main step's footer aggregate
+  (LAY-11) leaves it out, and its card stays on the Cleanup board.
+
+A failure is never hidden by that counting: a failed Cleanup row still
+colours the line above the list, as a failed gate does.
 
 ## Mock-up
 
@@ -76,18 +76,22 @@ The wording follows the owner's answers.
    with predicate, sources, status and moment, and the count line reads `1
    check`. Test: `lay20_criterion_1_a_component_call_lists_its_checks`.
 2. Under `cart` on the Main board, `cart_id_kept` is listed after the Main
-   checks with the title `cart_id_kept — Cleanup`; the count line reads as
-   Q20.2 says. Test:
+   checks with the title `cart_id_kept — Cleanup`; the count line reads
+   `3 checks · 1 shared · 1 in Cleanup`. Test:
    `lay20_criterion_2_a_cleanup_check_is_listed_under_its_main_step`.
-3. After a simulation the row shows the check's result and the count line
-   follows it (`3/3 ✓ · 1 shared · 1 in Cleanup` under Q20.2 = A). Test:
+3. After a simulation the row shows the check's result
+   (`cart_id_kept — Passed`) and the count line follows it
+   (`3/3 ✓ · 1 shared · 1 in Cleanup`). Test:
    `lay20_criterion_3_the_cleanup_result_after_a_run`.
 4. On the Cleanup board the list of `removed` names `gone`, and
    `cart_id_kept` is listed under no Cleanup step. Test:
    `lay20_criterion_4_the_cleanup_board_lists_its_own_checks`.
 5. The unit tests of `inspector::checks` and LAY-08's criteria still pass;
    a request's list is unchanged when the scenario has no Cleanup check.
-   Test: the existing `lay08_*` tests.
+   Tests: the existing `lay08_*` tests and
+   `a_cleanup_check_is_listed_under_the_main_step_it_reads`. The count line
+   still stands whole at 960 × 540, the fourth row below the fold as LAY-08
+   accepted. Test: `lay20_the_count_line_stands_at_the_smallest_window`.
 
 ## Not in scope
 
@@ -97,11 +101,18 @@ a component's own graph (listed in that component's board, as today).
 
 ## Technical appendix
 
-- `inspector/mod.rs`: the tab gate becomes `Request | Component`;
-  `Context` gets `cleanup: Option<&Graph>`, the scenario's Cleanup graph
-  while the board shows Main (`folder/diagram.rs`; `None` in `app.rs`).
-- `inspector/checks.rs`: `rows` runs once over the board and once over the
-  Cleanup graph with a combined lookup graph for `check_subjects`; a
-  Cleanup row's moment is *Cleanup* until it has a result; `summary` counts
-  per Q20.2. The mock's `mock_lay20` switch is not merged.
-- About 120 changed lines outside tests.
+As built:
+
+- `inspector/mod.rs`: the tab gate is `Request | Component`; `Context` gained
+  `cleanup: Option<&Graph>`, the scenario's Cleanup graph while the board
+  shows Main. Both windows fill it: `folder/diagram.rs` (the folder window)
+  and `app.rs` (the workspace window, through `Editor::sibling_graph`); it is
+  `None` on the Cleanup board and inside a component.
+- `inspector/checks.rs`: `rows` runs `pass` once over the board and once over
+  the Cleanup graph, the second with a combined lookup graph so that
+  `check_subjects` finds the Main steps it reads; a Cleanup row's moment is
+  *Cleanup* until it has a result; `summary` counts those rows apart and
+  leaves them out of the pass fraction, while a failed one still colours the
+  line. A Cleanup graph without a check costs no second pass.
+- About 130 changed lines outside tests. The mock's `mock_lay20` switch is not
+  merged.
