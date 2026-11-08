@@ -54,7 +54,10 @@ Taken on the captures of `mock/lay-20-checks` (`d253fed`), recorded on #308.
   (LAY-11) leaves it out, and its card stays on the Cleanup board.
 
 A failure is never hidden by that counting: a failed Cleanup row still
-colours the line above the list, as a failed gate does.
+colours the line above the list, as a failed gate does, and the row carries
+the failure in words. Tests:
+`lay20_a_failed_cleanup_check_is_shown_and_counted_apart` through the window
+and `the_summary_counts_what_became_of_the_checks` for the colour.
 
 ## Mock-up
 
@@ -83,8 +86,8 @@ The wording follows the owner's answers.
    (`cart_id_kept — Passed`) and the count line follows it
    (`3/3 ✓ · 1 shared · 1 in Cleanup`). Test:
    `lay20_criterion_3_the_cleanup_result_after_a_run`.
-4. On the Cleanup board the list of `removed` names `gone`, and
-   `cart_id_kept` is listed under no Cleanup step. Test:
+4. On the Cleanup board the list of `removed` names `gone`; `cart_id_kept`
+   is listed under no Cleanup step and its card is still there. Test:
    `lay20_criterion_4_the_cleanup_board_lists_its_own_checks`.
 5. The unit tests of `inspector::checks` and LAY-08's criteria still pass;
    a request's list is unchanged when the scenario has no Cleanup check.
@@ -109,10 +112,13 @@ As built:
   and `app.rs` (the workspace window, through `Editor::sibling_graph`); it is
   `None` on the Cleanup board and inside a component.
 - `inspector/checks.rs`: `rows` runs `pass` once over the board and once over
-  the Cleanup graph, the second with a combined lookup graph so that
-  `check_subjects` finds the Main steps it reads; a Cleanup row's moment is
-  *Cleanup* until it has a result; `summary` counts those rows apart and
-  leaves them out of the pass fraction, while a failed one still colours the
-  line. A Cleanup graph without a check costs no second pass.
+  the Cleanup graph, the second resolving sources in both so that the Main
+  steps it reads are found; a Cleanup row's moment is *Cleanup* until it has
+  a result; `summary` counts those rows apart and leaves them out of the pass
+  fraction, while a failed one still colours the line. A Cleanup graph
+  without a check costs no second pass.
+- `apiforge-core::graph`: `check_subjects_in(&[&Graph], check)` is
+  `check_subjects` over several graphs, which spares the Inspector an owned
+  combined graph per frame; `check_subjects` now calls it with one.
 - About 130 changed lines outside tests. The mock's `mock_lay20` switch is not
   merged.

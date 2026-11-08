@@ -13263,6 +13263,33 @@ mod lay20 {
                 && harness.query_by_label_contains("cart_id_kept —").is_none(),
             "listed under no Cleanup step"
         );
+        // It is listed nowhere here because it is still a card here: it has no
+        // wire on this board to fold into (the rule LAY-11 follows).
+        assert!(
+            has(&harness, "cart_id_kept (Comparison)"),
+            "its card stays on the Cleanup board"
+        );
+    }
+
+    /// A Cleanup check that fails is shown with its failure under its Main
+    /// step, while the count of checks and the pass fraction leave it out:
+    /// counting apart hides no failure.
+    #[test]
+    fn lay20_a_failed_cleanup_check_is_shown_and_counted_apart() {
+        let failing = source().replace(IN_CLEANUP, "cart_id_kept = assert cart.body.id == \"c-2\"");
+        assert!(failing.contains("\"c-2\""), "the Cleanup check now fails");
+        let (_project, mut harness) = open(&failing, WIDE);
+        show_checks(&mut harness, "cart", false);
+        simulate(&mut harness);
+        settle(&mut harness);
+        assert_lists(
+            &harness,
+            &[
+                "3/3 ✓ · 1 shared · 1 in Cleanup",
+                "cart_id_kept — Failed",
+                "✕ Failed: got \"c-1\", expected \"c-2\"",
+            ],
+        );
     }
 
     /// The fourth row of `cart` is below the fold at the smallest window, which

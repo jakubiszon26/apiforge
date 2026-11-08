@@ -12,7 +12,7 @@ use super::Context;
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson},
-    graph::{check_subjects, condition_inputs, condition_predicates, predicate, sequence},
+    graph::{check_subjects_in, condition_inputs, condition_predicates, predicate, sequence},
     model::{Match, NodeKind, Predicate},
     run::{RunResult, RunStatus, StepResult, StepStatus},
 };
@@ -237,7 +237,7 @@ fn cleanup_moment(check: &Node, run: Option<&RunResult>) -> String {
 /// `position` is the board's order, which says which subject comes last.
 fn pass(
     checks: &Graph,
-    lookup: &Graph,
+    lookup: &[&Graph],
     names: &Names<'_>,
     position: &HashMap<&str, usize>,
     subject: &str,
@@ -248,7 +248,7 @@ fn pass(
         .iter()
         .filter_map(|id| checks.nodes.iter().find(|node| node.id == *id))
         .filter_map(|check| {
-            let subjects = check_subjects(lookup, check).subjects;
+            let subjects = check_subjects_in(lookup, check).subjects;
             let own = subjects
                 .iter()
                 .find(|candidate| candidate.step == subject)?;
@@ -294,16 +294,6 @@ fn is_check(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Assert | NodeKind::Condition)
 }
 
-/// The steps of both graphs in one, so that a Cleanup check's subjects are
-/// found. `check_subjects` reads the nodes alone.
-fn both(board: &Graph, cleanup: &Graph) -> Graph {
-    Graph {
-        nodes: board.nodes.iter().chain(&cleanup.nodes).cloned().collect(),
-        edges: Vec::new(),
-        proxies: Vec::new(),
-    }
-}
-
 /// The checks of the step `subject`: those of its own board, then those the
 /// scenario's Cleanup graph holds for it, which `cleanup` names while the board
 /// shows Main (LAY-20).
@@ -322,12 +312,17 @@ fn rows(
         .enumerate()
         .map(|(index, id)| (*id, index))
         .collect();
-    let mut rows = pass(board, board, &names, &position, subject, run, false);
+    let mut rows = pass(board, &[board], &names, &position, subject, run, false);
     // A Cleanup graph without a check needs no pass of its own.
     if let Some(cleanup) = cleanup.filter(|graph| graph.nodes.iter().any(is_check)) {
-        let lookup = both(board, cleanup);
         rows.extend(pass(
-            cleanup, &lookup, &names, &position, subject, run, true,
+            cleanup,
+            &[board, cleanup],
+            &names,
+            &position,
+            subject,
+            run,
+            true,
         ));
     }
     rows
