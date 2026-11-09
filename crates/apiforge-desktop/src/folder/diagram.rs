@@ -359,21 +359,30 @@ impl FolderApp {
                 None
             }
             Command::SetCompactCards(compact) => {
-                self.preferences.compact_cards = compact;
-                let preferences = self.preferences.clone();
-                self.storage_io(
-                    "Saving preferences…",
-                    move || preferences.save(crate::preferences::Preference::CompactCards),
-                    |_, _| {},
-                );
-                let density = self.density();
-                for canvas in self.canvases.values_mut() {
-                    canvas.set_density(density);
+                let before = self.density();
+                let density = if compact {
+                    canvas::CardDensity::Compact
+                } else {
+                    canvas::CardDensity::Full
+                };
+                self.switch_density(density);
+                // The board repacks at the new sizes, as one edit (Q14 = A),
+                // which Undo takes back together with the density.
+                let current = self.shared_model(document_id);
+                let repacked = Board { density, ..board }.tidy_up(&[]);
+                if let Some(result) = repacked.map(|graph| Ok(graph.into())) {
+                    self.apply_edit(document_id, model, cleanup, result);
                 }
-                // The board repacks at the new sizes, as one edit (Q14 = A).
-                Board { density, ..board }
-                    .tidy_up(&[])
-                    .map(|graph| Ok(graph.into()))
+                self.density_switch = self
+                    .shared_model(document_id)
+                    .filter(|after| current.is_none_or(|current| !Arc::ptr_eq(&current, after)))
+                    .map(|after| DensitySwitch {
+                        document: document_id.to_owned(),
+                        before,
+                        after: density,
+                        model: after,
+                    });
+                None
             }
             Command::InspectInput { node, input } => {
                 self.new_inputs.remove(document_id);

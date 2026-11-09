@@ -14319,6 +14319,43 @@ mod lay16 {
         assert_eq!(canvas(&harness).debug_camera(), camera);
     }
 
+    /// The switch and its Tidy up are one action: Undo restores the density
+    /// with the positions packed for it, so no card overlaps, and Redo
+    /// brings both back.
+    #[test]
+    fn lay16_undo_of_the_switch_restores_the_density() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        let compact = world(&harness);
+        switch_density(&mut harness);
+        settle(&mut harness);
+        harness.step();
+        assert!(!folder(&harness).preferences.compact_cards);
+        let full = world(&harness);
+
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness);
+        harness.step();
+        assert!(
+            folder(&harness).preferences.compact_cards,
+            "Undo restores compact cards"
+        );
+        assert_eq!(world(&harness), compact, "and the compact positions");
+        assert_disjoint_cards(&world(&harness), "after Undo of the switch");
+
+        harness.key_press_modifiers(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::Z,
+        );
+        settle(&mut harness);
+        harness.step();
+        assert!(
+            !folder(&harness).preferences.compact_cards,
+            "Redo switches to full cards again"
+        );
+        assert_eq!(world(&harness), full, "with the full positions");
+        assert_disjoint_cards(&world(&harness), "after Redo of the switch");
+    }
+
     /// Criterion 5: double-clicking an input row at Full opens the Inspector
     /// on that input; the card has no inline field.
     #[test]
