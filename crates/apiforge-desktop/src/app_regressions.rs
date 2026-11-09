@@ -212,7 +212,7 @@ fn component_code_places_all_new_blocks_without_moving_existing_ones() {
                         other,
                         &reference,
                         app.editor.project(),
-                        canvas::CardDensity::Full
+                        canvas::CardDensity::Full,
                     )
                     .rect()
                 )

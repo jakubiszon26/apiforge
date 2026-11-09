@@ -101,8 +101,9 @@ Tests in `crates/apiforge-desktop/src/canvas/layout.rs` (`mod tests`) and
 1. At the compact density `login` and `cart` are at least 40 % shorter than
    today's `Card::height()`; the metric command prints both heights. Test:
    `lay16_criterion_1_compact_cards_are_shorter`.
-2. Zooming from 0.2 to 1.0 moves no card: every world rectangle is equal at
-   each zoom; at Full the card writes the input values in the same box.
+2. Zooming from 0.25 (the board's minimum) to 1.0 moves no card: every
+   world rectangle is equal at each zoom; at Full the card writes the input
+   values in the same box.
    Test: `lay16_criterion_2_zooming_moves_no_card`.
 3. `catalogue`'s query, configured but not wired, reads `Query · 1
    parameter` at the compact density; no configured input is hidden. Test:
@@ -113,9 +114,10 @@ Tests in `crates/apiforge-desktop/src/canvas/layout.rs` (`mod tests`) and
 5. Double-clicking an input row at Full opens the Inspector on that input
    (UX-32's form); the card itself has no inline field. Test:
    `lay16_criterion_5_editing_moves_to_the_inspector`.
-6. Routing receives the final sizes: the LAY-01 metrics on `shop-30` at the
-   compact density show no card collision, and the measured fit zoom at
-   1600 × 1000 is reported with the heights. Test:
+6. Routing receives the final sizes: `shop-30` tidied at the compact
+   density has no card collision, and the fit zoom at 1600 × 1000, measured
+   by the test from the compact cards (the LAY-01 `quality` example still
+   measures full cards), is reported with the heights. Test:
    `lay16_criterion_6_no_collision_and_the_fit_reported`. Decided on
    2026-11-06: the fit of at least 0.50 moved to LAY-06, because Tidy up on
    `main` gives `shop-30` fifteen columns of 376 px (5544 px wide, fit

@@ -13570,9 +13570,10 @@ mod ux21 {
     }
 }
 
-/// UX-28 (#236): the *Curves* wire style leaves the *Wire style* menu until
-/// it draws curves (owner decision 18 = A); a saved `spline` preference, which
-/// is how *Curves* was stored, falls back to *Right angles*.
+/// UX-28 (#236): the *Curves* wire style leaves the *Board view* menu (named
+/// *Wire style* until LAY-16) until it draws curves (owner decision 18 = A); a
+/// saved `spline` preference, which is how *Curves* was stored, falls back to
+/// *Right angles*.
 mod ux28 {
     use super::*;
     use crate::canvas::WireStyle;
@@ -13599,7 +13600,7 @@ mod ux28 {
         (harness, id)
     }
 
-    /// Criterion 1: the *Wire style* menu lists the current set minus
+    /// Criterion 1: the *Board view* menu lists the current set minus
     /// *Curves*: *Right angles*, and *Bridges at crossings* below the line.
     #[test]
     fn ux28_criterion_1_the_menu_has_no_curves() {
@@ -14218,14 +14219,14 @@ mod lay16 {
         harness.step();
     }
 
-    /// Criterion 2: zooming from 0.2 to 1.0 moves no card, and at Full the
+    /// Criterion 2: zooming from 0.25 to 1.0 moves no card, and at Full the
     /// card writes the input values in the same box.
     #[test]
     fn lay16_criterion_2_zooming_moves_no_card() {
         let (_project, mut harness) = open(&shop_30(), WIDE);
         let before = world(&harness);
         assert!(before.len() >= 30, "the whole board is measured");
-        for zoom in [0.2, 0.3, 0.44, 0.46, 0.6, 0.74, 0.76, 0.9, 1.0] {
+        for zoom in [0.25, 0.3, 0.44, 0.46, 0.6, 0.74, 0.76, 0.9, 1.0] {
             show(&mut harness, "catalogue", zoom);
             assert_eq!(world(&harness), before, "at zoom {zoom} no card moved");
         }

@@ -188,7 +188,9 @@ fn the_row_shows_its_parts_left_to_right() {
 }
 
 /// Criterion 3: Main and Cleanup keep their names and switch the board's
-/// phase; Add step and the tools keep their names and Add step opens its menu.
+/// phase; Add step and the tools carry their current names (the second tool
+/// is *Board view* since LAY-16) and Add step opens its menu. The test keeps
+/// its name, which the KTLO-12 QA report cites.
 #[test]
 fn main_cleanup_add_step_and_the_tools_keep_their_names_and_behaviour() {
     for mode in ["Diagram", "Split"] {
