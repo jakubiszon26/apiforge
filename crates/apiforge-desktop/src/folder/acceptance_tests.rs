@@ -13073,6 +13073,273 @@ mod lay08 {
     }
 }
 
+/// LAY-20 (#308): every check with a subject is listed under that subject. A
+/// component call has the *Checks* tab, and a Cleanup check that reads a Main
+/// step is listed under that step, counted apart. On `shop-30` with the two
+/// checks this ticket needs, added here and not in the fixture.
+mod lay20 {
+    use super::*;
+    use crate::testing::{MINIMUM, assert_within_window, folder_harness_in};
+    use std::time::{Duration, Instant};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    /// Reads the component call `promoted`.
+    const ON_A_CALL: &str = "promo_priced = assert promoted.promotion.price > 0";
+    /// A Cleanup check whose only subject is the Main step `cart`.
+    const IN_CLEANUP: &str = "cart_id_kept = assert cart.body.id == \"c-1\"";
+
+    fn shop_30() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/scenarios/lay/shop-30.afs");
+        fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("the fixture {}: {error}", path.display()))
+    }
+
+    /// `shop-30` plus the two checks. `replace` does nothing when its anchor is
+    /// gone, so each line is looked for afterwards.
+    fn source() -> String {
+        let source = shop_30()
+            .replace("  cleanup {", &format!("  {ON_A_CALL}\n  cleanup {{"))
+            .replace(
+                "    gone = assert removed.status == 204",
+                &format!("    gone = assert removed.status == 204\n    {IN_CLEANUP}"),
+            );
+        for line in [ON_A_CALL, IN_CLEANUP] {
+            assert!(source.contains(line), "the source holds {line}");
+        }
+        source
+    }
+
+    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        fs::write(project.path().join(SCENARIO), source).unwrap();
+        let mut harness = folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    fn document(harness: &FolderHarness) -> String {
+        only(harness, DocumentKind::Scenario)
+    }
+
+    /// The steps of one board of the scenario, by handle: a request or a call
+    /// of a component, the two kinds that have subjects.
+    fn steps(harness: &FolderHarness, cleanup: bool) -> Vec<(String, String)> {
+        let id = document(harness);
+        let model = folder(harness).snapshot(&id).unwrap().model.unwrap();
+        graph_of(&model, cleanup)
+            .nodes
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    apiforge_core::model::NodeKind::Request
+                        | apiforge_core::model::NodeKind::Component
+                )
+            })
+            .map(|node| (node.handle.clone(), node.id.clone()))
+            .collect()
+    }
+
+    /// Selects the step `handle` of the board shown and opens its checks.
+    fn show_checks(harness: &mut FolderHarness, handle: &str, cleanup: bool) {
+        let id = steps(harness, cleanup)
+            .into_iter()
+            .find(|(name, _)| name == handle)
+            .unwrap_or_else(|| panic!("no step {handle}"))
+            .1;
+        let document = document(harness);
+        app(harness).selections.insert(document, vec![id]);
+        settle(harness);
+        harness.get_by_label("Checks").click();
+        settle(harness);
+    }
+
+    fn has(harness: &FolderHarness, label: &str) -> bool {
+        harness.query_by_label(label).is_some()
+    }
+
+    fn assert_lists(harness: &FolderHarness, labels: &[&str]) {
+        for label in labels {
+            assert!(has(harness, label), "the list says: {label}");
+        }
+    }
+
+    fn simulate(harness: &mut FolderHarness) {
+        choose(harness, "Run simulation");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while folder(harness).runs.handle.is_some() {
+            assert!(Instant::now() < deadline, "the run must finish");
+            harness.step();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        settle(harness);
+    }
+
+    /// Criterion 1: the Inspector of the component call `promoted` has the
+    /// *Checks* tab, with the same list as a request's.
+    #[test]
+    fn lay20_criterion_1_a_component_call_lists_its_checks() {
+        let (_project, mut harness) = open(&source(), WIDE);
+        show_checks(&mut harness, "promoted", false);
+        assert_lists(
+            &harness,
+            &[
+                "1 check",
+                "Check promo_priced",
+                "promo_priced — Waiting for promoted",
+                "promoted.product.promotion.price is greater than 0",
+                "Sources: promoted.product.promotion.price",
+                "Not run yet",
+            ],
+        );
+    }
+
+    /// Criterion 2: `cart_id_kept` runs in Cleanup and reads `cart`, so the
+    /// list of `cart` names it after the Main checks, with the moment word
+    /// *Cleanup*, and counts it apart.
+    #[test]
+    fn lay20_criterion_2_a_cleanup_check_is_listed_under_its_main_step() {
+        let (_project, mut harness) = open(&source(), WIDE);
+        show_checks(&mut harness, "cart", false);
+        assert_lists(
+            &harness,
+            &[
+                "3 checks · 1 shared · 1 in Cleanup",
+                "cart_id_kept — Cleanup",
+                "cart.body.id equals \"c-1\"",
+                "Sources: cart.body.id",
+            ],
+        );
+        let cleanup = harness.get_by_label("Check cart_id_kept").rect();
+        for main in [
+            "Check cart_created",
+            "Check cart_total",
+            "Check receipt_total",
+        ] {
+            let rect = harness.get_by_label(main).rect();
+            assert!(
+                rect.bottom() <= cleanup.top(),
+                "{main} stands above the Cleanup check: {rect:?} and {cleanup:?}"
+            );
+        }
+    }
+
+    /// Criterion 3: after a simulation the row carries the check's result and
+    /// the count line follows it, the Cleanup check still apart. The list is
+    /// open before the run, as a person watching a step's checks has it.
+    #[test]
+    fn lay20_criterion_3_the_cleanup_result_after_a_run() {
+        let (_project, mut harness) = open(&source(), WIDE);
+        show_checks(&mut harness, "cart", false);
+        simulate(&mut harness);
+        settle(&mut harness);
+        assert_lists(
+            &harness,
+            &[
+                "3/3 ✓ · 1 shared · 1 in Cleanup",
+                "cart_id_kept — Passed",
+                "Check cart_id_kept",
+            ],
+        );
+        assert!(
+            !has(&harness, "cart_id_kept — Cleanup"),
+            "the result takes the moment's place"
+        );
+        assert!(
+            harness.query_all_by_label("✓ Passed").count() >= 4,
+            "the Cleanup check passed with the Main ones"
+        );
+    }
+
+    /// Criterion 4: the Cleanup board lists the checks of its own steps, and a
+    /// Cleanup check whose subject is a Main step is listed under no step
+    /// there: it stays the card it is.
+    #[test]
+    fn lay20_criterion_4_the_cleanup_board_lists_its_own_checks() {
+        let (_project, mut harness) = open(&source(), WIDE);
+        choose(&mut harness, "Cleanup");
+        settle(&mut harness);
+        show_checks(&mut harness, "removed", true);
+        assert_lists(
+            &harness,
+            &[
+                "1 check",
+                "Check gone",
+                "gone — Waiting for removed",
+                "removed.status equals 204",
+            ],
+        );
+        assert!(
+            harness.query_by_label("Check cart_id_kept").is_none()
+                && harness.query_by_label_contains("cart_id_kept —").is_none(),
+            "listed under no Cleanup step"
+        );
+        // It is listed nowhere here because it is still a card here: it has no
+        // wire on this board to fold into (the rule LAY-11 follows).
+        assert!(
+            has(&harness, "cart_id_kept (Comparison)"),
+            "its card stays on the Cleanup board"
+        );
+    }
+
+    /// A Cleanup check that fails is shown with its failure under its Main
+    /// step, while the count of checks and the pass fraction leave it out:
+    /// counting apart hides no failure.
+    #[test]
+    fn lay20_a_failed_cleanup_check_is_shown_and_counted_apart() {
+        let failing = source().replace(IN_CLEANUP, "cart_id_kept = assert cart.body.id == \"c-2\"");
+        assert!(failing.contains("\"c-2\""), "the Cleanup check now fails");
+        let (_project, mut harness) = open(&failing, WIDE);
+        show_checks(&mut harness, "cart", false);
+        simulate(&mut harness);
+        settle(&mut harness);
+        assert_lists(
+            &harness,
+            &[
+                "3/3 ✓ · 1 shared · 1 in Cleanup",
+                "cart_id_kept — Failed",
+                "✕ Failed: got \"c-1\", expected \"c-2\"",
+            ],
+        );
+    }
+
+    /// The fourth row of `cart` is below the fold at the smallest window, which
+    /// LAY-08 accepted; the count line that names it is not.
+    #[test]
+    fn lay20_the_count_line_stands_at_the_smallest_window() {
+        let (_project, mut harness) = open(&source(), MINIMUM);
+        show_checks(&mut harness, "cart", false);
+        let count = "3 checks · 1 shared · 1 in Cleanup";
+        assert_within_window(&harness, &[count]);
+        // The list scrolls inside the panel's margin, which ends above the
+        // window's own edge (LAY-08).
+        let bottom = harness.get_by_label("Resize inspector").rect().bottom() - 16.0;
+        let line = harness.get_by_label(count).rect();
+        assert!(
+            line.bottom() <= bottom,
+            "the count line is clipped: {line:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay20_checks() {
+        for (size, name) in [(MINIMUM, "960"), (WIDE, "1600")] {
+            let (_project, mut harness) = open(&source(), size);
+            show_checks(&mut harness, "promoted", false);
+            crate::testing::capture(&mut harness, &format!("lay20-component-{name}"), None);
+            let (_project, mut harness) = open(&source(), size);
+            show_checks(&mut harness, "cart", false);
+            crate::testing::capture(&mut harness, &format!("lay20-cleanup-apart-{name}"), None);
+            simulate(&mut harness);
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, &format!("lay20-cleanup-run-{name}"), None);
+        }
+    }
+}
+
 /// UX-18 (#226): opening the Inspector does not re-fit the board. Selecting a
 /// card keeps the zoom, and the selected or newly added card is panned the
 /// least into view when the Inspector would cover it. A resize of the window

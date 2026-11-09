@@ -1,15 +1,18 @@
-//! The *Checks* tab of a request's Inspector (LAY-08): the checks that read the
-//! step, in words, with their sources, status and moment.
+//! The *Checks* tab of a step's Inspector (LAY-08): the checks that read the
+//! step, in words, with their sources, status and moment. A request and a call
+//! of a component both have it, because both are subjects of a check (LAY-20).
 //!
 //! A check with several subjects is listed under each (Q6); a gate is listed
 //! under its subject and counted apart; a check with no subject is listed
-//! nowhere. Nothing here edits the document.
+//! nowhere. A check of the scenario's Cleanup graph is listed under the Main
+//! step it reads, with the moment word *Cleanup* and counted apart, so that
+//! aggregation hides no failure (LAY-20). Nothing here edits the document.
 
 use super::Context;
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson},
-    graph::{check_subjects, condition_inputs, condition_predicates, predicate, sequence},
+    graph::{check_subjects_in, condition_inputs, condition_predicates, predicate, sequence},
     model::{Match, NodeKind, Predicate},
     run::{RunResult, RunStatus, StepResult, StepStatus},
 };
@@ -57,12 +60,15 @@ struct Row {
     sources: Vec<String>,
     shared_with: Vec<String>,
     gate: bool,
+    /// Listed under a Main step but run in Cleanup: counted apart, and its
+    /// card stays on the Cleanup board (LAY-20).
+    cleanup: bool,
 }
 
 /// Names a step by its handle, wherever the check found it: a Cleanup check
 /// may read a step of the main graph.
 struct Names<'a> {
-    graphs: [&'a Graph; 2],
+    graphs: Vec<&'a Graph>,
 }
 
 impl Names<'_> {
@@ -216,22 +222,33 @@ fn moment(check: &Node, latest: &str, names: &Names<'_>, run: Option<&RunResult>
     }
 }
 
-/// The checks of the step `subject`, in the order the engine reaches them.
-fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) -> Vec<Row> {
-    let names = Names {
-        graphs: [board, graph],
-    };
-    let order = sequence(board);
-    let position: HashMap<&str, usize> = order
+/// A check listed under a Main step but run in Cleanup names its phase until it
+/// has a result of its own; then the result takes that place (LAY-20).
+fn cleanup_moment(check: &Node, run: Option<&RunResult>) -> String {
+    match run.and_then(|run| run.step(&check.id)) {
+        Some(step) => step.status.label().to_owned(),
+        None => "Cleanup".to_owned(),
+    }
+}
+
+/// The checks of one graph that read the step `subject`, in the order the engine
+/// reaches them. `lookup` is where a check's sources are resolved: the Cleanup
+/// pass resolves them in both graphs, because its subjects are Main steps.
+/// `position` is the board's order, which says which subject comes last.
+fn pass(
+    checks: &Graph,
+    lookup: &[&Graph],
+    names: &Names<'_>,
+    position: &HashMap<&str, usize>,
+    subject: &str,
+    run: Option<&RunResult>,
+    cleanup: bool,
+) -> Vec<Row> {
+    sequence(checks)
         .iter()
-        .enumerate()
-        .map(|(index, id)| (*id, index))
-        .collect();
-    order
-        .iter()
-        .filter_map(|id| board.nodes.iter().find(|node| node.id == *id))
+        .filter_map(|id| checks.nodes.iter().find(|node| node.id == *id))
         .filter_map(|check| {
-            let subjects = check_subjects(board, check).subjects;
+            let subjects = check_subjects_in(lookup, check).subjects;
             let own = subjects
                 .iter()
                 .find(|candidate| candidate.step == subject)?;
@@ -240,7 +257,12 @@ fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) ->
                 .map(|candidate| candidate.step)
                 .max_by_key(|step| position.get(step))?;
             let (status, tone, outcome) = status(run.and_then(|run| run.step(&check.id)));
-            let mut title = format!("{} — {}", check.handle, moment(check, latest, &names, run));
+            let moment = if cleanup {
+                cleanup_moment(check, run)
+            } else {
+                moment(check, latest, names, run)
+            };
+            let mut title = format!("{} — {moment}", check.handle);
             // Under its latest subject the line *Shared with* says it alone.
             if own.shared && latest != subject {
                 title.push_str(" · Shared");
@@ -262,9 +284,48 @@ fn rows(board: &Graph, graph: &Graph, subject: &str, run: Option<&RunResult>) ->
                     .map(|candidate| names.step(candidate.step))
                     .collect(),
                 gate: own.gate,
+                cleanup,
             })
         })
         .collect()
+}
+
+fn is_check(node: &Node) -> bool {
+    matches!(node.kind, NodeKind::Assert | NodeKind::Condition)
+}
+
+/// The checks of the step `subject`: those of its own board, then those the
+/// scenario's Cleanup graph holds for it, which `cleanup` names while the board
+/// shows Main (LAY-20).
+fn rows(
+    board: &Graph,
+    graph: &Graph,
+    cleanup: Option<&Graph>,
+    subject: &str,
+    run: Option<&RunResult>,
+) -> Vec<Row> {
+    let mut graphs = vec![board, graph];
+    graphs.extend(cleanup);
+    let names = Names { graphs };
+    let position: HashMap<&str, usize> = sequence(board)
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (*id, index))
+        .collect();
+    let mut rows = pass(board, &[board], &names, &position, subject, run, false);
+    // A Cleanup graph without a check needs no pass of its own.
+    if let Some(cleanup) = cleanup.filter(|graph| graph.nodes.iter().any(is_check)) {
+        rows.extend(pass(
+            cleanup,
+            &[board, cleanup],
+            &names,
+            &position,
+            subject,
+            run,
+            true,
+        ));
+    }
+    rows
 }
 
 fn plural(count: usize, one: &str) -> String {
@@ -275,10 +336,13 @@ fn plural(count: usize, one: &str) -> String {
     }
 }
 
-/// The line above the list. Gates are counted apart from the checks; a run
-/// turns the count of checks into what became of them.
+/// The line above the list. Gates and the checks of Cleanup are counted apart
+/// from the checks; a run turns the count of checks into what became of them.
 fn summary(rows: &[Row], run: bool) -> (String, Tone) {
-    let checks: Vec<&Row> = rows.iter().filter(|row| !row.gate).collect();
+    let checks: Vec<&Row> = rows
+        .iter()
+        .filter(|row| !row.gate && !row.cleanup)
+        .collect();
     let count = |outcome: Outcome| checks.iter().filter(|row| row.outcome == outcome).count();
     let (failed, passed) = (count(Outcome::Failed), count(Outcome::Passed));
     let (not_run, waiting) = (count(Outcome::NotRun), count(Outcome::Waiting));
@@ -303,7 +367,11 @@ fn summary(rows: &[Row], run: bool) -> (String, Tone) {
     if shared > 0 {
         parts.push(format!("{shared} shared"));
     }
-    let gates = rows.len() - checks.len();
+    let in_cleanup = rows.iter().filter(|row| row.cleanup).count();
+    if in_cleanup > 0 {
+        parts.push(format!("{in_cleanup} in Cleanup"));
+    }
+    let gates = rows.iter().filter(|row| row.gate && !row.cleanup).count();
     if gates > 0 {
         parts.push(plural(gates, "gate"));
     }
@@ -369,9 +437,15 @@ fn row(ui: &mut Ui, row: &Row) {
     .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
 }
 
-/// The list of the selected request.
+/// The list of the selected step.
 pub(super) fn show(ui: &mut Ui, context: &Context<'_>) {
-    let rows = rows(context.board, context.graph, &context.node.id, context.run);
+    let rows = rows(
+        context.board,
+        context.graph,
+        context.cleanup,
+        &context.node.id,
+        context.run,
+    );
     if rows.is_empty() {
         widgets::hint(ui, "No check reads this step yet.");
         return;
@@ -453,7 +527,7 @@ mod tests {
     }
 
     fn title(board: &Graph, subject: &str, run: Option<&RunResult>) -> String {
-        rows(board, board, subject, run)[0].title.clone()
+        rows(board, board, None, subject, run)[0].title.clone()
     }
 
     /// The moment follows a run under way: a shared check still waits for its
@@ -497,6 +571,7 @@ mod tests {
                 Vec::new()
             },
             gate,
+            cleanup: false,
         };
         let passed = line(false, Outcome::Passed, Tone::Passed, false);
         let waiting = line(false, Outcome::Waiting, Tone::Quiet, true);
@@ -521,6 +596,84 @@ mod tests {
             summary(&[failed, skipped, passed.clone()], true),
             ("✕ 1/3 failed · 1 skipped".to_owned(), Tone::Failed)
         );
-        assert_eq!(summary(&[passed], true), ("1/1 ✓".to_owned(), Tone::Passed));
+        assert_eq!(
+            summary(std::slice::from_ref(&passed), true),
+            ("1/1 ✓".to_owned(), Tone::Passed)
+        );
+
+        // A check of Cleanup listed under a Main step is counted apart, like a
+        // gate, and its failure still colours the line (LAY-20).
+        let in_cleanup = Row {
+            cleanup: true,
+            ..line(false, Outcome::Waiting, Tone::Quiet, false)
+        };
+        assert_eq!(
+            summary(&[passed.clone(), passed.clone(), in_cleanup.clone()], false),
+            ("2 checks · 1 in Cleanup".to_owned(), Tone::Quiet)
+        );
+        assert_eq!(
+            summary(&[passed.clone(), in_cleanup, gate], false),
+            ("1 check · 1 in Cleanup · 1 gate".to_owned(), Tone::Quiet)
+        );
+        let failed_in_cleanup = Row {
+            cleanup: true,
+            ..line(false, Outcome::Failed, Tone::Failed, false)
+        };
+        assert_eq!(
+            summary(&[passed, failed_in_cleanup], true),
+            ("1/1 ✓ · 1 in Cleanup".to_owned(), Tone::Failed),
+            "the count leaves it out, the colour does not"
+        );
+    }
+
+    /// A Cleanup check that reads a Main step is listed under that step, with
+    /// the moment word *Cleanup* until it has a result (LAY-20).
+    #[test]
+    fn a_cleanup_check_is_listed_under_the_main_step_it_reads() {
+        let board = board();
+        let mut kept = create_node(NodeKind::Assert, Position { x: 0.0, y: 0.0 }, None);
+        kept.id = "kept".into();
+        kept.handle = "kept".into();
+        kept.inputs
+            .insert("actual".into(), Binding::reference("first", "body", "id"));
+        kept.inputs.insert(
+            "expected".into(),
+            Binding::literal(serde_json::json!("c-1")),
+        );
+        let cleanup = Graph {
+            nodes: vec![request("removed"), kept],
+            edges: Vec::new(),
+            proxies: Vec::new(),
+        };
+
+        let listed = rows(&board, &board, Some(&cleanup), "first", None);
+        let titles: Vec<&str> = listed.iter().map(|row| row.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["shared — Waiting for second · Shared", "kept — Cleanup"],
+            "the Cleanup check comes after the Main checks"
+        );
+        assert_eq!(
+            listed.last().unwrap().sources,
+            ["first.body.id"],
+            "the Cleanup check names the Main step it reads"
+        );
+        assert_eq!(
+            summary(&listed, false).0,
+            "1 check · 1 shared · 1 in Cleanup"
+        );
+
+        // Nothing is listed under a step of the Cleanup graph itself: that
+        // board lists its own checks.
+        assert!(rows(&board, &board, Some(&cleanup), "removed", None).is_empty());
+        // The result takes the moment's place once the check has one.
+        let done = run(&cleanup, &["kept"], RunStatus::Passed);
+        assert_eq!(
+            rows(&board, &board, Some(&cleanup), "first", Some(&done))
+                .last()
+                .unwrap()
+                .title,
+            "kept — Passed"
+        );
     }
 }

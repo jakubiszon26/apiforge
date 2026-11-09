@@ -2243,6 +2243,9 @@ impl App {
                 node: &node,
                 graph: &reference,
                 board: self.editor.graph(),
+                cleanup: (phase == Phase::Main)
+                    .then(|| self.editor.sibling_graph())
+                    .flatten(),
                 project: self.editor.project(),
                 parameters: &parameters,
                 run,
