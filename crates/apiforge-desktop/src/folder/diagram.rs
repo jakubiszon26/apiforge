@@ -335,7 +335,11 @@ impl FolderApp {
             Command::SetWireStyle(style) => {
                 self.preferences.wire_style = style;
                 let preferences = self.preferences.clone();
-                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                self.storage_io(
+                    "Saving preferences…",
+                    move || preferences.save(crate::preferences::Preference::WireStyle),
+                    |_, _| {},
+                );
                 for canvas in self.canvases.values_mut() {
                     canvas.wire_style = style;
                 }
@@ -344,7 +348,11 @@ impl FolderApp {
             Command::SetBridges(bridges) => {
                 self.preferences.bridges = bridges;
                 let preferences = self.preferences.clone();
-                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                self.storage_io(
+                    "Saving preferences…",
+                    move || preferences.save(crate::preferences::Preference::Bridges),
+                    |_, _| {},
+                );
                 for canvas in self.canvases.values_mut() {
                     canvas.bridges = bridges;
                 }
@@ -353,7 +361,11 @@ impl FolderApp {
             Command::SetCompactCards(compact) => {
                 self.preferences.compact_cards = compact;
                 let preferences = self.preferences.clone();
-                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                self.storage_io(
+                    "Saving preferences…",
+                    move || preferences.save(crate::preferences::Preference::CompactCards),
+                    |_, _| {},
+                );
                 let density = self.density();
                 for canvas in self.canvases.values_mut() {
                     canvas.set_density(density);

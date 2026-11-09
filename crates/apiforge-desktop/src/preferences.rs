@@ -6,9 +6,11 @@
 //! the default, and one that cannot be written is simply not remembered. Nothing
 //! here is worth interrupting the user for, and nothing here is worth a prompt.
 //!
-//! Several windows share the file without coordination, so the last window to
-//! change a preference wins. Each write is atomic, so a crash never leaves a
-//! half-written file behind.
+//! Several windows share the file without coordination. A change reads the file
+//! again and replaces only the preference that changed, so a window never
+//! reverts what another window changed since it started; the last window to
+//! change the same preference wins. Each write is atomic, so a crash never
+//! leaves a half-written file behind.
 
 use crate::canvas::WireStyle;
 use serde::{Deserialize, Serialize};
@@ -45,6 +47,15 @@ struct Stored {
 
 fn on() -> bool {
     true
+}
+
+/// One preference, named so that a change writes only that one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preference {
+    WireStyle,
+    Bridges,
+    CodePanel,
+    CompactCards,
 }
 
 /// The preferences of this session.
@@ -88,43 +99,47 @@ impl Preferences {
             path,
             ..Self::default()
         };
-        let Some(path) = preferences.path.clone() else {
-            return preferences;
-        };
-        let path = path.as_path();
-        let Ok(file) = std::fs::File::open(path) else {
-            return preferences;
-        };
-        if file
-            .metadata()
-            .is_ok_and(|metadata| metadata.len() > MAX_BYTES)
-        {
-            return preferences;
+        if let Some(stored) = preferences.path.as_deref().and_then(read) {
+            preferences.wire_style = match stored.wire_style {
+                StoredWireStyle::Orthogonal | StoredWireStyle::Spline => WireStyle::Orthogonal,
+            };
+            preferences.bridges = stored.bridges;
+            preferences.code_panel = stored.code_panel;
+            preferences.compact_cards = stored.compact_cards;
         }
-        let Ok(stored) = std::fs::read(path) else {
-            return preferences;
-        };
-        let Ok(stored) = serde_json::from_slice::<Stored>(&stored) else {
-            return preferences;
-        };
-        if stored.version != VERSION {
-            return preferences;
-        }
-        preferences.wire_style = match stored.wire_style {
-            StoredWireStyle::Orthogonal | StoredWireStyle::Spline => WireStyle::Orthogonal,
-        };
-        preferences.bridges = stored.bridges;
-        preferences.code_panel = stored.code_panel;
-        preferences.compact_cards = stored.compact_cards;
         preferences
     }
 
-    /// Writes the preferences, and says nothing if it cannot.
-    pub fn save(&self) {
+    /// Writes the preference that changed, and says nothing if it cannot. The
+    /// file is read again first and only `changed` is replaced in it, so what
+    /// another window wrote since this one started is kept; a file that cannot
+    /// be read is replaced by this window's preferences.
+    pub fn save(&self, changed: Preference) {
         let Some(path) = &self.path else {
             return;
         };
-        let stored = Stored {
+        let mut stored = read(path).unwrap_or_else(|| self.stored());
+        // A stored *Curves* is never written again (UX-28).
+        stored.wire_style = StoredWireStyle::Orthogonal;
+        match changed {
+            Preference::WireStyle => {
+                stored.wire_style = match self.wire_style {
+                    WireStyle::Orthogonal => StoredWireStyle::Orthogonal,
+                }
+            }
+            Preference::Bridges => stored.bridges = self.bridges,
+            Preference::CodePanel => stored.code_panel = self.code_panel,
+            Preference::CompactCards => stored.compact_cards = self.compact_cards,
+        }
+        let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
+            return;
+        };
+        let _ = apiforge_storage::write_atomic(path, &bytes);
+    }
+
+    /// This window's preferences as the file holds them.
+    fn stored(&self) -> Stored {
+        Stored {
             version: VERSION,
             wire_style: match self.wire_style {
                 WireStyle::Orthogonal => StoredWireStyle::Orthogonal,
@@ -132,12 +147,22 @@ impl Preferences {
             bridges: self.bridges,
             code_panel: self.code_panel,
             compact_cards: self.compact_cards,
-        };
-        let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
-            return;
-        };
-        let _ = apiforge_storage::write_atomic(path, &bytes);
+        }
     }
+}
+
+/// What `path` holds, or `None` when it is missing, unreadable, oversized or
+/// written by a version this one does not know.
+fn read(path: &std::path::Path) -> Option<Stored> {
+    let file = std::fs::File::open(path).ok()?;
+    if file
+        .metadata()
+        .is_ok_and(|metadata| metadata.len() > MAX_BYTES)
+    {
+        return None;
+    }
+    let stored = serde_json::from_slice::<Stored>(&std::fs::read(path).ok()?).ok()?;
+    (stored.version == VERSION).then_some(stored)
 }
 
 /// Tests never read the developer's own preferences: a suite whose result
@@ -163,8 +188,9 @@ mod tests {
         let path = directory.path().join("preferences.json");
         let mut preferences = Preferences::at(Some(path.clone()));
         preferences.bridges = false;
+        preferences.save(Preference::Bridges);
         preferences.code_panel = true;
-        preferences.save();
+        preferences.save(Preference::CodePanel);
         let reloaded = Preferences::at(Some(path));
         assert_eq!(reloaded.wire_style, WireStyle::Orthogonal);
         assert!(!reloaded.bridges);
@@ -180,7 +206,7 @@ mod tests {
         assert!(Preferences::at(Some(path.clone())).compact_cards);
         let mut preferences = Preferences::at(Some(path.clone()));
         preferences.compact_cards = false;
-        preferences.save();
+        preferences.save(Preference::CompactCards);
         assert!(!Preferences::at(Some(path.clone())).compact_cards);
 
         std::fs::write(
@@ -191,6 +217,23 @@ mod tests {
         let earlier = Preferences::at(Some(path));
         assert!(!earlier.bridges, "an earlier file is still read");
         assert!(earlier.compact_cards);
+    }
+
+    /// A window that started before another changed *Compact cards* keeps that
+    /// change when it saves a different preference.
+    #[test]
+    fn a_change_replaces_only_its_own_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let mut stale = Preferences::at(Some(path.clone()));
+        let mut other = Preferences::at(Some(path.clone()));
+        other.compact_cards = false;
+        other.save(Preference::CompactCards);
+        stale.bridges = false;
+        stale.save(Preference::Bridges);
+        let reloaded = Preferences::at(Some(path));
+        assert!(!reloaded.compact_cards, "the other window's change is kept");
+        assert!(!reloaded.bridges, "this window's change is written");
     }
 
     #[test]
@@ -238,7 +281,7 @@ mod tests {
         let mut session = Preferences::at(None);
         session.bridges = false;
         // Saving does nothing and must not panic.
-        session.save();
+        session.save(Preference::Bridges);
         assert!(!session.bridges);
         assert!(Preferences::at(None).bridges);
     }

@@ -12,7 +12,7 @@ use crate::{
     library::{self, Library},
     navigator::Navigator,
     persistence::{SaveStatus, Saver},
-    preferences::Preferences,
+    preferences::{Preference, Preferences},
     report::{self, ReportPanel},
     theme, widgets,
 };
@@ -693,7 +693,7 @@ impl App {
     fn toggle_code_panel(&mut self) {
         self.code_open = !self.code_open;
         self.preferences.code_panel = self.code_open;
-        self.preferences.save();
+        self.preferences.save(Preference::CodePanel);
     }
 
     /// Applies an inspector action that belongs to the window rather than to the
@@ -706,7 +706,7 @@ impl App {
         // the panel shows it.
         self.code_open = true;
         self.preferences.code_panel = true;
-        self.preferences.save();
+        self.preferences.save(Preference::CodePanel);
         self.revealed = None;
         if let Some(node) = self
             .editor
@@ -836,7 +836,7 @@ impl App {
                 {
                     self.code_open = false;
                     self.preferences.code_panel = false;
-                    self.preferences.save();
+                    self.preferences.save(Preference::CodePanel);
                 }
             });
         });
@@ -2391,12 +2391,12 @@ impl App {
             Command::SetWireStyle(style) => {
                 self.canvas.wire_style = style;
                 self.preferences.wire_style = style;
-                self.preferences.save();
+                self.preferences.save(Preference::WireStyle);
             }
             Command::SetBridges(bridges) => {
                 self.canvas.bridges = bridges;
                 self.preferences.bridges = bridges;
-                self.preferences.save();
+                self.preferences.save(Preference::Bridges);
             }
             Command::AddNode {
                 block,
