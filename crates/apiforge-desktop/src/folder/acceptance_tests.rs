@@ -12340,7 +12340,8 @@ mod ux34 {
         let document = model(&harness, &id);
         let main = graph_of(&document, false);
         let project = folder(&harness).context_project();
-        let rect = |node: &Node| Card::build(node, main, &project).rect();
+        let rect =
+            |node: &Node| Card::build(node, main, &project, canvas::CardDensity::Compact).rect();
         let original = rect(node(main, "add_to_cart"));
         let clone_node = node(main, "add_to_cart_2");
         let clone = rect(clone_node);
@@ -12403,7 +12404,13 @@ mod ux34 {
         let parameters = parameters_of(&document);
         let chip = main.proxies.last().expect("the chip");
         let chip = crate::canvas::Chip::build(chip, main, &project, &parameters).rect();
-        let clone = Card::build(node(main, "add_to_cart_2"), main, &project).rect();
+        let clone = Card::build(
+            node(main, "add_to_cart_2"),
+            main,
+            &project,
+            canvas::CardDensity::Compact,
+        )
+        .rect();
         assert!(
             !clone.intersects(chip),
             "the clone overlaps the chip: {clone:?} {chip:?}"
@@ -12413,7 +12420,7 @@ mod ux34 {
             .iter()
             .filter(|other| other.handle != "add_to_cart_2")
         {
-            let rect = Card::build(other, main, &project).rect();
+            let rect = Card::build(other, main, &project, canvas::CardDensity::Compact).rect();
             assert!(
                 !rect.intersects(clone),
                 "the clone overlaps {}",
@@ -12481,7 +12488,13 @@ mod ux34 {
         let cleanup = graph_of(&document, true);
         let canvas = folder(&harness).canvases.get(&id).expect("the board");
         for handle in ["expected_price_2", "promotional_price_2", "delete_cart"] {
-            let card = Card::build(node(cleanup, handle), main, &project).rect();
+            let card = Card::build(
+                node(cleanup, handle),
+                main,
+                &project,
+                canvas::CardDensity::Compact,
+            )
+            .rect();
             assert!(
                 canvas.debug_in_view(card),
                 "{handle} is in view after the paste: {card:?}"
@@ -13503,7 +13516,14 @@ mod ux21 {
         let rightmost = before
             .nodes
             .iter()
-            .map(|node| f64::from(canvas::Card::build(node, &before, &project).rect().max.x))
+            .map(|node| {
+                f64::from(
+                    canvas::Card::build(node, &before, &project, canvas::CardDensity::Compact)
+                        .rect()
+                        .max
+                        .x,
+                )
+            })
             .fold(f64::MIN, f64::max);
         let board = harness.get_by_label("Diagram board").rect();
         let drop = board.left_center() + egui::vec2(160.0, 0.0);
@@ -13710,7 +13730,7 @@ mod ux16 {
             .clone();
         card.inputs
             .insert("actual".into(), Binding::reference("ghost", "status", ""));
-        let built = canvas::Card::build(&card, &both, &project);
+        let built = canvas::Card::build(&card, &both, &project, canvas::CardDensity::Compact);
         let actual = built
             .inputs
             .iter()
@@ -13969,6 +13989,7 @@ mod lay16 {
     use apiforge_core::format::Binding;
     use egui::accesskit::Role;
     use egui::{Pos2, Rect, pos2, vec2};
+    use egui_kittest::kittest::NodeT;
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
@@ -14141,7 +14162,17 @@ mod lay16 {
         release(harness, to);
     }
 
+    /// Clicks `times` times. The harness's clock advances a quarter of a
+    /// second a frame, so two clicks a frame apart are already past egui's
+    /// double-click window; it is widened for the clicks, as a person's two
+    /// clicks fall inside it.
     fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
+        let window = harness
+            .ctx
+            .options(|options| options.input_options.max_double_click_delay);
+        harness
+            .ctx
+            .options_mut(|options| options.input_options.max_double_click_delay = 2.0);
         harness.hover_at(at);
         harness.step();
         for _ in 0..times {
@@ -14155,6 +14186,9 @@ mod lay16 {
                 harness.step();
             }
         }
+        harness
+            .ctx
+            .options_mut(|options| options.input_options.max_double_click_delay = window);
         settle(harness);
     }
 
@@ -14406,6 +14440,9 @@ mod lay16 {
             Some(Binding::literal(serde_json::json!("/probe"))),
             "the URL is as it was"
         );
+        // The Body is configured now, so the box has its row (criterion 3).
+        let bound = world_of(&harness, "probe");
+        assert!(bound.height() > at_rest.height());
 
         // Near the URL's socket but not on it, the wire does not snap to it.
         show(&mut harness, "probe", 0.6);
@@ -14420,7 +14457,7 @@ mod lay16 {
             Some(Binding::literal(serde_json::json!("/probe"))),
             "a drop beside the URL's socket leaves the URL"
         );
-        assert_eq!(world_of(&harness, "probe"), at_rest);
+        assert_eq!(world_of(&harness, "probe"), bound);
     }
 
     /// Criterion 8: the compact card has no footer row; the right-click menu
