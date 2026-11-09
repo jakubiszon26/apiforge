@@ -22,8 +22,8 @@ LAY-06's, on this geometry, because the fit is bounded by the board's width.
   ports in use and one summary line per configured input (`Body · 2
   fields`, `Query · 1 parameter`); unconnected output ports are hidden
   (Q13 = A). A configured input never disappears, wired or not.
-- New: a board-level *Compact cards* application preference beside the
-  *Checks* toggle (Q14 = A); switching it is a deliberate action that Tidy
+- New: a board-level *Compact cards* application preference in the board's
+  *Board view* menu (Q14 = A; the place decided on 2026-11-09); switching it is a deliberate action that Tidy
   up repacks. The compact density is the default.
 - The compact box is the card at every zoom (Q16 = A): at Full it writes
   the input values, and editing happens in the Inspector or by double-click
@@ -66,6 +66,21 @@ LAY-06's, on this geometry, because the fit is bounded by the board's width.
 >
 > **The footer row (2026-11-07): hidden at the compact density.** `+` and
 > *Next* stay available through the right-click menu and the Inspector.
+
+## Decision taken (owner, 2026-11-09)
+
+> **Where *Compact cards* is switched: the board's view menu.** A toolbar
+> button of its own narrowed the header row at 960 × 540 so far that the
+> file name was shortened (KTLO-12). The switch is a third item, with a
+> tick, in the menu that holds *Right angles* and *Bridges at crossings*;
+> that menu's name changes from *Wire style* to *Board view*. LAY-11's
+> *Checks* toggle can join it.
+
+## Measured (2026-11-09)
+
+At the compact density on `shop-30`, tidied: `login` 372 → 190 px, `cart`
+424 → 214 px (−49 %); the board 5544 × 1437, fit at 1600 × 1000 0.205
+(width-bound, as decision 1 expected), no card collision.
 
 ## Mock-up
 
