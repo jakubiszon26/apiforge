@@ -561,6 +561,12 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let graph = graph_of(&model, cleanup);
+        // While the board shows Main, the Cleanup checks that read a Main step
+        // are listed under that step (LAY-20).
+        let in_cleanup = match &*model {
+            Document::Scenario(scenario) if !cleanup => Some(&scenario.cleanup),
+            _ => None,
+        };
         let Some(node) = self
             .selections
             .get(document_id)
@@ -624,6 +630,7 @@ impl FolderApp {
                             node: &node,
                             graph: reference,
                             board: graph,
+                            cleanup: in_cleanup,
                             project: &project,
                             parameters: &parameters,
                             run: run.as_ref(),

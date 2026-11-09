@@ -590,14 +590,22 @@ pub struct CheckSubjects<'a> {
 /// any other node, nothing. Only references written in the check count: a
 /// step read through a value is that value's source, not the check's subject.
 pub fn check_subjects<'a>(graph: &'a Graph, check: &'a Node) -> CheckSubjects<'a> {
+    check_subjects_in(std::slice::from_ref(&graph), check)
+}
+
+/// The same over several graphs at once, for a check that reads steps of
+/// another graph: a Cleanup check reads the main graph's steps, and whether it
+/// is a gate is decided by every graph that may read it.
+pub fn check_subjects_in<'a>(graphs: &[&'a Graph], check: &'a Node) -> CheckSubjects<'a> {
     if !matches!(check.kind, NodeKind::Assert | NodeKind::Condition) {
         return CheckSubjects::default();
     }
+    let nodes = || graphs.iter().flat_map(|graph| &graph.nodes);
     let mut steps: IndexSet<&str> = IndexSet::new();
     let mut values: IndexSet<&str> = IndexSet::new();
     for binding in check.inputs.values() {
         for reference in binding.references() {
-            let source = graph.nodes.iter().find(|node| node.id == reference.node_id);
+            let source = nodes().find(|node| node.id == reference.node_id);
             match source.map(|node| node.kind) {
                 Some(NodeKind::Request | NodeKind::Component) => {
                     steps.insert(reference.node_id);
@@ -610,7 +618,7 @@ pub fn check_subjects<'a>(graph: &'a Graph, check: &'a Node) -> CheckSubjects<'a
         }
     }
     let gate = check.kind == NodeKind::Condition
-        && graph.nodes.iter().any(|node| {
+        && nodes().any(|node| {
             node.inputs
                 .values()
                 .any(|binding| binding.references_node(&check.id))
