@@ -4,6 +4,12 @@
 //! placer from its host. The library's fixed placer assumes one uniform card
 //! and is there for headless sessions and the CLI; the board draws taller,
 //! content-dependent cards, so placing with the uniform size overlaps them.
+//!
+//! Cards are measured at the full density whatever the window shows (LAY-16):
+//! the placer is fixed when the session opens, while *Compact cards* is the
+//! window's view preference and changes under it. A fresh block on a compact
+//! board keeps a full card's footprint, which leaves room rather than overlap,
+//! until the next Tidy up packs it at the size drawn.
 
 use crate::canvas;
 use apiforge_core::format::{Graph, Position, Project};
