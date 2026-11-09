@@ -2,7 +2,10 @@
 
 use super::{
     Camera,
-    layout::{CHIP_HEIGHT, Card, Chip, RowValue, WIDTH},
+    layout::{
+        CHIP_HEIGHT, COMPACT_HEADER, COMPACT_ROW, Card, CardDetail, Chip, CompactRole, RowValue,
+        WIDTH,
+    },
     routing::Routed,
 };
 use crate::{icons::Icon, theme, widgets::paint_label as label};
@@ -348,7 +351,7 @@ pub fn card(
     related: bool,
     step: Option<&StepResult>,
 ) {
-    use super::layout::{CARD_PADDING, CardDetail};
+    use super::layout::CARD_PADDING;
     let z = camera.zoom;
     let detail = CardDetail::at_zoom(z);
     let rect = camera.rect(card.rect());
@@ -610,6 +613,210 @@ pub fn card(
     }
 }
 
+/// A request card at the compact density (LAY-16): the band, the name, one
+/// line per row of its box and the sockets of the rows it shows. Below Full
+/// an input reads as a summary (`Body · 2 fields`), at Full as its values, in
+/// the same box. Returns the lines written.
+pub fn compact_card(
+    painter: &Painter,
+    card: &Card,
+    camera: Camera,
+    selected: bool,
+    related: bool,
+    step: Option<&StepResult>,
+) -> Vec<String> {
+    let Some(compact) = &card.compact else {
+        return Vec::new();
+    };
+    let z = camera.zoom;
+    let full = CardDetail::at_zoom(z) == CardDetail::Full;
+    let rect = camera.rect(card.rect());
+    let radius = (10.0 * z).max(3.0);
+    painter.rect_filled(
+        rect.translate(vec2(0.0, 2.0 * z)),
+        radius,
+        Color32::from_black_alpha(8),
+    );
+    painter.rect_filled(rect, radius, theme::WHITE);
+    let border_color = if selected {
+        theme::ACCENT
+    } else if related {
+        theme::VARIABLE
+    } else {
+        theme::BORDER
+    };
+    painter.rect_stroke(
+        rect,
+        radius,
+        Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
+        StrokeKind::Inside,
+    );
+    let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
+    let local = |x: f32, y: f32| camera.to_screen(card.origin + vec2(x, y));
+    let cell = |l: f32, t: f32, r: f32, b: f32| Rect::from_min_max(local(l, t), local(r, b));
+
+    // The band carries the last run's status.
+    let band = Rect::from_min_max(
+        rect.left_top(),
+        pos2(rect.right(), rect.top() + (5.0 * z).max(3.0)),
+    );
+    let corner = radius as u8;
+    clipped.rect_filled(
+        band,
+        egui::CornerRadius {
+            nw: corner,
+            ne: corner,
+            sw: 0,
+            se: 0,
+        },
+        step.map_or(Color32::from_rgb(214, 214, 214), |step| {
+            status_color(step.status)
+        }),
+    );
+    let color = theme::block_color(card.block);
+    let icon = Rect::from_min_size(local(12.0, 10.0), Vec2::splat(22.0 * z));
+    clipped.rect_filled(icon, 5.0 * z, color.gamma_multiply(0.10));
+    theme::block_icon(&clipped, icon, card.block, color);
+    label(
+        &clipped,
+        cell(42.0, 6.0, WIDTH - 12.0, COMPACT_HEADER),
+        &card.name,
+        FontId::new((16.0 * z).max(11.0), theme::bold_family()),
+        theme::TEXT,
+        egui::Align::Min,
+    );
+
+    let small = (12.0 * z).max(9.0);
+    let legible = COMPACT_ROW * z >= 11.0;
+    let mut written = Vec::new();
+    for row in &compact.rows {
+        let area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
+        let text = if full { &row.full_text } else { &row.text };
+        let (text, font, color, align) = match row.role {
+            CompactRole::Subtitle => (
+                text.clone(),
+                FontId::monospace(small),
+                theme::LINK,
+                egui::Align::Min,
+            ),
+            CompactRole::Input(index) => (
+                text.clone(),
+                FontId::proportional(small),
+                match card.inputs[index].value {
+                    RowValue::Missing => theme::DANGER,
+                    RowValue::Source(_) => theme::LINK,
+                    _ => theme::TEXT,
+                },
+                egui::Align::Min,
+            ),
+            CompactRole::Output(_) => (
+                text.clone(),
+                FontId::proportional(small),
+                theme::TEXT,
+                egui::Align::Max,
+            ),
+            CompactRole::Result => {
+                let top = local(0.0, row.top).y;
+                clipped.line_segment(
+                    [pos2(rect.left(), top), pos2(rect.right(), top)],
+                    Stroke::new(0.75, theme::BORDER),
+                );
+                let (text, color) = step.map_or(("Not run".to_owned(), theme::MUTED), |step| {
+                    (
+                        format!("{} · {} ms", step.status.label(), step.duration_ms),
+                        status_color(step.status),
+                    )
+                });
+                (text, FontId::proportional(small), color, egui::Align::Min)
+            }
+            CompactRole::Checks(_) => (
+                text.clone(),
+                FontId::proportional(small),
+                theme::MUTED,
+                egui::Align::Min,
+            ),
+        };
+        if legible {
+            label(&clipped, area, &text, font, color, align);
+            written.push(text);
+        }
+    }
+
+    for index in 0..card.inputs.len() {
+        if let Some(anchor) = card.shown_row_anchor(index) {
+            socket(painter, camera.to_screen(anchor), false, z);
+        }
+    }
+    for row in &card.outputs {
+        if let Some(anchor) = card.output_anchor(&row.name) {
+            socket(painter, camera.to_screen(anchor), false, z);
+        }
+    }
+    for (port, _) in &card.controls {
+        if let Some(anchor) = card.output_anchor(port) {
+            socket(painter, camera.to_screen(anchor), true, z);
+        }
+    }
+    if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
+        socket(painter, camera.to_screen(anchor), true, z);
+    }
+    written
+}
+
+/// The trays beside a compact card (decision 2 = D): its hidden inputs on the
+/// left, its hidden outputs on the right, each labelled with its socket.
+pub fn trays(painter: &Painter, card: &Card, camera: Camera, inputs: bool, outputs: bool) {
+    let z = camera.zoom;
+    let small = (11.0 * z).max(8.0);
+    let frame = |rect: Rect| {
+        let rect = camera.rect(rect);
+        painter.rect_filled(
+            rect.translate(vec2(0.0, 2.0 * z)),
+            4.0 * z,
+            Color32::from_black_alpha(10),
+        );
+        painter.rect_filled(rect, 4.0 * z, theme::WHITE);
+        painter.rect_stroke(
+            rect,
+            4.0 * z,
+            Stroke::new(1.0, theme::ACCENT),
+            StrokeKind::Inside,
+        );
+    };
+    if inputs && let Some(tray) = card.input_tray() {
+        frame(tray);
+        for index in card.hidden_inputs() {
+            if let Some((row, anchor)) = card.tray_input(index) {
+                label(
+                    painter,
+                    camera.rect(row).shrink2(vec2(10.0 * z, 0.0)),
+                    &card.inputs[index].label,
+                    FontId::proportional(small),
+                    theme::TEXT,
+                    egui::Align::Min,
+                );
+                socket(painter, camera.to_screen(anchor), false, z);
+            }
+        }
+    }
+    if outputs && let Some(tray) = card.output_tray() {
+        frame(tray);
+        for index in card.hidden_outputs() {
+            if let Some((row, anchor)) = card.tray_output(index) {
+                label(
+                    painter,
+                    camera.rect(row).shrink2(vec2(10.0 * z, 0.0)),
+                    &card.outputs[index].label,
+                    FontId::proportional(small),
+                    theme::TEXT,
+                    egui::Align::Max,
+                );
+                socket(painter, camera.to_screen(anchor), false, z);
+            }
+        }
+    }
+}
+
 /// A proxy chip: the name of the value, and the socket its wires leave from.
 ///
 /// A chip is deliberately not a card. It holds no arguments and no settings — it
@@ -852,7 +1059,12 @@ mod tests {
         let graph = &project.scenarios[0].graph;
         for zoom in [0.25, 0.35, 0.45, 0.6, 0.75, 1.0, 1.6] {
             for node in &graph.nodes {
-                let mut card = Card::build(node, graph, &project);
+                let mut card = Card::build(
+                    node,
+                    graph,
+                    &project,
+                    super::super::layout::CardDensity::Full,
+                );
                 card.origin = Pos2::ZERO;
                 // Unbroken identifiers and long captions must ellipsise as well.
                 card.name = "ŻółćVeryLongUnbrokenComponentName".repeat(5);

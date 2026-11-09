@@ -15,7 +15,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 const NAME: &str = "promotion-and-cart-price.afs";
 const KIND: &str = "Scenario";
 /// The board's two tool buttons, after Add step.
-const TOOLS: [&str; 2] = ["Tidy up", "Wire style"];
+const TOOLS: [&str; 2] = ["Tidy up", "Board view"];
 /// The top app bar, which this ticket does not change.
 const APP_BAR: [&str; 8] = [
     "Project",

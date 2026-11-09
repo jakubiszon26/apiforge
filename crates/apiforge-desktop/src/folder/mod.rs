@@ -666,11 +666,27 @@ impl FolderApp {
         self.is_settled() && !self.analyser.is_busy()
     }
 
-    fn new_canvas(&self) -> Canvas {
+    pub(crate) fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
         canvas.bridges = self.preferences.bridges;
+        canvas.set_density(self.density());
         canvas
+    }
+
+    /// The sizes the boards draw their cards at, from *Compact cards*.
+    fn density(&self) -> canvas::CardDensity {
+        if self.preferences.compact_cards {
+            canvas::CardDensity::Compact
+        } else {
+            canvas::CardDensity::Full
+        }
+    }
+
+    /// The input the Inspector last scrolled to for a double-click (LAY-16).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_focus(&self) -> Option<String> {
+        self.inspector.focused_input().map(str::to_owned)
     }
 
     fn activate_tab(&mut self, id: &str) {

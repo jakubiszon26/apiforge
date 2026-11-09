@@ -38,6 +38,13 @@ struct Stored {
     wire_style: StoredWireStyle,
     bridges: bool,
     code_panel: bool,
+    /// Absent from a file written before LAY-16, which reads as on.
+    #[serde(default = "on")]
+    compact_cards: bool,
+}
+
+fn on() -> bool {
+    true
 }
 
 /// The preferences of this session.
@@ -48,6 +55,8 @@ pub struct Preferences {
     pub bridges: bool,
     /// Whether the code panel is open beside the board.
     pub code_panel: bool,
+    /// Whether a request card shows only what it uses (LAY-16).
+    pub compact_cards: bool,
     /// Where to write them, or `None` when the system has no configuration
     /// directory and preferences last only for this session.
     path: Option<PathBuf>,
@@ -59,6 +68,7 @@ impl Default for Preferences {
             wire_style: WireStyle::default(),
             bridges: true,
             code_panel: false,
+            compact_cards: true,
             path: default_path(),
         }
     }
@@ -105,6 +115,7 @@ impl Preferences {
         };
         preferences.bridges = stored.bridges;
         preferences.code_panel = stored.code_panel;
+        preferences.compact_cards = stored.compact_cards;
         preferences
     }
 
@@ -120,6 +131,7 @@ impl Preferences {
             },
             bridges: self.bridges,
             code_panel: self.code_panel,
+            compact_cards: self.compact_cards,
         };
         let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
             return;

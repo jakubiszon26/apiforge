@@ -79,7 +79,8 @@ fn the_demo_board_never_overlaps_its_own_cards() {
         .nodes
         .iter()
         .map(|node| {
-            let card = canvas::Card::build(node, &reference, &project);
+            let card =
+                canvas::Card::build(node, &reference, &project, canvas::CardDensity::Compact);
             format!("{} ({})", card.name, card.caption)
         })
         .collect();

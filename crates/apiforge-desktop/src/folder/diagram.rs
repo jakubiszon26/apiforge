@@ -269,6 +269,7 @@ impl FolderApp {
                     | Command::Copy
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)
+                    | Command::InspectInput { .. }
             )
         {
             return;
@@ -283,6 +284,7 @@ impl FolderApp {
             project: &project,
             parameters: &parameters,
             sibling: sibling_of(model, cleanup),
+            density: self.density(),
         };
         let selection = self
             .selections
@@ -346,6 +348,27 @@ impl FolderApp {
                 for canvas in self.canvases.values_mut() {
                     canvas.bridges = bridges;
                 }
+                None
+            }
+            Command::SetCompactCards(compact) => {
+                self.preferences.compact_cards = compact;
+                let preferences = self.preferences.clone();
+                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                let density = self.density();
+                for canvas in self.canvases.values_mut() {
+                    canvas.set_density(density);
+                }
+                // The board repacks at the new sizes, as one edit (Q14 = A).
+                Board { density, ..board }
+                    .tidy_up(&[])
+                    .map(|graph| Ok(graph.into()))
+            }
+            Command::InspectInput { node, input } => {
+                self.new_inputs.remove(document_id);
+                self.component_settings.remove(document_id);
+                self.selections.insert(document_id.to_owned(), vec![node]);
+                self.selected_inputs.remove(document_id);
+                self.inspector.focus_input(input);
                 None
             }
             Command::AddNode {

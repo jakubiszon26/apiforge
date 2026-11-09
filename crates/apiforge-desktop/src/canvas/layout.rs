@@ -39,6 +39,16 @@ pub const MINIMAP_MIN_BOARD_HEIGHT: f32 = 300.0;
 pub const MINIMAP_SIZE: Vec2 = vec2(136.0, 88.0);
 pub const FOCUS_MARGIN: f32 = 24.0;
 
+/// How much a request card's box holds (LAY-16): the rows it shows
+/// ([`Compact`]), or every port it could have. A board-level setting, never
+/// the zoom, so zooming moves no card.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CardDensity {
+    #[default]
+    Compact,
+    Full,
+}
+
 /// Keep the same graph geometry while reducing visual detail at distant zooms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CardDetail {
@@ -288,10 +298,81 @@ pub struct Card {
     /// Control outputs: pseudo-port and label.
     pub controls: Vec<(&'static str, &'static str)>,
     pub origin: Pos2,
+    /// The compact box of a request at the compact density (LAY-16).
+    pub compact: Option<Compact>,
+}
+
+/// What one row of a compact card stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactRole {
+    /// The method and address, carrying the URL input's socket.
+    Subtitle,
+    /// An input that is configured, wired, or required and missing.
+    Input(usize),
+    /// An output some step reads.
+    Output(usize),
+    /// The last run's result.
+    Result,
+    /// How many checks read the step.
+    Checks(usize),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompactRow {
+    pub role: CompactRole,
+    /// Top of the row, from the card's origin.
+    pub top: f32,
+    pub height: f32,
+    /// The line below Full: an input's summary (`Body · 2 fields`).
+    pub text: String,
+    /// The line at Full: an input's values (`Query · limit: 20`).
+    pub full_text: String,
+}
+
+/// A request card's box at the compact density: the header, then one row per
+/// thing it shows, the box ending 6 px under the last.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Compact {
+    pub rows: Vec<CompactRow>,
+    pub height: f32,
+}
+
+pub const COMPACT_HEADER: f32 = 40.0;
+pub const COMPACT_ROW: f32 = 24.0;
+const COMPACT_SUBTITLE: f32 = 22.0;
+const COMPACT_RESULT: f32 = 26.0;
+const COMPACT_END: f32 = 6.0;
+/// The tray of the ports a compact card hides: its width and its gap from
+/// the card, inside the 96 px column gap Tidy up leaves.
+pub const TRAY_WIDTH: f32 = 88.0;
+pub const TRAY_GAP: f32 = 4.0;
+
+impl Compact {
+    pub fn row(&self, role: CompactRole) -> Option<&CompactRow> {
+        self.rows.iter().find(|row| row.role == role)
+    }
+
+    fn input(&self, index: usize, url: bool) -> Option<&CompactRow> {
+        self.row(CompactRole::Input(index))
+            .or_else(|| url.then(|| self.row(CompactRole::Subtitle)).flatten())
+    }
 }
 
 impl Card {
-    pub fn build(node: &Node, reference_graph: &Graph, project: &Project) -> Self {
+    pub fn build(
+        node: &Node,
+        reference_graph: &Graph,
+        project: &Project,
+        density: CardDensity,
+    ) -> Self {
+        let mut card = Self::build_full(node, reference_graph, project);
+        if density == CardDensity::Compact && node.kind == NodeKind::Request {
+            card.compact = Some(compact(&card, node, reference_graph, project));
+        }
+        card
+    }
+
+    fn build_full(node: &Node, reference_graph: &Graph, project: &Project) -> Self {
         let slots = input_slots(node, project);
         let inline_allowed = node.kind != NodeKind::Component && slots.len() <= 3;
         let inputs = slots
@@ -379,6 +460,7 @@ impl Card {
             outputs,
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
+            compact: None,
         }
     }
 
@@ -400,6 +482,9 @@ impl Card {
     }
 
     pub fn height(&self) -> f32 {
+        if let Some(compact) = &self.compact {
+            return compact.height;
+        }
         self.footer_top() + FOOTER + CONTROL
     }
 
@@ -420,7 +505,14 @@ impl Card {
         )
     }
 
+    /// The row an input is shown on, which is where a variable drops on it;
+    /// [`Rect::NOTHING`] for an input a compact card does not show.
     pub fn input_row(&self, index: usize) -> Rect {
+        if let Some(compact) = &self.compact {
+            return compact
+                .input(index, self.inputs[index].name == URL_INPUT)
+                .map_or(Rect::NOTHING, |row| self.row_rect(row));
+        }
         let top = self.input_row_top(index);
         Rect::from_min_size(self.origin + vec2(0.0, top), vec2(WIDTH, INPUT_ROW))
     }
@@ -472,16 +564,37 @@ impl Card {
             .filter(|(_, row)| row.name == name && path.starts_with(&row.path))
             .max_by_key(|(_, row)| row.path.len())?
             .0;
-        Some(self.row_anchor(index))
+        self.shown_row_anchor(index)
     }
 
-    /// Anchor of the input row at `index`.
+    /// Anchor of the input row at `index`, or `None` for an input a compact
+    /// card does not show.
+    pub fn shown_row_anchor(&self, index: usize) -> Option<Pos2> {
+        match &self.compact {
+            Some(compact) => {
+                let row = compact.input(index, self.inputs[index].name == URL_INPUT)?;
+                Some(self.origin + vec2(0.0, row.top + row.height / 2.0))
+            }
+            None => Some(self.row_anchor(index)),
+        }
+    }
+
+    /// Anchor of the input row at `index` of a full card.
     pub fn row_anchor(&self, index: usize) -> Pos2 {
         self.origin + vec2(0.0, self.input_row_top(index) + 30.0)
     }
 
-    /// Anchor of a data output or a control pseudo-port.
+    /// Anchor of a data output or a control pseudo-port; `None` for an output
+    /// a compact card does not show.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if let Some(compact) = &self.compact {
+            if self.controls.iter().any(|(port, _)| *port == name) {
+                return Some(self.origin + vec2(WIDTH / 2.0, compact.height));
+            }
+            let index = self.outputs.iter().position(|row| row.name == name)?;
+            let row = compact.row(CompactRole::Output(index))?;
+            return Some(self.origin + vec2(WIDTH, row.top + row.height / 2.0));
+        }
         if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
             let button = self.control_button(index);
             return Some(pos2(button.center().x, self.rect().bottom()));
@@ -494,6 +607,231 @@ impl Card {
         let mut card = self.clone();
         card.origin += offset;
         card
+    }
+
+    fn row_rect(&self, row: &CompactRow) -> Rect {
+        Rect::from_min_size(self.origin + vec2(0.0, row.top), vec2(WIDTH, row.height))
+    }
+
+    /// The inputs a compact card does not show; the URL has the subtitle's
+    /// socket. Empty for a full card.
+    pub fn hidden_inputs(&self) -> Vec<usize> {
+        let Some(compact) = &self.compact else {
+            return Vec::new();
+        };
+        (0..self.inputs.len())
+            .filter(|index| {
+                self.inputs[*index].name != URL_INPUT
+                    && compact.row(CompactRole::Input(*index)).is_none()
+            })
+            .collect()
+    }
+
+    /// The outputs a compact card does not show. Empty for a full card.
+    pub fn hidden_outputs(&self) -> Vec<usize> {
+        let Some(compact) = &self.compact else {
+            return Vec::new();
+        };
+        (0..self.outputs.len())
+            .filter(|index| compact.row(CompactRole::Output(*index)).is_none())
+            .collect()
+    }
+
+    fn tray(&self, x: f32, rows: usize) -> Rect {
+        Rect::from_min_size(
+            self.origin + vec2(x, COMPACT_HEADER),
+            vec2(TRAY_WIDTH, rows as f32 * COMPACT_ROW + 8.0),
+        )
+    }
+
+    /// The tray of hidden inputs, outside the card's left edge (decision 2 =
+    /// D): view state, which neither the box nor the routing sees.
+    pub fn input_tray(&self) -> Option<Rect> {
+        let rows = self.hidden_inputs().len();
+        (rows > 0).then(|| self.tray(-TRAY_GAP - TRAY_WIDTH, rows))
+    }
+
+    /// The tray of hidden outputs, outside the card's right edge.
+    pub fn output_tray(&self) -> Option<Rect> {
+        let rows = self.hidden_outputs().len();
+        (rows > 0).then(|| self.tray(WIDTH + TRAY_GAP, rows))
+    }
+
+    /// The `k`-th row of a tray.
+    pub fn tray_row(tray: Rect, k: usize) -> Rect {
+        Rect::from_min_size(
+            tray.min + vec2(0.0, 4.0 + k as f32 * COMPACT_ROW),
+            vec2(TRAY_WIDTH, COMPACT_ROW),
+        )
+    }
+
+    /// The tray row of a hidden input, and its socket on the tray's left edge.
+    pub fn tray_input(&self, index: usize) -> Option<(Rect, Pos2)> {
+        let k = self.hidden_inputs().iter().position(|i| *i == index)?;
+        let row = Self::tray_row(self.input_tray()?, k);
+        Some((row, pos2(row.left(), row.center().y)))
+    }
+
+    /// The tray row of a hidden output, and its socket on the tray's right edge.
+    pub fn tray_output(&self, index: usize) -> Option<(Rect, Pos2)> {
+        let k = self.hidden_outputs().iter().position(|i| *i == index)?;
+        let row = Self::tray_row(self.output_tray()?, k);
+        Some((row, pos2(row.right(), row.center().y)))
+    }
+}
+
+/// The compact rows of a request (LAY-16, Q13 = A): the subtitle with the URL's
+/// socket; an input when it is configured, wired, or required and missing; an
+/// output when a step reads it; the result; the checks when one reads the step.
+fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project) -> Compact {
+    let mut read_outputs: Vec<&str> = Vec::new();
+    let mut checks = 0;
+    for other in reference_graph
+        .nodes
+        .iter()
+        .filter(|other| other.id != node.id)
+    {
+        let mut reads = false;
+        for binding in other.inputs.values() {
+            binding.for_each_leaf(&mut |leaf, _| {
+                if let Binding::Reference { node_id, port, .. } = leaf
+                    && node_id == &node.id
+                {
+                    reads = true;
+                    read_outputs.push(port);
+                }
+            });
+        }
+        if reads && other.kind.is_check() {
+            checks += 1;
+        }
+    }
+    let scope = Scope {
+        nodes: &reference_graph.nodes,
+        project,
+        request: Some(node),
+    };
+    let mut rows: Vec<(CompactRole, f32, String, String)> = Vec::new();
+    if let Some(subtitle) = &card.subtitle {
+        rows.push((
+            CompactRole::Subtitle,
+            COMPACT_SUBTITLE,
+            subtitle.clone(),
+            subtitle.clone(),
+        ));
+    }
+    for (index, row) in card.inputs.iter().enumerate() {
+        if row.name == URL_INPUT || !row.path.is_empty() {
+            continue;
+        }
+        let binding = node.inputs.get(&row.name);
+        let missing = row.required && binding.is_none();
+        if binding.is_none() && !missing {
+            continue;
+        }
+        let (text, full_text) = input_lines(&row.name, &row.label, binding, scope, reference_graph);
+        rows.push((CompactRole::Input(index), COMPACT_ROW, text, full_text));
+    }
+    for (index, row) in card.outputs.iter().enumerate() {
+        if read_outputs.contains(&row.name.as_str()) {
+            let text = format!("{} →", row.label);
+            rows.push((CompactRole::Output(index), COMPACT_ROW, text.clone(), text));
+        }
+    }
+    rows.push((
+        CompactRole::Result,
+        COMPACT_RESULT,
+        String::new(),
+        String::new(),
+    ));
+    if checks > 0 {
+        let text = format!("{checks} {}", if checks == 1 { "check" } else { "checks" });
+        rows.push((CompactRole::Checks(checks), COMPACT_ROW, text.clone(), text));
+    }
+    let mut top = COMPACT_HEADER;
+    let rows = rows
+        .into_iter()
+        .map(|(role, height, text, full_text)| {
+            let row = CompactRow {
+                role,
+                top,
+                height,
+                text,
+                full_text,
+            };
+            top += height;
+            row
+        })
+        .collect();
+    Compact {
+        rows,
+        height: top + COMPACT_END,
+    }
+}
+
+/// An input's line below Full (`Body · 2 fields`) and at Full (`Query ·
+/// limit: 20`).
+fn input_lines(
+    name: &str,
+    label: &str,
+    binding: Option<&Binding>,
+    scope: Scope<'_>,
+    graph: &Graph,
+) -> (String, String) {
+    let count = |n: usize| {
+        let (one, many) = match name {
+            "query" => ("parameter", "parameters"),
+            "headers" => ("header", "headers"),
+            _ => ("field", "fields"),
+        };
+        format!("{label} · {n} {}", if n == 1 { one } else { many })
+    };
+    let value = |binding: &Binding| {
+        print_template(binding, scope).unwrap_or_else(|| match binding {
+            Binding::Literal { value } => apiforge_core::js::json_stringify(value),
+            other => labels::binding(other, graph),
+        })
+    };
+    let pairs = |pairs: Vec<(String, String)>| {
+        let pairs: Vec<String> = pairs
+            .into_iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect();
+        format!("{label} · {}", pairs.join(", "))
+    };
+    match binding {
+        None => {
+            let text = format!("{label} · value missing");
+            (text.clone(), text)
+        }
+        Some(Binding::Object { fields }) => (
+            count(fields.len()),
+            pairs(
+                fields
+                    .iter()
+                    .map(|(key, field)| (key.clone(), value(field)))
+                    .collect(),
+            ),
+        ),
+        Some(Binding::Literal {
+            value: serde_json::Value::Object(fields),
+        }) => (
+            count(fields.len()),
+            pairs(
+                fields
+                    .iter()
+                    .map(|(key, field)| (key.clone(), apiforge_core::js::json_stringify(field)))
+                    .collect(),
+            ),
+        ),
+        Some(reference @ Binding::Reference { .. }) => {
+            let text = format!("{label} ← {}", labels::binding(reference, graph));
+            (text.clone(), text)
+        }
+        Some(other) => {
+            let text = format!("{label} · {}", value(other));
+            (text.clone(), text)
+        }
     }
 }
 
@@ -703,7 +1041,10 @@ mod tests {
         .into_workspace();
         for project in &workspace.projects {
             for scenario in &project.scenarios {
-                for graph in [&scenario.graph, &scenario.cleanup] {
+                for (graph, density) in [&scenario.graph, &scenario.cleanup]
+                    .into_iter()
+                    .flat_map(|graph| [CardDensity::Compact, CardDensity::Full].map(|d| (graph, d)))
+                {
                     for wire in apiforge_core::graph::wires(graph) {
                         let Some(source) = graph.nodes.iter().find(|node| node.id == wire.source)
                         else {
@@ -714,8 +1055,8 @@ mod tests {
                             .iter()
                             .find(|node| node.id == wire.target)
                             .unwrap();
-                        let source = Card::build(source, graph, project);
-                        let target = Card::build(target, graph, project);
+                        let source = Card::build(source, graph, project, density);
+                        let target = Card::build(target, graph, project, density);
                         let (output, input) = match wire.kind {
                             apiforge_core::graph::WireKind::Order => (
                                 match wire.branch {
@@ -756,12 +1097,12 @@ mod tests {
             None,
         );
         node.config.predicate = Some(Predicate::NotEmpty);
-        let card = Card::build(&node, graph, &project);
+        let card = Card::build(&node, graph, &project, CardDensity::Full);
         assert_eq!(card.subtitle.as_deref(), Some("is not empty"));
         assert!(card.inputs.iter().any(|row| row.name == "actual"));
         assert!(!card.inputs.iter().any(|row| row.name == "expected"));
         node.config.predicate = Some(Predicate::Equals);
-        let card = Card::build(&node, graph, &project);
+        let card = Card::build(&node, graph, &project, CardDensity::Full);
         assert!(card.inputs.iter().any(|row| row.name == "expected"));
     }
 

@@ -13580,7 +13580,7 @@ mod ux28 {
     use crate::testing::MINIMUM;
     use std::path::Path;
 
-    const WIRE_STYLE: &str = "Wire style";
+    const WIRE_STYLE: &str = "Board view";
     const RIGHT_ANGLES: &str = "Right angles";
     const CURVES: &str = "Curves";
     const BRIDGES: &str = "Bridges at crossings";
@@ -14200,6 +14200,13 @@ mod lay16 {
         harness.query_by_label(label).is_some()
     }
 
+    /// *Compact cards* in the board's view menu (decided 2026-11-09).
+    fn switch_density(harness: &mut FolderHarness) {
+        harness.get_by_label("Board view").click();
+        settle(harness);
+        harness.get_by_label("Compact cards").click();
+    }
+
     fn select(harness: &mut FolderHarness, handles: &[&str]) {
         let ids = handles
             .iter()
@@ -14288,7 +14295,7 @@ mod lay16 {
         let compact = world_of(&harness, "login").height();
         let camera = canvas(&harness).debug_camera();
 
-        harness.get_by_label("Compact cards").click();
+        switch_density(&mut harness);
         settle(&mut harness);
         harness.step();
         assert!(!folder(&harness).preferences.compact_cards);
@@ -14303,7 +14310,7 @@ mod lay16 {
         // Remembered: a board opened from now on has full cards too.
         assert!(!app(&mut harness).new_canvas().debug_compact());
 
-        harness.get_by_label("Compact cards").click();
+        switch_density(&mut harness);
         settle(&mut harness);
         harness.step();
         assert!(folder(&harness).preferences.compact_cards);
@@ -14484,5 +14491,67 @@ mod lay16 {
             canvas(&harness).debug_menu_open(),
             "right-click opens Add step"
         );
+    }
+
+    /// A capture with the pointer held where it is, during a wire drag.
+    fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
+        harness.step();
+        let image = harness.render().unwrap();
+        let pixels = region.intersect(harness.ctx.content_rect());
+        let x = pixels.min.x.floor().max(0.0) as u32;
+        let y = pixels.min.y.floor().max(0.0) as u32;
+        let width = (pixels.width().ceil() as u32).min(image.width() - x);
+        let height = (pixels.height().ceil() as u32).min(image.height() - y);
+        let image = image::imageops::crop_imm(&image, x, y, width, height).to_image();
+        let directory = crate::testing::capture_dir();
+        fs::create_dir_all(&directory).unwrap();
+        image.save(directory.join(format!("{name}.png"))).unwrap();
+    }
+
+    /// The board of `shop-30` at the compact density, whole window, at both
+    /// sizes, and *Compact cards* off.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay16_board() {
+        for (size, suffix) in [(WIDE, "1600"), (crate::testing::MINIMUM, "960")] {
+            let (_project, mut harness) = open(&shop_30(), size);
+            harness.get_by_label("Tidy up").click();
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, &format!("lay16-fit-{suffix}"), None);
+            show(&mut harness, "cart", 0.6);
+            crate::testing::capture(&mut harness, &format!("lay16-compact-60-{suffix}"), None);
+            show(&mut harness, "cart", 1.0);
+            crate::testing::capture(&mut harness, &format!("lay16-compact-100-{suffix}"), None);
+            switch_density(&mut harness);
+            settle(&mut harness);
+            show(&mut harness, "cart", 0.6);
+            crate::testing::capture(&mut harness, &format!("lay16-full-60-{suffix}"), None);
+        }
+    }
+
+    /// The tray of a fresh request: selected, and while a wire is dragged to it.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay16_tray() {
+        let (_project, mut harness) = open(TRAY, WIDE);
+        show(&mut harness, "probe", 0.6);
+        let region = screen_of(&harness, "cart")
+            .union(screen_of(&harness, "probe"))
+            .union(screen_of(&harness, "cart_ok"))
+            .expand2(vec2(110.0, 60.0));
+        crate::testing::capture(&mut harness, "lay16-tray-rest", Some(region));
+        select(&mut harness, &["probe"]);
+        crate::testing::capture(&mut harness, "lay16-tray-selected", Some(region));
+        select(&mut harness, &[]);
+        let card = screen_of(&harness, "probe");
+        let from = centre(&harness, "Output body of cart");
+        let near = pos2(card.left() - 40.0, card.center().y);
+        press(&mut harness, from);
+        move_to(&mut harness, from, near);
+        let body = centre(&harness, "Input body of probe");
+        move_to(&mut harness, near, body);
+        capture_held(&mut harness, "lay16-tray-drag", region);
+        release(&mut harness, body);
+        crate::testing::capture(&mut harness, "lay16-tray-bound", Some(region));
     }
 }

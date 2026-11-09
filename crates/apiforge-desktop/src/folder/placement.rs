@@ -41,7 +41,8 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
         .nodes
         .iter()
         .map(|node| {
-            let rect = canvas::Card::build(node, &reference, context).rect();
+            let rect =
+                canvas::Card::build(node, &reference, context, canvas::CardDensity::Full).rect();
             let block = apiforge_layout::Block::new(
                 apiforge_layout::Size::new(rect.width(), rect.height()),
                 apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),

@@ -427,7 +427,9 @@ mod tests {
                     let cards: Vec<Card> = graph
                         .nodes
                         .iter()
-                        .map(|node| Card::build(node, graph, project))
+                        .map(|node| {
+                            Card::build(node, graph, project, super::super::CardDensity::Full)
+                        })
                         .collect();
                     if cards.len() < 2 {
                         continue;

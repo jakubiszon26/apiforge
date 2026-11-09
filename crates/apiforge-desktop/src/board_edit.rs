@@ -26,6 +26,8 @@ pub struct Board<'a> {
     /// main board, main on the cleanup board. `None` where the caller keeps
     /// handles apart itself, or for a component.
     pub sibling: Option<&'a Graph>,
+    /// The sizes the board draws its cards at (LAY-16).
+    pub density: canvas::CardDensity,
 }
 
 /// A graph edit and the selection that should follow it.
@@ -157,7 +159,7 @@ impl Board<'_> {
             .nodes
             .iter()
             .map(|node| {
-                canvas::Card::build(node, self.reference, self.project)
+                canvas::Card::build(node, self.reference, self.project, self.density)
                     .rect()
                     .max
                     .x
@@ -296,7 +298,9 @@ impl Board<'_> {
     /// two down, and so on.
     fn land_clear(&self, mut graph: Graph, ids: &[String]) -> Graph {
         let moving = |node: &Node| ids.contains(&node.id);
-        let rect = |node: &Node| canvas::Card::build(node, self.reference, self.project).rect();
+        let rect = |node: &Node| {
+            canvas::Card::build(node, self.reference, self.project, self.density).rect()
+        };
         let pasted: Vec<egui::Rect> = graph
             .nodes
             .iter()
@@ -383,7 +387,7 @@ impl Board<'_> {
     }
 
     fn card_block(&self, node: &Node) -> apiforge_layout::Block {
-        let rect = canvas::Card::build(node, self.reference, self.project).rect();
+        let rect = canvas::Card::build(node, self.reference, self.project, self.density).rect();
         apiforge_layout::Block::new(
             apiforge_layout::Size::new(rect.width(), rect.height()),
             apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
@@ -444,6 +448,7 @@ mod tests {
         };
         let parameters = vec!["id".to_owned()];
         let board = Board {
+            density: canvas::CardDensity::Full,
             sibling: None,
             graph: &graph,
             reference: &graph,
