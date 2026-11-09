@@ -765,6 +765,34 @@ mod tests {
         assert!(card.inputs.iter().any(|row| row.name == "expected"));
     }
 
+    /// LAY-16 criterion 1: at the compact density `login` and `cart` are at
+    /// least 40 % shorter than today's cards, which *Compact cards* off keeps.
+    #[test]
+    fn lay16_criterion_1_compact_cards_are_shorter() {
+        use apiforge_script::{Document, LowerContext, lower, parse};
+        let project = apiforge_core::demos::shop_project();
+        let text = include_str!("../../../../fixtures/scenarios/lay/shop-30.afs");
+        let lowered = lower(&parse(text), &LowerContext::folder(&project));
+        let Some(Document::Scenario(scenario)) = lowered.document else {
+            panic!("shop-30 lowers: {:#?}", lowered.diagnostics);
+        };
+        let graph = &scenario.graph;
+        for (handle, today) in [("login", 372.0), ("cart", 424.0)] {
+            let node = graph
+                .nodes
+                .iter()
+                .find(|node| node.handle == handle)
+                .unwrap();
+            let full = Card::build(node, graph, &project, CardDensity::Full).height();
+            let compact = Card::build(node, graph, &project, CardDensity::Compact).height();
+            assert_eq!(full, today, "{handle} at full density is today's card");
+            assert!(
+                compact <= today * 0.6,
+                "{handle}: {compact} px is not 40 % shorter than {today} px"
+            );
+        }
+    }
+
     #[test]
     fn inline_values_are_parsed_by_port_type() {
         assert_eq!(parse_inline("12", ValueType::Number), Ok(json!(12)));

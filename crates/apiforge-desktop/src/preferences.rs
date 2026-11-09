@@ -159,6 +159,28 @@ mod tests {
         assert!(reloaded.code_panel);
     }
 
+    /// LAY-16 criterion 4: *Compact cards* is on by default and remembered;
+    /// a file written before it existed loads with it on.
+    #[test]
+    fn compact_cards_is_remembered_and_on_by_default() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        assert!(Preferences::at(Some(path.clone())).compact_cards);
+        let mut preferences = Preferences::at(Some(path.clone()));
+        preferences.compact_cards = false;
+        preferences.save();
+        assert!(!Preferences::at(Some(path.clone())).compact_cards);
+
+        std::fs::write(
+            &path,
+            br#"{"version": 1, "wireStyle": "orthogonal", "bridges": false, "codePanel": true}"#,
+        )
+        .unwrap();
+        let earlier = Preferences::at(Some(path));
+        assert!(!earlier.bridges, "an earlier file is still read");
+        assert!(earlier.compact_cards);
+    }
+
     #[test]
     fn an_unreadable_or_newer_file_leaves_the_defaults_in_place() {
         let directory = tempfile::tempdir().unwrap();
