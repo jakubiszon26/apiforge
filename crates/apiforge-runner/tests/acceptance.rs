@@ -523,6 +523,7 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
   reader = GET "/r/{{missing.body.id}}" {
     sample 200 {}
   }
+  @after(begin)
   first = GET "/a" {
     sample 200 { id: 1 }
   }
@@ -549,7 +550,11 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
             step: id(&run, "missing")
         })
     );
-    assert_eq!(by_handle(&run, "valid").status, StepStatus::Blocked);
+    assert_eq!(
+        by_handle(&run, "valid").status,
+        StepStatus::Blocked,
+        "{run:#?}"
+    );
     assert_eq!(by_handle(&run, "valid").cause, None, "the condition ran");
     assert_eq!(
         by_handle(&run, "guarded").cause,
@@ -599,7 +604,8 @@ async fn causes_on_shop_30() {
         .iter()
         .filter(|step| step.cause.is_some())
         .collect();
-    assert!(not_run.len() >= 12, "{not_run:#?}");
+    // Everything after `checkout_total` in the main phase; Cleanup runs.
+    assert_eq!(not_run.len(), 11, "{not_run:#?}");
     for step in not_run {
         assert_eq!(
             chain_end(&run, step),

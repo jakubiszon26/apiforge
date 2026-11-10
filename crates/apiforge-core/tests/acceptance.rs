@@ -199,11 +199,21 @@ fn relations_of_cart_on_shop_30() {
 /// again adds neither a cause nor the running step.
 #[test]
 fn a_report_without_causes_still_loads() {
+    // A whole report from the run corpus, with a skipped step written the way
+    // the runner wrote one before this change.
     let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/runs/error-policy-stop.json");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/runs/single-with-history.json");
     let text = fs::read_to_string(&path).expect("the recorded run");
     let fixture: serde_json::Value = serde_json::from_str(&text).expect("JSON");
-    let recorded = fixture["expected"].clone();
+    let mut recorded = fixture["request"]["previousRun"].clone();
+    recorded["steps"]
+        .as_array_mut()
+        .expect("steps")
+        .push(serde_json::json!({
+            "nodeId": "reads-failed", "handle": "reads_failed", "kind": "value",
+            "status": "skipped", "phase": "main", "inputs": {}, "outputs": {},
+            "durationMs": 0, "message": "Stopped after an error."
+        }));
     assert!(!recorded.to_string().contains("\"cause\""));
     let report: RunResult = serde_json::from_value(recorded).expect("an earlier report loads");
     assert!(
