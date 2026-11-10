@@ -650,10 +650,11 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node, focus: &
     ui.add_space(6.0);
     focus.at(ui, URL_INPUT);
     widgets::field_label(ui, "Method and URL or path");
-    let mut method = node
+    let shown = node
         .config
         .method
         .unwrap_or(apiforge_core::model::HttpMethod::Get);
+    let mut method = shown;
     let combo = egui::ComboBox::from_id_salt(id.with("method"))
         .selected_text(labels::method(method))
         .width(86.0)
@@ -663,7 +664,11 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node, focus: &
             }
         });
     widgets::named(combo.response, "Method");
-    node.config.method = Some(method);
+    // Only a choice writes the method: showing the Inspector changes nothing
+    // in the document (#288).
+    if method != shown {
+        node.config.method = Some(method);
+    }
     let url = node
         .inputs
         .get(URL_INPUT)
@@ -701,7 +706,8 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node, focus: &
     }
 
     widgets::field_label(ui, "Body format");
-    let mut format = node.config.body_format.unwrap_or_default();
+    let shown = node.config.body_format.unwrap_or_default();
+    let mut format = shown;
     let combo = egui::ComboBox::from_id_salt(id.with("body-format"))
         .selected_text(body_format_label(format))
         .width(ui.available_width())
@@ -711,7 +717,12 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node, focus: &
             }
         });
     widgets::named(combo.response, "Body format");
-    node.config.body_format = (format != BodyFormat::default()).then_some(format);
+    // An explicit `Json` from the source stays as it is until another format
+    // is chosen; writing the default's absence on show would change the
+    // document (#288).
+    if format != shown {
+        node.config.body_format = (format != BodyFormat::default()).then_some(format);
+    }
 
     ui.add_space(6.0);
     for (label, input) in [

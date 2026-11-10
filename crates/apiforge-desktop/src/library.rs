@@ -32,7 +32,15 @@ pub enum Example {
     OperatorBlocks,
 }
 
-const BUILTIN: [Block; 7] = Block::BUILTIN;
+/// The built-in blocks listed under BASIC STEPS, in library order, on a
+/// component's board (`component`) or a scenario's: the step menus' rule,
+/// [`Block::offered`] (UX-40).
+fn basic_steps(component: bool) -> impl Iterator<Item = Block> {
+    Block::BUILTIN
+        .into_iter()
+        .chain([Block::Export])
+        .filter(move |block| block.offered(component))
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Section {
@@ -167,10 +175,8 @@ impl Library {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "Block library")
             });
             ui.label(
-                // A component's graph also offers the Export block.
                 RichText::new(
-                    (BUILTIN.len() + usize::from(context.editing_component) + components.len())
-                        .to_string(),
+                    (basic_steps(context.editing_component).count() + components.len()).to_string(),
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -281,9 +287,7 @@ impl Library {
                 }
                 if show_blocks {
                     widgets::subcaption(ui, "BASIC STEPS");
-                    // Only a component's graph can pass values out.
-                    let export = context.editing_component.then_some(Block::Export);
-                    for block in BUILTIN.into_iter().chain(export) {
+                    for block in basic_steps(context.editing_component) {
                         if matches(&format!("{} {}", block.label(), block.description())) {
                             let payload = Payload::Node {
                                 block,
