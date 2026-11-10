@@ -358,9 +358,11 @@ pub const COMPACT_ROW: f32 = 24.0;
 const COMPACT_SUBTITLE: f32 = 22.0;
 const COMPACT_RESULT: f32 = 26.0;
 const COMPACT_END: f32 = 6.0;
-/// The tray of the ports a compact card hides: its width and its gap from
-/// the card, inside the 96 px column gap Tidy up leaves.
+/// The tray of the ports a compact card hides: its narrowest width, which
+/// fits the 96 px column gap Tidy up leaves, its widest, and its gap from the
+/// card.
 pub const TRAY_WIDTH: f32 = 88.0;
+pub const TRAY_MAX_WIDTH: f32 = 160.0;
 pub const TRAY_GAP: f32 = 4.0;
 
 impl Compact {
@@ -687,31 +689,41 @@ impl Card {
             .collect()
     }
 
-    fn tray(&self, x: f32, rows: usize) -> Rect {
+    fn tray(&self, x: f32, width: f32, rows: usize) -> Rect {
         Rect::from_min_size(
             self.origin + vec2(x, COMPACT_HEADER),
-            vec2(TRAY_WIDTH, rows as f32 * COMPACT_ROW + 8.0),
+            vec2(width, rows as f32 * COMPACT_ROW + 8.0),
         )
+    }
+
+    /// A tray as wide as its longest label needs, between [`TRAY_WIDTH`] and
+    /// [`TRAY_MAX_WIDTH`]. Like a chip's, the width is estimated from the
+    /// text, so hit testing and painting agree without a font.
+    fn tray_width<'a>(labels: impl Iterator<Item = &'a str>) -> f32 {
+        let longest = labels.map(|label| label.chars().count()).max().unwrap_or(0);
+        (6.4 * longest as f32 + 30.0).clamp(TRAY_WIDTH, TRAY_MAX_WIDTH)
     }
 
     /// The tray of hidden inputs, outside the card's left edge (decision 2 =
     /// D): view state, which neither the box nor the routing sees.
     pub fn input_tray(&self) -> Option<Rect> {
-        let rows = self.hidden_inputs().len();
-        (rows > 0).then(|| self.tray(-TRAY_GAP - TRAY_WIDTH, rows))
+        let hidden = self.hidden_inputs();
+        let width = Self::tray_width(hidden.iter().map(|i| self.inputs[*i].label.as_str()));
+        (!hidden.is_empty()).then(|| self.tray(-TRAY_GAP - width, width, hidden.len()))
     }
 
     /// The tray of hidden outputs, outside the card's right edge.
     pub fn output_tray(&self) -> Option<Rect> {
-        let rows = self.hidden_outputs().len();
-        (rows > 0).then(|| self.tray(WIDTH + TRAY_GAP, rows))
+        let hidden = self.hidden_outputs();
+        let width = Self::tray_width(hidden.iter().map(|i| self.outputs[*i].label.as_str()));
+        (!hidden.is_empty()).then(|| self.tray(WIDTH + TRAY_GAP, width, hidden.len()))
     }
 
     /// The `k`-th row of a tray.
     pub fn tray_row(tray: Rect, k: usize) -> Rect {
         Rect::from_min_size(
             tray.min + vec2(0.0, 4.0 + k as f32 * COMPACT_ROW),
-            vec2(TRAY_WIDTH, COMPACT_ROW),
+            vec2(tray.width(), COMPACT_ROW),
         )
     }
 
@@ -1151,12 +1163,10 @@ fn input_lines(
                     .collect(),
             ),
         ),
-        Some(reference @ Binding::Reference { .. }) => {
-            let text = format!("{label} ← {}", labels::binding(reference, graph));
-            (text.clone(), text)
-        }
+        // One form on every card: the input's name, then its source as the
+        // value and check lines write it (`Body · cart.body`, `id · "p-1"`).
         Some(other) => {
-            let text = format!("{label} · {}", value(other));
+            let text = format!("{label} · {}", source_text(other, scope, graph, 0));
             (text.clone(), text)
         }
     }

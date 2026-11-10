@@ -678,7 +678,7 @@ fn ktlo32_an_undeclared_input_is_marked_required_on_a_call() {
         settle(&mut harness);
         assert!(
             !painted_on_board(&harness, "note · Missing input")
-                && painted_on_board(&harness, "note · hello"),
+                && painted_on_board(&harness, "note · \"hello\""),
             "{size:?}: a bound input is not missing"
         );
         assert!(
