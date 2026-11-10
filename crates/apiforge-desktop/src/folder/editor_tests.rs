@@ -1584,3 +1584,131 @@ mod ux20 {
         );
     }
 }
+
+// ---- #276: a tab switch never changes the remembered Problems height ----
+
+mod issue276 {
+    use super::*;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const COMPONENT: &str = "components/add-to-cart.afs";
+
+    /// A scenario whose `count` checks each read a step that does not exist.
+    fn broken(count: usize) -> String {
+        let mut text = String::from("scenario \"Broken\" {\n");
+        for index in 0..count {
+            text.push_str(&format!(
+                "  check{index} = assert missing{index}.status == 200\n"
+            ));
+        }
+        text.push_str("}\n");
+        text
+    }
+
+    fn by_path(harness: &FolderHarness, path: &str) -> String {
+        folder(harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned()
+    }
+
+    /// Opens `path` as the active tab with `text` as its unsaved source.
+    fn open_with(harness: &mut FolderHarness, path: &str, text: &str) -> String {
+        let id = by_path(harness, path);
+        app(harness).workbench.open(&id);
+        app(harness).activate_tab(&id);
+        let session = app(harness).session.as_mut().unwrap();
+        session.edit_source(&id, text, CODE).unwrap();
+        session.settle(&id).unwrap();
+        settle(harness);
+        id
+    }
+
+    /// Clicks the document tab of `path`: of the controls named after the
+    /// file (the project files row has the name too), the one holding its
+    /// *Close* control.
+    fn click_tab(harness: &mut FolderHarness, path: &str) {
+        let name = path.rsplit('/').next().unwrap();
+        let close = harness.get_by_label(&format!("Close {name}")).rect();
+        let tab = harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, name)
+            .find(|node| node.rect().contains(close.center()))
+            .unwrap_or_else(|| panic!("no tab named {name}"));
+        tab.click();
+    }
+
+    fn problems(harness: &FolderHarness, id: &str) -> usize {
+        folder(harness).snapshot(id).unwrap().diagnostics.len()
+    }
+
+    /// The demo shop in Code with two tabs: one with a single problem, one
+    /// with at least twelve.
+    fn two_tabs(
+        size: egui::Vec2,
+        mode: &str,
+    ) -> (tempfile::TempDir, FolderHarness, String, String) {
+        let project = shop();
+        let mut harness = folder_harness(project.path(), size);
+        harness.get_by_label(mode).click();
+        settle(&mut harness);
+        let one = open_with(&mut harness, SCENARIO, &broken(1));
+        let many = open_with(&mut harness, COMPONENT, &broken(12));
+        assert_eq!(problems(&harness, &one), 1, "one problem");
+        assert!(problems(&harness, &many) >= 12, "twelve problems");
+        (project, harness, one, many)
+    }
+
+    /// Criterion 1: switching between the tabs ten times, by clicking them,
+    /// leaves the remembered height what it was, in every frame.
+    #[test]
+    fn a_tab_switch_never_changes_the_problems_height() {
+        for (size, mode) in [(MINIMUM, "Code"), (WIDE, "Code"), (WIDE, "Split")] {
+            let (_project, mut harness, one, many) = two_tabs(size, mode);
+            let before = remembered(&harness);
+            for round in 0..10 {
+                for (id, path) in [(&one, SCENARIO), (&many, COMPONENT)] {
+                    click_tab(&mut harness, path);
+                    harness.step();
+                    assert_eq!(
+                        folder(&harness).workbench.active(),
+                        Some(id.as_str()),
+                        "the click shows {path}"
+                    );
+                    for frame in 0..4 {
+                        harness.step();
+                        assert_eq!(
+                            remembered(&harness),
+                            before,
+                            "{mode} at {size:?}, round {round}, frame {frame} after showing {id}"
+                        );
+                    }
+                    settle(&mut harness);
+                    assert_eq!(remembered(&harness), before, "{mode} at {size:?}");
+                }
+            }
+        }
+    }
+
+    /// Criterion 2: a drag of the panel's edge still changes and remembers
+    /// the height, which then survives a tab switch.
+    #[test]
+    fn a_drag_still_sets_the_problems_height() {
+        let (_project, mut harness, one, _many) = two_tabs(WIDE, "Code");
+        let before = remembered(&harness);
+        drag_problems_edge(&mut harness, -60.0);
+        let dragged = remembered(&harness);
+        assert!(
+            (dragged - before - 60.0).abs() <= 2.0,
+            "the drag took the height from {before} to {dragged}"
+        );
+        app(&mut harness).activate_tab(&one);
+        settle(&mut harness);
+        assert_eq!(remembered(&harness), dragged);
+    }
+}
