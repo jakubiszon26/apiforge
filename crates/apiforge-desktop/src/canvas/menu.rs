@@ -97,12 +97,11 @@ impl ActionMenu {
                 Block::Variable,
             ]
         };
-        let export = component.then_some(Block::Export);
         let mut actions: Vec<Action> = blocks
             .iter()
             .copied()
-            .filter(|block| !component || !matches!(block, Block::Start | Block::Condition))
-            .chain(export)
+            .chain([Block::Export])
+            .filter(|block| block.offered(component))
             .map(|block| Action {
                 block,
                 name: block.label().to_owned(),
