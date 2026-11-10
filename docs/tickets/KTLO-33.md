@@ -254,6 +254,80 @@ merges. The fix stays in one place.
 The issue's first entry (the ubuntu push run of #118, 2026-10-28) is run
 40704347762, flake 1 above: the minute boundary falls on Linux as well.
 
+### 8. The Windows hover family (#279) and flake 3 ✔ — test defect, one shared hover
+
+Added by the planning model on 2026-11-10. Failing on most Windows runs
+and passing on a rerun: `ux33_the_icon_shows_one_tooltip`,
+`ux33_criterion_1_a_component_board_has_the_button_a_scenario_none` and
+`ux34_criterion_4_a_chip_alone_cannot_be_copied` (all through
+`ux02::hover_shows`), once `ux18::fit_the_view_still_fits_beside_the_inspector`;
+flake 3 is the same family.
+
+Cause, established in the implementation. The window protects unsaved
+work and the view one second of **wall** time after the last change
+(`touched`: a mode, a tab, a panel; `saving.rs::protect`,
+`RECOVERY_DELAY`). The job runs on the storage worker; when it runs
+longer than 150 ms the storage band (*Protecting unsaved work…* with a
+spinner, KTLO-24) shows under the tabs and moves everything below it down
+by its height until the job ends. A hover test moved the pointer to the
+widget's centre, settled, and took sixty steps; a fast Linux runner ends
+the steps before the job starts or finishes the job within 150 ms, a slow
+Windows runner is in the middle of it at the last step, with the widget
+below the pointer. The tooltip delay itself runs on the harness's
+simulated clock, as the analysis said, so only the layout differs.
+Reproduced on Linux by slowing the storage worker 200 ms per file
+operation through its fault seam: the *Component settings* icon moved from
+y 146 to y 184, the old hover failed and the new one passes; the UX-18 fit
+ended with exactly the CI failure's rectangles (cards
+`[[258 261] - [568 407]]`, focus `[[272 204] - [568 464]]`): the band
+moves the board's viewport, which re-applies UX-18's rule that keeps the
+one selected card whole in view, panning the centred board 7 px.
+
+Fix. `testing::quiesce` settles, makes the pending protection due now
+(`FolderApp::debug_protect_now`) and waits for it. `testing::hover_until`
+is the one hover every hover test uses (`hover_shows`, the narrowing row,
+the header name, the run label, *Follow*, *Run simulation*): it quiesces,
+hovers the widget's current centre, asserts that the pointer is over it,
+steps until the expected text shows within fifteen simulated seconds
+(the old sixty steps), and on failure prints per frame the widget's
+rectangle, the pointer, `is_still`, whether a tooltip layer is open and
+whether the storage band shows. The narrowing-row test asserts the name is
+shortened on the window it hovers. UX-18's fixture quiesces after
+choosing Diagram. No assertion changed.
+
+Seen, not changed (a product matter for the owner, written on #122): on a
+slow disk the band appears for a moment a second after a mode or tab
+change and the board below it jumps by its height; beside a selected card
+at 960 × 540 the jump leaves a fitted board panned.
+
+## As built
+
+- Flake 4 (decision 2 A): `TakeBack::stopped` became `failures`; any
+  failure other than `Locked`, `StaleStorage` and a transaction to
+  recover is tried again at the next check, the notice appears at the
+  third failure in a row and the window keeps trying; a success resets
+  the count. The tests inject the failure at the flush of
+  `.apiforge/local` that `open_exclusive_as` makes right after it takes
+  the lock (`Boundary::DirectorySync`): the holder file's own replace goes
+  through `apiforge_storage::write_atomic`, which the fault seam does not
+  reach. Tests: `ktlo33_a_take_back_that_fails_once_is_tried_again_at_the_next_check`,
+  `ktlo33_three_failed_take_backs_in_a_row_show_the_notice_and_the_window_keeps_trying`.
+- Flake 1: `mcp08b::await_holder_file`, used by
+  `take_back_sits_at_the_right_end_of_the_bar_under_run` and by
+  `mcp10::await_since`; `holder.rs` test
+  `the_provisional_description_after_a_hand_over_names_no_endpoint`.
+- Flake 2: the consent goes off from the run's own `running` message
+  (`Runs::observe`); moving the check after the run fails the test with
+  `LiveDisabled` (checked by hand once).
+- Flake 5: `wait_for_journal` watches the run (`Running`) and fails with
+  its result when it ends first; the bound is 45 s. Test:
+  `ktlo33_a_run_refused_before_any_request_ends_the_wait_with_its_refusal`.
+- Flakes 3 and 8: see 8.
+- Flakes 6 and 7: MCP-19 (#191) is merged; no change here, the loop runs
+  them.
+- The loop: `.github/workflows/flake-loop.yml`, by hand once on `main`,
+  or by a push whose head commit says `[flake-loop]`.
+
 ## Decisions
 
 Taken by the owner on 2026-11-10 (quiz on the analysis, recorded on #122):
