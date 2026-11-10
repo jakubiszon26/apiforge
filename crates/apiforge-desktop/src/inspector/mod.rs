@@ -83,6 +83,25 @@ pub struct Inspector {
     node_id: String,
     tab: Tab,
     choosing_response: Option<ResponseChoiceState>,
+    focus: Focus,
+}
+
+/// The input a double-click on the board asked the Inspector to show
+/// (LAY-16), and the last one it scrolled to.
+#[derive(Default)]
+struct Focus {
+    wanted: Option<String>,
+    reached: Option<String>,
+}
+
+impl Focus {
+    /// Scrolls the panel to what is drawn next when it is the wanted input.
+    fn at(&mut self, ui: &mut Ui, input: &str) {
+        if self.wanted.as_deref() == Some(input) {
+            ui.scroll_to_cursor(Some(egui::Align::Min));
+            self.reached = self.wanted.take();
+        }
+    }
 }
 
 impl Default for Inspector {
@@ -91,17 +110,34 @@ impl Default for Inspector {
             node_id: String::new(),
             tab: Tab::Configuration,
             choosing_response: None,
+            focus: Focus::default(),
         }
     }
 }
 
 impl Inspector {
+    /// Opens the Configuration tab on `input` of the block shown next.
+    pub fn focus_input(&mut self, input: String) {
+        self.tab = Tab::Configuration;
+        self.focus.wanted = Some(input);
+    }
+
+    /// The input the Inspector last scrolled to for a double-click.
+    #[cfg(test)]
+    pub fn focused_input(&self) -> Option<&str> {
+        self.focus.reached.as_deref()
+    }
+
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         if self.node_id != context.node.id {
+            let wanted = self.focus.wanted.take();
             *self = Self {
                 node_id: context.node.id.clone(),
                 ..Self::default()
             };
+            if let Some(input) = wanted {
+                self.focus_input(input);
+            }
         }
         let mut actions = Vec::new();
         let mut node = context.node.clone();
@@ -221,7 +257,7 @@ impl Inspector {
                     "A value can be data, a field of another step's result or a calculation. It is computed again on every run.",
                 );
             }
-            NodeKind::Request => request(ui, id, context, node),
+            NodeKind::Request => request(ui, id, context, node, &mut self.focus),
             NodeKind::Assert => check(ui, id, node),
             NodeKind::Export => {
                 widgets::field_label(ui, "Output type");
@@ -342,6 +378,7 @@ impl Inspector {
         }
         let binding_context = binding_context(context);
         for port in &ports {
+            self.focus.at(ui, &port.name);
             reveal = argument(
                 ui,
                 &binding_context,
@@ -595,7 +632,7 @@ fn flow_connections(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action
         });
 }
 
-fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
+fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node, focus: &mut Focus) {
     let scope = scope(context);
     // The URL and the header and query values are templates, so they complete
     // from the same index the code editor uses.
@@ -611,6 +648,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         steps: context.run.map_or(&[][..], |run| run.steps.as_slice()),
     };
     ui.add_space(6.0);
+    focus.at(ui, URL_INPUT);
     widgets::field_label(ui, "Method and URL or path");
     let mut method = node
         .config
@@ -684,6 +722,7 @@ fn request(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
         if current.is_some_and(|binding| !has_text_form(binding, scope)) {
             continue;
         }
+        focus.at(ui, input);
         match fields::template_map(
             ui,
             id.with(input),

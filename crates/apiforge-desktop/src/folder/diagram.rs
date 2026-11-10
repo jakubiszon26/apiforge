@@ -269,6 +269,7 @@ impl FolderApp {
                     | Command::Copy
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)
+                    | Command::InspectInput { .. }
             )
         {
             return;
@@ -283,6 +284,7 @@ impl FolderApp {
             project: &project,
             parameters: &parameters,
             sibling: sibling_of(model, cleanup),
+            density: self.density(),
         };
         let selection = self
             .selections
@@ -333,7 +335,11 @@ impl FolderApp {
             Command::SetWireStyle(style) => {
                 self.preferences.wire_style = style;
                 let preferences = self.preferences.clone();
-                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                self.storage_io(
+                    "Saving preferences…",
+                    move || preferences.save(crate::preferences::Preference::WireStyle),
+                    |_, _| {},
+                );
                 for canvas in self.canvases.values_mut() {
                     canvas.wire_style = style;
                 }
@@ -342,10 +348,48 @@ impl FolderApp {
             Command::SetBridges(bridges) => {
                 self.preferences.bridges = bridges;
                 let preferences = self.preferences.clone();
-                self.storage_io("Saving preferences…", move || preferences.save(), |_, _| {});
+                self.storage_io(
+                    "Saving preferences…",
+                    move || preferences.save(crate::preferences::Preference::Bridges),
+                    |_, _| {},
+                );
                 for canvas in self.canvases.values_mut() {
                     canvas.bridges = bridges;
                 }
+                None
+            }
+            Command::SetCompactCards(compact) => {
+                let before = self.density();
+                let density = if compact {
+                    canvas::CardDensity::Compact
+                } else {
+                    canvas::CardDensity::Full
+                };
+                self.switch_density(density);
+                // The board repacks at the new sizes, as one edit (Q14 = A),
+                // which Undo takes back together with the density.
+                let current = self.shared_model(document_id);
+                let repacked = Board { density, ..board }.tidy_up(&[]);
+                if let Some(result) = repacked.map(|graph| Ok(graph.into())) {
+                    self.apply_edit(document_id, model, cleanup, result);
+                }
+                self.density_switch = self
+                    .shared_model(document_id)
+                    .filter(|after| current.is_none_or(|current| !Arc::ptr_eq(&current, after)))
+                    .map(|after| DensitySwitch {
+                        document: document_id.to_owned(),
+                        before,
+                        after: density,
+                        model: after,
+                    });
+                None
+            }
+            Command::InspectInput { node, input } => {
+                self.new_inputs.remove(document_id);
+                self.component_settings.remove(document_id);
+                self.selections.insert(document_id.to_owned(), vec![node]);
+                self.selected_inputs.remove(document_id);
+                self.inspector.focus_input(input);
                 None
             }
             Command::AddNode {

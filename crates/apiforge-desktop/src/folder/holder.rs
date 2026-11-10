@@ -121,9 +121,15 @@ pub(super) struct TakeBack {
     /// The take-back met a transaction the holder left behind and opened
     /// recovery; it waits until recovery has been finished and reloaded.
     recovering: bool,
-    /// The take-back failed for a reason another attempt would repeat.
-    stopped: bool,
+    /// Take-backs that failed in a row. A failure is most often passing (a
+    /// reader or a scanner held a file for a moment), so the next check tries
+    /// again; the notice is shown at the third (KTLO-33, decision 2 A).
+    failures: u32,
 }
+
+/// Failed take-backs in a row after which the window says so; it keeps
+/// trying after that.
+const FAILURES_NOTICED: u32 = 3;
 
 impl FolderApp {
     /// Whether this window observes a project another process holds, which
@@ -169,7 +175,6 @@ impl FolderApp {
         // between the window's grant and its own lock (MCP-08b).
         if self.take_back.pending
             || self.take_back.recovering
-            || self.take_back.stopped
             || self.persistence.closing
             || self.handover.holds_back()
         {
@@ -188,22 +193,30 @@ impl FolderApp {
                     Ok(true) => app.taken_back(),
                     // Another writer was quicker, or the window changed
                     // while the project was read; the next check tries again.
-                    Ok(false) | Err(apiforge_project::Error::StaleStorage) => {}
+                    // Neither is a failure: the streak of failures ends.
+                    Ok(false) | Err(apiforge_project::Error::StaleStorage) => {
+                        app.take_back.failures = 0;
+                    }
                     Err(apiforge_project::Error::Storage(
                         apiforge_project::ProjectError::RecoveryRequired,
                     )) => {
+                        app.take_back.failures = 0;
                         // As at start: the transaction is reviewed and
                         // finished before the project is used.
                         app.take_back.recovering = true;
                         app.watcher.recovery_required = true;
                         app.review_transaction(app.root.clone());
                     }
+                    // The next check tries again; only a failure that
+                    // persists is worth the person's attention.
                     Err(error) => {
-                        app.take_back.stopped = true;
-                        app.notify(
-                            format!("This window could not take the project back: {error}"),
-                            true,
-                        );
+                        app.take_back.failures += 1;
+                        if app.take_back.failures == FAILURES_NOTICED {
+                            app.notify(
+                                format!("This window could not take the project back: {error}"),
+                                true,
+                            );
+                        }
                     }
                 }
             },
@@ -535,6 +548,27 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// KTLO-33, flake 1: the description the window shows at a hand-over,
+    /// before the holder's own is read, names no endpoint; the agent's own
+    /// names its control channel. A test that reads the bar's text waits for
+    /// the endpoint, which only the holder's own description has.
+    #[test]
+    fn the_provisional_description_after_a_hand_over_names_no_endpoint() {
+        let client = Some("Claude Code".to_owned());
+        // As `handed_over` describes the agent at the grant.
+        let provisional = Observed::new(Holder::new(HolderRole::Agent, client.clone()));
+        assert_eq!(provisional.holder().endpoint(), None);
+        // As the agent describes itself in the holder file.
+        let own = Holder::new(HolderRole::Agent, client)
+            .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into()));
+        assert!(own.endpoint().is_some());
+        assert_ne!(
+            provisional.holder(),
+            &own,
+            "the holder's own description replaces the provisional one"
+        );
+    }
 
     #[test]
     fn the_start_time_is_shown_on_the_local_wall_clock() {

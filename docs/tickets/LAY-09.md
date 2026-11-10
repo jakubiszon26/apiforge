@@ -3,7 +3,9 @@
 - Size: S–M · Owner review: 20 min · Risk: `visible UI`
 - State: Backlog (issue #293) · decided by the owner on 2026-11-05 (Q7 = A
   not vetoed, Q13 = A, Q15 = A; DIAG-00 #241 folded in by Q8 = A) · LAY
-  sprint, wave 1, after LAY-16
+  sprint, part A, after LAY-21 and LAY-11; re-scoped by the
+  [review of 2026-11-10](../sprints/lay.md#11-mid-sprint-review-2026-11-10)
+  (R3, R7)
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -37,6 +39,24 @@ level.
 - New: a check card's subtitle names its subject and predicate
   (`cart.total ≈ total`), from LAY-08's subjects.
 
+## Re-scoped on 2026-11-10
+
+LAY-16 and LAY-21 built the compact box, which already drops a row that is
+not legible and keeps the name at every zoom. What is left here: the
+minimum sizes as one rule for every card kind at both densities, the failed
+and blocked borders, the aggregate pill at Overview, and two additions.
+
+- **Fit shows every card.** The board's minimum zoom is 0.25 today and Fit
+  is clamped to it, so a board that needs less is cut off (`shop-30`
+  tidied needs 0.205; at 960 × 540 every reference board needs 0.06 to
+  0.16). The minimum becomes 0.05; below 0.25 a card is its band, its
+  border and its badge, and the name is drawn only where it fits.
+- **The zoom level between 0.45 and 0.75 is called *Medium***, in code
+  (`CardDetail::Medium`) and in the documents, because *Compact* is the
+  density (*Compact cards*). Nothing on screen carries either word.
+- A check's line naming subject and predicate moved to LAY-21 (it is the
+  compact check card); criterion 6 below now covers the full card only.
+
 ## Decisions taken (owner, 2026-11-05)
 
 > Q7 = A (not vetoed): the thresholds are a parameter until this ticket's
@@ -57,8 +77,7 @@ defect is criterion 2.
 
 ## Acceptance criteria
 
-Tests in `crates/apiforge-desktop/src/folder/acceptance_tests.rs`, `mod
-lay09`, on `shop-30.afs` after a failed simulation.
+Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay09.rs`, on `shop-30.afs` after a failed simulation.
 
 1. At 0.35 the failed card has the red 2 px border and the blocked one the
    amber one; at 0.25 a name is at least 11 px high on screen, a step number
@@ -83,6 +102,9 @@ lay09`, on `shop-30.afs` after a failed simulation.
 7. The final thresholds are recorded in this file with the measurement that
    fixed them; if they differ from 0.45 / 0.75 the QA captures show the
    boundary frames.
+8. Fit on `shop-50.afs` at 960 × 540 shows every card (the cards' box is
+   inside the viewport), and the failed card's red border is visible in
+   that frame. Test: `lay09_criterion_8_fit_shows_every_card`.
 
 ## Not in scope
 
