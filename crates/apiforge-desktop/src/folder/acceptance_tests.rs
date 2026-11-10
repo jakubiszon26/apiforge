@@ -17,6 +17,8 @@ use std::fs;
 
 #[path = "acceptance_tests/issue288.rs"]
 mod issue288;
+#[path = "acceptance_tests/ktlo33.rs"]
+mod ktlo33;
 
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
@@ -2112,6 +2114,28 @@ mod mcp08b {
             .expect("a labelled node")
     }
 
+    /// Steps the window until the bar names the holder from its own
+    /// description, the one in the holder file, rather than the provisional
+    /// one the window shows from the grant until its next check reads the
+    /// file (KTLO-33, flake 1, decision 1 A). Only the holder's own names an
+    /// endpoint. The two may differ in the minute of *since*, so a test that
+    /// reads the bar's text and asks for it again later waits for this first.
+    pub(super) fn await_holder_file(harness: &mut FolderHarness) {
+        await_until(
+            harness,
+            Instant::now(),
+            "the holder's own description",
+            |harness| {
+                folder(harness)
+                    .holder
+                    .as_ref()
+                    .map(crate::folder::holder::Observed::holder)
+                    .and_then(Holder::endpoint)
+                    .is_some()
+            },
+        );
+    }
+
     /// Who holds the project, as a reader finds out.
     pub(super) fn holder(root: &Path) -> Option<Holder> {
         ProjectStore::open_read_only(root)
@@ -3108,6 +3132,7 @@ mod mcp08b {
             await_endpoint(&mut harness, root, HolderRole::Window);
             let mut server = agent(root, "Claude Code");
             hand_over(&mut harness, &mut server, "Written by the agent.");
+            await_holder_file(&mut harness);
             let holder_text = label_containing(&harness, &format!("{AGENT} · "));
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
@@ -5418,8 +5443,8 @@ mod mcp15 {
 
 mod mcp10 {
     use super::mcp08b::{
-        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
-        holder, label_containing, read, read_only, write,
+        AGENT, SCENARIO, address, answer, await_endpoint, await_holder_file, await_until, call,
+        commented, contains, holder, label_containing, read, read_only, write,
     };
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
@@ -5600,11 +5625,11 @@ mod mcp10 {
     }
 
     /// Waits until the bar names the agent with its start time, as the
-    /// holder file gives it.
+    /// holder file gives it: the provisional description shown from the
+    /// grant has a start time too, the window's own (KTLO-33, flake 1).
     fn await_since(harness: &mut FolderHarness) {
-        await_until(harness, Instant::now(), "the holder's start", |harness| {
-            contains(harness, &format!("{AGENT} · since "))
-        });
+        await_holder_file(harness);
+        assert!(contains(harness, &format!("{AGENT} · since ")));
     }
 
     /// Criterion 1: the server tells a connected window `run` with the
@@ -6209,8 +6234,9 @@ mod mcp16 {
     }
 
     /// The agent writes `path` with `note` added under its first line and
-    /// returns when it started the write: the window steps while the
-    /// agent waits for the answer, and may follow before it comes.
+    /// returns when the answer came, which is when the write had committed.
+    /// The window steps while the agent waits for the answer, and may follow
+    /// before it comes.
     fn agent_notes(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
@@ -6218,14 +6244,18 @@ mod mcp16 {
         note: &str,
     ) -> Instant {
         let (text, _) = read(server, path);
-        let asked = Instant::now();
         let answer = write(harness, server, path, &commented(&text, note));
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
-        asked
+        returned
     }
 
     /// The window is at `document_id` within the ticket's bound of
-    /// `returned`, the moment the agent started the write that commits.
+    /// `returned`, the moment the agent's commit was answered. The bound is
+    /// the window's: it follows a commit within two seconds. Timed from the
+    /// start of the agent's call it also held the agent's own transaction,
+    /// which on a loaded Windows runner took most of it (KTLO-33, run
+    /// 42881644458: 2.15 s for a publication).
     fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
         let took = await_until(harness, returned, what, |harness| {
             folder(harness).workbench.active() == Some(document_id)
@@ -6375,8 +6405,8 @@ mod mcp16 {
         assert_ne!(deep, padded);
         let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
-        let returned = Instant::now();
         let answer = write(&mut harness, &mut server, SCENARIO, &deep);
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_active(&mut harness, returned, &scenario, "the scenario");
         await_until(&mut harness, Instant::now(), "the new text", |harness| {
@@ -6443,13 +6473,13 @@ mod mcp16 {
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
         );
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "create_document",
             json!({ "kind": "scenario", "path": ADDED, "text": text }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_until(&mut harness, returned, "the new document", |harness| {
             is_registered(harness, ADDED)
@@ -6486,13 +6516,13 @@ mod mcp16 {
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "publish",
             json!({ "path": PRODUCT, "expected_source_sha256": hash }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["revision"], 2, "{answer}");
         await_active(&mut harness, returned, &product, "the published component");
         let revisions: Vec<u32> = folder(&harness)
@@ -6806,17 +6836,26 @@ mod mcp16 {
         settle(&mut harness);
         assert!(pressed(&harness), "Space presses it again");
 
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
-        assert!(has_label(&harness, PINNED_HINT), "the pressed hover text");
+        let follow = |harness: &FolderHarness| {
+            harness
+                .query_all_by_label(FOLLOW)
+                .next()
+                .map(|node| node.rect())
+        };
+        assert!(
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                PINNED_HINT
+            )),
+            "the pressed hover text"
+        );
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness));
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            has_label(&harness, RELEASED_HINT),
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                RELEASED_HINT
+            )),
             "the released hover text"
         );
         drop(harness);
@@ -7866,12 +7905,19 @@ mod ux02 {
         close_options(harness);
     }
 
-    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    /// Whether hovering the widget `label` shows a tooltip with `text`,
+    /// through the one hover every hover test takes (KTLO-33, #279).
     pub(super) fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
-        harness.get_by_label(label).hover();
-        settle(harness);
-        harness.run_steps(60);
-        contains(harness, text)
+        crate::testing::hover_until(
+            harness,
+            |harness| {
+                harness
+                    .query_all_by_label(label)
+                    .next()
+                    .map(|node| node.rect())
+            },
+            |harness| contains(harness, text),
+        )
     }
 
     /// The project name in the header (the explorer may name it too).
@@ -8075,15 +8121,15 @@ mod ux02 {
             );
         }
         let names = harness.query_all_by_label(NAME).count();
-        harness
-            .query_all_by_label(NAME)
-            .find(|node| node.rect().top() < 40.0)
-            .expect("the project name in the header")
-            .hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            harness.query_all_by_label(NAME).count() > names,
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(NAME)
+                    .map(|node| node.rect())
+                    .find(|rect| rect.top() < 40.0),
+                |harness| harness.query_all_by_label(NAME).count() > names,
+            ),
             "hovering the shortened name shows it whole"
         );
     }
@@ -9897,9 +9943,17 @@ mod ux04 {
         assert!(label.width() + 1.0 < whole, "cut: {label:?}, whole {whole}");
         let publish = harness.get_by_label("Publish").rect();
         assert!(publish.right() <= label.left(), "clear of Publish");
-        harness.get_by_label(&named).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(&named)
+                    .next()
+                    .map(|node| node.rect()),
+                |harness| harness.query_all_by_label_contains(&named).count() > 1,
+            ),
+            "the label's hover"
+        );
         assert_eq!(
             harness.query_all_by_label_contains(&named).count(),
             2,
@@ -12343,7 +12397,8 @@ mod ux34 {
         let document = model(&harness, &id);
         let main = graph_of(&document, false);
         let project = folder(&harness).context_project();
-        let rect = |node: &Node| Card::build(node, main, &project).rect();
+        let rect =
+            |node: &Node| Card::build(node, main, &project, canvas::CardDensity::Compact).rect();
         let original = rect(node(main, "add_to_cart"));
         let clone_node = node(main, "add_to_cart_2");
         let clone = rect(clone_node);
@@ -12406,7 +12461,13 @@ mod ux34 {
         let parameters = parameters_of(&document);
         let chip = main.proxies.last().expect("the chip");
         let chip = crate::canvas::Chip::build(chip, main, &project, &parameters).rect();
-        let clone = Card::build(node(main, "add_to_cart_2"), main, &project).rect();
+        let clone = Card::build(
+            node(main, "add_to_cart_2"),
+            main,
+            &project,
+            canvas::CardDensity::Compact,
+        )
+        .rect();
         assert!(
             !clone.intersects(chip),
             "the clone overlaps the chip: {clone:?} {chip:?}"
@@ -12416,7 +12477,7 @@ mod ux34 {
             .iter()
             .filter(|other| other.handle != "add_to_cart_2")
         {
-            let rect = Card::build(other, main, &project).rect();
+            let rect = Card::build(other, main, &project, canvas::CardDensity::Compact).rect();
             assert!(
                 !rect.intersects(clone),
                 "the clone overlaps {}",
@@ -12484,7 +12545,13 @@ mod ux34 {
         let cleanup = graph_of(&document, true);
         let canvas = folder(&harness).canvases.get(&id).expect("the board");
         for handle in ["expected_price_2", "promotional_price_2", "delete_cart"] {
-            let card = Card::build(node(cleanup, handle), main, &project).rect();
+            let card = Card::build(
+                node(cleanup, handle),
+                main,
+                &project,
+                canvas::CardDensity::Compact,
+            )
+            .rect();
             assert!(
                 canvas.debug_in_view(card),
                 "{handle} is in view after the paste: {card:?}"
@@ -13357,6 +13424,10 @@ mod ux18 {
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
         choose(&mut harness, "Diagram");
+        // The view's protection, due a second after the mode changed, would
+        // otherwise show the storage band under the tabs in the middle of a
+        // test on a slow runner, moving the board (KTLO-33, #279).
+        crate::testing::quiesce(&mut harness);
         assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
         (project, harness, scenario)
     }
@@ -13773,7 +13844,14 @@ mod ux21 {
         let rightmost = before
             .nodes
             .iter()
-            .map(|node| f64::from(canvas::Card::build(node, &before, &project).rect().max.x))
+            .map(|node| {
+                f64::from(
+                    canvas::Card::build(node, &before, &project, canvas::CardDensity::Compact)
+                        .rect()
+                        .max
+                        .x,
+                )
+            })
             .fold(f64::MIN, f64::max);
         let board = harness.get_by_label("Diagram board").rect();
         let drop = board.left_center() + egui::vec2(160.0, 0.0);
@@ -13820,9 +13898,10 @@ mod ux21 {
     }
 }
 
-/// UX-28 (#236): the *Curves* wire style leaves the *Wire style* menu until
-/// it draws curves (owner decision 18 = A); a saved `spline` preference, which
-/// is how *Curves* was stored, falls back to *Right angles*.
+/// UX-28 (#236): the *Curves* wire style leaves the *Board view* menu (named
+/// *Wire style* until LAY-16) until it draws curves (owner decision 18 = A); a
+/// saved `spline` preference, which is how *Curves* was stored, falls back to
+/// *Right angles*.
 mod ux28 {
     use super::*;
     use crate::canvas::WireStyle;
@@ -13830,7 +13909,7 @@ mod ux28 {
     use crate::testing::MINIMUM;
     use std::path::Path;
 
-    const WIRE_STYLE: &str = "Wire style";
+    const WIRE_STYLE: &str = "Board view";
     const RIGHT_ANGLES: &str = "Right angles";
     const CURVES: &str = "Curves";
     const BRIDGES: &str = "Bridges at crossings";
@@ -13849,7 +13928,7 @@ mod ux28 {
         (harness, id)
     }
 
-    /// Criterion 1: the *Wire style* menu lists the current set minus
+    /// Criterion 1: the *Board view* menu lists the current set minus
     /// *Curves*: *Right angles*, and *Bridges at crossings* below the line.
     #[test]
     fn ux28_criterion_1_the_menu_has_no_curves() {
@@ -13980,7 +14059,7 @@ mod ux16 {
             .clone();
         card.inputs
             .insert("actual".into(), Binding::reference("ghost", "status", ""));
-        let built = canvas::Card::build(&card, &both, &project);
+        let built = canvas::Card::build(&card, &both, &project, canvas::CardDensity::Compact);
         let actual = built
             .inputs
             .iter()
@@ -14227,5 +14306,629 @@ mod ux15 {
             );
             assert_dot_at_the_right(&harness, LONG, &context);
         }
+    }
+}
+
+/// LAY-16: the compact request card, the density preference and the tray that
+/// reaches the ports the compact box does not show
+/// ([ticket](../../../../docs/tickets/LAY-16.md)).
+mod lay16 {
+    use super::*;
+    use crate::canvas::Canvas;
+    use apiforge_core::format::Binding;
+    use egui::accesskit::Role;
+    use egui::{Pos2, Rect, pos2, vec2};
+    use egui_kittest::kittest::NodeT;
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    fn shop_30() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/scenarios/lay/shop-30.afs");
+        fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("the fixture {}: {error}", path.display()))
+    }
+
+    /// A request as *Add step* leaves one beside `cart`, whose response a
+    /// check reads.
+    const TRAY: &str = r#"scenario "Tray" {
+  cart = POST "/cart" {
+    body { items: 1 }
+    sample 201 { id: "c-1" }
+  }
+  cart_ok = assert cart.body.id == "c-1"
+  probe = GET "/probe" {
+    sample 200 {}
+  }
+}
+"#;
+
+    /// `source` on the board of the demo shop, whose components it calls.
+    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+        let project = crate::testing::shop_project();
+        fs::write(project.path().join(SCENARIO), source).unwrap();
+        let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
+        settle(&mut harness);
+        (project, harness)
+    }
+
+    fn document(harness: &FolderHarness) -> String {
+        only(harness, DocumentKind::Scenario)
+    }
+
+    fn graph(harness: &FolderHarness) -> Graph {
+        let model = folder(harness)
+            .snapshot(&document(harness))
+            .unwrap()
+            .model
+            .unwrap();
+        graph_of(&model, false).clone()
+    }
+
+    fn id_of(harness: &FolderHarness, handle: &str) -> String {
+        graph(harness)
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("no step {handle}"))
+            .id
+            .clone()
+    }
+
+    fn canvas(harness: &FolderHarness) -> &Canvas {
+        folder(harness)
+            .canvases
+            .get(&document(harness))
+            .expect("the board is drawn")
+    }
+
+    fn canvas_mut(harness: &mut FolderHarness) -> &mut Canvas {
+        let document = document(harness);
+        app(harness)
+            .canvases
+            .get_mut(&document)
+            .expect("the board is drawn")
+    }
+
+    /// Every card's box on the board, by handle.
+    fn world(harness: &FolderHarness) -> Vec<(String, Rect)> {
+        let canvas = canvas(harness);
+        graph(harness)
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                canvas
+                    .debug_world(&node.id)
+                    .map(|rect| (node.handle.clone(), rect))
+            })
+            .collect()
+    }
+
+    fn world_of(harness: &FolderHarness, handle: &str) -> Rect {
+        let id = id_of(harness, handle);
+        canvas(harness)
+            .debug_world(&id)
+            .unwrap_or_else(|| panic!("{handle} is not on the board"))
+    }
+
+    fn screen_of(harness: &FolderHarness, handle: &str) -> Rect {
+        let id = id_of(harness, handle);
+        canvas(harness)
+            .debug_card_rect(&id)
+            .unwrap_or_else(|| panic!("{handle} is not drawn"))
+    }
+
+    /// The lines the card `handle` wrote in the last frame.
+    fn lines(harness: &FolderHarness, handle: &str) -> Vec<String> {
+        let id = id_of(harness, handle);
+        canvas(harness).debug_lines(&id)
+    }
+
+    /// The camera centred on `handle` at `zoom`, as a person scrolls there.
+    fn show(harness: &mut FolderHarness, handle: &str, zoom: f32) {
+        let id = id_of(harness, handle);
+        canvas_mut(harness).debug_show(&id, zoom);
+        settle(harness);
+        harness.step();
+    }
+
+    fn assert_disjoint_cards(cards: &[(String, Rect)], context: &str) {
+        for (index, (a, first)) in cards.iter().enumerate() {
+            for (b, second) in &cards[index + 1..] {
+                assert!(
+                    !first.intersects(*second),
+                    "{context}: {a} {first:?} overlaps {b} {second:?}"
+                );
+            }
+        }
+    }
+
+    fn binding_of(harness: &FolderHarness, handle: &str, input: &str) -> Option<Binding> {
+        graph(harness)
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .and_then(|node| node.inputs.get(input).cloned())
+    }
+
+    fn press(harness: &mut FolderHarness, at: Pos2) {
+        harness.hover_at(at);
+        harness.step();
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+    }
+
+    fn move_to(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+        let steps = ((to - from).length() / 24.0).ceil().max(2.0);
+        for step in 1..=steps as usize {
+            harness.hover_at(from + (to - from) * (step as f32 / steps));
+            harness.step();
+        }
+        harness.step();
+    }
+
+    fn release(harness: &mut FolderHarness, at: Pos2) {
+        harness.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        harness.remove_cursor();
+        settle(harness);
+    }
+
+    fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+        press(harness, from);
+        move_to(harness, from, to);
+        release(harness, to);
+    }
+
+    /// Clicks `times` times. The harness's clock advances a quarter of a
+    /// second a frame, so two clicks a frame apart are already past egui's
+    /// double-click window; it is widened for the clicks, as a person's two
+    /// clicks fall inside it.
+    fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
+        let window = harness
+            .ctx
+            .options(|options| options.input_options.max_double_click_delay);
+        harness
+            .ctx
+            .options_mut(|options| options.input_options.max_double_click_delay = 2.0);
+        harness.hover_at(at);
+        harness.step();
+        for _ in 0..times {
+            for pressed in [true, false] {
+                harness.event(egui::Event::PointerButton {
+                    pos: at,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
+        }
+        harness
+            .ctx
+            .options_mut(|options| options.input_options.max_double_click_delay = window);
+        settle(harness);
+    }
+
+    fn centre(harness: &FolderHarness, label: &str) -> Pos2 {
+        harness.get_by_label(label).rect().center()
+    }
+
+    fn has(harness: &FolderHarness, label: &str) -> bool {
+        harness.query_by_label(label).is_some()
+    }
+
+    /// *Compact cards* in the board's view menu (decided 2026-11-09).
+    fn switch_density(harness: &mut FolderHarness) {
+        harness.get_by_label("Board view").click();
+        settle(harness);
+        harness.get_by_label("Compact cards").click();
+    }
+
+    fn select(harness: &mut FolderHarness, handles: &[&str]) {
+        let ids = handles
+            .iter()
+            .map(|handle| id_of(harness, handle))
+            .collect();
+        let document = document(harness);
+        app(harness).selections.insert(document, ids);
+        settle(harness);
+        harness.step();
+    }
+
+    /// Criterion 2: zooming from 0.25 to 1.0 moves no card, and at Full the
+    /// card writes the input values in the same box.
+    #[test]
+    fn lay16_criterion_2_zooming_moves_no_card() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        let before = world(&harness);
+        assert!(before.len() >= 30, "the whole board is measured");
+        for zoom in [0.25, 0.3, 0.44, 0.46, 0.6, 0.74, 0.76, 0.9, 1.0] {
+            show(&mut harness, "catalogue", zoom);
+            assert_eq!(world(&harness), before, "at zoom {zoom} no card moved");
+        }
+        show(&mut harness, "catalogue", 1.0);
+        assert!(
+            lines(&harness, "catalogue").contains(&"Query · limit: 20".to_owned()),
+            "at Full the card writes the value: {:?}",
+            lines(&harness, "catalogue")
+        );
+        assert_eq!(world(&harness), before);
+    }
+
+    /// Criterion 3: a configured input never disappears at the compact
+    /// density, wired or not.
+    #[test]
+    fn lay16_criterion_3_a_configured_input_never_disappears() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        show(&mut harness, "catalogue", 0.6);
+        let catalogue = lines(&harness, "catalogue");
+        assert!(
+            catalogue.contains(&"Query · 1 parameter".to_owned()),
+            "catalogue's query, configured and not wired, is summarised: {catalogue:?}"
+        );
+        assert!(
+            catalogue.contains(&"Headers · 1 header".to_owned()),
+            "{catalogue:?}"
+        );
+        show(&mut harness, "login", 0.6);
+        assert!(
+            lines(&harness, "login").contains(&"Body · 2 fields".to_owned()),
+            "{:?}",
+            lines(&harness, "login")
+        );
+        // Every input a request configures has its line.
+        for node in graph(&harness)
+            .nodes
+            .iter()
+            .filter(|node| node.kind == apiforge_core::model::NodeKind::Request)
+        {
+            show(&mut harness, &node.handle, 0.6);
+            let written = lines(&harness, &node.handle);
+            for input in node.inputs.keys().filter(|input| input.as_str() != "url") {
+                let label = match input.as_str() {
+                    "body" => "Body",
+                    "headers" => "Headers",
+                    "query" => "Query",
+                    other => other,
+                };
+                assert!(
+                    written.iter().any(|line| line.starts_with(label)),
+                    "{}'s {input} is configured and shown: {written:?}",
+                    node.handle
+                );
+            }
+        }
+    }
+
+    /// Criterion 4: *Compact cards* off restores today's geometry once Tidy
+    /// up has repacked; the preference is remembered; the camera stays.
+    #[test]
+    fn lay16_criterion_4_the_density_switch_repacks() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        assert!(
+            folder(&harness).preferences.compact_cards,
+            "compact by default"
+        );
+        let compact = world_of(&harness, "login").height();
+        let camera = canvas(&harness).debug_camera();
+
+        switch_density(&mut harness);
+        settle(&mut harness);
+        harness.step();
+        assert!(!folder(&harness).preferences.compact_cards);
+        assert_eq!(world_of(&harness, "login").height(), 372.0);
+        assert_eq!(world_of(&harness, "cart").height(), 424.0);
+        assert_disjoint_cards(&world(&harness), "after the switch to full cards");
+        assert_eq!(
+            canvas(&harness).debug_camera(),
+            camera,
+            "the switch moves no camera"
+        );
+        // Remembered: a board opened from now on has full cards too.
+        assert!(!app(&mut harness).new_canvas().debug_compact());
+
+        switch_density(&mut harness);
+        settle(&mut harness);
+        harness.step();
+        assert!(folder(&harness).preferences.compact_cards);
+        assert_eq!(world_of(&harness, "login").height(), compact);
+        assert_disjoint_cards(&world(&harness), "back at compact cards");
+        assert_eq!(canvas(&harness).debug_camera(), camera);
+    }
+
+    /// The switch and its Tidy up are one action: Undo restores the density
+    /// with the positions packed for it, so no card overlaps, and Redo
+    /// brings both back.
+    #[test]
+    fn lay16_undo_of_the_switch_restores_the_density() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        let compact = world(&harness);
+        switch_density(&mut harness);
+        settle(&mut harness);
+        harness.step();
+        assert!(!folder(&harness).preferences.compact_cards);
+        let full = world(&harness);
+
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        settle(&mut harness);
+        harness.step();
+        assert!(
+            folder(&harness).preferences.compact_cards,
+            "Undo restores compact cards"
+        );
+        assert_eq!(world(&harness), compact, "and the compact positions");
+        assert_disjoint_cards(&world(&harness), "after Undo of the switch");
+
+        harness.key_press_modifiers(
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            egui::Key::Z,
+        );
+        settle(&mut harness);
+        harness.step();
+        assert!(
+            !folder(&harness).preferences.compact_cards,
+            "Redo switches to full cards again"
+        );
+        assert_eq!(world(&harness), full, "with the full positions");
+        assert_disjoint_cards(&world(&harness), "after Redo of the switch");
+    }
+
+    /// Criterion 5: double-clicking an input row at Full opens the Inspector
+    /// on that input; the card has no inline field.
+    #[test]
+    fn lay16_criterion_5_editing_moves_to_the_inspector() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        show(&mut harness, "login", 1.0);
+        let inline = harness
+            .query_all_by_role(Role::TextInput)
+            .filter(|node| {
+                node.accesskit_node()
+                    .label()
+                    .is_some_and(|label| label.ends_with(" of login"))
+            })
+            .count();
+        assert_eq!(inline, 0, "the card has no inline field");
+
+        let id = id_of(&harness, "login");
+        let row = canvas(&harness)
+            .debug_input_row(&id, "body")
+            .expect("login shows its Body row");
+        click_at(&mut harness, row.center(), egui::PointerButton::Primary, 2);
+        assert_eq!(
+            folder(&harness).selections.get(&document(&harness)),
+            Some(&vec![id]),
+            "the double-click selects login"
+        );
+        assert_eq!(
+            folder(&harness).debug_inspector_focus().as_deref(),
+            Some("body"),
+            "the Inspector opens on the Body input"
+        );
+        assert!(has(&harness, "Body value source"));
+    }
+
+    /// Criterion 6: routing and Tidy up receive the compact sizes: no card
+    /// collides on `shop-30`, and the fit at 1600 × 1000 is reported.
+    #[test]
+    fn lay16_criterion_6_no_collision_and_the_fit_reported() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        harness.get_by_label("Tidy up").click();
+        settle(&mut harness);
+        harness.step();
+        let cards = world(&harness);
+        assert_disjoint_cards(&cards, "shop-30 tidied at the compact density");
+        let bounds = cards
+            .iter()
+            .map(|(_, rect)| *rect)
+            .reduce(Rect::union)
+            .unwrap();
+        let focus = canvas(&harness).debug_focus();
+        let fit = (focus.width() / bounds.width()).min(focus.height() / bounds.height());
+        eprintln!(
+            "LAY-16 shop-30 compact: login {} px, cart {} px; board {:.0} × {:.0}; fit at 1600 × 1000 {fit:.3}",
+            world_of(&harness, "login").height(),
+            world_of(&harness, "cart").height(),
+            bounds.width(),
+            bounds.height(),
+        );
+        // The width bounds the fit (LAY-06); the compact cards never make it worse.
+        assert!(fit >= 0.2, "fit {fit:.3}");
+    }
+
+    /// Criterion 7: the tray reaches what the compact box hides, and the
+    /// URL's socket takes a wire only under the pointer.
+    #[test]
+    fn lay16_criterion_7_the_tray_reaches_hidden_ports() {
+        let (_project, mut harness) = open(TRAY, WIDE);
+        show(&mut harness, "probe", 0.6);
+        let probe = id_of(&harness, "probe");
+        let at_rest = world_of(&harness, "probe");
+
+        // At rest a fresh request shows no output socket.
+        assert!(!has(&harness, "Output body of probe"));
+        assert!(!has(&harness, "Input body of probe"));
+
+        // Selected: the hidden ports stand in trays outside the box.
+        select(&mut harness, &["probe"]);
+        let card = screen_of(&harness, "probe");
+        for output in ["body", "status", "headers", "duration"] {
+            let label = format!("Output {output} of probe");
+            let socket = harness.get_by_label(&label).rect();
+            assert!(
+                socket.center().x > card.right(),
+                "{label} is right of the card"
+            );
+        }
+        let body = harness.get_by_label("Input body of probe").rect();
+        assert!(
+            body.right() <= card.left(),
+            "the Body input is left of the card"
+        );
+        assert_eq!(
+            world_of(&harness, "probe"),
+            at_rest,
+            "the box does not change"
+        );
+        select(&mut harness, &[]);
+        assert!(!has(&harness, "Input body of probe"));
+
+        // A wire dragged near the card shows the hidden inputs; dropped on the
+        // tray's Body it binds the Body and leaves the URL.
+        show(&mut harness, "probe", 0.6);
+        let card = screen_of(&harness, "probe");
+        let from = centre(&harness, "Output body of cart");
+        let far = pos2(card.left() - 300.0, card.bottom() + 200.0);
+        press(&mut harness, from);
+        move_to(&mut harness, from, far);
+        assert!(
+            !has(&harness, "Input body of probe"),
+            "far from the card, no tray"
+        );
+        let near = pos2(card.left() - 40.0, card.center().y);
+        move_to(&mut harness, far, near);
+        let body = centre(&harness, "Input body of probe");
+        move_to(&mut harness, near, body);
+        release(&mut harness, body);
+        match binding_of(&harness, "probe", "body") {
+            Some(Binding::Reference { node_id, port, .. }) => {
+                assert_eq!(node_id, id_of(&harness, "cart"));
+                assert_eq!(port, "body");
+            }
+            other => panic!("probe's body reads cart.body, not {other:?}"),
+        }
+        assert_eq!(
+            binding_of(&harness, "probe", "url"),
+            Some(Binding::literal(serde_json::json!("/probe"))),
+            "the URL is as it was"
+        );
+        // The Body is configured now, so the box has its row (criterion 3).
+        let bound = world_of(&harness, "probe");
+        assert!(bound.height() > at_rest.height());
+
+        // Near the URL's socket but not on it, the wire does not snap to it.
+        show(&mut harness, "probe", 0.6);
+        let url = canvas(&harness)
+            .debug_input_socket(&probe, "url")
+            .expect("the subtitle row carries the URL's socket");
+        let from = centre(&harness, "Output body of cart");
+        let beside = url + vec2(0.0, 16.0);
+        drag(&mut harness, from, beside);
+        assert_eq!(
+            binding_of(&harness, "probe", "url"),
+            Some(Binding::literal(serde_json::json!("/probe"))),
+            "a drop beside the URL's socket leaves the URL"
+        );
+        assert_eq!(world_of(&harness, "probe"), bound);
+    }
+
+    /// Criterion 8: the compact card has no footer row; the right-click menu
+    /// still opens *Add step*.
+    #[test]
+    fn lay16_criterion_8_the_footer_leaves_the_compact_card() {
+        let (_project, mut harness) = open(&shop_30(), WIDE);
+        for zoom in [0.6, 1.0] {
+            show(&mut harness, "cart", zoom);
+            assert!(!has(&harness, "Add a step connected to cart"), "at {zoom}");
+            assert!(
+                !has(&harness, "Add the next step (next) after cart"),
+                "at {zoom}"
+            );
+        }
+        let card = screen_of(&harness, "cart");
+        click_at(
+            &mut harness,
+            card.center(),
+            egui::PointerButton::Secondary,
+            1,
+        );
+        assert!(
+            canvas(&harness).debug_menu_open(),
+            "right-click opens Add step"
+        );
+    }
+
+    /// A capture with the pointer held where it is, during a wire drag.
+    fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
+        harness.step();
+        let image = harness.render().unwrap();
+        let pixels = region.intersect(harness.ctx.content_rect());
+        let x = pixels.min.x.floor().max(0.0) as u32;
+        let y = pixels.min.y.floor().max(0.0) as u32;
+        let width = (pixels.width().ceil() as u32).min(image.width() - x);
+        let height = (pixels.height().ceil() as u32).min(image.height() - y);
+        let image = image::imageops::crop_imm(&image, x, y, width, height).to_image();
+        let directory = crate::testing::capture_dir();
+        fs::create_dir_all(&directory).unwrap();
+        image.save(directory.join(format!("{name}.png"))).unwrap();
+    }
+
+    /// The board of `shop-30` at the compact density, whole window, at both
+    /// sizes, and *Compact cards* off.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay16_board() {
+        for (size, suffix) in [(WIDE, "1600"), (crate::testing::MINIMUM, "960")] {
+            let (_project, mut harness) = open(&shop_30(), size);
+            harness.get_by_label("Tidy up").click();
+            settle(&mut harness);
+            // Tidy up leaves the camera where it was (LAY-06), so fit the board.
+            harness.get_by_label("Fit the view").click();
+            settle(&mut harness);
+            let board = canvas(&harness);
+            assert!(
+                board
+                    .debug_cards()
+                    .iter()
+                    .any(|(_, card)| card.intersects(board.debug_viewport())),
+                "the fitted board shows cards at {suffix}"
+            );
+            crate::testing::capture(&mut harness, &format!("lay16-fit-{suffix}"), None);
+            show(&mut harness, "cart", 0.6);
+            crate::testing::capture(&mut harness, &format!("lay16-compact-60-{suffix}"), None);
+            show(&mut harness, "cart", 1.0);
+            crate::testing::capture(&mut harness, &format!("lay16-compact-100-{suffix}"), None);
+            switch_density(&mut harness);
+            settle(&mut harness);
+            show(&mut harness, "cart", 0.6);
+            crate::testing::capture(&mut harness, &format!("lay16-full-60-{suffix}"), None);
+        }
+    }
+
+    /// The tray of a fresh request: selected, and while a wire is dragged to it.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay16_tray() {
+        let (_project, mut harness) = open(TRAY, WIDE);
+        show(&mut harness, "probe", 0.6);
+        let region = screen_of(&harness, "cart")
+            .union(screen_of(&harness, "probe"))
+            .union(screen_of(&harness, "cart_ok"))
+            .expand2(vec2(110.0, 60.0));
+        crate::testing::capture(&mut harness, "lay16-tray-rest", Some(region));
+        select(&mut harness, &["probe"]);
+        crate::testing::capture(&mut harness, "lay16-tray-selected", Some(region));
+        select(&mut harness, &[]);
+        let card = screen_of(&harness, "probe");
+        let from = centre(&harness, "Output body of cart");
+        let near = pos2(card.left() - 40.0, card.center().y);
+        press(&mut harness, from);
+        move_to(&mut harness, from, near);
+        let body = centre(&harness, "Input body of probe");
+        move_to(&mut harness, near, body);
+        capture_held(&mut harness, "lay16-tray-drag", region);
+        release(&mut harness, body);
+        crate::testing::capture(&mut harness, "lay16-tray-bound", Some(region));
     }
 }

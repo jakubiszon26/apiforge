@@ -653,6 +653,7 @@ impl FolderApp {
                         project: &context,
                         parameters: &parameters,
                         sibling: sibling_of(&model, cleanup),
+                        density: self.density(),
                     };
                     let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
                     // The check is counted when its edit applies, which may

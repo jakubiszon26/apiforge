@@ -317,11 +317,14 @@ the three deferred items that change what the board says (LAY-17, LAY-18,
 LAY-19) are in (Q12 = C). DIAG-00 (#241) folded into LAY-09 and LAY-11
 (Q8 = A). Runs after UX-1's wave 3; UX-1's wave 4 continues beside it.
 
-Capacity: **365** owner review minutes over 19 tickets — must 255, should 50,
-added 60. The order of work is the work-in-progress limit of four pull
-requests within 60 minutes; waves ([plan, section 7](sprints/lay.md#7-dependencies-and-order)):
-0 LAY-01, LAY-08 (no decision, may start now) · 1 LAY-16 → 09 → 07 → 19 →
-10 → 14, 15 → 18 → 11 · 2 LAY-02, 06, 17, 13 · 3 LAY-04, 03, 05 · 4 LAY-12.
+Capacity: **385** owner review minutes over 21 tickets. The order of work
+was revised by the [mid-sprint review of 2026-11-10](sprints/lay.md#11-mid-sprint-review-2026-11-10),
+which replaces the waves: **part A**, the coherent board — LAY-16 → LAY-21 →
+LAY-11 → LAY-09 → LAY-07 on the card track, LAY-02 → LAY-06 → LAY-04 →
+LAY-03 on the layout track and LAY-22 on the engine track, in parallel; a **checkpoint** where
+the owner uses the real board and confirms part B; **part B** — LAY-10 →
+LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 → LAY-05 → LAY-12. The *Wave* column below is the plan of 2026-11-05, kept as the
+record.
 Exit criteria:
 
 - [ ] The three reference scenarios (14, 30, 50 steps) exist and the metric
@@ -358,6 +361,8 @@ Exit criteria:
 | [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Nudge; [ticket](tickets/LAY-03.md) | S · 15 | 3 (should) |
 | [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
 | [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
+| [#311](https://github.com/jakubiszon26/apiforge/issues/311) | LAY-21 Every other card is compact too; [ticket](tickets/LAY-21.md); from LAY-06, which becomes M · 20 | S–M · 20 · `visible UI`, `default` | part A |
+| [#312](https://github.com/jakubiszon26/apiforge/issues/312) | LAY-22 Runner and core groundwork: the started step, the not-run cause, relations; [ticket](tickets/LAY-22.md) | S–M · 10 | part A |
 
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
 keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
@@ -383,7 +388,7 @@ LAY-08, joined the sprint on 2026-11-05: the *Checks* list covers a component
 call's checks and a Cleanup check that reads a Main step. It closes before
 LAY-11, which hides the cards those checks would otherwise be seen on;
 [ticket](tickets/LAY-20.md), S · 15, decided on 2026-11-07 (Q20.1 = A,
-Q20.2 = A) and awaiting acceptance in #309.
+Q20.2 = A), merged in #309.
 
 Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads

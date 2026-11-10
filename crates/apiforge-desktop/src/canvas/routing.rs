@@ -411,7 +411,7 @@ mod tests {
 
     /// Every board of the fixtures, routed through the desktop's own conversion:
     /// the guarantee has to hold for the cards the application really draws, not
-    /// only for the rectangles the layout crate is tested with.
+    /// only for the rectangles the layout crate is tested with, at either density.
     #[test]
     fn fixture_boards_route_without_crossing_a_card() {
         let workspace = apiforge_core::import_document(
@@ -421,13 +421,22 @@ mod tests {
         .unwrap()
         .into_workspace();
         let mut boards = 0;
-        for project in &workspace.projects {
+        let densities = [
+            super::super::CardDensity::Full,
+            super::super::CardDensity::Compact,
+        ];
+        for (density, project) in densities.into_iter().flat_map(|density| {
+            workspace
+                .projects
+                .iter()
+                .map(move |project| (density, project))
+        }) {
             for scenario in &project.scenarios {
                 for graph in [&scenario.graph, &scenario.cleanup] {
                     let cards: Vec<Card> = graph
                         .nodes
                         .iter()
-                        .map(|node| Card::build(node, graph, project))
+                        .map(|node| Card::build(node, graph, project, density))
                         .collect();
                     if cards.len() < 2 {
                         continue;
@@ -466,7 +475,7 @@ mod tests {
                     assert_eq!(
                         layout::violations(&drawn, &wires, &rectangles),
                         [],
-                        "{}: a wire of {} crosses a card",
+                        "{}: a wire of {} crosses a card at {density:?}",
                         project.name,
                         scenario.name
                     );
