@@ -545,6 +545,27 @@ where
 mod tests {
     use super::*;
 
+    /// KTLO-33, flake 1: the description the window shows at a hand-over,
+    /// before the holder's own is read, names no endpoint; the agent's own
+    /// names its control channel. A test that reads the bar's text waits for
+    /// the endpoint, which only the holder's own description has.
+    #[test]
+    fn the_provisional_description_after_a_hand_over_names_no_endpoint() {
+        let client = Some("Claude Code".to_owned());
+        // As `handed_over` describes the agent at the grant.
+        let provisional = Observed::new(Holder::new(HolderRole::Agent, client.clone()));
+        assert_eq!(provisional.holder().endpoint(), None);
+        // As the agent describes itself in the holder file.
+        let own = Holder::new(HolderRole::Agent, client)
+            .with_endpoint(Some("apiforge-0123456789abcdef0123456789abcdef".into()));
+        assert!(own.endpoint().is_some());
+        assert_ne!(
+            provisional.holder(),
+            &own,
+            "the holder's own description replaces the provisional one"
+        );
+    }
+
     #[test]
     fn the_start_time_is_shown_on_the_local_wall_clock() {
         let warsaw = chrono::FixedOffset::east_opt(3600).unwrap();

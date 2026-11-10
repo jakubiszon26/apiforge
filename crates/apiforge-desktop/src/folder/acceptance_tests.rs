@@ -2112,6 +2112,28 @@ mod mcp08b {
             .expect("a labelled node")
     }
 
+    /// Steps the window until the bar names the holder from its own
+    /// description, the one in the holder file, rather than the provisional
+    /// one the window shows from the grant until its next check reads the
+    /// file (KTLO-33, flake 1, decision 1 A). Only the holder's own names an
+    /// endpoint. The two may differ in the minute of *since*, so a test that
+    /// reads the bar's text and asks for it again later waits for this first.
+    pub(super) fn await_holder_file(harness: &mut FolderHarness) {
+        await_until(
+            harness,
+            Instant::now(),
+            "the holder's own description",
+            |harness| {
+                folder(harness)
+                    .holder
+                    .as_ref()
+                    .map(crate::folder::holder::Observed::holder)
+                    .and_then(Holder::endpoint)
+                    .is_some()
+            },
+        );
+    }
+
     /// Who holds the project, as a reader finds out.
     pub(super) fn holder(root: &Path) -> Option<Holder> {
         ProjectStore::open_read_only(root)
@@ -3108,6 +3130,7 @@ mod mcp08b {
             await_endpoint(&mut harness, root, HolderRole::Window);
             let mut server = agent(root, "Claude Code");
             hand_over(&mut harness, &mut server, "Written by the agent.");
+            await_holder_file(&mut harness);
             let holder_text = label_containing(&harness, &format!("{AGENT} · "));
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
@@ -5418,8 +5441,8 @@ mod mcp15 {
 
 mod mcp10 {
     use super::mcp08b::{
-        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
-        holder, label_containing, read, read_only, write,
+        AGENT, SCENARIO, address, answer, await_endpoint, await_holder_file, await_until, call,
+        commented, contains, holder, label_containing, read, read_only, write,
     };
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
@@ -5600,11 +5623,11 @@ mod mcp10 {
     }
 
     /// Waits until the bar names the agent with its start time, as the
-    /// holder file gives it.
+    /// holder file gives it: the provisional description shown from the
+    /// grant has a start time too, the window's own (KTLO-33, flake 1).
     fn await_since(harness: &mut FolderHarness) {
-        await_until(harness, Instant::now(), "the holder's start", |harness| {
-            contains(harness, &format!("{AGENT} · since "))
-        });
+        await_holder_file(harness);
+        assert!(contains(harness, &format!("{AGENT} · since ")));
     }
 
     /// Criterion 1: the server tells a connected window `run` with the
