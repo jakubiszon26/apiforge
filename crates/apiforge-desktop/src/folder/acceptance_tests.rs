@@ -14822,6 +14822,17 @@ mod lay16 {
             let (_project, mut harness) = open(&shop_30(), size);
             harness.get_by_label("Tidy up").click();
             settle(&mut harness);
+            // Tidy up leaves the camera where it was (LAY-06), so fit the board.
+            harness.get_by_label("Fit the view").click();
+            settle(&mut harness);
+            let board = canvas(&harness);
+            assert!(
+                board
+                    .debug_cards()
+                    .iter()
+                    .any(|(_, card)| card.intersects(board.debug_viewport())),
+                "the fitted board shows cards at {suffix}"
+            );
             crate::testing::capture(&mut harness, &format!("lay16-fit-{suffix}"), None);
             show(&mut harness, "cart", 0.6);
             crate::testing::capture(&mut harness, &format!("lay16-compact-60-{suffix}"), None);
