@@ -14259,9 +14259,9 @@ mod lay16 {
     use egui::{Pos2, Rect, pos2, vec2};
     use egui_kittest::kittest::NodeT;
 
-    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    pub(super) const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
-    fn shop_30() -> String {
+    pub(super) fn shop_30() -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/scenarios/lay/shop-30.afs");
         fs::read_to_string(&path)
@@ -14283,7 +14283,7 @@ mod lay16 {
 "#;
 
     /// `source` on the board of the demo shop, whose components it calls.
-    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+    pub(super) fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
         let project = crate::testing::shop_project();
         fs::write(project.path().join(SCENARIO), source).unwrap();
         let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
@@ -14292,11 +14292,11 @@ mod lay16 {
         (project, harness)
     }
 
-    fn document(harness: &FolderHarness) -> String {
+    pub(super) fn document(harness: &FolderHarness) -> String {
         only(harness, DocumentKind::Scenario)
     }
 
-    fn graph(harness: &FolderHarness) -> Graph {
+    pub(super) fn graph(harness: &FolderHarness) -> Graph {
         let model = folder(harness)
             .snapshot(&document(harness))
             .unwrap()
@@ -14305,7 +14305,7 @@ mod lay16 {
         graph_of(&model, false).clone()
     }
 
-    fn id_of(harness: &FolderHarness, handle: &str) -> String {
+    pub(super) fn id_of(harness: &FolderHarness, handle: &str) -> String {
         graph(harness)
             .nodes
             .iter()
@@ -14315,14 +14315,14 @@ mod lay16 {
             .clone()
     }
 
-    fn canvas(harness: &FolderHarness) -> &Canvas {
+    pub(super) fn canvas(harness: &FolderHarness) -> &Canvas {
         folder(harness)
             .canvases
             .get(&document(harness))
             .expect("the board is drawn")
     }
 
-    fn canvas_mut(harness: &mut FolderHarness) -> &mut Canvas {
+    pub(super) fn canvas_mut(harness: &mut FolderHarness) -> &mut Canvas {
         let document = document(harness);
         app(harness)
             .canvases
@@ -14331,7 +14331,7 @@ mod lay16 {
     }
 
     /// Every card's box on the board, by handle.
-    fn world(harness: &FolderHarness) -> Vec<(String, Rect)> {
+    pub(super) fn world(harness: &FolderHarness) -> Vec<(String, Rect)> {
         let canvas = canvas(harness);
         graph(harness)
             .nodes
@@ -14344,14 +14344,14 @@ mod lay16 {
             .collect()
     }
 
-    fn world_of(harness: &FolderHarness, handle: &str) -> Rect {
+    pub(super) fn world_of(harness: &FolderHarness, handle: &str) -> Rect {
         let id = id_of(harness, handle);
         canvas(harness)
             .debug_world(&id)
             .unwrap_or_else(|| panic!("{handle} is not on the board"))
     }
 
-    fn screen_of(harness: &FolderHarness, handle: &str) -> Rect {
+    pub(super) fn screen_of(harness: &FolderHarness, handle: &str) -> Rect {
         let id = id_of(harness, handle);
         canvas(harness)
             .debug_card_rect(&id)
@@ -14359,20 +14359,20 @@ mod lay16 {
     }
 
     /// The lines the card `handle` wrote in the last frame.
-    fn lines(harness: &FolderHarness, handle: &str) -> Vec<String> {
+    pub(super) fn lines(harness: &FolderHarness, handle: &str) -> Vec<String> {
         let id = id_of(harness, handle);
         canvas(harness).debug_lines(&id)
     }
 
     /// The camera centred on `handle` at `zoom`, as a person scrolls there.
-    fn show(harness: &mut FolderHarness, handle: &str, zoom: f32) {
+    pub(super) fn show(harness: &mut FolderHarness, handle: &str, zoom: f32) {
         let id = id_of(harness, handle);
         canvas_mut(harness).debug_show(&id, zoom);
         settle(harness);
         harness.step();
     }
 
-    fn assert_disjoint_cards(cards: &[(String, Rect)], context: &str) {
+    pub(super) fn assert_disjoint_cards(cards: &[(String, Rect)], context: &str) {
         for (index, (a, first)) in cards.iter().enumerate() {
             for (b, second) in &cards[index + 1..] {
                 assert!(
@@ -14383,7 +14383,7 @@ mod lay16 {
         }
     }
 
-    fn binding_of(harness: &FolderHarness, handle: &str, input: &str) -> Option<Binding> {
+    pub(super) fn binding_of(harness: &FolderHarness, handle: &str, input: &str) -> Option<Binding> {
         graph(harness)
             .nodes
             .iter()
@@ -14391,7 +14391,7 @@ mod lay16 {
             .and_then(|node| node.inputs.get(input).cloned())
     }
 
-    fn press(harness: &mut FolderHarness, at: Pos2) {
+    pub(super) fn press(harness: &mut FolderHarness, at: Pos2) {
         harness.hover_at(at);
         harness.step();
         harness.event(egui::Event::PointerButton {
@@ -14403,7 +14403,7 @@ mod lay16 {
         harness.step();
     }
 
-    fn move_to(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+    pub(super) fn move_to(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
         let steps = ((to - from).length() / 24.0).ceil().max(2.0);
         for step in 1..=steps as usize {
             harness.hover_at(from + (to - from) * (step as f32 / steps));
@@ -14412,7 +14412,7 @@ mod lay16 {
         harness.step();
     }
 
-    fn release(harness: &mut FolderHarness, at: Pos2) {
+    pub(super) fn release(harness: &mut FolderHarness, at: Pos2) {
         harness.event(egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -14424,7 +14424,7 @@ mod lay16 {
         settle(harness);
     }
 
-    fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+    pub(super) fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
         press(harness, from);
         move_to(harness, from, to);
         release(harness, to);
@@ -14434,7 +14434,7 @@ mod lay16 {
     /// second a frame, so two clicks a frame apart are already past egui's
     /// double-click window; it is widened for the clicks, as a person's two
     /// clicks fall inside it.
-    fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
+    pub(super) fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
         let window = harness
             .ctx
             .options(|options| options.input_options.max_double_click_delay);
@@ -14460,22 +14460,22 @@ mod lay16 {
         settle(harness);
     }
 
-    fn centre(harness: &FolderHarness, label: &str) -> Pos2 {
+    pub(super) fn centre(harness: &FolderHarness, label: &str) -> Pos2 {
         harness.get_by_label(label).rect().center()
     }
 
-    fn has(harness: &FolderHarness, label: &str) -> bool {
+    pub(super) fn has(harness: &FolderHarness, label: &str) -> bool {
         harness.query_by_label(label).is_some()
     }
 
     /// *Compact cards* in the board's view menu (decided 2026-11-09).
-    fn switch_density(harness: &mut FolderHarness) {
+    pub(super) fn switch_density(harness: &mut FolderHarness) {
         harness.get_by_label("Board view").click();
         settle(harness);
         harness.get_by_label("Compact cards").click();
     }
 
-    fn select(harness: &mut FolderHarness, handles: &[&str]) {
+    pub(super) fn select(harness: &mut FolderHarness, handles: &[&str]) {
         let ids = handles
             .iter()
             .map(|handle| id_of(harness, handle))
@@ -14799,7 +14799,7 @@ mod lay16 {
     }
 
     /// A capture with the pointer held where it is, during a wire drag.
-    fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
+    pub(super) fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
         harness.step();
         let image = harness.render().unwrap();
         let pixels = region.intersect(harness.ctx.content_rect());
