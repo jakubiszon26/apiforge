@@ -37,6 +37,11 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
     }
     // Rows read the other blocks of the same graph, as the board does.
     let reference = graph.clone();
+    // A graph whose blocks are all fresh, a scenario opened from code, is laid
+    // out whole (LAY-02); its chips then follow their first readers instead of
+    // standing in the way.
+    let whole = indices.len() == graph.nodes.len();
+    let chips: &[apiforge_core::format::Proxy] = if whole { &[] } else { &reference.proxies };
     let blocks: Vec<apiforge_layout::Block> = graph
         .nodes
         .iter()
@@ -53,7 +58,7 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
             }
         })
         // Proxy chips the user put on the board are obstacles, not cards.
-        .chain(reference.proxies.iter().map(|proxy| {
+        .chain(chips.iter().map(|proxy| {
             let rect = canvas::Chip::build(proxy, &reference, context, parameters).rect();
             apiforge_layout::Block::new(
                 apiforge_layout::Size::new(rect.width(), rect.height()),
@@ -80,6 +85,15 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
             y: f64::from(position.y),
         };
         node.auto_placed = true;
+    }
+    if whole {
+        crate::board_edit::chips_beside_their_readers(
+            graph,
+            &reference,
+            context,
+            parameters,
+            |_| true,
+        );
     }
 }
 
