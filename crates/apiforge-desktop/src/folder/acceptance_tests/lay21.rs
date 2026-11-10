@@ -152,7 +152,7 @@ fn add(harness: &mut FolderHarness, block: Block, component: Option<(&str, u32)>
 fn lay21_criterion_1_satellites_are_shorter_than_requests() {
     let (_project, harness) = open(&shop_30(), WIDE);
     let cart = world_of(&harness, "cart").height();
-    eprintln!(
+    errln!(
         "LAY-21 heights on shop-30: value first {}, check cart_created {}, Data condition \
          valid_cart {}, if paid {}, component call product {}, request cart {cart}",
         world_of(&harness, "first").height(),
@@ -458,7 +458,7 @@ fn lay21_criterion_8_no_collision() {
         .unwrap();
     let focus = canvas(&harness).debug_focus();
     let fit = (focus.width() / bounds.width()).min(focus.height() / bounds.height());
-    eprintln!(
+    errln!(
         "LAY-21 shop-30 compact: board {:.0} × {:.0}; fit at 1600 × 1000 {fit:.3}",
         bounds.width(),
         bounds.height(),
