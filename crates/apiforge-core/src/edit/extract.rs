@@ -230,23 +230,38 @@ pub fn template_readers(
             }
             // An argument is read by the URL, headers, query or body that
             // names it; the first of them says where it is used.
-            let place = if is_request_argument(name) {
+            // An argument nothing reads can lose its value and stay valid.
+            let user = |argument: &str| {
                 node.inputs
                     .iter()
                     .find(|(_, other)| {
                         other.leaves().iter().any(|(_, leaf)| {
-                            matches!(leaf, Binding::Argument { name: used, .. } if used == name)
+                            matches!(leaf, Binding::Argument { name: used, .. } if used == argument)
                         })
                     })
-                    .map_or(URL_INPUT, |(other, _)| other.as_str())
-            } else {
-                name.as_str()
+                    .map(|(other, _)| other.as_str())
             };
+            let mut place = name.as_str();
+            // Arguments may read one another; their order is acyclic.
+            for _ in 0..node.inputs.len() {
+                if !is_request_argument(place) {
+                    break;
+                }
+                match user(place) {
+                    Some(next) => place = next,
+                    None => break,
+                }
+            }
+            if place == name.as_str() && is_request_argument(place) {
+                continue;
+            }
             let place = match place {
                 HEADERS_INPUT => "headers",
                 QUERY_INPUT => "query",
                 BODY_INPUT => "body",
-                _ => "URL",
+                URL_INPUT => "URL",
+                // Read by another argument that nothing reads in turn.
+                _ => "arguments",
             };
             let used = (node.display_name().to_owned(), place);
             if !uses.contains(&used) {
@@ -657,6 +672,18 @@ mod tests {
             template_readers(&extraction, &draft),
             vec![("Delete cart".to_owned(), "URL")]
         );
+        // An argument the URL no longer names can be left unconnected.
+        let mut unused = scenario.cleanup.clone();
+        unused.nodes[0].inputs.insert(
+            "url".into(),
+            Binding::literal(serde_json::json!("/carts/1")),
+        );
+        let unused_later = [&unused];
+        let extraction_unused = Extraction {
+            later: &unused_later,
+            ..extraction
+        };
+        assert!(template_readers(&extraction_unused, &draft).is_empty());
 
         // In Cleanup, *Cart was deleted* reads the status of *Delete cart*.
         let selected: HashSet<&str> = ["delete-cart"].into();
