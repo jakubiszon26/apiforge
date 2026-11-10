@@ -43,15 +43,21 @@ its future shape.
 3. Folder window: opening the project from
    [`order-flow.afs`](../qa/2026-10-26/LAY/order-flow.afs) without a diagram
    shows one column per layer and `assert_disjoint` holds for every card.
-4. Added (Q10 = A): the positions of an opened scenario are not written
-   until the next save; a second open before any save gives the same
-   positions; a code edit adding one or three steps keeps today's
+4. Added (Q10 = A), corrected 2026-11-10: the layout made on open is
+   recorded as any first analysis is (KTLO-04 seals a document's identities
+   and layout in `.apiforge/diagram.json` at its first successful analysis;
+   that decision stands, and the earlier wording "not written until the
+   next save" contradicted it). A second open gives the same identities and
+   the same positions; a code edit adding one or three steps keeps today's
    incremental placement, no re-layout. Test:
-   `lay02_criterion_4_positions_kept_until_save_and_edits_stay_incremental`.
-5. Added (P8): a variable chip is placed beside its first reader on open and
-   moves with Tidy up; Fit view is within 10 % of the cards' box on
-   `shop-30.afs`. Test: `lay02_criterion_5_chips_beside_their_first_reader`.
-
+   `lay02_criterion_4_a_second_open_is_the_same_and_edits_stay_incremental`.
+5. Added (P8), corrected 2026-11-10: a scenario opened from code has no
+   chips yet, so the window test is about Tidy up — a chip left far from
+   its readers moves beside its first reader with Tidy up, and Fit view on
+   `shop-30.afs` is within 10 % of the cards' box; a unit test of the
+   placer covers a chip placed with fresh blocks. Tests:
+   `lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader`,
+   `place_puts_a_chip_beside_its_first_reader`.
 6. Added 2026-11-10: the scenario is laid out at the board's density (the
    card heights the board draws, LAY-16), and the first frame shows it
    fitted: at least one card is inside the viewport and Fit's zoom is the
