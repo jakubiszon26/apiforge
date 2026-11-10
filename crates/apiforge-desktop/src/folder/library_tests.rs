@@ -1465,6 +1465,8 @@ mod ux40 {
         assert!(listed(&harness, "Export"));
 
         for path in [PRODUCT, SCENARIO] {
+            // A window of its own: a second one on a folder only observes it.
+            let project = shop();
             let harness = open(&project, WIDE, path, "Split");
             let components =
                 apiforge_core::graph::latest_components(&folder(&harness).context_project()).len();
@@ -1485,5 +1487,19 @@ mod ux40 {
                 .collect();
             assert_eq!(shown, [entries], "{path}: the caption's count");
         }
+    }
+
+    /// The library panel beside a component's board in Diagram at the
+    /// minimum window, and in Split at the wide one with its count.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux40_component_library() {
+        let project = shop();
+        let mut harness = open(&project, MINIMUM, PRODUCT, "Diagram");
+        crate::testing::capture(&mut harness, "ux40-component-library-960x540", None);
+        // A second window on the same folder would only observe it.
+        let project = shop();
+        let mut harness = open(&project, WIDE, PRODUCT, "Split");
+        crate::testing::capture(&mut harness, "ux40-component-library-split-1600x1000", None);
     }
 }
