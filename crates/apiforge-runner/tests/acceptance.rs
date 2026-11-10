@@ -16,7 +16,7 @@ use apiforge_core::{
     format::{Node, Project, Scenario},
     graph::{WireKind, wires},
     model::{Branch, NodeKind},
-    run::{RunMode, RunResult, RunStatus, StepStatus},
+    run::{NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, run_scenario};
 use apiforge_script::{Document, LowerContext, format, lower, parse};
@@ -340,4 +340,303 @@ async fn lay01_criterion_5_a_broken_sample_fails_one_check_of_checkout() {
         .collect();
     assert_eq!(failed, ["checkout_total"]);
     assert_eq!(checks_of(&scenario, "checkout").len(), 3);
+}
+
+// LAY-22 (#312) ---------------------------------------------------------------
+
+/// `shop-30` with the sample total of `checkout` broken, as the task sheet uses.
+fn broken_checkout() -> String {
+    source("shop-30").replace(
+        r#"sample 201 { orderId: "o-1", status: "created", total: 172.5 }"#,
+        r#"sample 201 { orderId: "o-1", status: "created", total: 170 }"#,
+    )
+}
+
+fn by_handle<'a>(run: &'a RunResult, handle: &str) -> &'a StepResult {
+    run.steps
+        .iter()
+        .find(|step| step.handle == handle)
+        .unwrap_or_else(|| panic!("no result for `{handle}`: {run:#?}"))
+}
+
+/// The messages of a step that did not run; they stay as they were.
+const NOT_RUN_MESSAGES: [&str; 4] = [
+    "Step outside the active execution path.",
+    "Unavailable data or an unmet condition of an earlier step.",
+    "Stopped after an error.",
+    "Cancelled.",
+];
+
+/// Every result built for a step that did not run carries one cause, and every
+/// step that ran carries none.
+fn assert_causes_only_on_steps_that_did_not_run(run: &RunResult) {
+    for step in &run.steps {
+        let not_run = step
+            .message
+            .as_deref()
+            .is_some_and(|message| NOT_RUN_MESSAGES.contains(&message));
+        assert_eq!(
+            step.cause.is_some(),
+            not_run,
+            "`{}`: {:?} {:?}",
+            step.handle,
+            step.message,
+            step.cause
+        );
+    }
+}
+
+/// Criterion 1: the observer learns which step started before its result, only
+/// for a step that executes, and the result clears it.
+#[tokio::test]
+async fn a_step_is_announced_before_its_result() {
+    for text in [source("shop-30"), broken_checkout()] {
+        let (project, scenario) = lowered(&text);
+        let mut updates: Vec<(Option<String>, Vec<String>)> = Vec::new();
+        let run = run_scenario(
+            RunRequest::new(project, scenario.id.clone(), RunMode::Simulation),
+            RunOptions::new(HttpTransport::new().expect("client builds")),
+            CancellationToken::new(),
+            |run: &RunResult| {
+                let done = run.steps.iter().map(|step| step.node_id.clone()).collect();
+                updates.push((run.running.clone(), done));
+            },
+        )
+        .await
+        .expect("the run starts");
+        assert_eq!(run.running, None, "a finished run names no running step");
+        assert_eq!(updates.last().map(|update| update.0.clone()), Some(None));
+        let mut announced = Vec::new();
+        for (index, (running, done)) in updates.iter().enumerate() {
+            let Some(id) = running else { continue };
+            assert!(!done.contains(id), "`{id}` is announced before its result");
+            let (next_running, next_done) = &updates[index + 1];
+            assert_eq!(next_running, &None, "the result of `{id}` clears it");
+            assert_eq!(next_done.last(), Some(id), "the result that follows");
+            assert_eq!(next_done.len(), done.len() + 1);
+            announced.push(id.clone());
+        }
+        let executed: Vec<String> = run
+            .steps
+            .iter()
+            .filter(|step| step.cause.is_none())
+            .map(|step| step.node_id.clone())
+            .collect();
+        assert_eq!(announced, executed, "only the steps that execute");
+        assert!(
+            serde_json::to_string(&run)
+                .expect("a report serialises")
+                .find("running")
+                .is_none(),
+            "never in a report"
+        );
+    }
+}
+
+/// Criterion 2: one cause per branch of the engine that builds a result for a
+/// step that does not run; the messages stay.
+#[tokio::test]
+async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
+    let id = |run: &RunResult, handle: &str| by_handle(run, handle).node_id.clone();
+
+    // Stopped, and a branch not taken.
+    let (project, scenario) = lowered(
+        r#"scenario "Causes stop" {
+  begin = start
+  @after(begin)
+  first = GET "/a" {
+    sample 200 { ok: true }
+  }
+  broken = assert first.body.ok == false
+  later = GET "/b" {
+    query { ok: first.body.ok }
+    sample 200 {}
+  }
+}
+"#,
+    );
+    let run = simulate(project, &scenario).await;
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    assert_eq!(
+        by_handle(&run, "later").cause,
+        Some(NotRunCause::Stopped {
+            by: id(&run, "broken")
+        })
+    );
+    assert_eq!(
+        by_handle(&run, "later").message.as_deref(),
+        Some("Stopped after an error.")
+    );
+
+    let (project, scenario) = lowered(
+        r#"scenario "Causes branch" {
+  begin = start
+  @after(begin)
+  first = GET "/a" {
+    sample 200 { ok: true }
+  }
+  chosen = if first.status == 200 {
+    yes = GET "/yes" {
+      sample 200 {}
+    }
+  } else {
+    no = GET "/no" {
+      sample 200 {}
+    }
+  }
+}
+"#,
+    );
+    let run = simulate(project.clone(), &scenario).await;
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    assert_eq!(by_handle(&run, "yes").cause, None);
+    assert_eq!(by_handle(&run, "no").cause, Some(NotRunCause::OutsidePath));
+
+    // Cancelled before anything ran.
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let run = run_scenario(
+        RunRequest::new(project, scenario.id.clone(), RunMode::Simulation),
+        RunOptions::new(HttpTransport::new().expect("client builds")),
+        cancel,
+        |_| {},
+    )
+    .await
+    .expect("the run starts");
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    for handle in ["begin", "first", "chosen"] {
+        assert_eq!(
+            by_handle(&run, handle).cause,
+            Some(NotRunCause::Cancelled),
+            "{handle}"
+        );
+    }
+
+    // A failed source, a false Data condition and a Cleanup input that is missing.
+    let (project, scenario) = lowered(
+        r#"scenario "Causes continue" {
+  on_error continue
+  begin = start
+  @after(begin)
+  missing = GET "/m" {
+  }
+  reader = GET "/r/{{missing.body.id}}" {
+    sample 200 {}
+  }
+  first = GET "/a" {
+    sample 200 { id: 1 }
+  }
+  valid = condition all {
+    first.status == 500,
+  } with first.body
+  guarded = GET "/g/{{valid.value.id}}" {
+    sample 200 {}
+  }
+  cleanup {
+    removed = DELETE "/a/{{first.body.nothing}}" {
+      sample 204 {}
+    }
+  }
+}
+"#,
+    );
+    let run = simulate(project, &scenario).await;
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    assert_eq!(by_handle(&run, "missing").status, StepStatus::Error);
+    assert_eq!(
+        by_handle(&run, "reader").cause,
+        Some(NotRunCause::BlockedBy {
+            step: id(&run, "missing")
+        })
+    );
+    assert_eq!(by_handle(&run, "valid").status, StepStatus::Blocked);
+    assert_eq!(by_handle(&run, "valid").cause, None, "the condition ran");
+    assert_eq!(
+        by_handle(&run, "guarded").cause,
+        Some(NotRunCause::ConditionUnmet {
+            condition: id(&run, "valid")
+        })
+    );
+    assert_eq!(
+        by_handle(&run, "removed").cause,
+        Some(NotRunCause::CleanupInputMissing {
+            step: id(&run, "first")
+        })
+    );
+}
+
+/// The step a not-run step's cause chain ends at, or the cause that ends it
+/// without a step.
+fn chain_end<'a>(run: &'a RunResult, step: &'a StepResult) -> Result<&'a str, NotRunCause> {
+    let mut current = step;
+    for _ in 0..=run.steps.len() {
+        let Some(cause) = &current.cause else {
+            return Ok(&current.handle);
+        };
+        let Some(next) = cause.step() else {
+            return Err(cause.clone());
+        };
+        current = run
+            .steps
+            .iter()
+            .find(|step| step.node_id == next)
+            .unwrap_or_else(|| panic!("the cause of `{}` names `{next}`", current.handle));
+    }
+    panic!("the cause chain of `{}` loops", step.handle);
+}
+
+/// Criterion 3: after the failed simulation of `shop-30`, every not-run step's
+/// cause chain reaches `checkout_total`; the arm of the branch that is not taken
+/// is `OutsidePath` in a passing run and in a run that fails after the branch.
+#[tokio::test]
+async fn causes_on_shop_30() {
+    let (project, scenario) = lowered(&broken_checkout());
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    let not_run: Vec<_> = run
+        .steps
+        .iter()
+        .filter(|step| step.cause.is_some())
+        .collect();
+    assert!(not_run.len() >= 12, "{not_run:#?}");
+    for step in not_run {
+        assert_eq!(
+            chain_end(&run, step),
+            Ok("checkout_total"),
+            "`{}`: {:?}",
+            step.handle,
+            step.cause
+        );
+    }
+
+    let (project, scenario) = fixture("shop-30");
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed);
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    let not_run: Vec<_> = run
+        .steps
+        .iter()
+        .filter(|step| step.cause.is_some())
+        .map(|step| (step.handle.as_str(), step.cause.clone()))
+        .collect();
+    assert_eq!(not_run, [("not_created", Some(NotRunCause::OutsidePath))]);
+
+    // A run that fails after the branch has been decided: the refund's amount.
+    let text = source("shop-30").replace(
+        "sample 200 { refunded: true, amount: 172.5 }",
+        "sample 200 { refunded: true, amount: 170 }",
+    );
+    let (project, scenario) = lowered(&text);
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_causes_only_on_steps_that_did_not_run(&run);
+    assert_eq!(
+        by_handle(&run, "not_created").cause,
+        Some(NotRunCause::OutsidePath)
+    );
+    assert_eq!(
+        chain_end(&run, by_handle(&run, "logout")),
+        Ok("refund_amount")
+    );
 }
