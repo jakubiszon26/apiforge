@@ -11,7 +11,7 @@
 use apiforge_core::{
     format::{Binding, Graph, Node, NodeConfig, OptionalJson, TemplatePart},
     js::utf16_len,
-    run::{RequestSnapshot, RunResult, RunSnapshot, StepResult},
+    run::{NotRunCause, RequestSnapshot, RunResult, RunSnapshot, StepResult},
     template::encode_uri_component,
 };
 use indexmap::{IndexMap, IndexSet};
@@ -219,6 +219,7 @@ impl Redactor {
             }),
             error: run.error.as_deref().map(text),
             notice: run.notice.as_deref().map(text),
+            running: run.running.as_deref().map(text),
         }
     }
 
@@ -246,6 +247,23 @@ impl Redactor {
                 .children
                 .as_ref()
                 .map(|children| children.iter().map(|step| self.redact_step(step)).collect()),
+            // Node ids, redacted as `node_id` is, so that they still match.
+            cause: step.cause.as_ref().map(|cause| match cause {
+                NotRunCause::Stopped { by } => NotRunCause::Stopped {
+                    by: self.redact_str(by),
+                },
+                NotRunCause::BlockedBy { step } => NotRunCause::BlockedBy {
+                    step: self.redact_str(step),
+                },
+                NotRunCause::ConditionUnmet { condition } => NotRunCause::ConditionUnmet {
+                    condition: self.redact_str(condition),
+                },
+                NotRunCause::CleanupInputMissing { step } => NotRunCause::CleanupInputMissing {
+                    step: self.redact_str(step),
+                },
+                NotRunCause::OutsidePath => NotRunCause::OutsidePath,
+                NotRunCause::Cancelled => NotRunCause::Cancelled,
+            }),
         }
     }
 

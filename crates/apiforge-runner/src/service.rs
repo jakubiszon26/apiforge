@@ -120,6 +120,7 @@ impl RunnerService {
                 "Internal runner error: the worker terminated before finishing the run.".to_owned(),
             ),
             notice: None,
+            running: None,
         };
         let finish = FinishGuard::new(Arc::clone(&shared), Arc::clone(&notify), fallback);
         runtime.spawn(async move {
@@ -332,6 +333,7 @@ mod tests {
             snapshot: None,
             error: Some("Internal runner error".into()),
             notice: None,
+            running: None,
         };
         let shared_for_panic = Arc::clone(&shared);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
