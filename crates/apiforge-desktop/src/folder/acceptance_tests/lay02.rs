@@ -407,6 +407,17 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
     }
 }
 
+/// Criterion 6, the density half: with *Compact cards* on, the board draws
+/// shorter cards than the full ones, and the layout made on open must use
+/// the heights drawn. `main` has only the full density, which the test above
+/// covers; this one switches *Compact cards* on before opening once LAY-16
+/// is merged, then asserts as above that Tidy up moves nothing.
+#[test]
+#[ignore = "LAY-02: needs LAY-16 (#310) on main"]
+fn lay02_criterion_6_opened_at_the_compact_density() {
+    unimplemented!("the Compact cards switch arrives with LAY-16 (#310)");
+}
+
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay02_open() {
