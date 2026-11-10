@@ -237,6 +237,8 @@ fn lay21_criterion_4_the_tray_reaches_hidden_ports() {
     let (_project, mut harness) = open(FRESH, WIDE);
     let check = add(&mut harness, Block::Comparison, None);
     let name = check.display_name().to_owned();
+    // *Add step* selects the new step, which opens its tray.
+    select(&mut harness, &[]);
     show(&mut harness, &check.handle, 0.6);
     let actual = format!("Input actual of {name}");
     assert!(!has(&harness, &actual), "at rest the tray is closed");
@@ -366,7 +368,12 @@ fn lay21_criterion_6_a_component_call_is_compact() {
         );
     }
 
-    let call = add(&mut harness, Block::Component, Some(("get-product", 1)));
+    // *Active promotion* requires its product and has no default for it.
+    let call = add(
+        &mut harness,
+        Block::Component,
+        Some(("active-promotion", 1)),
+    );
     show(&mut harness, &call.handle, 0.6);
     let written = lines(&harness, &call.handle);
     assert!(
