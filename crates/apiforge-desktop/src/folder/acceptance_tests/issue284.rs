@@ -202,3 +202,18 @@ fn the_main_boards_inspector_is_unchanged() {
         ]
     );
 }
+
+/// The Inspector of *Cart was deleted* on the demo's Cleanup board at the
+/// minimum window, with its *Step* list open.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_issue284_cleanup_inspector() {
+    let (_directory, mut harness, id) = open(None, true);
+    select(&mut harness, &id, true, "Cart was deleted");
+    choose(&mut harness, STEP);
+    crate::testing::capture(
+        &mut harness,
+        "issue284-cleanup-inspector-steps-960x540",
+        None,
+    );
+}
