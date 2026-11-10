@@ -199,6 +199,27 @@ pub fn unkept_outputs(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Ve
     unkept
 }
 
+/// The steps after the selection that read an output no kept output
+/// provides, by name, in reading order: those [`replace_with_call_unconnecting`]
+/// leaves unconnected (UX-37).
+pub fn unkept_readers(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Vec<String> {
+    let mut readers: Vec<String> = Vec::new();
+    for node in extraction.readers() {
+        let reads_unkept = node.inputs.values().any(|binding| {
+            binding.references().iter().any(|reference| {
+                extraction.selected.contains(reference.node_id)
+                    && kept_output(draft, reference.node_id, reference.port, reference.path)
+                        .is_none()
+            })
+        });
+        let name = node.display_name().to_owned();
+        if reads_unkept && !readers.contains(&name) {
+            readers.push(name);
+        }
+    }
+    readers
+}
+
 /// Whether an IF/ELSE branch leads from inside the selection to outside it,
 /// which one call cannot carry.
 pub fn branch_leaves(extraction: &Extraction<'_>) -> bool {
@@ -247,11 +268,32 @@ pub fn replace_with_call(
     draft: &ComponentDraft,
     component: &Component,
 ) -> Result<Replaced, EditError> {
+    replace(extraction, draft, component, false)
+}
+
+/// [`replace_with_call`] that, instead of refusing, leaves unconnected every
+/// slot of a later step that reads an output the draft does not keep, so
+/// the step shows its ordinary diagnostic until it is wired by hand
+/// (UX-37). Nothing else of the later steps changes.
+pub fn replace_with_call_unconnecting(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+    component: &Component,
+) -> Result<Replaced, EditError> {
+    replace(extraction, draft, component, true)
+}
+
+fn replace(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+    component: &Component,
+    unconnect: bool,
+) -> Result<Replaced, EditError> {
     let Extraction {
         graph, selected, ..
     } = *extraction;
     let unkept = unkept_outputs(extraction, draft);
-    if let Some(output) = unkept.into_iter().next() {
+    if let Some(output) = unkept.into_iter().next().filter(|_| !unconnect) {
         return Err(EditError::OutputNotKept(output));
     }
     if branch_leaves(extraction) {
@@ -303,32 +345,32 @@ pub fn replace_with_call(
             .insert(js::trim(&row.name).to_owned(), original.clone());
     }
 
-    // A reader of a kept output reads the call's output of that name.
+    // A reader of a kept output reads the call's output of that name; a
+    // reader of a dropped one, when asked, loses that slot (`None`).
     let call_id = call.id.clone();
-    let redirect = |binding: &Binding| -> Binding {
-        binding
-            .map_leaves(&mut |leaf, _| {
-                Some(match leaf {
-                    Binding::Reference {
-                        node_id,
-                        port,
-                        path,
-                    } if selected.contains(node_id.as_str()) => {
-                        kept_output(draft, node_id, port, path).map_or_else(
-                            || leaf.clone(),
-                            |(name, rest)| Binding::reference(&call_id, name, rest),
-                        )
-                    }
-                    other => other.clone(),
-                })
-            })
-            .unwrap_or_else(|| binding.clone())
+    let redirect = |binding: &Binding| -> Option<Binding> {
+        binding.map_leaves(&mut |leaf, _| match leaf {
+            Binding::Reference {
+                node_id,
+                port,
+                path,
+            } if selected.contains(node_id.as_str()) => {
+                match kept_output(draft, node_id, port, path) {
+                    Some((name, rest)) => Some(Binding::reference(&call_id, name, rest)),
+                    None if unconnect => None,
+                    None => Some(leaf.clone()),
+                }
+            }
+            other => Some(other.clone()),
+        })
     };
     let redirect_node = |node: &Node| -> Node {
         let mut node = node.clone();
-        for binding in node.inputs.values_mut() {
-            *binding = redirect(binding);
-        }
+        node.inputs = node
+            .inputs
+            .iter()
+            .filter_map(|(name, binding)| Some((name.clone(), redirect(binding)?)))
+            .collect();
         node
     };
 

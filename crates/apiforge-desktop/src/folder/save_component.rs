@@ -37,6 +37,10 @@ pub(super) struct SaveComponent {
     /// The file name was typed, so it no longer follows the name.
     file_typed: bool,
     publish: bool,
+    /// Save even though a later step reads an output left unticked, leaving
+    /// that step's input unconnected (UX-37). Unticked whenever the dialog
+    /// opens.
+    leave_unconnected: bool,
     focused: bool,
     /// Why the last attempt to save failed.
     error: Option<String>,
@@ -192,6 +196,7 @@ impl SaveComponent {
             file,
             file_typed: false,
             publish: true,
+            leave_unconnected: false,
             focused: false,
             error: None,
             problems: Vec::new(),
@@ -256,22 +261,30 @@ impl SaveComponent {
         })
     }
 
-    /// The outputs a later step reads that the draft drops, when the steps
-    /// are to be replaced.
+    /// Why one call cannot stand in for the steps, when they are to be
+    /// replaced, and whether the person may go ahead anyway.
     ///
     /// Only the default choice replaces the steps, so only it is refused
     /// when one call cannot stand in for them; a file alone changes nothing
-    /// the steps after them read.
-    fn unkept(&self) -> Option<String> {
+    /// the steps after them read. A branch leaving the selection is always
+    /// refused; an output a later step reads may be dropped on request,
+    /// leaving those steps unconnected (UX-37), and they are returned too.
+    fn unkept(&self) -> Option<(String, Vec<String>)> {
         if !self.publish {
             return None;
         }
         if self.with_extraction(edit::branch_leaves) {
-            return Some(edit::EditError::BranchLeavesSelection.to_string());
+            return Some((
+                edit::EditError::BranchLeavesSelection.to_string(),
+                Vec::new(),
+            ));
         }
-        unkept_message(
+        let message = unkept_message(
             &self.with_extraction(|extraction| edit::unkept_outputs(extraction, &self.draft)),
-        )
+        )?;
+        let readers =
+            self.with_extraction(|extraction| edit::unkept_readers(extraction, &self.draft));
+        Some((message, readers))
     }
 
     /// The draft's own problems; a missing name is the name field's.
@@ -441,9 +454,30 @@ impl SaveComponent {
                 output_row(ui, index + 1, row, &caption, &contracts);
             });
         }
-        if let Some(problem) = self.unkept() {
-            widgets::field_error(ui, &problem);
-            problems.push(problem);
+        match self.unkept() {
+            Some((problem, readers)) if !readers.is_empty() => {
+                // Chosen, the refusal stays as a muted note of what saving
+                // leaves to be fixed by hand.
+                if self.leave_unconnected {
+                    widgets::hint(ui, &problem);
+                } else {
+                    widgets::field_error(ui, &problem);
+                    problems.push(problem);
+                }
+                let label = match readers.as_slice() {
+                    [one] => format!("Save anyway and leave \"{one}\" unconnected"),
+                    many => format!(
+                        "Save anyway and leave {} later steps unconnected",
+                        many.len()
+                    ),
+                };
+                widgets::named(ui.checkbox(&mut self.leave_unconnected, &label), label);
+            }
+            Some((problem, _)) => {
+                widgets::field_error(ui, &problem);
+                problems.push(problem);
+            }
+            None => self.leave_unconnected = false,
         }
 
         self.action_picker(ui);
@@ -847,7 +881,12 @@ impl FolderApp {
             _ => Vec::new(),
         };
         let selected: HashSet<&str> = dialog.selected.iter().map(String::as_str).collect();
-        let replaced = edit::replace_with_call(
+        let replace = if dialog.leave_unconnected {
+            edit::replace_with_call_unconnecting
+        } else {
+            edit::replace_with_call
+        };
+        let replaced = replace(
             &Extraction {
                 graph: graph_of(&model, dialog.cleanup),
                 reference: graph_of(&model, false),
