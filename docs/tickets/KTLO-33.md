@@ -10,7 +10,9 @@
 
 ## Goal
 
-A red CI run means a regression, nothing else. Seven tests have failed at
+A red CI run means a regression, nothing else. (Items 8 and 9 below,
+added during the implementation, bring the loop's list to 17 tests.)
+Seven tests have failed at
 least once on a commit that passed on its other run or on a rerun, six of
 them on windows-2022 only (issue #122; the seventh,
 `mcp08a::the_holders_save…`, joined on 2026-11-02 by the owner's decision). Each gets its cause named from the
@@ -387,8 +389,9 @@ earlier answer of 2026-11-02 (2 = B) is superseded.
 3. Flake 3: the hover test asserts elision on the harness it hovers, waits
    for the tooltip bounded by simulated time, and prints the diagnosis on
    failure. The assertion is the same.
-4. Flake 4 (decision 2 A): a desktop test forces the first take-back's
-   holder-file replace to fail through the fault seam and shows the window
+4. Flake 4 (decision 2 A): a desktop test forces the first take-back to
+   fail through the fault seam (as built: at the flush of `.apiforge/local`
+   just before the holder file is written, which the seam does not reach) and shows the window
    the writer at the next probe, with no notice; a second test with three
    failures shows the notice and the window still trying. Under 2 B this
    criterion is dropped and criterion 7 alone covers the flake.
@@ -400,11 +403,11 @@ earlier answer of 2026-11-02 (2 = B) is superseded.
 7. **The loop.** A `workflow_dispatch` workflow `flake-loop.yml` builds the
    test binaries once and runs a named test filter N times on a chosen
    runner (`ubuntu-24.04`, `windows-2022`), failing on the first failure
-   and uploading the output. Each of the seven tests passes 20 of 20 on
+   and uploading the output. Each test of the list (17 with items 8 and 9) passes 20 of 20 on
    windows-2022 and 20 of 20 on ubuntu-24.04 with the fixes, and the run
    ids are in the QA report. Flakes 4, 6 and 7 are looped after MCP-19 merges
    or on a branch that carries both.
-8. No assertion of any of the seven tests is weakened; `git diff` of the
+8. No assertion of any listed test is weakened; `git diff` of the
    assertions is quoted in the QA report.
 9. The verification commands of the development guide pass.
 

@@ -193,10 +193,14 @@ impl FolderApp {
                     Ok(true) => app.taken_back(),
                     // Another writer was quicker, or the window changed
                     // while the project was read; the next check tries again.
-                    Ok(false) | Err(apiforge_project::Error::StaleStorage) => {}
+                    // Neither is a failure: the streak of failures ends.
+                    Ok(false) | Err(apiforge_project::Error::StaleStorage) => {
+                        app.take_back.failures = 0;
+                    }
                     Err(apiforge_project::Error::Storage(
                         apiforge_project::ProjectError::RecoveryRequired,
                     )) => {
+                        app.take_back.failures = 0;
                         // As at start: the transaction is reviewed and
                         // finished before the project is used.
                         app.take_back.recovering = true;

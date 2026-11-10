@@ -110,14 +110,15 @@ jobs:
         run: |
           set -uo pipefail
           tests="${TESTS:-$DEFAULT_TESTS}"
+          [[ "$RUNS" =~ ^[1-9][0-9]*$ ]] || { echo "::error::runs must be a positive integer"; exit 2; }
           mkdir -p flake-loop
           for round in $(seq 1 "$RUNS"); do
             echo "::group::Round $round of $RUNS"
             # Each test binary runs the names it has; the others filter out.
             # shellcheck disable=SC2086
+            status=0
             cargo test --workspace --all-targets --locked -- --exact $tests \
-              > "flake-loop/round-$round.log" 2>&1
-            status=$?
+              > "flake-loop/round-$round.log" 2>&1 || status=$?
             grep -E '^test .* (ok|FAILED)$|^test result' "flake-loop/round-$round.log"
             echo "::endgroup::"
             if [ "$status" -ne 0 ]; then
@@ -126,7 +127,14 @@ jobs:
               exit 1
             fi
           done
+          # A misspelled or renamed test would run nowhere and pass silently.
+          # shellcheck disable=SC2086
+          expected=$(( $(echo $tests | wc -w) * RUNS ))
           passed=$(cat flake-loop/round-*.log | grep -cE '^test .* ok$')
+          if [ "$passed" -ne "$expected" ]; then
+            echo "::error::$passed test runs passed, $expected expected: a name matches no test"
+            exit 1
+          fi
           echo "All $RUNS rounds passed: $passed test runs." | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the output
