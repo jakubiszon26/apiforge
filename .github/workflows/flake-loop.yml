@@ -1,0 +1,136 @@
+name: Flake loop
+
+# KTLO-33 (#122): runs named tests many times on one runner, to show that a
+# test which failed now and then on CI no longer does. Started by hand
+# (Actions → Flake loop → Run workflow), or by a push whose head commit's
+# message contains "[flake-loop]", which runs the default list on both
+# runners: a workflow_dispatch workflow can be started only once it is on
+# the default branch, and a fix is proved on its own branch first.
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: Exact test names, separated by spaces (default — the KTLO-33 list)
+        required: false
+        default: ''
+      runs:
+        description: How many times to run them
+        required: false
+        default: '20'
+      os:
+        description: The runner
+        type: choice
+        options: [both, windows-2022, ubuntu-24.04]
+        default: both
+  push:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tests KTLO-33 and #279 fixed; a test name is its full path in its
+  # test binary.
+  DEFAULT_TESTS: >-
+    folder::tests::acceptance_tests::mcp08b::take_back_sits_at_the_right_end_of_the_bar_under_run
+    mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run
+    folder::tests::header_tests::a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary
+    folder::tests::acceptance_tests::mcp07::a_transaction_left_by_the_holder_opens_the_recovery_view
+    mcp06_criterion_6_a_cancelled_or_timed_out_live_run
+    folder::tests::deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work
+    folder::tests::acceptance_tests::mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was
+    folder::tests::acceptance_tests::ux33::ux33_the_icon_shows_one_tooltip
+    folder::tests::acceptance_tests::ux33::ux33_criterion_1_a_component_board_has_the_button_a_scenario_none
+    folder::tests::acceptance_tests::ux33::ux33_the_button_waits_for_room_for_the_inspector
+    folder::tests::acceptance_tests::ux34::ux34_criterion_4_a_chip_alone_cannot_be_copied
+    folder::tests::acceptance_tests::ux18::fit_the_view_still_fits_beside_the_inspector
+    folder::tests::acceptance_tests::ktlo33::ktlo33_a_take_back_that_fails_once_is_tried_again_at_the_next_check
+    folder::tests::acceptance_tests::ktlo33::ktlo33_three_failed_take_backs_in_a_row_show_the_notice_and_the_window_keeps_trying
+
+jobs:
+  matrix:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[flake-loop]')
+    runs-on: ubuntu-24.04
+    outputs:
+      os: ${{ steps.pick.outputs.os }}
+    steps:
+      - id: pick
+        shell: bash
+        env:
+          CHOSEN: ${{ inputs.os || 'both' }}
+        run: |
+          case "$CHOSEN" in
+            both) echo 'os=["ubuntu-24.04","windows-2022"]' >> "$GITHUB_OUTPUT" ;;
+            *) echo "os=[\"$CHOSEN\"]" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  loop:
+    needs: matrix
+    name: Loop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.matrix.outputs.os) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libudev-dev \
+            libegl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.0'
+
+      - name: Provision Linux user runtime
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          runtime="/run/user/$(id -u)"
+          if ! test -d "$runtime"; then
+            sudo install -d -m 700 -o "$(id -u)" -g "$(id -g)" "$runtime"
+          fi
+
+      - name: Build the test binaries
+        run: cargo test --workspace --all-targets --locked --no-run
+
+      - name: Run the tests in a loop
+        shell: bash
+        env:
+          TESTS: ${{ inputs.tests }}
+          RUNS: ${{ inputs.runs || '20' }}
+        run: |
+          set -uo pipefail
+          tests="${TESTS:-$DEFAULT_TESTS}"
+          mkdir -p flake-loop
+          for round in $(seq 1 "$RUNS"); do
+            echo "::group::Round $round of $RUNS"
+            # Each test binary runs the names it has; the others filter out.
+            # shellcheck disable=SC2086
+            cargo test --workspace --all-targets --locked -- --exact $tests \
+              > "flake-loop/round-$round.log" 2>&1
+            status=$?
+            grep -E '^test .* (ok|FAILED)$|^test result' "flake-loop/round-$round.log"
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              echo "::error::Round $round of $RUNS failed"
+              cat "flake-loop/round-$round.log"
+              exit 1
+            fi
+          done
+          passed=$(cat flake-loop/round-*.log | grep -cE '^test .* ok$')
+          echo "All $RUNS rounds passed: $passed test runs." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-loop-${{ matrix.os }}
+          path: flake-loop/
+          if-no-files-found: ignore
