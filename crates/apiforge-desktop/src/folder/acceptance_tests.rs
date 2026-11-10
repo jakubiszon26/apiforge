@@ -15,6 +15,8 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+#[path = "acceptance_tests/ktlo33.rs"]
+mod ktlo33;
 #[path = "acceptance_tests/lay21.rs"]
 mod lay21;
 
@@ -2112,6 +2114,28 @@ mod mcp08b {
             .expect("a labelled node")
     }
 
+    /// Steps the window until the bar names the holder from its own
+    /// description, the one in the holder file, rather than the provisional
+    /// one the window shows from the grant until its next check reads the
+    /// file (KTLO-33, flake 1, decision 1 A). Only the holder's own names an
+    /// endpoint. The two may differ in the minute of *since*, so a test that
+    /// reads the bar's text and asks for it again later waits for this first.
+    pub(super) fn await_holder_file(harness: &mut FolderHarness) {
+        await_until(
+            harness,
+            Instant::now(),
+            "the holder's own description",
+            |harness| {
+                folder(harness)
+                    .holder
+                    .as_ref()
+                    .map(crate::folder::holder::Observed::holder)
+                    .and_then(Holder::endpoint)
+                    .is_some()
+            },
+        );
+    }
+
     /// Who holds the project, as a reader finds out.
     pub(super) fn holder(root: &Path) -> Option<Holder> {
         ProjectStore::open_read_only(root)
@@ -3108,6 +3132,7 @@ mod mcp08b {
             await_endpoint(&mut harness, root, HolderRole::Window);
             let mut server = agent(root, "Claude Code");
             hand_over(&mut harness, &mut server, "Written by the agent.");
+            await_holder_file(&mut harness);
             let holder_text = label_containing(&harness, &format!("{AGENT} · "));
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
@@ -5418,8 +5443,8 @@ mod mcp15 {
 
 mod mcp10 {
     use super::mcp08b::{
-        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
-        holder, label_containing, read, read_only, write,
+        AGENT, SCENARIO, address, answer, await_endpoint, await_holder_file, await_until, call,
+        commented, contains, holder, label_containing, read, read_only, write,
     };
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
@@ -5600,11 +5625,11 @@ mod mcp10 {
     }
 
     /// Waits until the bar names the agent with its start time, as the
-    /// holder file gives it.
+    /// holder file gives it: the provisional description shown from the
+    /// grant has a start time too, the window's own (KTLO-33, flake 1).
     fn await_since(harness: &mut FolderHarness) {
-        await_until(harness, Instant::now(), "the holder's start", |harness| {
-            contains(harness, &format!("{AGENT} · since "))
-        });
+        await_holder_file(harness);
+        assert!(contains(harness, &format!("{AGENT} · since ")));
     }
 
     /// Criterion 1: the server tells a connected window `run` with the
@@ -6209,8 +6234,9 @@ mod mcp16 {
     }
 
     /// The agent writes `path` with `note` added under its first line and
-    /// returns when it started the write: the window steps while the
-    /// agent waits for the answer, and may follow before it comes.
+    /// returns when the answer came, which is when the write had committed.
+    /// The window steps while the agent waits for the answer, and may follow
+    /// before it comes.
     fn agent_notes(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
@@ -6218,14 +6244,18 @@ mod mcp16 {
         note: &str,
     ) -> Instant {
         let (text, _) = read(server, path);
-        let asked = Instant::now();
         let answer = write(harness, server, path, &commented(&text, note));
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
-        asked
+        returned
     }
 
     /// The window is at `document_id` within the ticket's bound of
-    /// `returned`, the moment the agent started the write that commits.
+    /// `returned`, the moment the agent's commit was answered. The bound is
+    /// the window's: it follows a commit within two seconds. Timed from the
+    /// start of the agent's call it also held the agent's own transaction,
+    /// which on a loaded Windows runner took most of it (KTLO-33, run
+    /// 42881644458: 2.15 s for a publication).
     fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
         let took = await_until(harness, returned, what, |harness| {
             folder(harness).workbench.active() == Some(document_id)
@@ -6375,8 +6405,8 @@ mod mcp16 {
         assert_ne!(deep, padded);
         let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
-        let returned = Instant::now();
         let answer = write(&mut harness, &mut server, SCENARIO, &deep);
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_active(&mut harness, returned, &scenario, "the scenario");
         await_until(&mut harness, Instant::now(), "the new text", |harness| {
@@ -6443,13 +6473,13 @@ mod mcp16 {
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
         );
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "create_document",
             json!({ "kind": "scenario", "path": ADDED, "text": text }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_until(&mut harness, returned, "the new document", |harness| {
             is_registered(harness, ADDED)
@@ -6486,13 +6516,13 @@ mod mcp16 {
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "publish",
             json!({ "path": PRODUCT, "expected_source_sha256": hash }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["revision"], 2, "{answer}");
         await_active(&mut harness, returned, &product, "the published component");
         let revisions: Vec<u32> = folder(&harness)
@@ -6806,17 +6836,26 @@ mod mcp16 {
         settle(&mut harness);
         assert!(pressed(&harness), "Space presses it again");
 
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
-        assert!(has_label(&harness, PINNED_HINT), "the pressed hover text");
+        let follow = |harness: &FolderHarness| {
+            harness
+                .query_all_by_label(FOLLOW)
+                .next()
+                .map(|node| node.rect())
+        };
+        assert!(
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                PINNED_HINT
+            )),
+            "the pressed hover text"
+        );
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness));
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            has_label(&harness, RELEASED_HINT),
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                RELEASED_HINT
+            )),
             "the released hover text"
         );
         drop(harness);
@@ -7866,12 +7905,19 @@ mod ux02 {
         close_options(harness);
     }
 
-    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    /// Whether hovering the widget `label` shows a tooltip with `text`,
+    /// through the one hover every hover test takes (KTLO-33, #279).
     pub(super) fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
-        harness.get_by_label(label).hover();
-        settle(harness);
-        harness.run_steps(60);
-        contains(harness, text)
+        crate::testing::hover_until(
+            harness,
+            |harness| {
+                harness
+                    .query_all_by_label(label)
+                    .next()
+                    .map(|node| node.rect())
+            },
+            |harness| contains(harness, text),
+        )
     }
 
     /// The project name in the header (the explorer may name it too).
@@ -8075,15 +8121,15 @@ mod ux02 {
             );
         }
         let names = harness.query_all_by_label(NAME).count();
-        harness
-            .query_all_by_label(NAME)
-            .find(|node| node.rect().top() < 40.0)
-            .expect("the project name in the header")
-            .hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            harness.query_all_by_label(NAME).count() > names,
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(NAME)
+                    .map(|node| node.rect())
+                    .find(|rect| rect.top() < 40.0),
+                |harness| harness.query_all_by_label(NAME).count() > names,
+            ),
             "hovering the shortened name shows it whole"
         );
     }
@@ -9897,9 +9943,17 @@ mod ux04 {
         assert!(label.width() + 1.0 < whole, "cut: {label:?}, whole {whole}");
         let publish = harness.get_by_label("Publish").rect();
         assert!(publish.right() <= label.left(), "clear of Publish");
-        harness.get_by_label(&named).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(&named)
+                    .next()
+                    .map(|node| node.rect()),
+                |harness| harness.query_all_by_label_contains(&named).count() > 1,
+            ),
+            "the label's hover"
+        );
         assert_eq!(
             harness.query_all_by_label_contains(&named).count(),
             2,
@@ -13371,6 +13425,10 @@ mod ux18 {
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
         choose(&mut harness, "Diagram");
+        // The view's protection, due a second after the mode changed, would
+        // otherwise show the storage band under the tabs in the middle of a
+        // test on a slow runner, moving the board (KTLO-33, #279).
+        crate::testing::quiesce(&mut harness);
         assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
         (project, harness, scenario)
     }

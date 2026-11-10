@@ -627,7 +627,10 @@ holder file never blocks a free lock, even on a mounted Windows drive.
   whole and the run in flight finish, cleanup included (the bar says
   *waiting for the agent's run to finish*), then ends the session; the
   window is the writer again within two seconds. The agent's next write asks
-  again.
+  again. A take-back that fails, as when another program holds a file for a
+  moment, is tried again at the next check; the notice *This window could
+  not take the project back* appears only after three failures in a row,
+  and the window keeps trying (KTLO-33).
 - **The agent's runs** (MCP-10). The server tells every connected window
   `run` when a run starts (`path`, `mode`, `state: running`) and when it
   ends: `passed`, `failed` with the first step that did not pass (`step`,

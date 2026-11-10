@@ -660,8 +660,29 @@ pub struct Step {
     /// Always sent, `false` included:
     /// the output schema requires it (MCP-14, MCP-22).
     pub may_have_reached_api: bool,
+    /// Why a step that did not run did not run; absent for a step that ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<NotRunCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
+}
+
+/// Why a step did not run. A step is named by its handle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NotRunCause {
+    /// The run stopped, under the policy Stop, after `by` failed.
+    Stopped { by: String },
+    /// `step`, which this step waits for, failed or did not run itself.
+    BlockedBy { step: String },
+    /// `condition`, a Data condition this step reads, is false.
+    ConditionUnmet { condition: String },
+    /// The step is on a branch that was not taken.
+    OutsidePath,
+    /// The run was cancelled or ran out of time before the step.
+    Cancelled,
+    /// A Cleanup step reads an output of `step` that does not exist.
+    CleanupInputMissing { step: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
@@ -1318,7 +1339,35 @@ const NOTHING_SENT: &str = "Nothing was sent to the API.";
 /// The compact steps of a report.
 pub fn steps(report: &RunResult) -> Vec<Step> {
     let live = report.mode == apiforge_core::run::RunMode::Live;
-    report.steps.iter().map(|found| step(found, live)).collect()
+    report
+        .steps
+        .iter()
+        .map(|found| step(found, live, &report.steps))
+        .collect()
+}
+
+/// The cause of `found` with its steps named by handle; `siblings` are the
+/// results of its graph, a Cleanup step's main-phase producers included.
+fn cause(found: &StepResult, siblings: &[StepResult]) -> Option<NotRunCause> {
+    use apiforge_core::run::NotRunCause as Found;
+    let handle = |id: &str| {
+        siblings
+            .iter()
+            .find(|step| step.node_id == id)
+            .map_or_else(|| id.to_owned(), |step| step.handle.clone())
+    };
+    Some(match found.cause.as_ref()? {
+        Found::Stopped { by } => NotRunCause::Stopped { by: handle(by) },
+        Found::BlockedBy { step } => NotRunCause::BlockedBy { step: handle(step) },
+        Found::ConditionUnmet { condition } => NotRunCause::ConditionUnmet {
+            condition: handle(condition),
+        },
+        Found::OutsidePath => NotRunCause::OutsidePath,
+        Found::Cancelled => NotRunCause::Cancelled,
+        Found::CleanupInputMissing { step } => {
+            NotRunCause::CleanupInputMissing { step: handle(step) }
+        }
+    })
 }
 
 /// Whether the API may have received the request of `found` (MCP-22): a
@@ -1335,7 +1384,7 @@ fn may_have_reached_api(found: &StepResult, live: bool) -> bool {
         && found.request.is_some()
 }
 
-fn step(found: &StepResult, live: bool) -> Step {
+fn step(found: &StepResult, live: bool, siblings: &[StepResult]) -> Step {
     use apiforge_core::{format::OptionalJson, run::StepStatus as Status};
     let (expected, actual) = match (&found.expected, &found.actual) {
         (OptionalJson::Present(expected), OptionalJson::Present(actual))
@@ -1364,10 +1413,13 @@ fn step(found: &StepResult, live: bool) -> Step {
         expected,
         actual,
         may_have_reached_api: may_have_reached_api(found, live),
-        steps: found
-            .children
-            .as_ref()
-            .map(|children| children.iter().map(|child| step(child, live)).collect()),
+        cause: cause(found, siblings),
+        steps: found.children.as_ref().map(|children| {
+            children
+                .iter()
+                .map(|child| step(child, live, children))
+                .collect()
+        }),
     }
 }
 

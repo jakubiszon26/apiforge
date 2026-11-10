@@ -1556,6 +1556,7 @@ mod tests {
             snapshot: None,
             error: Some("Step failed".into()),
             notice: Some("Using saved inputs from the previous run.".into()),
+            running: None,
         }
     }
 

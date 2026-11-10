@@ -120,6 +120,92 @@ pub fn settles(harness: &mut FolderHarness) -> bool {
     }
 }
 
+/// Settles the window, then brings forward the protection of unsaved work
+/// and of the view and waits for it to finish. The window starts that job a
+/// second of wall time after the last change (a mode, a tab, a panel); on a
+/// slow runner it takes longer than the 150 ms after which the storage band
+/// shows under the tabs, and the band moves everything below it for as
+/// long as the job runs. A test that hovers or measures what lies below the
+/// tabs runs after this, so nothing moves under it (KTLO-33, #279).
+pub fn quiesce(harness: &mut FolderHarness) {
+    settle(harness);
+    harness
+        .state_mut()
+        .as_mut()
+        .expect("the folder window")
+        .debug_protect_now();
+    settle(harness);
+}
+
+/// How long, on the harness's simulated clock, a tooltip may take to show.
+/// egui shows one after half a second of stillness; the rest is margin, the
+/// sixty steps of a quarter of a second that the hover tests used to take.
+const TOOLTIP_WAIT: f64 = 15.0;
+
+/// Rests the pointer on the widget `widget` finds and steps until `shown`
+/// holds, for at most [`TOOLTIP_WAIT`] of simulated time; returns whether it
+/// did. The window is quiesced first and the pointer goes to the widget's
+/// centre as it is drawn now; the test fails at once if the pointer is then
+/// not over it. When `shown` never holds the diagnosis is printed per
+/// frame: the widget's rectangle, the pointer, whether egui saw the pointer
+/// still, whether a tooltip was open and whether the storage band showed
+/// (KTLO-33, #279). Every hover test goes through this helper.
+pub fn hover_until(
+    harness: &mut FolderHarness,
+    widget: impl Fn(&FolderHarness) -> Option<egui::Rect>,
+    shown: impl Fn(&FolderHarness) -> bool,
+) -> bool {
+    quiesce(harness);
+    let at = widget(harness).expect("the widget to hover is drawn");
+    harness.hover_at(at.center());
+    harness.step();
+    let start = harness.ctx.input(|input| input.time);
+    let mut frames = Vec::new();
+    loop {
+        let rect = widget(harness);
+        let (pointer, still, time) = harness.ctx.input(|input| {
+            (
+                input.pointer.hover_pos(),
+                input.pointer.is_still(),
+                input.time - start,
+            )
+        });
+        let tooltip = harness.ctx.memory(|memory| {
+            memory
+                .areas()
+                .visible_layer_ids()
+                .iter()
+                .any(|layer| layer.order == egui::Order::Tooltip)
+        });
+        let band = folder(harness).debug_storage_band();
+        let frame = format!(
+            "t={time:.2}s widget={rect:?} pointer={pointer:?} still={still} \
+             tooltip_open={tooltip} storage_band={band:?}"
+        );
+        if frames.is_empty() {
+            assert!(
+                rect.zip(pointer)
+                    .is_some_and(|(rect, pointer)| rect.contains(pointer)),
+                "the pointer is not over the widget it was moved to: {frame}"
+            );
+        }
+        frames.push(frame);
+        if shown(harness) {
+            return true;
+        }
+        if time >= TOOLTIP_WAIT {
+            break;
+        }
+        harness.step();
+    }
+    eprintln!(
+        "the hover did not show what was expected within {TOOLTIP_WAIT} simulated seconds; \
+         per frame:\n{}",
+        frames.join("\n")
+    );
+    false
+}
+
 /// The legacy workspace window with the default demo workspace in a session.
 pub fn workspace_harness(size: egui::Vec2) -> WorkspaceHarness {
     let mut harness = Harness::builder().with_size(size).build_ui_state(
