@@ -1,11 +1,9 @@
 name: Flake loop
 
-# KTLO-33 (#122): runs named tests many times on one runner, to show that a
-# test which failed now and then on CI no longer does. Started by hand
-# (Actions → Flake loop → Run workflow), or by a push whose head commit's
-# message contains "[flake-loop]", which runs the default list on both
-# runners: a workflow_dispatch workflow can be started only once it is on
-# the default branch, and a fix is proved on its own branch first.
+# KTLO-33 (#122): runs named tests N times on one runner. Started by hand
+# (Actions → Flake loop → Run workflow), or on a branch other than main by a
+# push whose head commit message contains "[flake-loop]" (default list, both
+# runners, 20 rounds): dispatch works only once the file is on main.
 on:
   workflow_dispatch:
     inputs:
@@ -23,6 +21,7 @@ on:
         options: [both, windows-2022, ubuntu-24.04]
         default: both
   push:
+    branches-ignore: [main]
 
 permissions:
   contents: read
