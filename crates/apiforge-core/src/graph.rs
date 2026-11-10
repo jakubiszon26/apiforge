@@ -539,6 +539,100 @@ pub fn dependency_index(graph: &Graph) -> HashMap<&str, IndexSet<&str>> {
     index
 }
 
+/// The steps in the order the engine reaches them, without executing anything.
+///
+/// The runner's loop takes the first step of the document whose dependencies
+/// have finished, and every step finishes whatever its result: a skipped branch
+/// or a stopped run still takes its turn. So the order is static. Dependencies
+/// outside `graph` do not hold a step back, as a Cleanup step reading the main
+/// graph. Steps of a cycle, which the engine refuses, keep their document order
+/// at the end, so every step has a place.
+pub fn sequence(graph: &Graph) -> Vec<&str> {
+    let index = dependency_index(graph);
+    let mut pending: Vec<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let known: HashSet<&str> = pending.iter().copied().collect();
+    let mut done: HashSet<&str> = HashSet::with_capacity(pending.len());
+    let mut order = Vec::with_capacity(pending.len());
+    while let Some(ready) = pending.iter().position(|id| {
+        index[id]
+            .iter()
+            .all(|source| !known.contains(source) || done.contains(source))
+    }) {
+        let id = pending.remove(ready);
+        done.insert(id);
+        order.push(id);
+    }
+    order.extend(pending);
+    order
+}
+
+/// A step a check verifies: a request or a component call it reads directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Subject<'a> {
+    /// The node id of the step.
+    pub step: &'a str,
+    /// The check has another subject too, and counts under each.
+    pub shared: bool,
+    /// The check is a gate: a Data condition whose value another step reads.
+    pub gate: bool,
+}
+
+/// What a check reads directly, by role.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CheckSubjects<'a> {
+    /// The steps it verifies; none for a standalone check.
+    pub subjects: Vec<Subject<'a>>,
+    /// The Value blocks it reads: its sources, which it does not verify.
+    pub values: Vec<&'a str>,
+}
+
+/// The subjects of a Comparison or a Data condition, and its value sources; of
+/// any other node, nothing. Only references written in the check count: a
+/// step read through a value is that value's source, not the check's subject.
+pub fn check_subjects<'a>(graph: &'a Graph, check: &'a Node) -> CheckSubjects<'a> {
+    check_subjects_in(std::slice::from_ref(&graph), check)
+}
+
+/// The same over several graphs at once, for a check that reads steps of
+/// another graph: a Cleanup check reads the main graph's steps, and whether it
+/// is a gate is decided by every graph that may read it.
+pub fn check_subjects_in<'a>(graphs: &[&'a Graph], check: &'a Node) -> CheckSubjects<'a> {
+    if !matches!(check.kind, NodeKind::Assert | NodeKind::Condition) {
+        return CheckSubjects::default();
+    }
+    let nodes = || graphs.iter().flat_map(|graph| &graph.nodes);
+    let mut steps: IndexSet<&str> = IndexSet::new();
+    let mut values: IndexSet<&str> = IndexSet::new();
+    for binding in check.inputs.values() {
+        for reference in binding.references() {
+            let source = nodes().find(|node| node.id == reference.node_id);
+            match source.map(|node| node.kind) {
+                Some(NodeKind::Request | NodeKind::Component) => {
+                    steps.insert(reference.node_id);
+                }
+                Some(NodeKind::Value) => {
+                    values.insert(reference.node_id);
+                }
+                _ => {}
+            }
+        }
+    }
+    let gate = check.kind == NodeKind::Condition
+        && nodes().any(|node| {
+            node.inputs
+                .values()
+                .any(|binding| binding.references_node(&check.id))
+        });
+    let shared = steps.len() > 1;
+    CheckSubjects {
+        subjects: steps
+            .into_iter()
+            .map(|step| Subject { step, shared, gate })
+            .collect(),
+        values: values.into_iter().collect(),
+    }
+}
+
 /// Whether ordering and data dependencies together form a cycle.
 pub fn has_cycle(graph: &Graph) -> bool {
     let index = dependency_index(graph);
@@ -776,6 +870,174 @@ mod tests {
             target: target.into(),
             branch: None,
         }
+    }
+
+    /// A check of `actual` against `expected`, both read from these sources.
+    fn check(id: &str, kind: NodeKind, reads: &[(&str, &str)]) -> Node {
+        let mut check = node(id, kind);
+        check.inputs.clear();
+        for (index, (source, port)) in reads.iter().enumerate() {
+            check.inputs.insert(
+                format!("in{index}"),
+                Binding::reference(*source, *port, "total"),
+            );
+        }
+        check
+    }
+
+    fn subject(step: &str, shared: bool, gate: bool) -> Subject<'_> {
+        Subject { step, shared, gate }
+    }
+
+    /// LAY-08 criterion 1. A check names the steps it reads directly: a
+    /// request or a component call is a subject, a value it is compared with
+    /// is its value source (lay.md 1.3), and a gate is a Data condition whose
+    /// value a later step reads.
+    #[test]
+    fn check_subjects_names_every_step_read_directly() {
+        let mut through_a_value = node("first", NodeKind::Value);
+        through_a_value
+            .inputs
+            .insert(VALUE_INPUT.into(), Binding::reference("cart", "body", ""));
+        let mut checkout = node("checkout", NodeKind::Request);
+        checkout.inputs.insert(
+            BODY_INPUT.into(),
+            Binding::reference("valid_cart", "value", "id"),
+        );
+        let mut standalone = node("standalone", NodeKind::Assert);
+        standalone.inputs.clear();
+        standalone
+            .inputs
+            .insert("actual".into(), Binding::literal(json!(1)));
+        let graph = Graph {
+            nodes: vec![
+                node("begin", NodeKind::Start),
+                node("cart", NodeKind::Request),
+                node("receipt", NodeKind::Request),
+                node("product", NodeKind::Component),
+                node("expected_total", NodeKind::Value),
+                through_a_value,
+                check(
+                    "cart_total",
+                    NodeKind::Assert,
+                    &[("cart", "body"), ("expected_total", "value")],
+                ),
+                check(
+                    "receipt_total",
+                    NodeKind::Assert,
+                    &[("receipt", "body"), ("cart", "body")],
+                ),
+                check(
+                    "twice",
+                    NodeKind::Assert,
+                    &[("cart", "body"), ("cart", "status")],
+                ),
+                check("priced", NodeKind::Assert, &[("product", "price")]),
+                check("indirect", NodeKind::Assert, &[("first", "value")]),
+                check("of_a_check", NodeKind::Assert, &[("cart_total", "passed")]),
+                standalone,
+                check("valid_cart", NodeKind::Condition, &[("cart", "body")]),
+                check("unread", NodeKind::Condition, &[("cart", "body")]),
+                check("ordered", NodeKind::Condition, &[("cart", "body")]),
+                checkout,
+            ],
+            edges: vec![edge("ordered", "checkout")],
+            proxies: Vec::new(),
+        };
+        let of = |id: &str| {
+            let check = graph.nodes.iter().find(|node| node.id == id).unwrap();
+            check_subjects(&graph, check)
+        };
+
+        let cart_total = of("cart_total");
+        assert_eq!(cart_total.subjects, [subject("cart", false, false)]);
+        assert_eq!(cart_total.values, ["expected_total"]);
+
+        let shared = of("receipt_total");
+        assert_eq!(
+            shared.subjects,
+            [
+                subject("receipt", true, false),
+                subject("cart", true, false)
+            ],
+            "a check with two subjects has both, each marked shared"
+        );
+        assert!(shared.values.is_empty());
+
+        assert_eq!(
+            of("twice").subjects,
+            [subject("cart", false, false)],
+            "two fields of one step are one subject"
+        );
+        assert_eq!(
+            of("priced").subjects,
+            [subject("product", false, false)],
+            "a component call is a subject"
+        );
+
+        let indirect = of("indirect");
+        assert!(
+            indirect.subjects.is_empty(),
+            "a step read through a value is not read directly"
+        );
+        assert_eq!(indirect.values, ["first"]);
+        let of_a_check = of("of_a_check");
+        assert!(of_a_check.subjects.is_empty() && of_a_check.values.is_empty());
+        let standalone = of("standalone");
+        assert!(standalone.subjects.is_empty() && standalone.values.is_empty());
+
+        assert_eq!(
+            of("valid_cart").subjects,
+            [subject("cart", false, true)],
+            "a Data condition read by a later step is a gate"
+        );
+        assert_eq!(
+            of("unread").subjects,
+            [subject("cart", false, false)],
+            "a Data condition nothing reads is a check"
+        );
+        assert_eq!(
+            of("ordered").subjects,
+            [subject("cart", false, false)],
+            "an ordering edge reads no value"
+        );
+    }
+
+    /// LAY-08 criterion 6, the rule on its own: ready steps in document
+    /// order, whatever comes first in the document.
+    #[test]
+    fn sequence_takes_the_first_ready_step_of_the_document() {
+        let mut reader = node("reader", NodeKind::Value);
+        reader
+            .inputs
+            .insert(VALUE_INPUT.into(), Binding::reference("source", "body", ""));
+        let graph = Graph {
+            nodes: vec![
+                reader,
+                node("ordered", NodeKind::Request),
+                node("free", NodeKind::Request),
+                node("source", NodeKind::Request),
+            ],
+            edges: vec![edge("source", "ordered")],
+            proxies: Vec::new(),
+        };
+        assert_eq!(sequence(&graph), ["free", "source", "reader", "ordered"]);
+    }
+
+    /// Steps of a cycle cannot run; they keep their document order at the end,
+    /// so every step has a place.
+    #[test]
+    fn sequence_leaves_a_cycle_at_the_end() {
+        let graph = Graph {
+            nodes: vec![
+                node("one", NodeKind::Request),
+                node("two", NodeKind::Request),
+                node("free", NodeKind::Request),
+            ],
+            edges: vec![edge("one", "two"), edge("two", "one")],
+            proxies: Vec::new(),
+        };
+        assert_eq!(sequence(&graph), ["free", "one", "two"]);
     }
 
     #[test]

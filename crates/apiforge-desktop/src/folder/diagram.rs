@@ -74,8 +74,16 @@ impl FolderApp {
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
         };
-        // While observing, the bar at the bottom says why (MCP-08a, M1).
-        if !snapshot.editable && !snapshot.paused {
+        // While observing, the bar at the bottom says why (MCP-08a, M1). A
+        // save or a publication holds the board for a moment, and the
+        // analysis a publication starts checks code that did not change:
+        // neither puts a notice above the board (UX-25).
+        let rechecking = snapshot.analysis == AnalysisState::Pending
+            && snapshot.model_describes_text
+            && !snapshot.held
+            && snapshot.conflict.is_none()
+            && snapshot.unavailable.is_none();
+        if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
             let text = if snapshot.held {
                 "Unsaved work from an earlier session needs a decision in the code first."
             } else if snapshot.analysis == AnalysisState::Pending {
@@ -116,7 +124,11 @@ impl FolderApp {
                 .collect::<Vec<_>>()
         });
         let graph = graph_of(&model, cleanup);
-        let reference = graph_of(&model, false);
+        // Built once per model, not every frame (UX-16).
+        let combined = cleanup.then(|| self.cleanup_reference(&model));
+        let reference = combined
+            .as_deref()
+            .unwrap_or_else(|| graph_of(&model, false));
         let parameters = parameters_of(&model);
         let selection = self
             .selections
@@ -124,10 +136,43 @@ impl FolderApp {
             .cloned()
             .unwrap_or_default();
         let context = context_key(document_id, cleanup);
-        let can_paste = self
-            .clipboard
-            .as_ref()
-            .is_some_and(|clipboard| clipboard.context == context);
+        // A component's board shows its inputs in the INPUTS strip (UX-31).
+        let inputs = match &*model {
+            Document::Component(component) => Some(component.inputs.as_slice()),
+            Document::Scenario(_) => None,
+        };
+        let input_selected =
+            selected_input(&model, &selection, self.selected_inputs.get(document_id))
+                .map(|port| port.name.clone());
+        if input_selected.is_none() {
+            // A block selected elsewhere, or an input the code no longer
+            // declares, ends the input's selection.
+            self.selected_inputs.remove(document_id);
+        }
+        // A block selected by any path, a run's step or an added block among
+        // them, leaves the *New input* form (UX-32).
+        if !selection.is_empty() {
+            self.new_inputs.remove(document_id);
+        }
+        // A selected block or input, the *New input* form, or a scenario's
+        // board leaves no room for the component's settings (UX-33).
+        if !selection.is_empty()
+            || input_selected.is_some()
+            || inputs.is_none()
+            || self.new_inputs.contains_key(document_id)
+        {
+            self.component_settings.remove(document_id);
+        }
+        let settings = inputs.map(|_| canvas::SettingsButton {
+            open: self.component_settings.contains(document_id),
+            available: self.library_room(ui.ctx()),
+            header_width: header.full_width(ui),
+        });
+        // The input the *New input* form is adding (UX-32).
+        let adding_input = inputs
+            .and_then(|_| self.new_inputs.get(document_id))
+            .map(|form| form.name.clone());
+        let can_paste = self.clipboard.is_some();
         let library_in_view = self.library_in_view(ui.ctx());
         // Without the panel, the Add step popup carries its sections (KTLO-05d),
         // also while it is folded to its rail (KTLO-17).
@@ -137,6 +182,7 @@ impl FolderApp {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
         }
+        let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         let mut chosen = cleanup;
         let commands = ui
@@ -159,6 +205,15 @@ impl FolderApp {
                     header_leading: None,
                     library: library.as_ref(),
                     read_only: !snapshot.editable,
+                    component: matches!(*model, Document::Component(_)),
+                    inputs,
+                    selected_input: input_selected.as_deref(),
+                    adding_input: adding_input.as_deref(),
+                    settings,
+                    arrangement: match mode {
+                        Mode::Split => "split",
+                        Mode::Code | Mode::Diagram => "diagram",
+                    },
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -181,6 +236,19 @@ impl FolderApp {
         }
     }
 
+    /// The steps a Cleanup card may read for `model`, from the cache while
+    /// the model is the same one.
+    fn cleanup_reference(&mut self, model: &Arc<Document>) -> Arc<Graph> {
+        if let Some((cached, graph)) = &self.cleanup_reference
+            && Arc::ptr_eq(cached, model)
+        {
+            return graph.clone();
+        }
+        let graph = Arc::new(reference_of(model, true).into_owned());
+        self.cleanup_reference = Some((model.clone(), graph.clone()));
+        graph
+    }
+
     pub(super) fn board_command(
         &mut self,
         document_id: &str,
@@ -193,6 +261,8 @@ impl FolderApp {
             && !matches!(
                 command,
                 Command::Select(_)
+                    | Command::SelectInput(_)
+                    | Command::ComponentSettings
                     // Opening a called component is navigation, which stays
                     // free while observing (MCP-08a).
                     | Command::EditComponent(_)
@@ -205,13 +275,14 @@ impl FolderApp {
         }
         let project = self.context_project();
         let graph = graph_of(model, cleanup);
-        let reference = graph_of(model, false);
+        let reference = reference_of(model, cleanup);
         let parameters = parameters_of(model);
         let board = Board {
             graph,
-            reference,
+            reference: &reference,
             project: &project,
             parameters: &parameters,
+            sibling: sibling_of(model, cleanup),
         };
         let selection = self
             .selections
@@ -220,7 +291,41 @@ impl FolderApp {
             .unwrap_or_default();
         let result: Option<Result<Edit, String>> = match command {
             Command::Select(ids) => {
+                if !ids.is_empty() {
+                    // Selecting a block leaves the *New input* form and the
+                    // component's settings.
+                    self.new_inputs.remove(document_id);
+                    self.component_settings.remove(document_id);
+                }
                 self.selections.insert(document_id.to_owned(), ids);
+                self.selected_inputs.remove(document_id);
+                None
+            }
+            Command::AddInput => {
+                if matches!(model, Document::Component(_)) {
+                    self.open_new_input(document_id);
+                }
+                None
+            }
+            Command::ComponentSettings => {
+                // The button opens the settings, or closes them when open.
+                if matches!(model, Document::Component(_))
+                    && !self.component_settings.remove(document_id)
+                {
+                    self.component_settings.insert(document_id.to_owned());
+                    self.selections.remove(document_id);
+                    self.selected_inputs.remove(document_id);
+                    self.new_inputs.remove(document_id);
+                }
+                None
+            }
+            Command::SelectInput(name) => {
+                match name {
+                    Some(name) => self.open_input(document_id, name),
+                    None => {
+                        self.selected_inputs.remove(document_id);
+                    }
+                }
                 None
             }
             Command::Move(positions) => Some(Ok(board.moved(positions).into())),
@@ -298,51 +403,88 @@ impl FolderApp {
                     .connect(&source, &source_port, &target, &target_input, &target_path)
                     .map(Into::into),
             ),
+            // The clipboard belongs to the window, not to a board: what is
+            // copied pastes into any graph of any document (UX-34).
             Command::Copy => {
-                let selected = selection.iter().map(String::as_str).collect();
-                let fragment = edit::copy_selection(graph, &selected);
-                if !fragment.nodes.is_empty() {
-                    self.clipboard = Some(Clipboard {
-                        context: context_key(document_id, cleanup),
-                        fragment,
-                        pastes: 0,
-                    });
+                if let Some(fragment) = board.copy(&selection) {
+                    self.clipboard = Some(fragment);
                 }
                 None
             }
-            Command::Paste => self
-                .clipboard
-                .as_mut()
-                .filter(|clipboard| clipboard.context == context_key(document_id, cleanup))
-                .map(|clipboard| {
-                    clipboard.pastes += 1;
-                    let count = f64::from(clipboard.pastes);
-                    board.paste(
-                        &clipboard.fragment,
-                        &Position {
-                            x: edit::PASTE_OFFSET.x * count,
-                            y: edit::PASTE_OFFSET.y * count,
-                        },
-                    )
-                }),
-            Command::Duplicate => (!selection.is_empty()).then(|| {
-                let selected = selection.iter().map(String::as_str).collect();
-                board.paste(&edit::copy_selection(graph, &selected), &edit::PASTE_OFFSET)
-            }),
+            Command::Paste => {
+                let pasted = self
+                    .clipboard
+                    .as_ref()
+                    .map(|fragment| board.paste(fragment));
+                self.apply_paste(document_id, model, cleanup, pasted);
+                None
+            }
+            Command::Duplicate => {
+                let pasted = board
+                    .copy(&selection)
+                    .map(|fragment| board.paste(&fragment));
+                self.apply_paste(document_id, model, cleanup, pasted);
+                None
+            }
             Command::EditComponent(node_id) => {
                 self.open_component(graph, &node_id);
                 None
             }
             Command::SaveSelectionAsComponent => {
-                self.notify(
-                    "Saving a selection as a component is not available in folder projects yet.",
-                    false,
-                );
+                self.open_save_component(document_id, model, cleanup, &selection);
                 None
             }
         };
         if let Some(result) = result {
             self.apply_edit(document_id, model, cleanup, result);
+        }
+    }
+
+    /// Applies a paste or a duplicate as one model edit, so one undo removes
+    /// it, brings the copies into view, and names what they read that this
+    /// board lacks: each such reference is left unconnected (UX-34).
+    fn apply_paste(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        pasted: Option<Result<board_edit::Paste, String>>,
+    ) {
+        let Some(pasted) = pasted else {
+            return;
+        };
+        let paste = match pasted {
+            Ok(paste) => paste,
+            Err(message) => {
+                self.apply_edit(document_id, model, cleanup, Err(message));
+                return;
+            }
+        };
+        // Shown once the edit is applied, which may wait for the person to
+        // accept losing unattached comments.
+        self.pasted = Some(PastedOutcome {
+            document_id: document_id.to_owned(),
+            ids: paste.edit.selection.clone().unwrap_or_default(),
+            summary: missing_summary(&paste.edit.graph, &paste.unresolved),
+        });
+        self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
+    }
+
+    /// After an applied model edit that selects `selection`: when it is the
+    /// last paste, brings the copies into view, as copies from another graph
+    /// keep their place, and reports what they lost.
+    pub(super) fn pasted_applied(&mut self, document_id: &str, selection: &[String]) {
+        let Some(pasted) = self
+            .pasted
+            .take_if(|pasted| pasted.document_id == document_id && pasted.ids == selection)
+        else {
+            return;
+        };
+        if let Some(canvas) = self.canvases.get_mut(document_id) {
+            canvas.show_pasted(pasted.ids);
+        }
+        if let Some(summary) = pasted.summary {
+            self.notify(summary, false);
         }
     }
 
@@ -361,6 +503,7 @@ impl FolderApp {
                 publication::Action::Model {
                     next: Box::new(with_graph(model, cleanup, edit.graph)),
                     selection: edit.selection,
+                    check: None,
                 },
             ),
             Err(message) => {
@@ -418,6 +561,12 @@ impl FolderApp {
         };
         let cleanup = self.cleanup(document_id);
         let graph = graph_of(&model, cleanup);
+        // While the board shows Main, the Cleanup checks that read a Main step
+        // are listed under that step (LAY-20).
+        let in_cleanup = match &*model {
+            Document::Scenario(scenario) if !cleanup => Some(&scenario.cleanup),
+            _ => None,
+        };
         let Some(node) = self
             .selections
             .get(document_id)
@@ -425,6 +574,27 @@ impl FolderApp {
             .and_then(|selection| graph.nodes.iter().find(|node| node.id == selection[0]))
             .cloned()
         else {
+            let Document::Component(component) = &*model else {
+                return;
+            };
+            // A component's input being added or selected (UX-32).
+            if self.new_inputs.contains_key(document_id) {
+                self.new_input_panel(ui, document_id, component, snapshot.editable);
+                return;
+            }
+            let selection = self
+                .selections
+                .get(document_id)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(port) =
+                selected_input(&model, &selection, self.selected_inputs.get(document_id))
+            {
+                let port = port.clone();
+                self.input_panel(ui, document_id, component, &port, snapshot.editable);
+            } else if self.component_settings.contains(document_id) {
+                self.component_settings_panel(ui, document_id, component, snapshot.editable);
+            }
             return;
         };
         let project = self.context_project();
@@ -460,6 +630,7 @@ impl FolderApp {
                             node: &node,
                             graph: reference,
                             board: graph,
+                            cleanup: in_cleanup,
                             project: &project,
                             parameters: &parameters,
                             run: run.as_ref(),
@@ -645,6 +816,18 @@ impl Header<'_> {
             .layout_no_wrap(text.to_owned(), font, theme::TEXT)
             .size()
             .x
+    }
+
+    /// The width the header takes when nothing of it is given up.
+    fn full_width(&self, ui: &egui::Ui) -> f32 {
+        self.fit(
+            ui,
+            canvas::HeaderRoom {
+                alone: f32::INFINITY,
+                with_summary: f32::INFINITY,
+            },
+        )
+        .width
     }
 
     /// Gives up, as the row narrows, first the kind, then the name's full

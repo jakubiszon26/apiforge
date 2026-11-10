@@ -50,8 +50,9 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
    request. The verification commands of the development guide pass. A ticket
    labelled `ready:sol` or `ready:sonnet` may be taken from here by that model
    under [autonomy](autonomy.md).
-7. **QA report.** A functional report with screenshots per platform and an
-   explicit list of what was not verified. See [testing](testing.md).
+7. **QA report.** A short QA section in the pull request body: criteria →
+   tests, what was not verified, captures for interface changes. See
+   [testing](testing.md#2-the-functional-qa-report).
 8. **Owner acceptance.** The owner reads the report and, when they choose,
    builds and uses the change locally. Only the owner merges to `main`.
 9. **Retrospective.** At the end of each sprint, with the measures from
@@ -104,7 +105,7 @@ the ticket before implementation.
 | `risk:format`, `risk:migration`, `risk:default`, `risk:visible-ui`, `risk:removal` | The [risk flags](estimation.md#risk-flags) |
 | `decision-needed` | Waits for an owner decision named in the issue |
 | `awaiting-acceptance` | A pull request is open and waits for the owner |
-| `ready:sol`, `ready:sonnet` | Approved, decided and bounded: that model may take the ticket unattended ([autonomy](autonomy.md)) |
+| `ready:sol`, `ready:opus`, `ready:sonnet` | Approved, decided and bounded: that model may take the ticket unattended ([autonomy](autonomy.md)) |
 | `process` | Changes the process itself |
 
 A pull request says `Closes #<issue>` so that the merge closes the ticket.

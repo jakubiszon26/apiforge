@@ -24,6 +24,13 @@ use std::ops::Range;
 /// Rows the completion popup shows at once.
 const POPUP_ROWS: usize = 8;
 
+/// The widest the completion popup's list grows.
+const POPUP_WIDTH: f32 = 420.0;
+
+/// The gutter's column for a diagnostic's dot, left of the line numbers, so
+/// a dot never overlaps a number of two or more digits (UX-20).
+const DOT_COLUMN: f32 = 10.0;
+
 /// A source above this size is large: work that reads the whole text costs
 /// more per frame or keystroke than it is worth, and the editor has to stay
 /// responsive at 1 MB. Such text is laid out plainly, completion opens only on
@@ -84,6 +91,9 @@ pub struct Outcome {
     /// The lines the gutter showed whole, counted from one; `None` without
     /// a gutter or with no whole line in view.
     pub lines_in_view: Option<std::ops::RangeInclusive<usize>>,
+    /// Whether the caret was inside the visible part of the editor, with or
+    /// without the keyboard; `None` before it has a caret.
+    pub caret_in_view: Option<bool>,
 }
 
 /// The editor's own state: what the popup is showing and what it is for.
@@ -96,6 +106,10 @@ pub struct CodeEditor {
     /// The selection drawn last frame, so a moved caret is scrolled clear of
     /// the gutter that covers the left of the panel.
     caret: Option<egui::text::CCursorRange>,
+    /// The focus line the gutter painted last frame, if any: a test seam
+    /// (UX-03), since interaction tests do not read pixels.
+    #[cfg(test)]
+    focus_stroke: Option<Stroke>,
 }
 
 /// The completion popup of one text edit, whatever widget drew it.
@@ -110,16 +124,46 @@ pub struct Completions {
     /// the one that moves and the one scrolled to.
     pending_caret: Option<(usize, usize)>,
     prepared_scroll: Option<usize>,
-    /// The pending caret is scrolled to only when it is out of view.
-    gentle: bool,
+    /// How the view moves to the pending caret.
+    reveal: Reveal,
+    /// Frames left in which a caret shown by the least scroll is brought back
+    /// into a view that shrank after it.
+    rechecks: u8,
+    /// Where the popup was drawn last, if it was: a test seam (UX-20).
+    #[cfg(test)]
+    shown: Option<Rect>,
+}
+
+/// The frames after a least scroll in which it is checked again.
+const LEAST_RECHECKS: u8 = 2;
+
+/// How the view moves to a caret placed from outside the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Reveal {
+    /// The caret's line to the middle of the view, wherever it is.
+    #[default]
+    Centre,
+    /// To the middle only when the line is out of view (MCP-16).
+    Gentle,
+    /// The least scroll that shows the line, only when it is out of view
+    /// (UX-13).
+    Least,
+    /// Not at all: the view stays where it is (UX-13).
+    Still,
 }
 
 #[derive(Clone)]
 struct Popup {
     completions: Vec<Completion>,
     selected: usize,
-    /// Where the popup is anchored, in screen coordinates.
+    /// Where the popup is anchored, in screen coordinates: under the caret.
     at: egui::Pos2,
+    /// The top of the caret's line, which a popup opened above it sits on.
+    line_top: f32,
+    /// The area the popup stays inside, the code's visible part, if the
+    /// editor has one: near the bottom it opens above the caret instead of
+    /// over what lies below the code (UX-20).
+    bounds: Option<Rect>,
     /// The caret the popup was opened for; a caret elsewhere closes it.
     cursor: usize,
 }
@@ -178,16 +222,62 @@ impl Completions {
         let cursor = output
             .cursor_range
             .map(|range| byte_offset(text, range.primary.index.0));
-        if let Some(caret) = self.prepared_scroll.take() {
+        let target = if let Some(caret) = self.prepared_scroll.take() {
+            self.rechecks = 0;
             let index = epaint_index(char_index(text, caret));
+            Some((
+                egui::text::CCursor::new(index),
+                std::mem::take(&mut self.reveal),
+                true,
+            ))
+        } else if self.rechecks > 0
+            && ui.input(|input| {
+                // The person scrolling, or pressing on a scroll bar, takes
+                // the view over: the caret is not brought back against it.
+                input.pointer.any_down()
+                    || input
+                        .raw
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::MouseWheel { .. }))
+            })
+        {
+            self.rechecks = 0;
+            None
+        } else if self.rechecks > 0 {
+            self.rechecks -= 1;
+            output
+                .state
+                .cursor
+                .char_range()
+                .map(|range| (range.primary, Reveal::Least, false))
+        } else {
+            None
+        };
+        if let Some((caret, reveal, placed)) = target {
             let rect = output
                 .galley
-                .pos_from_cursor(egui::text::CCursor::new(index))
+                .pos_from_cursor(caret)
                 .translate(output.galley_pos.to_vec2());
-            let gentle = std::mem::take(&mut self.gentle);
-            if !(gentle && ui.clip_rect().contains_rect(rect)) {
-                ui.scroll_to_rect(rect.expand(8.0), Some(egui::Align::Center));
+            let in_view = ui.clip_rect().contains_rect(rect);
+            let align = match reveal {
+                Reveal::Centre => Some(Some(egui::Align::Center)),
+                Reveal::Gentle if !in_view => Some(Some(egui::Align::Center)),
+                Reveal::Least if !in_view => Some(None),
+                Reveal::Gentle | Reveal::Least | Reveal::Still => None,
+            };
+            if let Some(align) = align {
+                ui.scroll_to_rect(rect.expand(8.0), align);
                 ui.ctx().request_repaint();
+                // The frame a tab comes back in can still be settling: a
+                // panel below the code that grows to its contents shortens
+                // the view after this scroll, so the least scroll is checked
+                // again for the next frames.
+                if reveal == Reveal::Least && placed {
+                    self.rechecks = LEAST_RECHECKS;
+                }
+            } else {
+                self.rechecks = 0;
             }
         }
         if !output.response.has_focus() || !ui.is_enabled() {
@@ -211,13 +301,20 @@ impl Completions {
         }
 
         // Offers come from analysing the whole source, so a large one waits to
-        // be asked; a popup already open keeps following the typing.
+        // be asked; a popup already open keeps following the typing, until
+        // the typing goes into a comment (UX-11).
+        // The comment is asked about last: it lexes the text before the
+        // caret, which only a keystroke that could open the popup needs.
         let wants_popup = keys.open
             || (typed
                 && cursor.is_some_and(|cursor| {
-                    self.popup.is_some()
-                        || (text.len() <= MAX_COLOURED_BYTES && opens_completion(text, cursor))
+                    (self.popup.is_some()
+                        || (text.len() <= MAX_COLOURED_BYTES && opens_completion(text, cursor)))
+                        && !in_comment(&text[..cursor.min(text.len())], context.mode)
                 }));
+        if typed && !keys.open && !wants_popup {
+            self.popup = None;
+        }
         if wants_popup && let Some(cursor) = cursor {
             let found = complete::complete(&Request {
                 source: text,
@@ -245,6 +342,8 @@ impl Completions {
                 Popup {
                     selected: 0,
                     at,
+                    line_top: at.y,
+                    bounds: None,
                     cursor,
                     completions: found,
                 }
@@ -252,15 +351,18 @@ impl Completions {
         }
 
         if let Some(popup) = &mut self.popup {
-            popup.at = output.galley_pos
-                + output
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
-                        text,
-                        cursor.unwrap_or(popup.cursor),
-                    ))))
-                    .left_bottom()
-                    .to_vec2();
+            let caret = output
+                .galley
+                .pos_from_cursor(egui::text::CCursor::new(epaint_index(char_index(
+                    text,
+                    cursor.unwrap_or(popup.cursor),
+                ))))
+                .translate(output.galley_pos.to_vec2());
+            popup.at = caret.left_bottom();
+            popup.line_top = caret.top();
+            // The code editor's popup stays in the code's visible part; a
+            // small field's popup may reach past its one line.
+            popup.bounds = context.line_numbers.then(|| ui.clip_rect());
             let count = popup.completions.len();
             if keys.down {
                 popup.selected = (popup.selected + 1) % count;
@@ -286,7 +388,7 @@ impl Completions {
                 apply(text, &chosen);
                 let caret = chosen.replace.start + chosen.caret;
                 self.pending_caret = Some((caret, caret));
-                self.gentle = false;
+                self.reveal = Reveal::Centre;
                 self.popup = None;
                 true
             }
@@ -305,21 +407,19 @@ impl Completions {
         let mut chosen = None;
         let selected = popup.selected;
         let completions = popup.completions.clone();
-        let at = popup.at;
-        egui::Area::new(popup_id)
+        let placement = placement(ui, popup_id, popup);
+        let area = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
-            .fixed_pos(at)
+            .pivot(placement.pivot)
+            .fixed_pos(placement.at)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
                     .fill(theme::WHITE)
                     .stroke(Stroke::new(1.0, theme::BORDER))
                     .show(ui, |ui| {
-                        ui.set_max_width(420.0);
+                        ui.set_max_width(placement.width);
                         egui::ScrollArea::vertical()
-                            .max_height(
-                                ui.text_style_height(&egui::TextStyle::Body) * POPUP_ROWS as f32
-                                    + 8.0,
-                            )
+                            .max_height(placement.list_height)
                             .show(ui, |ui| {
                                 for (index, completion) in completions.iter().enumerate() {
                                     let row = row_label(completion, context.font_size);
@@ -334,16 +434,102 @@ impl Completions {
                             });
                     });
             });
+        #[cfg(test)]
+        {
+            self.shown = Some(area.response.rect);
+        }
+        #[cfg(not(test))]
+        let _ = area;
         chosen
     }
 }
 
+/// Where the popup goes and how large it may grow.
+struct Placement {
+    /// The anchor, in screen coordinates.
+    at: egui::Pos2,
+    /// Which corner of the popup the anchor is.
+    pivot: egui::Align2,
+    /// The tallest its list may grow.
+    list_height: f32,
+    /// The widest its list may grow.
+    width: f32,
+}
+
+/// Where the popup goes and how large it may grow.
+///
+/// It opens under the caret. Inside bounds, where there is not room for it
+/// below but more above, it opens above the caret's line instead, and its
+/// list shortens to the room on the side it took; it is no wider than the
+/// bounds and moves left rather than past their right edge (UX-20). Its
+/// size is last frame's, or the largest it can be before it has been drawn.
+fn placement(ui: &Ui, popup_id: egui::Id, popup: &Popup) -> Placement {
+    let style = ui.style();
+    let row = ui.text_style_height(&egui::TextStyle::Body);
+    let list = row * POPUP_ROWS as f32 + 8.0;
+    let Some(bounds) = popup.bounds else {
+        return Placement {
+            at: popup.at,
+            pivot: egui::Align2::LEFT_TOP,
+            list_height: list,
+            width: POPUP_WIDTH,
+        };
+    };
+    // The frame's margin and stroke around the list.
+    let frame = style.spacing.menu_margin.sum() + vec2(2.0, 2.0);
+    let width = POPUP_WIDTH.min(bounds.width() - frame.x).max(row);
+    let size = ui
+        .ctx()
+        .memory(|memory| memory.area_rect(popup_id))
+        .map_or(vec2(width, list) + frame, |rect| rect.size());
+    let below = bounds.bottom() - popup.at.y;
+    let above = popup.line_top - bounds.top();
+    // Against the widest it may grow this frame, not last frame's width:
+    // new offers can widen it before its size is known.
+    let x = popup
+        .at
+        .x
+        .min(bounds.right() - width - frame.x)
+        .max(bounds.left());
+    let (y, pivot, room) = if size.y <= below || below >= above {
+        (popup.at.y, egui::Align2::LEFT_TOP, below)
+    } else {
+        (popup.line_top, egui::Align2::LEFT_BOTTOM, above)
+    };
+    Placement {
+        at: egui::pos2(x, y),
+        pivot,
+        list_height: list.min((room - frame.y).max(row)),
+        width,
+    }
+}
+
 impl CodeEditor {
+    /// The focus line the gutter painted in the last frame it was drawn,
+    /// `None` without keyboard focus: a test seam (UX-03).
+    #[cfg(test)]
+    pub fn focus_stroke(&self) -> Option<Stroke> {
+        self.focus_stroke
+    }
+
+    /// Whether the completion popup is open: a test seam (UX-11).
+    #[cfg(test)]
+    pub fn popup_open(&self) -> bool {
+        self.completions.popup.is_some()
+    }
+
+    /// Where the open completion popup was drawn: a test seam (UX-20).
+    #[cfg(test)]
+    pub fn popup_rect(&self) -> Option<Rect> {
+        self.completions.popup.as_ref()?;
+        self.completions.shown
+    }
+
     /// Puts the caret at a byte offset on the next frame, for a selection made
     /// outside the editor.
     pub fn reveal(&mut self, at: usize) {
         self.completions.pending_caret = Some((at, at));
-        self.completions.gentle = false;
+        self.completions.reveal = Reveal::Centre;
     }
 
     /// Puts the caret at a byte offset on the next frame, as `reveal` does,
@@ -351,14 +537,28 @@ impl CodeEditor {
     /// changed stays where the person reads it (MCP-16).
     pub fn show_line(&mut self, at: usize) {
         self.completions.pending_caret = Some((at, at));
-        self.completions.gentle = true;
+        self.completions.reveal = Reveal::Gentle;
     }
 
     /// Selects a byte range on the next frame, keeping its direction: the caret
     /// is the end that moves.
     pub fn select(&mut self, anchor: usize, caret: usize) {
         self.completions.pending_caret = Some((anchor, caret));
-        self.completions.gentle = false;
+        self.completions.reveal = Reveal::Centre;
+    }
+
+    /// Restores a tab's selection on the next frame without moving the view
+    /// its scroll was restored to (UX-13). A caret that was in view when the
+    /// tab was left, `in_view`, and is out of it now, because the text changed
+    /// meanwhile, is shown by the least scroll; one the person had scrolled
+    /// away from stays out of view.
+    pub fn restore(&mut self, anchor: usize, caret: usize, in_view: bool) {
+        self.completions.pending_caret = Some((anchor, caret));
+        self.completions.reveal = if in_view {
+            Reveal::Least
+        } else {
+            Reveal::Still
+        };
     }
 
     /// Draws the editor and returns what the user did.
@@ -415,7 +615,9 @@ impl CodeEditor {
             // gutter does number.
             let lines = text.bytes().filter(|byte| *byte == b'\n').count() + 1;
             let digits = lines.to_string().len().max(2);
-            ui.ctx().fonts_mut(|fonts| fonts.glyph_width(&font, '0')) * digits as f32 + 12.0
+            ui.ctx().fonts_mut(|fonts| fonts.glyph_width(&font, '0')) * digits as f32
+                + 12.0
+                + DOT_COLUMN
         } else {
             0.0
         };
@@ -452,13 +654,27 @@ impl CodeEditor {
                     .min_size(vec2(0.0, to_bottom));
             }
             let output = edit.show(ui);
+            // Read before the edit is handled: a completion or an indent
+            // changes the text the galley was laid out for.
+            let caret_in_view = output.state.cursor.char_range().map(|range| {
+                let at = output
+                    .galley
+                    .pos_from_cursor(range.primary)
+                    .translate(output.galley_pos.to_vec2());
+                ui.clip_rect().contains_rect(at)
+            });
             let mut lines_in_view = None;
+            #[cfg(test)]
+            {
+                self.focus_stroke = None;
+            }
             if let Some(gutter) = gutter {
                 self.keep_caret_clear_of_gutter(ui, &output, gutter_width);
                 lines_in_view = self.paint_gutter(ui, gutter, text, &output, context);
             }
             let mut shown = self.after_edit(ui, text, context, &output, Taken { keys, indent }, id);
             shown.lines_in_view = lines_in_view;
+            shown.caret_in_view = caret_in_view;
             outcome = Some(shown);
         });
         outcome.expect("the editor is always drawn")
@@ -471,7 +687,7 @@ impl CodeEditor {
     /// The y of each line comes from the galley, so a wrapped line keeps its
     /// number beside its first visual row instead of drifting out of step.
     fn paint_gutter(
-        &self,
+        &mut self,
         ui: &Ui,
         rect: Rect,
         text: &str,
@@ -489,16 +705,24 @@ impl CodeEditor {
         let band = Rect::from_x_y_ranges(rect.x_range(), visible.y_range());
         painter.rect_filled(band, 0.0, ui.visuals().panel_fill);
         // The box's coloured stroke used to be the only sign of keyboard focus.
-        if output.response.response.has_focus() {
+        // The line is grey: in the accent it read as an error beside the red
+        // marks (UX-03).
+        let focus = output
+            .response
+            .response
+            .has_focus()
+            .then(|| Stroke::new(2.0, theme::MUTED));
+        if let Some(stroke) = focus {
             let x = band.right() - 1.0;
-            painter.line_segment(
-                [pos2(x, band.top()), pos2(x, band.bottom())],
-                Stroke::new(2.0, ui.visuals().selection.stroke.color),
-            );
+            painter.line_segment([pos2(x, band.top()), pos2(x, band.bottom())], stroke);
+        }
+        #[cfg(test)]
+        {
+            self.focus_stroke = focus;
         }
         let font = FontId::monospace(context.font_size);
         let row_height = ui.ctx().fonts_mut(|fonts| fonts.row_height(&font));
-        let marked = marked_lines(text, context.diagnostics);
+        let marked = line_severities(text, context.diagnostics);
         // The galley's own rows are walked rather than the text's lines. Asking
         // the galley where a line begins scans the text up to it and then every
         // row before it, which a long scenario pays once per line and per frame:
@@ -522,13 +746,18 @@ impl CodeEditor {
             // A wrapped line keeps its number beside its first visual row
             // instead of repeating it under itself.
             if begins_a_line && top + row_height >= visible.top() {
-                let flagged = marked.contains(&number);
+                // A warning is amber and an error red, number and dot
+                // alike (UX-20).
+                let flagged = marked.get(&number).map(|severity| match severity {
+                    Severity::Error => theme::DANGER,
+                    Severity::Warning => theme::WARNING,
+                });
                 painter.text(
                     pos2(rect.right() - 8.0, top),
                     egui::Align2::RIGHT_TOP,
                     number.to_string(),
                     font.clone(),
-                    if flagged { theme::DANGER } else { theme::MUTED },
+                    flagged.unwrap_or(theme::MUTED),
                 );
                 // A changed line: an accent bar at the gutter's right edge,
                 // clear of the diagnostic's dot and the number (MCP-16).
@@ -546,11 +775,11 @@ impl CodeEditor {
                         theme::ACCENT,
                     );
                 }
-                if flagged {
+                if let Some(colour) = flagged {
                     painter.circle_filled(
-                        pos2(rect.left() + 4.0, top + row_height * 0.5),
+                        pos2(rect.left() + DOT_COLUMN * 0.5, top + row_height * 0.5),
                         3.0,
-                        theme::DANGER,
+                        colour,
                     );
                 }
             }
@@ -621,7 +850,7 @@ impl CodeEditor {
             );
             if let Some(moved) = reindent(text, selection, deeper) {
                 self.completions.pending_caret = Some(moved);
-                self.completions.gentle = false;
+                self.completions.reveal = Reveal::Centre;
                 ui.ctx().request_repaint();
                 changed = true;
             }
@@ -672,7 +901,7 @@ impl CodeEditor {
                 && let Some(caret) = auto_indent(text, cursor)
             {
                 self.completions.pending_caret = Some((caret, caret));
-                self.completions.gentle = false;
+                self.completions.reveal = Reveal::Centre;
             }
         }
 
@@ -681,6 +910,7 @@ impl CodeEditor {
             response,
             changed,
             lines_in_view: None,
+            caret_in_view: None,
         }
     }
 }
@@ -831,6 +1061,34 @@ fn opens_completion(text: &str, cursor: usize) -> bool {
             .is_some_and(|last| last.is_alphanumeric() || last == '_')
 }
 
+/// Whether the end of `before` is inside a `//` comment of the code, which
+/// is prose: nothing typed there opens the popup (UX-11).
+///
+/// Script is lexed from its start, so a `//` inside a string is not taken
+/// for one, while a comment in a string's open `{{ }}` is. A template is
+/// text, and only its open `{{ }}` is code: the `//` of `https://` is not a
+/// comment. Holes are found as the completion engine finds them.
+fn in_comment(before: &str, mode: Mode) -> bool {
+    if mode == Mode::Template {
+        return comment_in_hole(before);
+    }
+    match lex(before).0.last() {
+        Some(token) if token.kind == TokenKind::Comment => true,
+        Some(token) if token.kind == TokenKind::String && token.range.end == before.len() => {
+            comment_in_hole(&before[token.range.clone()])
+        }
+        _ => false,
+    }
+}
+
+/// Whether `text` ends inside a comment of an open `{{ }}`.
+fn comment_in_hole(text: &str) -> bool {
+    let Some(open) = text.rfind("{{") else {
+        return false;
+    };
+    !text[open..].contains("}}") && in_comment(&text[open + 2..], Mode::Script)
+}
+
 /// One level of indentation, the width the language is printed at.
 const INDENT: usize = 2;
 
@@ -959,12 +1217,31 @@ fn diagnostic_at(diagnostics: &[Diagnostic], at: usize) -> Option<String> {
         .map(|diagnostic| diagnostic.message.clone())
 }
 
-/// Lines a diagnostic marks, counted from one.
-fn marked_lines(text: &str, diagnostics: &[Diagnostic]) -> std::collections::HashSet<usize> {
-    diagnostics
-        .iter()
-        .map(|diagnostic| line_of(text, diagnostic.range.start))
-        .collect()
+/// Lines a diagnostic marks, counted from one: a test seam.
+#[cfg(test)]
+pub(crate) fn marked_lines(
+    text: &str,
+    diagnostics: &[Diagnostic],
+) -> std::collections::HashSet<usize> {
+    line_severities(text, diagnostics).into_keys().collect()
+}
+
+/// Lines a diagnostic marks, counted from one, each with the most severe
+/// of its diagnostics: an error outranks a warning on the same line.
+fn line_severities(
+    text: &str,
+    diagnostics: &[Diagnostic],
+) -> std::collections::HashMap<usize, Severity> {
+    let mut lines = std::collections::HashMap::new();
+    for diagnostic in diagnostics {
+        let severity = lines
+            .entry(line_of(text, diagnostic.range.start))
+            .or_insert(diagnostic.severity);
+        if diagnostic.severity == Severity::Error {
+            *severity = Severity::Error;
+        }
+    }
+    lines
 }
 
 /// The line a byte offset is on, counted from one.

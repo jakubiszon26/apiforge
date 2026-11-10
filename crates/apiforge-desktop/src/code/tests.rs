@@ -12,6 +12,9 @@ struct Harness {
     request_focus: bool,
     diagnostics: Vec<Diagnostic>,
     shapes: Vec<egui::epaint::ClippedShape>,
+    mode: Mode,
+    /// Where the text edit was laid out last frame, right of the gutter.
+    edit_rect: egui::Rect,
 }
 
 impl Harness {
@@ -26,6 +29,8 @@ impl Harness {
             request_focus: true,
             diagnostics: Vec::new(),
             shapes: Vec::new(),
+            mode: Mode::Script,
+            edit_rect: egui::Rect::NOTHING,
         }
     }
 
@@ -41,6 +46,8 @@ impl Harness {
         let top_space = self.top_space;
         let request_focus = self.request_focus;
         let diagnostics = self.diagnostics.clone();
+        let mode = self.mode;
+        let mut edit_rect = egui::Rect::NOTHING;
         let text = &mut self.text;
         let editor = &mut self.editor;
         let mut output = self.context.run_ui(
@@ -59,6 +66,7 @@ impl Harness {
                     egui::Id::new("test-editor"),
                     text,
                     &Context {
+                        mode,
                         scope: Scope {
                             handles: &handles,
                             ..Scope::default()
@@ -72,10 +80,12 @@ impl Harness {
                 }
                 changed = outcome.changed;
                 cursor = outcome.response.has_focus().then_some(0);
+                edit_rect = outcome.response.rect;
             },
         );
         output.textures_delta.clear();
         self.shapes = output.shapes;
+        self.edit_rect = edit_rect;
         (changed, cursor)
     }
 
@@ -316,6 +326,42 @@ fn what_was_typed_decides_whether_the_popup_opens_by_itself() {
 }
 
 #[test]
+fn nothing_typed_in_a_comment_opens_the_popup_by_itself() {
+    // UX-11: a comment is prose; the line after it and a `//` inside a
+    // string are code again.
+    assert!(in_comment("x = 1 // prod", Mode::Script));
+    assert!(in_comment("// products.", Mode::Script));
+    assert!(!in_comment("// note\nprod", Mode::Script));
+    assert!(!in_comment("x = \"a // b\" + prod", Mode::Script));
+    // A comment inside a string's open hole is one; a closed hole's is not.
+    assert!(in_comment("x = \"a {{ b // prod", Mode::Script));
+    assert!(!in_comment("x = \"a {{ b // c\n }} prod", Mode::Script));
+    // A template is text: the `//` of a URL is not a comment, a hole's is.
+    assert!(!in_comment("https://{{prod", Mode::Template));
+    assert!(!in_comment("https://api/prod", Mode::Template));
+    assert!(in_comment("https://{{ a // prod", Mode::Template));
+}
+
+#[test]
+fn a_url_template_still_opens_the_popup_in_its_hole() {
+    let mut harness = Harness::new("https://shop/{{pro");
+    harness.mode = Mode::Template;
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+}
+
+#[test]
+fn typing_into_a_comment_closes_an_open_popup() {
+    let mut harness = Harness::new("scenario \"S\" { total = pro");
+    harness.settle();
+    harness.type_text("d");
+    assert!(harness.editor.completions.popup.is_some());
+    harness.type_text(" // p");
+    assert!(harness.editor.completions.popup.is_none());
+}
+
+#[test]
 fn typing_a_name_offers_it_and_enter_chooses_it() {
     // The caret sits at the end of the text, where a name is being typed.
     let mut harness = Harness::new("scenario \"S\" {\n  total = pro");
@@ -481,6 +527,68 @@ fn reveal_scrolls_an_offscreen_statement_into_view() {
         output.textures_delta.clear();
     }
     assert!(offset > 1000.0, "offset: {offset}");
+}
+
+/// UX-13 criterion 3: MCP-16's gentle reveal, which a followed document
+/// uses, is unchanged: a line in view does not move the view, and a line out
+/// of view is brought to the middle of it.
+#[test]
+fn ux13_criterion_3_show_line_moves_only_for_a_line_out_of_view_and_centres_it() {
+    let ctx = egui::Context::default();
+    let mut editor = CodeEditor::default();
+    let mut text = (0..100)
+        .map(|i| format!("value_{i} = {i}\n"))
+        .collect::<String>();
+    let font = FontId::monospace(Context::default().font_size);
+    let mut frame = |editor: &mut CodeEditor| {
+        let mut offset = 0.0;
+        let mut height = 0.0;
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(500.0, 300.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    let scroll = egui::ScrollArea::both()
+                        .id_salt("gentle-scroll")
+                        .animated(false)
+                        .show(ui, |ui| {
+                            editor.show(
+                                ui,
+                                egui::Id::new("gentle-editor"),
+                                &mut text,
+                                &Context::default(),
+                            );
+                        });
+                    offset = scroll.state.offset.y;
+                    height = scroll.inner_rect.height();
+                },
+            );
+            output.textures_delta.clear();
+        }
+        (offset, height)
+    };
+    let (top, _) = frame(&mut editor);
+    assert_eq!(top, 0.0);
+    let line = |index: usize| (0..index).map(|i| format!("value_{i} = {i}\n").len()).sum();
+
+    editor.show_line(line(3));
+    let (offset, _) = frame(&mut editor);
+    assert_eq!(offset, 0.0, "a line in view does not move the view");
+
+    editor.show_line(line(90));
+    let (offset, height) = frame(&mut editor);
+    let row = ctx.fonts_mut(|fonts| fonts.row_height(&font));
+    let middle = 90.0 * row + row / 2.0 - offset;
+    assert!(
+        (middle - height / 2.0).abs() < row * 1.5,
+        "line 91 is centred: its middle at {middle} of {height}"
+    );
+
+    editor.show_line(line(88));
+    let (kept, _) = frame(&mut editor);
+    assert_eq!(kept, offset, "a line in view does not move the view");
 }
 
 #[test]
@@ -715,4 +823,122 @@ fn a_large_buffer_opens_completion_only_when_asked() {
             .iter()
             .any(|offer| offer.insert == "products")
     );
+}
+
+/// UX-20 (#228): a text of fourteen lines with an error on line 12 and a
+/// warning on line 13, drawn until it settles.
+fn ux20_marked_harness() -> Harness {
+    let text: String = (1..=14)
+        .map(|line| format!("  value_{line} = {line}\n"))
+        .collect();
+    let start_of = |line: usize| {
+        text.lines()
+            .take(line - 1)
+            .map(|line| line.len() + 1)
+            .sum::<usize>()
+    };
+    let error = start_of(12) + 2;
+    let warning = start_of(13) + 2;
+    let mut harness = Harness::new(&text);
+    harness.diagnostics = vec![
+        Diagnostic {
+            range: error..error + 5,
+            severity: Severity::Error,
+            message: "an error".into(),
+            fix: None,
+        },
+        Diagnostic {
+            range: warning..warning + 5,
+            severity: Severity::Warning,
+            message: "a warning".into(),
+            fix: None,
+        },
+    ];
+    harness.settle();
+    harness
+}
+
+/// The line number `number` the gutter painted: where and in which colour.
+fn ux20_number(harness: &Harness, number: &str) -> (egui::Rect, Color32) {
+    harness
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == number => Some((
+                text.visual_bounding_rect(),
+                text.galley.job.sections[0].format.color,
+            )),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("line number {number} is not painted"))
+}
+
+/// The diagnostic dot painted beside the line whose number sits in `row`.
+fn ux20_dot(harness: &Harness, row: egui::Rect) -> egui::epaint::CircleShape {
+    harness
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::Shape::Circle(circle)
+                if circle.center.y >= row.top() && circle.center.y <= row.bottom() =>
+            {
+                Some(*circle)
+            }
+            _ => None,
+        })
+        .expect("a dot beside the marked line")
+}
+
+/// UX-20 criterion 1: in a file of ten or more lines, the dot beside line 12
+/// does not overlap its digits; the gutter is wide enough for the dot, the
+/// widest number and the gaps between them and the code.
+#[test]
+fn ux20_criterion_1_the_dot_clears_two_digit_numbers() {
+    let harness = ux20_marked_harness();
+    let (twelve, _) = ux20_number(&harness, "12");
+    let dot = ux20_dot(&harness, twelve);
+    let dot_rect = egui::Rect::from_center_size(dot.center, egui::Vec2::splat(dot.radius * 2.0));
+    assert!(
+        dot_rect.right() + 2.0 <= twelve.left(),
+        "the dot {dot_rect:?} overlaps or touches the number 12 at {twelve:?}"
+    );
+    assert!(
+        dot_rect.left() >= 0.0,
+        "the dot {dot_rect:?} is cut at the panel's edge"
+    );
+    assert!(
+        twelve.right() <= harness.edit_rect.left(),
+        "the number 12 at {twelve:?} runs into the code at {:?}",
+        harness.edit_rect
+    );
+    for number in ["10", "11", "13", "14"] {
+        let (rect, _) = ux20_number(&harness, number);
+        assert!(
+            !rect.intersects(dot_rect),
+            "the dot {dot_rect:?} overlaps the number {number} at {rect:?}"
+        );
+    }
+}
+
+/// UX-20 criterion 2: a warning's dot and number are the warning colour, an
+/// error's the danger colour.
+#[test]
+fn ux20_criterion_2_a_warning_is_amber_and_an_error_red() {
+    let harness = ux20_marked_harness();
+    let (twelve, error_colour) = ux20_number(&harness, "12");
+    let (thirteen, warning_colour) = ux20_number(&harness, "13");
+    assert_eq!(error_colour, theme::DANGER, "the error's number");
+    assert_eq!(
+        ux20_dot(&harness, twelve).fill,
+        theme::DANGER,
+        "the error's dot"
+    );
+    assert_eq!(warning_colour, theme::WARNING, "the warning's number");
+    assert_eq!(
+        ux20_dot(&harness, thirteen).fill,
+        theme::WARNING,
+        "the warning's dot"
+    );
+    let (_, plain) = ux20_number(&harness, "14");
+    assert_eq!(plain, theme::MUTED, "a line without a problem");
 }

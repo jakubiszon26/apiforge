@@ -1,17 +1,39 @@
 //! The code view: the active document as text, its problems and save state.
 
 use super::*;
+use crate::report::DROP_SNAP;
 
-/// The heights the Problems section can be dragged between, while it is not
-/// expanded.
-const PROBLEMS_HEIGHTS: std::ops::RangeInclusive<f32> = 72.0..=360.0;
+/// The least height of the Problems section while the code panel has room
+/// for it and three lines of code; with less, the section gives way down to
+/// its caption row (UX-36).
+const PROBLEMS_LEAST: f32 = 72.0;
 /// The most code an expanded Problems section leaves above itself (KTLO-18).
 const CODE_STRIP: f32 = 96.0;
+/// The lines of code a short code panel keeps above the Problems section
+/// (UX-36).
+const CODE_LEAST_LINES: f32 = 3.0;
 /// The code panel's margin above and below the editor, and the editor's own
 /// margin above its first line.
 const CODE_MARGIN: f32 = 6.0;
 const EDITOR_MARGIN: f32 = 2.0;
 const CODE_FONT: f32 = 13.0;
+/// How long typing pauses before the editor marks errors again (UX-03):
+/// longer than the analysis pause, so the Problems list and the board keep
+/// ADR 0007's budget while the code itself stays quiet.
+pub(super) const MARKS_DELAY: Duration = Duration::from_millis(700);
+
+/// Whether the editor marks errors at `now`, with the text last changed by
+/// typing at `last_typed`: with nothing typed, or `delay` after it.
+pub(super) fn marks_due(last_typed: Option<Instant>, now: Instant, delay: Duration) -> bool {
+    marks_wait(last_typed, now, delay).is_zero()
+}
+
+/// How long the marks still wait at `now`; zero once they are due.
+fn marks_wait(last_typed: Option<Instant>, now: Instant, delay: Duration) -> Duration {
+    last_typed.map_or(Duration::ZERO, |typed| {
+        (typed + delay).saturating_duration_since(now)
+    })
+}
 
 /// The height of the code panel above an expanded Problems section: as many
 /// whole lines as fit in [`CODE_STRIP`] with the margins around them, so the
@@ -23,6 +45,15 @@ fn code_strip(ui: &egui::Ui) -> f32 {
     let margins = 2.0 * CODE_MARGIN + EDITOR_MARGIN;
     let rows = ((CODE_STRIP - margins) / row).floor().max(1.0);
     rows * row + margins
+}
+
+/// The least height of the code above the Problems section: three whole
+/// lines with the margins around them (UX-36).
+fn code_least(ui: &egui::Ui) -> f32 {
+    let row = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.row_height(&egui::FontId::monospace(CODE_FONT)));
+    CODE_LEAST_LINES * row + 2.0 * CODE_MARGIN + EDITOR_MARGIN
 }
 
 impl FolderApp {
@@ -42,30 +73,52 @@ impl FolderApp {
         // clicked (KTLO-18). The epoch is part of the id, as it is for the run
         // results panel, so egui forgets a height dragged under the other state.
         let expanded = self.problems_expanded;
-        let ceiling = (ui.available_height() - code_strip(ui)).max(*PROBLEMS_HEIGHTS.start());
+        let area = ui.available_rect_before_wrap();
+        let strip = code_strip(ui);
+        // The most the section takes: the code panel's height less KTLO-18's
+        // strip of code, or, in a code panel too short for that (Run results
+        // dragged high, UX-36), less three lines of code.
+        let room = (area.height() - code_least(ui)).max(0.0);
+        let ceiling = (area.height() - strip).max(PROBLEMS_LEAST.min(room));
+        let least = PROBLEMS_LEAST.min(ceiling);
         let diagnostics = egui::Id::new((
             "folder-diagnostics",
             self.workbench.mode as u8,
             self.problems_epoch,
         ));
+        let edge = ui.ctx().read_response(diagnostics.with("__resize"));
+        let held = edge.as_ref().is_some_and(egui::Response::dragged);
+        let let_go = edge.as_ref().is_some_and(egui::Response::drag_stopped);
         // Until its edge is dragged, an expanded section follows the ceiling
         // every frame: a height taken once would keep whatever the first frame
         // after the click had room for, and would not follow the window.
-        if expanded
-            && ui
-                .ctx()
-                .read_response(diagnostics.with("__resize"))
-                .is_some_and(|handle| handle.dragged() || handle.drag_stopped())
-        {
+        if expanded && (held || let_go) {
             self.problems_dragged = true;
+        }
+        // Dragged from its normal state, the edge goes up to the ceiling,
+        // where a release expands the section (UX-05).
+        if !expanded && held && self.problems_drag_from.is_none() {
+            self.problems_drag_from = Some(self.workbench.panels.diagnostics);
+        }
+        let reaching = !expanded && self.problems_drag_from.is_some();
+        // In its normal state the section is drawn at the height kept in the
+        // view state, which a code panel shorter for a while does not
+        // shorten: egui would keep the height it last drew and prefer it
+        // (UX-36, as UX-05 found for Run results).
+        let squeezed =
+            !expanded && !held && !let_go && ceiling + 0.5 < self.workbench.panels.diagnostics;
+        if !expanded && !held && !let_go {
+            ui.ctx()
+                .data_mut(|data| data.remove::<egui::PanelState>(diagnostics));
         }
         let panel = egui::Panel::bottom(diagnostics).resizable(true);
         let panel = if !expanded {
+            // It resizes freely up to the ceiling (UX-36).
             panel
                 .default_size(self.workbench.panels.diagnostics)
-                .size_range(PROBLEMS_HEIGHTS)
+                .size_range(least..=ceiling)
         } else if self.problems_dragged {
-            panel.size_range(*PROBLEMS_HEIGHTS.start()..=ceiling)
+            panel.size_range(least..=ceiling)
         } else {
             panel.exact_size(ceiling)
         };
@@ -82,14 +135,58 @@ impl FolderApp {
                     // height it was given.
                     ui.set_min_height(ui.available_height());
                 }
-                reveal = self.diagnostics_panel(ui, document_id, &snapshot);
+                if squeezed {
+                    // Given way to a short code panel, the section shows what
+                    // fits of its caption row and list. Taller contents would
+                    // make egui grow the panel past its size and move its top
+                    // down, under the code drawn above it (UX-36).
+                    let rect = ui.max_rect();
+                    let mut fitted = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                    fitted.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    reveal = self.diagnostics_panel(&mut fitted, document_id, &snapshot);
+                    ui.advance_cursor_after_rect(rect);
+                } else {
+                    reveal = self.diagnostics_panel(ui, document_id, &snapshot);
+                }
             });
         // An expanded height is never remembered, so restoring returns the
-        // height the section had, and so does the next window. The outer
+        // height the section had, and so does the next window; nor is a
+        // height the section gives way to a short code panel at. The outer
         // height is what `default_size` takes, so a restore gives it back
         // exactly; the inner height plus margins missed the separator's pixel.
-        if !expanded {
-            self.workbench.panels.diagnostics = shown.response.rect.height();
+        let height = shown.response.rect.height();
+        if !expanded && !squeezed {
+            self.workbench.panels.diagnostics = height;
+        }
+        if let Some(before) = self.problems_drag_from
+            && reaching
+        {
+            // In the zone the section has grown towards the ceiling and is
+            // within the snap distance of it. Its reach is measured from its
+            // top: a short list leaves the panel's fill short of it.
+            let top = shown.response.rect.top();
+            let reach = area.bottom() - top;
+            let snapped = reach > before + 1.0 && reach >= ceiling - DROP_SNAP;
+            if let_go || !held {
+                self.problems_drag_from = None;
+                // A drag that ends without a release expands nothing.
+                if snapped && let_go {
+                    // As *Expand problems* does, keeping the height from before
+                    // the drag for *Restore problems*.
+                    self.problems_expanded = true;
+                    self.problems_dragged = false;
+                    self.workbench.panels.diagnostics = before;
+                }
+                self.problems_epoch = self.problems_epoch.wrapping_add(1);
+                ui.ctx().request_repaint();
+            } else if snapped {
+                let zone = egui::Rect::from_min_max(
+                    area.min,
+                    egui::pos2(area.max.x, (area.top() + strip).min(top)),
+                )
+                .shrink(4.0);
+                widgets::drop_zone(ui, zone, "Release to expand problems");
+            }
         }
         widgets::name_resize_handle(ui.ctx(), diagnostics, "Resize problems");
         egui::CentralPanel::default()
@@ -134,10 +231,21 @@ impl FolderApp {
             self.code = code::CodeEditor::default();
             self.shown = Some(document_id.to_owned());
             self.revealed = None;
-            if let Some(tab) = self.workbench.tab_mut(document_id) {
-                let selection = clamp_selection(&snapshot.text, &tab.selection);
-                self.code.select(selection.anchor, selection.caret);
-                self.scroll_restore = Some(tab.scroll);
+            let restored = self
+                .workbench
+                .tab_mut(document_id)
+                .map(|tab| (clamp_selection(&snapshot.text, &tab.selection), tab.scroll));
+            if let Some((selection, scroll)) = restored {
+                // The tab keeps its scroll; its caret comes back without
+                // re-centring the view (UX-13).
+                let in_view = self.carets_in_view.contains(document_id);
+                self.code
+                    .restore(selection.anchor, selection.caret, in_view);
+                self.scroll_restore = Some(scroll);
+                // The block the board selected for the caret's statement is
+                // the caret's own; revealing it again would centre it. A
+                // block selected on the board meanwhile is still revealed.
+                self.revealed = self.statement_at(document_id, &snapshot.text, selection.caret);
             }
         }
         // The first line the holder changed, while following (MCP-16); the
@@ -177,6 +285,27 @@ impl FolderApp {
             nodes: &completion.nodes,
             steps: run.as_ref().map_or(&[], |run| run.steps.as_slice()),
         };
+        // The red numbers, dots, underlines and hover messages wait until
+        // typing has paused (UX-03), and then for the analysis of the typed
+        // text: the last analysis's would sit at the wrong places after the
+        // edit. The window is drawn again when they are due, mouse or not;
+        // a finished analysis asks for a frame of its own.
+        let now = self.marks_now();
+        let typed = self.marks_quiet_at.get(document_id).copied();
+        let wait =
+            (!marks_due(typed, now, MARKS_DELAY)).then(|| marks_wait(typed, now, MARKS_DELAY));
+        let analysed = typed.is_none() || snapshot.analysis != AnalysisState::Pending;
+        let marks: &[Diagnostic] = match wait {
+            None if analysed => {
+                self.marks_quiet_at.remove(document_id);
+                &snapshot.diagnostics
+            }
+            None => &[],
+            Some(wait) => {
+                ui.ctx().request_repaint_after(wait);
+                &[]
+            }
+        };
         let mut text = snapshot.text.clone();
         let mut scroll = egui::ScrollArea::both()
             .id_salt(("folder-code-scroll", document_id))
@@ -197,7 +326,7 @@ impl FolderApp {
                             &code::Context {
                                 mode: apiforge_script::complete::Mode::Script,
                                 scope: completion.names.scope(&shapes),
-                                diagnostics: &snapshot.diagnostics,
+                                diagnostics: marks,
                                 line_numbers: true,
                                 wrap: false,
                                 font_size: CODE_FONT,
@@ -212,6 +341,11 @@ impl FolderApp {
             .inner;
         self.completion_names = Some(completion);
         widgets::name(ui, id, &format!("Contents of {}", snapshot.path));
+        if output.inner.caret_in_view == Some(true) {
+            self.carets_in_view.insert(document_id.to_owned());
+        } else {
+            self.carets_in_view.remove(document_id);
+        }
         if self.persistence.closing || self.storage.blocks_edits() {
             return;
         }
@@ -219,6 +353,15 @@ impl FolderApp {
         let outcome = output.inner;
         #[cfg(test)]
         {
+            self.marks_shown = Some((
+                document_id.to_owned(),
+                code::marked_lines(&snapshot.text, marks)
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                wait,
+            ));
             self.lines_in_view = outcome
                 .lines_in_view
                 .clone()
@@ -234,12 +377,20 @@ impl FolderApp {
                 Ok(_) => {
                     self.analyser.typed(document_id, Instant::now());
                     self.changed_at = Some(Instant::now());
+                    // Typing, a paste, an undo or a redo in the editor: the
+                    // marks wait again. This pass drew them over the edited
+                    // text, so it is drawn again without them before it is
+                    // shown.
+                    self.marks_quiet_at.insert(document_id.to_owned(), now);
+                    if !marks.is_empty() {
+                        ui.ctx()
+                            .request_discard("UX-03: error marks drawn over an edit");
+                    }
                 }
                 Err(error) => {
-                    self.notice = Some(Notice {
-                        text: error.to_string(),
-                        error: true,
-                    });
+                    // The session is still borrowed: `notify` by its fields.
+                    self.notices
+                        .raise(self.workbench.active(), error.to_string(), true);
                     text = snapshot.text.clone();
                 }
             }

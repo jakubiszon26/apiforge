@@ -10,7 +10,8 @@ use std::{
     fs::{self, File, TryLockError},
     io::{self, Read},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
+    thread::ThreadId,
 };
 
 const HEAD: &str = ".apiforge/local/head.json";
@@ -116,7 +117,45 @@ pub(super) struct ActiveTransaction {
 pub(super) struct Owner {
     lock: Option<File>,
     pub(super) worker: Mutex<()>,
+    /// The thread that holds `worker`, so that a scan on that thread, such
+    /// as a test's fault hook inside a commit, does not wait for itself.
+    worker_thread: Mutex<Option<ThreadId>>,
     secrets: Mutex<Vec<String>>,
+}
+
+/// The worker, held: one storage operation of this owner at a time.
+pub(super) struct WorkerGuard<'a> {
+    owner: &'a Owner,
+    _worker: MutexGuard<'a, ()>,
+}
+
+impl Drop for WorkerGuard<'_> {
+    fn drop(&mut self) {
+        // Runs before the field releases the worker.
+        *self
+            .owner
+            .worker_thread
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
+impl Owner {
+    pub(super) fn lock_worker(&self) -> WorkerGuard<'_> {
+        let worker = self.worker.lock().unwrap_or_else(|p| p.into_inner());
+        *self.worker_thread.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(std::thread::current().id());
+        WorkerGuard {
+            owner: self,
+            _worker: worker,
+        }
+    }
+
+    /// Whether this thread holds the worker.
+    pub(super) fn holds_worker(&self) -> bool {
+        *self.worker_thread.lock().unwrap_or_else(|p| p.into_inner())
+            == Some(std::thread::current().id())
+    }
 }
 
 /// Cloneable ownership retains the OS writer lock until the final worker or
@@ -237,6 +276,7 @@ impl ProjectStore {
             owner: Arc::new(Owner {
                 lock,
                 worker: Mutex::new(()),
+                worker_thread: Mutex::new(None),
                 secrets: Mutex::new(Vec::new()),
             }),
         })
@@ -251,7 +291,7 @@ impl ProjectStore {
 
     /// Session-only values, never serialised in descriptors or error messages.
     pub fn set_known_secrets(&self, values: impl IntoIterator<Item = String>) {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         *self.owner.secrets.lock().unwrap_or_else(|p| p.into_inner()) = values
             .into_iter()
             .filter(|value| !value.is_empty())
@@ -291,7 +331,7 @@ impl ProjectStore {
     /// Stable raw reads for storage clients. Definitions are loaded with `load`,
     /// which discovers all registered sources inside the same read protocol.
     pub fn read(&self, paths: &[ProjectPath]) -> Result<ProjectSnapshot> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.stable_read(|| Ok(paths.to_vec()))
     }
 
@@ -299,7 +339,7 @@ impl ProjectStore {
     /// checkpoint. Invalid source is data, not a storage failure. Missing or
     /// mismatched immutable published source is always an integrity error.
     pub fn load(&self) -> Result<(ProjectManifest, ProjectSnapshot)> {
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.load_locked(&[])
     }
 
@@ -403,7 +443,7 @@ impl ProjectStore {
         boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<u64> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.validate_public_changes(&changes)?;
         self.commit_locked(changes, boundary)
     }
@@ -513,7 +553,7 @@ impl ProjectStore {
         mut boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<Option<u64>> {
         self.writable()?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         let Some(active) = self.read_active_transaction()? else {
             return Ok(None);
         };
@@ -651,7 +691,13 @@ impl ProjectStore {
                     )?,
                     FileState::Directory => create_directory(&path)?,
                     FileState::Missing => {
-                        disk::remove(&path, operation.expected == FileState::Directory)?;
+                        let directory = operation.expected == FileState::Directory;
+                        let removed = if directory {
+                            removed_from(&descriptor.operations[..index], &operation.path)
+                        } else {
+                            Vec::new()
+                        };
+                        disk::remove(&path, directory, &removed)?;
                     }
                 }
             } else {
@@ -1005,6 +1051,19 @@ impl ProjectStore {
     pub(super) fn atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         disk::atomic(path, bytes, false)
     }
+}
+
+/// The names directly inside `directory` that `earlier` operations removed:
+/// what Windows may still list, delete-pending, when the transaction comes
+/// to remove the directory itself (MCP-19).
+fn removed_from(earlier: &[Operation], directory: &ProjectPath) -> Vec<std::ffi::OsString> {
+    earlier
+        .iter()
+        .filter(|operation| operation.target == FileState::Missing)
+        .map(|operation| Path::new(operation.path.as_str()))
+        .filter(|path| path.parent() == Some(Path::new(directory.as_str())))
+        .filter_map(|path| path.file_name().map(ToOwned::to_owned))
+        .collect()
 }
 
 /// One JSON line beside the lock, replaced atomically; an unknown holder

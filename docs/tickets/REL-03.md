@@ -43,9 +43,9 @@ Not applicable: no interface change.
 1. `about.toml` (repository root) accepts exactly the licences in the
    workspace today, ordered MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception,
    BSD-2-Clause, BSD-3-Clause, ISC, Zlib, 0BSD, Unlicense, Unicode-3.0,
-   BSL-1.0, MPL-2.0, CDLA-Permissive-2.0, OFL-1.1, Ubuntu-font-1.0, so a crate
-   offering a choice is listed under the first accepted one and never under
-   GPL-2.0-only (`self_cell`) or LGPL-2.1 (`r-efi`); `targets` names
+   BSL-1.0, MPL-2.0, CDLA-Permissive-2.0, OFL-1.1, Ubuntu-font-1.0,
+   Bitstream-Vera, so a crate offering a choice is listed under the first
+   accepted one and never under GPL-2.0-only (`self_cell`) or LGPL-2.1 (`r-efi`); `targets` names
    `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; workspace crates
    are ignored. `cargo about generate --fail` with `packaging/about.hbs`
    produces the file; an unaccepted or unresolved licence fails the command.

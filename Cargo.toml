@@ -63,6 +63,10 @@ image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # Interface tests and agent inspection (ADR 0013); same egui release as eframe.
 egui_kittest = { version = "=0.36.2", default-features = false, features = ["wgpu"] }
 egui_inspection = { version = "=0.36.2", default-features = false, features = ["plugin"] }
+# Build scripts on Windows only: the icon and version strings of both .exe
+# files as a resource (REL-02); without the toml feature, which reads
+# package metadata the scripts do not use.
+winresource = { version = "=0.1.34", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

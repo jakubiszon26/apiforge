@@ -26,7 +26,7 @@ use apiforge_core::{
 use apiforge_runner::{RunHandle, RunRequest, RunnerService};
 use apiforge_storage::{JournalStore, WorkspaceStore};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText};
-use std::{collections::HashSet, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 /// Where the workspace comes from and whether edits are saved.
 pub enum Source {
@@ -2094,6 +2094,10 @@ impl App {
                 error_policy: self.editor.scenario().error_policy,
                 running: self.is_running(),
                 stale: self.is_run_stale(),
+                // The legacy workspace window keeps its behaviour: a check
+                // makes its results stale. Several checks from one run
+                // (UX-01) are the folder window's.
+                checked: &[],
                 files_busy: self.files.busy(),
                 component: false,
                 document_locked: self.document_locked(),
@@ -2231,6 +2235,9 @@ impl App {
                 node: &node,
                 graph: &reference,
                 board: self.editor.graph(),
+                cleanup: (phase == Phase::Main)
+                    .then(|| self.editor.sibling_graph())
+                    .flatten(),
                 project: self.editor.project(),
                 parameters: &parameters,
                 run,
@@ -2335,8 +2342,14 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 read_only: false,
+                component: self.editor.draft().is_some(),
                 header_leading: None,
                 library: None,
+                inputs: None,
+                selected_input: None,
+                adding_input: None,
+                settings: None,
+                arrangement: "",
             };
             self.canvas.show(ui, &input)
         };
@@ -2359,6 +2372,8 @@ impl App {
         }
         match command {
             Command::Select(ids) => self.editor.selection = ids,
+            // The workspace window shows no INPUTS strip or settings button.
+            Command::SelectInput(_) | Command::AddInput | Command::ComponentSettings => {}
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);
@@ -2424,18 +2439,14 @@ impl App {
             Command::Copy => self.copy_selection(),
             Command::Paste => self.paste(),
             Command::Duplicate => {
-                let selected: HashSet<&str> =
-                    self.editor.selection.iter().map(String::as_str).collect();
-                if selected.is_empty() {
-                    return;
-                }
                 // Cleanup bindings may read main-graph outputs. Preserve those
                 // references exactly as a regular paste does.
-                let fragment = edit::copy_selection(self.editor.graph(), &selected);
-                match self.with_board(|board| board.paste(&fragment, &edit::PASTE_OFFSET)) {
-                    Ok(edit) => self.insert_pasted(edit),
-                    Err(message) => self.canvas.set_error(message),
-                }
+                let selection = self.editor.selection.clone();
+                let Some(fragment) = self.with_board(|board| board.copy(&selection)) else {
+                    return;
+                };
+                let result = self.with_board(|board| board.paste(&fragment));
+                self.insert_pasted(result);
             }
             Command::SaveSelectionAsComponent => {
                 if !self.editor.selection.is_empty() {
@@ -2451,16 +2462,14 @@ impl App {
     }
 
     fn copy_selection(&mut self) {
-        let selected: HashSet<&str> = self.editor.selection.iter().map(String::as_str).collect();
-        let fragment = edit::copy_selection(self.editor.graph(), &selected);
-        if fragment.nodes.is_empty() {
+        let selection = self.editor.selection.clone();
+        let Some(fragment) = self.with_board(|board| board.copy(&selection)) else {
             return;
-        }
-        let count = fragment.nodes.len();
+        };
+        let count = fragment.graph.nodes.len();
         self.editor.clipboard = Some(BlockClipboard {
             context: self.editor.context_key(),
             fragment,
-            pastes: 0,
         });
         self.notice = Some(format!(
             "Copied {count} step(s) with their configuration. Paste with Ctrl+V."
@@ -2477,27 +2486,31 @@ impl App {
         else {
             return;
         };
-        let count = f64::from(clipboard.pastes + 1);
-        let offset = Position {
-            x: edit::PASTE_OFFSET.x * count,
-            y: edit::PASTE_OFFSET.y * count,
-        };
-        let result = self.with_board(|board| board.paste(&clipboard.fragment, &offset));
-        match result {
-            Ok(edit) => {
-                if let Some(stored) = &mut self.editor.clipboard {
-                    stored.pastes += 1;
-                }
-                self.insert_pasted(edit);
+        let result = self.with_board(|board| board.paste(&clipboard.fragment));
+        self.insert_pasted(result);
+    }
+
+    /// The workspace window pastes only into the board that copied, so a
+    /// reference it cannot keep means its source was deleted since: the paste
+    /// is refused, as before UX-34.
+    fn insert_pasted(&mut self, pasted: Result<board_edit::Paste, String>) {
+        let pasted = pasted.and_then(|paste| {
+            if paste.unresolved.is_empty() {
+                Ok(paste.edit)
+            } else {
+                Err(edit::EditError::PasteMissingSource.to_string())
+            }
+        });
+        match pasted {
+            Ok(pasted) => {
+                let ids = pasted.selection.clone().unwrap_or_default();
+                let count = ids.len();
+                self.apply_edit(Ok(pasted));
+                self.canvas.show_pasted(ids);
+                self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
             }
             Err(message) => self.canvas.set_error(message),
         }
-    }
-
-    fn insert_pasted(&mut self, pasted: board_edit::Edit) {
-        let count = pasted.selection.as_ref().map_or(0, Vec::len);
-        self.apply_edit(Ok(pasted));
-        self.notice = Some(format!("Pasted {count} step(s) with their configuration."));
     }
 
     /// Sets a slot of a node: a whole input, or the binding at `path` inside it.
@@ -2535,6 +2548,7 @@ impl App {
             reference: &reference,
             project: self.editor.project(),
             parameters: &parameters,
+            sibling: self.editor.sibling_graph(),
         })
     }
 
@@ -3498,7 +3512,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_style_is_remembered_for_the_next_session() {
+    fn the_wire_settings_are_remembered_for_the_next_session() {
         let context = egui::Context::default();
         let mut app = App::new(&context, Source::Session(default_workspace()));
         let directory = tempfile::tempdir().unwrap();
@@ -3506,12 +3520,12 @@ mod tests {
         let path = directory.path().join("preferences.json");
         app.preferences = crate::preferences::Preferences::at(Some(path.clone()));
         assert_eq!(app.canvas.wire_style, canvas::WireStyle::Orthogonal);
-        app.board_command(Command::SetWireStyle(canvas::WireStyle::Spline));
+        app.board_command(Command::SetWireStyle(canvas::WireStyle::Orthogonal));
         app.board_command(Command::SetBridges(false));
-        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Spline);
+        assert_eq!(app.canvas.wire_style, canvas::WireStyle::Orthogonal);
         assert!(!app.canvas.bridges);
         let stored = crate::preferences::Preferences::at(Some(path));
-        assert_eq!(stored.wire_style, canvas::WireStyle::Spline);
+        assert_eq!(stored.wire_style, canvas::WireStyle::Orthogonal);
         assert!(!stored.bridges);
     }
 

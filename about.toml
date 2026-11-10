@@ -21,6 +21,7 @@ accepted = [
     "CDLA-Permissive-2.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    "Bitstream-Vera",
 ]
 # The two release targets; workspace crates, build scripts and test-only
 # dependencies are not in the binaries.
@@ -35,11 +36,11 @@ private = { ignore = true }
 # texts are reproduced. A new version with other files fails the checksums,
 # which cargo-about only warns about; the workflows fail on that warning.
 [epaint_default_fonts.clarify]
-license = "(MIT OR Apache-2.0) AND MIT AND OFL-1.1 AND Ubuntu-font-1.0"
+license = "(MIT OR Apache-2.0) AND MIT AND Bitstream-Vera AND OFL-1.1 AND Ubuntu-font-1.0"
 
 [[epaint_default_fonts.clarify.files]]
 path = "fonts/Hack-Regular.txt"
-license = "MIT"
+license = "MIT AND Bitstream-Vera"
 checksum = "47c0cccbeec7e8614548cc485588b28149e7874188df5f41b36efebcee285c87"
 
 [[epaint_default_fonts.clarify.files]]

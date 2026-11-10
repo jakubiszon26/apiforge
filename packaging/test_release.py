@@ -1,5 +1,8 @@
 """REL-01 (#115): the release workflow's checks, criteria 2, 3 and 5.
 REL-03 (#120): the third-party notices, criteria 1 to 6.
+REL-02 (#119): the application icon on Windows, criteria 1 to 6.
+REL-04 (#205): no console window behind the desktop app, criteria 1, 2, 4 and
+6 to 8 as the workflows and the sources state them.
 
     python3 -I packaging/test_release.py
 
@@ -9,11 +12,13 @@ sums. These tests run it on small temporary trees; the release workflow runs
 them before it builds anything.
 """
 
+import ast
 import hashlib
 import importlib.util
 import io
 import os
 import re
+import struct
 import subprocess
 import sys
 import tarfile
@@ -232,6 +237,7 @@ ACCEPTED = [
     "CDLA-Permissive-2.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    "Bitstream-Vera",
 ]
 TRIPLES = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 NOTICES = "licenses/THIRD-PARTY-NOTICES.md"
@@ -411,7 +417,7 @@ class AboutConfig(unittest.TestCase):
         # checksum, not only the right numbers of each.
         clarify = self.about.split("[epaint_default_fonts.clarify]", 1)[1]
         records = clarify.split("[[epaint_default_fonts.clarify.files]]")[1:]
-        expected = dict(zip(FONT_FILES, ["MIT", "Ubuntu-font-1.0", "OFL-1.1", "MIT"]))
+        expected = dict(zip(FONT_FILES, ["MIT AND Bitstream-Vera", "Ubuntu-font-1.0", "OFL-1.1", "MIT"]))
         found = {}
         for record in records:
             fields = dict(re.findall(r'(?m)^(path|license|checksum)\s*=\s*"([^"]+)"', record))
@@ -535,6 +541,461 @@ class NoticeManifestsAndDocs(unittest.TestCase):
         self.assertIsNotNone(version)
         self.assertIn("cargo-about " + version.group(1), releases)
         self.assertIn("THIRD-PARTY-NOTICES.md", read("crates/apiforge-desktop/assets/fonts/FONT-SOURCES.md"))
+
+
+# REL-02 (#119): the sizes of the Windows icon, in the order of criterion 1.
+ICON_SIZES = [16, 32, 48, 64, 128, 256]
+ICON = "packaging/icon/apiforge.ico"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+BUILD_SCRIPTS = {
+    # crate directory: (binary, FileDescription)
+    "crates/apiforge-desktop": ("apiforge-desktop", "API Forge"),
+    "crates/apiforge-cli": ("apiforge", "API Forge command line"),
+}
+
+
+def read_bytes(relative):
+    with open(os.path.join(ROOT, *relative.split("/")), "rb") as file:
+        return file.read()
+
+
+def load_icon_module():
+    path = os.path.join(HERE, "icon.py")
+    spec = importlib.util.spec_from_file_location("icon", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def toml_section(text, header):
+    """The lines of the TOML table HEADER, up to the next table."""
+    found = re.search(r"^" + re.escape(header) + r"\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    return None if found is None else found.group(1)
+
+
+class IconFile(unittest.TestCase):
+    """Criterion 1: the .ico is the six PNG renders, and cannot drift from them."""
+
+    def test_the_ico_is_built_from_the_pngs(self):
+        icon = load_icon_module()
+        pngs = [os.path.join(HERE, "icon", f"apiforge-{size}.png") for size in ICON_SIZES]
+        self.assertEqual(icon.build(pngs), read_bytes(ICON))
+
+    def test_the_ico_holds_the_six_pngs_in_order_and_verbatim(self):
+        # Read with the format itself, not with icon.py, so a fault in the
+        # builder cannot hide in its own output.
+        data = read_bytes(ICON)
+        reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+        self.assertEqual((reserved, kind, count), (0, 1, len(ICON_SIZES)))
+        for index, size in enumerate(ICON_SIZES):
+            width, height, colours, zero, planes, bits, length, offset = struct.unpack_from(
+                "<BBBBHHII", data, 6 + 16 * index
+            )
+            expected = 0 if size == 256 else size
+            self.assertEqual((width, height, colours, zero), (expected, expected, 0, 0), size)
+            self.assertEqual((planes, bits), (1, 32), size)
+            png = read_bytes(f"packaging/icon/apiforge-{size}.png")
+            self.assertEqual(data[offset : offset + length], png, size)
+            self.assertTrue(png.startswith(PNG_SIGNATURE), size)
+            self.assertEqual(struct.unpack(">II", png[16:24]), (size, size), size)
+        last = struct.unpack_from("<II", data, 6 + 16 * (len(ICON_SIZES) - 1) + 8)
+        self.assertEqual(sum(last), len(data), "nothing follows the last image")
+
+    def test_the_builder_uses_the_standard_library_only(self):
+        tree = ast.parse(read("packaging/icon.py"))
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                modules.add(node.module.split(".")[0])
+        self.assertTrue(modules)
+        self.assertLessEqual(modules, set(sys.stdlib_module_names))
+
+
+class WindowsResource(unittest.TestCase):
+    """Criteria 2 and 5: both binaries carry the icon and the version strings,
+    through a build script that does nothing on another target."""
+
+    def test_each_binary_has_a_build_script_with_the_icon_and_the_version_strings(self):
+        for crate, (binary, description) in BUILD_SCRIPTS.items():
+            script = read(f"{crate}/build.rs")
+            self.assertIn("winresource::WindowsResource::new()", script, crate)
+            self.assertIn('"../../packaging/icon/apiforge.ico"', script, crate)
+            self.assertIn('.set("ProductName", "API Forge")', script, crate)
+            self.assertIn(f'.set("FileDescription", "{description}")', script, crate)
+            for field in ["FileVersion", "ProductVersion"]:
+                self.assertRegex(script, r'\.set\("' + field + r'", &?version\)', crate)
+            self.assertIn('env::var("CARGO_PKG_VERSION")', script, crate)
+            self.assertIn(f'.compile_for("{binary}")', script, crate)
+            # Only a Windows build runs the resource compiler.
+            self.assertIn('CARGO_CFG_TARGET_OS', script, crate)
+            self.assertIn("#[cfg(windows)]", script, crate)
+
+    def test_winresource_is_a_windows_only_build_dependency_pinned_by_the_lock(self):
+        root = read("Cargo.toml")
+        pinned = re.search(r'^winresource = \{ version = "=(\d+\.\d+\.\d+)"', root, re.M)
+        self.assertIsNotNone(pinned, "the workspace pins winresource")
+        for crate in BUILD_SCRIPTS:
+            manifest = read(f"{crate}/Cargo.toml")
+            section = toml_section(manifest, "[target.'cfg(windows)'.build-dependencies]")
+            self.assertIsNotNone(section, crate)
+            self.assertIn("winresource.workspace = true", section, crate)
+            self.assertEqual(manifest.count("winresource"), 1, crate)
+        lock = read("Cargo.lock")
+        self.assertIn(f'name = "winresource"\nversion = "{pinned.group(1)}"', lock)
+
+
+class IconWorkflows(unittest.TestCase):
+    """Criteria 2, 3 and 4 in rust.yml and release.yml."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_windows_ci_builds_both_release_binaries(self):
+        build = step(self.rust, "Build release binaries")
+        self.assertIn("cargo build --release --locked -p apiforge-desktop -p apiforge-cli", build)
+
+    def test_every_windows_run_extracts_the_icon_of_both_exes(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("runner.os == 'Windows'", icon)
+        self.assertIn("[System.Drawing.Icon]::ExtractAssociatedIcon", icon)
+        for name in ["apiforge.exe", "apiforge-desktop.exe"]:
+            self.assertIn(name, icon)
+        # 32 x 32, a transparent corner, an opaque centre, the source's pixels.
+        self.assertIn("$bitmap.Width -ne 32 -or $bitmap.Height -ne 32", icon)
+        self.assertIn("GetPixel(0, 0).A", icon)
+        self.assertIn("GetPixel(16, 16).A", icon)
+        self.assertIn("packaging/icon/apiforge-32.png", icon)
+        self.assertIn("VersionInfo", icon)
+
+    def test_every_windows_run_captures_the_window_with_its_icon(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("'--folder'", icon)
+        self.assertIn("MainWindowHandle", icon)
+        self.assertIn("CopyFromScreen", icon)
+        self.assertIn("taskkill.exe", icon)
+        upload = step(self.rust, "Upload the application icon (Windows)")
+        self.assertIn("runner.os == 'Windows'", upload)
+        self.assertIn("name: windows-icon", upload)
+        self.assertIn("test-results/icon/", upload)
+
+    def test_the_release_checks_the_product_version_of_both_exes(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        self.assertIn(".VersionInfo.ProductVersion", smoke)
+        self.assertRegex(smoke, r"-ne \$env:VERSION")
+
+
+class WindowIconSource(unittest.TestCase):
+    """Criterion 3: the window takes the icon on every platform."""
+
+    def test_the_icon_is_not_gated_on_linux(self):
+        main = read("crates/apiforge-desktop/src/main.rs")
+        self.assertIn(".with_icon(Arc::new(window_icon()))", main)
+        self.assertNotRegex(main, r'#\[cfg\(target_os = "linux"\)\]\s*\n[^\n]*with_icon')
+        self.assertNotRegex(main, r"allow\(dead_code\)\]\s*\nfn window_icon")
+
+
+class IconDocs(unittest.TestCase):
+    """Criterion 6: the development guide says where the .ico comes from."""
+
+    def test_the_releases_section_says_how_to_rebuild_the_ico(self):
+        releases = read("docs/development.md").split("## Releases", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("packaging/icon/apiforge.ico", releases)
+        self.assertIn("python3 -I packaging/icon.py", releases)
+        self.assertIn("winresource", releases)
+
+
+# REL-04 (#205): the attribute that makes the release desktop build a windowed
+# program, exactly as the ticket states it.
+WINDOWS_SUBSYSTEM = (
+    '#![cfg_attr(all(windows, not(debug_assertions), not(test)), windows_subsystem = "windows")]'
+)
+
+
+def start_process_calls(text):
+    """Each `Start-Process` statement of a PowerShell script, with its
+    backtick continuations and its argument array."""
+    calls = []
+    for found in re.finditer(r"Start-Process\b", text):
+        end = found.start()
+        depth = 0
+        while end < len(text):
+            char = text[end]
+            if char in "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "\n" and depth == 0 and not text[:end].rstrip(" ").endswith("`"):
+                break
+            end += 1
+        calls.append(text[found.start() : end])
+    return calls
+
+
+def steps_before(workflow, first, second):
+    return workflow.index(f"- name: {first}\n") < workflow.index(f"- name: {second}\n")
+
+
+class ConsoleSubsystem(unittest.TestCase):
+    """Criterion 1: the release desktop .exe is WindowsGui; apiforge.exe and the
+    debug desktop build stay WindowsCui; every Windows run and the release
+    smoke read it from the PE header."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_the_release_desktop_build_is_a_windowed_program_and_nothing_else_is(self):
+        # rustfmt wraps the attribute over four lines; compared on one.
+        main = re.sub(r"\s+", " ", read("crates/apiforge-desktop/src/main.rs"))
+        main = main.replace("( ", "(").replace(" )", ")")
+        self.assertEqual(main.count(WINDOWS_SUBSYSTEM), 1)
+        self.assertEqual(main.count("windows_subsystem"), 1)
+        for path in ["crates/apiforge-cli/src/main.rs", "crates/apiforge-cli/src/lib.rs"]:
+            if os.path.exists(os.path.join(ROOT, *path.split("/"))):
+                self.assertNotIn("windows_subsystem", read(path), path)
+
+    def test_every_windows_run_reads_the_subsystem_of_the_three_exes(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("System.Reflection.PortableExecutable.PEReader", icon)
+        self.assertIn(".PEHeaders.PEHeader.Subsystem", icon)
+        for exe, subsystem in [
+            ("target/release/apiforge-desktop.exe", "WindowsGui"),
+            ("target/release/apiforge.exe", "WindowsCui"),
+            ("target/debug/apiforge-desktop.exe", "WindowsCui"),
+        ]:
+            self.assertRegex(icon, re.escape(f"Exe = '{exe}'; Subsystem = '{subsystem}'"), exe)
+        self.assertIn("$subsystem -ne $binary.Subsystem", icon)
+        # The debug build is the one the test step made before.
+        self.assertTrue(steps_before(self.rust, "Run workspace unit and integration tests", "Show the application icon (Windows)"))
+
+    def test_the_release_smoke_reads_the_subsystem_of_both_extracted_exes(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        self.assertIn("System.Reflection.PortableExecutable.PEReader", smoke)
+        self.assertIn(".PEHeaders.PEHeader.Subsystem", smoke)
+        self.assertIn("'apiforge' = 'WindowsCui'", smoke)
+        self.assertIn("'apiforge-desktop' = 'WindowsGui'", smoke)
+        self.assertIn("Join-Path $root \"$name.exe\"", smoke)
+        self.assertRegex(smoke, r"if \(\$subsystem -ne [^)]+\) \{\s+throw")
+
+
+class NoConsoleWindow(unittest.TestCase):
+    """Criterion 2: the window started the way Explorer starts it owns no
+    conhost.exe, and is captured into windows-icon."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.icon = step(self.rust, "Show the application icon (Windows)")
+
+    def test_the_window_is_started_without_a_console_or_a_redirection(self):
+        calls = start_process_calls(self.icon)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("'--folder'", calls[0])
+        self.assertIn("-PassThru", calls[0])
+        self.assertNotIn("-NoNewWindow", calls[0])
+        self.assertNotIn("-Redirect", calls[0])
+
+    def test_the_open_window_owns_no_conhost(self):
+        self.assertIn("Get-CimInstance Win32_Process -Filter \"Name='conhost.exe' AND ParentProcessId=$($process.Id)\"", self.icon)
+        self.assertIn("$consoles.Count -ne 0", self.icon)
+        # Asked while the window is open: after its handle, before the kill.
+        query = self.icon.index("Name='conhost.exe'")
+        self.assertLess(self.icon.index("MainWindowHandle"), query)
+        self.assertLess(query, self.icon.index("} finally {", query))
+        self.assertIn("throw ($problems -join ' ')", self.icon)
+
+    def test_the_desktop_is_captured_into_windows_icon(self):
+        self.assertIn("CopyFromScreen", self.icon)
+        self.assertIn("'desktop-window.png'", self.icon)
+        upload = step(self.rust, "Upload the application icon (Windows)")
+        self.assertIn("name: windows-icon", upload)
+        self.assertIn("always()", upload)
+
+
+class DesktopLog(unittest.TestCase):
+    """Criteria 4 and 7: started by a parent with no console, the program writes
+    the log; cmd's redirection still reaches its file."""
+
+    NAME = "Write the desktop log without a console (Windows)"
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.log = step(self.rust, self.NAME)
+
+    def test_it_runs_on_windows_after_the_data_directory_is_owned(self):
+        folder = step(self.rust, "Exercise folder projects and managed startup (Windows)")
+        self.assertIn("id: folder-windows", folder)
+        self.assertIn("Reset-DataDirectory", folder)
+        self.assertIn(
+            "if: ${{ !cancelled() && runner.os == 'Windows' && steps.folder-windows.outcome == 'success' }}",
+            self.log,
+        )
+        self.assertTrue(steps_before(self.rust, "Exercise folder projects and managed startup (Windows)", self.NAME))
+        self.assertTrue(steps_before(self.rust, self.NAME, "Upload the application icon (Windows)"))
+
+    def test_the_parent_has_no_console(self):
+        self.assertIn("Invoke-CimMethod -ClassName Win32_Process -MethodName Create", self.log)
+        self.assertIn('--check `"$fixture`"', self.log)
+        self.assertIn("'fixtures/workspace.json'", self.log)
+        self.assertIn("$process.ExitCode -ne 0", self.log)
+
+    def test_the_log_ends_with_the_start_line_and_the_check(self):
+        self.assertIn("'apiforge/logs'", self.log)
+        self.assertIn("'apiforge-desktop.log'", self.log)
+        self.assertIn("^--- apiforge-desktop $([regex]::Escape($version)) .+ ---$", self.log)
+        self.assertIn("$lines[-1] -ne \"$valid\"", self.log)
+        self.assertIn("'^Valid v\\d+ document: \\d+ project\\(s\\)$'", self.log)
+
+    def test_two_starts_append_two_blocks_and_a_full_log_is_rotated(self):
+        self.assertRegex(self.log, r"Invoke-WithoutConsole 'first'\s+Assert-Log 'first' 1\s+Invoke-WithoutConsole 'second'\s+Assert-Log 'second' 2")
+        self.assertIn("$full = 1MB + 1", self.log)
+        self.assertIn("'apiforge-desktop.log.1'", self.log)
+        self.assertIn("(Get-Item $rotated).Length -ne $full", self.log)
+        self.assertIn("Assert-Log 'rotated' 1", self.log)
+
+    def test_cmd_redirects_the_version_into_a_file(self):
+        self.assertIn('& cmd.exe /c "$program --version > $redirected"', self.log)
+        self.assertIn('$line -ne "apiforge-desktop $version"', self.log)
+
+    def test_cmd_without_a_redirection_writes_the_version_to_the_log(self):
+        # Owner's decision of 2026-11-02 on #205: 2 = B, no console attached.
+        self.assertIn("Start-Process -FilePath cmd.exe -ArgumentList @('/c', \"$program --version\") -Wait", self.log)
+        self.assertIn('$lines[-1] -ne "apiforge-desktop $version"', self.log)
+        self.assertIn("$lines[-2] -notmatch $start", self.log)
+
+
+class OutputCapture(unittest.TestCase):
+    """Criterion 6: CI reads a windowed program's output deterministically."""
+
+    def setUp(self):
+        self.rust = read(".github/workflows/rust.yml")
+        self.release = read(".github/workflows/release.yml")
+
+    def test_the_release_smoke_reads_the_checks_output(self):
+        smoke = step(job(self.release, "build-windows"), "Smoke the binaries from the extracted ZIP")
+        # Assigning a windowed program's output is not enough: PowerShell then
+        # neither waits nor reads, and the program writes into a closed pipe.
+        self.assertIn(
+            "$check = & (Join-Path $root 'apiforge-desktop.exe') --check fixtures/workspace.json | Write-Output",
+            smoke,
+        )
+        self.assertNotRegex(smoke, r"(?m)^\s*& \(Join-Path \$root 'apiforge-desktop\.exe'\) --check")
+        self.assertIn("$LASTEXITCODE -ne 0", smoke)
+        self.assertIn("\"$check\" -notmatch '^Valid v", smoke)
+        self.assertIn("$line = & (Join-Path $root \"$name.exe\") --version | Write-Output", smoke)
+
+    def test_every_windows_step_pipes_what_it_reads_from_the_desktop_binary(self):
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("(& $exe --version | Write-Output)", icon)
+        log = step(self.rust, "Write the desktop log without a console (Windows)")
+        self.assertIn("$valid = & $program --check $fixture | Write-Output", log)
+        for workflow in [self.rust, self.release]:
+            self.assertNotRegex(workflow, r"(?m)= \(?& [^\n|]*--(version|check)[^\n|]*$")
+
+    def test_the_native_validation_reads_the_valid_line(self):
+        validate = step(self.rust, "Validate workspace using the native release binary")
+        self.assertIn("shell: bash", validate)
+        self.assertIn('output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"', validate)
+        self.assertIn('[[ ! "$output" =~ ^Valid\\ v[0-9]+\\ document:\\ [0-9]+\\ project\\(s\\)$ ]]', validate)
+        self.assertIn("exit 1", validate)
+
+    def test_every_windowed_probe_redirects_its_errors_and_prints_them(self):
+        for name in [
+            "Open native window and capture it (Windows)",
+            "Exercise folder projects and managed startup (Windows)",
+        ]:
+            text = step(self.rust, name)
+            calls = start_process_calls(text)
+            self.assertTrue(calls, name)
+            for call in calls:
+                self.assertIn("-RedirectStandardError", call, f"{name}: {call}")
+            self.assertIn("Show-Failures $failures", text, name)
+        native = step(self.rust, "Open native window and capture it (Windows)")
+        self.assertEqual(native.count("Show-Failures $failures"), 1)
+        folder = step(self.rust, "Exercise folder projects and managed startup (Windows)")
+        self.assertEqual(folder.count("Show-Failures $failures"), 2)
+        # The icon step's window cannot be redirected (criterion 2); what it
+        # writes without a console is in its log, which the step prints.
+        icon = step(self.rust, "Show the application icon (Windows)")
+        self.assertIn("'logs/apiforge-desktop.log'", icon)
+        self.assertIn("Get-Content $log", icon)
+
+    def test_every_windows_start_keeps_its_exit_code(self):
+        for name in [
+            "Open native window and capture it (Windows)",
+            "Exercise folder projects and managed startup (Windows)",
+            "Show the application icon (Windows)",
+        ]:
+            text = step(self.rust, name)
+            for call in start_process_calls(text):
+                self.assertIn("-PassThru", call, f"{name}: {call}")
+            self.assertIn("$null = $process.Handle", text, name)
+            self.assertIn("WaitForExit(", text, name)
+            self.assertIn("ExitCode", text, name)
+
+
+class NoNewCrate(unittest.TestCase):
+    """Criterion 8: windows-sys only for Windows, at a version the lock already
+    holds; apiforge-cli is untouched; the guide says what changed."""
+
+    def test_no_new_crate_and_no_unsafe_code(self):
+        # Owner's decision of 2026-11-02 on #205: no unsafe code, so no
+        # windows-sys either; the lock keeps the three versions it held.
+        root = read("Cargo.toml")
+        self.assertNotIn("windows-sys", root)
+        self.assertIn('unsafe_code = "forbid"', toml_section(root, "[workspace.lints.rust]"))
+        locked = re.findall(r'^name = "windows-sys"\nversion = "([^"]+)"', read("Cargo.lock"), re.M)
+        self.assertEqual(locked, ["0.52.0", "0.59.0", "0.61.2"])
+        for crate in ["crates/apiforge-desktop", "crates/apiforge-cli"]:
+            manifest = read(f"{crate}/Cargo.toml")
+            self.assertNotIn("windows-sys", manifest, crate)
+            self.assertEqual(toml_section(manifest, "[lints]").strip(), "workspace = true", crate)
+        for directory, _, names in os.walk(os.path.join(ROOT, "crates", "apiforge-desktop")):
+            for name in names:
+                if name.endswith(".rs"):
+                    with open(os.path.join(directory, name), encoding="utf-8") as file:
+                        text = file.read()
+                    self.assertNotIn("unsafe_code", text, name)
+                    self.assertNotRegex(text, r"\bunsafe\s*\{", name)
+
+    def test_every_line_the_desktop_prints_goes_through_one_function(self):
+        # Decision 2 = B: no console is attached, so a line printed straight to
+        # a handle the parent did not give would be lost instead of logged.
+        main = read("crates/apiforge-desktop/src/main.rs")
+        self.assertIn("macro_rules! outln", main)
+        self.assertIn("macro_rules! errln", main)
+        self.assertIn("$crate::windows_console::write(", main)
+        source = os.path.join(ROOT, "crates", "apiforge-desktop", "src")
+        for directory, _, names in os.walk(source):
+            for name in names:
+                if not name.endswith(".rs") or name in {"tests.rs", "testing.rs", "windows_console.rs"} or name.endswith("_tests.rs"):
+                    continue
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as file:
+                    text = file.read()
+                # Test modules may print; the program may not.
+                program = text.split("\n#[cfg(test)]\nmod tests", 1)[0]
+                for found in re.finditer(r"\b(e?print(ln)?)!\(", program):
+                    line = program[: found.start()].count("\n") + 1
+                    self.fail(f"{os.path.relpath(path, ROOT)}:{line} uses {found.group(1)}!")
+
+    def test_running_says_where_the_output_goes_without_a_console(self):
+        running = read("docs/development.md").split("## Running", 1)[1].split("\n## ", 1)[0]
+        paragraph = next((p for p in running.split("\n\n") if "apiforge-desktop.log" in p), "")
+        self.assertTrue(paragraph, "Running names the log")
+        for text in [
+            "%APPDATA%\\apiforge\\logs\\apiforge-desktop.log",
+            "apiforge-desktop.log.1",
+            "start /wait",
+            "%ERRORLEVEL%",
+            "never attaches",
+            "> out.txt",
+            "| Write-Output",
+            "apiforge.exe",
+        ]:
+            self.assertIn(text, " ".join(paragraph.split()), text)
 
 
 if __name__ == "__main__":

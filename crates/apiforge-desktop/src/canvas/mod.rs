@@ -8,9 +8,11 @@ mod layout;
 mod menu;
 mod paint;
 mod routing;
+mod strip;
 
 pub use layout::{Card, Chip, parse_inline};
 pub use routing::WireStyle;
+pub use strip::Pill as InputView;
 
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
@@ -18,7 +20,7 @@ use apiforge_core::{
     binding::data_edge_id,
     block::Block,
     edit::proxy_binding,
-    format::{Binding, Graph, Position, Project, ProxySource},
+    format::{Binding, Graph, Port, Position, Project, ProxySource},
     graph::{ORDER_PORT, WireKind, wires},
     model::{Branch, NodeKind},
     operator::Operator,
@@ -37,11 +39,23 @@ const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
 const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
+/// Why *Copy* and *Duplicate* are disabled with only chips selected (UX-34).
+const CHIP_NOT_COPIED: &str =
+    "Select a step to copy or duplicate. A variable chip shows a value; it is not copied.";
 
 /// A change requested on the board.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Select(Vec<String>),
+    /// Select a component's input in the INPUTS strip, or clear it (UX-31).
+    /// Selecting an input selects no block.
+    SelectInput(Option<String>),
+    /// Open the *New input* form for a component (UX-32): *+ Add input* in
+    /// the INPUTS strip.
+    AddInput,
+    /// Open or close the component's settings in the Inspector (UX-33):
+    /// *Component settings* in the board's header row.
+    ComponentSettings,
     /// Final positions after a drag.
     Move(Vec<(String, Position)>),
     Connect {
@@ -141,6 +155,54 @@ pub struct Input<'a> {
     /// moves, nothing is added, moved, wired or changed. An observing folder
     /// window shows it so (MCP-08a); a disabled board needs nothing more.
     pub read_only: bool,
+    /// The board is a component's: *Add step* offers *Export* and neither
+    /// *Start* nor *Data condition* (UX-21, decision 12).
+    pub component: bool,
+    /// A component's declared inputs, shown in the INPUTS strip under the
+    /// header row (UX-31); `None` for a board without the strip.
+    pub inputs: Option<&'a [Port]>,
+    /// The input selected in the strip: the steps that read it are ringed.
+    pub selected_input: Option<&'a str>,
+    /// The name typed in the *New input* form while it is open (UX-32): the
+    /// strip shows the input as being added.
+    pub adding_input: Option<&'a str>,
+    /// *Component settings* in the header row (UX-33); `None` on a board
+    /// without it, a scenario's.
+    pub settings: Option<SettingsButton>,
+    /// How the window is arranged around the board, such as the folder
+    /// window's mode. A change fits a camera the person has not moved again,
+    /// as a resized window does; a panel opening or closing beside the
+    /// board does not (UX-18).
+    pub arrangement: &'a str,
+}
+
+/// The state of the *Component settings* button in a component board's
+/// header row (UX-33, COMP-00 Q4).
+#[derive(Clone, Copy, Debug)]
+pub struct SettingsButton {
+    /// The settings are open in the Inspector: the button is pressed.
+    pub open: bool,
+    /// Whether the Inspector has room beside the board; without it the
+    /// button is disabled and says why.
+    pub available: bool,
+    /// The width the caller's header wants at the left of the row. The
+    /// button keeps its label while the row has room for both, and is an
+    /// icon with a tooltip when it has not.
+    pub header_width: f32,
+}
+
+/// The button's name, also its label when the header row has room.
+pub const SETTINGS: &str = "Component settings";
+const SETTINGS_HOVER: &str = "Component settings: name, description, action, inputs and outputs";
+const SETTINGS_UNAVAILABLE: &str =
+    "The window is too narrow for the Inspector beside the code. Widen it, or switch to Diagram.";
+
+/// How the toolbar shows *Component settings*.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SettingsShape {
+    None,
+    Icon,
+    Labelled,
 }
 
 /// The width a caller's header may take at the left of the board's header row.
@@ -179,6 +241,18 @@ impl Camera {
     }
 }
 
+/// How far a span on screen moves, the least, to lie inside `room`; one
+/// larger than the room moves its start to the room's start.
+fn least_shift(span: egui::Rangef, room: egui::Rangef) -> f32 {
+    if span.span() > room.span() || span.min < room.min {
+        room.min - span.min
+    } else if span.max > room.max {
+        room.max - span.max
+    } else {
+        0.0
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Drag {
     /// Moving the selected cards and proxies; `offset` is in world units.
@@ -214,6 +288,19 @@ pub struct Canvas {
     fit_pending: bool,
     camera_moved_by_user: bool,
     reveal_pending: Option<String>,
+    /// The board size the camera was last fitted to, while nothing has
+    /// panned it since: only such a camera is fitted again when the board's
+    /// own header settles.
+    fitted_for: Option<Vec2>,
+    /// The selected card last kept in view, so that a newly selected or
+    /// added card is panned into view once (UX-18).
+    kept_in_view: Option<String>,
+    /// The window's size and arrangement in the last frame: only their
+    /// change fits the board again (UX-18).
+    last_window: Vec2,
+    last_arrangement: String,
+    /// The blocks just pasted, to show once the board is drawn (UX-34).
+    pasted_pending: Vec<String>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -227,6 +314,16 @@ pub struct Canvas {
     pub wire_style: WireStyle,
     /// Whether a crossing is drawn as a bridge, from the user's settings.
     pub bridges: bool,
+    /// The blocks the last frame ringed for the selected input.
+    #[cfg(test)]
+    ringed: Vec<String>,
+    /// What the last frame's cards wrote in their source rows: the card's
+    /// name and the row's text (UX-16).
+    #[cfg(test)]
+    sources: Vec<(String, String)>,
+    /// Each card's whole rectangle on screen in the last frame, unclipped.
+    #[cfg(test)]
+    on_screen: Vec<(String, Rect)>,
 }
 
 impl Default for Canvas {
@@ -240,6 +337,11 @@ impl Default for Canvas {
             fit_pending: true,
             camera_moved_by_user: false,
             reveal_pending: None,
+            fitted_for: None,
+            kept_in_view: None,
+            last_window: Vec2::ZERO,
+            last_arrangement: String::new(),
+            pasted_pending: Vec::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -251,6 +353,12 @@ impl Default for Canvas {
             selected_wires: Vec::new(),
             inline: None,
             error: None,
+            #[cfg(test)]
+            ringed: Vec::new(),
+            #[cfg(test)]
+            sources: Vec::new(),
+            #[cfg(test)]
+            on_screen: Vec::new(),
         }
     }
 }
@@ -285,9 +393,65 @@ impl Canvas {
         self.menu.is_some()
     }
 
+    /// Whether a board rectangle was wholly in view in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_in_view(&self, world: Rect) -> bool {
+        self.last_focus.is_some_and(|focus| {
+            focus.contains_rect(self.screen_camera(self.last_viewport).rect(world))
+        })
+    }
+
+    /// The blocks the last frame ringed for the selected input (UX-31).
+    #[cfg(test)]
+    pub(crate) fn debug_ringed(&self) -> Vec<String> {
+        self.ringed.clone()
+    }
+
+    /// What the last frame's cards wrote in their source rows (UX-16).
+    #[cfg(test)]
+    pub(crate) fn debug_sources(&self) -> Vec<(String, String)> {
+        self.sources.clone()
+    }
+
+    /// The camera's zoom in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_zoom(&self) -> f32 {
+        self.camera.zoom
+    }
+
+    /// The part of the board the camera fits and keeps cards in.
+    #[cfg(test)]
+    pub(crate) fn debug_focus(&self) -> Rect {
+        self.last_focus.unwrap_or(Rect::NOTHING)
+    }
+
+    /// A card's whole rectangle on screen in the last frame, unclipped by
+    /// the board, the panels beside it or the window.
+    #[cfg(test)]
+    pub(crate) fn debug_card_rect(&self, id: &str) -> Option<Rect> {
+        self.on_screen
+            .iter()
+            .find(|(card, _)| card == id)
+            .map(|(_, rect)| *rect)
+    }
+
+    /// Every card's whole rectangle on screen in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_cards(&self) -> &[(String, Rect)] {
+        &self.on_screen
+    }
+
     /// Bring an explicitly located block into view without editing its position.
     pub fn reveal(&mut self, node_id: String) {
         self.reveal_pending = Some(node_id);
+    }
+
+    /// Shows the blocks just pasted or duplicated (UX-34): a fitted board
+    /// fits again, around the copies and their originals; a board the user
+    /// has moved brings the copies into view only when one of them is out of
+    /// it.
+    pub fn show_pasted(&mut self, node_ids: Vec<String>) {
+        self.pasted_pending = node_ids;
     }
 
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
@@ -338,6 +502,7 @@ impl Canvas {
             self.fit_pending = true;
             self.camera_moved_by_user = false;
             self.last_focus = None;
+            self.kept_in_view = None;
             self.drag = None;
             self.menu = None;
             self.inline = None;
@@ -350,6 +515,31 @@ impl Canvas {
         // The toolbar comes before the board in the keyboard order: it ends the
         // header row, which reads before the board below it (KTLO-12).
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
+        // The INPUTS strip reads after the header row and before the board.
+        if let (Some(rect), Some(inputs)) = (overlays.strip, input.inputs) {
+            let pills: Vec<strip::Pill> = inputs
+                .iter()
+                .map(|port| strip::Pill::of(port, &input.project.contracts))
+                .collect();
+            let state = strip::State {
+                selected: input.selected_input,
+                adding: input.adding_input,
+                can_add: !input.read_only,
+            };
+            match strip::show(ui, rect, &pills, state) {
+                Some(strip::Outcome::Select(name)) => {
+                    self.menu = None;
+                    self.selected_wires.clear();
+                    commands.push(Command::SelectInput(name));
+                }
+                Some(strip::Outcome::Add) => {
+                    self.menu = None;
+                    self.selected_wires.clear();
+                    commands.push(Command::AddInput);
+                }
+                None => {}
+            }
+        }
         let background = ui.allocate_rect(viewport, Sense::click_and_drag());
         background.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Diagram board")
@@ -363,6 +553,18 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project))
             .collect();
+        #[cfg(test)]
+        {
+            self.sources = cards
+                .iter()
+                .flat_map(|card| {
+                    card.inputs.iter().filter_map(|row| match &row.value {
+                        RowValue::Source(text) => Some((card.name.clone(), text.clone())),
+                        _ => None,
+                    })
+                })
+                .collect();
+        }
         let mut chips: Vec<Chip> = input
             .graph
             .proxies
@@ -370,44 +572,50 @@ impl Canvas {
             .map(|proxy| Chip::build(proxy, input.graph, input.project, input.parameters))
             .collect();
 
-        let focus_changed = self
-            .last_focus
-            .is_some_and(|prev| (prev.size() - overlays.focus.size()).length() > 1.0);
-        if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
-            self.fit(viewport, overlays.focus, shapes(&cards, &chips));
-        } else if focus_changed {
+        let pasted = std::mem::take(&mut self.pasted_pending);
+        if let Some(group) = cards
+            .iter()
+            .filter(|card| pasted.contains(&card.id))
+            .map(Card::rect)
+            .reduce(Rect::union)
+        {
             if !self.camera_moved_by_user {
-                self.fit(viewport, overlays.focus, shapes(&cards, &chips));
-            } else if let Some(prev) = self.last_focus {
-                let delta = (overlays.focus.center() - viewport.min)
-                    - (prev.center() - self.last_viewport.min);
-                self.camera.pan += delta;
-                if let Some(selected_id) = input.selection.first()
-                    && let Some(card) = cards.iter().find(|c| &c.id == selected_id)
-                {
-                    let screen_card = self.screen_camera(viewport).rect(card.rect());
-                    if screen_card.width() <= overlays.focus.width()
-                        && screen_card.height() <= overlays.focus.height()
-                    {
-                        let mut shift = Vec2::ZERO;
-                        if screen_card.left() < overlays.focus.left() {
-                            shift.x = overlays.focus.left() - screen_card.left();
-                        } else if screen_card.right() > overlays.focus.right() {
-                            shift.x = overlays.focus.right() - screen_card.right();
-                        }
-                        if screen_card.top() < overlays.focus.top() {
-                            shift.y = overlays.focus.top() - screen_card.top();
-                        } else if screen_card.bottom() > overlays.focus.bottom() {
-                            shift.y = overlays.focus.bottom() - screen_card.bottom();
-                        }
-                        self.camera.pan += shift;
-                    }
-                }
+                // A fitted board stays fitted, now around the copies too.
+                self.fit_pending = true;
+            } else if !overlays
+                .focus
+                .contains_rect(self.screen_camera(viewport).rect(group))
+            {
+                // Centre the copies, zooming out only as far as they need.
+                self.camera.zoom = self
+                    .camera
+                    .zoom
+                    .min(overlays.focus.width() / group.width())
+                    .min(overlays.focus.height() / group.height())
+                    .clamp(MIN_ZOOM, MAX_ZOOM);
+                self.camera.pan = (overlays.focus.center() - viewport.min)
+                    - group.center().to_vec2() * self.camera.zoom;
             }
         }
+        let window = ui.ctx().content_rect().size();
+        let rearranged = (window - self.last_window).length() > 1.0
+            || input.arrangement != self.last_arrangement;
+        let board_changed =
+            self.place_camera(viewport, overlays.focus, rearranged, shapes(&cards, &chips));
+        self.keep_selection_in_view(
+            viewport,
+            overlays.focus,
+            input.selection,
+            &cards,
+            board_changed,
+        );
         self.last_size = viewport.size();
         self.last_focus = Some(overlays.focus);
         self.last_viewport = viewport;
+        self.last_window = window;
+        if input.arrangement != self.last_arrangement {
+            input.arrangement.clone_into(&mut self.last_arrangement);
+        }
         if let Some(id) = self.reveal_pending.take()
             && let Some(card) = cards.iter().find(|card| card.id == id)
         {
@@ -432,6 +640,13 @@ impl Canvas {
             zoom: self.camera.zoom,
             pan: self.camera.pan + origin_offset,
         };
+        #[cfg(test)]
+        {
+            self.on_screen = cards
+                .iter()
+                .map(|card| (card.id.clone(), camera.rect(card.rect())))
+                .collect();
+        }
         if let Some(Drag::Nodes { ids, offset }) = &self.drag {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
                 *card = card.translated(*offset);
@@ -448,7 +663,18 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let board_wires = board_wires(input.graph, &cards, &chips);
-        let (related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
+        // The input selected in the strip has no shape on the board: the
+        // steps that read it are ringed (UX-31).
+        let ringed = input
+            .selected_input
+            .map_or_else(HashSet::new, |name| input_readers(input.graph, name));
+        #[cfg(test)]
+        {
+            self.ringed = ringed.iter().cloned().collect();
+            self.ringed.sort();
+        }
+        related_blocks.extend(ringed);
         let moving: HashSet<String> = match &self.drag {
             Some(Drag::Nodes { ids, .. }) => ids.iter().cloned().collect(),
             _ => HashSet::new(),
@@ -665,6 +891,9 @@ impl Canvas {
                     if !input.selection.is_empty() {
                         commands.push(Command::Select(vec![]));
                     }
+                    if input.selected_input.is_some() {
+                        commands.push(Command::SelectInput(None));
+                    }
                 }
             }
         }
@@ -734,7 +963,13 @@ impl Canvas {
         }
         self.error_banner(ui, &overlays);
         if let Some(menu) = &mut self.menu {
-            match menu.show(ui.ctx(), input.graph, input.project, input.library) {
+            match menu.show(
+                ui.ctx(),
+                input.graph,
+                input.project,
+                input.library,
+                input.component,
+            ) {
                 menu::Outcome::Open => {}
                 menu::Outcome::Close => self.menu = None,
                 menu::Outcome::Add(command) => {
@@ -751,22 +986,80 @@ impl Canvas {
         commands
     }
 
-    fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
+    /// Where the toolbar's size is kept as last drawn in one shape.
+    fn toolbar_key(&self, ui: &egui::Ui, input: &Input<'_>, settings: SettingsShape) -> egui::Id {
+        ui.id().with((
+            "toolbar-size",
+            input.selection.len(),
+            !self.selected_wires.is_empty(),
+            input.can_paste,
+            settings,
+        ))
+    }
+
+    fn toolbar_measured(
+        &self,
+        ui: &egui::Ui,
+        input: &Input<'_>,
+        settings: SettingsShape,
+    ) -> Option<Vec2> {
+        let key = self.toolbar_key(ui, input, settings);
+        ui.ctx().data(|data| data.get_temp(key))
+    }
+
+    /// The toolbar's width before it has been drawn in a shape, with the
+    /// settings button as an icon when it has one.
+    fn toolbar_estimate(&self, input: &Input<'_>) -> f32 {
         let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
-        let toolbar_width = 96.0
-            + if input.can_paste { 56.0 } else { 0.0 }
-            + if has_selection { 108.0 } else { 0.0 };
-        let toolbar_size = ui
-            .ctx()
-            .data(|data| {
-                data.get_temp(ui.id().with((
-                    "toolbar-size",
-                    input.selection.len(),
-                    !self.selected_wires.is_empty(),
-                    input.can_paste,
-                )))
+        96.0 + if input.can_paste { 56.0 } else { 0.0 }
+            + if has_selection { 108.0 } else { 0.0 }
+            + if input.settings.is_some() { 44.0 } else { 0.0 }
+    }
+
+    /// How the toolbar shows *Component settings* (UX-33): with its label
+    /// while the header row has room for the caller's whole header beside
+    /// the labelled toolbar, which the steps summary gives way to; else as
+    /// an icon with a tooltip.
+    fn settings_shape(&self, ui: &egui::Ui, input: &Input<'_>) -> SettingsShape {
+        let Some(settings) = input.settings else {
+            return SettingsShape::None;
+        };
+        let label = ui
+            .painter()
+            .layout_no_wrap(
+                SETTINGS.to_owned(),
+                FontId::proportional(theme::FONT_LABEL),
+                theme::TEXT,
+            )
+            .size()
+            .x;
+        // A compact button's label and its gap from the icon, as
+        // `widgets::ActionButton` lays them out, beside the square icon.
+        let extra = 20.0 + 14.0 + 6.0 + label - 26.0;
+        let labelled = self
+            .toolbar_measured(ui, input, SettingsShape::Labelled)
+            .map(|size| size.x)
+            .or_else(|| {
+                self.toolbar_measured(ui, input, SettingsShape::Icon)
+                    .map(|size| size.x + extra)
             })
-            .unwrap_or(vec2(toolbar_width, 30.0));
+            .unwrap_or_else(|| self.toolbar_estimate(input) + extra);
+        let room = Self::viewport(ui).width()
+            - layout::OVERLAY_PADDING_LEFT
+            - layout::OVERLAY_PADDING_RIGHT
+            - labelled
+            - 2.0 * layout::OVERLAY_GAP;
+        if room >= settings.header_width {
+            SettingsShape::Labelled
+        } else {
+            SettingsShape::Icon
+        }
+    }
+
+    fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
+        let toolbar_size = self
+            .toolbar_measured(ui, input, self.settings_shape(ui, input))
+            .unwrap_or(vec2(self.toolbar_estimate(input), 30.0));
         let banner_height = toolbar_size.y.max(26.0);
 
         let hint_galley = ui.fonts_mut(|fonts| {
@@ -778,6 +1071,11 @@ impl Canvas {
         });
         let error_size = self.error.as_ref().map(|_| vec2(320.0, 32.0));
         OverlayMeasures {
+            strip_height: if input.inputs.is_some() {
+                strip::HEIGHT
+            } else {
+                0.0
+            },
             banner_height,
             toolbar_size,
             zoom_size: vec2(180.0, 36.0),
@@ -799,11 +1097,18 @@ impl Canvas {
     pub fn header_room(&self, ui: &egui::Ui, input: &Input<'_>) -> HeaderRoom {
         // The header, a gap, the summary or nothing, a gap, the toolbar.
         let toolbar = self.measure_overlays(ui, input).toolbar_size.x;
-        let alone = Self::viewport(ui).width()
+        let row = Self::viewport(ui).width()
             - layout::OVERLAY_PADDING_LEFT
-            - layout::OVERLAY_PADDING_RIGHT
-            - toolbar
-            - 2.0 * layout::OVERLAY_GAP;
+            - layout::OVERLAY_PADDING_RIGHT;
+        // With too little room beside the toolbar for any header, the toolbar
+        // moves under the row (`layout::board_overlays`), and the header and
+        // the summary have the whole row.
+        let stacked = row - toolbar - layout::OVERLAY_GAP < layout::MIN_BANNER_SIDE_BY_SIDE;
+        let alone = if stacked {
+            row
+        } else {
+            row - toolbar - 2.0 * layout::OVERLAY_GAP
+        };
         let summary = ui
             .painter()
             .layout_no_wrap(
@@ -815,7 +1120,7 @@ impl Canvas {
             .x;
         HeaderRoom {
             alone,
-            with_summary: alone - summary,
+            with_summary: alone - summary - if stacked { layout::OVERLAY_GAP } else { 0.0 },
         }
     }
 
@@ -826,9 +1131,105 @@ impl Canvas {
         layout::board_overlays(Self::viewport(ui), &measures).leading
     }
 
+    /// Places the camera for this frame's board, and says whether the board
+    /// changed size or place since the last frame.
+    ///
+    /// A new board is fitted. A resized or rearranged window fits a camera
+    /// the person has not moved again, and keeps the middle of the board in
+    /// the middle of a moved one. A panel opening, closing or resized beside
+    /// the board (the Inspector, the library, Run results, Split's code)
+    /// leaves the board where it is on screen and its zoom as it is: the
+    /// panel covers the edge it opens from (UX-18). The board's own header
+    /// settling, with nothing else changed, fits a fitted camera again and
+    /// keeps the middle of a moved one.
+    fn place_camera(
+        &mut self,
+        viewport: Rect,
+        focus: Rect,
+        rearranged: bool,
+        shapes: Shapes<'_>,
+    ) -> bool {
+        if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
+            self.fit(viewport, focus, shapes);
+            return false;
+        }
+        let Some(previous) = self.last_focus else {
+            return false;
+        };
+        let moved = (viewport.min - self.last_viewport.min).length() > 0.5;
+        let resized = (viewport.size() - self.last_viewport.size()).length() > 0.5;
+        let refocused = (focus.size() - previous.size()).length() > 1.0;
+        if !(moved || resized || refocused) {
+            return false;
+        }
+        let kept_middle =
+            (focus.center() - viewport.min) - (previous.center() - self.last_viewport.min);
+        if rearranged {
+            if self.camera_moved_by_user {
+                self.camera.pan += kept_middle;
+            } else {
+                self.fit(viewport, focus, shapes);
+            }
+        } else if moved || resized {
+            self.camera.pan += self.last_viewport.min - viewport.min;
+            self.fitted_for = None;
+        } else if self.camera_moved_by_user {
+            self.camera.pan += kept_middle;
+        } else if self.fitted_for == Some(viewport.size()) {
+            self.fit(viewport, focus, shapes);
+        }
+        true
+    }
+
+    /// Pans the least that shows the one selected card whole in the focus,
+    /// once when it is selected or added and again whenever the board
+    /// changes size, so the Inspector it opens never covers it (UX-18). A
+    /// card larger than the focus shows its top left corner. Nothing pans
+    /// while a drag is under way: the card stays under the pointer.
+    fn keep_selection_in_view(
+        &mut self,
+        viewport: Rect,
+        focus: Rect,
+        selection: &[String],
+        cards: &[Card],
+        board_changed: bool,
+    ) {
+        let selected = match selection {
+            [one] => Some(one),
+            _ => None,
+        };
+        if self.drag.is_some() {
+            self.kept_in_view = selected.cloned();
+            return;
+        }
+        let Some(id) = selected else {
+            self.kept_in_view = None;
+            return;
+        };
+        if !board_changed && self.kept_in_view.as_ref() == Some(id) {
+            return;
+        }
+        // A card being added is not on the board until its edit applies:
+        // it is kept in view in the first frame that draws it.
+        let Some(card) = cards.iter().find(|card| &card.id == id) else {
+            return;
+        };
+        self.kept_in_view = Some(id.clone());
+        let on_screen = self.screen_camera(viewport).rect(card.rect());
+        let shift = vec2(
+            least_shift(on_screen.x_range(), focus.x_range()),
+            least_shift(on_screen.y_range(), focus.y_range()),
+        );
+        if shift != Vec2::ZERO {
+            self.camera.pan += shift;
+            self.fitted_for = None;
+        }
+    }
+
     fn fit(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
         self.fit_pending = false;
         self.camera_moved_by_user = false;
+        self.fitted_for = Some(viewport.size());
         let local_focus_center = focus.center() - viewport.min;
         let Some(bounds) = shapes.bounds() else {
             self.camera = Camera {
@@ -1455,6 +1856,7 @@ impl Canvas {
         commands: &mut Vec<Command>,
     ) {
         let has_selection = !input.selection.is_empty();
+        let shape = self.settings_shape(ui, input);
         let measured = egui::Area::new(ui.id().with("board-toolbar"))
             .enabled(ui.is_enabled())
             .constrain_to(viewport)
@@ -1472,6 +1874,32 @@ impl Canvas {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let editable = !input.read_only;
+                            if let Some(settings) = input.settings {
+                                let labelled = shape == SettingsShape::Labelled;
+                                // An icon's own tooltip is its label: there
+                                // the longer text, under the button's name.
+                                let button = if labelled {
+                                    widgets::action(Icon::Settings, SETTINGS).compact().quiet()
+                                } else {
+                                    widgets::icon_button(Icon::Settings, SETTINGS_HOVER)
+                                        .named(SETTINGS)
+                                        .compact()
+                                };
+                                let mut response = ui
+                                    .add_enabled(
+                                        settings.available,
+                                        button.toggle(settings.open && settings.available),
+                                    )
+                                    .on_disabled_hover_text(SETTINGS_UNAVAILABLE);
+                                if labelled {
+                                    response = response.on_hover_text(SETTINGS_HOVER);
+                                }
+                                if response.clicked() {
+                                    self.menu = None;
+                                    commands.push(Command::ComponentSettings);
+                                }
+                                ui.separator();
+                            }
                             if ui
                                 .add_enabled(
                                     editable,
@@ -1516,27 +1944,24 @@ impl Canvas {
                                 ui,
                                 widgets::icon_button(Icon::Wire, "Wire style").compact(),
                                 |ui| {
-                                    for (style, label) in [
-                                        (WireStyle::Orthogonal, "Right angles"),
-                                        (WireStyle::Spline, "Curves"),
-                                    ] {
-                                        if ui
-                                            .add(
-                                                widgets::action(
-                                                    if self.wire_style == style {
-                                                        Icon::Check
-                                                    } else {
-                                                        Icon::Wire
-                                                    },
-                                                    label,
-                                                )
-                                                .quiet(),
+                                    // *Curves* returns when it draws curves (UX-28).
+                                    let style = WireStyle::Orthogonal;
+                                    if ui
+                                        .add(
+                                            widgets::action(
+                                                if self.wire_style == style {
+                                                    Icon::Check
+                                                } else {
+                                                    Icon::Wire
+                                                },
+                                                "Right angles",
                                             )
-                                            .clicked()
-                                        {
-                                            commands.push(Command::SetWireStyle(style));
-                                            ui.close();
-                                        }
+                                            .quiet(),
+                                        )
+                                        .clicked()
+                                    {
+                                        commands.push(Command::SetWireStyle(style));
+                                        ui.close();
                                     }
                                     ui.separator();
                                     if ui
@@ -1576,17 +2001,31 @@ impl Canvas {
                                                 Command::SaveSelectionAsComponent,
                                             ),
                                         ];
+                                        // A variable chip is a view of a value, not
+                                        // a step, so a chip alone has nothing to
+                                        // copy (UX-34).
+                                        let has_block = input.selection.iter().any(|id| {
+                                            input.graph.nodes.iter().any(|node| &node.id == id)
+                                        });
                                         for (icon, label, shortcut, command) in items {
+                                            let copies = matches!(
+                                                command,
+                                                Command::Copy | Command::Duplicate
+                                            );
                                             let allowed = has_selection
-                                                && (editable || matches!(command, Command::Copy));
-                                            if ui
+                                                && (editable || matches!(command, Command::Copy))
+                                                && (has_block || !copies);
+                                            let mut response = ui
                                                 .add_enabled(
                                                     allowed,
                                                     widgets::action(icon, label).quiet(),
                                                 )
-                                                .on_hover_text(shortcut)
-                                                .clicked()
-                                            {
+                                                .on_hover_text(shortcut);
+                                            if copies && has_selection && !has_block {
+                                                response = response
+                                                    .on_disabled_hover_text(CHIP_NOT_COPIED);
+                                            }
+                                            if response.clicked() {
                                                 commands.push(command);
                                                 ui.close();
                                             }
@@ -1612,12 +2051,7 @@ impl Canvas {
                         });
                     });
             });
-        let key = ui.id().with((
-            "toolbar-size",
-            input.selection.len(),
-            !self.selected_wires.is_empty(),
-            input.can_paste,
-        ));
+        let key = self.toolbar_key(ui, input, shape);
         let size = measured.response.rect.size();
         if ui.ctx().data(|data| data.get_temp::<Vec2>(key)) != Some(size) {
             ui.ctx().data_mut(|data| data.insert_temp(key, size));
@@ -1948,15 +2382,37 @@ fn highlights(
         if let Some(node) = chip.source_node() {
             blocks.insert(node.to_owned());
         }
-        for node in &graph.nodes {
-            for (input, binding) in &node.inputs {
-                binding.for_each_leaf(&mut |leaf, path| {
-                    if reads_source(&chip.proxy.source, leaf) {
-                        blocks.insert(node.id.clone());
-                        wire_ids.insert(data_edge_id(&node.id, input, path));
-                    }
-                });
-            }
+        let (readers, wires) = readers(graph, &chip.proxy.source);
+        blocks.extend(readers);
+        wire_ids.extend(wires);
+    }
+    (blocks, wire_ids)
+}
+
+/// The blocks that read the parameter or component input `name`.
+pub fn input_readers(graph: &Graph, name: &str) -> HashSet<String> {
+    readers(
+        graph,
+        &ProxySource::Parameter {
+            name: name.to_owned(),
+        },
+    )
+    .0
+}
+
+/// The blocks that read what `source` stands for, a field of it included,
+/// and the data wires a proxy of it would draw to them.
+fn readers(graph: &Graph, source: &ProxySource) -> (HashSet<String>, HashSet<String>) {
+    let mut blocks = HashSet::new();
+    let mut wire_ids = HashSet::new();
+    for node in &graph.nodes {
+        for (input, binding) in &node.inputs {
+            binding.for_each_leaf(&mut |leaf, path| {
+                if reads_source(source, leaf) {
+                    blocks.insert(node.id.clone());
+                    wire_ids.insert(data_edge_id(&node.id, input, path));
+                }
+            });
         }
     }
     (blocks, wire_ids)
@@ -2313,8 +2769,14 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
+                                inputs: None,
+                                selected_input: None,
+                                adding_input: None,
+                                settings: None,
+                                arrangement: "",
                             },
                         );
                     });
@@ -2359,8 +2821,14 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
+                                component: false,
                                 header_leading: None,
                                 library: None,
+                                inputs: None,
+                                selected_input: None,
+                                adding_input: None,
+                                settings: None,
+                                arrangement: "",
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -2397,6 +2865,71 @@ mod tests {
                 );
                 output.textures_delta.clear();
             }
+        }
+    }
+    /// UX-33: on a board too narrow for any header beside the toolbar, the
+    /// toolbar moves under the row and the header has the whole row, so a
+    /// wider toolbar does not cut the file name short for nothing.
+    #[test]
+    fn a_header_has_the_whole_row_when_the_toolbar_moves_below() {
+        let context = egui::Context::default();
+        crate::theme::apply(&context);
+        let project = apiforge_core::demos::shop_project();
+        let component = &project.components[0];
+        let graph = &component.graph;
+        let mut canvas = Canvas::default();
+        for frame in 0..3 {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(340.0, 600.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let mut input = Input {
+                            graph,
+                            reference_graph: graph,
+                            project: &project,
+                            parameters: &[],
+                            selection: &[],
+                            steps: None,
+                            can_paste: false,
+                            context: "test",
+                            library_in_view: true,
+                            read_only: false,
+                            component: false,
+                            header_leading: None,
+                            library: None,
+                            inputs: Some(&component.inputs),
+                            selected_input: None,
+                            adding_input: None,
+                            settings: Some(SettingsButton {
+                                open: true,
+                                available: true,
+                                header_width: 200.0,
+                            }),
+                            arrangement: "",
+                        };
+                        let room = canvas.header_room(ui, &input);
+                        input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));
+                        if frame == 2 {
+                            let row = Canvas::viewport(ui).width()
+                                - layout::OVERLAY_PADDING_LEFT
+                                - layout::OVERLAY_PADDING_RIGHT;
+                            assert!((room.alone - row).abs() < 0.01, "{room:?} of {row}");
+                            assert_eq!(canvas.settings_shape(ui, &input), SettingsShape::Icon);
+                            let overlays = layout::board_overlays(
+                                Canvas::viewport(ui),
+                                &canvas.measure_overlays(ui, &input),
+                            );
+                            assert!((overlays.leading.width() - 200.0).abs() < 0.01);
+                            assert!(overlays.toolbar.top() >= overlays.leading.bottom());
+                        }
+                        canvas.show(ui, &input);
+                    });
+                },
+            );
+            output.textures_delta.clear();
         }
     }
 }

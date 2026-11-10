@@ -8,13 +8,15 @@ use apiforge_project::PreparedRun;
 use apiforge_runner::{RunHandle, RunRequest, RunTarget, RunnerService};
 use apiforge_storage::JournalStore;
 use apiforge_storage::project::IdentityBase;
+use std::cell::Cell;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 #[derive(Default)]
 pub(super) struct Runs {
     pub runner: Option<RunnerService>,
     pub handle: Option<RunHandle>,
     active: Option<PreparedRun>,
-    reports: HashMap<String, (PreparedRun, RunResult)>,
+    reports: HashMap<String, Report>,
     panel: crate::report::ReportPanel,
     journal: Option<Arc<JournalStore>>,
     pending_review: Option<JournalReview>,
@@ -33,15 +35,144 @@ pub(super) struct JournalReview {
     legacy: bool,
 }
 
+/// A document's latest run and the checks added from its results since.
+struct Report {
+    prepared: PreparedRun,
+    result: RunResult,
+    /// In the order they were added; an undone check stays until another
+    /// check replaces it, so that redo finds it again.
+    checks: Vec<AddedCheck>,
+    /// The document's text at a source version: its hash, and whether it is
+    /// the run's own source, so a frame does not read the same text again.
+    text: Cell<Option<(u64, u64, bool)>>,
+}
+
+impl Report {
+    fn new(prepared: PreparedRun, result: RunResult) -> Self {
+        Self {
+            prepared,
+            result,
+            checks: Vec::new(),
+            text: Cell::new(None),
+        }
+    }
+}
+
+/// A check added from a report: its field, and the hash of the document's
+/// text right after the check's edit applied (UX-01). Never persisted.
+struct AddedCheck {
+    field: crate::report::CheckedField,
+    source_after: u64,
+}
+
+/// A check whose edit is on its way to the document (UX-35): applied at
+/// once, or after the person confirms the comment prompt, it is counted
+/// only if its card was added.
+#[derive(Clone)]
+pub(super) struct PendingCheck {
+    field: crate::report::CheckedField,
+    /// Whether the card goes to the cleanup graph.
+    cleanup: bool,
+    /// The graph's card count before the edit.
+    before: usize,
+    /// The checks counted when the edit was asked for; later ones are
+    /// replaced, as after an undo.
+    checks: usize,
+}
+
+/// How a document's report relates to the document now (UX-01).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Freshness {
+    /// Nothing changed since the run.
+    Fresh,
+    /// The first `n` checks added from the results are the only change:
+    /// the results stay usable and the checks run on the next run.
+    ChecksOnly(usize),
+    /// Something else changed.
+    Stale,
+}
+
+impl Freshness {
+    fn checks(self) -> usize {
+        match self {
+            Freshness::ChecksOnly(count) => count,
+            Freshness::Fresh | Freshness::Stale => 0,
+        }
+    }
+}
+
+fn text_hash(text: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Why no live request leaves an observing window (MCP-08a).
 pub(super) const LIVE_PAUSED: &str =
     "Live requests are not sent from this window while another process holds the project.";
 
+/// Keeps the latest report of `prepared`'s run. Another run starts a new
+/// report, and with it a new count of checks; the same run's progress keeps
+/// the checks added from it meanwhile.
+fn publish(reports: &mut HashMap<String, Report>, prepared: &PreparedRun, result: RunResult) {
+    match reports.get_mut(prepared.document_id()) {
+        Some(report) if report.result.id == result.id => report.result = result,
+        _ => {
+            reports.insert(
+                prepared.document_id().into(),
+                Report::new(prepared.clone(), result),
+            );
+        }
+    }
+}
+
+/// The hover of the header's label while a run of unsaved code runs (UX-04).
+const UNSAVED_HOVER: &str = "The run uses the code in the editor, which is not saved yet.";
+/// The hover while a run of the last confirmed code runs (UX-04).
+const EARLIER_HOVER: &str =
+    "The editor's code has errors; the run uses the last confirmed code and configuration.";
+
 impl FolderApp {
-    /// The active tab's run results fill the window (KTLO-19).
+    /// What the header says beside *Cancel run* while a run runs (UX-04):
+    /// the text and its hover, or nothing when no run runs. On the run's
+    /// own tab it says *code*; on any other it names the file that runs.
+    pub(super) fn running_label(
+        &self,
+        active: Option<&str>,
+    ) -> Option<(String, Option<&'static str>)> {
+        self.runs.handle.as_ref()?;
+        let prepared = self.runs.active.as_ref()?;
+        let (what, hover) = if prepared.last_valid {
+            ("earlier", Some(EARLIER_HOVER))
+        } else if prepared.unsaved {
+            ("unsaved", Some(UNSAVED_HOVER))
+        } else {
+            ("saved", None)
+        };
+        let id = prepared.document_id();
+        let subject = if active == Some(id) {
+            "code"
+        } else {
+            self.session
+                .as_ref()
+                .and_then(|session| session.document(id))
+                .map_or("code", |document| file_name(document.entry().path.as_str()))
+        };
+        Some((format!("Running {what} {subject}"), hover))
+    }
+
+    /// The active tab's run results fill the window (KTLO-19), so nothing
+    /// else is drawn. At any other height the views stay drawn above them
+    /// (UX-36).
     pub(super) fn report_maximised(&self, active: Option<&str>) -> bool {
         self.runs.panel.is_maximised()
             && active.is_some_and(|id| self.runs.reports.contains_key(id))
+    }
+
+    /// The run results panel's heights and drag, for a test's failure message.
+    #[cfg(test)]
+    pub(super) fn report_state(&self) -> String {
+        self.runs.panel.debug_state()
     }
 
     /// Escape returns maximised run results to their height; the board, which
@@ -54,14 +185,56 @@ impl FolderApp {
         }
     }
 
+    /// The document's report while it is fresh or only checks were added
+    /// from it (UX-01), for the board's and the code's marks.
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
-        let (prepared, report) = self.runs.reports.get(id)?;
-        (!self.session.as_ref()?.run_is_stale(prepared)).then(|| report.clone())
+        let report = self.runs.reports.get(id)?;
+        (self.freshness(report) != Freshness::Stale).then(|| report.result.clone())
+    }
+
+    /// Fresh while the run's own checks are clear; otherwise, when nothing
+    /// but the text changed, the text says how: the run's own source after
+    /// every check was undone, or the text right after one of the checks.
+    fn freshness(&self, report: &Report) -> Freshness {
+        let Some(session) = &self.session else {
+            return Freshness::Stale;
+        };
+        if !session.run_is_stale(&report.prepared) {
+            return Freshness::Fresh;
+        }
+        if report.checks.is_empty() || session.run_is_stale_beyond_text(&report.prepared) {
+            return Freshness::Stale;
+        }
+        let Some(document) = session.document(report.prepared.document_id()) else {
+            return Freshness::Stale;
+        };
+        let version = document.source_version();
+        let (hash, run_source) = match report.text.get() {
+            Some((cached, hash, run_source)) if cached == version => (hash, run_source),
+            _ => {
+                let text = document.text();
+                let hash = text_hash(text);
+                let run_source = report.prepared.snapshot.matches_source(text);
+                report.text.set(Some((version, hash, run_source)));
+                (hash, run_source)
+            }
+        };
+        if let Some(index) = report
+            .checks
+            .iter()
+            .rposition(|check| check.source_after == hash)
+        {
+            Freshness::ChecksOnly(index + 1)
+        } else if run_source {
+            Freshness::Fresh
+        } else {
+            Freshness::Stale
+        }
     }
 
     #[cfg(test)]
     pub(super) fn run_result(&self, id: &str) -> Option<&RunResult> {
-        self.runs.reports.get(id).map(|(_, result)| result)
+        self.runs.reports.get(id).map(|report| &report.result)
     }
 
     pub(super) fn open_run_journal(&mut self) {
@@ -262,14 +435,8 @@ impl FolderApp {
             .start(request)
         {
             Ok(handle) => {
-                let message = if prepared.last_valid {
-                    "Running the confirmed earlier code and configuration."
-                } else if prepared.unsaved {
-                    "Running unsaved code."
-                } else {
-                    "Running saved code."
-                };
-                self.notify(message, false);
+                // What runs is said in the header for the run's life, not
+                // in the band (UX-04, #152).
                 self.runs.active = Some(prepared);
                 self.runs.handle = Some(handle);
                 self.runs.panel.open = true;
@@ -281,15 +448,11 @@ impl FolderApp {
     pub(super) fn poll_run(&mut self) {
         if let (Some(handle), Some(prepared)) = (&self.runs.handle, &self.runs.active) {
             if let Some(report) = handle.latest() {
-                self.runs
-                    .reports
-                    .insert(prepared.document_id().into(), (prepared.clone(), report));
+                publish(&mut self.runs.reports, prepared, report);
             }
             if handle.is_finished() {
                 if let Some(report) = handle.latest() {
-                    self.runs
-                        .reports
-                        .insert(prepared.document_id().into(), (prepared.clone(), report));
+                    publish(&mut self.runs.reports, prepared, report);
                 }
                 self.runs.handle = None;
                 self.runs.active = None;
@@ -374,13 +537,16 @@ impl FolderApp {
             self.runs.panel.restore();
         }
         let Some(id) = active else { return };
-        let Some((prepared, result)) = self.runs.reports.get(id).cloned() else {
+        let Some(report) = self.runs.reports.get(id) else {
             return;
         };
-        let stale = self
-            .session
-            .as_ref()
-            .is_none_or(|session| session.run_is_stale(&prepared));
+        let freshness = self.freshness(report);
+        let result = report.result.clone();
+        let checked: Vec<_> = report.checks[..freshness.checks()]
+            .iter()
+            .map(|check| check.field.clone())
+            .collect();
+        let stale = freshness == Freshness::Stale;
         let snapshot = self.snapshot(id);
         let policy = snapshot
             .as_ref()
@@ -402,6 +568,7 @@ impl FolderApp {
                 error_policy: policy,
                 running: self.runs.handle.is_some(),
                 stale,
+                checked: &checked,
                 files_busy: false,
                 component: self
                     .session
@@ -455,6 +622,7 @@ impl FolderApp {
                         publication::Action::Model {
                             next: Box::new(Document::Scenario(scenario)),
                             selection: None,
+                            check: None,
                         },
                     );
                 }
@@ -470,20 +638,41 @@ impl FolderApp {
                     .iter()
                     .any(|node| node.id == node_id);
                 let graph = graph_of(&model, cleanup);
+                let before = graph.nodes.len();
+                let checks = self
+                    .runs
+                    .reports
+                    .get(id)
+                    .map_or(0, |report| self.freshness(report).checks());
                 if let Some(node) = graph.nodes.iter().find(|node| node.id == node_id) {
                     let context = self.context_project();
                     let parameters = parameters_of(&model);
                     let board = Board {
                         graph,
-                        reference: graph_of(&model, false),
+                        reference: &reference_of(&model, cleanup),
                         project: &context,
                         parameters: &parameters,
+                        sibling: sibling_of(&model, cleanup),
                     };
-                    self.apply_edit(
+                    let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
+                    // The check is counted when its edit applies, which may
+                    // first ask about unattached comments (UX-35).
+                    self.component_action(
                         id,
-                        &model,
-                        cleanup,
-                        Ok(board.push_node(edit::field_assertion(node, &port, &path, &value))),
+                        publication::Action::Model {
+                            next: Box::new(with_graph(&model, cleanup, pushed.graph)),
+                            selection: pushed.selection,
+                            check: Some(Box::new(PendingCheck {
+                                field: crate::report::CheckedField {
+                                    node_id,
+                                    port,
+                                    path,
+                                },
+                                cleanup,
+                                before,
+                                checks,
+                            })),
+                        },
                     );
                 }
             }
@@ -507,6 +696,31 @@ impl FolderApp {
                     )),
                 });
             }
+        }
+    }
+
+    /// Remembers a check added from the document's report when its edit
+    /// applied, the text right after it as the key (UX-01). A check after an
+    /// undone one replaces it, as a new edit clears what redo would bring
+    /// back.
+    pub(super) fn record_check(&mut self, id: &str, check: PendingCheck) {
+        let Some(document) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.document(id))
+        else {
+            return;
+        };
+        let added = document
+            .model()
+            .is_some_and(|model| graph_of(model, check.cleanup).nodes.len() > check.before);
+        let source_after = text_hash(document.text());
+        if added && let Some(report) = self.runs.reports.get_mut(id) {
+            report.checks.truncate(check.checks);
+            report.checks.push(AddedCheck {
+                field: check.field,
+                source_after,
+            });
         }
     }
 

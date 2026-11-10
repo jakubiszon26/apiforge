@@ -29,6 +29,11 @@ chrono.workspace = true
 # Serves egui_inspection when EGUI_INSPECTION is set (ADR 0013). Never enabled in releases.
 inspection = ["eframe/inspection"]
 
+# REL-02: the icon and version strings of apiforge-desktop.exe; build.rs does nothing
+# on another target, and a Linux build never fetches this.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [lints]
 workspace = true
 

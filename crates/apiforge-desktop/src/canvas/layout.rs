@@ -80,12 +80,17 @@ pub struct OverlayMeasures {
     /// A header the caller draws at the left of the header row (KTLO-12):
     /// its size, or zero when the row has none.
     pub leading_size: Vec2,
+    /// The height of a strip under the header row across the whole board, a
+    /// component's inputs (UX-31), or zero for none.
+    pub strip_height: f32,
 }
 
 /// Disjoint regions of the canvas viewport.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoardOverlays {
     pub header: Rect,
+    /// The strip under the header row, when the board has one (UX-31).
+    pub strip: Option<Rect>,
     /// Where the caller's own header sits, at the left of the header row.
     pub leading: Rect,
     /// The steps summary's room: after the leading header, before the toolbar.
@@ -156,8 +161,15 @@ pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverla
     let header_bottom =
         (banner.bottom().max(toolbar.bottom()) + OVERLAY_PADDING_Y).min(viewport.bottom());
     let header = Rect::from_min_max(viewport.min, pos2(viewport.right(), header_bottom));
+    let strip_bottom = (header.bottom() + measures.strip_height.max(0.0)).min(viewport.bottom());
+    let strip = (measures.strip_height > 0.0).then(|| {
+        Rect::from_min_max(
+            pos2(viewport.left(), header.bottom()),
+            pos2(viewport.right(), strip_bottom),
+        )
+    });
 
-    let footer_top = (viewport.bottom() - FOOTER_BAND_HEIGHT).max(header.bottom());
+    let footer_top = (viewport.bottom() - FOOTER_BAND_HEIGHT).max(strip_bottom);
     let footer = Rect::from_min_max(pos2(viewport.left(), footer_top), viewport.max);
     let zoom_y = (footer.center().y - measures.zoom_size.y / 2.0).max(footer.top() + 2.0);
     let zoom_controls = Rect::from_min_size(
@@ -182,7 +194,7 @@ pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverla
     };
 
     let board = Rect::from_min_max(
-        pos2(viewport.left(), header.bottom()),
+        pos2(viewport.left(), strip_bottom),
         pos2(viewport.right(), footer.top()),
     );
     let minimap =
@@ -210,6 +222,7 @@ pub fn board_overlays(viewport: Rect, measures: &OverlayMeasures) -> BoardOverla
 
     BoardOverlays {
         header,
+        strip,
         leading,
         banner,
         banner_wrap_width: wrap_width,
@@ -776,10 +789,13 @@ mod tests {
         // No leading header (the legacy window), Split's Main / Cleanup, and
         // Diagram's file name, kind and Main / Cleanup (KTLO-12).
         let leading_sizes = [Vec2::ZERO, vec2(140.0, 32.0), vec2(400.0, 32.0)];
-        for (size, leading_size) in sizes
-            .into_iter()
-            .flat_map(|size| leading_sizes.map(|leading| (size, leading)))
-        {
+        // A scenario's board, and a component's with its inputs (UX-31).
+        let strip_heights = [0.0, 40.0];
+        for (size, leading_size, strip_height) in sizes.into_iter().flat_map(|size| {
+            leading_sizes
+                .into_iter()
+                .flat_map(move |leading| strip_heights.map(|strip| (size, leading, strip)))
+        }) {
             let viewport = Rect::from_min_size(pos2(235.0, 160.0), size);
             let measures = OverlayMeasures {
                 banner_height: 36.0,
@@ -789,6 +805,7 @@ mod tests {
                 shortcuts_badge_width: 78.0,
                 error_size: Some(vec2(300.0, 30.0)),
                 leading_size,
+                strip_height,
             };
             let out = board_overlays(viewport, &measures);
             assert!(viewport.contains_rect(out.header));
@@ -812,6 +829,17 @@ mod tests {
             }
             assert!(!out.header.intersects(out.board.shrink(0.5)));
             assert!(!out.footer.intersects(out.board.shrink(0.5)));
+            match out.strip {
+                Some(strip) => {
+                    // Under the header row, across the board, above it.
+                    assert_eq!(strip.top(), out.header.bottom());
+                    assert_eq!(strip.width(), viewport.width());
+                    assert_eq!(strip.height(), strip_height);
+                    assert_eq!(out.board.top(), strip.bottom());
+                    assert!(!out.footer.intersects(strip.shrink(0.5)));
+                }
+                None => assert_eq!(strip_height, 0.0),
+            }
             let hint_rect = match out.hint {
                 HintPlacement::Inline(r) | HintPlacement::Tooltip(r) => r,
             };

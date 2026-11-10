@@ -116,7 +116,7 @@ impl Channel {
                         Some(listener)
                     }
                     Err(error) => {
-                        eprintln!("apiforge: channel: cannot listen: {}", error.kind());
+                        errln!("apiforge: channel: cannot listen: {}", error.kind());
                         None
                     }
                 };
@@ -127,11 +127,11 @@ impl Channel {
                         runtime.block_on(serve(listener, receiver, sender, repaint, said));
                     });
                 if spawned.is_err() {
-                    eprintln!("apiforge: channel: cannot start its thread");
+                    errln!("apiforge: channel: cannot start its thread");
                     endpoint = None;
                 }
             }
-            Err(error) => eprintln!("apiforge: channel: cannot start: {}", error.kind()),
+            Err(error) => errln!("apiforge: channel: cannot start: {}", error.kind()),
         }
         Self {
             endpoint,
@@ -218,7 +218,7 @@ async fn serve(
                     }
                 }
                 Err(error) => {
-                    eprintln!("apiforge: channel: a connection failed: {}", error.kind());
+                    errln!("apiforge: channel: a connection failed: {}", error.kind());
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             },
@@ -252,7 +252,7 @@ async fn serve(
                             tell(Event::Connected { link });
                         }
                         _ => {
-                            eprintln!("apiforge: channel: the holder could not be reached");
+                            errln!("apiforge: channel: the holder could not be reached");
                             tell(Event::Closed { link });
                         }
                     }
@@ -322,7 +322,7 @@ fn read(
                 }
                 Ok(Some(Received::Message(message))) => tell(Event::Message { link, message }),
                 Ok(Some(Received::Ignored(why))) => {
-                    eprintln!("apiforge: channel: ignored {why}");
+                    errln!("apiforge: channel: ignored {why}");
                 }
                 Ok(None) | Err(_) => break,
             }
@@ -591,17 +591,17 @@ impl FolderApp {
                 }
                 // The person's consent is said by this window, never heard.
                 Message::Permission { .. } => {
-                    eprintln!("apiforge: channel: ignored a message only a window sends");
+                    errln!("apiforge: channel: ignored a message only a window sends");
                 }
                 Message::Request { .. }
                 | Message::Granted
                 | Message::Refused { .. }
                 | Message::TakeBack => {
-                    eprintln!("apiforge: channel: ignored a message only a window sends");
+                    errln!("apiforge: channel: ignored a message only a window sends");
                 }
             },
             Event::Message { .. } => {
-                eprintln!(
+                errln!(
                     "apiforge: channel: ignored a message on a connection that observes nothing"
                 );
             }
@@ -797,7 +797,7 @@ impl FolderApp {
                         app.open_run_journal();
                     }
                     Err(error) => {
-                        eprintln!("apiforge: channel: the project could not be handed over");
+                        errln!("apiforge: channel: the project could not be handed over");
                         app.refuse(link, "the window could not hand the project over");
                         app.open_run_journal();
                         app.notify(
@@ -913,7 +913,7 @@ impl FolderApp {
                     return;
                 }
                 if !matches!(result, Ok(Ok(()))) {
-                    eprintln!(
+                    errln!(
                         "apiforge: channel: the holder file could not name this window's channel"
                     );
                 }

@@ -57,7 +57,10 @@ time; a second window opens it read-only, says so, and can still export its work
   Right-click, or the buttons above the tree, create, rename, move and delete files
   and folders. Deleted files go to the project's **Trash**, which restores them.
 - **Tabs**: one per open file. A dot marks unsaved work; the close button asks
-  before discarding it.
+  before discarding it. A tab keeps its scroll: switching back shows the code
+  where it was left, with the caret in place. If the text changed meanwhile and
+  moved a caret that was in view out of it, the code scrolls only as far as
+  needed to show it.
 - **Code, Diagram and Split** (top): the same document as text, as a board of
   blocks, or both side by side. Edits in either form update the other once the
   code is valid; invalid code keeps the last valid diagram read-only.
@@ -87,10 +90,17 @@ stay in memory for the session and are never written or exported.
 
 ## Runs
 
-**Run** simulates the active scenario with its sample responses. **Run options →
-Run live requests** sends real requests. A run takes the scenario's current text,
-saved or not, together with the published component revisions it calls; later
-edits do not change a run in progress. When the code has errors, Run offers the
+The Run button runs the project's run mode on the active scenario or component:
+**Run simulation** uses its sample responses and sends nothing; **Run live** sends
+real requests. The mode is chosen under **Run options**, the chevron at the button's
+right, and holds until it is changed. It is the person's, per project and computer,
+kept in `run-mode.json` beside `agent-consent.json` in the user's configuration
+directory by the manifest id, never in the project folder; a project never set is in
+Simulation. While the window observes another process's work, the button runs a
+simulation and *Live* cannot be chosen; the stored mode returns after *Take back*
+unless *Simulation* was chosen meanwhile. A run takes the scenario's current text,
+saved or not, together with the published component revisions it calls; later edits
+do not change a run in progress. When the code has errors, the Run button offers the
 last valid version and asks first. A live run is journalled under
 `.apiforge/local/`; one interrupted by a crash is listed at the next start until
 marked as handled. The command-line `run --folder` uses saved files only.

@@ -116,9 +116,11 @@ pub struct PublishResult {
     pub source_sha256: String,
     /// The project's head generation after the publication.
     pub generation: u64,
+    /// Whether this call wrote: `false` with `replayed`, whose publication
+    /// an earlier call wrote (MCP-22).
     pub wrote: bool,
-    /// The project paths the commit wrote: the revision, the registry and
-    /// the checkpoint.
+    /// The project paths the publication's commit wrote: the revision, the
+    /// registry and the checkpoint; with `replayed`, the earlier call's.
     pub changed: Vec<String>,
     /// The result recorded for this `request_id` earlier: nothing was
     /// published by this call.
@@ -888,7 +890,7 @@ fn commit_failed(
 /// The answer to a publication the record holds for its `request_id`: its
 /// result for the same path and hash, `invalid_inputs` for another call,
 /// `unknown_outcome` when the server that started it did not record how it
-/// ended. Nothing is written.
+/// ended. Nothing is written, so the result says `wrote: false`.
 fn replay(
     recorded: requests::Publication,
     path: &ProjectPath,
@@ -915,6 +917,7 @@ fn replay(
         .with_details(json!({ "path": recorded.path })));
     }
     Ok(PublishResult {
+        wrote: false,
         replayed: true,
         ..result
     })

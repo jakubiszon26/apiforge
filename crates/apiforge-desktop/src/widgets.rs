@@ -95,6 +95,34 @@ pub fn name_resize_handle(ctx: &egui::Context, panel: egui::Id, name: &str) {
     }
 }
 
+/// The place a dragged panel takes when it is released there (UX-05): a soft
+/// accent fill with an accent outline and `label` in bold accent text, painted
+/// above every panel. Its rect is a labelled widget that takes no click, so
+/// the zone is found by its words and the drag under it goes on.
+pub fn drop_zone(ui: &Ui, rect: egui::Rect, label: &str) {
+    let id = egui::Id::new(("drop-zone", label));
+    let painter = ui
+        .ctx()
+        .layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
+    painter.rect(
+        rect,
+        6,
+        theme::ACCENT_SOFT,
+        Stroke::new(1.5, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::new(theme::FONT_BODY, theme::bold_family()),
+        theme::ACCENT,
+    );
+    let label = label.to_owned();
+    ui.interact(rect, id, Sense::hover())
+        .widget_info(move || egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+}
+
 pub fn field_label(ui: &mut Ui, text: &str) {
     let _ = field_name(ui, text);
 }
@@ -371,6 +399,8 @@ pub struct ActionButton<'a> {
     pressed: Option<bool>,
     /// The accessible name, when it says more than the visible label.
     name: Option<&'a str>,
+    /// A primary button's fill instead of the accent.
+    fill: Option<egui::Color32>,
 }
 
 pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
@@ -382,6 +412,7 @@ pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
         compact: false,
         pressed: None,
         name: None,
+        fill: None,
     }
 }
 
@@ -414,6 +445,17 @@ impl ActionButton<'_> {
     pub fn toggle(mut self, pressed: bool) -> Self {
         self.pressed = Some(pressed);
         self
+    }
+    /// A primary button in `colour` instead of the accent, as *Run
+    /// simulation* is (UX-02).
+    pub fn fill(mut self, colour: egui::Color32) -> Self {
+        self.fill = Some(colour);
+        self
+    }
+
+    /// A primary button's fill at rest.
+    pub fn primary_fill(&self) -> egui::Color32 {
+        self.fill.unwrap_or(theme::ACCENT)
     }
 }
 
@@ -476,12 +518,18 @@ impl Widget for ActionButton<'_> {
                     egui::Color32::TRANSPARENT
                 }
             } else if primary {
-                if response.is_pointer_button_down_on() {
-                    theme::ACCENT_PRESSED
-                } else if response.hovered() {
-                    theme::ACCENT_HOVER
-                } else {
-                    theme::ACCENT
+                // Another fill darkens as the accent does: by 8 % under the
+                // pointer and by 17 % while pressed.
+                match (
+                    self.fill,
+                    response.is_pointer_button_down_on(),
+                    response.hovered(),
+                ) {
+                    (None, true, _) => theme::ACCENT_PRESSED,
+                    (None, false, true) => theme::ACCENT_HOVER,
+                    (Some(colour), true, _) => darker(colour, 0.83),
+                    (Some(colour), false, true) => darker(colour, 0.92),
+                    (_, false, false) => self.primary_fill(),
                 }
             } else if pressed {
                 theme::ACCENT_SOFT
@@ -554,13 +602,46 @@ pub fn action_menu(
     button: ActionButton<'_>,
     content: impl FnOnce(&mut Ui),
 ) -> Response {
-    let name = format!("{} menu", button.label.trim_end_matches('…'));
+    let name = menu_name(&button);
     let response = ui.add(button);
-    egui::Popup::menu(&response).show(|ui| {
-        name_menu(ui, &name);
+    show_menu(&response, &name, content);
+    response
+}
+
+/// [`action_menu`] with its button at `rect`, a place `ui` took earlier: the
+/// button then follows the widgets drawn meanwhile in the Tab order. The
+/// cursor of `ui` stays where it is.
+pub fn action_menu_at(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    button: ActionButton<'_>,
+    content: impl FnOnce(&mut Ui),
+) -> Response {
+    let name = menu_name(&button);
+    let response = ui
+        .new_child(egui::UiBuilder::new().max_rect(rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        ))
+        .add(button);
+    show_menu(&response, &name, content);
+    response
+}
+
+fn menu_name(button: &ActionButton<'_>) -> String {
+    format!("{} menu", button.label.trim_end_matches('…'))
+}
+
+fn show_menu(response: &Response, name: &str, content: impl FnOnce(&mut Ui)) {
+    egui::Popup::menu(response).show(|ui| {
+        name_menu(ui, name);
         content(ui)
     });
-    response
+}
+
+/// `colour` with its red, green and blue scaled by `factor`.
+fn darker(colour: egui::Color32, factor: f32) -> egui::Color32 {
+    let scale = |channel: u8| (f32::from(channel) * factor).round() as u8;
+    egui::Color32::from_rgb(scale(colour.r()), scale(colour.g()), scale(colour.b()))
 }
 
 /// Names the open menu or popup whose contents `ui` draws. egui lets its

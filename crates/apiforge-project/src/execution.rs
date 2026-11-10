@@ -11,6 +11,10 @@ pub struct PreparedRun {
     pub unsaved: bool,
     ticket: crate::AnalysisTicket,
     fields: Vec<FieldRecovery>,
+    /// The components the run calls, directly or through another component:
+    /// publishing one of them makes its results stale, publishing any other
+    /// leaves them fresh (UX-25, plan decision 16).
+    calls: std::collections::BTreeSet<String>,
 }
 
 impl PreparedRun {
@@ -36,12 +40,52 @@ impl ProjectSession {
     pub fn run_is_stale(&self, prepared: &PreparedRun) -> bool {
         self.index(prepared.document_id()).map_or(true, |index| {
             let document = &self.documents[index];
+            let ticket = self.ticket(index);
             prepared.last_valid
                 || !prepared.snapshot.matches_source(document.text())
-                || self.ticket(index) != prepared.ticket
+                || ticket.session_id != prepared.ticket.session_id
+                || ticket.session_epoch != prepared.ticket.session_epoch
+                || ticket.source_version != prepared.ticket.source_version
+                || self.context_changed_for(prepared)
                 || document.fields != prepared.fields
                 || document.conflict.is_some()
                 || self.registry != crate::RegistryState::Current
+        })
+    }
+
+    /// Whether the run is stale for a reason other than its document's text
+    /// and the edits that led to it: an earlier version ran, the session or
+    /// the project's context changed, fields are unresolved, the document is
+    /// in conflict or the registry changed. A caller that knows which texts
+    /// it still accepts for these results compares the text itself (UX-01:
+    /// checks added from the results).
+    pub fn run_is_stale_beyond_text(&self, prepared: &PreparedRun) -> bool {
+        self.index(prepared.document_id()).map_or(true, |index| {
+            let document = &self.documents[index];
+            let ticket = self.ticket(index);
+            prepared.last_valid
+                || ticket.session_id != prepared.ticket.session_id
+                || ticket.session_epoch != prepared.ticket.session_epoch
+                || self.context_changed_for(prepared)
+                || document.fields != prepared.fields
+                || document.conflict.is_some()
+                || self.registry != crate::RegistryState::Current
+        })
+    }
+
+    /// Whether the project's context changed for this run since it was
+    /// prepared: a change other than a publication, or the publication of a
+    /// component the run calls. Publishing a component the run does not call
+    /// changes nothing the run used (UX-25, plan decision 16).
+    fn context_changed_for(&self, prepared: &PreparedRun) -> bool {
+        let from = prepared.ticket.context_generation;
+        if self.context_generation < from {
+            return true;
+        }
+        (from + 1..=self.context_generation).any(|generation| {
+            !self.publications.iter().any(|(published, component)| {
+                *published == generation && !prepared.calls.contains(component)
+            })
         })
     }
 
@@ -101,6 +145,7 @@ impl ProjectSession {
         let document = &self.documents[index];
         Ok(PreparedRun {
             unsaved: !snapshot.matches_source(document.text()) || document.is_dirty() || last_valid,
+            calls: calls(&snapshot),
             snapshot,
             last_valid,
             ticket: self.ticket(index),
@@ -148,4 +193,43 @@ impl ProjectSession {
         )
         .ok();
     }
+}
+
+/// The components a snapshot's definition calls, directly or through the
+/// revisions its calls pin, by component ID: a publication of any revision
+/// of one of them makes the run stale.
+fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
+    use apiforge_core::model::NodeKind;
+    use apiforge_storage::project::IdentityBase;
+    let context = snapshot.context();
+    let mut graphs = match snapshot.document() {
+        IdentityBase::Scenario(scenario) => vec![&scenario.graph, &scenario.cleanup],
+        IdentityBase::Component(component) => vec![&component.graph],
+    };
+    let mut calls = std::collections::BTreeSet::new();
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(graph) = graphs.pop() {
+        for node in &graph.nodes {
+            if node.kind != NodeKind::Component {
+                continue;
+            }
+            let Some(id) = &node.config.component_id else {
+                continue;
+            };
+            calls.insert(id.clone());
+            let revision = node.config.revision;
+            if visited.insert((id.clone(), revision)) {
+                graphs.extend(
+                    context
+                        .components
+                        .iter()
+                        .filter(|component| {
+                            &component.id == id && Some(component.revision) == revision
+                        })
+                        .map(|component| &component.graph),
+                );
+            }
+        }
+    }
+    calls
 }

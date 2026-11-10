@@ -133,18 +133,28 @@ impl Stopped {
             Choice::OpenPrevious => match (self.previous)() {
                 Ok(source) => {
                     let context = ui.ctx();
+                    // The workspace window's usual size, fitted to the
+                    // monitor's work area like the first window (KTLO-38).
+                    let usual = egui::Vec2::from(crate::DEFAULT_WINDOW_SIZE);
+                    let screen = crate::window_fit::screen(context);
+                    let size = screen.map_or(usual, |(monitor, title_bar)| {
+                        crate::window_fit::first_window_size(monitor, title_bar)
+                    });
                     for command in [
                         egui::ViewportCommand::Resizable(true),
                         egui::ViewportCommand::MinInnerSize(crate::MIN_WINDOW_SIZE.into()),
-                        egui::ViewportCommand::InnerSize(crate::DEFAULT_WINDOW_SIZE.into()),
+                        egui::ViewportCommand::InnerSize(size),
                     ] {
                         context.send_viewport_cmd(command);
                     }
-                    // Centred again at its new size, as the stop window was, so
-                    // it does not grow off the screen from the dialog's corner.
-                    let size = egui::Vec2::from(crate::DEFAULT_WINDOW_SIZE);
-                    if let Some(monitor) = context.input(|input| input.viewport().monitor_size) {
-                        let corner = ((monitor - size) / 2.0).max(egui::Vec2::ZERO);
+                    // Centred again at its new size with its title bar, above
+                    // the panel allowance, as the stop window was, so it does
+                    // not grow off the screen from the dialog's corner.
+                    if let Some((monitor, title_bar)) = screen {
+                        let outer = size + egui::vec2(0.0, title_bar);
+                        let work_area =
+                            monitor - egui::vec2(0.0, crate::window_fit::PANEL_ALLOWANCE);
+                        let corner = ((work_area - outer) / 2.0).max(egui::Vec2::ZERO);
                         context.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
                             corner.to_pos2(),
                         ));

@@ -37,9 +37,12 @@ follows. It is written in Rust with [egui](https://github.com/emilk/egui).
   outputs. A scenario calls an exact published revision (`Product@1(...)`), so
   a later change to the component never alters a scenario until it moves to
   the new revision.
-- **Simulation and live requests.** *Run* simulates the scenario with the
-  sample responses written into it and sends nothing. *Run live requests*
-  sends real requests to the project's base URL. A live run is journalled, so
+- **Simulation and live requests.** The Run button runs the project's mode:
+  *Run simulation* uses the sample responses written into the scenario and
+  sends nothing; *Run live* sends real requests to the project's base URL.
+  The mode is chosen in *Run options*, the chevron beside the button, and
+  kept for that project on this computer, for this person, until it is
+  changed; a clone elsewhere starts in Simulation. A live run is journalled, so
   a run interrupted by a crash is reported at the next start, and a cleanup
   phase runs after errors and cancellation too.
 - **Run results with checks.** Every step's inputs, outputs, request and
@@ -97,8 +100,8 @@ window with Linux MCP (or the reverse) is unsupported, including projects on
 4. **Watch in the window.** While the agent holds the project, the open
    window observes: editing pauses there, the bottom bar names the agent, and
    every change the agent commits appears within two seconds, keeping your
-   place. A window with nothing unsaved hands the project over when the agent
-   first writes; *Take back* in the bottom bar returns it to you, and when
+   place. A window with nothing unsaved and nothing in progress hands the
+   project over when the agent first writes; *Take back* in the bottom bar returns it to you, and when
    the agent finishes the window takes the project back by itself.
 
 5. **Live requests stay yours.** A model cannot allow live requests. In the

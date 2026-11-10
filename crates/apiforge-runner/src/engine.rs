@@ -712,11 +712,27 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         step.duration_ms = milliseconds(started.elapsed());
         let size = serde_json::to_vec(&step).map_or(usize::MAX, |bytes| bytes.len());
         if self.report_bytes.saturating_add(size) > self.limits.max_report_bytes {
-            step.status = StepStatus::Error;
-            step.message = Some(format!(
+            // The emptied step keeps the one fact a reader of a live run needs:
+            // whether its request, or one of a component's, can have reached
+            // the tested API (MCP-22).
+            let effect = if self.request.mode != apiforge_core::run::RunMode::Live {
+                None
+            } else if may_have_sent(&step) {
+                Some(MAY_HAVE_HAPPENED)
+            } else if step.request.is_some() {
+                Some(NOTHING_SENT)
+            } else {
+                None
+            };
+            let exceeded = format!(
                 "Exceeded the run data limit of {}.",
                 byte_size(self.limits.max_report_bytes)
-            ));
+            );
+            step.status = StepStatus::Error;
+            step.message = Some(match effect {
+                Some(effect) => format!("{exceeded} {effect}"),
+                None => exceeded,
+            });
             step.inputs.clear();
             step.outputs.clear();
             step.children = None;
@@ -1373,6 +1389,18 @@ fn outputs_value(outputs: &IndexMap<String, Value>) -> Value {
     )
 }
 
+/// Whether a live step, or a step nested in it, sent a request the API may
+/// have performed: one with a snapshot the runner did not mark as never sent.
+fn may_have_sent(step: &StepResult) -> bool {
+    let message = step.message.as_deref().unwrap_or_default();
+    message.ends_with(MAY_HAVE_HAPPENED)
+        || (step.request.is_some() && !message.ends_with(NOTHING_SENT))
+        || step
+            .children
+            .as_ref()
+            .is_some_and(|children| children.iter().any(may_have_sent))
+}
+
 /// The document name of an operator, e.g. `multiply`.
 fn operator_id(operator: Operator) -> String {
     match serde_json::to_value(operator) {
@@ -1453,6 +1481,110 @@ mod tests {
                 .status,
             StepStatus::Skipped
         );
+    }
+
+    /// MCP-22: a live request step emptied at the run data limit still says
+    /// whether the API may have performed it.
+    #[tokio::test]
+    async fn a_step_emptied_at_the_data_limit_keeps_whether_it_was_sent() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let served = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = [0; 4096];
+                let _ = stream.read(&mut buffer).await;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let refused = format!("http://{}/", closed.local_addr().unwrap());
+        drop(closed);
+        for (url, effect) in [(served, MAY_HAVE_HAPPENED), (refused, NOTHING_SENT)] {
+            let mut project: Project =
+                serde_json::from_slice(include_bytes!("../../../fixtures/projects/shop.json"))
+                    .unwrap();
+            project.scenarios.truncate(1);
+            let scenario = &mut project.scenarios[0];
+            scenario.graph = serde_json::from_value(serde_json::json!({
+                "nodes": [
+                    {"id": "start", "kind": "start", "handle": "begin", "position": {"x": 0, "y": 0}, "inputs": {}, "config": {}},
+                    {"id": "fetch", "kind": "request", "handle": "fetch", "position": {"x": 0, "y": 0}, "inputs": {"url": {"kind": "literal", "value": url}}, "config": {}}
+                ],
+                "edges": [{"id": "start-fetch", "source": "start", "target": "fetch"}]
+            }))
+            .unwrap();
+            scenario.cleanup = Graph {
+                nodes: vec![],
+                edges: vec![],
+                proxies: Vec::new(),
+            };
+            let scenario_id = scenario.id.clone();
+            let mut options = RunOptions::new(http::HttpTransport::new().unwrap());
+            // The start step fits; the request step, with its snapshot, does not.
+            options.limits.max_report_bytes = 200;
+            let result = run_scenario(
+                RunRequest::new(project, scenario_id, apiforge_core::run::RunMode::Live),
+                options,
+                CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap();
+            let fetch = result.step("fetch").unwrap();
+            let message = fetch.message.as_deref().unwrap();
+            assert!(
+                message.starts_with("Exceeded the run data limit"),
+                "{message}"
+            );
+            assert!(message.ends_with(effect), "{message}");
+        }
+        server.abort();
+    }
+
+    /// MCP-22: a component step is marked by the requests nested in it, so
+    /// emptying it keeps that fact.
+    #[test]
+    fn a_component_may_have_sent_what_its_steps_sent() {
+        let step =
+            |kind: &str, message: Option<&str>, snapshot: bool, children: Vec<StepResult>| {
+                let mut step: StepResult = serde_json::from_value(serde_json::json!({
+                    "nodeId": "n", "handle": "h", "kind": kind, "status": "passed",
+                    "phase": "main", "inputs": {}, "outputs": {}, "durationMs": 0,
+                    "message": message,
+                }))
+                .unwrap();
+                step.request = snapshot.then(|| RequestSnapshot {
+                    method: "GET".into(),
+                    url: "http://a/".into(),
+                    headers: IndexMap::new(),
+                    body: OptionalJson::Missing,
+                });
+                step.children = (!children.is_empty()).then_some(children);
+                step
+            };
+        let refused = format!("Connection refused. {NOTHING_SENT}");
+        let sent = step("request", None, true, vec![]);
+        let unsent = step("request", Some(&refused), true, vec![]);
+        let value = step("value", None, false, vec![]);
+        assert!(may_have_sent(&sent));
+        assert!(!may_have_sent(&unsent));
+        assert!(may_have_sent(&step(
+            "component",
+            None,
+            false,
+            vec![value.clone(), sent]
+        )));
+        assert!(!may_have_sent(&step(
+            "component",
+            None,
+            false,
+            vec![value, unsent]
+        )));
     }
 
     #[tokio::test]

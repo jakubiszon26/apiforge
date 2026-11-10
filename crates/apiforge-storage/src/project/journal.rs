@@ -8,11 +8,7 @@ impl ProjectStore {
         action: &mut dyn FnMut(&Path) -> std::result::Result<(), crate::StorageError>,
     ) -> std::result::Result<(), crate::StorageError> {
         self.writable()?;
-        let _worker = self
-            .owner
-            .worker
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _worker = self.owner.lock_worker();
         if self.head()?.active_transaction_id.is_some() {
             return Err(ProjectError::RecoveryRequired.into());
         }
@@ -40,11 +36,7 @@ impl ProjectStore {
         if bytes.len() > MAX_JSON_BYTES {
             return Err(ProjectError::Limit);
         }
-        let _worker = self
-            .owner
-            .worker
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let _worker = self.owner.lock_worker();
         let path = path::resolve(self.root(), &relative)?;
         crate::write_atomic(&path, bytes).map_err(|error| match error {
             crate::DocumentError::Io { path, source } => ProjectError::Io { path, source },

@@ -4,11 +4,12 @@
 //! applies them as undoable edits.
 
 mod binding;
+mod checks;
 pub mod drafts;
 mod fields;
 mod response;
 
-pub use fields::forget_field_text;
+pub use fields::{forget_field_text, type_combo};
 pub use response::sample_output;
 
 use crate::icons::Icon;
@@ -54,6 +55,9 @@ pub struct Context<'a> {
     pub graph: &'a Graph,
     /// The board graph, for ordering connections.
     pub board: &'a Graph,
+    /// The scenario's Cleanup graph while the board shows Main: its checks are
+    /// listed under the Main steps they read (LAY-20). `None` anywhere else.
+    pub cleanup: Option<&'a Graph>,
     pub project: &'a Project,
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
@@ -64,6 +68,7 @@ pub struct Context<'a> {
 enum Tab {
     Configuration,
     Outputs,
+    Checks,
 }
 
 #[derive(Clone, Debug)]
@@ -112,10 +117,28 @@ impl Inspector {
                 .family(theme::bold_family()),
         );
         ui.add_space(theme::SPACE_SM);
+        // A request and a call of a component list their checks; both are
+        // subjects of one (LAY-20). In the narrowest panel the third tab takes
+        // a row of its own rather than running past the edge.
+        let checks = matches!(context.node.kind, NodeKind::Request | NodeKind::Component);
+        let tabs = ["Configuration", "Output data", "Checks"];
+        let width: f32 = tabs
+            .iter()
+            .map(|tab| widgets::tab_value_width(ui, tab) + ui.spacing().item_spacing.x)
+            .sum();
+        let one_row = width <= ui.available_width();
         ui.horizontal(|ui| {
-            widgets::tab_value(ui, &mut self.tab, Tab::Configuration, "Configuration");
-            widgets::tab_value(ui, &mut self.tab, Tab::Outputs, "Output data");
+            widgets::tab_value(ui, &mut self.tab, Tab::Configuration, tabs[0]);
+            widgets::tab_value(ui, &mut self.tab, Tab::Outputs, tabs[1]);
+            if checks && one_row {
+                widgets::tab_value(ui, &mut self.tab, Tab::Checks, tabs[2]);
+            }
         });
+        if checks && !one_row {
+            ui.horizontal(|ui| {
+                widgets::tab_value(ui, &mut self.tab, Tab::Checks, tabs[2]);
+            });
+        }
         ui.separator();
 
         egui::ScrollArea::vertical()
@@ -125,6 +148,7 @@ impl Inspector {
                 match self.tab {
                     Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
                     Tab::Outputs => outputs(ui, context, &mut actions),
+                    Tab::Checks => checks::show(ui, context),
                 }
             });
         self.response_choice(ui.ctx(), context, &mut node);

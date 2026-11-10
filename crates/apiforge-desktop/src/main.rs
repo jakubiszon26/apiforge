@@ -2,6 +2,35 @@
 //!
 //! Opening a document never executes a request.
 
+// REL-04: on Windows a release build is a windowed program, so a start from
+// Explorer opens no console window; `windows_console` says where its output
+// goes. Debug builds and tests keep their console.
+#![cfg_attr(
+    all(windows, not(debug_assertions), not(test)),
+    windows_subsystem = "windows"
+)]
+
+/// A line for standard output: `println!` through [`windows_console::write`],
+/// so that a windowed start without that handle writes it to the log (REL-04).
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        $crate::windows_console::write(
+            $crate::windows_console::Stream::Out,
+            format_args!($($arg)*),
+        )
+    };
+}
+
+/// A line for standard error: `eprintln!` through [`windows_console::write`].
+macro_rules! errln {
+    ($($arg:tt)*) => {
+        $crate::windows_console::write(
+            $crate::windows_console::Stream::Err,
+            format_args!($($arg)*),
+        )
+    };
+}
+
 mod app;
 mod board_edit;
 mod buffers;
@@ -22,12 +51,15 @@ mod navigator;
 mod persistence;
 mod preferences;
 mod report;
+mod run_mode;
 mod shapes;
 mod stop;
 #[cfg(test)]
 mod testing;
 mod theme;
 mod widgets;
+mod window_fit;
+mod windows_console;
 
 use apiforge_storage::WorkspaceStore;
 use std::{
@@ -183,7 +215,7 @@ fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
         folder::Start::Managed => Ok(Opening::Managed(data)),
         folder::Start::Legacy(reason) => {
             if let Some(reason) = reason {
-                eprintln!("Opening the workspace instead: {reason}");
+                errln!("Opening the workspace instead: {reason}");
             }
             let store = WorkspaceStore::default_location().map_err(|error| error.to_string())?;
             Ok(Opening::Workspace(app::Source::Storage(store)))
@@ -191,7 +223,7 @@ fn opening_for(data: PathBuf, start: folder::Start) -> Result<Opening, String> {
         // Nothing opens by itself after a refusal (KTLO-03, decision 1): the
         // stop window offers the previous workspace and quitting.
         folder::Start::Refused(refusal) => {
-            eprintln!("Migration stopped: {refusal}.");
+            errln!("Migration stopped: {refusal}.");
             Ok(Opening::Stopped(refusal))
         }
     }
@@ -216,25 +248,26 @@ const HELP: &str = "API Forge
 Opening a document never executes requests.";
 
 fn main() -> ExitCode {
+    windows_console::prepare();
     let arguments = match arguments(env::args_os().skip(1)) {
         Ok(arguments) => arguments,
         Err(message) => {
-            eprintln!("{message}");
+            errln!("{message}");
             return ExitCode::from(2);
         }
     };
     match arguments {
         Arguments::Help => {
-            println!("{HELP}");
+            outln!("{HELP}");
             ExitCode::SUCCESS
         }
         Arguments::Version => {
-            println!("apiforge-desktop {}", env!("CARGO_PKG_VERSION"));
+            outln!("apiforge-desktop {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Arguments::Check(path) => match files::read_document(&path) {
             Ok(document) => {
-                println!(
+                outln!(
                     "Valid v{} document: {} project(s)",
                     document.workspace().version,
                     document.workspace().projects.len()
@@ -242,14 +275,14 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(message) => {
-                eprintln!("{message}");
+                errln!("{message}");
                 ExitCode::FAILURE
             }
         },
         Arguments::Legacy => match WorkspaceStore::default_location() {
             Ok(store) => run_window(Opening::Workspace(app::Source::Storage(store)), Probe::None),
             Err(error) => {
-                eprintln!("{error}");
+                errln!("{error}");
                 ExitCode::FAILURE
             }
         },
@@ -258,7 +291,7 @@ fn main() -> ExitCode {
         Arguments::Managed => match managed_opening() {
             Ok(opening) => run_window(opening, Probe::None),
             Err(error) => {
-                eprintln!("{error}");
+                errln!("{error}");
                 ExitCode::FAILURE
             }
         },
@@ -285,7 +318,7 @@ fn main() -> ExitCode {
                 Some(project) => match files::read_document(&project) {
                     Ok(document) => document.into_workspace(),
                     Err(message) => {
-                        eprintln!("{message}");
+                        errln!("{message}");
                         return ExitCode::FAILURE;
                     }
                 },
@@ -313,7 +346,7 @@ fn session(path: &std::path::Path, probe: Probe) -> ExitCode {
             probe,
         ),
         Err(message) => {
-            eprintln!("{message}");
+            errln!("{message}");
             ExitCode::FAILURE
         }
     }
@@ -416,6 +449,9 @@ struct Window {
     frames: u8,
     completed: Arc<AtomicBool>,
     closing_since: Option<Instant>,
+    /// Fits the first window to its monitor, and the workspace window the stop
+    /// window grows into; `None` where its size is fixed.
+    fit: Option<window_fit::FirstFit>,
 }
 
 /// Cleanup has a bounded runner budget. Leave a little time for its final report
@@ -424,6 +460,9 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(12);
 
 impl eframe::App for Window {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(fit) = &mut self.fit {
+            fit.update(ui.ctx());
+        }
         if ui.ctx().input(|input| input.viewport().close_requested()) {
             self.closing_since.get_or_insert_with(Instant::now);
         }
@@ -443,11 +482,17 @@ impl eframe::App for Window {
                 ui.ctx().request_repaint_after(Duration::from_millis(16));
             }
         }
+        let stopped = matches!(self.app, Front::Stopped(_));
         ui.add_enabled_ui(self.closing_since.is_none(), |ui| self.app.ui(ui));
+        if stopped && !matches!(self.app, Front::Stopped(_)) {
+            // The stop window grew into the workspace window: fit it once the
+            // monitor is known, should it not have been when it grew.
+            self.fit = Some(window_fit::FirstFit::toward(DEFAULT_WINDOW_SIZE.into()));
+        }
         if let Some(capture) = &mut self.capture {
             if let Some(result) = capture.update(ui.ctx(), self.app.has_document()) {
                 if let Err(message) = &result {
-                    eprintln!("{message}");
+                    errln!("{message}");
                 }
                 self.completed.store(result.is_ok(), Ordering::Release);
                 ui.ctx()
@@ -466,7 +511,8 @@ impl eframe::App for Window {
     }
 }
 
-/// The window's logical size when it opens.
+/// The window's logical size when it opens, on a monitor large enough for it;
+/// a smaller one fits it to its work area ([`window_fit`]).
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [1600.0, 1000.0];
 
 /// Minimum logical window size: 1920×1080 at 200 % scaling (G6).
@@ -475,21 +521,18 @@ const MIN_WINDOW_SIZE: [f32; 2] = [960.0, 540.0];
 fn run_window(opening: Opening, probe: Probe) -> ExitCode {
     let automated = !matches!(probe, Probe::None);
     let completed = Arc::new(AtomicBool::new(!automated));
-    let size = match probe {
-        Probe::Screenshot(_, _, Some((width, height))) => [width as f32, height as f32],
-        _ => DEFAULT_WINDOW_SIZE,
+    let (size, explicit) = match probe {
+        Probe::Screenshot(_, _, Some((width, height))) => ([width as f32, height as f32], true),
+        _ => (DEFAULT_WINDOW_SIZE, false),
     };
     let observed = Arc::clone(&completed);
-    let viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("API Forge")
-        .with_app_id("apiforge");
-    // REL-01: the application icon, which X11 window managers show for the
-    // window; Wayland takes it from the desktop file named by the app ID.
-    #[cfg(target_os = "linux")]
-    let viewport = viewport.with_icon(Arc::new(window_icon()));
+    let viewport = window_viewport();
     // The stop window has one size and is centred, like a dialog; it grows
     // into the workspace window if the person opens the previous workspace.
     let stopped = matches!(opening, Opening::Stopped(_));
+    // The window opens at its usual size and is fitted to the monitor on its
+    // first frames (KTLO-38); a capture at a size asked for keeps that size.
+    let fit = (!stopped && !explicit).then(window_fit::FirstFit::default);
     let options = eframe::NativeOptions {
         viewport: if stopped {
             let size = stop::WINDOW_SIZE;
@@ -545,6 +588,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
                 frames: 0,
                 completed,
                 closing_since: None,
+                fit,
             }))
         }),
     );
@@ -552,7 +596,7 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
         Ok(()) if observed.load(Ordering::Acquire) => ExitCode::SUCCESS,
         Ok(()) => ExitCode::FAILURE,
         Err(_) => {
-            eprintln!(
+            errln!(
                 "Cannot initialise the native window. Check GPU drivers and the display session."
             );
             ExitCode::FAILURE
@@ -563,9 +607,20 @@ fn run_window(opening: Opening, probe: Probe) -> ExitCode {
 /// The application icon at 256 px, rendered from packaging/icon/apiforge.svg.
 const ICON_PNG: &[u8] = include_bytes!("../../../packaging/icon/apiforge-256.png");
 
+/// The title, app ID and icon every API Forge window starts with.
+///
+/// The icon is the one X11 window managers and Windows show in the title bar,
+/// the taskbar and Alt+Tab (REL-01, REL-02); Wayland takes it from the
+/// desktop file named by the app ID instead.
+fn window_viewport() -> eframe::egui::ViewportBuilder {
+    eframe::egui::ViewportBuilder::default()
+        .with_title("API Forge")
+        .with_app_id("apiforge")
+        .with_icon(Arc::new(window_icon()))
+}
+
 /// The application icon for the window. The image is part of the binary and
 /// a test decodes it, so a failure here is a defect of the build.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn window_icon() -> eframe::egui::IconData {
     eframe::icon_data::from_png_bytes(ICON_PNG).expect("the bundled icon is a valid PNG")
 }
@@ -584,6 +639,14 @@ mod tests {
         assert_eq!(icon.rgba[3], 0, "the corner is transparent");
         let centre = (128 * 256 + 128) * 4;
         assert_eq!(icon.rgba[centre + 3], 255, "the centre is opaque");
+    }
+
+    /// REL-02: the window takes that icon on every platform, Windows included.
+    #[test]
+    fn the_window_carries_the_application_icon_on_every_platform() {
+        let viewport = window_viewport();
+        let icon = viewport.icon.expect("the window has an icon");
+        assert_eq!(*icon, window_icon());
     }
 
     fn parse(args: &[&str]) -> Result<Arguments, &'static str> {

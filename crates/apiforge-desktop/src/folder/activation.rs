@@ -365,12 +365,16 @@ impl FolderApp {
         // the start, not only the one that opened.
         self.navigation.recent.remember_all(known);
         self.install_destination(destination);
-        self.notice = match outcome {
-            Outcome::Opened => None,
-            Outcome::Created => Some(Notice {
-                text: format!("Created a project in {}.", self.root.display()),
-                error: false,
-            }),
+        // Another project: nothing said about the previous one stays.
+        self.notices.clear();
+        match outcome {
+            Outcome::Opened => {}
+            Outcome::Created => {
+                self.notify(
+                    format!("Created a project in {}.", self.root.display()),
+                    false,
+                );
+            }
             Outcome::Migrated {
                 original,
                 projects,
@@ -384,15 +388,15 @@ impl FolderApp {
                         " {many} drafts had no project left to belong to and stay in the original."
                     ),
                 };
-                Some(Notice {
-                    text: format!(
+                self.notify(
+                    format!(
                         "Projects are now folders in {}. The original workspace is unchanged at {}.{drafts}",
                         projects.display(),
                         original.display()
                     ),
-                    error: false,
-                })
+                    false,
+                );
             }
-        };
+        }
     }
 }

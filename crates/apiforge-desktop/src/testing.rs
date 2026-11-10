@@ -168,6 +168,25 @@ pub fn assert_disjoint<State>(harness: &Harness<'_, State>, labels: &[&str]) {
     }
 }
 
+/// Clicks the *Check* on the row of `field` in Run results: the *Check*
+/// level with the field's label (UX-01). The pointer then leaves for the
+/// header's empty top margin, so nothing stays hovered.
+pub fn check_field(harness: &mut FolderHarness, field: &str) {
+    let y = harness.get_by_label(field).rect().center().y;
+    harness
+        .query_all_by_label("Check")
+        .filter(|check| (check.rect().center().y - y).abs() < 8.0)
+        .min_by(|a, b| {
+            let a = (a.rect().center().y - y).abs();
+            let b = (b.rect().center().y - y).abs();
+            a.total_cmp(&b)
+        })
+        .unwrap_or_else(|| panic!("the {field} row offers no Check"))
+        .click();
+    harness.hover_at(egui::pos2(480.0, 3.0));
+    settle(harness);
+}
+
 /// Where design review captures are written: `APIFORGE_CAPTURE_DIR`, otherwise
 /// `gui-captures` in the Cargo target directory. Never inside the sources.
 pub fn capture_dir() -> PathBuf {
@@ -480,6 +499,391 @@ mod review {
         stop_on_screen(MINIMUM, "migration-stop-960x540", None);
         let window = stop_on_screen(WIDE, "migration-stop-1600x1000", None);
         stop_on_screen(WIDE, "migration-stop-window", Some(window.expand(1.0)));
+    }
+
+    /// UX-01: one simulation of the demo shop in Split, then a check added
+    /// for `productId` and `total` of *Add to cart* from Run results without
+    /// running again; the other fields still offer *Check*. At 960 × 540 Run
+    /// results is maximised, as the fields do not show at its normal height,
+    /// and restored after the checks; at 1600 × 1000 it is at its tallest
+    /// normal height. The states of the approved mock-up `ux01-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux01_two_checks() {
+        use egui_kittest::kittest::NodeT;
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).scroll_to_me();
+            settle(harness);
+            harness.get_by_label(label).click();
+            // The pointer leaves for the header's empty top margin, so no
+            // control is captured hovered.
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            click(&mut harness, "Split");
+            click(&mut harness, "Run simulation");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("PASSED").is_none() {
+                assert!(Instant::now() < deadline, "the run must pass");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            if size == MINIMUM {
+                click(&mut harness, "Maximise run results");
+            } else {
+                // The panel at its tallest normal height, from its edge's
+                // keyboard, so the fields show.
+                harness.get_by_label("Resize run report").focus();
+                harness.step();
+                harness.key_press(egui::Key::End);
+                settle(&mut harness);
+            }
+            let step = harness
+                .get_by_label_contains("Add to cart · Passed")
+                .accesskit_node()
+                .label()
+                .unwrap_or_default();
+            click(&mut harness, &step);
+            capture(&mut harness, &format!("ux01-before-{suffix}"), None);
+            check_field(&mut harness, "productId");
+            check_field(&mut harness, "total");
+            assert_eq!(harness.query_all_by_label("Check added").count(), 2);
+            assert!(
+                harness
+                    .query_by_label("2 checks added · they run on the next run")
+                    .is_some()
+            );
+            capture(&mut harness, &format!("ux01-two-checks-{suffix}"), None);
+            if size == MINIMUM {
+                click(&mut harness, "Restore run results");
+                capture(&mut harness, "ux01-two-checks-restored-960x540", None);
+            }
+        }
+    }
+
+    /// UX-02: the Run button in either mode, beside MCP-09's *Live
+    /// allowed*, after a simulation so the SIMULATION badge is in view; the
+    /// chevron's menu in either mode; a component's tab, with *Publish*, the
+    /// fullest header. Compare with `docs/qa/2026-11-02/UX-00/ux02-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux02_run_mode() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            // The pointer leaves for the header's empty top margin, so no
+            // control is captured hovered.
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        fn explorer_row(harness: &mut FolderHarness, name: &str) {
+            let tree = harness.get_by_label("Project files").rect();
+            harness
+                .query_all_by_label(name)
+                .find(|node| tree.contains(node.rect().center()))
+                .unwrap_or_else(|| panic!("no explorer row {name:?}"))
+                .click();
+            settle(harness);
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let configuration = tempfile::tempdir().unwrap();
+            // MCP-09's consent, so *Live allowed* shares the header.
+            let manifest = apiforge_project::ProjectManifest::from_bytes(
+                &std::fs::read(project.path().join("apiforge.project.json")).unwrap(),
+            )
+            .unwrap();
+            let consent = configuration.path().join("apiforge/agent-consent.json");
+            std::fs::create_dir_all(consent.parent().unwrap()).unwrap();
+            std::fs::write(
+                &consent,
+                format!(
+                    r#"{{"version": 1, "projects": {{"{}": {{"live": true, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#,
+                    manifest.id
+                ),
+            )
+            .unwrap();
+            let mut harness = folder_harness(project.path(), size);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Diagram");
+            click(&mut harness, "Run simulation");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("Cancel run").is_some() {
+                assert!(Instant::now() < deadline, "the run must finish");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            let header = [
+                "Code",
+                "Diagram",
+                "Split",
+                "Save",
+                "Save all",
+                "Run options",
+            ];
+            for run in ["Run simulation", "Run live"] {
+                let mode = if run == "Run live" {
+                    "live"
+                } else {
+                    "simulation"
+                };
+                let mut labels = header.to_vec();
+                labels.extend(["Live allowed", run]);
+                assert_within_window(&harness, &labels);
+                assert_disjoint(&harness, &labels);
+                capture(&mut harness, &format!("ux02-run-{mode}-{suffix}"), None);
+                click(&mut harness, "Run options");
+                capture(
+                    &mut harness,
+                    &format!("ux02-run-options-{mode}-{suffix}"),
+                    None,
+                );
+                click(
+                    &mut harness,
+                    if run == "Run live" {
+                        "Simulation"
+                    } else {
+                        "Live"
+                    },
+                );
+            }
+            click(&mut harness, "Code");
+            explorer_row(&mut harness, "components");
+            explorer_row(&mut harness, "product.afs");
+            click(&mut harness, "Diagram");
+            let mut labels = header.to_vec();
+            labels.extend(["Live allowed", "Run simulation", "Publish"]);
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux02-component-tab-{suffix}"), None);
+        }
+    }
+
+    /// UX-04: *Running unsaved code* just left of *Cancel run* while a
+    /// live run runs, on the run's tab and, at both windows, on a
+    /// component's tab with *Publish* and *Live allowed*, where it names
+    /// the file. The API accepts and never answers, so the run is still
+    /// running when captured. Compare with
+    /// `docs/qa/2026-11-02/UX-00/ux04-beside-cancel-*` and
+    /// `ux04-component-tab-960x540`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux04_running_label() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                held.push(stream);
+            }
+        });
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let manifest_path = project.path().join("apiforge.project.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+            manifest["environment"]["baseUrl"] = serde_json::json!(format!("http://{address}"));
+            std::fs::write(
+                &manifest_path,
+                serde_json::to_vec_pretty(&manifest).unwrap(),
+            )
+            .unwrap();
+            let id = manifest["id"].as_str().unwrap().to_owned();
+            // MCP-09's consent, so *Live allowed* shares the header, and the
+            // run mode Live (UX-02).
+            let configuration = tempfile::tempdir().unwrap();
+            let directory = configuration.path().join("apiforge");
+            std::fs::create_dir_all(&directory).unwrap();
+            for (file, entry) in [
+                ("agent-consent.json", r#""live": true"#),
+                ("run-mode.json", r#""mode": "live""#),
+            ] {
+                std::fs::write(
+                    directory.join(file),
+                    format!(
+                        r#"{{"version": 1, "projects": {{"{id}": {{{entry}, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#
+                    ),
+                )
+                .unwrap();
+            }
+            let mut harness = folder_harness(project.path(), size);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Split");
+            // An unsaved, valid change to the scenario's description.
+            harness.state_mut().as_mut().unwrap().review_open(
+                "scenarios/promotion-and-cart-price.afs",
+                Some(("description \"", "description \"Edited. ")),
+            );
+            settle(&mut harness);
+            click(&mut harness, "Run live");
+            assert!(
+                harness.query_by_label("Cancel run").is_some(),
+                "the run is running"
+            );
+            let header = egui::Rect::from_min_max(
+                egui::Pos2::ZERO,
+                egui::pos2(size.x, harness.get_by_label("Code").rect().bottom() + 9.0),
+            );
+            let mut labels = vec![
+                "Code",
+                "Diagram",
+                "Split",
+                "Save",
+                "Save all",
+                "Live allowed",
+                "Cancel run",
+                "Running unsaved code",
+            ];
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-beside-cancel-{suffix}"), None);
+            capture(
+                &mut harness,
+                &format!("ux04-beside-cancel-header-{suffix}"),
+                Some(header),
+            );
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .review_open("components/add-to-cart.afs", None);
+            settle(&mut harness);
+            labels.pop();
+            labels.extend(["Publish", "Running unsaved promotion-and-cart-price.afs"]);
+            assert_within_window(&harness, &labels);
+            assert_disjoint(&harness, &labels);
+            capture(&mut harness, &format!("ux04-component-tab-{suffix}"), None);
+            click(&mut harness, "Cancel run");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("Cancel run").is_some() {
+                assert!(Instant::now() < deadline, "the run must end");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            capture(&mut harness, &format!("ux04-after-cancel-{suffix}"), None);
+        }
+    }
+
+    /// UX-05: Run results dragged by its grip until its top is 64 px under
+    /// the tab strip, held there with the drop zone shown, then released and
+    /// filling the workspace with its grip at the top; and Problems held
+    /// within 64 px of its ceiling in Code at 960 × 540, with its zone over
+    /// the strip of code. A real pointer drag, captured while the button is
+    /// still down. Compare with `docs/qa/2026-11-02/UX-00/ux05-*`.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux05_drag_to_workspace() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        /// Presses at `from` and moves to `to` at most 32 px a frame.
+        fn hold(harness: &mut FolderHarness, from: egui::Pos2, to: egui::Pos2) {
+            harness.hover_at(from);
+            harness.step();
+            harness.drag_at(from);
+            harness.step();
+            let steps = ((to - from).length() / 32.0).ceil().max(1.0);
+            for step in 1..=steps as usize {
+                harness.hover_at(from + (to - from) * (step as f32 / steps));
+                harness.step();
+            }
+            harness.step();
+        }
+        fn release(harness: &mut FolderHarness, at: egui::Pos2) {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+            harness.remove_cursor();
+            settle(harness);
+        }
+        /// [`capture`] without taking the pointer away, which would end the
+        /// drag.
+        fn capture_held(harness: &mut FolderHarness, name: &str) {
+            let image = harness
+                .render()
+                .unwrap_or_else(|error| panic!("cannot render {name}: {error}"));
+            let directory = capture_dir();
+            std::fs::create_dir_all(&directory).unwrap();
+            image.save(directory.join(format!("{name}.png"))).unwrap();
+        }
+        for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+            let project = shop_project();
+            let mut harness = folder_harness(project.path(), size);
+            click(&mut harness, "Split");
+            click(&mut harness, "Run simulation");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while harness.query_by_label("PASSED").is_none() {
+                assert!(Instant::now() < deadline, "the run must pass");
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            settle(&mut harness);
+            // The mock-up has no notice under the tab strip (UX-04 moved
+            // *Running saved code.* to the header).
+            if harness.query_by_label("Dismiss").is_some() {
+                click(&mut harness, "Dismiss");
+            }
+            let top = egui::PanelState::load(&harness.ctx, egui::Id::new("folder-tabs"))
+                .unwrap()
+                .outer_rect
+                .bottom();
+            let from = harness.get_by_label("Resize run report").rect().center();
+            let to = egui::pos2(from.x, top + 64.0 + 8.0);
+            hold(&mut harness, from, to);
+            assert!(
+                harness
+                    .query_by_label("Release to fill the workspace")
+                    .is_some()
+            );
+            capture_held(&mut harness, &format!("ux05-mid-drag-{suffix}"));
+            release(&mut harness, to);
+            assert!(harness.query_by_label("Restore run results").is_some());
+            capture(&mut harness, &format!("ux05-released-{suffix}"), None);
+            if size == MINIMUM {
+                click(&mut harness, "Restore run results");
+                click(&mut harness, "Code");
+                click(&mut harness, "Expand problems");
+                let ceiling = harness.get_by_label("Resize problems").rect().center().y;
+                click(&mut harness, "Restore problems");
+                let edge = harness.get_by_label("Resize problems").rect().center();
+                let to = egui::pos2(edge.x, ceiling + 30.0);
+                hold(&mut harness, edge, to);
+                assert!(
+                    harness
+                        .query_by_label("Release to expand problems")
+                        .is_some()
+                );
+                capture_held(&mut harness, "ux05-problems-mid-drag-960x540");
+                release(&mut harness, to);
+                capture(&mut harness, "ux05-problems-released-960x540", None);
+            }
+        }
     }
 
     #[test]

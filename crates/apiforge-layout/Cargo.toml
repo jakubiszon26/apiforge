@@ -8,5 +8,9 @@ license.workspace = true
 
 [dependencies]
 
+[dev-dependencies]
+apiforge-core.workspace = true
+apiforge-script.workspace = true
+
 [lints]
 workspace = true

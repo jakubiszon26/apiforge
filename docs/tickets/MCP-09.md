@@ -54,6 +54,11 @@ settings* with the *Agent* section in observer mode, and the header with the
    applies at once and needs no save. *Cancel* also stays enabled, as in M3,
    and closes the dialog without changes (owner decision of 2026-10-28,
    recorded on #93).
+   *Amended by MCP-26 (#214, owner decision 4 = A of 2026-11-02):* the box
+   applies on *Apply settings* only and *Cancel* discards it; while
+   observing, *Apply settings* is shown again, enabled only for the box's
+   change. The line under a ticked box reads *On — the agent may send real
+   requests to any URL the project's documents name.*
 3. With the agent connected and the box off, `run(live: true)` is
    `live_disabled` with the settings message; ticking the box — no restart
    of the window or the server — makes the next `run(live: true)` send; the

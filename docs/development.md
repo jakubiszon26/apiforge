@@ -50,6 +50,28 @@ without `--folder`, because the workspace window has no modes. `--size WxH`
 sets the window's logical size for either window (default 1600x1000, at least
 960x540); the PNG is that size times the display scale.
 
+On Windows the release `apiforge-desktop.exe` is a windowed program
+([REL-04](tickets/REL-04.md)): started from Explorer, the Start menu or the
+release ZIP, it opens no console window, and it never attaches to one. What it
+prints (`--version`, `--help`, `--check`, the control channel's diagnostics,
+an error that ends the start, the text of a crash) reaches whoever started it
+only through a redirection: `apiforge-desktop.exe --check FILE > out.txt` in `cmd`,
+or `$out = apiforge-desktop.exe --check FILE | Write-Output` in PowerShell,
+which waits for it only when the output goes on down a pipeline. Typed in a
+terminal without redirection, it prints nothing there: the output goes to
+`%APPDATA%\apiforge\logs\apiforge-desktop.log`, beside the managed projects,
+as after a start from Explorer. `cmd` does not wait for a windowed program,
+and `%ERRORLEVEL%` is set only under `start /wait apiforge-desktop.exe …`;
+`Start-Process -Wait` waits too, but returns the output only with
+`-RedirectStandardOutput` or `-RedirectStandardError`. The log is opened when
+the first line needs it: each start that writes there appends a line
+`--- apiforge-desktop <version> <date time> ---` first, and a log over 1 MiB
+at that moment is renamed to `apiforge-desktop.log.1`, unless another running
+window holds it, in which case this start appends to it. If the log cannot be
+created, the window still starts and the output is lost. When the log could
+be opened, a crash of the window also shows a dialog that names it. Debug
+builds (`cargo run`) and `apiforge.exe` remain console programs.
+
 ### Demo API
 
 The demo projects send requests to `http://127.0.0.1:4318/demo`:
@@ -85,6 +107,23 @@ cargo run -p apiforge-layout --example bench --release --locked [-- --strict]
 
 It prints each measurement against its budget. `--strict` makes an exceeded budget
 an error, which only makes sense on a machine whose speed is known.
+
+How readable the boards are is measured beside it, before and after a layout
+ticket, and the numbers go into the ticket's pull request:
+
+```bash
+cargo run -p apiforge-layout --example quality --release --locked [-- --dump <seed> <cards>]
+```
+
+It prints wires, crossings, bends, straight wires, close and coincident pairs,
+long edges and incomplete routes for generated boards of 6, 12, 25 and 50 cards
+with and without an ordering chain, then the same for the reference scenarios of
+`fixtures/scenarios/lay/`, with their board size, fit zoom at 1600 × 1000 and
+960 × 540, card and chip collisions and 12 px clearance violations. Two runs print
+the same; the example's header defines each column. `--dump` prints one generated
+board's rectangles and routes. What these numbers cannot say is timed by hand with
+the [UX task sheet](sprints/lay.md#9-metrics-and-qa), on `shop-30.afs` after a
+failed simulation.
 
 Changes to analysis, the code view or folder sessions also check the source
 budgets of the [Stage II plan](stage-ii-code-workspace.md#delivery-and-acceptance)
@@ -247,8 +286,23 @@ for size in 16 32 48 64 128 256 512; do
 done
 ```
 
-The window carries the 256 px image on Linux; the AppImage uses it for its
-launcher entry.
+The window carries the 256 px image on Linux and Windows; the AppImage uses
+it for its launcher entry.
+
+On Windows, both `.exe` files carry the icon as a resource
+([REL-02](tickets/REL-02.md)), which Explorer and the taskbar show:
+`packaging/icon/apiforge.ico` holds the 16, 32, 48, 64, 128 and 256 px PNGs
+above, verbatim and in that order. It is committed, and rebuilt from the PNGs
+whenever they change with `python3 -I packaging/icon.py` (standard library
+only; `--check` compares instead of writing), which `test_release.py` also
+does in memory. The `build.rs` of `apiforge-desktop` and `apiforge-cli` embed
+it with `winresource`, a Windows-only build dependency, together with the
+product name, the file description and the workspace version as the file and
+product versions of Explorer's *Details* tab; it needs the Windows SDK's
+`rc.exe`, which the MSVC toolchain installs, and does nothing on Linux. Every
+Windows CI run extracts the icon of both release binaries, compares it with
+`apiforge-32.png` and captures the running window, as the artifact
+`windows-icon`.
 
 ## Running a scenario from the command line
 
@@ -371,16 +425,16 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window's live setting decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
 | `check_text` | `path`, `text` | the diagnostics `text` would have as that document, `valid`, `generation`, the saved `source_sha256`, `used` (the published revisions analysed against); for an unregistered path also `registered: false`, `kind` and `handle` from the header and `problems` (`path_exists`, `handle_exists`, `invalid_text`); a path that is not a working source is the error `path_rejected` |
 | `print` | `path` | the canonical text, byte for byte what `apiforge print` prints |
-| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `journal_unreadable`, `replayed` (`true` for a repeated `request_id`); `replayed` and `journal_unreadable` are always sent, as is `may_have_reached_api` on every compact step, `false` included; with `full: true` the runner's JSON report instead of the steps |
+| `run` | `path`, `inputs`?, `full`?, `live`?, `request_id`? | a simulation of the saved document, or with `live: true` a live run: `live`, `status` (`passed`, `failed`, `cancelled`), `ended_by` (`completed`, `cancelled`, `timed_out`), `step_count`, the steps (handle, label, status, phase, message, `expected`/`actual` on a failed comparison, `may_have_reached_api`, a component's steps nested), `generation`, `source_sha256`, `used`, `redacted: true`, `interrupted`, `journal_unreadable`, `replayed` (`true` for a repeated `request_id`); `replayed` and `journal_unreadable` are always sent, as is `may_have_reached_api` on every compact step, `false` included: `true` on every request a live run sent, answered or not, `false` on a step that sent nothing; with `full: true` the runner's JSON report instead of the steps |
 | `write_source` | `path`, `text`, `expected_source_sha256`, `expected_generation`? | the text saved exactly, with its checkpoint: `wrote`, `changed` (the paths the commit wrote), the new `source_sha256`, `generation`, `valid`, diagnostics (warnings), `omitted` |
 | `create_document` | `kind`, `path`, `text`, `expected_generation`? | a new scenario or component registered: `path`, `kind`, `handle`, `wrote`, `changed`, `source_sha256`, `generation`, diagnostics, `omitted` |
-| `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote`, `changed`, `replayed` |
+| `publish` | `path`, `expected_source_sha256`, `accept_comment_loss`?, `expected_generation`?, `request_id`? | the saved working component's next revision, as *Publish* in the window: `path`, `handle`, `revision`, `revision_path`, the revision's `source_sha256`, `generation`, `wrote` (this call's write: `false` with `replayed`), `changed`, `replayed` |
 | `finish_editing` | — | `finished`: whether an agent session ended and released the project |
 
 `check_text` checks a proposed text without saving it, while `run` executes
@@ -408,8 +462,8 @@ run with `notifications/cancelled`; the main phase stops at the next step,
 the cleanup still runs, the run's slot frees, and the request gets no
 response, as the protocol says, while stderr says `apiforge mcp: run:
 cancelled`. A run still going after ten minutes is cancelled the same way
-and answered with `status: cancelled`, `ended_by: timed_out`; a step whose
-request was on its way is marked `may_have_reached_api`. At the end of stdin
+and answered with `status: cancelled`, `ended_by: timed_out`; a request
+cut off on its way stays marked `may_have_reached_api`, as every sent one is. At the end of stdin
 a simulation in progress has five seconds to finish and be answered (rmcp's
 drain of in-flight requests); after that it is cancelled and its cleanup
 waited for up to ten seconds. A live run is cancelled at once
@@ -486,7 +540,7 @@ language-reference and local holder/channel versions retain their purposes.
 - A `publish` with a `request_id` is answered from the record of request
   ids (below), by this server or by one started later for the same folder:
   an id that published returns the recorded result with `replayed: true`
-  and publishes nothing; the same id for another path or hash is
+  and `wrote: false`, and publishes nothing; the same id for another path or hash is
   `invalid_inputs`. The id is written to the record, with the path, the
   expected hash and the time, before the transaction starts, and the result
   right after the commit; a server that finds an entry without a result (an
@@ -648,15 +702,16 @@ the project hears that window's setting first: when it is off the run is
 nothing within two seconds. The window reads the file again once a second,
 so a change made in another window is followed. The overview never connects
 to a window: until one is connected it reports the flag, except while a window
-holding the project names a valid endpoint, when it says that window decides when
-the live run starts (MCP-18). The server
+holding the project names a valid endpoint, when it says that window's live
+setting decides when the live run starts (MCP-18). The server
 tells connected windows `run { mode: live }` when a live run starts and ends,
 so a box unticked meanwhile says *A live run is in progress; it will finish.
 No new one starts.*
 `project_overview.live_requests` says `allowed` and its `source`
 (`--allow-live`, `no --allow-live`, `window setting`, `off in the project's
-settings`); `allowed` is `null`, with `window setting, asked when the run
-starts`, while that window has yet to be asked. The permission is checked immediately before the run starts,
+settings`); `allowed` is `null`, with `the open window's live setting decides`,
+while that window has not connected: nobody is asked, and a setting that is off
+refuses the run with `live_disabled`. The permission is checked immediately before the run starts,
 under the writer lock; a change after that does not stop the run, whose
 cleanup must finish.
 
@@ -723,7 +778,7 @@ live runs only) is read, and written as version 2 on the next change.
   ten-minute deadline, stops the main phase at the next step; the cleanup runs
   and its steps are in the report; the entry is removed at the end; the result
   is `status: cancelled` with `ended_by: cancelled` or `timed_out`, and the
-  request that was on its way is `may_have_reached_api`. A cancelled call gets
+  request that was on its way is `may_have_reached_api`, as every sent one is. A cancelled call gets
   no response, as the protocol says; a timeout is not evidence that nothing
   was sent.
 - **Client lost**: at the end of stdin a live run is cancelled at once, its
@@ -885,8 +940,8 @@ order; these are the mechanics.
 - Small [Conventional Commits](https://www.conventionalcommits.org/).
   Acceptance tests are committed before the implementation
   ([testing](process/testing.md#1-acceptance-tests-first)).
-- The pull request follows `.github/PULL_REQUEST_TEMPLATE.md` and links its
-  QA report. At most four pull requests await owner acceptance at a time, and
+- The pull request follows `.github/PULL_REQUEST_TEMPLATE.md`; its QA section
+  is in the pull request body ([testing](process/testing.md#2-the-functional-qa-report)). At most four pull requests await owner acceptance at a time, and
   at most 60 estimated review minutes among them
   ([limits](process/README.md#limits-that-keep-review-possible)).
 - Only the owner merges to `main`. Passing the verification commands above is

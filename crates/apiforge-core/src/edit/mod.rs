@@ -8,18 +8,31 @@
 mod clipboard;
 mod component;
 mod connect;
+mod extract;
 mod fold;
+mod inputs;
 mod inspect;
 mod nodes;
 mod proxies;
 mod storage;
 
-pub use clipboard::{PASTE_OFFSET, Pasted, copy_selection, duplicate_selection, paste_selection};
+pub use clipboard::{
+    Fragment, Missing, PASTE_OFFSET, PasteTarget, Pasted, Unresolved, copy_selection,
+    duplicate_selection, paste_selection,
+};
 pub use component::{
     ComponentDraft, DraftError, DraftSection, InputRow, InputTarget, OutputRow, add_component,
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use extract::{
+    Extraction, Replaced, branch_leaves, extraction_component, propose_extraction,
+    replace_with_call, unkept_outputs,
+};
+pub use inputs::{
+    InputNameError, add_input, check_input_name, delete_input, rename_input, replace_input,
+    set_action,
+};
 pub use inspect::{
     RESPONSE_FIELD_DEPTH, RESPONSE_FIELD_LIMIT, ResponseField, ResponseFields,
     collect_response_fields, collect_response_fields_bounded, sample_paths,
@@ -82,6 +95,12 @@ pub enum EditError {
     InvalidOperandPath,
     #[error("The component to revise does not exist.")]
     ComponentNotFound,
+    #[error("A step after the selection reads {0}. Keep it as an output.")]
+    OutputNotKept(String),
+    #[error(
+        "An IF/ELSE branch leaves the selection. Select the steps of the branch as well, or leave the IF/ELSE out."
+    )]
+    BranchLeavesSelection,
     #[error("{0}")]
     InvalidProject(#[from] ImportError),
 }

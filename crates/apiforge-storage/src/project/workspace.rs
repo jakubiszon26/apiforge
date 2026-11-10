@@ -191,7 +191,7 @@ impl ProjectStore {
         self.writable()?;
         let bytes = state.to_bytes()?;
         self.check_secrets(&bytes)?;
-        let _worker = self.owner.worker.lock().unwrap_or_else(|p| p.into_inner());
+        let _worker = self.owner.lock_worker();
         self.atomic(&path::resolve(self.root(), WORKSPACE_PATH)?, &bytes)
     }
 }

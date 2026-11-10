@@ -213,6 +213,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "winresource",
 ]
 
 [[package]]
@@ -229,11 +230,15 @@ dependencies = [
 name = "apiforge-core"
 version = "0.1.0"
 dependencies = [
+ "apiforge-runner",
+ "apiforge-script",
  "indexmap",
  "libm",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
  "uuid",
 ]
 
@@ -273,11 +278,16 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "winresource",
 ]
 
 [[package]]
 name = "apiforge-layout"
 version = "0.1.0"
+dependencies = [
+ "apiforge-core",
+ "apiforge-script",
+]
 
 [[package]]
 name = "apiforge-mcp"
@@ -321,6 +331,7 @@ name = "apiforge-runner"
 version = "0.1.0"
 dependencies = [
  "apiforge-core",
+ "apiforge-script",
  "indexmap",
  "reqwest",
  "serde",
@@ -5321,6 +5332,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]
