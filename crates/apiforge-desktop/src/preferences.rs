@@ -6,11 +6,11 @@
 //! the default, and one that cannot be written is simply not remembered. Nothing
 //! here is worth interrupting the user for, and nothing here is worth a prompt.
 //!
-//! Several windows share the file without coordination. A change reads the file
-//! again and replaces only the preference that changed, so a window never
-//! reverts what another window changed since it started; the last window to
-//! change the same preference wins. Each write is atomic, so a crash never
-//! leaves a half-written file behind.
+//! Several windows share the file. A change takes a lock file beside it, reads
+//! the file again and replaces only the preference that changed, so a window
+//! never reverts what another window changed, even when both save at once; the
+//! last window to change the same preference wins. Each write is atomic, so a
+//! crash never leaves a half-written file behind.
 
 use crate::canvas::WireStyle;
 use serde::{Deserialize, Serialize};
@@ -113,11 +113,16 @@ impl Preferences {
     /// Writes the preference that changed, and says nothing if it cannot. The
     /// file is read again first and only `changed` is replaced in it, so what
     /// another window wrote since this one started is kept; a file that cannot
-    /// be read is replaced by this window's preferences.
+    /// be read is replaced by this window's preferences. The read and the write
+    /// happen under a lock shared by every window, so two windows saving at once
+    /// both keep their change.
     pub fn save(&self, changed: Preference) {
         let Some(path) = &self.path else {
             return;
         };
+        // Held until this function returns. Without it the change is still
+        // written, only no longer serialised against another window.
+        let _lock = lock(path);
         let mut stored = read(path).unwrap_or_else(|| self.stored());
         // A stored *Curves* is never written again (UX-28).
         stored.wire_style = StoredWireStyle::Orthogonal;
@@ -149,6 +154,24 @@ impl Preferences {
             compact_cards: self.compact_cards,
         }
     }
+}
+
+/// The lock that serialises every window's read-modify-write of `path`: a file
+/// beside it that is never removed, so every window locks the same one. The
+/// lock is released when the returned file is dropped.
+fn lock(path: &std::path::Path) -> Option<std::fs::File> {
+    if let Some(directory) = path.parent() {
+        let _ = std::fs::create_dir_all(directory);
+    }
+    let file = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_extension("lock"))
+        .ok()?;
+    file.lock().ok()?;
+    Some(file)
 }
 
 /// What `path` holds, or `None` when it is missing, unreadable, oversized or
@@ -234,6 +257,40 @@ mod tests {
         let reloaded = Preferences::at(Some(path));
         assert!(!reloaded.compact_cards, "the other window's change is kept");
         assert!(!reloaded.bridges, "this window's change is written");
+    }
+
+    /// Two windows saving at once both keep their change: a save waits for
+    /// the lock every window takes around its read-modify-write, so it reads
+    /// the file only after the other window's write.
+    #[test]
+    fn a_save_waits_for_another_window_saving_at_the_same_moment() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        let mut waiting = Preferences::at(Some(path.clone()));
+        waiting.bridges = false;
+
+        // The other window is between its read and its write.
+        let other = lock(&path).expect("the lock file can be taken");
+        let (saved, done) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            waiting.save(Preference::Bridges);
+            saved.send(()).unwrap();
+        });
+        assert!(
+            done.recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "a save must not read the file while another window holds the lock"
+        );
+        let mut writer = Preferences::at(Some(path.clone()));
+        writer.compact_cards = false;
+        std::fs::write(&path, serde_json::to_vec(&writer.stored()).unwrap()).unwrap();
+        drop(other);
+        done.recv().unwrap();
+        thread.join().unwrap();
+
+        let reloaded = Preferences::at(Some(path));
+        assert!(!reloaded.compact_cards, "the other window's change is kept");
+        assert!(!reloaded.bridges, "the waiting window's change is written");
     }
 
     #[test]
