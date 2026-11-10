@@ -64,6 +64,18 @@ pub(super) struct Request {
     publish: bool,
 }
 
+/// What the dialog says about outputs a later step reads but the draft
+/// drops (UX-30, UX-37).
+struct Unkept {
+    /// The refusal.
+    message: String,
+    /// The later steps that would be left unconnected.
+    readers: Vec<String>,
+    /// For each request that uses a dropped value in a template, where:
+    /// such a reader cannot be left unconnected.
+    reasons: Vec<String>,
+}
+
 /// Why a read output must stay, or nothing.
 fn unkept_message(unkept: &[String]) -> Option<String> {
     match unkept {
@@ -268,23 +280,38 @@ impl SaveComponent {
     /// when one call cannot stand in for them; a file alone changes nothing
     /// the steps after them read. A branch leaving the selection is always
     /// refused; an output a later step reads may be dropped on request,
-    /// leaving those steps unconnected (UX-37), and they are returned too.
-    fn unkept(&self) -> Option<(String, Vec<String>)> {
+    /// leaving those steps unconnected (UX-37), unless a request uses it in
+    /// its URL, headers, query or body, which the refusal then names
+    /// (option B).
+    fn unkept(&self) -> Option<Unkept> {
         if !self.publish {
             return None;
         }
         if self.with_extraction(edit::branch_leaves) {
-            return Some((
-                edit::EditError::BranchLeavesSelection.to_string(),
-                Vec::new(),
-            ));
+            return Some(Unkept {
+                message: edit::EditError::BranchLeavesSelection.to_string(),
+                readers: Vec::new(),
+                reasons: Vec::new(),
+            });
         }
         let message = unkept_message(
             &self.with_extraction(|extraction| edit::unkept_outputs(extraction, &self.draft)),
         )?;
-        let readers =
-            self.with_extraction(|extraction| edit::unkept_readers(extraction, &self.draft));
-        Some((message, readers))
+        let (readers, uses) = self.with_extraction(|extraction| {
+            (
+                edit::unkept_readers(extraction, &self.draft),
+                edit::template_readers(extraction, &self.draft),
+            )
+        });
+        let reasons = uses
+            .into_iter()
+            .map(|(reader, place)| format!("\"{reader}\" uses this in its {place}."))
+            .collect();
+        Some(Unkept {
+            message,
+            readers,
+            reasons,
+        })
     }
 
     /// The draft's own problems; a missing name is the name field's.
@@ -455,16 +482,16 @@ impl SaveComponent {
             });
         }
         match self.unkept() {
-            Some((problem, readers)) if !readers.is_empty() => {
+            Some(unkept) if !unkept.readers.is_empty() && unkept.reasons.is_empty() => {
                 // Chosen, the refusal stays as a muted note of what saving
                 // leaves to be fixed by hand.
                 if self.leave_unconnected {
-                    widgets::hint(ui, &problem);
+                    widgets::hint(ui, &unkept.message);
                 } else {
-                    widgets::field_error(ui, &problem);
-                    problems.push(problem);
+                    widgets::field_error(ui, &unkept.message);
+                    problems.push(unkept.message);
                 }
-                let label = match readers.as_slice() {
+                let label = match unkept.readers.as_slice() {
                     [one] => format!("Save anyway and leave \"{one}\" unconnected"),
                     many => format!(
                         "Save anyway and leave {} later steps unconnected",
@@ -473,9 +500,15 @@ impl SaveComponent {
                 };
                 widgets::named(ui.checkbox(&mut self.leave_unconnected, &label), label);
             }
-            Some((problem, _)) => {
-                widgets::field_error(ui, &problem);
-                problems.push(problem);
+            Some(unkept) => {
+                // A reader that cannot lose the value: the refusal alone,
+                // with where it is used.
+                self.leave_unconnected = false;
+                widgets::field_error(ui, &unkept.message);
+                for reason in &unkept.reasons {
+                    widgets::field_error(ui, reason);
+                }
+                problems.push(unkept.message);
             }
             None => self.leave_unconnected = false,
         }
@@ -763,6 +796,14 @@ impl FolderApp {
     /// Writes the component and, when asked, publishes it and calls it in
     /// place of the steps. A refusal reopens the dialog with its reason.
     fn save_component(&mut self, mut dialog: Box<SaveComponent>, request: Request) {
+        if request.publish
+            && dialog.leave_unconnected
+            && let Err(reason) = self.check_unconnected(&dialog, &request.component)
+        {
+            dialog.error = Some(reason);
+            self.prompt = Some(Prompt::SaveComponent(dialog));
+            return;
+        }
         let Some(session) = self.session.as_ref() else {
             return;
         };
@@ -876,34 +917,8 @@ impl FolderApp {
         };
         // The board the dialog was opened on, as it is now: nothing could
         // change it while the dialog and the save held the window.
-        let later: Vec<&Graph> = match &model {
-            Document::Scenario(scenario) if !dialog.cleanup => vec![&scenario.cleanup],
-            _ => Vec::new(),
-        };
-        let selected: HashSet<&str> = dialog.selected.iter().map(String::as_str).collect();
-        let replace = if dialog.leave_unconnected {
-            edit::replace_with_call_unconnecting
-        } else {
-            edit::replace_with_call
-        };
-        let replaced = replace(
-            &Extraction {
-                graph: graph_of(&model, dialog.cleanup),
-                reference: graph_of(&model, false),
-                later: &later,
-                selected: &selected,
-            },
-            &dialog.draft,
-            component,
-        );
-        match replaced {
-            Ok(replaced) => {
-                let mut next = with_graph(&model, dialog.cleanup, replaced.graph);
-                if let (Document::Scenario(scenario), Some(cleanup)) =
-                    (&mut next, replaced.later.into_iter().next())
-                {
-                    scenario.cleanup = cleanup;
-                }
+        match replaced_model(dialog, &model, component) {
+            Ok((next, call)) => {
                 // A refusal of the edit replaces this notice with its reason.
                 self.notify(
                     format!(
@@ -921,7 +936,7 @@ impl FolderApp {
                     &dialog.document_id,
                     publication::Action::Model {
                         next: Box::new(next),
-                        selection: Some(vec![replaced.call]),
+                        selection: Some(vec![call]),
                         check: None,
                     },
                 );
@@ -932,4 +947,68 @@ impl FolderApp {
             ),
         }
     }
+
+    /// With *Save anyway* ticked, whether the scenario that would result,
+    /// calling `component` and with the readers unconnected, is valid: asked
+    /// before anything is written or published (UX-37, criterion 5).
+    fn check_unconnected(
+        &self,
+        dialog: &SaveComponent,
+        component: &Component,
+    ) -> Result<(), String> {
+        const REFUSED: &str = "Saving would leave the scenario invalid, so nothing was saved. \
+                               Keep the output instead.";
+        let session = self.session.as_ref().ok_or(REFUSED)?;
+        let model = session
+            .document(&dialog.document_id)
+            .and_then(|document| document.model().cloned())
+            .ok_or(REFUSED)?;
+        let (next, _) = replaced_model(dialog, &model, component).map_err(|_| REFUSED)?;
+        let mut project = (**session.context()).clone();
+        project.components.push(component.clone());
+        apiforge_script::validate_document_model(
+            &next,
+            &apiforge_script::LowerContext::folder(&project),
+        )
+        .map_err(|_| REFUSED.to_owned())
+    }
+}
+
+/// `model` with the dialog's steps replaced by one call to `component`, and
+/// the call's identifier; with *Save anyway* ticked, the readers of a dropped
+/// output are left unconnected.
+fn replaced_model(
+    dialog: &SaveComponent,
+    model: &Document,
+    component: &Component,
+) -> Result<(Document, String), edit::EditError> {
+    // The board the dialog was opened on, as it is now: nothing could
+    // change it while the dialog and the save held the window.
+    let later: Vec<&Graph> = match model {
+        Document::Scenario(scenario) if !dialog.cleanup => vec![&scenario.cleanup],
+        _ => Vec::new(),
+    };
+    let selected: HashSet<&str> = dialog.selected.iter().map(String::as_str).collect();
+    let replace = if dialog.leave_unconnected {
+        edit::replace_with_call_unconnecting
+    } else {
+        edit::replace_with_call
+    };
+    let replaced = replace(
+        &Extraction {
+            graph: graph_of(model, dialog.cleanup),
+            reference: graph_of(model, false),
+            later: &later,
+            selected: &selected,
+        },
+        &dialog.draft,
+        component,
+    )?;
+    let mut next = with_graph(model, dialog.cleanup, replaced.graph);
+    if let (Document::Scenario(scenario), Some(cleanup)) =
+        (&mut next, replaced.later.into_iter().next())
+    {
+        scenario.cleanup = cleanup;
+    }
+    Ok((next, replaced.call))
 }

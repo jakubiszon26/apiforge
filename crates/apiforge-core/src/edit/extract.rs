@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
     format::{Binding, Component, Graph, Node, OrderEdge, Position, Project, ProxySource},
-    graph::{component_definition, create_node, output_ports},
+    graph::{
+        BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, component_definition, create_node,
+        is_request_argument, output_ports,
+    },
     handle::unique_handle,
     js,
     model::{NodeKind, ValueType},
@@ -199,21 +202,73 @@ pub fn unkept_outputs(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Ve
     unkept
 }
 
+/// Whether `binding` reads an output of the selection that no kept output
+/// provides.
+fn reads_unkept(extraction: &Extraction<'_>, draft: &ComponentDraft, binding: &Binding) -> bool {
+    binding.references().iter().any(|reference| {
+        extraction.selected.contains(reference.node_id)
+            && kept_output(draft, reference.node_id, reference.port, reference.path).is_none()
+    })
+}
+
+/// The later requests that read an output no kept output provides, by name,
+/// with where they use it: `URL`, `headers`, `query` or `body` (UX-37,
+/// option B). A request cannot lose such a value and still be the request
+/// the person wrote, so these readers are never left unconnected.
+pub fn template_readers(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+) -> Vec<(String, &'static str)> {
+    let mut uses: Vec<(String, &'static str)> = Vec::new();
+    for node in extraction.readers() {
+        if node.kind != NodeKind::Request {
+            continue;
+        }
+        for (name, binding) in &node.inputs {
+            if !reads_unkept(extraction, draft, binding) {
+                continue;
+            }
+            // An argument is read by the URL, headers, query or body that
+            // names it; the first of them says where it is used.
+            let place = if is_request_argument(name) {
+                node.inputs
+                    .iter()
+                    .find(|(_, other)| {
+                        other.leaves().iter().any(|(_, leaf)| {
+                            matches!(leaf, Binding::Argument { name: used, .. } if used == name)
+                        })
+                    })
+                    .map_or(URL_INPUT, |(other, _)| other.as_str())
+            } else {
+                name.as_str()
+            };
+            let place = match place {
+                HEADERS_INPUT => "headers",
+                QUERY_INPUT => "query",
+                BODY_INPUT => "body",
+                _ => "URL",
+            };
+            let used = (node.display_name().to_owned(), place);
+            if !uses.contains(&used) {
+                uses.push(used);
+            }
+        }
+    }
+    uses
+}
+
 /// The steps after the selection that read an output no kept output
 /// provides, by name, in reading order: those [`replace_with_call_unconnecting`]
 /// leaves unconnected (UX-37).
 pub fn unkept_readers(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Vec<String> {
     let mut readers: Vec<String> = Vec::new();
     for node in extraction.readers() {
-        let reads_unkept = node.inputs.values().any(|binding| {
-            binding.references().iter().any(|reference| {
-                extraction.selected.contains(reference.node_id)
-                    && kept_output(draft, reference.node_id, reference.port, reference.path)
-                        .is_none()
-            })
-        });
+        let reads = node
+            .inputs
+            .values()
+            .any(|binding| reads_unkept(extraction, draft, binding));
         let name = node.display_name().to_owned();
-        if reads_unkept && !readers.contains(&name) {
+        if reads && !readers.contains(&name) {
             readers.push(name);
         }
     }
@@ -579,6 +634,54 @@ mod tests {
         draft.outputs[0].path = String::new();
         assert!(unkept_outputs(&extraction, &draft).is_empty());
         assert!(!branch_leaves(&extraction));
+    }
+
+    /// UX-37: a request that uses a dropped value as a URL argument is named
+    /// with where it uses it; a check that reads one loses only that slot.
+    #[test]
+    fn a_template_reader_is_named_and_a_check_reader_is_unconnected() {
+        let (project, scenario) = shop();
+        let later = [&scenario.cleanup];
+        let selected: HashSet<&str> = ["cart", "price"].into();
+        let extraction = Extraction {
+            graph: &scenario.graph,
+            reference: &scenario.graph,
+            later: &later,
+            selected: &selected,
+        };
+        let mut draft = propose_extraction(&extraction, &project, "Check".into());
+        draft.outputs[0].enabled = false;
+        draft.outputs[1].enabled = true;
+        assert_eq!(unkept_readers(&extraction, &draft), vec!["Delete cart"]);
+        assert_eq!(
+            template_readers(&extraction, &draft),
+            vec![("Delete cart".to_owned(), "URL")]
+        );
+
+        // In Cleanup, *Cart was deleted* reads the status of *Delete cart*.
+        let selected: HashSet<&str> = ["delete-cart"].into();
+        let extraction = Extraction {
+            graph: &scenario.cleanup,
+            reference: &scenario.graph,
+            later: &[],
+            selected: &selected,
+        };
+        let mut draft = propose_extraction(&extraction, &project, "Delete".into());
+        for row in &mut draft.outputs {
+            row.enabled = row.port != "status";
+        }
+        assert!(template_readers(&extraction, &draft).is_empty());
+        let component = extraction_component(&extraction, &draft).unwrap();
+        assert!(replace_with_call(&extraction, &draft, &component).is_err());
+        let replaced = replace_with_call_unconnecting(&extraction, &draft, &component).unwrap();
+        let check = replaced
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "verify-cleanup")
+            .unwrap();
+        assert!(!check.inputs.contains_key("actual"));
+        assert!(check.inputs.contains_key("expected"));
     }
 
     #[test]
