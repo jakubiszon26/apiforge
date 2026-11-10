@@ -320,11 +320,10 @@ LAY-19) are in (Q12 = C). DIAG-00 (#241) folded into LAY-09 and LAY-11
 Capacity: **385** owner review minutes over 21 tickets. The order of work
 was revised by the [mid-sprint review of 2026-11-10](sprints/lay.md#11-mid-sprint-review-2026-11-10),
 which replaces the waves: **part A**, the coherent board — LAY-16 → LAY-21 →
-LAY-11 → LAY-09 → LAY-07 on the card track, LAY-02 → LAY-06 on the layout
-track and LAY-22 on the engine track, in parallel; a **checkpoint** where
+LAY-11 → LAY-09 → LAY-07 on the card track, LAY-02 → LAY-06 → LAY-04 →
+LAY-03 on the layout track and LAY-22 on the engine track, in parallel; a **checkpoint** where
 the owner uses the real board and confirms part B; **part B** — LAY-10 →
-LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 → LAY-04, LAY-03, LAY-05
-→ LAY-12. The *Wave* column below is the plan of 2026-11-05, kept as the
+LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 → LAY-05 → LAY-12. The *Wave* column below is the plan of 2026-11-05, kept as the
 record.
 Exit criteria:
 

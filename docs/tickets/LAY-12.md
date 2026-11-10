@@ -37,8 +37,8 @@ the card (Q16 = A) is the one thing the reading tasks cannot measure.
 The checkpoint is run as an experiment ([lay.md 11.5](../sprints/lay.md#115-what-published-studies-say-and-what-they-do-not)):
 the baseline on a build of `8248b93`; tasks 2 and 4 with checks collapsed
 and expanded (the default of Q4 follows the result); crossings per wire on
-shape D for `shop-30` (above 0.5, LAY-04 and LAY-03 lead part B); the
-sheet once in Code view.
+shape D for `shop-30`, after LAY-04 and LAY-03, beside the timed tasks;
+the sheet once in Code view.
 
 ## Mock-up
 

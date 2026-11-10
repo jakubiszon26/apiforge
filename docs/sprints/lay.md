@@ -1095,7 +1095,11 @@ is dropped and no decision of 5.1 changes.
 3. **LAY-11** collapse checks.
 4. **LAY-09** what each zoom shows, the minimum sizes, Fit below 25 %.
 5. **LAY-07** badges and the running step.
-6. In parallel, the layout track: **LAY-02** → **LAY-06**.
+6. In parallel, the layout track: **LAY-02** → **LAY-06** → **LAY-04** →
+   **LAY-03** (the two routing tickets joined part A after the reading of
+   11.5: crossings and broken continuity are the best-evidenced obstacles
+   to following a wire, and the layout track is free while the card track
+   finishes).
 7. In parallel, no interface: **LAY-22** (new) the runner's and core's
    groundwork for LAY-07, LAY-19 and LAY-10.
 
@@ -1106,14 +1110,14 @@ exit criterion "fits at 50 % or more" is read here.
 
 **Part B — the refinements**, in this order unless the checkpoint says
 otherwise: LAY-10 → LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 →
-LAY-04, LAY-03, LAY-05 → LAY-12.
+LAY-05 → LAY-12.
 
 ### 11.3 Tracks
 
 | Track | Files | Tickets |
 | --- | --- | --- |
 | Cards | `apiforge-desktop/src/canvas/` | LAY-21 → 11 → 09 → 07, then part B's card tickets; one at a time |
-| Layout | `apiforge-layout`, `board_edit.rs`, `folder/placement.rs` | LAY-02 → 06 → 17 → 04 → 03 → 05 |
+| Layout | `apiforge-layout`, `board_edit.rs`, `folder/placement.rs` | LAY-02 → 06 → 04 → 03, then 17 and 05 in part B |
 | Engine | `apiforge-runner`, `apiforge-core` | LAY-22 |
 
 A ticket's acceptance module is its own file,
@@ -1133,7 +1137,10 @@ the end of `acceptance_tests.rs` any more.
   get smaller.
 - **LAY-06** gains: Tidy up ends with the board in view (R4); `quality`
   reads the desktop's card sizes (R9); `shop-30` with checks collapsed fits
-  1600 × 1000 at 0.50 or more (the assertion LAY-16 handed over).
+  1600 × 1000 at 0.50 or more (the assertion LAY-16 handed over); its pull
+  request prints crossings, coincident pairs and straight wires per
+  scenario before and after, and `shop-30` must not have more crossings per
+  wire than today's 2.05 (11.5).
 - **LAY-09** gains: Fit shows every card (R3); the zoom level is *Medium*
   (R7); it covers every card kind of LAY-21.
 - **LAY-12** gains the checkpoint run and tasks 9 and 10 (R5, R6).
@@ -1142,7 +1149,7 @@ the end of `acceptance_tests.rs` any more.
   it; a capture of a board asserts that a card is in the viewport (R4).
 
 Capacity: 21 tickets, **385** minutes (365 + LAY-21 20 + LAY-22 10 − LAY-06
-10); part A is 150 of them.
+10); part A is 185 of them, with LAY-04 and LAY-03.
 
 **Task sheet, added (R5)** — on `shop-30.afs`, timed with the count of
 clicks, before (on `main` at `8248b93`, full cards) and at the checkpoint:
@@ -1162,7 +1169,7 @@ says where the plan stands on evidence and where it stands on judgement.
 | --- | --- | --- |
 | Fewer, smaller elements (compact cards, collapse) | Model size is the factor that most affects how well a process model is understood (Reijers and Mendling). | Supported in direction. |
 | Hiding checks by default (Q4 = A) | In two experiments on large BPMN models a fully flattened model was understood better than one with collapsed sub-processes (Türetken et al., 2016 and 2020); hidden dependencies are a known cost of visual notations (Green and Petre). | **Not supported as a default.** The aggregate and the visible failure are the mitigation; the checkpoint times tasks 2 and 4 collapsed and expanded, and the default follows the result. |
-| The shape before the wires ("comprehension before crossing count") | Edge crossings are the aesthetic with by far the largest measured effect on reading a graph, and path continuity comes next for following a path (Purchase; Ware, Purchase et al.). `shop-30` has 117 crossings on 57 wires today. | **A risk in part A.** Tracing a value is a path task. The checkpoint reads crossings per wire on shape D; above 0.5, LAY-04 and LAY-03 come before every other ticket of part B. |
+| The shape before the wires ("comprehension before crossing count") | Edge crossings are the aesthetic with by far the largest measured effect on reading a graph, and path continuity comes next for following a path (Purchase; Ware, Purchase et al.). `shop-30` has 117 crossings on 57 wires and 97 coincident pairs today. | **The plan changes.** Tracing a value is a path task, so LAY-04 (straight wires between neighbours) and LAY-03 (no wire on top of another) move into part A; LAY-06 may not raise crossings per wire; the checkpoint reads the metric table beside the timed tasks. |
 | A graph at all, for reading a test | Visual programs were slower to read than text in Green and Petre's experiments; Whitley's review finds the opposite for some tasks. | No guarantee either way. Code and Split stay first-class; the task sheet is timed in Diagram and, once, in Code. |
 | Focus by dimming, off-screen chips, badges, bands | No task-performance study found for these in this reading. | Judgement only: they are part B and are confirmed at the checkpoint, on use. |
 
