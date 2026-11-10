@@ -11,7 +11,7 @@
 use apiforge_core::{
     format::{Binding, Graph, Node, NodeConfig, OptionalJson, TemplatePart},
     js::utf16_len,
-    run::{RequestSnapshot, RunResult, RunSnapshot, StepResult},
+    run::{NotRunCause, RequestSnapshot, RunResult, RunSnapshot, StepResult},
     template::encode_uri_component,
 };
 use indexmap::{IndexMap, IndexSet};
@@ -219,6 +219,7 @@ impl Redactor {
             }),
             error: run.error.as_deref().map(text),
             notice: run.notice.as_deref().map(text),
+            running: run.running.as_deref().map(text),
         }
     }
 
@@ -246,6 +247,23 @@ impl Redactor {
                 .children
                 .as_ref()
                 .map(|children| children.iter().map(|step| self.redact_step(step)).collect()),
+            // Node ids, redacted as `node_id` is, so that they still match.
+            cause: step.cause.as_ref().map(|cause| match cause {
+                NotRunCause::Stopped { by } => NotRunCause::Stopped {
+                    by: self.redact_str(by),
+                },
+                NotRunCause::BlockedBy { step } => NotRunCause::BlockedBy {
+                    step: self.redact_str(step),
+                },
+                NotRunCause::ConditionUnmet { condition } => NotRunCause::ConditionUnmet {
+                    condition: self.redact_str(condition),
+                },
+                NotRunCause::CleanupInputMissing { step } => NotRunCause::CleanupInputMissing {
+                    step: self.redact_str(step),
+                },
+                NotRunCause::OutsidePath => NotRunCause::OutsidePath,
+                NotRunCause::Cancelled => NotRunCause::Cancelled,
+            }),
         }
     }
 
@@ -474,6 +492,41 @@ mod tests {
         assert_eq!(
             redactor.redact_str(text),
             "[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] visible 2"
+        );
+    }
+
+    /// LAY-22: a cause and the running step name node ids, masked as the
+    /// step's own id is, so they still match it.
+    #[test]
+    fn causes_and_the_running_step_are_redacted_like_node_ids() {
+        let mut redactor = Redactor::new();
+        redactor.add("s3cret");
+        let step: StepResult = serde_json::from_value(json!({
+            "nodeId": "s3cret-step", "handle": "h", "kind": "request", "status": "skipped",
+            "phase": "main", "inputs": {}, "outputs": {}, "durationMs": 0,
+            "cause": { "kind": "blockedBy", "step": "s3cret-step" }
+        }))
+        .unwrap();
+        let redacted = redactor.redact_step(&step);
+        assert_eq!(redacted.node_id, "[REDACTED]-step");
+        assert_eq!(
+            redacted.cause,
+            Some(NotRunCause::BlockedBy {
+                step: redacted.node_id.clone()
+            })
+        );
+        let run: RunResult = serde_json::from_value(json!({
+            "id": "r", "scenarioId": "s", "mode": "simulation",
+            "startedAt": "2026-11-10T00:00:00.000Z", "status": "running", "steps": []
+        }))
+        .unwrap();
+        let run = RunResult {
+            running: Some("s3cret-step".into()),
+            ..run
+        };
+        assert_eq!(
+            redactor.redact_run(&run).running.as_deref(),
+            Some("[REDACTED]-step")
         );
     }
 
