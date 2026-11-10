@@ -325,11 +325,7 @@ async fn lay01_criterion_5_the_fixtures_simulate_deterministically() {
 /// policy is *Stop*, the run ends there.
 #[tokio::test]
 async fn lay01_criterion_5_a_broken_sample_fails_one_check_of_checkout() {
-    let text = source("shop-30").replace(
-        r#"sample 201 { orderId: "o-1", status: "created", total: 172.5 }"#,
-        r#"sample 201 { orderId: "o-1", status: "created", total: 170 }"#,
-    );
-    let (project, scenario) = lowered(&text);
+    let (project, scenario) = lowered(&broken_checkout());
     let run = simulate(project, &scenario).await;
     assert_eq!(run.status, RunStatus::Failed);
     let failed: Vec<_> = run

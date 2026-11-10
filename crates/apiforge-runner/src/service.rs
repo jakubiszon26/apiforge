@@ -210,6 +210,8 @@ impl Shared {
                 existing.status = RunStatus::Failed;
                 existing.finished_at.get_or_insert(now);
                 existing.error = fallback.error;
+                // A finished run names no running step.
+                existing.running = None;
             }
             None => {
                 fallback.finished_at.get_or_insert(now);
@@ -312,6 +314,37 @@ impl RunHandle {
 mod tests {
     use super::*;
     use apiforge_core::run::RunMode;
+
+    /// LAY-22: a worker that dies while a step executes leaves a finished run
+    /// that names no running step.
+    #[test]
+    fn a_terminal_failure_clears_the_running_step() {
+        let shared = Shared::default();
+        let running = RunResult {
+            id: "run-1".into(),
+            scenario_id: "scen-1".into(),
+            mode: RunMode::Simulation,
+            started_at: "2026-10-20T00:00:00.000Z".into(),
+            finished_at: None,
+            status: RunStatus::Running,
+            steps: Vec::new(),
+            diagnostic: false,
+            snapshot: None,
+            error: None,
+            notice: None,
+            running: Some("login".into()),
+        };
+        let fallback = RunResult {
+            status: RunStatus::Failed,
+            running: None,
+            ..running.clone()
+        };
+        shared.publish(running);
+        shared.publish_terminal_failure(fallback);
+        let report = shared.latest.lock().unwrap().report.clone().unwrap();
+        assert_eq!(report.status, RunStatus::Failed);
+        assert_eq!(report.running, None);
+    }
 
     #[test]
     fn finish_guard_marks_run_failed_and_notifies_on_panic() {

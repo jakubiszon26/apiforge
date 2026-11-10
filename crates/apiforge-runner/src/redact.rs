@@ -495,6 +495,41 @@ mod tests {
         );
     }
 
+    /// LAY-22: a cause and the running step name node ids, masked as the
+    /// step's own id is, so they still match it.
+    #[test]
+    fn causes_and_the_running_step_are_redacted_like_node_ids() {
+        let mut redactor = Redactor::new();
+        redactor.add("s3cret");
+        let step: StepResult = serde_json::from_value(json!({
+            "nodeId": "s3cret-step", "handle": "h", "kind": "request", "status": "skipped",
+            "phase": "main", "inputs": {}, "outputs": {}, "durationMs": 0,
+            "cause": { "kind": "blockedBy", "step": "s3cret-step" }
+        }))
+        .unwrap();
+        let redacted = redactor.redact_step(&step);
+        assert_eq!(redacted.node_id, "[REDACTED]-step");
+        assert_eq!(
+            redacted.cause,
+            Some(NotRunCause::BlockedBy {
+                step: redacted.node_id.clone()
+            })
+        );
+        let run: RunResult = serde_json::from_value(json!({
+            "id": "r", "scenarioId": "s", "mode": "simulation",
+            "startedAt": "2026-11-10T00:00:00.000Z", "status": "running", "steps": []
+        }))
+        .unwrap();
+        let run = RunResult {
+            running: Some("s3cret-step".into()),
+            ..run
+        };
+        assert_eq!(
+            redactor.redact_run(&run).running.as_deref(),
+            Some("[REDACTED]-step")
+        );
+    }
+
     #[test]
     fn values_under_sensitive_keys_are_replaced_whole() {
         let mut redactor = Redactor::new();
