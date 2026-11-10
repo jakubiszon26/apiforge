@@ -2,7 +2,10 @@
 
 - Size: S–M · Owner review: 20 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #294) · decided by the owner on 2026-11-05 (Q9 = A)
-  · LAY sprint, wave 1, after LAY-19
+  · LAY sprint, part B, first after the checkpoint
+  ([review of 2026-11-10](../sprints/lay.md#11-mid-sprint-review-2026-11-10));
+  after LAY-22 and after #288 is fixed (selecting a step must not mark the
+  document changed, or focus would stale the results it reads)
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -46,8 +49,7 @@ Approved as direction on 2026-11-05.
 
 ## Acceptance criteria
 
-Tests in `crates/apiforge-desktop/src/folder/acceptance_tests.rs`, `mod
-lay10`, on `shop-30.afs` after a failed simulation.
+Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay10.rs`, on `shop-30.afs` after a failed simulation.
 
 1. Selecting `cart` rings `login`, `first`, `second`, `cart_total` and
    `order` with the halo and their ports; every other card is dimmed; the
@@ -61,9 +63,8 @@ lay10`, on `shop-30.afs` after a failed simulation.
 4. Esc restores every card and wire to full strength and clears the
    selection; clicking the empty board does the same. Test:
    `lay10_criterion_4_esc_restores`.
-5. The relation model is one function in `apiforge-core` returning
-   producers, readers, checks and gates of a step; LAY-08's `check_subjects`
-   is its check part. Test: `relations_of_cart_on_shop_30` in core.
+5. The rings and the dimming read LAY-22's `relations`; this ticket adds
+   no relation of its own.
 6. Selecting a check rings its subjects and value sources in the check
    colour. Test: `lay10_criterion_6_a_check_rings_its_subjects`.
 

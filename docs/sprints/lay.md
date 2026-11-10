@@ -5,7 +5,10 @@
   ([4.8](#48-round-4-the-four-proofs-measured)); the answers are in
   [5.1](#51-decisions-taken-2026-11-05). The sprint is LAY in the
   [backlog](../backlog.md#sprint-lay-in-progress-since-2026-11-05): issues
-  LAY-01..19 with their ticket files under `docs/tickets/`.
+  LAY-01..19 with their ticket files under `docs/tickets/`. The order of
+  work and four tickets were revised by the mid-sprint review of 2026-11-10
+  ([section 11](#11-mid-sprint-review-2026-11-10)), which adds LAY-21 and
+  LAY-22.
 - Analysis model: Fable. Mock-ups rendered by Opus on the throwaway branches
   `mock/lay-00-shapes`, `mock/lay-00-cards`, `mock/lay-00-shapes-2`,
   `mock/lay-00-round-3` and `mock/lay-00-round-4` (captures under
@@ -1053,6 +1056,101 @@ against the live loopback sample (the steps name `shop-30` and `shop-50`;
    selection is in without zooming (orientation); at 60 %, name the
    producers and readers of the selected step from the board and the
    chips (neighbouring dependencies). Both timed in the task sheet.
+
+## 11. Mid-sprint review (2026-11-10)
+
+Five days in: LAY-01, LAY-08 and LAY-20 are merged, LAY-16 waits in #310.
+The planning model read the plan again, rendered the board of #310 on
+`shop-30` (`tools/gui/review.sh review_lay16`) and ran the metric command.
+The direction stands. The order of delivery and four gaps do not.
+
+### 11.1 What the real board says
+
+| # | Finding | Evidence | Answer |
+| --- | --- | --- | --- |
+| R1 | **The value arrives last.** Shape D, short satellites and collapsed checks take `shop-30` from fit 0.205 to 0.52 ([4.8](#48-round-4-the-four-proofs-measured)); the plan put eight card tickets before them. Until then nothing a person sees at a glance improves. | `quality`: `shop-30` 5544 × 1688, fit 0.205 before and after LAY-16 | The new order of 11.2: the coherent board first, the refinements after a checkpoint |
+| R2 | **The interim board reads worse than the old one.** With *Compact cards* on, only requests are compact: `cart` (214 px) is the smallest card, a value card `first` that says `items[0]` is taller, and a check card is the tallest. The hierarchy is inverted. | `lay16-compact-60-1600`, `lay16-compact-100-1600` | LAY-21: the compact geometry for every other card kind, pulled out of LAY-06, directly after LAY-16 |
+| R3 | **Fit cannot fit.** `MIN_ZOOM` is 0.25 and Fit clamps to it; `shop-30` needs 0.205 today and every board needs 0.06–0.16 at 960 × 540. The plan's fit figures below 0.25 cannot be reached in the window. | `canvas/mod.rs:37`, `fit()` | LAY-09 lowers the limit so that Fit shows every card |
+| R4 | **Tidy up can leave an empty board.** The camera fits only when the document changes; a Tidy up that moves every card away leaves the viewport on nothing. The capture named `lay16-fit` shows an empty board and passed the review. | `lay16-fit-1600`, `lay16-fit-960`; `Canvas::show` | LAY-06: Tidy up ends with the board in view. Review captures are looked at by the agent that takes them (11.4) |
+| R5 | **The task sheet times reading only.** Q16 = A moved editing off the card (no inline field, hidden ports in a tray, the Inspector for values). None of the eight tasks edits anything, so a loss there would not be seen. | [section 9](#9-metrics-and-qa) | Tasks 9 and 10 below |
+| R6 | **All evidence so far is mock-ups read by models.** Four rounds on throwaway branches with injected state; no person has used the result. The findings that changed this project most came from real work. | [4](#4-mock-ups) | The checkpoint of 11.2: the owner uses the real board before the second half is built |
+| R7 | **"Compact" names two things**: the zoom level 0.45–0.75 (`CardDetail::Compact`) and the density (*Compact cards*). With Q16 = A the compact box already drops rows that are not legible, so the zoom levels do little for it. | `canvas/layout.rs:54`, `paint.rs` `legible` | LAY-09 renames the zoom level *Medium* in code and documents, and is re-scoped to what LAY-16 left open |
+| R8 | **The chain is serial on three files and one test file.** Every wave-1 ticket edits `canvas/{layout,paint,mod}.rs` and appends to `acceptance_tests.rs` (14,862 lines); a Windows CI run takes 35 minutes and the hover flakes (#279) cost a rerun on most pull requests. | `git diff --stat` of #310; #279 | Three tracks by crate (11.3); a test module per ticket in its own file; the flakes fixed first (KTLO-33, #279) |
+| R9 | **`quality` measures full cards**, so the exit criterion "fits at 50 %" cannot be read from the command. | #310, *Not verified* | LAY-06's window test is the measure; the command takes card sizes from a file the desktop writes — in LAY-06 |
+
+Two items the review looked at and leaves alone: the tray of LAY-16
+(decision 2 = D) is legible at 100 % and reaches every hidden port; the
+vocabulary (badge, band, halo, tray, chips, two result lines) is large, and
+whether it is too large is a question for the checkpoint, on the real board.
+
+### 11.2 The order from here
+
+The order of [section 7](#7-dependencies-and-order) is replaced. No ticket
+is dropped and no decision of 5.1 changes.
+
+**Part A — the coherent board** (the brief's goal at 1600 × 1000):
+
+1. LAY-16 (#310) merges.
+2. **LAY-21** every other card compact (new; LAY-06's short satellites).
+3. **LAY-11** collapse checks.
+4. **LAY-09** what each zoom shows, the minimum sizes, Fit below 25 %.
+5. **LAY-07** badges and the running step.
+6. In parallel, the layout track: **LAY-02** → **LAY-06**.
+7. In parallel, no interface: **LAY-22** (new) the runner's and core's
+   groundwork for LAY-07, LAY-19 and LAY-10.
+
+**Checkpoint.** With part A on `main`, LAY-12's task sheet (tasks 1–10) is
+timed on the real build and the owner uses `shop-30` and one scenario of his
+own. The owner then confirms, reorders or drops the tickets of part B; the
+exit criterion "fits at 50 % or more" is read here.
+
+**Part B — the refinements**, in this order unless the checkpoint says
+otherwise: LAY-10 → LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 →
+LAY-04, LAY-03, LAY-05 → LAY-12.
+
+### 11.3 Tracks
+
+| Track | Files | Tickets |
+| --- | --- | --- |
+| Cards | `apiforge-desktop/src/canvas/` | LAY-21 → 11 → 09 → 07, then part B's card tickets; one at a time |
+| Layout | `apiforge-layout`, `board_edit.rs`, `folder/placement.rs` | LAY-02 → 06 → 17 → 04 → 03 → 05 |
+| Engine | `apiforge-runner`, `apiforge-core` | LAY-22 |
+
+A ticket's acceptance module is its own file,
+`crates/apiforge-desktop/src/folder/acceptance_tests/<id>.rs`, declared by
+one `mod <id>;` line at the head of `acceptance_tests.rs` in alphabetical
+order; it reads the helpers through `use super::*`. Nothing is appended to
+the end of `acceptance_tests.rs` any more.
+
+### 11.4 Changes to tickets
+
+- **LAY-21** (new, S–M · 20): value, check, *Data condition*, `if` and
+  component-call cards at the compact density. LAY-06 loses the short
+  satellites and 10 minutes (M · 20).
+- **LAY-22** (new, S–M · 10, no interface): the step-started event (from
+  LAY-07), the not-run cause (LAY-19 criterion 6), `relations` (LAY-10
+  criterion 5). The three tickets keep their minutes; their interface halves
+  get smaller.
+- **LAY-06** gains: Tidy up ends with the board in view (R4); `quality`
+  reads the desktop's card sizes (R9); `shop-30` with checks collapsed fits
+  1600 × 1000 at 0.50 or more (the assertion LAY-16 handed over).
+- **LAY-09** gains: Fit shows every card (R3); the zoom level is *Medium*
+  (R7); it covers every card kind of LAY-21.
+- **LAY-12** gains the checkpoint run and tasks 9 and 10 (R5, R6).
+- **LAY-11** no longer waits for LAY-18.
+- A design-review capture is opened and described by the agent that takes
+  it; a capture of a board asserts that a card is in the viewport (R4).
+
+Capacity: 21 tickets, **385** minutes (365 + LAY-21 20 + LAY-22 10 − LAY-06
+10); part A is 150 of them.
+
+**Task sheet, added (R5)** — on `shop-30.afs`, timed with the count of
+clicks, before (on `main` at `8248b93`, full cards) and at the checkpoint:
+
+9. Add a request after `cart`, give it a JSON body with one field bound to
+   `cart.body.id`, and run it. *(editing with no inline field — LAY-16)*
+10. Add a check that `cart_view`'s `body.total` equals `expected_total`,
+    from the board. *(wiring to a hidden port — LAY-16's tray, LAY-21)*
 
 ## Technical appendix
 
