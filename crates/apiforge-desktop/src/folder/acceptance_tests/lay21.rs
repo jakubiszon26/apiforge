@@ -81,6 +81,13 @@ fn review_lay21_board() {
                 None,
             );
         }
+        if suffix == "1600" {
+            // A selected check and value: their hidden ports in the trays.
+            select(&mut harness, &["cart_created", "first"]);
+            show(&mut harness, "cart", 1.0);
+            crate::testing::capture(&mut harness, "lay21-trays-100-1600", None);
+            select(&mut harness, &[]);
+        }
     }
     let (_project, mut harness) = open(CALLS, WIDE);
     harness.get_by_label("Tidy up").click();
