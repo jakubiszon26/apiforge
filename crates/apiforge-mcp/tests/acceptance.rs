@@ -2708,18 +2708,45 @@ fn journal(root: &Path) -> Option<Value> {
         .map(|bytes| serde_json::from_slice(&bytes).unwrap())
 }
 
-/// Waits up to ten seconds for a request to reach `api`, then for the run
-/// journal to show it. A request is journalled before it is sent, so the
-/// file is read only once the request has arrived: polling it meanwhile
+/// A run on a thread of its own, which [`wait_for_journal`] watches.
+struct Running(Option<thread::JoinHandle<Result<tools::RunReport, ToolError>>>);
+
+impl Running {
+    fn spawn(run: impl FnOnce() -> Result<tools::RunReport, ToolError> + Send + 'static) -> Self {
+        Self(Some(thread::spawn(run)))
+    }
+
+    /// The run's result once it has ended, taken once.
+    fn ended(&mut self) -> Option<thread::Result<Result<tools::RunReport, ToolError>>> {
+        if self.0.as_ref().is_some_and(thread::JoinHandle::is_finished) {
+            self.0.take().map(thread::JoinHandle::join)
+        } else {
+            None
+        }
+    }
+
+    fn join(mut self) -> thread::Result<Result<tools::RunReport, ToolError>> {
+        self.0.take().expect("the run's result was taken").join()
+    }
+}
+
+/// Only a hung run reaches it: the wait below ends with the run.
+const HANG: Duration = Duration::from_secs(45);
+
+/// Waits for a request to reach `api`, then for the run journal to show it.
+/// A run that ends before any request was sent ends the wait at once, and
+/// the test fails with the run's own result, which says why nothing was
+/// sent (KTLO-33, flake 5). A request is journalled before it is sent, so
+/// the file is read only once the request has arrived: polling it meanwhile
 /// would race the runner's atomic replace, which Windows refuses while the
 /// file is open.
-fn wait_for_journal(root: &Path, api: &Listener) -> Value {
+fn wait_for_journal(root: &Path, api: &Listener, running: &mut Running) -> Value {
     let started = Instant::now();
     while api.accepted() == 0 {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "no request was sent"
-        );
+        if let Some(result) = running.ended() {
+            panic!("the run ended before a request was sent: {result:?}");
+        }
+        assert!(started.elapsed() < HANG, "no request was sent");
         thread::sleep(Duration::from_millis(5));
     }
     loop {
@@ -2730,23 +2757,41 @@ fn wait_for_journal(root: &Path, api: &Listener) -> Value {
         {
             return journal;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "no request was journalled"
-        );
+        assert!(started.elapsed() < HANG, "no request was journalled");
         thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn wait_until_busy(server: &ApiforgeServer) {
+/// KTLO-33, flake 5: a run refused before any request ends the wait for the
+/// journal at once, and the failure names the refusal, rather than "no
+/// request was sent" after a bound.
+#[test]
+fn ktlo33_a_run_refused_before_any_request_ends_the_wait_with_its_refusal() {
+    let directory = checkout();
+    let root = directory.path().to_owned();
+    let api = Listener::start();
+    point_at(&root, &api.base_url());
+    let server = live_server(&root, false, &[]);
+    let mut running =
+        Running::spawn(move || server.run_tool(live(SCENARIO), CancellationToken::new()));
     let started = Instant::now();
-    while !server.runs().is_busy() {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the run did not start"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wait_for_journal(&root, &api, &mut running)
+    }))
+    .expect_err("a refused run sends nothing");
+    let message = failed
+        .downcast_ref::<String>()
+        .expect("a formatted message");
+    assert!(
+        message.starts_with("the run ended before a request was sent")
+            && message.contains("LiveDisabled"),
+        "{message}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "ended with the run, after {:?}",
+        started.elapsed()
+    );
 }
 
 /// Criterion 1: without `--allow-live` a live run is `live_disabled`, sends
@@ -2938,14 +2983,24 @@ fn mcp06_criterion_5_a_change_after_the_start_does_not_stop_the_run() {
             step_delay: Some(Duration::from_millis(100)),
         },
     );
-    let running = {
-        let server = server.clone();
-        thread::spawn(move || server.run_tool(live(SCENARIO), CancellationToken::new()))
-    };
-    wait_until_busy(&server);
-    thread::sleep(Duration::from_millis(250));
-    server.permission().set_window(false);
-    let report = running.join().unwrap().unwrap();
+    // The run tells its start after the permission check, before its first
+    // step; the consent goes off then, from the run's own thread (KTLO-33,
+    // flake 2).
+    let permission = server.permission().clone();
+    server.runs().observe(move |message| {
+        if matches!(
+            message,
+            apiforge_channel::Message::Run {
+                state: apiforge_channel::RunState::Running,
+                ..
+            }
+        ) {
+            permission.set_window(false);
+        }
+    });
+    let report = server
+        .run_tool(live(SCENARIO), CancellationToken::new())
+        .unwrap();
     assert_eq!(report.status, Verdict::Passed);
     assert_eq!(report.ended_by, EndedBy::Completed);
     let error = server
@@ -2981,11 +3036,11 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             },
         );
         let cancel = CancellationToken::new();
-        let running = {
+        let mut running = {
             let (server, cancel) = (server.clone(), cancel.clone());
-            thread::spawn(move || server.run_tool(live(SCENARIO), cancel))
+            Running::spawn(move || server.run_tool(live(SCENARIO), cancel))
         };
-        let during = wait_for_journal(&root, &api);
+        let during = wait_for_journal(&root, &api, &mut running);
         let entry = &during["runs"][0]["entries"][0];
         assert_eq!(entry["method"], "GET");
         assert_eq!(entry["state"], "inFlight", "journalled before it was sent");
@@ -3119,9 +3174,9 @@ fn mcp06_criterion_9_an_answered_request_id_returns_the_recorded_result() {
     assert_eq!(listener.accepted(), 0, "nothing was sent");
     // Another id is a new run: it reaches the listener and is cancelled.
     let cancel = CancellationToken::new();
-    let other = {
+    let mut other = {
         let (server, cancel) = (server.clone(), cancel.clone());
-        thread::spawn(move || {
+        Running::spawn(move || {
             server.run_tool(
                 RunArguments {
                     request_id: Some("live-run-2".into()),
@@ -3131,7 +3186,7 @@ fn mcp06_criterion_9_an_answered_request_id_returns_the_recorded_result() {
             )
         })
     };
-    wait_for_journal(root, &listener);
+    wait_for_journal(root, &listener, &mut other);
     cancel.cancel();
     let other = other.join().unwrap().unwrap();
     assert!(!other.replayed);
@@ -3152,9 +3207,9 @@ fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_id_an_earlier_s
     point_at(root, &api.base_url());
     let earlier = live_server(root, true, &[]);
     let cancel = CancellationToken::new();
-    let running = {
+    let mut running = {
         let (server, cancel) = (earlier.clone(), cancel.clone());
-        thread::spawn(move || {
+        Running::spawn(move || {
             server.run_tool(
                 RunArguments {
                     request_id: Some("lost-before-a-restart".into()),
@@ -3164,7 +3219,7 @@ fn mcp06_criterion_9_a_new_server_answers_unknown_outcome_for_an_id_an_earlier_s
             )
         })
     };
-    wait_for_journal(root, &api);
+    wait_for_journal(root, &api, &mut running);
     let record: Value = serde_json::from_slice(
         &fs::read(root.join(".apiforge/local/agent-requests.json")).unwrap(),
     )
@@ -3390,11 +3445,11 @@ fn mcp06_review_the_server_own_run_is_not_interrupted() {
     point_at(&root, &api.base_url());
     let server = live_server(&root, true, &[]);
     let cancel = CancellationToken::new();
-    let running = {
+    let mut running = {
         let (server, cancel) = (server.clone(), cancel.clone());
-        thread::spawn(move || server.run_tool(live(SCENARIO), cancel))
+        Running::spawn(move || server.run_tool(live(SCENARIO), cancel))
     };
-    wait_for_journal(&root, &api);
+    wait_for_journal(&root, &api, &mut running);
     assert_eq!(server.overview_tool().unwrap().interrupted_runs, 0);
     cancel.cancel();
     assert_eq!(running.join().unwrap().unwrap().status, Verdict::Cancelled);

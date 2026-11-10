@@ -391,23 +391,32 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
         }
     }
 
+    // The harness that is hovered shortens the name itself (KTLO-33, flake 3).
     let (_project, mut narrow) = open(egui::vec2(880.0, 800.0), "Diagram");
+    crate::testing::quiesce(&mut narrow);
+    assert_eq!(
+        given_up(&narrow, full_name, 880.0),
+        2,
+        "the hovered window shortens the name"
+    );
     let name = narrow
         .query_all_by_role_and_label(Role::Label, NAME)
         .count();
-    let main = rect(&narrow, "Main");
-    narrow
-        .query_all_by_role_and_label(Role::Label, NAME)
-        .find(|node| on_row(main, node.rect()))
-        .expect("the shortened name is on the row")
-        .hover();
-    settle(&mut narrow);
-    narrow.run_steps(60);
     assert!(
-        narrow
-            .query_all_by_role_and_label(Role::Label, NAME)
-            .count()
-            > name,
+        crate::testing::hover_until(
+            &mut narrow,
+            |harness| {
+                let main = rect(harness, "Main");
+                harness
+                    .query_all_by_role_and_label(Role::Label, NAME)
+                    .map(|node| node.rect())
+                    .find(|found| on_row(main, *found))
+            },
+            |harness| harness
+                .query_all_by_role_and_label(Role::Label, NAME)
+                .count()
+                > name,
+        ),
         "hovering the shortened name shows its full text"
     );
 }

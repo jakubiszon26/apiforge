@@ -128,12 +128,14 @@ fn ktlo23_a_component_tab_holds_run_and_run_options_beside_publish() {
         }
     }
     let (mut harness, _) = on(&project, PRODUCT, WIDE, "Diagram");
-    harness.get_by_label("Run simulation").hover();
-    settle(&mut harness);
-    harness.run_steps(60);
-    assert!(has(
-        &harness,
-        "Simulate the selected scenario or component with sample responses, including unsaved valid code"
+    const HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
+    assert!(crate::testing::hover_until(
+        &mut harness,
+        |harness| harness
+            .query_all_by_label("Run simulation")
+            .next()
+            .map(|node| node.rect()),
+        |harness| has(harness, HOVER),
     ));
 }
 

@@ -633,6 +633,119 @@ pub fn check_subjects_in<'a>(graphs: &[&'a Graph], check: &'a Node) -> CheckSubj
     }
 }
 
+/// One output field of a step that feeds an input of another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Feed<'a> {
+    /// The node id of the other step: the producer or the reader.
+    pub step: &'a str,
+    /// The output port read, such as `body`.
+    pub output: &'a str,
+    /// The path inside that output; empty for the whole output.
+    pub path: &'a str,
+    /// The reader's input it feeds, such as `headers`.
+    pub input: &'a str,
+}
+
+/// A check that verifies a step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckOf<'a> {
+    /// The node id of the check.
+    pub check: &'a str,
+    /// The check has another subject too.
+    pub shared: bool,
+    /// The check is a gate: a Data condition another step reads.
+    pub gate: bool,
+}
+
+/// What a step is related to inside its graph.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Relations<'a> {
+    /// The fields the step reads, one per reference, Data conditions excepted.
+    pub producers: Vec<Feed<'a>>,
+    /// The fields other steps read from it, one per reference; the checks
+    /// that verify it are listed under `checks` instead.
+    pub readers: Vec<Feed<'a>>,
+    /// The checks whose subjects include the step: `check_subjects` inverted.
+    pub checks: Vec<CheckOf<'a>>,
+    /// The Data conditions whose value the step reads.
+    pub gates: Vec<&'a str>,
+    /// For a check, the steps it verifies; empty otherwise.
+    pub subjects: Vec<Subject<'a>>,
+    /// For a check, the Value blocks it reads; empty otherwise.
+    pub values: Vec<&'a str>,
+}
+
+/// The producers and readers of `node`, each with the output field and the
+/// input between them, its checks and its gates; for a check also its
+/// subjects and value sources. Only references inside `graph` count, and
+/// ordering edges relate nothing here.
+pub fn relations<'a>(graph: &'a Graph, node: &'a Node) -> Relations<'a> {
+    let kind_of = |id: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|other| other.id == id)
+            .map(|other| other.kind)
+    };
+    let mut relations = Relations::default();
+    let mut gates: IndexSet<&str> = IndexSet::new();
+    for (input, binding) in &node.inputs {
+        for reference in binding.references() {
+            match kind_of(reference.node_id) {
+                None => {}
+                Some(NodeKind::Condition) => {
+                    gates.insert(reference.node_id);
+                }
+                Some(_) => relations.producers.push(Feed {
+                    step: reference.node_id,
+                    output: reference.port,
+                    path: reference.path,
+                    input,
+                }),
+            }
+        }
+    }
+    relations.gates = gates.into_iter().collect();
+    let checks: Vec<CheckOf<'a>> = graph
+        .nodes
+        .iter()
+        .filter_map(|other| {
+            let subjects = check_subjects(graph, other);
+            let subject = subjects
+                .subjects
+                .iter()
+                .find(|subject| subject.step == node.id)?;
+            Some(CheckOf {
+                check: &other.id,
+                shared: subject.shared,
+                gate: subject.gate,
+            })
+        })
+        .collect();
+    for other in &graph.nodes {
+        if checks.iter().any(|check| check.check == other.id) {
+            continue;
+        }
+        for (input, binding) in &other.inputs {
+            for reference in binding.references() {
+                if reference.node_id == node.id {
+                    relations.readers.push(Feed {
+                        step: &other.id,
+                        output: reference.port,
+                        path: reference.path,
+                        input,
+                    });
+                }
+            }
+        }
+    }
+    relations.checks = checks;
+    let own = check_subjects(graph, node);
+    relations.subjects = own.subjects;
+    relations.values = own.values;
+    relations
+}
+
 /// Whether ordering and data dependencies together form a cycle.
 pub fn has_cycle(graph: &Graph) -> bool {
     let index = dependency_index(graph);

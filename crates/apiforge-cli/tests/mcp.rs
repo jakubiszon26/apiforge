@@ -1864,6 +1864,14 @@ fn mcp14_criterion_1_simulated_run_results_match_the_output_schema() {
     let cancelled = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
     assert_eq!(cancelled["status"], "cancelled");
     assert_eq!(cancelled["ended_by"], "timed_out");
+    // LAY-22 criterion 5: a step that did not run carries its cause, and the
+    // result still matches the schema.
+    assert!(
+        flattened(&cancelled["steps"])
+            .iter()
+            .any(|step| step["cause"]["kind"] == "cancelled"),
+        "{cancelled}"
+    );
     assert_clean_end(server);
 }
 
