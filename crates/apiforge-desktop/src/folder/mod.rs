@@ -80,6 +80,15 @@ use watcher::Watcher;
 pub use workbench::Mode;
 use workbench::Workbench;
 
+/// The last *Compact cards* switch: the density before and after it, and the
+/// document as its Tidy up left it.
+struct DensitySwitch {
+    document: String,
+    before: canvas::CardDensity,
+    after: canvas::CardDensity,
+    model: Arc<Document>,
+}
+
 /// Edits typed into the code view; the view recognises its own changes.
 const CODE: Origin = Origin(1);
 /// Graphical edits, undo and redo of the model, and reverts.
@@ -319,6 +328,9 @@ pub struct FolderApp {
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
     preferences: Preferences,
+    /// The last *Compact cards* switch and the document its Tidy up left, so
+    /// Undo and Redo of that Tidy up switch the density with it (LAY-16).
+    density_switch: Option<DensitySwitch>,
     runs: runs::Runs,
     navigation: navigation::Navigation,
     storage: storage::Storage,
@@ -515,6 +527,7 @@ impl FolderApp {
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),
+            density_switch: None,
             runs: runs::Runs::default(),
             navigation: navigation::Navigation::default(),
             storage: storage::Storage::new(context.clone()),
@@ -666,11 +679,41 @@ impl FolderApp {
         self.is_settled() && !self.analyser.is_busy()
     }
 
-    fn new_canvas(&self) -> Canvas {
+    pub(crate) fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
         canvas.bridges = self.preferences.bridges;
+        canvas.set_density(self.density());
         canvas
+    }
+
+    /// Draws every board at `density` and remembers it as *Compact cards*.
+    fn switch_density(&mut self, density: canvas::CardDensity) {
+        self.preferences.compact_cards = density == canvas::CardDensity::Compact;
+        let preferences = self.preferences.clone();
+        self.storage_io(
+            "Saving preferences…",
+            move || preferences.save(crate::preferences::Preference::CompactCards),
+            |_, _| {},
+        );
+        for canvas in self.canvases.values_mut() {
+            canvas.set_density(density);
+        }
+    }
+
+    /// The sizes the boards draw their cards at, from *Compact cards*.
+    fn density(&self) -> canvas::CardDensity {
+        if self.preferences.compact_cards {
+            canvas::CardDensity::Compact
+        } else {
+            canvas::CardDensity::Full
+        }
+    }
+
+    /// The input the Inspector last scrolled to for a double-click (LAY-16).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_focus(&self) -> Option<String> {
+        self.inspector.focused_input().map(str::to_owned)
     }
 
     fn activate_tab(&mut self, id: &str) {
@@ -1660,7 +1703,44 @@ impl FolderApp {
     }
 
     fn step_model_history(&mut self, document_id: &str, undo: bool) {
+        let current = self.shared_model(document_id);
         self.component_action(document_id, publication::Action::History { undo });
+        let stepped = self.shared_model(document_id);
+        if current
+            .as_ref()
+            .zip(stepped.as_ref())
+            .is_none_or(|(current, stepped)| Arc::ptr_eq(current, stepped))
+        {
+            return;
+        }
+        // Undo leaves the switch's Tidy up, Redo arrives at it again.
+        let switch = self
+            .density_switch
+            .as_ref()
+            .filter(|switch| switch.document == document_id);
+        let density = switch.and_then(|switch| {
+            let at_switch =
+                |model: &Option<Arc<Document>>| model.as_deref() == Some(&*switch.model);
+            if undo && at_switch(&current) {
+                Some(switch.before)
+            } else if !undo && at_switch(&stepped) {
+                Some(switch.after)
+            } else {
+                None
+            }
+        });
+        if let Some(density) = density {
+            self.switch_density(density);
+        }
+    }
+
+    /// The document's model as the session holds it now.
+    fn shared_model(&self, document_id: &str) -> Option<Arc<Document>> {
+        self.session
+            .as_ref()?
+            .document(document_id)?
+            .shared_model()
+            .cloned()
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
