@@ -10,7 +10,7 @@ mod paint;
 mod routing;
 mod strip;
 
-pub use layout::{Card, Chip, parse_inline};
+pub use layout::{Card, CardDensity, Chip, parse_inline};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -21,7 +21,7 @@ use apiforge_core::{
     block::Block,
     edit::proxy_binding,
     format::{Binding, Graph, Port, Position, Project, ProxySource},
-    graph::{ORDER_PORT, WireKind, wires},
+    graph::{ORDER_PORT, URL_INPUT, WireKind, wires},
     model::{Branch, NodeKind},
     operator::Operator,
     run::StepResult,
@@ -108,6 +108,78 @@ pub enum Command {
     /// Change how wires are drawn. A user setting, not a document edit.
     SetWireStyle(WireStyle),
     SetBridges(bool),
+    /// Switch *Compact cards* (LAY-16): a user setting, which the board
+    /// follows with a Tidy up.
+    SetCompactCards(bool),
+    /// Select a block and open the Inspector on one of its inputs: a
+    /// double-click on the input's row (LAY-16).
+    InspectInput {
+        node: String,
+        input: String,
+    },
+}
+
+/// Where a carried wire may land on a card, and how near it must come: within
+/// `reach` of the socket on screen, or anywhere in `area`.
+struct DropSlot {
+    name: String,
+    path: Vec<String>,
+    anchor: Pos2,
+    area: Option<Rect>,
+    reach: f32,
+}
+
+impl DropSlot {
+    fn new(name: &str, path: &[String], anchor: Pos2, reach: f32) -> Self {
+        Self {
+            name: name.to_owned(),
+            path: path.to_vec(),
+            anchor,
+            area: None,
+            reach,
+        }
+    }
+}
+
+/// What is being carried to an input: a data wire, or a value from no step
+/// (`None`): a proxy's wire or a library variable.
+struct Carried(Option<String>);
+
+/// A wire carried within this distance of a compact card shows its hidden
+/// inputs (decision 2 = D).
+const TRAY_NEAR: f32 = 120.0;
+
+/// What a compact card's trays show this frame: view state, which neither
+/// the card's box, the routing nor Tidy up sees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Reveal {
+    inputs: bool,
+    outputs: bool,
+}
+
+impl Reveal {
+    fn of(
+        card: &Card,
+        camera: Camera,
+        selected: bool,
+        carried: Option<&Carried>,
+        pointer: Option<Pos2>,
+    ) -> Self {
+        if card.compact.is_none() {
+            return Self::default();
+        }
+        let near = carried.is_some_and(|Carried(source)| source.as_ref() != Some(&card.id))
+            && pointer.is_some_and(|pointer| {
+                camera
+                    .rect(card.rect())
+                    .expand(TRAY_NEAR * camera.zoom)
+                    .contains(pointer)
+            });
+        Self {
+            inputs: selected || near,
+            outputs: selected,
+        }
+    }
 }
 
 /// The board command for a block library action: a block or operator added at
@@ -314,6 +386,16 @@ pub struct Canvas {
     pub wire_style: WireStyle,
     /// Whether a crossing is drawn as a bridge, from the user's settings.
     pub bridges: bool,
+    /// What a request card's box holds, from the user's settings (LAY-16).
+    density: CardDensity,
+    /// Whether the toolbar offers *Compact cards*.
+    pub density_switch: bool,
+    /// The cards of the last frame, in board coordinates.
+    #[cfg(test)]
+    cards: Vec<Card>,
+    /// The lines each compact card wrote in the last frame.
+    #[cfg(test)]
+    lines: Vec<(String, Vec<String>)>,
     /// The blocks the last frame ringed for the selected input.
     #[cfg(test)]
     ringed: Vec<String>,
@@ -348,6 +430,8 @@ impl Default for Canvas {
             router: routing::Router::default(),
             wire_style: WireStyle::default(),
             bridges: true,
+            density: CardDensity::default(),
+            density_switch: true,
             drag: None,
             menu: None,
             selected_wires: Vec::new(),
@@ -359,6 +443,10 @@ impl Default for Canvas {
             sources: Vec::new(),
             #[cfg(test)]
             on_screen: Vec::new(),
+            #[cfg(test)]
+            cards: Vec::new(),
+            #[cfg(test)]
+            lines: Vec::new(),
         }
     }
 }
@@ -439,6 +527,72 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_cards(&self) -> &[(String, Rect)] {
         &self.on_screen
+    }
+
+    /// A card's box on the board in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_world(&self, id: &str) -> Option<Rect> {
+        self.cards.iter().find(|card| card.id == id).map(Card::rect)
+    }
+
+    /// The lines a compact card wrote in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_lines(&self, id: &str) -> Vec<String> {
+        self.lines
+            .iter()
+            .find(|(card, _)| card == id)
+            .map(|(_, lines)| lines.clone())
+            .unwrap_or_default()
+    }
+
+    /// The camera's pan and zoom.
+    #[cfg(test)]
+    pub(crate) fn debug_camera(&self) -> (Vec2, f32) {
+        (self.camera.pan, self.camera.zoom)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_compact(&self) -> bool {
+        self.density == CardDensity::Compact
+    }
+
+    /// Centres the card `id` at `zoom`, as a person scrolls and zooms there.
+    #[cfg(test)]
+    pub(crate) fn debug_show(&mut self, id: &str, zoom: f32) {
+        let (Some(rect), Some(focus)) = (self.debug_world(id), self.last_focus) else {
+            return;
+        };
+        self.camera.zoom = zoom;
+        self.camera.pan =
+            (focus.center() - self.last_viewport.min) - rect.center().to_vec2() * zoom;
+        self.camera_moved_by_user = true;
+        self.fit_pending = false;
+    }
+
+    /// The row an input of the card `id` is shown on, on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_input_row(&self, id: &str, input: &str) -> Option<Rect> {
+        let card = self.cards.iter().find(|card| card.id == id)?;
+        let index = card.inputs.iter().position(|row| row.name == input)?;
+        let row = card.input_row(index);
+        (row != Rect::NOTHING).then(|| self.screen_camera(self.last_viewport).rect(row))
+    }
+
+    /// The socket of an input of the card `id`, on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_input_socket(&self, id: &str, input: &str) -> Option<Pos2> {
+        let card = self.cards.iter().find(|card| card.id == id)?;
+        let anchor = card.input_anchor(input, &[])?;
+        Some(self.screen_camera(self.last_viewport).to_screen(anchor))
+    }
+
+    /// Switches what a request card's box holds. The camera stays where it
+    /// is: the board is repacked under it (LAY-16, criterion 4).
+    pub fn set_density(&mut self, density: CardDensity) {
+        if density != self.density && !self.fit_pending {
+            self.camera_moved_by_user = true;
+        }
+        self.density = density;
     }
 
     /// Bring an explicitly located block into view without editing its position.
@@ -551,7 +705,7 @@ impl Canvas {
             .graph
             .nodes
             .iter()
-            .map(|node| Card::build(node, input.reference_graph, input.project))
+            .map(|node| Card::build(node, input.reference_graph, input.project, self.density))
             .collect();
         #[cfg(test)]
         {
@@ -646,6 +800,8 @@ impl Canvas {
                 .iter()
                 .map(|card| (card.id.clone(), camera.rect(card.rect())))
                 .collect();
+            self.cards = cards.clone();
+            self.lines.clear();
         }
         if let Some(Drag::Nodes { ids, offset }) = &self.drag {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
@@ -704,6 +860,7 @@ impl Canvas {
         let pointer = ui.input(|state| state.pointer.interact_pos());
         let modifiers = ui.input(|state| state.modifiers);
         let mut clicked_card = false;
+        let carried = self.carried_value(ui.ctx());
 
         let mut board_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -746,6 +903,19 @@ impl Canvas {
             if response.double_clicked() && card.kind == NodeKind::Component {
                 commands.push(Command::EditComponent(card.id.clone()));
             }
+            // A compact card has no field: a double-click on an input's row
+            // opens the Inspector on that input (LAY-16, Q16 = A).
+            if response.double_clicked()
+                && card.compact.is_some()
+                && let Some(pointer) = pointer
+                && let Some(index) = (0..card.inputs.len())
+                    .find(|index| camera.rect(card.input_row(*index)).contains(pointer))
+            {
+                commands.push(Command::InspectInput {
+                    node: card.id.clone(),
+                    input: card.inputs[index].name.clone(),
+                });
+            }
             if response.secondary_clicked() && !input.read_only {
                 let source = menu::default_source(input.graph, input.project, &card.id);
                 self.menu = Some(ActionMenu::new(
@@ -781,20 +951,58 @@ impl Canvas {
             let step = input
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
-            paint::card(
-                &board_painter,
+            let reveal = Reveal::of(
                 card,
                 camera,
                 selection.contains(card.id.as_str()),
-                related_blocks.contains(&card.id),
-                step,
+                carried.as_ref(),
+                pointer,
             );
+            if card.compact.is_some() {
+                let _written = paint::compact_card(
+                    &board_painter,
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    related_blocks.contains(&card.id),
+                    step,
+                );
+                #[cfg(test)]
+                self.lines.push((card.id.clone(), _written));
+                paint::trays(&board_painter, card, camera, reveal.inputs, reveal.outputs);
+                if reveal.inputs {
+                    for index in card.hidden_inputs() {
+                        let Some((row, _)) = card.tray_input(index) else {
+                            continue;
+                        };
+                        let name = format!("Input {} of {}", card.inputs[index].name, card.name);
+                        board_ui
+                            .interact(
+                                camera.rect(row),
+                                board_ui.id().with(("tray", &card.id, index)),
+                                Sense::hover(),
+                            )
+                            .widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name)
+                            });
+                    }
+                }
+            } else {
+                paint::card(
+                    &board_painter,
+                    card,
+                    camera,
+                    selection.contains(card.id.as_str()),
+                    related_blocks.contains(&card.id),
+                    step,
+                );
+            }
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
             // controls keep their ids whichever cards are off screen.
             board_ui.scope_builder(
                 egui::UiBuilder::new().id_salt(("card-controls", &card.id)),
-                |ui| self.card_controls(ui, card, camera, input, &mut commands),
+                |ui| self.card_controls(ui, card, camera, input, reveal, &mut commands),
             );
         }
 
@@ -1281,21 +1489,48 @@ impl Canvas {
         }
     }
 
+    /// A value being carried to an input: a data wire from a step's output, or
+    /// a proxy's wire or a variable from the library, which come from no step.
+    fn carried_value(&self, context: &egui::Context) -> Option<Carried> {
+        match &self.drag {
+            Some(Drag::Wire {
+                start: WireStart::Output { node, port },
+                ..
+            }) if !port.starts_with("__") => Some(Carried(Some(node.clone()))),
+            Some(Drag::Wire {
+                start: WireStart::Proxy { .. },
+                ..
+            }) => Some(Carried(None)),
+            _ => egui::DragAndDrop::payload::<Payload>(context)
+                .filter(|payload| matches!(payload.as_ref(), Payload::Variable { .. }))
+                .map(|_| Carried(None)),
+        }
+    }
+
     fn card_controls(
         &mut self,
         ui: &mut egui::Ui,
         card: &Card,
         camera: Camera,
         input: &Input<'_>,
+        reveal: Reveal,
         commands: &mut Vec<Command>,
     ) {
         let zoom = camera.zoom;
-        // Output sockets start wires.
+        // Output sockets start wires; a compact card's hidden outputs start
+        // them from the tray while it is selected.
         let mut outputs: Vec<(String, Pos2)> = card
             .outputs
             .iter()
-            .filter_map(|row| {
+            .enumerate()
+            .filter_map(|(index, row)| {
                 card.output_anchor(&row.name)
+                    .or_else(|| {
+                        reveal
+                            .outputs
+                            .then(|| card.tray_output(index).map(|(_, socket)| socket))
+                            .flatten()
+                    })
                     .map(|anchor| (row.name.clone(), anchor))
             })
             .collect();
@@ -1338,7 +1573,9 @@ impl Canvas {
             }
         }
 
-        if layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full {
+        // A compact card has no footer and no field: *Add step* is on the
+        // right-click menu and the toolbar, values are edited in the Inspector.
+        if card.compact.is_some() || layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full {
             return;
         }
 
@@ -1587,30 +1824,64 @@ impl Canvas {
             return;
         };
         let control = port.starts_with("__");
+        let carried = (!control).then(|| Carried(source.clone()));
+        // Each slot says how it takes the wire: by the snap near its socket,
+        // only under the pointer, or anywhere on its tray row.
+        let exact = (SOCKET_HIT * camera.zoom).max(3.0);
         let target = cards
             .iter()
             .filter(|card| Some(&card.id) != source.as_ref())
             .flat_map(|card| {
-                let slots: Vec<(String, Vec<String>, Pos2)> = if control {
-                    card.input_anchor(ORDER_PORT, &[])
-                        .map(|anchor| (ORDER_PORT.to_owned(), Vec::new(), anchor))
-                        .into_iter()
-                        .collect()
+                let mut slots: Vec<DropSlot> = Vec::new();
+                let snap = SOCKET_HIT * 2.0;
+                if control {
+                    if let Some(anchor) = card.input_anchor(ORDER_PORT, &[]) {
+                        slots.push(DropSlot::new(ORDER_PORT, &[], anchor, snap));
+                    }
                 } else {
-                    card.inputs
-                        .iter()
-                        .enumerate()
-                        .map(|(index, row)| {
-                            (row.name.clone(), row.path.clone(), card.row_anchor(index))
-                        })
-                        .collect()
-                };
-                slots.into_iter().map(move |(name, path, anchor)| {
-                    (card.id.clone(), name, path, camera.to_screen(anchor))
+                    for (index, row) in card.inputs.iter().enumerate() {
+                        if let Some(anchor) = card.shown_row_anchor(index) {
+                            // The URL's socket sits on the subtitle of a
+                            // compact card, where a drop meant for the card
+                            // would rewrite its address by the snap.
+                            let reach = if card.compact.is_some() && row.name == URL_INPUT {
+                                exact
+                            } else {
+                                snap
+                            };
+                            slots.push(DropSlot::new(&row.name, &row.path, anchor, reach));
+                        }
+                    }
+                    let reveal = Reveal::of(
+                        card,
+                        camera,
+                        input.selection.contains(&card.id),
+                        carried.as_ref(),
+                        Some(pointer),
+                    );
+                    if reveal.inputs {
+                        for index in card.hidden_inputs() {
+                            if let Some((row, anchor)) = card.tray_input(index) {
+                                let input = &card.inputs[index];
+                                let mut slot = DropSlot::new(&input.name, &input.path, anchor, 0.0);
+                                slot.area = Some(camera.rect(row));
+                                slots.push(slot);
+                            }
+                        }
+                    }
+                }
+                slots.into_iter().filter_map(move |slot| {
+                    let anchor = camera.to_screen(slot.anchor);
+                    let distance = match slot.area {
+                        Some(area) if area.contains(pointer) => 0.0,
+                        _ => anchor.distance(pointer),
+                    };
+                    (distance <= slot.reach.max(f32::EPSILON))
+                        .then(|| (distance, (card.id.clone(), slot.name, slot.path, anchor)))
                 })
             })
-            .min_by(|a, b| a.3.distance(pointer).total_cmp(&b.3.distance(pointer)))
-            .filter(|(.., anchor)| anchor.distance(pointer) <= SOCKET_HIT * 2.0);
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, target)| target);
 
         let end = target.as_ref().map_or(pointer, |(.., anchor)| *anchor);
         let painter = ui.painter();
@@ -1744,18 +2015,35 @@ impl Canvas {
             return;
         };
         // Highlight the input a variable would bind to.
+        // A compact card's hidden inputs take the variable on their tray rows.
         let row_under = |cards: &[Card]| {
             cards.iter().find_map(|card| {
-                (0..card.inputs.len())
-                    .find(|index| camera.rect(card.input_row(*index)).contains(pointer))
-                    .map(|index| {
+                let reveal = Reveal::of(
+                    card,
+                    camera,
+                    input.selection.contains(&card.id),
+                    Some(&Carried(None)),
+                    Some(pointer),
+                );
+                (0..card.inputs.len()).find_map(|index| {
+                    let row = card.input_row(index);
+                    let row = if row != Rect::NOTHING {
+                        row
+                    } else if reveal.inputs {
+                        card.tray_input(index)?.0
+                    } else {
+                        return None;
+                    };
+                    let rect = camera.rect(row);
+                    rect.contains(pointer).then(|| {
                         (
                             card.id.clone(),
                             card.inputs[index].name.clone(),
                             card.inputs[index].path.clone(),
-                            camera.rect(card.input_row(index)),
+                            rect,
                         )
                     })
+                })
             })
         };
         if let Payload::Variable { .. } = payload.as_ref()
@@ -1942,7 +2230,9 @@ impl Canvas {
                             }
                             widgets::action_menu(
                                 ui,
-                                widgets::icon_button(Icon::Wire, "Wire style").compact(),
+                                // How the board draws, beside each other: wires, and
+                                // what a card holds (LAY-16, decided 2026-11-09).
+                                widgets::icon_button(Icon::Wire, "Board view").compact(),
                                 |ui| {
                                     // *Curves* returns when it draws curves (UX-28).
                                     let style = WireStyle::Orthogonal;
@@ -1980,6 +2270,31 @@ impl Canvas {
                                     {
                                         commands.push(Command::SetBridges(!self.bridges));
                                         ui.close();
+                                    }
+                                    if self.density_switch {
+                                        ui.separator();
+                                        let compact = self.density == CardDensity::Compact;
+                                        if ui
+                                            .add_enabled(
+                                                editable,
+                                                widgets::action(
+                                                    if compact {
+                                                        Icon::Check
+                                                    } else {
+                                                        Icon::Density
+                                                    },
+                                                    "Compact cards",
+                                                )
+                                                .quiet(),
+                                            )
+                                            .on_hover_text(
+                                                "A request card shows only what it uses; Tidy up repacks the board",
+                                            )
+                                            .clicked()
+                                        {
+                                            commands.push(Command::SetCompactCards(!compact));
+                                            ui.close();
+                                        }
                                     }
                                 },
                             );
@@ -2540,7 +2855,7 @@ mod tests {
         let cards: Vec<Card> = graph
             .nodes
             .iter()
-            .map(|node: &Node| Card::build(node, graph, project))
+            .map(|node: &Node| Card::build(node, graph, project, CardDensity::Full))
             .collect();
         let chips: Vec<Chip> = graph
             .proxies
@@ -2784,7 +3099,7 @@ mod tests {
             );
             output.textures_delta.clear();
         }
-        let card = Card::build(target, graph, &project);
+        let card = Card::build(target, graph, &project, canvas.density);
         let actual = canvas.screen_camera(canvas.last_viewport).rect(card.rect());
         let focus = canvas.last_focus.unwrap();
         assert!(

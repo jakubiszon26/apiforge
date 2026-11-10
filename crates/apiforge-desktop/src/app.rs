@@ -12,7 +12,7 @@ use crate::{
     library::{self, Library},
     navigator::Navigator,
     persistence::{SaveStatus, Saver},
-    preferences::Preferences,
+    preferences::{Preference, Preferences},
     report::{self, ReportPanel},
     theme, widgets,
 };
@@ -248,6 +248,10 @@ impl App {
         let mut canvas = Canvas::default();
         canvas.wire_style = preferences.wire_style;
         canvas.bridges = preferences.bridges;
+        // The workspace window keeps the full cards; *Compact cards* is the
+        // folder window's (LAY-16).
+        canvas.set_density(canvas::CardDensity::Full);
+        canvas.density_switch = false;
         let repaint = context.clone();
         let runner = RunnerService::new(Arc::new(move || repaint.request_repaint()))
             .map_err(|error| {
@@ -442,6 +446,8 @@ impl App {
                         }
                     }
                     self.canvas = Canvas::default();
+                    self.canvas.set_density(canvas::CardDensity::Full);
+                    self.canvas.density_switch = false;
                     self.inspector = Inspector::default();
                     self.inspector_collapsed = false;
                     self.navigator = Navigator::default();
@@ -687,7 +693,7 @@ impl App {
     fn toggle_code_panel(&mut self) {
         self.code_open = !self.code_open;
         self.preferences.code_panel = self.code_open;
-        self.preferences.save();
+        self.preferences.save(Preference::CodePanel);
     }
 
     /// Applies an inspector action that belongs to the window rather than to the
@@ -700,7 +706,7 @@ impl App {
         // the panel shows it.
         self.code_open = true;
         self.preferences.code_panel = true;
-        self.preferences.save();
+        self.preferences.save(Preference::CodePanel);
         self.revealed = None;
         if let Some(node) = self
             .editor
@@ -830,7 +836,7 @@ impl App {
                 {
                     self.code_open = false;
                     self.preferences.code_panel = false;
-                    self.preferences.save();
+                    self.preferences.save(Preference::CodePanel);
                 }
             });
         });
@@ -1121,7 +1127,9 @@ impl App {
             .iter()
             .enumerate()
             .map(|(index, node)| {
-                let rect = canvas::Card::build(node, &reference, project).rect();
+                let rect =
+                    canvas::Card::build(node, &reference, project, canvas::CardDensity::Full)
+                        .rect();
                 let block = apiforge_layout::Block::new(
                     apiforge_layout::Size::new(rect.width(), rect.height()),
                     apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
@@ -2373,7 +2381,11 @@ impl App {
         match command {
             Command::Select(ids) => self.editor.selection = ids,
             // The workspace window shows no INPUTS strip or settings button.
-            Command::SelectInput(_) | Command::AddInput | Command::ComponentSettings => {}
+            Command::SelectInput(_)
+            | Command::AddInput
+            | Command::ComponentSettings
+            | Command::SetCompactCards(_) => {}
+            Command::InspectInput { node, .. } => self.editor.selection = vec![node],
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);
@@ -2382,12 +2394,12 @@ impl App {
             Command::SetWireStyle(style) => {
                 self.canvas.wire_style = style;
                 self.preferences.wire_style = style;
-                self.preferences.save();
+                self.preferences.save(Preference::WireStyle);
             }
             Command::SetBridges(bridges) => {
                 self.canvas.bridges = bridges;
                 self.preferences.bridges = bridges;
-                self.preferences.save();
+                self.preferences.save(Preference::Bridges);
             }
             Command::AddNode {
                 block,
@@ -2549,6 +2561,7 @@ impl App {
             project: self.editor.project(),
             parameters: &parameters,
             sibling: self.editor.sibling_graph(),
+            density: canvas::CardDensity::Full,
         })
     }
 
@@ -3260,7 +3273,7 @@ mod tests {
         let reference = app.editor.reference_graph().into_owned();
         let project = app.editor.project().clone();
         let rect = |node: &apiforge_core::format::Node| {
-            canvas::Card::build(node, &reference, &project).rect()
+            canvas::Card::build(node, &reference, &project, canvas::CardDensity::Full).rect()
         };
         for node in graph
             .nodes
@@ -3473,7 +3486,7 @@ mod tests {
         let project = app.editor.project().clone();
         let chip = canvas::Chip::build(&graph.proxies[0], &graph, &project, &[]);
         let added = graph.nodes.last().unwrap();
-        let card = canvas::Card::build(added, &graph, &project);
+        let card = canvas::Card::build(added, &graph, &project, canvas::CardDensity::Full);
         assert!(
             !card.rect().intersects(chip.rect()),
             "the new block landed on a placed value"
@@ -3597,7 +3610,7 @@ mod tests {
         let reference = app.editor.reference_graph().into_owned();
         let project = app.editor.project().clone();
         let rect = |node: &apiforge_core::format::Node| {
-            canvas::Card::build(node, &reference, &project).rect()
+            canvas::Card::build(node, &reference, &project, canvas::CardDensity::Full).rect()
         };
         for other in graph.nodes.iter().filter(|node| node.id != fresh.id) {
             assert!(

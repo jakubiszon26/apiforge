@@ -523,6 +523,7 @@ mod tests {
             snapshot: None,
             error: None,
             notice: None,
+            running: None,
         }
     }
 

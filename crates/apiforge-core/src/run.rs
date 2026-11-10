@@ -99,6 +99,41 @@ pub struct RequestSnapshot {
     pub body: OptionalJson,
 }
 
+/// Why a step did not run. Each variant answers one branch of the runner that
+/// builds a result for a step it does not execute. The step a variant names is
+/// a node id of the same graph, except the producer of a Cleanup input, which
+/// is a step of the main graph.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NotRunCause {
+    /// The run stopped, under the policy *Stop*, after `by` failed.
+    Stopped { by: String },
+    /// `step`, which this step waits for, failed or did not run itself.
+    BlockedBy { step: String },
+    /// `condition`, a Data condition this step reads, is false.
+    ConditionUnmet { condition: String },
+    /// The step is on a branch that was not taken.
+    OutsidePath,
+    /// The run was cancelled or ran out of time before the step.
+    Cancelled,
+    /// A Cleanup step reads an output of `step` that does not exist.
+    CleanupInputMissing { step: String },
+}
+
+impl NotRunCause {
+    /// The step this cause points at; it has a cause of its own when it did not
+    /// run either.
+    pub fn step(&self) -> Option<&str> {
+        match self {
+            Self::Stopped { by: step }
+            | Self::BlockedBy { step }
+            | Self::ConditionUnmet { condition: step }
+            | Self::CleanupInputMissing { step } => Some(step),
+            Self::OutsidePath | Self::Cancelled => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StepResult {
@@ -124,6 +159,9 @@ pub struct StepResult {
     /// Steps of a component's inner graph.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<StepResult>>,
+    /// Why the step did not run; absent for a step that ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<NotRunCause>,
 }
 
 impl StepResult {
@@ -149,6 +187,7 @@ impl StepResult {
             actual: OptionalJson::Missing,
             request: None,
             children: None,
+            cause: None,
         }
     }
 }
@@ -184,6 +223,10 @@ pub struct RunResult {
     /// inputs from an earlier run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// The node id of the top-level step executing now, for an observer of a
+    /// run in progress. Never written to a report; a finished run has none.
+    #[serde(skip)]
+    pub running: Option<String>,
 }
 
 impl RunResult {
