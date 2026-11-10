@@ -10477,8 +10477,9 @@ mod ux32 {
                 "the pill reads {typed}"
             );
             assert!(
-                painted_on_board(&harness, &format!("→ {typed}"))
-                    && !painted_on_board(&harness, "→ quantity"),
+                // The compact card's one line (LAY-21) reads the parameter.
+                painted_on_board(&harness, &format!("param.{typed}"))
+                    && !painted_on_board(&harness, "param.quantity"),
                 "the Cart item card reads {typed}"
             );
             assert_eq!(ringed(&harness, &id), ["Cart item"], "still selected");
