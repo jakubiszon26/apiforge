@@ -1630,6 +1630,19 @@ mod issue276 {
         id
     }
 
+    /// Clicks the document tab of `path`: of the controls named after the
+    /// file (the project files row has the name too), the one holding its
+    /// *Close* control.
+    fn click_tab(harness: &mut FolderHarness, path: &str) {
+        let name = path.rsplit('/').next().unwrap();
+        let close = harness.get_by_label(&format!("Close {name}")).rect();
+        let tab = harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, name)
+            .find(|node| node.rect().contains(close.center()))
+            .unwrap_or_else(|| panic!("no tab named {name}"));
+        tab.click();
+    }
+
     fn problems(harness: &FolderHarness, id: &str) -> usize {
         folder(harness).snapshot(id).unwrap().diagnostics.len()
     }
@@ -1651,16 +1664,22 @@ mod issue276 {
         (project, harness, one, many)
     }
 
-    /// Criterion 1: switching between the tabs ten times leaves the
-    /// remembered height what it was, in every frame.
+    /// Criterion 1: switching between the tabs ten times, by clicking them,
+    /// leaves the remembered height what it was, in every frame.
     #[test]
     fn a_tab_switch_never_changes_the_problems_height() {
         for (size, mode) in [(MINIMUM, "Code"), (WIDE, "Code"), (WIDE, "Split")] {
             let (_project, mut harness, one, many) = two_tabs(size, mode);
             let before = remembered(&harness);
             for round in 0..10 {
-                for id in [&one, &many] {
-                    app(&mut harness).activate_tab(id);
+                for (id, path) in [(&one, SCENARIO), (&many, COMPONENT)] {
+                    click_tab(&mut harness, path);
+                    harness.step();
+                    assert_eq!(
+                        folder(&harness).workbench.active(),
+                        Some(id.as_str()),
+                        "the click shows {path}"
+                    );
                     for frame in 0..4 {
                         harness.step();
                         assert_eq!(
