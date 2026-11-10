@@ -111,6 +111,22 @@ fn open_dialog(harness: &mut FolderHarness, id: &str) {
     choose(harness, &format!("Use output {other}"));
 }
 
+/// The demo at `size` with *Add to cart* and *Promotional price* in the
+/// dialog, the cart's output unticked and the check's value ticked.
+fn open_demo_without_the_cart(root: &std::path::Path, size: egui::Vec2) -> FolderHarness {
+    let (mut harness, id) = window(root, size, SCENARIO, "Diagram");
+    app(&mut harness)
+        .selections
+        .insert(id, vec!["cart".to_owned(), "price".to_owned()]);
+    settle(&mut harness);
+    choose(&mut harness, "Selection actions");
+    choose(&mut harness, TITLE);
+    replace_text(&mut harness, NAME, "Check cart price");
+    choose(&mut harness, "Use output 1");
+    choose(&mut harness, "Use output 2");
+    harness
+}
+
 fn revisions(harness: &FolderHarness, handle: &str) -> usize {
     folder(harness)
         .session
@@ -150,16 +166,7 @@ fn ux37_criterion_1_the_refusal_stays_the_default() {
 #[test]
 fn ux37_criterion_1b_no_checkbox_for_a_template_reader() {
     let directory = shop();
-    let (mut harness, id) = window(directory.path(), WIDE, SCENARIO, "Diagram");
-    app(&mut harness)
-        .selections
-        .insert(id.clone(), vec!["cart".to_owned(), "price".to_owned()]);
-    settle(&mut harness);
-    choose(&mut harness, "Selection actions");
-    choose(&mut harness, TITLE);
-    replace_text(&mut harness, NAME, "Check cart price");
-    choose(&mut harness, "Use output 1");
-    choose(&mut harness, "Use output 2");
+    let harness = open_demo_without_the_cart(directory.path(), WIDE);
     assert!(contains(&harness, DEMO_REFUSAL));
     assert!(
         contains(&harness, DEMO_REASON),
@@ -317,4 +324,28 @@ fn ux37_criterion_5_nothing_is_published_when_the_call_cannot_be_placed() {
         edited,
         "the scenario is untouched"
     );
+}
+
+/// The dialog with the checkbox (order-flow, ticked) and, separately, with
+/// the refusal alone for the demo's template reader, at both windows.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_ux37_save_anyway() {
+    use crate::testing::capture;
+    for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
+        let directory = shop();
+        let (mut harness, _) = open_order_flow(directory.path(), size);
+        choose(&mut harness, LEAVE);
+        capture(&mut harness, &format!("ux37-checkbox-{suffix}"), None);
+
+        let directory = shop();
+        let mut harness = open_demo_without_the_cart(directory.path(), size);
+        harness.get_by_label_contains(DEMO_REASON).scroll_to_me();
+        settle(&mut harness);
+        capture(
+            &mut harness,
+            &format!("ux37-template-refusal-{suffix}"),
+            None,
+        );
+    }
 }
