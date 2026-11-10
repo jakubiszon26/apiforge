@@ -121,9 +121,15 @@ pub(super) struct TakeBack {
     /// The take-back met a transaction the holder left behind and opened
     /// recovery; it waits until recovery has been finished and reloaded.
     recovering: bool,
-    /// The take-back failed for a reason another attempt would repeat.
-    stopped: bool,
+    /// Take-backs that failed in a row. A failure is most often passing (a
+    /// reader or a scanner held a file for a moment), so the next check tries
+    /// again; the notice is shown at the third (KTLO-33, decision 2 A).
+    failures: u32,
 }
+
+/// Failed take-backs in a row after which the window says so; it keeps
+/// trying after that.
+const FAILURES_NOTICED: u32 = 3;
 
 impl FolderApp {
     /// Whether this window observes a project another process holds, which
@@ -169,7 +175,6 @@ impl FolderApp {
         // between the window's grant and its own lock (MCP-08b).
         if self.take_back.pending
             || self.take_back.recovering
-            || self.take_back.stopped
             || self.persistence.closing
             || self.handover.holds_back()
         {
@@ -198,12 +203,16 @@ impl FolderApp {
                         app.watcher.recovery_required = true;
                         app.review_transaction(app.root.clone());
                     }
+                    // The next check tries again; only a failure that
+                    // persists is worth the person's attention.
                     Err(error) => {
-                        app.take_back.stopped = true;
-                        app.notify(
-                            format!("This window could not take the project back: {error}"),
-                            true,
-                        );
+                        app.take_back.failures += 1;
+                        if app.take_back.failures == FAILURES_NOTICED {
+                            app.notify(
+                                format!("This window could not take the project back: {error}"),
+                                true,
+                            );
+                        }
                     }
                 }
             },
