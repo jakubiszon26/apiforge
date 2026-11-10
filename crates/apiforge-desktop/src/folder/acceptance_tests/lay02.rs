@@ -312,7 +312,8 @@ fn lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader() {
         "the first reader in document order"
     );
     let chip = Chip::build(&graph.proxies[0], &graph, &project, &[]).rect();
-    let card = |node: &Node| Card::build(node, &graph, &project).rect();
+    let density = folder(&harness).density();
+    let card = |node: &Node| Card::build(node, &graph, &project, density).rect();
     let beside = separation(chip, card(reader));
     assert!(
         beside <= 96.0,
@@ -407,15 +408,50 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
     }
 }
 
-/// Criterion 6, the density half: with *Compact cards* on, the board draws
-/// shorter cards than the full ones, and the layout made on open must use
-/// the heights drawn. `main` has only the full density, which the test above
-/// covers; this one switches *Compact cards* on before opening once LAY-16
-/// is merged, then asserts as above that Tidy up moves nothing.
+/// Criterion 6, the density half: *Compact cards* is on, as by default, so
+/// the board draws request cards shorter than the full ones (LAY-16). The
+/// layout made on open uses the heights drawn: Tidy up, which packs at the
+/// board's density, moves nothing, and a compact card stands closer to the
+/// card below it than its full height would allow.
 #[test]
-#[ignore = "LAY-02: needs LAY-16 (#310) on main"]
 fn lay02_criterion_6_opened_at_the_compact_density() {
-    unimplemented!("the Compact cards switch arrives with LAY-16 (#310)");
+    let (_project, mut harness, id) = open("shop-30", WIDE);
+    assert_eq!(
+        folder(&harness).density(),
+        crate::canvas::CardDensity::Compact,
+        "Compact cards is on by default"
+    );
+    let graph = main_graph(&harness, &id);
+    let project = folder(&harness).context_project();
+    let height =
+        |node: &Node, density| Card::build(node, &graph, &project, density).rect().height();
+    let full = crate::canvas::CardDensity::Full;
+    let compact = crate::canvas::CardDensity::Compact;
+    let shorter: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| height(node, compact) + 1.0 < height(node, full))
+        .collect();
+    assert!(!shorter.is_empty(), "the board draws some cards compact");
+    // A compact card with another card below it in its column: the gap is
+    // the row gap at the compact height, less than the full height leaves.
+    let packed = shorter.iter().any(|node| {
+        graph.nodes.iter().any(|below| {
+            (below.position.x - node.position.x).abs() < 1.0
+                && below.position.y > node.position.y
+                && ((below.position.y - node.position.y) as f32)
+                    < height(node, full) + ROW_GAP - 1.0
+        })
+    });
+    assert!(packed, "the cards are packed at the compact heights");
+    let opened = positions(&harness, &id);
+    app(&mut harness).active_board_command(Command::TidyUp(Vec::new()));
+    settle(&mut harness);
+    assert_eq!(
+        positions(&harness, &id),
+        opened,
+        "Tidy up has nothing to move"
+    );
 }
 
 #[test]

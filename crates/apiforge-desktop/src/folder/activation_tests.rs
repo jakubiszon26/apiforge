@@ -258,7 +258,10 @@ fn a_migration_that_cannot_finish_activates_nothing_and_reports_it() {
     fs::create_dir_all(&occupied).unwrap();
     fs::write(occupied.join("theirs.txt"), b"not ours").unwrap();
 
-    let Err(error) = activate(data.path()) else {
+    let Err(error) = activate(
+        data.path(),
+        &super::placement::DensityHandle::new(crate::canvas::CardDensity::Full),
+    ) else {
         panic!("an occupied destination stops migration");
     };
     assert!(error.to_string().contains("shop"), "{error}");

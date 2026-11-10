@@ -1214,8 +1214,14 @@ fn a_found_source_is_registered_from_the_explorer() {
 #[test]
 fn fresh_cards_are_placed_at_the_sizes_the_board_draws() {
     let directory = tempfile::tempdir().unwrap();
-    let mut session =
-        ProjectSession::create_with(directory.path(), "Placement", Arc::new(CardPlacer)).unwrap();
+    let mut session = ProjectSession::create_with(
+        directory.path(),
+        "Placement",
+        Arc::new(CardPlacer::new(placement::DensityHandle::new(
+            crate::canvas::CardDensity::Full,
+        ))),
+    )
+    .unwrap();
     let id = session
         .create_document(
             DocumentKind::Scenario,

@@ -297,9 +297,10 @@ impl FolderApp {
         self.opening = true;
         let generation = self.open_generation;
         let requested = root.clone();
+        let density = self.card_density.clone();
         self.storage_io(
             "Opening folder…",
-            move || super::opening::load(root),
+            move || super::opening::load(root, &density),
             move |app, result| {
                 if app.open_generation != generation {
                     return;

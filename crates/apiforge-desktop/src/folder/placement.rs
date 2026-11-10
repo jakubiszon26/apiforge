@@ -5,23 +5,65 @@
 //! and is there for headless sessions and the CLI; the board draws taller,
 //! content-dependent cards, so placing with the uniform size overlaps them.
 //!
-//! Cards are measured at the full density whatever the window shows (LAY-16):
-//! the placer is fixed when the session opens, while *Compact cards* is the
-//! window's view preference and changes under it. A fresh block on a compact
-//! board keeps a full card's footprint, which leaves room rather than overlap,
-//! until the next Tidy up packs it at the size drawn.
+//! A block added to a placed board is measured at the full density whatever
+//! the window shows (LAY-16): a fresh block on a compact board keeps a full
+//! card's footprint, which leaves room rather than overlap, until the next
+//! Tidy up packs it at the size drawn. A graph whose blocks are all fresh, a
+//! scenario opened from code, is laid out whole at the density the board
+//! draws (LAY-02), read through a [`DensityHandle`] the window shares with
+//! the placer, because the placer is fixed when the session opens while
+//! *Compact cards* changes under it.
 
 use crate::canvas;
 use apiforge_core::format::{Graph, Position, Project};
 use apiforge_project::{Document, Placer};
 use std::collections::HashSet;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+/// The density the window draws its boards at, shared with the placer that
+/// runs on the analysis worker: *Compact cards* on or off.
+#[derive(Clone, Debug)]
+pub struct DensityHandle(Arc<AtomicBool>);
+
+impl DensityHandle {
+    pub fn new(density: canvas::CardDensity) -> Self {
+        Self(Arc::new(AtomicBool::new(
+            density == canvas::CardDensity::Compact,
+        )))
+    }
+
+    pub fn set(&self, density: canvas::CardDensity) {
+        self.0
+            .store(density == canvas::CardDensity::Compact, Ordering::Relaxed);
+    }
+
+    pub fn get(&self) -> canvas::CardDensity {
+        if self.0.load(Ordering::Relaxed) {
+            canvas::CardDensity::Compact
+        } else {
+            canvas::CardDensity::Full
+        }
+    }
+}
 
 /// Measures each card and chip as the board paints it, then runs the shared
 /// incremental layout. Pure, so analysis can place on a worker thread.
-pub struct CardPlacer;
+pub struct CardPlacer {
+    density: DensityHandle,
+}
+
+impl CardPlacer {
+    pub fn new(density: DensityHandle) -> Self {
+        Self { density }
+    }
+}
 
 impl Placer for CardPlacer {
     fn place(&self, document: &mut Document, fresh: &[String], context: &Project) {
+        let density = self.density.get();
         let fresh: HashSet<&str> = fresh.iter().map(String::as_str).collect();
         let parameters = super::parameters_of(document);
         let graphs = match document {
@@ -29,12 +71,18 @@ impl Placer for CardPlacer {
             Document::Component(component) => vec![&mut component.graph],
         };
         for graph in graphs {
-            place_graph(graph, &fresh, context, &parameters);
+            place_graph(graph, &fresh, context, &parameters, density);
         }
     }
 }
 
-fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, parameters: &[String]) {
+fn place_graph(
+    graph: &mut Graph,
+    fresh: &HashSet<&str>,
+    context: &Project,
+    parameters: &[String],
+    density: canvas::CardDensity,
+) {
     let indices: Vec<usize> = (0..graph.nodes.len())
         .filter(|index| fresh.contains(graph.nodes[*index].id.as_str()))
         .collect();
@@ -48,12 +96,16 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
     // standing in the way.
     let whole = indices.len() == graph.nodes.len();
     let chips: &[apiforge_core::format::Proxy] = if whole { &[] } else { &reference.proxies };
+    let density = if whole {
+        density
+    } else {
+        canvas::CardDensity::Full
+    };
     let blocks: Vec<apiforge_layout::Block> = graph
         .nodes
         .iter()
         .map(|node| {
-            let rect =
-                canvas::Card::build(node, &reference, context, canvas::CardDensity::Full).rect();
+            let rect = canvas::Card::build(node, &reference, context, density).rect();
             let block = apiforge_layout::Block::new(
                 apiforge_layout::Size::new(rect.width(), rect.height()),
                 apiforge_layout::Point::new(node.position.x as f32, node.position.y as f32),
@@ -99,6 +151,7 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
             &reference,
             context,
             parameters,
+            density,
             |_| true,
         );
     }
@@ -159,7 +212,11 @@ mod tests {
             .chain(&scenario.cleanup.nodes)
             .map(|node| node.id.clone())
             .collect();
-        CardPlacer.place(&mut document, &fresh, &project);
+        CardPlacer::new(DensityHandle::new(canvas::CardDensity::Full)).place(
+            &mut document,
+            &fresh,
+            &project,
+        );
         let Document::Scenario(scenario) = &document else {
             unreachable!()
         };
@@ -178,7 +235,8 @@ mod tests {
             .expect("first has a reader");
         assert_eq!(reader.handle, "total", "the first reader in document order");
         let chip = canvas::Chip::build(&graph.proxies[0], graph, &project, &[]).rect();
-        let card = |node| canvas::Card::build(node, graph, &project).rect();
+        let card =
+            |node| canvas::Card::build(node, graph, &project, canvas::CardDensity::Full).rect();
         let beside = separation(chip, card(reader));
         assert!(
             beside <= 96.0,

@@ -137,6 +137,7 @@ impl Board<'_> {
             self.reference,
             self.project,
             self.parameters,
+            self.density,
             |id| moved.contains(id),
         );
         Some(tidied)
@@ -495,6 +496,7 @@ pub(crate) fn chips_beside_their_readers(
     reference: &Graph,
     project: &Project,
     parameters: &[String],
+    density: canvas::CardDensity,
     moved: impl Fn(&str) -> bool,
 ) {
     let readers: Vec<Option<Reader>> = graph
@@ -509,7 +511,7 @@ pub(crate) fn chips_beside_their_readers(
     let cards: Vec<canvas::Card> = graph
         .nodes
         .iter()
-        .map(|node| canvas::Card::build(node, reference, project))
+        .map(|node| canvas::Card::build(node, reference, project, density))
         .collect();
     let mut obstacles: Vec<egui::Rect> = cards
         .iter()
