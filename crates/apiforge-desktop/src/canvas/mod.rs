@@ -367,6 +367,10 @@ pub struct Canvas {
     /// The selected card last kept in view, so that a newly selected or
     /// added card is panned into view once (UX-18).
     kept_in_view: Option<String>,
+    /// The last frame's focus where it lies now on screen, after a change of
+    /// the board that kept the camera; `None` after one that fitted it. A
+    /// change pans the selected card only for what it newly hides (#324).
+    previous_focus: Option<Rect>,
     /// The window's size and arrangement in the last frame: only their
     /// change fits the board again (UX-18).
     last_window: Vec2,
@@ -421,6 +425,7 @@ impl Default for Canvas {
             reveal_pending: None,
             fitted_for: None,
             kept_in_view: None,
+            previous_focus: None,
             last_window: Vec2::ZERO,
             last_arrangement: String::new(),
             pasted_pending: Vec::new(),
@@ -1372,6 +1377,7 @@ impl Canvas {
         }
         let kept_middle =
             (focus.center() - viewport.min) - (previous.center() - self.last_viewport.min);
+        let pan = self.camera.pan;
         if rearranged {
             if self.camera_moved_by_user {
                 self.camera.pan += kept_middle;
@@ -1386,14 +1392,20 @@ impl Canvas {
         } else if self.fitted_for == Some(viewport.size()) {
             self.fit(viewport, focus, shapes);
         }
+        let fitted = !self.camera_moved_by_user && self.fitted_for == Some(viewport.size());
+        let moved_with = (viewport.min - self.last_viewport.min) + (self.camera.pan - pan);
+        self.previous_focus = (!fitted).then(|| previous.translate(moved_with));
         true
     }
 
     /// Pans the least that shows the one selected card whole in the focus,
-    /// once when it is selected or added and again whenever the board
-    /// changes size, so the Inspector it opens never covers it (UX-18). A
-    /// card larger than the focus shows its top left corner. Nothing pans
-    /// while a drag is under way: the card stays under the pointer.
+    /// once when it is selected or added, so the Inspector it opens never
+    /// covers it (UX-18). When the board changes size it pans only for what
+    /// the change newly hides: a card the person or a holder's save left
+    /// partly outside stays so, and the storage band coming and going leaves
+    /// the camera where it was (MCP-08a, #324). A card larger than the focus
+    /// shows its top left corner. Nothing pans while a drag is under way:
+    /// the card stays under the pointer.
     fn keep_selection_in_view(
         &mut self,
         viewport: Rect,
@@ -1414,20 +1426,29 @@ impl Canvas {
             self.kept_in_view = None;
             return;
         };
-        if !board_changed && self.kept_in_view.as_ref() == Some(id) {
-            return;
-        }
         // A card being added is not on the board until its edit applies:
         // it is kept in view in the first frame that draws it.
         let Some(card) = cards.iter().find(|card| &card.id == id) else {
             return;
         };
-        self.kept_in_view = Some(id.clone());
         let on_screen = self.screen_camera(viewport).rect(card.rect());
-        let shift = vec2(
+        let outside = vec2(
             least_shift(on_screen.x_range(), focus.x_range()),
             least_shift(on_screen.y_range(), focus.y_range()),
         );
+        let shift = match (self.kept_in_view.as_ref() == Some(id), self.previous_focus) {
+            (false, _) => outside,
+            (true, _) if !board_changed => Vec2::ZERO,
+            (true, Some(previous)) => {
+                outside
+                    - vec2(
+                        least_shift(on_screen.x_range(), previous.x_range()),
+                        least_shift(on_screen.y_range(), previous.y_range()),
+                    )
+            }
+            (true, None) => outside,
+        };
+        self.kept_in_view = Some(id.clone());
         if shift != Vec2::ZERO {
             self.camera.pan += shift;
             self.fitted_for = None;
