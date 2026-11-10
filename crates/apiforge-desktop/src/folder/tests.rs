@@ -1234,7 +1234,7 @@ fn fresh_cards_are_placed_at_the_sizes_the_board_draws() {
     let cards: Vec<egui::Rect> = graph
         .nodes
         .iter()
-        .map(|node| canvas::Card::build(node, graph, &project).rect())
+        .map(|node| canvas::Card::build(node, graph, &project, canvas::CardDensity::Full).rect())
         .collect();
     assert!(
         !cards[0].intersects(cards[1]),

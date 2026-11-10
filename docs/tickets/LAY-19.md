@@ -4,8 +4,9 @@
 - State: Backlog (issue #303) · added to the sprint by the owner on
   2026-11-05 (Q12 = C; the second opinion's item 6 of
   [lay.md 4.5](../sprints/lay.md#45-second-opinion-part-two-local-context);
-  runner-side, kept in LAY by that decision) · LAY sprint, wave 1, after
-  LAY-07
+  runner-side, kept in LAY by that decision) · LAY sprint, part B, after
+  LAY-10 ([review of 2026-11-10](../sprints/lay.md#11-mid-sprint-review-2026-11-10));
+  its runner half is LAY-22
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -65,11 +66,7 @@ runner test.
 5. The footer fits LAY-16's box at Compact and Overview (the count and the
    cause word are at least 9 px on screen at Fit, LAY-09's rule). Test:
    `lay19_criterion_5_fits_the_box`.
-6. Runner: the causes are an enum the window reads, not strings it parses
-   — `Stopped`, `BlockedBy(step)`, `ConditionUnmet`, `OutsidePath`,
-   `Cancelled` — and a test asserts the mapping of every `engine.rs`
-   branch that builds a Skipped, Blocked or Cancelled result. Test:
-   `not_run_causes_are_an_enum_with_one_variant_per_branch`.
+6. The window reads LAY-22's `NotRunCause`, never a message string.
 7. A run cancelled by the person marks the unreached steps *Cancelled*, not
    *Stopped*. Test: `lay19_criterion_7_cancelled_is_its_own_cause`.
 

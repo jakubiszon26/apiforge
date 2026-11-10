@@ -198,11 +198,23 @@ fn component_code_places_all_new_blocks_without_moving_existing_ones() {
         .iter()
         .filter(|n| n.handle.starts_with("extra_"))
     {
-        let rect = canvas::Card::build(fresh, &reference, app.editor.project()).rect();
+        let rect = canvas::Card::build(
+            fresh,
+            &reference,
+            app.editor.project(),
+            canvas::CardDensity::Full,
+        )
+        .rect();
         for other in app.editor.graph().nodes.iter().filter(|n| n.id != fresh.id) {
             assert!(
                 !rect.intersects(
-                    canvas::Card::build(other, &reference, app.editor.project()).rect()
+                    canvas::Card::build(
+                        other,
+                        &reference,
+                        app.editor.project(),
+                        canvas::CardDensity::Full,
+                    )
+                    .rect()
                 )
             );
         }
