@@ -37,6 +37,8 @@ pub enum Icon {
     Layout,
     /// A wire turning a corner, for the wire style.
     Wire,
+    /// A short card above a tall one, for *Compact cards* (LAY-16).
+    Density,
     /// Angle brackets, for the code view.
     Code,
     Folder,
@@ -258,6 +260,12 @@ impl Icon {
                 outline(3.0, 4.0, 10.0, 11.0);
                 outline(3.0, 14.0, 10.0, 20.0);
                 outline(14.0, 7.0, 21.0, 17.0);
+            }
+            Self::Density => {
+                outline(4.0, 3.0, 20.0, 9.0);
+                outline(4.0, 12.0, 20.0, 21.0);
+                line((7.0, 15.5), (17.0, 15.5));
+                line((7.0, 18.0), (14.0, 18.0));
             }
             Self::Wire => {
                 path(&[(3.0, 6.0), (12.0, 6.0), (12.0, 18.0), (21.0, 18.0)]);

@@ -5,8 +5,9 @@
 - State: Backlog (issue #37) · **decided by the owner on 2026-11-05: D
   hybrid** (Q1 = A) with `@after` wires drawn dashed on the rail (Q3 = A),
   in the LAY plan ([lay.md 5.1](../sprints/lay.md#51-decisions-taken-2026-11-05))
-  · LAY sprint, wave 2, after LAY-02 and on LAY-16's card heights
-  (criterion 2); LAY-17 (the dependency-aware row break) follows it
+  · LAY sprint, wave 2, after LAY-02 and LAY-11 (wave 1 ends with the
+  collapse) and on LAY-16's card heights (criterion 2); LAY-17 (the
+  dependency-aware row break) follows it
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -90,6 +91,15 @@ checks collapsed and expanded.
    `lay06_criterion_6_deterministic`.
 7. ADR 0006 is amended: the flow direction stays left to right; the shape
    is D and the rail is named.
+8. `shop-30` fits 1600 × 1000 at 0.50 or more with checks collapsed, LAY-11's
+   default; with checks expanded the fit is reported, not asserted. Test:
+   `lay06_criterion_8_fit_at_least_half_collapsed`. Moved here from LAY-16
+   on 2026-11-06: the fit is bounded by the board's width, which only the
+   shape changes (`main` tidies `shop-30` to 5544 px wide, fit 0.205 at any
+   card height); the mock-up's 0.52 (`lay00r4-d-shop-30-compact-fit`) was
+   measured with checks collapsed on LAY-16's heights, so the criterion
+   depends on LAY-11's collapse, and the order holds: LAY-11 closes wave 1
+   and this ticket is in wave 2 ([lay.md 7](../sprints/lay.md#7-dependencies-and-order)).
 
 ## Not in scope
 
