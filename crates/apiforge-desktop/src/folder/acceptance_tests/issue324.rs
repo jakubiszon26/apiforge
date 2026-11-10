@@ -54,7 +54,9 @@ fn a_viewport_that_only_moves_does_not_pan_the_board() {
 
     // A slow job shows the band, then ends.
     app(&mut harness).storage.forced_label = Some(BAND);
-    settle(&mut harness);
+    // A few frames under the band, as a slow job gives; not `settle`, whose
+    // wait for a quiet window the band's spinner may keep from coming.
+    harness.run_steps(4);
     assert_eq!(folder(&harness).debug_storage_band(), Some(BAND));
     let during = canvas(&harness, &scenario).debug_viewport();
     assert_ne!(during, viewport, "the band moved the board");
