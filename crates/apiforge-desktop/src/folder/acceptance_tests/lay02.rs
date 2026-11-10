@@ -288,8 +288,11 @@ fn lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader() {
         "the chip is placed"
     );
 
-    harness.get_by_label(TIDY).click();
+    // The chip is selected once placed; Tidy up then lays out the board as a
+    // whole, with nothing selected.
+    app(&mut harness).selections.insert(id.clone(), Vec::new());
     settle(&mut harness);
+    choose(&mut harness, TIDY);
     let graph = main_graph(&harness, &id);
     let project = folder(&harness).context_project();
     let reads_first = |binding: &Binding| {
@@ -324,8 +327,7 @@ fn lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader() {
         );
     }
 
-    harness.get_by_label(FIT).click();
-    settle(&mut harness);
+    choose(&mut harness, FIT);
     let board = canvas(&harness, &id);
     let zoom = board.debug_zoom();
     let focus = board.debug_focus();
@@ -362,8 +364,7 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
                 "{name} at {size:?}: no card stands whole in the board {focus:?}"
             );
             let first_zoom = board.debug_zoom();
-            harness.get_by_label(FIT).click();
-            settle(&mut harness);
+            choose(&mut harness, FIT);
             let fitted = canvas(&harness, &id).debug_zoom();
             assert!(
                 (fitted - first_zoom).abs() < 1e-3,
