@@ -3,8 +3,10 @@
 - Size: M (uncertainty: two causes are established from the CI evidence,
   one from the code alone, two are not yet established and need the Windows
   loop) · Owner review: 15 min · Risk: none visible beyond decisions 1 and 2
-- State: Analysis (issue #122); two owner decisions below
-- Analysis model: Fable · Implementation model: —
+- State: Implementation (issue #122); decisions 1 = A and 2 = A taken by
+  the owner on 2026-11-10; the Windows hover family of #279 added the same
+  day
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -253,6 +255,13 @@ The issue's first entry (the ubuntu push run of #118, 2026-10-28) is run
 40704347762, flake 1 above: the minute boundary falls on Linux as well.
 
 ## Decisions
+
+Taken by the owner on 2026-11-10 (quiz on the analysis, recorded on #122):
+**decision 1 = A** — the bar keeps its provisional *since*; the tests wait
+for the holder's own description — and **decision 2 = A** — an observing
+window whose take-back fails for a passing reason tries again at its next
+check, and the notice appears only after three failed checks in a row. The
+earlier answer of 2026-11-02 (2 = B) is superseded.
 
 1. **The provisional holder description after a hand-over.**
    - **A (recommended):** keep it. For up to a second after the grant the
