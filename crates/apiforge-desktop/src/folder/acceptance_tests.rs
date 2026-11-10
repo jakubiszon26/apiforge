@@ -14386,7 +14386,11 @@ mod lay16 {
         }
     }
 
-    pub(super) fn binding_of(harness: &FolderHarness, handle: &str, input: &str) -> Option<Binding> {
+    pub(super) fn binding_of(
+        harness: &FolderHarness,
+        handle: &str,
+        input: &str,
+    ) -> Option<Binding> {
         graph(harness)
             .nodes
             .iter()
@@ -14437,7 +14441,12 @@ mod lay16 {
     /// second a frame, so two clicks a frame apart are already past egui's
     /// double-click window; it is widened for the clicks, as a person's two
     /// clicks fall inside it.
-    pub(super) fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
+    pub(super) fn click_at(
+        harness: &mut FolderHarness,
+        at: Pos2,
+        button: egui::PointerButton,
+        times: usize,
+    ) {
         let window = harness
             .ctx
             .options(|options| options.input_options.max_double_click_delay);
