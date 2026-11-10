@@ -300,6 +300,20 @@ slow disk the band appears for a moment a second after a mode or tab
 change and the board below it jumps by its height; beside a selected card
 at 960 × 540 the jump leaves a fitted board panned.
 
+### 9. `mcp16` follow bounds ✔ — test defect
+
+`mcp16_criterion_4_a_publication_is_followed` failed on windows-2022 in
+run 42881644458 (PR #313, documents only): *at the document 2.1471401s
+after the write*, against the two-second bound; `mcp16_criterion_2_*`
+did the same once at 2.3 s (run 41554907272). The bound is the window's
+(MCP-16: the window follows a commit within two seconds), but the tests
+started the clock before the agent's call, so it also held the agent's
+own transaction: for a publication a revision, the registry and several
+replaces, the slowest work a loaded Windows runner does. Not the
+storage-band family. Fix: the clock starts when the agent's answer
+arrives, which is when its commit is done; the bound and the assertion
+are unchanged.
+
 ## As built
 
 - Flake 4 (decision 2 A): `TakeBack::stopped` became `failures`; any

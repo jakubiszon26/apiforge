@@ -6232,8 +6232,9 @@ mod mcp16 {
     }
 
     /// The agent writes `path` with `note` added under its first line and
-    /// returns when it started the write: the window steps while the
-    /// agent waits for the answer, and may follow before it comes.
+    /// returns when the answer came, which is when the write had committed.
+    /// The window steps while the agent waits for the answer, and may follow
+    /// before it comes.
     fn agent_notes(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
@@ -6241,14 +6242,18 @@ mod mcp16 {
         note: &str,
     ) -> Instant {
         let (text, _) = read(server, path);
-        let asked = Instant::now();
         let answer = write(harness, server, path, &commented(&text, note));
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
-        asked
+        returned
     }
 
     /// The window is at `document_id` within the ticket's bound of
-    /// `returned`, the moment the agent started the write that commits.
+    /// `returned`, the moment the agent's commit was answered. The bound is
+    /// the window's: it follows a commit within two seconds. Timed from the
+    /// start of the agent's call it also held the agent's own transaction,
+    /// which on a loaded Windows runner took most of it (KTLO-33, run
+    /// 42881644458: 2.15 s for a publication).
     fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
         let took = await_until(harness, returned, what, |harness| {
             folder(harness).workbench.active() == Some(document_id)
@@ -6398,8 +6403,8 @@ mod mcp16 {
         assert_ne!(deep, padded);
         let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
-        let returned = Instant::now();
         let answer = write(&mut harness, &mut server, SCENARIO, &deep);
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_active(&mut harness, returned, &scenario, "the scenario");
         await_until(&mut harness, Instant::now(), "the new text", |harness| {
@@ -6466,13 +6471,13 @@ mod mcp16 {
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
         );
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "create_document",
             json!({ "kind": "scenario", "path": ADDED, "text": text }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_until(&mut harness, returned, "the new document", |harness| {
             is_registered(harness, ADDED)
@@ -6509,13 +6514,13 @@ mod mcp16 {
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "publish",
             json!({ "path": PRODUCT, "expected_source_sha256": hash }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["revision"], 2, "{answer}");
         await_active(&mut harness, returned, &product, "the published component");
         let revisions: Vec<u32> = folder(&harness)
