@@ -15,6 +15,9 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+#[path = "acceptance_tests/lay21.rs"]
+mod lay21;
+
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
     format!(
