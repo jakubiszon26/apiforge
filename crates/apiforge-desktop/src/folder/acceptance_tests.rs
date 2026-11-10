@@ -15,6 +15,9 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+#[path = "acceptance_tests/ktlo33.rs"]
+mod ktlo33;
+
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
     format!(
