@@ -1152,6 +1152,36 @@ clicks, before (on `main` at `8248b93`, full cards) and at the checkpoint:
 10. Add a check that `cart_view`'s `body.total` equals `expected_total`,
     from the board. *(wiring to a hidden port — LAY-16's tray, LAY-21)*
 
+### 11.5 What published studies say, and what they do not
+
+A short reading of the literature on 2026-11-10 (six searches, abstracts
+and summaries, not full texts). Nothing in it guarantees the outcome; it
+says where the plan stands on evidence and where it stands on judgement.
+
+| Idea of the sprint | Evidence | Consequence |
+| --- | --- | --- |
+| Fewer, smaller elements (compact cards, collapse) | Model size is the factor that most affects how well a process model is understood (Reijers and Mendling). | Supported in direction. |
+| Hiding checks by default (Q4 = A) | In two experiments on large BPMN models a fully flattened model was understood better than one with collapsed sub-processes (Türetken et al., 2016 and 2020); hidden dependencies are a known cost of visual notations (Green and Petre). | **Not supported as a default.** The aggregate and the visible failure are the mitigation; the checkpoint times tasks 2 and 4 collapsed and expanded, and the default follows the result. |
+| The shape before the wires ("comprehension before crossing count") | Edge crossings are the aesthetic with by far the largest measured effect on reading a graph, and path continuity comes next for following a path (Purchase; Ware, Purchase et al.). `shop-30` has 117 crossings on 57 wires today. | **A risk in part A.** Tracing a value is a path task. The checkpoint reads crossings per wire on shape D; above 0.5, LAY-04 and LAY-03 come before every other ticket of part B. |
+| A graph at all, for reading a test | Visual programs were slower to read than text in Green and Petre's experiments; Whitley's review finds the opposite for some tasks. | No guarantee either way. Code and Split stay first-class; the task sheet is timed in Diagram and, once, in Code. |
+| Focus by dimming, off-screen chips, badges, bands | No task-performance study found for these in this reading. | Judgement only: they are part B and are confirmed at the checkpoint, on use. |
+
+So the checkpoint is the sprint's own experiment and is run as one: the
+baseline is timed on a build of `8248b93` (before LAY), the same tasks on
+part A, with times, pans and zoom changes, wrong answers, and the metric
+table for both.
+
+Sources: Purchase, *Which aesthetic has the greatest effect on human
+understanding?* (Graph Drawing 1997); Reijers and Mendling, *A study into
+the factors that influence the understandability of business process
+models* (2011); Türetken et al., *The influence of using collapsed
+sub-processes and groups on the understandability of business process
+models* (BISE 2020); Green and Petre, *When visual programs are harder to
+read than textual programs* (1992) and *Usability analysis of visual
+programming environments* (1996); Whitley, *Visual programming languages
+and the empirical evidence for and against* (1997); Yoghourdjian et al.,
+*Exploring the limits of complexity* (2018).
+
 ## Technical appendix
 
 - Subjects: `Binding::references()` over `node.inputs`, filtered by node
