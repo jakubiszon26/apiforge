@@ -57,11 +57,32 @@ fn fresh(harness: &FolderHarness, id: &str) -> bool {
 
 /// The steps of one board, by node id and handle.
 fn steps(harness: &FolderHarness, id: &str, cleanup: bool) -> Vec<(String, String)> {
+    cards(harness, id, cleanup)
+        .into_iter()
+        .map(|(node, handle, _, _)| (node, handle))
+        .collect()
+}
+
+/// The steps of one board with the name their card shows and whether they
+/// always stand as a card: a request and a call of a component do, while a
+/// check may be folded into a wire (LAY-11).
+fn cards(harness: &FolderHarness, id: &str, cleanup: bool) -> Vec<(String, String, String, bool)> {
     let model = folder(harness).snapshot(id).unwrap().model.unwrap();
     graph_of(&model, cleanup)
         .nodes
         .iter()
-        .map(|node| (node.id.clone(), node.handle.clone()))
+        .map(|node| {
+            (
+                node.id.clone(),
+                node.handle.clone(),
+                node.display_name().to_owned(),
+                matches!(
+                    node.kind,
+                    apiforge_core::model::NodeKind::Request
+                        | apiforge_core::model::NodeKind::Component
+                ),
+            )
+        })
         .collect()
 }
 
@@ -76,6 +97,7 @@ fn assert_selection_changes_nothing(source: &str, what: &str, least: usize) {
     assert!(fresh(&harness, &id), "{what}: the run's results are fresh");
 
     let mut seen = 0;
+    let mut clicked = 0;
     for cleanup in [false, true] {
         if cleanup {
             if !has_label(&harness, "Cleanup") {
@@ -83,7 +105,7 @@ fn assert_selection_changes_nothing(source: &str, what: &str, least: usize) {
             }
             choose(&mut harness, "Cleanup");
         }
-        for (node, handle) in steps(&harness, &id, cleanup) {
+        for (node, handle, name, carded) in cards(&harness, &id, cleanup) {
             for tab in TABS {
                 app(&mut harness).selections.remove(&id);
                 settle(&mut harness);
@@ -98,14 +120,18 @@ fn assert_selection_changes_nothing(source: &str, what: &str, least: usize) {
                     assert_eq!(tab, "Checks", "{what}: {handle} has the tab {tab}");
                 }
                 // A card clicked as a person would, with the Inspector open.
-                let card = format!("{handle} (");
+                let card = format!("{name} (");
                 let label = harness
                     .query_all_by_label_contains(&card)
                     .filter_map(|found| found.accesskit_node().label())
                     .find(|label| label.starts_with(&card));
-                if let Some(label) = label {
-                    harness.get_by_label(&label).click();
-                    settle(&mut harness);
+                match label {
+                    Some(label) => {
+                        harness.get_by_label(&label).click();
+                        settle(&mut harness);
+                        clicked += 1;
+                    }
+                    None => assert!(!carded, "{what}: {handle} has no card to click"),
                 }
                 assert!(
                     !dirty(&harness, &id),
@@ -124,6 +150,7 @@ fn assert_selection_changes_nothing(source: &str, what: &str, least: usize) {
             }
         }
     }
+    assert!(clicked > 0, "{what}: no card was clicked");
     assert!(
         seen >= least * TABS.len(),
         "{what}: {seen} selections, fewer than its {least} steps on each tab"
