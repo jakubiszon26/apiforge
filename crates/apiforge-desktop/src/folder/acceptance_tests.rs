@@ -17,6 +17,8 @@ use std::fs;
 
 // Loaded through `#[path]` from `tests.rs`, this file's modules resolve
 // beside it, so each ticket's own file names its directory.
+#[path = "acceptance_tests/issue288.rs"]
+mod issue288;
 #[path = "acceptance_tests/ktlo33.rs"]
 mod ktlo33;
 #[path = "acceptance_tests/lay02.rs"]

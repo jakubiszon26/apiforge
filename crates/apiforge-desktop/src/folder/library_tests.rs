@@ -1366,3 +1366,140 @@ fn ktlo11_the_panel_widens_to_420_in_diagram_only() {
         "Diagram keeps its width after Split: {width} -> {back}"
     );
 }
+
+/// UX-40 (#286): the Library panel beside a component's board follows the
+/// step menus of UX-21: *Start* and *Data condition* are not listed there,
+/// *Export* is; a scenario's board keeps both.
+mod ux40 {
+    use super::super::project_interaction_tests::{app, choose, replace_text};
+    use super::*;
+    use apiforge_core::block::Block;
+
+    const PRODUCT: &str = "components/product.afs";
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const SEARCH: &str = "Search blocks";
+
+    /// The demo shop at `size` with `path` open in `mode`.
+    fn open(
+        project: &tempfile::TempDir,
+        size: egui::Vec2,
+        path: &str,
+        mode: &str,
+    ) -> FolderHarness {
+        let mut harness = folder_harness(project.path(), size);
+        let id = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .unwrap_or_else(|| panic!("{path} is in the demo shop"))
+            .id()
+            .to_owned();
+        app(&mut harness).activate_tab(&id);
+        settle(&mut harness);
+        choose(&mut harness, mode);
+        harness
+    }
+
+    /// Whether the library panel, left of the board, lists `label`.
+    fn listed(harness: &FolderHarness, label: &str) -> bool {
+        let board = harness.get_by_label("Diagram board").rect();
+        harness
+            .query_all_by_label(label)
+            .any(|node| node.rect().right() <= board.left())
+    }
+
+    /// Every built-in block the panel lists, in its order.
+    fn listed_blocks(harness: &FolderHarness) -> Vec<&'static str> {
+        Block::BUILTIN
+            .into_iter()
+            .chain([Block::Export])
+            .map(Block::label)
+            .filter(|label| listed(harness, label))
+            .collect()
+    }
+
+    /// Criterion 1: on a component's board neither *Start* nor *Data
+    /// condition* is listed, not by a search either.
+    #[test]
+    fn ux40_a_components_library_lists_no_start_and_no_data_condition() {
+        for size in [MINIMUM, WIDE] {
+            let project = shop();
+            let mut harness = open(&project, size, PRODUCT, "Diagram");
+            assert!(listed(&harness, "HTTP request"), "at {size:?}");
+            for label in ["Start", "Data condition"] {
+                assert!(!listed(&harness, label), "{label} at {size:?}");
+            }
+            for (text, label) in [("start", "Start"), ("condition", "Data condition")] {
+                replace_text(&mut harness, SEARCH, text);
+                assert!(!listed(&harness, label), "{label} by {text:?} at {size:?}");
+            }
+        }
+    }
+
+    /// Criterion 2: on a scenario's board both are listed, as before, and
+    /// found by a search.
+    #[test]
+    fn ux40_a_scenarios_library_is_unchanged() {
+        let project = shop();
+        let mut harness = open(&project, WIDE, SCENARIO, "Diagram");
+        assert_eq!(
+            listed_blocks(&harness),
+            Block::BUILTIN.map(Block::label),
+            "every built-in block and no Export"
+        );
+        for (text, label) in [("start", "Start"), ("condition", "Data condition")] {
+            replace_text(&mut harness, SEARCH, text);
+            assert!(listed(&harness, label), "{label} by {text:?}");
+        }
+    }
+
+    /// Criterion 3: *Export* stays on a component's board, and in Split the
+    /// number beside the *Block library* caption equals the entries listed.
+    #[test]
+    fn ux40_export_stays_and_the_count_matches() {
+        let project = shop();
+        let harness = open(&project, WIDE, PRODUCT, "Diagram");
+        assert!(listed(&harness, "Export"));
+
+        for path in [PRODUCT, SCENARIO] {
+            // A window of its own: a second one on a folder only observes it.
+            let project = shop();
+            let harness = open(&project, WIDE, path, "Split");
+            let components =
+                apiforge_core::graph::latest_components(&folder(&harness).context_project()).len();
+            let entries = listed_blocks(&harness).len() + components;
+            let caption = harness.get_by_label("Block library").rect();
+            let shown: Vec<usize> = harness
+                .query_all_by_role(egui::accesskit::Role::Label)
+                .filter(|node| {
+                    let rect = node.rect();
+                    rect.left() >= caption.right()
+                        && rect.center().y >= caption.top()
+                        && rect.center().y <= caption.bottom()
+                })
+                .filter_map(|node| {
+                    let node = node.accesskit_node();
+                    node.label().or_else(|| node.value())?.parse().ok()
+                })
+                .collect();
+            assert_eq!(shown, [entries], "{path}: the caption's count");
+        }
+    }
+
+    /// The library panel beside a component's board in Diagram at the
+    /// minimum window, and in Split at the wide one with its count.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_ux40_component_library() {
+        let project = shop();
+        let mut harness = open(&project, MINIMUM, PRODUCT, "Diagram");
+        crate::testing::capture(&mut harness, "ux40-component-library-960x540", None);
+        // A second window on the same folder would only observe it.
+        let project = shop();
+        let mut harness = open(&project, WIDE, PRODUCT, "Split");
+        crate::testing::capture(&mut harness, "ux40-component-library-split-1600x1000", None);
+    }
+}
