@@ -2,8 +2,9 @@
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`
 - State: Backlog (issue #295) · decided by the owner on 2026-11-05 (Q4 = A,
-  Q5 = A, Q6 = A, Q15 = A) · LAY sprint, wave 1, last (after LAY-08 and
-  LAY-18)
+  Q5 = A, Q6 = A, Q15 = A) · LAY sprint, part A, after LAY-21
+  ([review of 2026-11-10](../sprints/lay.md#11-mid-sprint-review-2026-11-10));
+  LAY-08 and LAY-20 are merged
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -64,8 +65,7 @@ nothing overlapped (criterion 5).
 
 ## Acceptance criteria
 
-Tests in `crates/apiforge-desktop/src/folder/acceptance_tests.rs`, `mod
-lay11`, on `shop-30.afs`.
+Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay11.rs`, on `shop-30.afs`.
 
 1. Collapsed, after a failed simulation, the failed check is visible at
    0.35, 0.60 and 1.0 as its subject's red footer and border. Test:
@@ -95,6 +95,18 @@ lay11`, on `shop-30.afs`.
    subject, so expanding needs no second tidy (the positions after
    expanding equal the positions Tidy up expanded would give). Test:
    `lay11_criterion_9_tidy_up_hangs_hidden_checks`.
+
+## Notes of 2026-11-10
+
+- The toggle sits in the *Board view* menu beside *Compact cards* (the
+  owner's decision of 2026-11-09 on LAY-16 put the density there because a
+  toolbar button shortened the file name at 960 × 540); *Checks* follows it.
+- The red footer and border of a failed check (criterion 1) are drawn by
+  this ticket on LAY-16's two result lines; LAY-09 then holds them to the
+  minimum sizes at every zoom.
+- Criterion 9 is written against today's Tidy up; LAY-06 keeps its test
+  green when the shape changes.
+- The gate glyph is LAY-21's compact *Data condition* card.
 
 ## Not in scope
 
