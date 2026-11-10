@@ -746,6 +746,25 @@ impl FolderApp {
         self.notices.clock.step(by);
     }
 
+    /// Makes the protection of unsaved work and of the view due now, rather
+    /// than [`RECOVERY_DELAY`] of wall time after the last change, so a test
+    /// can wait for it to finish: a test seam (KTLO-33).
+    #[cfg(test)]
+    pub(crate) fn debug_protect_now(&mut self) {
+        if let Some(changed) = self.changed_at.as_mut() {
+            *changed = Instant::now()
+                .checked_sub(RECOVERY_DELAY)
+                .unwrap_or(*changed);
+        }
+    }
+
+    /// The storage band's text while it shows under the tabs: a test seam
+    /// for the diagnosis of a hover (KTLO-33).
+    #[cfg(test)]
+    pub(crate) fn debug_storage_band(&self) -> Option<&'static str> {
+        self.storage_indicator()
+    }
+
     /// Shows a dismissable notice, as an action that reports its outcome
     /// does, for design review views outside this module.
     #[cfg(test)]

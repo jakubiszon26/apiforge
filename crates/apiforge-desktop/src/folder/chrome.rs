@@ -456,7 +456,7 @@ impl FolderApp {
     /// The storage indicator, shown only while a tab is open: with no file
     /// open nothing is at stake, and the indicator alone would bring the band
     /// back for a moment and move the central area (KTLO-24, round 2).
-    fn storage_indicator(&self) -> Option<&'static str> {
+    pub(super) fn storage_indicator(&self) -> Option<&'static str> {
         self.storage
             .label()
             .filter(|_| !self.workbench.tabs().is_empty())

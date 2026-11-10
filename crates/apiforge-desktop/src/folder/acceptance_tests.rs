@@ -6829,17 +6829,26 @@ mod mcp16 {
         settle(&mut harness);
         assert!(pressed(&harness), "Space presses it again");
 
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
-        assert!(has_label(&harness, PINNED_HINT), "the pressed hover text");
+        let follow = |harness: &FolderHarness| {
+            harness
+                .query_all_by_label(FOLLOW)
+                .next()
+                .map(|node| node.rect())
+        };
+        assert!(
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                PINNED_HINT
+            )),
+            "the pressed hover text"
+        );
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness));
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            has_label(&harness, RELEASED_HINT),
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                RELEASED_HINT
+            )),
             "the released hover text"
         );
         drop(harness);
@@ -7889,12 +7898,19 @@ mod ux02 {
         close_options(harness);
     }
 
-    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    /// Whether hovering the widget `label` shows a tooltip with `text`,
+    /// through the one hover every hover test takes (KTLO-33, #279).
     pub(super) fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
-        harness.get_by_label(label).hover();
-        settle(harness);
-        harness.run_steps(60);
-        contains(harness, text)
+        crate::testing::hover_until(
+            harness,
+            |harness| {
+                harness
+                    .query_all_by_label(label)
+                    .next()
+                    .map(|node| node.rect())
+            },
+            |harness| contains(harness, text),
+        )
     }
 
     /// The project name in the header (the explorer may name it too).
@@ -8098,15 +8114,15 @@ mod ux02 {
             );
         }
         let names = harness.query_all_by_label(NAME).count();
-        harness
-            .query_all_by_label(NAME)
-            .find(|node| node.rect().top() < 40.0)
-            .expect("the project name in the header")
-            .hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            harness.query_all_by_label(NAME).count() > names,
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(NAME)
+                    .map(|node| node.rect())
+                    .find(|rect| rect.top() < 40.0),
+                |harness| harness.query_all_by_label(NAME).count() > names,
+            ),
             "hovering the shortened name shows it whole"
         );
     }
@@ -9920,9 +9936,17 @@ mod ux04 {
         assert!(label.width() + 1.0 < whole, "cut: {label:?}, whole {whole}");
         let publish = harness.get_by_label("Publish").rect();
         assert!(publish.right() <= label.left(), "clear of Publish");
-        harness.get_by_label(&named).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(&named)
+                    .next()
+                    .map(|node| node.rect()),
+                |harness| harness.query_all_by_label_contains(&named).count() > 1,
+            ),
+            "the label's hover"
+        );
         assert_eq!(
             harness.query_all_by_label_contains(&named).count(),
             2,
@@ -13380,6 +13404,10 @@ mod ux18 {
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
         choose(&mut harness, "Diagram");
+        // The view's protection, due a second after the mode changed, would
+        // otherwise show the storage band under the tabs in the middle of a
+        // test on a slow runner, moving the board (KTLO-33, #279).
+        crate::testing::quiesce(&mut harness);
         assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
         (project, harness, scenario)
     }
