@@ -126,11 +126,15 @@ impl Board<'_> {
             };
             node.auto_placed = true;
         }
+        // A Tidy up of the whole board lays out every chip with its reader,
+        // however far it was left (LAY-02 criterion 5). A Tidy up of a
+        // selection takes along only the chips of the readers it moved.
         let moved: HashSet<String> = tidied
             .nodes
             .iter()
-            .filter(|node| moving(node))
-            .map(|node| node.id.clone())
+            .zip(&self.graph.nodes)
+            .filter(|(after, before)| selection.is_empty() || after.position != before.position)
+            .map(|(node, _)| node.id.clone())
             .collect();
         chips_beside_their_readers(
             &mut tidied,
@@ -490,7 +494,9 @@ const CHIP_SEARCH: f32 = 720.0;
 /// Places each proxy whose first reader `moved` says has moved beside that
 /// reader (LAY-02, #168): left of the input that reads it, level with that
 /// input, or at the nearest place around it clear of every card and chip.
-/// The other proxies stay where they are and are kept clear of.
+/// A proxy that stays but now lies on a card, its reader's or another's, is
+/// moved the least that clears it: beside its reader when it has one. Every
+/// other proxy stays where it is and is kept clear of.
 pub(crate) fn chips_beside_their_readers(
     graph: &mut Graph,
     reference: &Graph,
@@ -499,13 +505,7 @@ pub(crate) fn chips_beside_their_readers(
     density: canvas::CardDensity,
     moved: impl Fn(&str) -> bool,
 ) {
-    let readers: Vec<Option<Reader>> = graph
-        .proxies
-        .iter()
-        .map(|proxy| first_reader(graph, &proxy.source))
-        .map(|reader| reader.filter(|reader| moved(&graph.nodes[reader.node].id)))
-        .collect();
-    if readers.iter().all(Option::is_none) {
+    if graph.proxies.is_empty() {
         return;
     }
     let cards: Vec<canvas::Card> = graph
@@ -513,48 +513,80 @@ pub(crate) fn chips_beside_their_readers(
         .iter()
         .map(|node| canvas::Card::build(node, reference, project, density))
         .collect();
+    let chips: Vec<egui::Rect> = graph
+        .proxies
+        .iter()
+        .map(|proxy| canvas::Chip::build(proxy, graph, project, parameters).rect())
+        .collect();
+    let on_a_card = |chip: &egui::Rect| {
+        cards
+            .iter()
+            .any(|card| chip.intersects(card.rect()) && chip.intersect(card.rect()).area() > 0.0)
+    };
+    // Where each proxy that moves should go, before it is kept clear.
+    let wanted: Vec<Option<egui::Pos2>> = graph
+        .proxies
+        .iter()
+        .zip(&chips)
+        .map(|(proxy, chip)| {
+            let reader = first_reader(graph, &proxy.source);
+            let follows = reader
+                .as_ref()
+                .is_some_and(|reader| moved(&graph.nodes[reader.node].id));
+            if !follows && !on_a_card(chip) {
+                return None;
+            }
+            Some(match reader {
+                Some(reader) => {
+                    let card = &cards[reader.node];
+                    let level = card
+                        .input_anchor(&reader.input, &reader.path)
+                        .map_or(card.rect().center().y, |anchor| anchor.y);
+                    egui::pos2(
+                        card.rect().min.x - 2.0 * CHIP_CLEARANCE - chip.width(),
+                        level - chip.height() / 2.0,
+                    )
+                }
+                None => chip.min,
+            })
+        })
+        .collect();
+    if wanted.iter().all(Option::is_none) {
+        return;
+    }
     let mut obstacles: Vec<egui::Rect> = cards
         .iter()
         .map(canvas::Card::rect)
         .chain(
-            graph
-                .proxies
+            chips
                 .iter()
-                .zip(&readers)
-                .filter(|(_, reader)| reader.is_none())
-                .map(|(proxy, _)| canvas::Chip::build(proxy, graph, project, parameters).rect()),
+                .zip(&wanted)
+                .filter(|(_, wanted)| wanted.is_none())
+                .map(|(chip, _)| *chip),
         )
         .collect();
-    for (index, reader) in readers.iter().enumerate() {
-        let Some(reader) = reader else { continue };
-        let card = &cards[reader.node];
-        let size = canvas::Chip::build(&graph.proxies[index], graph, project, parameters)
-            .rect()
-            .size();
-        let level = card
-            .input_anchor(&reader.input, &reader.path)
-            .map_or(card.rect().center().y, |anchor| anchor.y);
-        let wanted = egui::pos2(
-            card.rect().min.x - 2.0 * CHIP_CLEARANCE - size.x,
-            level - size.y / 2.0,
-        );
+    // Candidate offsets on a grid, nearest first, built once for every chip.
+    let step = CHIP_CLEARANCE;
+    let reach = (CHIP_SEARCH / step) as i32;
+    let mut offsets: Vec<(i32, i32)> = (-reach..=reach)
+        .flat_map(|x| (-reach..=reach).map(move |y| (x, y)))
+        .collect();
+    offsets.sort_by_key(|(x, y)| (x * x + y * y, x.abs(), *y));
+    for (index, wanted) in wanted.iter().enumerate() {
+        let Some(wanted) = *wanted else { continue };
+        let size = chips[index].size();
         let clear = |at: egui::Pos2| {
             let chip = egui::Rect::from_min_size(at, size).expand(CHIP_CLEARANCE);
             obstacles
                 .iter()
                 .all(|other| !chip.intersects(*other) || chip.intersect(*other).area() == 0.0)
         };
-        let step = CHIP_CLEARANCE;
-        let reach = (CHIP_SEARCH / step) as i32;
-        let mut offsets: Vec<(i32, i32)> = (-reach..=reach)
-            .flat_map(|x| (-reach..=reach).map(move |y| (x, y)))
-            .collect();
-        offsets.sort_by_key(|(x, y)| (x * x + y * y, x.abs(), *y));
         let Some(at) = offsets
-            .into_iter()
-            .map(|(x, y)| wanted + egui::vec2(x as f32 * step, y as f32 * step))
+            .iter()
+            .map(|(x, y)| wanted + egui::vec2(*x as f32 * step, *y as f32 * step))
             .find(|at| clear(*at))
         else {
+            obstacles.push(chips[index]);
             continue;
         };
         let proxy = &mut graph.proxies[index];

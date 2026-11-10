@@ -347,6 +347,110 @@ fn lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader() {
     );
 }
 
+/// Criterion 5 with two chips: Tidy up of a selection takes along the chip
+/// of a reader it moves and leaves the chip of a reader it does not move
+/// exactly where it was, the two kept clear of each other and of every card.
+#[test]
+fn lay02_a_chip_whose_reader_stays_stays_where_it_was() {
+    let (_project, mut harness, id) = open("shop-30", WIDE);
+    let graph = main_graph(&harness, &id);
+    let node = |handle: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a step {handle}"))
+            .clone()
+    };
+    let bottom = graph
+        .nodes
+        .iter()
+        .map(|node| node.position.y)
+        .fold(0.0, f64::max);
+    for (variable, y) in [("second", bottom + 2000.0), ("first", bottom + 2200.0)] {
+        app(&mut harness).active_board_command(Command::AddProxy {
+            source: ProxySource::Variable {
+                node_id: node(variable).id,
+            },
+            position: Position { x: 0.0, y },
+        });
+        settle(&mut harness);
+    }
+    // `product`, the first reader of `first`, is dragged away; Tidy up of it
+    // and `promoted` brings it back. Nothing selected reads `second`.
+    let product = node("product");
+    app(&mut harness).active_board_command(Command::Move(vec![(
+        product.id.clone(),
+        Position {
+            x: product.position.x + 3000.0,
+            y: product.position.y + 3000.0,
+        },
+    )]));
+    settle(&mut harness);
+    let before = main_graph(&harness, &id);
+    assert_eq!(before.proxies.len(), 2, "both chips are placed");
+    let stays = before.proxies[0].clone();
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec![product.id.clone(), node("promoted").id]);
+    settle(&mut harness);
+    choose(&mut harness, TIDY);
+
+    let graph = main_graph(&harness, &id);
+    let project = folder(&harness).context_project();
+    let density = folder(&harness).density();
+    let moved = graph
+        .nodes
+        .iter()
+        .find(|candidate| candidate.id == product.id)
+        .unwrap();
+    assert_ne!(
+        moved.position,
+        before
+            .nodes
+            .iter()
+            .find(|candidate| candidate.id == product.id)
+            .unwrap()
+            .position,
+        "Tidy up moved product"
+    );
+    let unmoved = graph
+        .proxies
+        .iter()
+        .find(|proxy| proxy.id == stays.id)
+        .unwrap();
+    assert_eq!(unmoved.position, stays.position, "the chip of second stays");
+    let chips: Vec<egui::Rect> = graph
+        .proxies
+        .iter()
+        .map(|proxy| Chip::build(proxy, &graph, &project, &[]).rect())
+        .collect();
+    let follows = graph
+        .proxies
+        .iter()
+        .position(|proxy| proxy.id != stays.id)
+        .unwrap();
+    let card = |node: &Node| Card::build(node, &graph, &project, density).rect();
+    let beside = separation(chips[follows], card(moved));
+    assert!(
+        beside <= 96.0,
+        "the chip of first is {beside} px from product"
+    );
+    assert!(
+        separation(chips[0], chips[1]) >= 11.5,
+        "the chips keep clear of each other: {chips:?}"
+    );
+    for chip in &chips {
+        for node in &graph.nodes {
+            assert!(
+                !chip.intersects(card(node)),
+                "a chip overlaps {}",
+                node.handle
+            );
+        }
+    }
+}
+
 /// Criterion 6: the scenario is laid out at the sizes the board draws its
 /// cards at, so *Tidy up* has nothing to move, and the first frame shows it
 /// fitted: a card inside the board and Fit's own zoom.

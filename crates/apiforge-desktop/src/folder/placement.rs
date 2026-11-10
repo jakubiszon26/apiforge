@@ -251,4 +251,50 @@ mod tests {
             );
         }
     }
+
+    /// A chip nothing reads keeps its place, unless the layout put a card on
+    /// it: then it moves the least that clears every card.
+    #[test]
+    fn place_clears_a_chip_nothing_reads_off_the_cards() {
+        let project = apiforge_core::demos::shop_project();
+        let mut document = lowered(&project);
+        let Document::Scenario(scenario) = &mut document else {
+            panic!("order-flow is a scenario");
+        };
+        scenario.graph.proxies.push(Proxy {
+            id: "chip".into(),
+            source: ProxySource::Environment {
+                name: "unread".into(),
+            },
+            position: Position { x: 0.0, y: 0.0 },
+        });
+        let fresh: Vec<String> = scenario
+            .graph
+            .nodes
+            .iter()
+            .chain(&scenario.cleanup.nodes)
+            .map(|node| node.id.clone())
+            .collect();
+        CardPlacer::new(DensityHandle::new(canvas::CardDensity::Full)).place(
+            &mut document,
+            &fresh,
+            &project,
+        );
+        let Document::Scenario(scenario) = &document else {
+            unreachable!()
+        };
+        let graph = &scenario.graph;
+        let chip = canvas::Chip::build(&graph.proxies[0], graph, &project, &[]).rect();
+        for node in &graph.nodes {
+            let card = canvas::Card::build(node, graph, &project, canvas::CardDensity::Full).rect();
+            assert!(!chip.intersects(card), "the chip overlaps {}", node.handle);
+        }
+        assert!(
+            separation(
+                chip,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, chip.size())
+            ) <= 300.0,
+            "the chip moved the least: {chip:?}"
+        );
+    }
 }
