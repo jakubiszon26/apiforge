@@ -819,6 +819,81 @@ mod tests {
         }
     }
 
+    /// LAY-02 criterion 1: a scenario opened from code has no positions, so
+    /// every block is fresh. `place` then lays it out in the columns of
+    /// `tidy`, and no two cards overlap or come closer than the row gap.
+    #[test]
+    fn place_with_every_block_fresh_gives_the_columns_of_tidy() {
+        // The shape of a small scenario: a start, a request with its check, two
+        // requests reading it, and a last step reading both; heights differ.
+        let heights = [64.0, 220.0, 120.0, 300.0, 180.0, 120.0, 260.0];
+        let blocks: Vec<Block> = heights
+            .iter()
+            .map(|height| Block::new(Size::new(280.0, *height), Point::default()))
+            .collect();
+        let edges = [
+            Edge::new(0, 1),
+            Edge::new(1, 2),
+            Edge::new(1, 3),
+            Edge::new(1, 4),
+            Edge::new(3, 6),
+            Edge::new(4, 6),
+            Edge::new(6, 5),
+        ];
+        let graph = Graph::new(&blocks, &edges);
+        let fresh: Vec<usize> = (0..blocks.len()).collect();
+        let placed = place(&graph, &fresh);
+        let tidied = tidy(&graph);
+        assert_eq!(columns_of(&placed), columns_of(&tidied));
+        let layers = layers_of(&graph);
+        for (index, position) in placed.iter().enumerate() {
+            assert_eq!(
+                position.x.round(),
+                tidied[index].x.round(),
+                "block {index} is in its layer's column"
+            );
+            for (other, at) in placed.iter().enumerate().skip(index + 1) {
+                if layers[other] != layers[index] {
+                    continue;
+                }
+                let (upper, lower) = if position.y <= at.y {
+                    (index, other)
+                } else {
+                    (other, index)
+                };
+                let gap = placed[lower].y - (placed[upper].y + blocks[upper].size.height);
+                assert!(
+                    gap >= Spacing::default().row_gap - 0.5,
+                    "blocks {upper} and {lower} are {gap} apart: {placed:?}"
+                );
+            }
+        }
+        assert!(!any_overlap(&placed, &blocks));
+        assert!(
+            columns_of(&placed).len() > 1,
+            "the flow is laid out, not stacked: {placed:?}"
+        );
+    }
+
+    /// LAY-02 criterion 2: one fresh block among placed ones is placed as
+    /// before: in the column after its source's, level with it.
+    #[test]
+    fn place_with_one_fresh_block_is_unchanged() {
+        let mut blocks = blocks(3);
+        blocks[0].position = Point::new(0.0, 0.0);
+        blocks[0].pinned = true;
+        blocks[1].position = Point::new(400.0, 200.0);
+        blocks[1].pinned = true;
+        blocks[2].position = Point::new(0.0, 0.0);
+        let edges = [Edge::new(0, 1), Edge::new(1, 2)];
+        let placed = place(&Graph::new(&blocks, &edges), &[2]);
+        let spacing = Spacing::default();
+        assert_eq!(
+            placed,
+            [Point::new(400.0 + 280.0 + spacing.layer_gap, 200.0)]
+        );
+    }
+
     #[test]
     fn an_empty_graph_lays_out_to_nothing() {
         assert!(tidy(&Graph::new(&[], &[])).is_empty());

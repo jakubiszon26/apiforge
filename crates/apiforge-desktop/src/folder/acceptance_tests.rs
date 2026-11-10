@@ -15,6 +15,11 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+// Loaded through `#[path]` from `tests.rs`, this file's modules resolve
+// beside it, so each ticket's own file names its directory.
+#[path = "acceptance_tests/lay02.rs"]
+mod lay02;
+
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
     format!(

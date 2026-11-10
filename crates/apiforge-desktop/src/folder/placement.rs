@@ -82,3 +82,94 @@ fn place_graph(graph: &mut Graph, fresh: &HashSet<&str>, context: &Project, para
         node.auto_placed = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apiforge_core::format::{Binding, Proxy, ProxySource};
+    use eframe::egui;
+
+    const ORDER_FLOW: &str = include_str!("../../../../fixtures/scenarios/lay/order-flow.afs");
+
+    /// The scenario as code lowers it: no positions, every block fresh.
+    fn lowered(project: &Project) -> Document {
+        let lowered = apiforge_script::lower(
+            &apiforge_script::parse(ORDER_FLOW),
+            &apiforge_script::LowerContext::folder(project),
+        );
+        lowered.document.expect("order-flow lowers")
+    }
+
+    /// The gap between two rectangles, zero when they touch or overlap.
+    fn separation(a: egui::Rect, b: egui::Rect) -> f32 {
+        let dx = (b.min.x - a.max.x).max(a.min.x - b.max.x).max(0.0);
+        let dy = (b.min.y - a.max.y).max(a.min.y - b.max.y).max(0.0);
+        dx.max(dy)
+    }
+
+    /// LAY-02 criterion 5: a chip that comes with blocks that are all fresh
+    /// is placed beside the first block reading it, clear of every card.
+    #[test]
+    fn place_puts_a_chip_beside_its_first_reader() {
+        let project = apiforge_core::demos::shop_project();
+        let mut document = lowered(&project);
+        let Document::Scenario(scenario) = &mut document else {
+            panic!("order-flow is a scenario");
+        };
+        let first = scenario
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == "first")
+            .expect("the variable first")
+            .id
+            .clone();
+        scenario.graph.proxies.push(Proxy {
+            id: "chip".into(),
+            source: ProxySource::Variable {
+                node_id: first.clone(),
+            },
+            position: Position { x: 0.0, y: 5000.0 },
+        });
+        let fresh: Vec<String> = scenario
+            .graph
+            .nodes
+            .iter()
+            .chain(&scenario.cleanup.nodes)
+            .map(|node| node.id.clone())
+            .collect();
+        CardPlacer.place(&mut document, &fresh, &project);
+        let Document::Scenario(scenario) = &document else {
+            unreachable!()
+        };
+        let graph = &scenario.graph;
+        let reads_first = |binding: &Binding| {
+            let mut reads = false;
+            binding.for_each_leaf(&mut |leaf, _| {
+                reads |= matches!(leaf, Binding::Reference { node_id, .. } if *node_id == first);
+            });
+            reads
+        };
+        let reader = graph
+            .nodes
+            .iter()
+            .find(|node| node.inputs.values().any(reads_first))
+            .expect("first has a reader");
+        assert_eq!(reader.handle, "total", "the first reader in document order");
+        let chip = canvas::Chip::build(&graph.proxies[0], graph, &project, &[]).rect();
+        let card = |node| canvas::Card::build(node, graph, &project).rect();
+        let beside = separation(chip, card(reader));
+        assert!(
+            beside <= 96.0,
+            "the chip at {chip:?} is {beside} px from its reader at {:?}",
+            card(reader)
+        );
+        for node in &graph.nodes {
+            assert!(
+                !chip.intersects(card(node)),
+                "the chip overlaps {}",
+                node.handle
+            );
+        }
+    }
+}
