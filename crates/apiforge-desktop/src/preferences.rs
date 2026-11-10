@@ -158,11 +158,10 @@ impl Preferences {
 
 /// The lock that serialises every window's read-modify-write of `path`: a file
 /// beside it that is never removed, so every window locks the same one. The
-/// lock is released when the returned file is dropped.
+/// lock is released when the returned file is dropped. Before the first save
+/// the directory does not exist yet and there is no lock: `write_atomic`
+/// creates the directory, so that it can make the new directory durable too.
 fn lock(path: &std::path::Path) -> Option<std::fs::File> {
-    if let Some(directory) = path.parent() {
-        let _ = std::fs::create_dir_all(directory);
-    }
     let file = std::fs::File::options()
         .read(true)
         .write(true)
