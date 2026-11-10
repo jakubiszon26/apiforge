@@ -3,7 +3,9 @@
 - Size: S · Owner review: 15 min · Risk: `visible UI`
 - State: Backlog (issue #291) · decided by the owner on 2026-11-05 (Q2 = A)
   in the LAY plan ([lay.md 5.1](../sprints/lay.md#51-decisions-taken-2026-11-05))
-  · LAY sprint, wave 1, after LAY-09 and after UX-25 (#233) is merged
+  · LAY sprint, part A, after LAY-09 and LAY-22
+  ([review of 2026-11-10](../sprints/lay.md#11-mid-sprint-review-2026-11-10));
+  UX-25 (#233) is merged
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -45,8 +47,7 @@ stale-versus-current distinction was not verified there and is criterion 4.
 
 ## Acceptance criteria
 
-Tests in `crates/apiforge-desktop/src/folder/acceptance_tests.rs`, `mod
-lay07`, on the LAY-01 reference scenarios.
+Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay07.rs`, on the LAY-01 reference scenarios.
 
 1. For every step of `shop-30.afs` the badge's number equals the index of
    the step's row in Run results after a simulation, checks included; the
@@ -83,11 +84,9 @@ What the Overview and Compact levels show (LAY-09); the rows of Run results
 
 - Sequence: LAY-08's `apiforge_core::graph::sequence` (wave 0) gives the
   numbers; LAY-07 only draws them.
-- Running: the runner today emits a snapshot when a step finishes and
-  `StepStatus` has no running variant, so this ticket adds a step-started
-  event to the runner's sink (`engine.rs:692`, where the step's clock
-  starts) and the window marks the step running from it until its result
-  arrives; the CLI ignores the event.
+- Running: LAY-22 makes the runner name the step that started; the window
+  marks that step running until its result arrives. This ticket adds
+  nothing to the runner.
 - Badge: `canvas/paint.rs::card` draws the circle at the card's top-left
   from `canvas/layout.rs` geometry; the minimum on-screen size follows
   LAY-09's rule (`(size * zoom).max(min)`); the running state comes from

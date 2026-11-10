@@ -24,6 +24,22 @@ end, and the two small-window goals are checked at 960 × 540.
 - Task 8 (the return-to-work walk) is asserted by clicks in a test, as round
   4's proof 4 did (four clicks, no pans).
 
+## The checkpoint (added 2026-11-10)
+
+The task sheet is run twice more than planned: once at the checkpoint of
+the [review](../sprints/lay.md#11-mid-sprint-review-2026-11-10), when part A
+is on `main`, and at the sprint's end. At the checkpoint the owner uses
+`shop-30` and one scenario of his own on the real build and confirms,
+reorders or drops part B's tickets; the result is recorded on #296. The
+sheet has ten tasks: 9 and 10 edit the scenario, because moving editing off
+the card (Q16 = A) is the one thing the reading tasks cannot measure.
+
+The checkpoint is run as an experiment ([lay.md 11.5](../sprints/lay.md#115-what-published-studies-say-and-what-they-do-not)):
+the baseline on a build of `8248b93`; tasks 2 and 4 with checks collapsed
+and expanded (the default of Q4 follows the result); crossings per wire on
+shape D for `shop-30`, after LAY-04 and LAY-03, beside the timed tasks;
+the sheet once in Code view.
+
 ## Mock-up
 
 Not applicable: no interface change.
