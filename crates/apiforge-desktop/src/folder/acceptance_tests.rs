@@ -17,6 +17,8 @@ use std::fs;
 
 #[path = "acceptance_tests/issue284.rs"]
 mod issue284;
+#[path = "acceptance_tests/issue288.rs"]
+mod issue288;
 #[path = "acceptance_tests/ktlo33.rs"]
 mod ktlo33;
 
