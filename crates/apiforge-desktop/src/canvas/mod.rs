@@ -313,6 +313,20 @@ impl Camera {
     }
 }
 
+/// Of `now`, the pan along one axis that shows a card whole in the focus,
+/// what a change of the board added to `before`, the pan it needed in the
+/// last frame's focus. A card the change uncovered, or left as it was, is
+/// not panned: a card the person left partly outside stays so (#324).
+fn newly_hidden(now: f32, before: f32) -> f32 {
+    if before * now <= 0.0 {
+        now
+    } else if now.abs() > before.abs() {
+        now - before
+    } else {
+        0.0
+    }
+}
+
 /// How far a span on screen moves, the least, to lie inside `room`; one
 /// larger than the room moves its start to the room's start.
 fn least_shift(span: egui::Rangef, room: egui::Rangef) -> f32 {
@@ -367,6 +381,10 @@ pub struct Canvas {
     /// The selected card last kept in view, so that a newly selected or
     /// added card is panned into view once (UX-18).
     kept_in_view: Option<String>,
+    /// The last frame's focus where it lies now on screen, after a change of
+    /// the board that kept the camera; `None` after one that fitted it. A
+    /// change pans the selected card only for what it newly hides (#324).
+    previous_focus: Option<Rect>,
     /// The window's size and arrangement in the last frame: only their
     /// change fits the board again (UX-18).
     last_window: Vec2,
@@ -421,6 +439,7 @@ impl Default for Canvas {
             reveal_pending: None,
             fitted_for: None,
             kept_in_view: None,
+            previous_focus: None,
             last_window: Vec2::ZERO,
             last_arrangement: String::new(),
             pasted_pending: Vec::new(),
@@ -1398,6 +1417,7 @@ impl Canvas {
         }
         let kept_middle =
             (focus.center() - viewport.min) - (previous.center() - self.last_viewport.min);
+        let pan = self.camera.pan;
         if rearranged {
             if self.camera_moved_by_user {
                 self.camera.pan += kept_middle;
@@ -1412,14 +1432,20 @@ impl Canvas {
         } else if self.fitted_for == Some(viewport.size()) {
             self.fit(viewport, focus, shapes);
         }
+        let fitted = !self.camera_moved_by_user && self.fitted_for == Some(viewport.size());
+        let moved_with = (viewport.min - self.last_viewport.min) + (self.camera.pan - pan);
+        self.previous_focus = (!fitted).then(|| previous.translate(moved_with));
         true
     }
 
     /// Pans the least that shows the one selected card whole in the focus,
-    /// once when it is selected or added and again whenever the board
-    /// changes size, so the Inspector it opens never covers it (UX-18). A
-    /// card larger than the focus shows its top left corner. Nothing pans
-    /// while a drag is under way: the card stays under the pointer.
+    /// once when it is selected or added, so the Inspector it opens never
+    /// covers it (UX-18). When the board changes size it pans only for what
+    /// the change newly hides: a card the person or a holder's save left
+    /// partly outside stays so, and the storage band coming and going leaves
+    /// the camera where it was (MCP-08a, #324). A card larger than the focus
+    /// shows its top left corner. Nothing pans while a drag is under way:
+    /// the card stays under the pointer.
     fn keep_selection_in_view(
         &mut self,
         viewport: Rect,
@@ -1440,20 +1466,32 @@ impl Canvas {
             self.kept_in_view = None;
             return;
         };
-        if !board_changed && self.kept_in_view.as_ref() == Some(id) {
-            return;
-        }
         // A card being added is not on the board until its edit applies:
         // it is kept in view in the first frame that draws it.
         let Some(card) = cards.iter().find(|card| &card.id == id) else {
             return;
         };
-        self.kept_in_view = Some(id.clone());
         let on_screen = self.screen_camera(viewport).rect(card.rect());
-        let shift = vec2(
+        let outside = vec2(
             least_shift(on_screen.x_range(), focus.x_range()),
             least_shift(on_screen.y_range(), focus.y_range()),
         );
+        let shift = match (self.kept_in_view.as_ref() == Some(id), self.previous_focus) {
+            (false, _) => outside,
+            (true, _) if !board_changed => Vec2::ZERO,
+            (true, Some(previous)) => vec2(
+                newly_hidden(
+                    outside.x,
+                    least_shift(on_screen.x_range(), previous.x_range()),
+                ),
+                newly_hidden(
+                    outside.y,
+                    least_shift(on_screen.y_range(), previous.y_range()),
+                ),
+            ),
+            (true, None) => outside,
+        };
+        self.kept_in_view = Some(id.clone());
         if shift != Vec2::ZERO {
             self.camera.pan += shift;
             self.fitted_for = None;
@@ -3080,6 +3118,23 @@ mod tests {
             .to_screen(world_center);
         assert!(actual.distance(canvas.last_focus.unwrap().center()) < 0.01);
     }
+    /// #324: a change of the board pans a kept card only for what it newly
+    /// hides; a focus that grows, or leaves the card as it was, pans
+    /// nothing, even for a card the person left partly outside.
+    #[test]
+    fn a_change_of_the_board_pans_only_what_it_newly_hides() {
+        assert_eq!(newly_hidden(-30.0, 0.0), -30.0, "newly hidden: all of it");
+        assert_eq!(
+            newly_hidden(-50.0, -30.0),
+            -20.0,
+            "hidden further: the rest"
+        );
+        assert_eq!(newly_hidden(-30.0, -30.0), 0.0, "as it was");
+        assert_eq!(newly_hidden(0.0, -30.0), 0.0, "uncovered: nothing");
+        assert_eq!(newly_hidden(-10.0, -30.0), 0.0, "less hidden: nothing");
+        assert_eq!(newly_hidden(20.0, -30.0), 20.0, "now on the other side");
+    }
+
     #[test]
     fn navigator_reveal_survives_toolbar_and_drawer_layout_settling() {
         let context = egui::Context::default();

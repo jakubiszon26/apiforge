@@ -38,6 +38,7 @@ env:
     mcp06_criterion_6_a_cancelled_or_timed_out_live_run
     folder::tests::deleting_a_folder_closes_its_tabs_and_the_trash_restores_unsaved_work
     folder::tests::acceptance_tests::mcp08a::the_holders_save_is_shown_within_two_seconds_where_the_person_was
+    folder::tests::acceptance_tests::issue324::a_viewport_that_only_moves_does_not_pan_the_board
     folder::tests::acceptance_tests::ux33::ux33_the_icon_shows_one_tooltip
     folder::tests::acceptance_tests::ux33::ux33_criterion_1_a_component_board_has_the_button_a_scenario_none
     folder::tests::acceptance_tests::ux33::ux33_the_button_waits_for_room_for_the_inspector

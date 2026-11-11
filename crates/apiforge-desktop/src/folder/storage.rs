@@ -51,6 +51,10 @@ pub(super) struct Storage {
     /// For tests: the fault hook every later job runs under.
     #[cfg(test)]
     pub(super) fault: Option<Fault>,
+    /// For tests: the label the storage band shows, as a job that runs past
+    /// the band's delay shows it, with no job running (#324).
+    #[cfg(test)]
+    pub(super) forced_label: Option<&'static str>,
 }
 
 impl Storage {
@@ -75,6 +79,8 @@ impl Storage {
             unavailable: false,
             #[cfg(test)]
             fault: None,
+            #[cfg(test)]
+            forced_label: None,
         }
     }
 
@@ -95,6 +101,10 @@ impl Storage {
     }
 
     pub fn label(&self) -> Option<&'static str> {
+        #[cfg(test)]
+        if let Some(label) = self.forced_label {
+            return Some(label);
+        }
         self.active
             .as_ref()
             .filter(|active| active.started.elapsed() >= Duration::from_millis(150))
