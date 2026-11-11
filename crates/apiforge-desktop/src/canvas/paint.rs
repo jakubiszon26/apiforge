@@ -677,9 +677,15 @@ pub fn compact_card(
     let icon = Rect::from_min_size(local(12.0, 10.0), Vec2::splat(22.0 * z));
     clipped.rect_filled(icon, 5.0 * z, color.gamma_multiply(0.10));
     theme::block_icon(&clipped, icon, card.block, color);
+    let call = card.kind == NodeKind::Component;
     label(
         &clipped,
-        cell(42.0, 6.0, WIDTH - 12.0, COMPACT_HEADER),
+        cell(
+            42.0,
+            6.0,
+            if call { WIDTH - 40.0 } else { WIDTH - 12.0 },
+            COMPACT_HEADER,
+        ),
         &card.name,
         // The floor scales as the Overview title's does, so it fits its cell at 25%.
         FontId::new((16.0 * z).max(7.5), theme::bold_family()),
@@ -689,13 +695,59 @@ pub fn compact_card(
 
     let small = (12.0 * z).max(9.0);
     let legible = COMPACT_ROW * z >= 11.0;
+    if call && legible {
+        let button = camera.rect(card.open_button());
+        Icon::ExternalLink.paint(&clipped, button.shrink(5.0 * z), theme::MUTED);
+    }
     // Only the tests read the lines back; the window collects nothing.
     #[cfg_attr(not(test), allow(unused_mut))]
     let mut written = Vec::new();
     for row in &compact.rows {
         let area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
         let text = if full { &row.full_text } else { &row.text };
+        if row.role == CompactRole::Branches {
+            // *Yes* and *No* over their sockets on the bottom edge.
+            for (index, (port, text)) in card.controls.iter().enumerate() {
+                if !legible {
+                    continue;
+                }
+                let x = card.control_x(index);
+                let text = text.trim_end_matches(" →");
+                label(
+                    &clipped,
+                    cell(x - 60.0, row.top, x + 60.0, row.top + row.height),
+                    text,
+                    FontId::proportional(small),
+                    match *port {
+                        apiforge_core::graph::TRUE_PORT => theme::BRANCH_YES,
+                        apiforge_core::graph::FALSE_PORT => theme::BRANCH_NO,
+                        _ => theme::MUTED,
+                    },
+                    egui::Align::Center,
+                );
+                #[cfg(test)]
+                written.push(text.to_owned());
+            }
+            continue;
+        }
         let (text, font, color, align) = match row.role {
+            CompactRole::Caption => (
+                Cow::Borrowed(text.as_str()),
+                FontId::proportional(small),
+                theme::MUTED,
+                egui::Align::Min,
+            ),
+            CompactRole::Line => (
+                Cow::Borrowed(text.as_str()),
+                FontId::proportional(small),
+                if row.missing {
+                    theme::DANGER
+                } else {
+                    theme::TEXT
+                },
+                egui::Align::Min,
+            ),
+            CompactRole::Branches => continue,
             CompactRole::Subtitle => (
                 Cow::Borrowed(text.as_str()),
                 FontId::monospace(small),
@@ -1190,11 +1242,18 @@ mod tests {
                         super::trays(ui.painter(), &card, camera, true, true);
                     },
                 );
+                // A value's icon is a glyph, not a label (LAY-21).
+                let icon = camera.rect(Rect::from_min_size(
+                    card.origin + vec2(12.0, 10.0),
+                    Vec2::splat(22.0),
+                ));
                 let mut labels = 0;
                 for shape in &output.shapes {
                     if let Shape::Text(text) = &shape.shape {
-                        labels += 1;
                         let text_bounds = text.galley.rect.translate(text.pos.to_vec2());
+                        if !icon.contains(text_bounds.center()) {
+                            labels += 1;
+                        }
                         assert!(
                             cells
                                 .iter()

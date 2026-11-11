@@ -881,10 +881,27 @@ impl Canvas {
                 card.origin + vec2(56.0, 8.0),
                 card.origin + vec2(layout::WIDTH - 48.0, 60.0),
             ));
+            // A satellite's one line may be cut short: its tooltip has it whole.
+            let line = card.compact.as_ref().and_then(|compact| {
+                let row = compact
+                    .rows
+                    .iter()
+                    .find(|row| row.role == layout::CompactRole::Line)?;
+                let area = camera.rect(Rect::from_min_size(
+                    card.origin + vec2(0.0, row.top),
+                    vec2(layout::WIDTH, row.height),
+                ));
+                Some((area, compact.hover.clone()?))
+            });
             if layout::CardDetail::at_zoom(camera.zoom) != layout::CardDetail::Full
                 || pointer.is_some_and(|pos| title_rect.contains(pos))
+                || pointer
+                    .is_some_and(|pos| line.as_ref().is_some_and(|(area, _)| area.contains(pos)))
             {
-                response = response.on_hover_text(format!("{}\n{}", card.name, card.caption));
+                response = response.on_hover_text(match &line {
+                    Some((_, line)) => format!("{}\n{}\n{line}", card.name, card.caption),
+                    None => format!("{}\n{}", card.name, card.caption),
+                });
             }
             let a11y_label = format!("{} ({})", card.name, card.caption);
             response.widget_info(move || {
@@ -900,21 +917,30 @@ impl Canvas {
                     modifiers,
                 )));
             }
-            if response.double_clicked() && card.kind == NodeKind::Component {
-                commands.push(Command::EditComponent(card.id.clone()));
-            }
             // A compact card has no field: a double-click on an input's row
-            // opens the Inspector on that input (LAY-16, Q16 = A).
-            if response.double_clicked()
-                && card.compact.is_some()
-                && let Some(pointer) = pointer
-                && let Some(index) = (0..card.inputs.len())
-                    .find(|index| camera.rect(card.input_row(*index)).contains(pointer))
-            {
-                commands.push(Command::InspectInput {
-                    node: card.id.clone(),
-                    input: card.inputs[index].name.clone(),
-                });
+            // opens the Inspector on that input (LAY-16, Q16 = A), on a
+            // satellite's line its first input; elsewhere on a component call
+            // it opens the component.
+            let input_row = (card.compact.is_some())
+                .then(|| {
+                    let pointer = pointer?;
+                    (0..card.inputs.len())
+                        .find(|index| camera.rect(card.input_row(*index)).contains(pointer))
+                        .or_else(|| {
+                            let (area, _) = line.as_ref()?;
+                            (area.contains(pointer) && !card.inputs.is_empty()).then_some(0)
+                        })
+                })
+                .flatten();
+            if response.double_clicked() {
+                if let Some(index) = input_row {
+                    commands.push(Command::InspectInput {
+                        node: card.id.clone(),
+                        input: card.inputs[index].name.clone(),
+                    });
+                } else if card.kind == NodeKind::Component {
+                    commands.push(Command::EditComponent(card.id.clone()));
+                }
             }
             if response.secondary_clicked() && !input.read_only {
                 let source = menu::default_source(input.graph, input.project, &card.id);
@@ -1573,6 +1599,26 @@ impl Canvas {
             }
         }
 
+        // A component call keeps *Open* in its header: a compact one wherever
+        // its rows are legible, a full one at Full.
+        let open = if card.compact.is_some() {
+            layout::COMPACT_ROW * zoom >= 11.0
+        } else {
+            layout::CardDetail::at_zoom(zoom) == layout::CardDetail::Full
+        };
+        if card.kind == NodeKind::Component && open {
+            let rect = camera.rect(card.open_button());
+            let response = ui
+                .interact(rect, ui.id().with(("open", &card.id)), Sense::click())
+                .on_hover_text("Open the component's steps");
+            let name = format!("Open the steps of {}", card.name);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+            if response.clicked() {
+                commands.push(Command::EditComponent(card.id.clone()));
+            }
+        }
+
         // A compact card has no footer and no field: *Add step* is on the
         // right-click menu and the toolbar, values are edited in the Inspector.
         if card.compact.is_some() || layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Full {
@@ -1620,19 +1666,6 @@ impl Canvas {
                 ));
             }
         }
-        if card.kind == NodeKind::Component {
-            let rect = camera.rect(card.open_button());
-            let response = ui
-                .interact(rect, ui.id().with(("open", &card.id)), Sense::click())
-                .on_hover_text("Open the component's steps");
-            let name = format!("Open the steps of {}", card.name);
-            response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-            if response.clicked() {
-                commands.push(Command::EditComponent(card.id.clone()));
-            }
-        }
-
         // Inline literal fields.
         if zoom < INLINE_EDIT_ZOOM {
             return;
