@@ -15,6 +15,8 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+#[path = "acceptance_tests/issue284.rs"]
+mod issue284;
 #[path = "acceptance_tests/issue288.rs"]
 mod issue288;
 #[path = "acceptance_tests/ktlo33.rs"]
