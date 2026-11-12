@@ -51,6 +51,16 @@ const CHIP_NOT_COPIED: &str =
     "Select a step to copy or duplicate. A variable chip shows a value; it is not copied.";
 
 /// A change requested on the board.
+/// An input a paste left unconnected because the step it read is missing
+/// from the board (UX-39).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingStep {
+    pub node_id: String,
+    pub input: String,
+    /// The missing step's handle where the block was copied.
+    pub step: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Select(Vec<String>),
@@ -407,6 +417,10 @@ pub struct Canvas {
     last_arrangement: String,
     /// The blocks just pasted, to show once the board is drawn (UX-34).
     pasted_pending: Vec<String>,
+    /// The inputs a paste left unconnected because the step they read is
+    /// missing, by block and input, with that step's name (UX-39). Session
+    /// state of the document's board, never written.
+    missing_steps: Vec<MissingStep>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -492,6 +506,7 @@ impl Default for Canvas {
             last_window: Vec2::ZERO,
             last_arrangement: String::new(),
             pasted_pending: Vec::new(),
+            missing_steps: Vec::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -907,6 +922,39 @@ impl Canvas {
         self.pasted_pending = node_ids;
     }
 
+    /// Marks the inputs a paste left unconnected because the step they read
+    /// is missing (UX-39). Each mark lasts until the input is wired or given
+    /// a value, a step of that name is on the board, or the board is dropped
+    /// with its document.
+    pub fn mark_missing_steps(&mut self, marks: impl IntoIterator<Item = MissingStep>) {
+        for mark in marks {
+            if !self.missing_steps.contains(&mark) {
+                self.missing_steps.push(mark);
+            }
+        }
+    }
+
+    /// Drops the marks that no longer hold on this board and writes the
+    /// others on their cards. A mark whose block is on another board of the
+    /// document is kept for it.
+    fn apply_missing_steps(&mut self, graph: &Graph, reference: &Graph, cards: &mut [Card]) {
+        self.missing_steps.retain(|mark| {
+            let Some(node) = graph.nodes.iter().find(|node| node.id == mark.node_id) else {
+                return true;
+            };
+            !node.inputs.contains_key(&mark.input)
+                && !reference
+                    .nodes
+                    .iter()
+                    .any(|other| other.handle == mark.step)
+        });
+        for mark in &self.missing_steps {
+            if let Some(card) = cards.iter_mut().find(|card| card.id == mark.node_id) {
+                card.mark_missing_step(&mark.input, &mark.step);
+            }
+        }
+    }
+
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
     /// document's view can be kept between sessions. A fitted camera is not
     /// worth keeping: it is fitted again.
@@ -1006,6 +1054,7 @@ impl Canvas {
             .iter()
             .map(|node| Card::build(node, input.reference_graph, input.project, self.density))
             .collect();
+        self.apply_missing_steps(input.graph, input.reference_graph, &mut cards);
         #[cfg(test)]
         {
             self.sources = cards

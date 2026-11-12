@@ -397,6 +397,9 @@ struct PastedOutcome {
     document_id: String,
     ids: Vec<String>,
     summary: Option<String>,
+    /// The inputs left unconnected for a missing step, marked on their cards
+    /// (UX-39).
+    missing: Vec<canvas::MissingStep>,
 }
 
 /// The statement found under the caret, for one source version.
