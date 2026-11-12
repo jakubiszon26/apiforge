@@ -5,12 +5,13 @@
 
 use apiforge_core::{
     demos::shop_project,
-    format::{Graph, Project, Scenario},
-    graph::sequence,
-    run::{Phase, RunMode, RunResult},
+    format::{Graph, Node, Project, Scenario},
+    graph::{relations, sequence},
+    run::{NotRunCause, Phase, RunMode, RunResult, StepStatus},
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, run_scenario};
 use apiforge_script::{Document, LowerContext, lower, parse};
+use std::collections::BTreeSet;
 use std::{fs, path::Path};
 use tokio_util::sync::CancellationToken;
 
@@ -88,4 +89,150 @@ async fn sequence_agrees_with_the_engine_on_the_fixtures() {
             reversed(&mut scenario.cleanup);
         }
     }
+}
+
+// LAY-22 (#312) ---------------------------------------------------------------
+
+fn handle_of<'a>(graph: &'a Graph, id: &str) -> &'a str {
+    graph
+        .nodes
+        .iter()
+        .find(|node| node.id == id)
+        .map_or_else(|| panic!("no node `{id}`"), |node| node.handle.as_str())
+}
+
+fn node_by_handle<'a>(graph: &'a Graph, handle: &str) -> &'a Node {
+    graph
+        .nodes
+        .iter()
+        .find(|node| node.handle == handle)
+        .unwrap_or_else(|| panic!("no step `{handle}`"))
+}
+
+/// Criterion 4: a step's producers and readers with the field and the input
+/// between them, its checks and its gates; a check's subjects and values.
+#[test]
+fn relations_of_cart_on_shop_30() {
+    let (_, scenario) = fixture("shop-30");
+    let graph = &scenario.graph;
+    let handles = |ids: Vec<&str>| -> BTreeSet<String> {
+        ids.into_iter()
+            .map(|id| handle_of(graph, id).to_owned())
+            .collect()
+    };
+    let set = |names: &[&str]| -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    };
+
+    let cart = relations(graph, node_by_handle(graph, "cart"));
+    assert_eq!(
+        handles(cart.producers.iter().map(|feed| feed.step).collect()),
+        set(&["login", "first", "second"])
+    );
+    let login = &node_by_handle(graph, "login").id;
+    assert!(
+        cart.producers.iter().any(|feed| feed.step == login
+            && feed.output == "body"
+            && feed.path == "token"
+            && feed.input == "headers"),
+        "{:#?}",
+        cart.producers
+    );
+    let checks = handles(cart.checks.iter().map(|check| check.check).collect());
+    assert!(checks.contains("cart_total"), "{checks:?}");
+    assert_eq!(
+        checks,
+        set(&["cart_created", "cart_total", "receipt_total"])
+    );
+    let shared: Vec<_> = cart
+        .checks
+        .iter()
+        .filter(|check| check.shared)
+        .map(|check| handle_of(graph, check.check))
+        .collect();
+    assert_eq!(shared, ["receipt_total"]);
+    let readers = handles(cart.readers.iter().map(|feed| feed.step).collect());
+    assert!(readers.contains("order"), "{readers:?}");
+    assert!(
+        readers.iter().all(|reader| !checks.contains(reader)),
+        "checks are listed apart: {readers:?}"
+    );
+    let order = &node_by_handle(graph, "order").id;
+    assert!(
+        cart.readers
+            .iter()
+            .any(|feed| feed.step == order && feed.output == "body" && feed.input == "query"),
+        "{:#?}",
+        cart.readers
+    );
+    assert!(cart.gates.is_empty() && cart.subjects.is_empty() && cart.values.is_empty());
+
+    // A check: its subjects and its value sources.
+    let cart_total = relations(graph, node_by_handle(graph, "cart_total"));
+    assert_eq!(
+        handles(
+            cart_total
+                .subjects
+                .iter()
+                .map(|subject| subject.step)
+                .collect()
+        ),
+        set(&["cart"])
+    );
+    assert_eq!(handles(cart_total.values.clone()), set(&["expected_total"]));
+
+    // A gate: the Data condition a step reads, and the step it checks.
+    let checkout = relations(graph, node_by_handle(graph, "checkout"));
+    assert_eq!(handles(checkout.gates.clone()), set(&["valid_cart"]));
+    let cart_view = relations(graph, node_by_handle(graph, "cart_view"));
+    assert!(
+        cart_view
+            .checks
+            .iter()
+            .any(|check| handle_of(graph, check.check) == "valid_cart" && check.gate),
+        "{:#?}",
+        cart_view.checks
+    );
+}
+
+/// Criterion 5: a report written before causes existed loads, and writing it
+/// again adds neither a cause nor the running step.
+#[test]
+fn a_report_without_causes_still_loads() {
+    // A whole report from the run corpus, with a skipped step written the way
+    // the runner wrote one before this change.
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/runs/single-with-history.json");
+    let text = fs::read_to_string(&path).expect("the recorded run");
+    let fixture: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    let mut recorded = fixture["request"]["previousRun"].clone();
+    recorded["steps"]
+        .as_array_mut()
+        .expect("steps")
+        .push(serde_json::json!({
+            "nodeId": "reads-failed", "handle": "reads_failed", "kind": "value",
+            "status": "skipped", "phase": "main", "inputs": {}, "outputs": {},
+            "durationMs": 0, "message": "Stopped after an error."
+        }));
+    assert!(!recorded.to_string().contains("\"cause\""));
+    let report: RunResult = serde_json::from_value(recorded).expect("an earlier report loads");
+    assert!(
+        report
+            .steps
+            .iter()
+            .any(|step| step.status == StepStatus::Skipped)
+    );
+    assert!(report.steps.iter().all(|step| step.cause.is_none()));
+    assert_eq!(report.running, None);
+    let written = serde_json::to_string(&report).expect("the report serialises");
+    assert!(!written.contains("\"cause\"") && !written.contains("\"running\""));
+
+    // A cause written now reads back as written.
+    let mut later = report.clone();
+    later.steps[0].cause = Some(NotRunCause::Stopped {
+        by: "create".into(),
+    });
+    let reloaded: RunResult =
+        serde_json::from_str(&serde_json::to_string(&later).expect("serialises")).expect("loads");
+    assert_eq!(reloaded, later);
 }

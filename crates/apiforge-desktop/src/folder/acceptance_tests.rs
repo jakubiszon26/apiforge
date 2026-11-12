@@ -15,6 +15,16 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
+#[path = "acceptance_tests/issue284.rs"]
+mod issue284;
+#[path = "acceptance_tests/issue288.rs"]
+mod issue288;
+#[path = "acceptance_tests/issue324.rs"]
+mod issue324;
+#[path = "acceptance_tests/ktlo33.rs"]
+mod ktlo33;
+#[path = "acceptance_tests/lay21.rs"]
+mod lay21;
 #[path = "acceptance_tests/ux37.rs"]
 mod ux37;
 
@@ -2112,6 +2122,28 @@ mod mcp08b {
             .expect("a labelled node")
     }
 
+    /// Steps the window until the bar names the holder from its own
+    /// description, the one in the holder file, rather than the provisional
+    /// one the window shows from the grant until its next check reads the
+    /// file (KTLO-33, flake 1, decision 1 A). Only the holder's own names an
+    /// endpoint. The two may differ in the minute of *since*, so a test that
+    /// reads the bar's text and asks for it again later waits for this first.
+    pub(super) fn await_holder_file(harness: &mut FolderHarness) {
+        await_until(
+            harness,
+            Instant::now(),
+            "the holder's own description",
+            |harness| {
+                folder(harness)
+                    .holder
+                    .as_ref()
+                    .map(crate::folder::holder::Observed::holder)
+                    .and_then(Holder::endpoint)
+                    .is_some()
+            },
+        );
+    }
+
     /// Who holds the project, as a reader finds out.
     pub(super) fn holder(root: &Path) -> Option<Holder> {
         ProjectStore::open_read_only(root)
@@ -3108,6 +3140,7 @@ mod mcp08b {
             await_endpoint(&mut harness, root, HolderRole::Window);
             let mut server = agent(root, "Claude Code");
             hand_over(&mut harness, &mut server, "Written by the agent.");
+            await_holder_file(&mut harness);
             let holder_text = label_containing(&harness, &format!("{AGENT} · "));
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
@@ -5418,8 +5451,8 @@ mod mcp15 {
 
 mod mcp10 {
     use super::mcp08b::{
-        AGENT, SCENARIO, address, answer, await_endpoint, await_until, call, commented, contains,
-        holder, label_containing, read, read_only, write,
+        AGENT, SCENARIO, address, answer, await_endpoint, await_holder_file, await_until, call,
+        commented, contains, holder, label_containing, read, read_only, write,
     };
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
@@ -5600,11 +5633,11 @@ mod mcp10 {
     }
 
     /// Waits until the bar names the agent with its start time, as the
-    /// holder file gives it.
+    /// holder file gives it: the provisional description shown from the
+    /// grant has a start time too, the window's own (KTLO-33, flake 1).
     fn await_since(harness: &mut FolderHarness) {
-        await_until(harness, Instant::now(), "the holder's start", |harness| {
-            contains(harness, &format!("{AGENT} · since "))
-        });
+        await_holder_file(harness);
+        assert!(contains(harness, &format!("{AGENT} · since ")));
     }
 
     /// Criterion 1: the server tells a connected window `run` with the
@@ -6209,8 +6242,9 @@ mod mcp16 {
     }
 
     /// The agent writes `path` with `note` added under its first line and
-    /// returns when it started the write: the window steps while the
-    /// agent waits for the answer, and may follow before it comes.
+    /// returns when the answer came, which is when the write had committed.
+    /// The window steps while the agent waits for the answer, and may follow
+    /// before it comes.
     fn agent_notes(
         harness: &mut FolderHarness,
         server: &mut StdioServer,
@@ -6218,14 +6252,18 @@ mod mcp16 {
         note: &str,
     ) -> Instant {
         let (text, _) = read(server, path);
-        let asked = Instant::now();
         let answer = write(harness, server, path, &commented(&text, note));
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
-        asked
+        returned
     }
 
     /// The window is at `document_id` within the ticket's bound of
-    /// `returned`, the moment the agent started the write that commits.
+    /// `returned`, the moment the agent's commit was answered. The bound is
+    /// the window's: it follows a commit within two seconds. Timed from the
+    /// start of the agent's call it also held the agent's own transaction,
+    /// which on a loaded Windows runner took most of it (KTLO-33, run
+    /// 42881644458: 2.15 s for a publication).
     fn await_active(harness: &mut FolderHarness, returned: Instant, document_id: &str, what: &str) {
         let took = await_until(harness, returned, what, |harness| {
             folder(harness).workbench.active() == Some(document_id)
@@ -6375,8 +6413,8 @@ mod mcp16 {
         assert_ne!(deep, padded);
         let line = line_of(&deep, "Delete the cart");
         assert!(line > 50, "line {line} is out of view at first");
-        let returned = Instant::now();
         let answer = write(&mut harness, &mut server, SCENARIO, &deep);
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_active(&mut harness, returned, &scenario, "the scenario");
         await_until(&mut harness, Instant::now(), "the new text", |harness| {
@@ -6443,13 +6481,13 @@ mod mcp16 {
             "scenario \"Added by agent\" {{\n{}  total = 2\n}}\n",
             "  // A line of the new scenario.\n".repeat(40)
         );
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "create_document",
             json!({ "kind": "scenario", "path": ADDED, "text": text }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["wrote"], true, "{answer}");
         await_until(&mut harness, returned, "the new document", |harness| {
             is_registered(harness, ADDED)
@@ -6486,13 +6524,13 @@ mod mcp16 {
         assert_eq!(active(&harness).as_deref(), Some(scenario.as_str()));
 
         let (_, hash) = read(&mut server, PRODUCT);
-        let returned = Instant::now();
         let answer = call(
             &mut harness,
             &mut server,
             "publish",
             json!({ "path": PRODUCT, "expected_source_sha256": hash }),
         );
+        let returned = Instant::now();
         assert_eq!(structured(&answer)["revision"], 2, "{answer}");
         await_active(&mut harness, returned, &product, "the published component");
         let revisions: Vec<u32> = folder(&harness)
@@ -6806,17 +6844,26 @@ mod mcp16 {
         settle(&mut harness);
         assert!(pressed(&harness), "Space presses it again");
 
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
-        assert!(has_label(&harness, PINNED_HINT), "the pressed hover text");
+        let follow = |harness: &FolderHarness| {
+            harness
+                .query_all_by_label(FOLLOW)
+                .next()
+                .map(|node| node.rect())
+        };
+        assert!(
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                PINNED_HINT
+            )),
+            "the pressed hover text"
+        );
         choose(&mut harness, FOLLOW);
         assert!(!pressed(&harness));
-        harness.get_by_label(FOLLOW).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            has_label(&harness, RELEASED_HINT),
+            crate::testing::hover_until(&mut harness, follow, |harness| has_label(
+                harness,
+                RELEASED_HINT
+            )),
             "the released hover text"
         );
         drop(harness);
@@ -7866,12 +7913,19 @@ mod ux02 {
         close_options(harness);
     }
 
-    /// Whether hovering the widget `label` shows a tooltip with `text`.
+    /// Whether hovering the widget `label` shows a tooltip with `text`,
+    /// through the one hover every hover test takes (KTLO-33, #279).
     pub(super) fn hover_shows(harness: &mut FolderHarness, label: &str, text: &str) -> bool {
-        harness.get_by_label(label).hover();
-        settle(harness);
-        harness.run_steps(60);
-        contains(harness, text)
+        crate::testing::hover_until(
+            harness,
+            |harness| {
+                harness
+                    .query_all_by_label(label)
+                    .next()
+                    .map(|node| node.rect())
+            },
+            |harness| contains(harness, text),
+        )
     }
 
     /// The project name in the header (the explorer may name it too).
@@ -8075,15 +8129,15 @@ mod ux02 {
             );
         }
         let names = harness.query_all_by_label(NAME).count();
-        harness
-            .query_all_by_label(NAME)
-            .find(|node| node.rect().top() < 40.0)
-            .expect("the project name in the header")
-            .hover();
-        settle(&mut harness);
-        harness.run_steps(60);
         assert!(
-            harness.query_all_by_label(NAME).count() > names,
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(NAME)
+                    .map(|node| node.rect())
+                    .find(|rect| rect.top() < 40.0),
+                |harness| harness.query_all_by_label(NAME).count() > names,
+            ),
             "hovering the shortened name shows it whole"
         );
     }
@@ -9897,9 +9951,17 @@ mod ux04 {
         assert!(label.width() + 1.0 < whole, "cut: {label:?}, whole {whole}");
         let publish = harness.get_by_label("Publish").rect();
         assert!(publish.right() <= label.left(), "clear of Publish");
-        harness.get_by_label(&named).hover();
-        settle(&mut harness);
-        harness.run_steps(60);
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |harness| harness
+                    .query_all_by_label(&named)
+                    .next()
+                    .map(|node| node.rect()),
+                |harness| harness.query_all_by_label_contains(&named).count() > 1,
+            ),
+            "the label's hover"
+        );
         assert_eq!(
             harness.query_all_by_label_contains(&named).count(),
             2,
@@ -10477,8 +10539,9 @@ mod ux32 {
                 "the pill reads {typed}"
             );
             assert!(
-                painted_on_board(&harness, &format!("→ {typed}"))
-                    && !painted_on_board(&harness, "→ quantity"),
+                // The compact card's one line (LAY-21) reads the parameter.
+                painted_on_board(&harness, &format!("param.{typed}"))
+                    && !painted_on_board(&harness, "param.quantity"),
                 "the Cart item card reads {typed}"
             );
             assert_eq!(ringed(&harness, &id), ["Cart item"], "still selected");
@@ -13370,6 +13433,10 @@ mod ux18 {
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
         choose(&mut harness, "Diagram");
+        // The view's protection, due a second after the mode changed, would
+        // otherwise show the storage band under the tabs in the middle of a
+        // test on a slow runner, moving the board (KTLO-33, #279).
+        crate::testing::quiesce(&mut harness);
         assert!(!has_label(&harness, CLOSE_INSPECTOR), "nothing is selected");
         (project, harness, scenario)
     }
@@ -14262,9 +14329,9 @@ mod lay16 {
     use egui::{Pos2, Rect, pos2, vec2};
     use egui_kittest::kittest::NodeT;
 
-    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    pub(super) const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
-    fn shop_30() -> String {
+    pub(super) fn shop_30() -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../fixtures/scenarios/lay/shop-30.afs");
         fs::read_to_string(&path)
@@ -14286,7 +14353,7 @@ mod lay16 {
 "#;
 
     /// `source` on the board of the demo shop, whose components it calls.
-    fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+    pub(super) fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
         let project = crate::testing::shop_project();
         fs::write(project.path().join(SCENARIO), source).unwrap();
         let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
@@ -14295,11 +14362,11 @@ mod lay16 {
         (project, harness)
     }
 
-    fn document(harness: &FolderHarness) -> String {
+    pub(super) fn document(harness: &FolderHarness) -> String {
         only(harness, DocumentKind::Scenario)
     }
 
-    fn graph(harness: &FolderHarness) -> Graph {
+    pub(super) fn graph(harness: &FolderHarness) -> Graph {
         let model = folder(harness)
             .snapshot(&document(harness))
             .unwrap()
@@ -14308,7 +14375,7 @@ mod lay16 {
         graph_of(&model, false).clone()
     }
 
-    fn id_of(harness: &FolderHarness, handle: &str) -> String {
+    pub(super) fn id_of(harness: &FolderHarness, handle: &str) -> String {
         graph(harness)
             .nodes
             .iter()
@@ -14318,14 +14385,14 @@ mod lay16 {
             .clone()
     }
 
-    fn canvas(harness: &FolderHarness) -> &Canvas {
+    pub(super) fn canvas(harness: &FolderHarness) -> &Canvas {
         folder(harness)
             .canvases
             .get(&document(harness))
             .expect("the board is drawn")
     }
 
-    fn canvas_mut(harness: &mut FolderHarness) -> &mut Canvas {
+    pub(super) fn canvas_mut(harness: &mut FolderHarness) -> &mut Canvas {
         let document = document(harness);
         app(harness)
             .canvases
@@ -14334,7 +14401,7 @@ mod lay16 {
     }
 
     /// Every card's box on the board, by handle.
-    fn world(harness: &FolderHarness) -> Vec<(String, Rect)> {
+    pub(super) fn world(harness: &FolderHarness) -> Vec<(String, Rect)> {
         let canvas = canvas(harness);
         graph(harness)
             .nodes
@@ -14347,14 +14414,14 @@ mod lay16 {
             .collect()
     }
 
-    fn world_of(harness: &FolderHarness, handle: &str) -> Rect {
+    pub(super) fn world_of(harness: &FolderHarness, handle: &str) -> Rect {
         let id = id_of(harness, handle);
         canvas(harness)
             .debug_world(&id)
             .unwrap_or_else(|| panic!("{handle} is not on the board"))
     }
 
-    fn screen_of(harness: &FolderHarness, handle: &str) -> Rect {
+    pub(super) fn screen_of(harness: &FolderHarness, handle: &str) -> Rect {
         let id = id_of(harness, handle);
         canvas(harness)
             .debug_card_rect(&id)
@@ -14362,20 +14429,20 @@ mod lay16 {
     }
 
     /// The lines the card `handle` wrote in the last frame.
-    fn lines(harness: &FolderHarness, handle: &str) -> Vec<String> {
+    pub(super) fn lines(harness: &FolderHarness, handle: &str) -> Vec<String> {
         let id = id_of(harness, handle);
         canvas(harness).debug_lines(&id)
     }
 
     /// The camera centred on `handle` at `zoom`, as a person scrolls there.
-    fn show(harness: &mut FolderHarness, handle: &str, zoom: f32) {
+    pub(super) fn show(harness: &mut FolderHarness, handle: &str, zoom: f32) {
         let id = id_of(harness, handle);
         canvas_mut(harness).debug_show(&id, zoom);
         settle(harness);
         harness.step();
     }
 
-    fn assert_disjoint_cards(cards: &[(String, Rect)], context: &str) {
+    pub(super) fn assert_disjoint_cards(cards: &[(String, Rect)], context: &str) {
         for (index, (a, first)) in cards.iter().enumerate() {
             for (b, second) in &cards[index + 1..] {
                 assert!(
@@ -14386,7 +14453,11 @@ mod lay16 {
         }
     }
 
-    fn binding_of(harness: &FolderHarness, handle: &str, input: &str) -> Option<Binding> {
+    pub(super) fn binding_of(
+        harness: &FolderHarness,
+        handle: &str,
+        input: &str,
+    ) -> Option<Binding> {
         graph(harness)
             .nodes
             .iter()
@@ -14394,7 +14465,7 @@ mod lay16 {
             .and_then(|node| node.inputs.get(input).cloned())
     }
 
-    fn press(harness: &mut FolderHarness, at: Pos2) {
+    pub(super) fn press(harness: &mut FolderHarness, at: Pos2) {
         harness.hover_at(at);
         harness.step();
         harness.event(egui::Event::PointerButton {
@@ -14406,7 +14477,7 @@ mod lay16 {
         harness.step();
     }
 
-    fn move_to(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+    pub(super) fn move_to(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
         let steps = ((to - from).length() / 24.0).ceil().max(2.0);
         for step in 1..=steps as usize {
             harness.hover_at(from + (to - from) * (step as f32 / steps));
@@ -14415,7 +14486,7 @@ mod lay16 {
         harness.step();
     }
 
-    fn release(harness: &mut FolderHarness, at: Pos2) {
+    pub(super) fn release(harness: &mut FolderHarness, at: Pos2) {
         harness.event(egui::Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -14427,7 +14498,7 @@ mod lay16 {
         settle(harness);
     }
 
-    fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
+    pub(super) fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
         press(harness, from);
         move_to(harness, from, to);
         release(harness, to);
@@ -14437,7 +14508,12 @@ mod lay16 {
     /// second a frame, so two clicks a frame apart are already past egui's
     /// double-click window; it is widened for the clicks, as a person's two
     /// clicks fall inside it.
-    fn click_at(harness: &mut FolderHarness, at: Pos2, button: egui::PointerButton, times: usize) {
+    pub(super) fn click_at(
+        harness: &mut FolderHarness,
+        at: Pos2,
+        button: egui::PointerButton,
+        times: usize,
+    ) {
         let window = harness
             .ctx
             .options(|options| options.input_options.max_double_click_delay);
@@ -14463,22 +14539,22 @@ mod lay16 {
         settle(harness);
     }
 
-    fn centre(harness: &FolderHarness, label: &str) -> Pos2 {
+    pub(super) fn centre(harness: &FolderHarness, label: &str) -> Pos2 {
         harness.get_by_label(label).rect().center()
     }
 
-    fn has(harness: &FolderHarness, label: &str) -> bool {
+    pub(super) fn has(harness: &FolderHarness, label: &str) -> bool {
         harness.query_by_label(label).is_some()
     }
 
     /// *Compact cards* in the board's view menu (decided 2026-11-09).
-    fn switch_density(harness: &mut FolderHarness) {
+    pub(super) fn switch_density(harness: &mut FolderHarness) {
         harness.get_by_label("Board view").click();
         settle(harness);
         harness.get_by_label("Compact cards").click();
     }
 
-    fn select(harness: &mut FolderHarness, handles: &[&str]) {
+    pub(super) fn select(harness: &mut FolderHarness, handles: &[&str]) {
         let ids = handles
             .iter()
             .map(|handle| id_of(harness, handle))
@@ -14802,7 +14878,7 @@ mod lay16 {
     }
 
     /// A capture with the pointer held where it is, during a wire drag.
-    fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
+    pub(super) fn capture_held(harness: &mut FolderHarness, name: &str, region: Rect) {
         harness.step();
         let image = harness.render().unwrap();
         let pixels = region.intersect(harness.ctx.content_rect());

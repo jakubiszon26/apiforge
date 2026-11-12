@@ -647,7 +647,12 @@ impl FolderApp {
             .as_ref()
             .map(|session| session.manifest().id.clone())
             .unwrap_or_default();
-        let reference = graph_of(&model, false);
+        // A Cleanup block reads Main and the Cleanup steps, as its card does
+        // (UX-16, #284).
+        let cleanup_reference = cleanup.then(|| self.cleanup_reference(&model));
+        let reference = cleanup_reference
+            .as_deref()
+            .unwrap_or_else(|| graph_of(&model, false));
         let parameters = parameters_of(&model);
         let run = self.fresh_run(document_id);
         let step = run

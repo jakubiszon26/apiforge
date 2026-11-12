@@ -30,7 +30,10 @@ use apiforge_core::{
     operator::{Operator, OperatorError, RandomSource},
     path,
     predicate::PredicateError,
-    run::{Phase, RequestSnapshot, RunResult, RunSnapshot, RunStatus, StepResult, StepStatus},
+    run::{
+        NotRunCause, Phase, RequestSnapshot, RunResult, RunSnapshot, RunStatus, StepResult,
+        StepStatus,
+    },
     template,
 };
 use indexmap::{IndexMap, IndexSet};
@@ -307,6 +310,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             }),
             error: None,
             notice: None,
+            running: None,
         };
         Self {
             request,
@@ -535,7 +539,8 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 .collect();
             let graph_ids: HashSet<&str> = pending.iter().map(|node| node.id.as_str()).collect();
             let mut results = Vec::with_capacity(pending.len());
-            let mut stopped = false;
+            // The step whose failure stopped this graph under the policy Stop.
+            let mut stopped: Option<String> = None;
             while !pending.is_empty() {
                 let index = pending
                     .iter()
@@ -550,9 +555,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 let gate = self.gate(graph, &plan, node, context, bypass_gate);
                 let status = if context.signal.is_aborted() {
                     Some(StepStatus::Cancelled)
-                } else if gate.inactive || stopped || gate.missing_cleanup_input {
+                } else if gate.inactive.is_some()
+                    || stopped.is_some()
+                    || gate.missing_cleanup_input.is_some()
+                {
                     Some(StepStatus::Skipped)
-                } else if gate.blocked {
+                } else if gate.blocked.is_some() {
                     Some(match context.phase {
                         Phase::Cleanup => StepStatus::Skipped,
                         Phase::Main => StepStatus::Blocked,
@@ -564,33 +572,44 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                     Some(status) => {
                         let mut step = StepResult::new(node, context.phase);
                         step.status = status;
-                        step.message = Some(
-                            if gate.inactive {
-                                OUTSIDE_PATH
-                            } else if status == StepStatus::Cancelled {
-                                CANCELLED
-                            } else if gate.blocked || gate.missing_cleanup_input {
-                                UNAVAILABLE
-                            } else {
-                                STOPPED
-                            }
-                            .to_owned(),
-                        );
+                        // The message and the cause answer the same branch.
+                        let (message, cause) = if let Some(cause) = gate.inactive {
+                            (OUTSIDE_PATH, cause)
+                        } else if status == StepStatus::Cancelled {
+                            (CANCELLED, NotRunCause::Cancelled)
+                        } else if let Some(cause) = gate.blocked {
+                            (UNAVAILABLE, cause)
+                        } else if let Some(step) = gate.missing_cleanup_input {
+                            (UNAVAILABLE, NotRunCause::CleanupInputMissing { step })
+                        } else {
+                            let by = stopped.clone().unwrap_or_default();
+                            (STOPPED, NotRunCause::Stopped { by })
+                        };
+                        step.message = Some(message.to_owned());
+                        step.cause = Some(cause);
                         step
                     }
-                    None => self.execute(node, context).await,
+                    None => {
+                        if publish {
+                            self.run.running = Some(node.id.clone());
+                            self.notify();
+                        }
+                        self.execute(node, context).await
+                    }
                 };
                 if self.scenario.error_policy == apiforge_core::model::ErrorPolicy::Stop
                     && context.phase == Phase::Main
+                    && stopped.is_none()
                     && matches!(
                         step.status,
                         StepStatus::Failed | StepStatus::Error | StepStatus::Blocked
                     )
                 {
-                    stopped = true;
+                    stopped = Some(node.id.clone());
                 }
                 context.outputs.insert(node.id.clone(), step.clone());
                 if publish {
+                    self.run.running = None;
                     self.run.steps.push(step.clone());
                     self.notify();
                 }
@@ -632,6 +651,15 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 })
             })
             .count();
+        let not_taken = |branch: Option<Branch>, source: &StepResult| {
+            branch.is_some() && source.status == StepStatus::Passed && !takes_branch(branch, source)
+        };
+        let skipped = |id: &str| {
+            context
+                .outputs
+                .get(id)
+                .is_some_and(|source| source.status == StepStatus::Skipped)
+        };
         // Alternative branches merge with OR. An inactive branch is never a failure.
         let inactive = !bypass
             && (!plan.is_reachable(&node.id)
@@ -639,22 +667,47 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                     && active_order == 0
                     && incoming.iter().all(|edge| {
                         context.outputs.get(&edge.source).is_some_and(|source| {
-                            source.status == StepStatus::Skipped
-                                || (edge.branch.is_some()
-                                    && source.status == StepStatus::Passed
-                                    && !takes_branch(edge.branch, source))
+                            source.status == StepStatus::Skipped || not_taken(edge.branch, source)
                         })
                     }))
-                || (incoming.is_empty()
-                    && dependencies.iter().any(|id| {
-                        context
-                            .outputs
-                            .get(*id)
-                            .is_some_and(|source| source.status == StepStatus::Skipped)
-                    })));
+                || (incoming.is_empty() && dependencies.iter().any(|id| skipped(id))));
+        // A step past a branch not taken is outside the path too; past a step
+        // that did not run for another reason, it waits on that step.
+        let inactive = inactive.then(|| {
+            if !plan.is_reachable(&node.id) {
+                return NotRunCause::OutsidePath;
+            }
+            let sources: Vec<&str> = if incoming.is_empty() {
+                dependencies
+                    .iter()
+                    .copied()
+                    .filter(|id| skipped(id))
+                    .collect()
+            } else {
+                if incoming.iter().any(|edge| {
+                    context
+                        .outputs
+                        .get(&edge.source)
+                        .is_some_and(|source| not_taken(edge.branch, source))
+                }) {
+                    return NotRunCause::OutsidePath;
+                }
+                incoming.iter().map(|edge| edge.source.as_str()).collect()
+            };
+            sources
+                .into_iter()
+                .find(|id| {
+                    context.outputs.get(*id).is_some_and(|source| {
+                        source.cause.as_ref() != Some(&NotRunCause::OutsidePath)
+                    })
+                })
+                .map_or(NotRunCause::OutsidePath, |step| NotRunCause::BlockedBy {
+                    step: step.to_owned(),
+                })
+        });
         let references: Vec<Reference<'_>> =
             node.inputs.values().flat_map(Binding::references).collect();
-        let blocked = dependencies.iter().any(|id| {
+        let blocked = dependencies.iter().copied().find(|id| {
             let Some(source) = context.outputs.get(*id) else {
                 return true;
             };
@@ -676,10 +729,30 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             }
             source.status.is_unavailable()
         });
-        let missing_cleanup_input = context.phase == Phase::Cleanup
-            && references
-                .iter()
-                .any(|reference| !is_available(reference, context));
+        // A false Data condition ran; every other unusable source is a step
+        // that failed or did not run.
+        let blocked = blocked.map(|id| match context.outputs.get(id) {
+            Some(source)
+                if source.kind == NodeKind::Condition
+                    && source.cause.is_none()
+                    && source.outputs.get("passed") == Some(&Value::Bool(false)) =>
+            {
+                NotRunCause::ConditionUnmet {
+                    condition: id.to_owned(),
+                }
+            }
+            _ => NotRunCause::BlockedBy {
+                step: id.to_owned(),
+            },
+        });
+        let missing_cleanup_input = (context.phase == Phase::Cleanup)
+            .then(|| {
+                references
+                    .iter()
+                    .find(|reference| !is_available(reference, context))
+                    .map(|reference| reference.node_id.to_owned())
+            })
+            .flatten();
         Gate {
             inactive,
             blocked,
@@ -1281,12 +1354,13 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
 
 /// The scheduler's verdict on a ready node.
 struct Gate {
-    /// Not on the active path: skipped, never a failure.
-    inactive: bool,
-    /// A dependency's result is unusable.
-    blocked: bool,
-    /// A cleanup step references data that does not exist.
-    missing_cleanup_input: bool,
+    /// Not on the active path: skipped, never a failure. The cause is
+    /// `OutsidePath` on a branch not taken, or the source that did not run.
+    inactive: Option<NotRunCause>,
+    /// A dependency's result is unusable: the first such dependency.
+    blocked: Option<NotRunCause>,
+    /// A cleanup step references data that does not exist: its producer.
+    missing_cleanup_input: Option<String>,
 }
 
 fn reference_value(reference: &Reference<'_>, context: &Context) -> Option<Value> {

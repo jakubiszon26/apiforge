@@ -74,6 +74,18 @@ impl Block {
         }
     }
 
+    /// Whether the library panel and the step menus offer this block on a
+    /// component's board (`component`) or on a scenario's. Only a component
+    /// passes values out through *Export*; *Start* and *Data condition* only
+    /// a scenario runs (UX-21, UX-40).
+    pub fn offered(self, component: bool) -> bool {
+        match self {
+            Self::Export => component,
+            Self::Start | Self::Condition => !component,
+            _ => true,
+        }
+    }
+
     /// Whether a new block of this kind may be wired from a data output.
     pub fn accepts_data(self) -> bool {
         !matches!(self, Self::Start)
