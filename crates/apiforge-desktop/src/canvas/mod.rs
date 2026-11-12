@@ -13,6 +13,8 @@ mod strip;
 
 pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
+#[cfg(test)]
+pub(crate) use paint::{DrawnText, NUMBER_MIN, NUMBER_TEXT, TextKind, min_on_screen};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -36,7 +38,9 @@ use layout::{BoardOverlays, HintPlacement, OverlayMeasures, RowValue};
 use menu::ActionMenu;
 use std::collections::{HashMap, HashSet};
 
-const MIN_ZOOM: f32 = 0.25;
+/// The farthest zoom: low enough that Fit shows every card of a large board
+/// in the smallest window (LAY-09, R3).
+const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
 const INLINE_EDIT_ZOOM: f32 = 0.8;
@@ -453,6 +457,10 @@ pub struct Canvas {
     /// The wires the last frame drew.
     #[cfg(test)]
     wires: Vec<DrawnWire>,
+    /// What each card drew in the last frame: its texts, band and signal
+    /// border (LAY-09).
+    #[cfg(test)]
+    drawn: Vec<(String, paint::Drawn)>,
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -516,6 +524,8 @@ impl Default for Canvas {
             aggregates: Vec::new(),
             #[cfg(test)]
             wires: Vec::new(),
+            #[cfg(test)]
+            drawn: Vec::new(),
         }
     }
 }
@@ -612,6 +622,35 @@ impl Canvas {
             .find(|(card, _)| card == id)
             .map(|(_, lines)| lines.clone())
             .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn debug_drawn(&self, id: &str) -> Option<&paint::Drawn> {
+        self.drawn
+            .iter()
+            .find(|(card, _)| card == id)
+            .map(|(_, drawn)| drawn)
+    }
+
+    /// The texts the card `id` wrote in the last frame, with their sizes on
+    /// screen (LAY-09).
+    #[cfg(test)]
+    pub(crate) fn debug_texts(&self, id: &str) -> Vec<DrawnText> {
+        self.debug_drawn(id)
+            .map(|drawn| drawn.texts.clone())
+            .unwrap_or_default()
+    }
+
+    /// The colour of the card's 2 px border for a failed or blocked step.
+    #[cfg(test)]
+    pub(crate) fn debug_signal(&self, id: &str) -> Option<Color32> {
+        self.debug_drawn(id)?.signal
+    }
+
+    /// The colour of a compact card's band.
+    #[cfg(test)]
+    pub(crate) fn debug_band(&self, id: &str) -> Option<Color32> {
+        self.debug_drawn(id)?.band
     }
 
     /// The camera's pan and zoom.
@@ -1080,6 +1119,7 @@ impl Canvas {
                 .collect();
             self.cards = cards.clone();
             self.lines.clear();
+            self.drawn.clear();
         }
         if let Some(Drag::Nodes { ids, offset }) = &self.drag {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
@@ -1308,8 +1348,8 @@ impl Canvas {
                     }
                 }
             }
-            if card.compact.is_some() {
-                let _written = paint::compact_card(
+            let _drawn = if card.compact.is_some() {
+                let drawn = paint::compact_card(
                     &board_painter,
                     card,
                     camera,
@@ -1318,8 +1358,6 @@ impl Canvas {
                     step,
                     aggregate,
                 );
-                #[cfg(test)]
-                self.lines.push((card.id.clone(), _written));
                 paint::trays(&board_painter, card, camera, reveal.inputs, reveal.outputs);
                 if reveal.inputs {
                     for index in card.hidden_inputs() {
@@ -1338,6 +1376,7 @@ impl Canvas {
                             });
                     }
                 }
+                drawn
             } else {
                 paint::card(
                     &board_painter,
@@ -1347,7 +1386,14 @@ impl Canvas {
                     related_blocks.contains(&card.id),
                     step,
                     aggregate,
-                );
+                )
+            };
+            #[cfg(test)]
+            {
+                if card.compact.is_some() {
+                    self.lines.push((card.id.clone(), _drawn.lines.clone()));
+                }
+                self.drawn.push((card.id.clone(), _drawn));
             }
             // A scope, so that a read-only card's disabled fields leave the
             // next card's interactions alone; its id is the card's, so the
@@ -1947,7 +1993,7 @@ impl Canvas {
         // A component call keeps *Open* in its header: a compact one wherever
         // its rows are legible, a full one at Full.
         let open = if card.compact.is_some() {
-            layout::COMPACT_ROW * zoom >= 11.0
+            layout::CardDetail::at_zoom(zoom) != layout::CardDetail::Overview
         } else {
             layout::CardDetail::at_zoom(zoom) == layout::CardDetail::Full
         };
