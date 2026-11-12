@@ -5,7 +5,7 @@
 - State: Backlog (issue #35) · LAY sprint, wave 3 (must, by the second
   opinion of 2026-11-04), measured on the LAY-01 reference scenarios after
   LAY-06 and LAY-17 ([lay.md](../sprints/lay.md) section 6)
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
