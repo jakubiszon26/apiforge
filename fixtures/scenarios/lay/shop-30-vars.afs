@@ -1,0 +1,92 @@
+scenario "Shop 30 with variables" {
+  description "LAY-23 mock-up: shop-30 with every value read by three or more steps saved in a variable first."
+  begin = start
+  @after(begin)
+  login = POST "/login" {
+    body { user: "demo", password: "demo" }
+    sample 200 { token: "t-1", userId: "u-1" }
+  }
+  logged_in = assert login.status == 200
+  var token = login.body.token
+  known_user = assert login.body.userId == "u-1"
+  catalogue = GET "/products" {
+    headers { Authorization: "Bearer {{token}}" }
+    query { limit: 20 }
+    sample 200 { items: [{ id: 123, price: 100 }, { id: 124, price: 12.5 }] }
+  }
+  listed = assert nonempty catalogue.body.items
+  var first = catalogue.body.items[0]
+  var second = catalogue.body.items[1]
+  product = product@1(id: first.id)
+  promoted = active_promotion@1(product: product)
+  expected_total = promoted.promotion.price * 2 + second.price
+  cart = POST "/cart" {
+    headers { Authorization: "Bearer {{token}}" }
+    body { items: [{ productId: first.id, quantity: 2 }, { productId: second.id, quantity: 1 }] }
+    sample 201 { id: "c-1", total: 172.5 }
+  }
+  cart_created = assert cart.status == 201
+  var cartId = cart.body.id
+  cart_total = assert cart.body.total ~= expected_total within 0.01
+  cart_view = GET "/cart/{{cartId}}" {
+    headers { Authorization: "Bearer {{token}}" }
+    sample 200 { id: "c-1", total: 172.5, items: [{ productId: 123 }, { productId: 124 }] }
+  }
+  valid_cart = condition all {
+    cart_view.status == 200,
+    nonempty cart_view.body.items,
+  } with cart_view.body
+  @after(cart_total)
+  address = PUT "/cart/{{cartId}}/address" {
+    headers { Authorization: "Bearer {{token}}" }
+    body { street: "Main 1", city: "Gdansk" }
+    sample 200 { ok: true }
+  }
+  @after(address)
+  checkout = POST "/checkout" {
+    headers { Authorization: "Bearer {{token}}" }
+    body { cartId: valid_cart.value.id, total: expected_total }
+    sample 201 { orderId: "o-1", status: "created", total: 172.5 }
+  }
+  checkout_total = assert checkout.body.total ~= expected_total within 0.01
+  checkout_status = assert checkout.body.status == "created"
+  checkout_created = assert checkout.status == 201
+  order = GET "/orders/{{checkout.body.orderId}}" {
+    headers { Authorization: "Bearer {{token}}" }
+    query { cart: cartId, view: valid_cart.value.id }
+    sample 200 { id: "o-1", status: "created", total: 172.5 }
+  }
+  var orderId = order.body.id
+  paid = if order.body.status == "created" {
+    payment = POST "/orders/{{orderId}}/pay" {
+      headers { Authorization: "Bearer {{token}}" }
+      body { amount: order.body.total }
+      sample 200 { paid: true, receiptId: "r-1" }
+    }
+    receipt = GET "/orders/{{orderId}}/receipts/{{payment.body.receiptId}}" {
+      headers { Authorization: "Bearer {{token}}" }
+      sample 200 { id: "r-1", total: 172.5 }
+    }
+    receipt_total = assert receipt.body.total ~= cart.body.total within 0.01
+  } else {
+    not_created = assert false == true
+  }
+  @after(paid.then)
+  refund = POST "/orders/{{orderId}}/refund" {
+    headers { Authorization: "Bearer {{token}}" }
+    sample 200 { refunded: true, amount: 172.5 }
+  }
+  refund_amount = assert refund.body.amount ~= expected_total within 0.01
+  @after(refund_amount)
+  logout = POST "/logout" {
+    headers { Authorization: "Bearer {{token}}" }
+    sample 204 {}
+  }
+  cleanup {
+    removed = DELETE "/cart/{{cartId}}" {
+      headers { Authorization: "Bearer {{token}}" }
+      sample 204 {}
+    }
+    gone = assert removed.status == 204
+  }
+}

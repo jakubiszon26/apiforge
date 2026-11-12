@@ -1081,6 +1081,16 @@ impl Canvas {
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
         let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
+        // LAY-23 mock-up, direction D: the proxies Tidy up would place.
+        let lay23_proxies = lay23::proxies(
+            &self.lay23,
+            input.graph,
+            &cards,
+            input.project,
+            input.parameters,
+        );
+        let lay23_proxy_count = lay23_proxies.len();
+        chips.extend(lay23_proxies);
         let aggregates = collapse::aggregates(input.graph, input.later, input.steps);
         #[cfg(test)]
         {
@@ -1309,6 +1319,7 @@ impl Canvas {
                 .iter()
                 .filter(|tag| !tag.out)
                 .map(|tag| (tag.anchor, tag.text.clone()))
+                .chain((0..lay23_proxy_count).map(|_| (Pos2::ZERO, String::new())))
                 .collect(),
             hidden: lay23.hidden,
         };

@@ -33,6 +33,9 @@ pub enum Mode {
     Chips,
     Bus,
     OnDemand,
+    /// D: real proxy chips beside the far readers of a variable, as Tidy
+    /// up would place them; drawn by the board's own chip code.
+    Proxies,
 }
 
 /// The threshold rule under test.
@@ -210,7 +213,7 @@ pub fn plan(
     selection: &HashSet<&str>,
 ) -> Plan {
     let wires = thinned(config, graph, cards, wires);
-    if config.mode == Mode::Off {
+    if matches!(config.mode, Mode::Off | Mode::Proxies) {
         return Plan {
             routed: wires,
             ..Plan::default()
@@ -456,7 +459,7 @@ pub fn plan(
                 }
             }
         }
-        Mode::Off | Mode::OnDemand => unreachable!(),
+        Mode::Off | Mode::OnDemand | Mode::Proxies => unreachable!(),
     }
     plan
 }
@@ -617,4 +620,97 @@ fn thinned(
             !config.merge_parallel || seen.insert((format!("{:?}", wire.start), wire.target))
         })
         .collect()
+}
+
+/// Direction D: a proxy chip of each variable read by enough steps, one
+/// beside every reader that is not next to the variable. A chip is 36 px
+/// tall and at least 112 px wide, more than the gap between two columns
+/// holds, so it stands in the row gap above its reader, left of it; a
+/// reader hung under a card has no such room and keeps its wire.
+pub fn proxies(
+    config: &Config,
+    graph: &Graph,
+    cards: &[Card],
+    project: &apiforge_core::format::Project,
+    parameters: &[String],
+) -> Vec<Chip> {
+    use apiforge_core::format::{Position, Proxy, ProxySource};
+    use apiforge_core::graph::{WireKind, wires as document_wires};
+    if config.mode != Mode::Proxies {
+        return Vec::new();
+    }
+    let mut rows: Vec<f32> = cards
+        .iter()
+        .filter(|card| on_spine(card.kind))
+        .map(|card| card.rect().top())
+        .collect();
+    rows.sort_by(f32::total_cmp);
+    rows.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+    let row_of = |y: f32| {
+        rows.iter()
+            .rposition(|top| *top <= y + 1.0)
+            .unwrap_or_default()
+    };
+    let card_of = |id: &str| cards.iter().find(|card| card.id == id);
+    let mut readers: HashMap<String, Vec<String>> = HashMap::new();
+    for wire in document_wires(graph) {
+        let variable = graph
+            .nodes
+            .iter()
+            .any(|node| node.id == wire.source && node.is_variable());
+        if wire.kind == WireKind::Data && variable {
+            let list = readers.entry(wire.source).or_default();
+            if !list.contains(&wire.target) {
+                list.push(wire.target);
+            }
+        }
+    }
+    let mut placed: HashMap<String, usize> = HashMap::new();
+    let mut chips = Vec::new();
+    for node in graph.nodes.iter().filter(|node| node.is_variable()) {
+        let Some(list) = readers.get(&node.id) else {
+            continue;
+        };
+        if list.len() < config.min_readers {
+            continue;
+        }
+        let Some(from) = card_of(&node.id).map(Card::rect) else {
+            continue;
+        };
+        for reader in list {
+            let Some(card) = card_of(reader) else {
+                continue;
+            };
+            let to = card.rect();
+            let step = to.left() - from.left();
+            let near = row_of(from.top()) == row_of(to.top())
+                && (step.abs() < 1.0 || (step - super::layout::WIDTH - GAP).abs() < 1.0);
+            if near || !on_spine(card.kind) {
+                continue;
+            }
+            let slot = placed.entry(reader.clone()).or_default();
+            let mut chip = Chip::build(
+                &Proxy {
+                    id: format!("lay23-proxy-{}", chips.len()),
+                    source: ProxySource::Variable {
+                        node_id: node.id.clone(),
+                    },
+                    position: Position { x: 0.0, y: 0.0 },
+                },
+                graph,
+                project,
+                parameters,
+            );
+            let x = to.left() - 24.0 - chip.width();
+            let y = to.top() - 44.0 - 40.0 * *slot as f32;
+            chip.proxy.position = Position {
+                x: f64::from(x),
+                y: f64::from(y),
+            };
+            chip.origin = pos2(x, y);
+            *slot += 1;
+            chips.push(chip);
+        }
+    }
+    chips
 }

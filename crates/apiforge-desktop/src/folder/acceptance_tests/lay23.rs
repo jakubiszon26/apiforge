@@ -291,6 +291,10 @@ fn options() -> Vec<(&'static str, Config)> {
         ("B bus, 3+ readers, all", count(Wires::Bus, 3, false)),
         ("C on demand", count(Wires::OnDemand, 3, true)),
         (
+            "D variables with proxy chips, 3+ readers",
+            count(Wires::Proxies, 3, true),
+        ),
+        (
             "today, without @after the data implies",
             Config {
                 order: Order::WithoutImplied,
@@ -348,7 +352,7 @@ fn options() -> Vec<(&'static str, Config)> {
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay23_measures() {
     let mut text = String::from(HEAD);
-    for name in ["fan-out", "shop-30"] {
+    for name in ["fan-out", "shop-30", "shop-30-vars"] {
         for expanded in [false, true] {
             let (_project, mut harness, id) = tidied(name, expanded);
             let checks = if expanded { "expanded" } else { "collapsed" };
@@ -376,7 +380,11 @@ fn review_lay23_measures() {
                 row(&mut text, name, checks, label, &measures);
             }
             // With a card selected: what comes back.
-            let source = if name == "fan-out" { "cartId" } else { "login" };
+            let source = match name {
+                "fan-out" => "cartId",
+                "shop-30" => "login",
+                _ => "token",
+            };
             for (label, mode, handle) in [
                 ("A, a reader selected", Wires::Chips, "checkout"),
                 ("A, the source selected", Wires::Chips, source),
@@ -419,6 +427,35 @@ fn assert_in_view(harness: &FolderHarness, id: &str, label: &str) {
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay23_captures() {
+    // Direction D: the variable style with proxy chips.
+    for (name, centre) in [("fan-out", "shipping"), ("shop-30-vars", "address")] {
+        let (_project, mut harness, id) = tidied(name, false);
+        for (view, config) in [
+            ("d-main", Config::default()),
+            ("d-proxies", count(Wires::Proxies, 3, true)),
+        ] {
+            if name == "fan-out" && view == "d-main" {
+                continue;
+            }
+            set(&mut harness, &id, config);
+            choose(&mut harness, FIT);
+            harness.step();
+            let label = format!("lay23-{name}-{view}-fit");
+            assert_in_view(&harness, &id, &label);
+            crate::testing::capture(&mut harness, &label, None);
+            let card = id_of(&harness, &id, centre);
+            app(&mut harness)
+                .canvases
+                .get_mut(&id)
+                .unwrap()
+                .debug_show(&card, 0.6);
+            settle(&mut harness);
+            harness.step();
+            let label = format!("lay23-{name}-{view}-60");
+            assert_in_view(&harness, &id, &label);
+            crate::testing::capture(&mut harness, &label, None);
+        }
+    }
     for (name, centre, reader, source) in [
         ("fan-out", "shipping", "checkout", "cartId"),
         ("shop-30", "address", "checkout", "login"),
