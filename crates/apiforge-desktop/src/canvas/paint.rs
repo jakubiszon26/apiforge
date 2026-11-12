@@ -242,12 +242,9 @@ pub const NAME_MIN: f32 = 11.0;
 #[cfg_attr(not(test), allow(dead_code))]
 pub const NUMBER_MIN: f32 = 9.0;
 pub const LINE_MIN: f32 = 9.0;
-/// The sizes at 100 %: a card's name, a line, and the number LAY-07's badge
-/// writes.
+/// The sizes at 100 %: a card's name and a line.
 const NAME_TEXT: f32 = 16.0;
 const LINE_TEXT: f32 = 12.0;
-#[cfg_attr(not(test), allow(dead_code))]
-pub const NUMBER_TEXT: f32 = 11.0;
 /// Below this zoom a card is its band, its border and its badge; its name
 /// is written only where it fits (LAY-09).
 const LABELS_FROM: f32 = 0.25;
@@ -613,7 +610,8 @@ pub fn card(
             .y;
         let pill_height = aggregate.map_or(0.0, |_| line(LINE_TEXT) * 1.4);
         let area = rect.shrink2(vec2(5.0, 8.0));
-        if z >= LABELS_FROM || area.height() >= height {
+        // Below 25 % only where the tile holds the name, two letters wide.
+        if z >= LABELS_FROM || (area.height() >= height && area.width() >= 2.0 * NAME_MIN) {
             let name = Rect::from_center_size(
                 area.center() - vec2(0.0, pill_height / 2.0),
                 vec2(area.width(), height),
@@ -965,7 +963,9 @@ pub fn compact_card(
             pos2(local(42.0, 0.0).x, band.bottom()),
             pos2(local(right, 0.0).x, band.bottom() + height),
         );
-        (z >= LABELS_FROM || name.bottom() <= rect.bottom() - 1.0).then_some(name)
+        (z >= LABELS_FROM
+            || (name.bottom() <= rect.bottom() - 1.0 && name.width() >= 2.0 * NAME_MIN))
+            .then_some(name)
     };
     if let Some(name) = name {
         drawn.label(

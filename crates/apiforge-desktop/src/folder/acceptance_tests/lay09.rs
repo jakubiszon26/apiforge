@@ -90,13 +90,13 @@ fn texts(harness: &FolderHarness, handle: &str) -> Vec<DrawnText> {
     canvas(harness).debug_texts(&id_of(harness, handle))
 }
 
-/// The largest text of `kind` a card wrote in the last frame, on screen.
+/// The smallest text of `kind` a card wrote in the last frame, on screen.
 fn size_of(texts: &[DrawnText], kind: TextKind) -> Option<f32> {
     texts
         .iter()
         .filter(|text| text.kind == kind)
         .map(|text| text.size)
-        .reduce(f32::max)
+        .reduce(f32::min)
 }
 
 fn result_text<'a>(texts: &'a [DrawnText], start: &str) -> Option<&'a DrawnText> {
@@ -174,11 +174,15 @@ fn lay09_criterion_1_signals_and_minimum_sizes_at_overview() {
     let login = texts(&harness, "login");
     let pill = result_text(&login, "✓ 2 checks").expect("login's checks pill at 25 %");
     assert!(pill.size >= 9.0, "the pill is {} px", pill.size);
-    // The step number of LAY-07's badge takes the same rule.
-    assert!(
-        crate::canvas::min_on_screen(crate::canvas::NUMBER_TEXT, 0.25, crate::canvas::NUMBER_MIN)
-            >= 9.0
-    );
+    // A step number takes the same rule; LAY-07's badge draws the first.
+    for (id, texts) in &cards {
+        if let Some(number) = size_of(texts, TextKind::Number) {
+            assert!(
+                number >= crate::canvas::NUMBER_MIN,
+                "{id}'s number is {number} px"
+            );
+        }
+    }
 }
 
 /// Criterion 2: no text is smaller after zooming in across a threshold: the

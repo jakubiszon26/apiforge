@@ -14,7 +14,7 @@ mod strip;
 pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
-pub(crate) use paint::{DrawnText, NUMBER_MIN, NUMBER_TEXT, TextKind, min_on_screen};
+pub(crate) use paint::{DrawnText, NUMBER_MIN, TextKind};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -38,8 +38,9 @@ use layout::{BoardOverlays, HintPlacement, OverlayMeasures, RowValue};
 use menu::ActionMenu;
 use std::collections::{HashMap, HashSet};
 
-/// The farthest zoom: low enough that Fit shows every card of a large board
-/// in the smallest window (LAY-09, R3).
+/// The farthest zoom: low enough that Fit shows every card of the reference
+/// boards at 960 x 540, `shop-50` needing 0.069 (LAY-09, R3). A larger board
+/// is still cut at this limit.
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.

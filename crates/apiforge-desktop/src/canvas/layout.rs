@@ -419,9 +419,9 @@ impl Card {
         density: CardDensity,
     ) -> Self {
         let mut card = Self::build_full(node, reference_graph, project);
-        if node.kind == NodeKind::Assert {
-            // A check's subtitle names its subject and predicate, in the
-            // words of its compact line (LAY-09, LAY-21).
+        if node.kind == NodeKind::Assert && density == CardDensity::Full {
+            // A full check card's subtitle names its subject and predicate,
+            // in the words of the compact card's line (LAY-09, LAY-21).
             let scope = Scope {
                 nodes: &reference_graph.nodes,
                 project,
@@ -1483,8 +1483,7 @@ mod tests {
         node.config.predicate = Some(Predicate::NotEmpty);
         let card = Card::build(&node, graph, &project, CardDensity::Full);
         // The subtitle names the subject before the predicate (LAY-09).
-        let subtitle = card.subtitle.clone().unwrap_or_default();
-        assert!(subtitle.ends_with(" is not empty"), "{subtitle}");
+        assert_eq!(card.subtitle.as_deref(), Some("null is not empty"));
         assert!(card.inputs.iter().any(|row| row.name == "actual"));
         assert!(!card.inputs.iter().any(|row| row.name == "expected"));
         node.config.predicate = Some(Predicate::Equals);
