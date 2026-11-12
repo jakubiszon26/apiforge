@@ -185,6 +185,20 @@ impl FolderApp {
         }
     }
 
+    /// Cuts the document's last run back to the steps `keep` accepts, still
+    /// running: a run part of the way through, for tests (LAY-11).
+    #[cfg(test)]
+    pub(super) fn debug_cut_run(
+        &mut self,
+        id: &str,
+        keep: impl Fn(&apiforge_core::run::StepResult) -> bool,
+    ) {
+        if let Some(report) = self.runs.reports.get_mut(id) {
+            report.result.steps.retain(|step| keep(step));
+            report.result.status = apiforge_core::run::RunStatus::Running;
+        }
+    }
+
     /// The document's report while it is fresh or only checks were added
     /// from it (UX-01), for the board's and the code's marks.
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
@@ -606,7 +620,17 @@ impl FolderApp {
                 if let Some(tab) = self.workbench.tab_mut(id) {
                     tab.cleanup = cleanup;
                 }
-                self.selections.insert(id.into(), vec![node]);
+                // A check folded into its subject is found there: the row
+                // selects the subject and opens its checks (LAY-11).
+                let subject = self.canvases.get(id).and_then(|canvas| {
+                    canvas.folded_into(graph_of(&model, cleanup), later_of(&model, cleanup), &node)
+                });
+                match subject {
+                    Some(subject) => self.show_checks(id, subject),
+                    None => {
+                        self.selections.insert(id.into(), vec![node]);
+                    }
+                }
             }
             Action::ExportReport => {
                 if let Ok(text) = serde_json::to_string_pretty(result) {
@@ -654,6 +678,7 @@ impl FolderApp {
                         parameters: &parameters,
                         sibling: sibling_of(&model, cleanup),
                         density: self.density(),
+                        satellites: true,
                     };
                     let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
                     // The check is counted when its edit applies, which may

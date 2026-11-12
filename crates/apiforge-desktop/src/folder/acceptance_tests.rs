@@ -27,6 +27,8 @@ mod issue324;
 mod ktlo33;
 #[path = "acceptance_tests/lay02.rs"]
 mod lay02;
+#[path = "acceptance_tests/lay11.rs"]
+mod lay11;
 #[path = "acceptance_tests/lay21.rs"]
 mod lay21;
 #[path = "acceptance_tests/ux37.rs"]
@@ -13429,10 +13431,13 @@ mod ux18 {
     /// Rounding slack for positions on screen.
     const EPSILON: f32 = 0.5;
 
-    /// The demo shop's scenario in Diagram at `size`, as fitted on opening.
+    /// The demo shop's scenario in Diagram at `size`, as fitted on opening,
+    /// its checks drawn as cards: the tests select one (LAY-11 folds them by
+    /// default).
     fn diagram(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
         let project = crate::testing::shop_project();
         let mut harness = folder_harness(project.path(), size);
+        app(&mut harness).debug_draw_checks();
         let scenario = only(&harness, DocumentKind::Scenario);
         app(&mut harness).activate_tab(&scenario);
         settle(&mut harness);
@@ -14356,11 +14361,14 @@ mod lay16 {
 }
 "#;
 
-    /// `source` on the board of the demo shop, whose components it calls.
+    /// `source` on the board of the demo shop, whose components it calls,
+    /// every check drawn as a card: these tests measure the cards (LAY-11
+    /// folds them by default).
     pub(super) fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
         let project = crate::testing::shop_project();
         fs::write(project.path().join(SCENARIO), source).unwrap();
         let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).debug_draw_checks();
         app(&mut harness).review_open(SCENARIO, None);
         settle(&mut harness);
         (project, harness)

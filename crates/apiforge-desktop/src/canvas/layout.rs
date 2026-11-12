@@ -664,6 +664,34 @@ impl Card {
         card
     }
 
+    /// Where a step's checks line is, which a click opens in the Inspector
+    /// (LAY-11): the compact card's *Checks* row, or a full card's footer at
+    /// Full, left of its action button. `None` for a step without it.
+    pub fn aggregate_area(&self, zoom: f32) -> Option<Rect> {
+        if !matches!(self.kind, NodeKind::Request | NodeKind::Component) {
+            return None;
+        }
+        if let Some(compact) = &self.compact {
+            // Below the zoom where the line is written there is nothing to
+            // click.
+            if COMPACT_ROW * zoom < 11.0 {
+                return None;
+            }
+            return compact
+                .rows
+                .iter()
+                .find(|row| matches!(row.role, CompactRole::Checks(_)))
+                .map(|row| self.row_rect(row));
+        }
+        (CardDetail::at_zoom(zoom) == CardDetail::Full).then(|| {
+            let footer = self.footer();
+            Rect::from_min_max(
+                footer.min,
+                pos2(self.action_button().left() - 8.0, footer.max.y),
+            )
+        })
+    }
+
     fn row_rect(&self, row: &CompactRow) -> Rect {
         Rect::from_min_size(self.origin + vec2(0.0, row.top), vec2(WIDTH, row.height))
     }
