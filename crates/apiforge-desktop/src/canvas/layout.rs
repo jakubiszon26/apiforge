@@ -271,6 +271,9 @@ pub enum RowValue {
     /// A literal shown but edited in the inspector.
     Summary(String),
     Missing,
+    /// An input a paste left unconnected because the step it read, named
+    /// here, is missing from the board (UX-39): session state, never written.
+    MissingStep(String),
     Optional,
 }
 
@@ -524,6 +527,33 @@ impl Card {
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             compact: None,
+        }
+    }
+
+    /// Marks the whole input `input` as reading the missing step `step`
+    /// (UX-39): its row's value on a full card, its line on a compact one,
+    /// where the line of a required input without a value was. An input
+    /// that has a value keeps it.
+    pub fn mark_missing_step(&mut self, input: &str, step: &str) {
+        let Some(index) = self.inputs.iter().position(|row| {
+            row.name == input
+                && row.path.is_empty()
+                && matches!(row.value, RowValue::Missing | RowValue::Optional)
+        }) else {
+            return;
+        };
+        let row = &mut self.inputs[index];
+        row.value = RowValue::MissingStep(step.to_owned());
+        let text = format!("{} · Missing step “{step}”", row.label);
+        if let Some(compact) = &mut self.compact
+            && let Some(line) = compact
+                .rows
+                .iter_mut()
+                .find(|line| line.role == CompactRole::Input(index))
+        {
+            line.text.clone_from(&text);
+            line.full_text = text;
+            line.missing = true;
         }
     }
 
