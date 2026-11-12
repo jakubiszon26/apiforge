@@ -128,10 +128,21 @@ cargo run -p apiforge-layout --example quality --release --locked [-- --dump <se
 It prints wires, crossings, bends, straight wires, close and coincident pairs,
 long edges and incomplete routes for generated boards of 6, 12, 25 and 50 cards
 with and without an ordering chain, then the same for the reference scenarios of
-`fixtures/scenarios/lay/`, with their board size, fit zoom at 1600 × 1000 and
-960 × 540, card and chip collisions and 12 px clearance violations. Two runs print
-the same; the example's header defines each column. `--dump` prints one generated
-board's rectangles and routes. What these numbers cannot say is timed by hand with
+`fixtures/scenarios/lay/` as the desktop tidies them, at the compact and the full
+density, with their checks collapsed and expanded, with their board size, fit zoom
+at 1600 × 1000 and 960 × 540, card and chip collisions and 12 px clearance
+violations. Two runs print the same; the example's header defines each column.
+`--dump` prints one generated board's rectangles and routes.
+
+The reference boards come from the desktop: its acceptance test
+`lay06_criterion_10_quality_on_real_card_sizes` tidies each scenario in the
+window and fails when `crates/apiforge-layout/examples/support/boards.txt` is not
+what it gives. A change to the cards, the layout or the ports writes the file
+again:
+
+```bash
+APIFORGE_WRITE_BOARDS=1 cargo test -p apiforge-desktop --locked lay06_criterion_10
+``` What these numbers cannot say is timed by hand with
 the [UX task sheet](sprints/lay.md#9-metrics-and-qa), on `shop-30.afs` after a
 failed simulation.
 
