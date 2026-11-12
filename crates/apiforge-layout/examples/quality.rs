@@ -711,4 +711,45 @@ mod tests {
         assert_ne!(dump(2, 12), dump(3, 12));
         assert_eq!(dump(2, 12), dump(2, 12));
     }
+
+    /// LAY-04 criterion 3: on the generated boards without an ordering
+    /// chain, the data-only rows of the table, at least 40 % of the wires
+    /// run straight at every size, and the four rows together have no more
+    /// crossings and coincident pairs than before LAY-04.
+    #[test]
+    fn lay04_criterion_3_straight_wires_on_data_only_boards() {
+        // Before LAY-04: crossings and coincident pairs over the ten seeds.
+        const BEFORE: [(usize, f64, f64); 4] = [
+            (6, 20.0, 23.0),
+            (12, 64.0, 61.0),
+            (25, 181.0, 106.0),
+            (50, 526.0, 328.0),
+        ];
+        let mut after = Measures::default();
+        for (count, _, _) in BEFORE {
+            let mut total = Measures::default();
+            for seed in 1..=SEEDS {
+                total.add(&Measures::of(&lay(&generated(seed, count, false))));
+            }
+            assert!(
+                total.straight >= 0.40 * total.wires,
+                "{count} cards: {} of {} wires straight",
+                total.straight,
+                total.wires
+            );
+            after.add(&total);
+        }
+        let crossings: f64 = BEFORE.iter().map(|row| row.1).sum();
+        let coincident: f64 = BEFORE.iter().map(|row| row.2).sum();
+        assert!(
+            after.crossings <= crossings,
+            "{} crossings, {crossings} before",
+            after.crossings
+        );
+        assert!(
+            after.coincident <= coincident,
+            "{} coincident pairs, {coincident} before",
+            after.coincident
+        );
+    }
 }

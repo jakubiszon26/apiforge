@@ -1222,4 +1222,85 @@ mod tests {
             "{positions:?}"
         );
     }
+
+    /// The wires of `edges` routed on the cards where `positions` put them,
+    /// each from its port on the right side of its source to its port on
+    /// the left side of its target.
+    fn routed(blocks: &[Block], positions: &[Point], edges: &[Edge]) -> Vec<crate::Route> {
+        use crate::{Port, Routing, Side, Wire, route};
+        let rectangles: Vec<Rect> = positions
+            .iter()
+            .zip(blocks)
+            .map(|(position, block)| Rect::from_size(*position, block.size))
+            .collect();
+        let wires: Vec<Wire> = edges
+            .iter()
+            .map(|edge| {
+                Wire::new(
+                    Port::new(edge.source, Side::Right, edge.source_offset),
+                    Port::new(edge.target, Side::Left, edge.target_offset),
+                )
+            })
+            .collect();
+        route(&rectangles, &wires, &Routing::default())
+    }
+
+    /// LAY-04 criterion 1: a chain of five cards, each consuming the
+    /// previous card's output into its first input, tidies so that every
+    /// wire has zero bends. The cards differ in height and in where their
+    /// ports are, as a board's do, and start anywhere.
+    #[test]
+    fn lay04_criterion_1_a_chain_of_five_runs_straight() {
+        let heights = [132.0, 190.0, 166.0, 214.0, 142.0];
+        let outputs = [98.0, 122.0, 98.0, 146.0, 98.0];
+        let inputs = [52.0, 74.0, 51.0, 74.0, 52.0];
+        let blocks: Vec<Block> = heights
+            .iter()
+            .enumerate()
+            .map(|(index, height)| {
+                Block::new(
+                    Size::new(280.0, *height),
+                    Point::new(index as f32 * 37.0, 300.0 - index as f32 * 53.0),
+                )
+            })
+            .collect();
+        let edges: Vec<Edge> = (0..4)
+            .map(|index| {
+                Edge::new(index, index + 1).with_offsets(outputs[index], inputs[index + 1])
+            })
+            .collect();
+        let positions = tidy(&Graph::new(&blocks, &edges));
+        assert!(!any_overlap(&positions, &blocks));
+        for (edge, route) in edges.iter().zip(routed(&blocks, &positions, &edges)) {
+            assert_eq!(
+                route.bends(),
+                0,
+                "{} -> {} runs straight: {:?}",
+                edge.source,
+                edge.target,
+                route.points
+            );
+        }
+    }
+
+    /// LAY-04 criterion 2: two wires leave one card from different ports.
+    /// Their targets tie on the barycentre, and the ports break the tie: the
+    /// target of the upper port stands above, so the wires do not cross
+    /// right after the card.
+    #[test]
+    fn lay04_criterion_2_ports_break_ties() {
+        let blocks = blocks(3);
+        // Card 0 feeds card 1 from its lower port and card 2 from its upper.
+        let edges = [
+            Edge::new(0, 1).with_offsets(100.0, 60.0),
+            Edge::new(0, 2).with_offsets(40.0, 60.0),
+        ];
+        let graph = Graph::new(&blocks, &edges);
+        assert_eq!(rows_of(&graph)[1], [2, 1], "the upper port's target first");
+        let positions = tidy(&graph);
+        assert!(positions[2].y < positions[1].y, "{positions:?}");
+        for route in routed(&blocks, &positions, &edges) {
+            assert!(route.bridges.is_empty(), "no crossing: {:?}", route.points);
+        }
+    }
 }

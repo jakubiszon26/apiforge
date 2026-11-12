@@ -174,8 +174,14 @@ fn lay06_criterion_1_the_spine_and_the_satellites() {
             first.left() + column as f32 * (280.0 + 96.0),
             "{handle} is step {place} of the spine, in column {column}"
         );
+        // A spine card stands in its row: at or below the top of the row's
+        // first card, lower where its ports put it (LAY-04), and above the
+        // next row.
         let leader = rect(&spine[row * 5]);
-        assert_eq!(card.top(), leader.top(), "{handle} is in row {row}");
+        assert!(card.top() >= leader.top(), "{handle} is in row {row}");
+        if let Some(next) = spine.get((row + 1) * 5) {
+            assert!(card.top() < rect(next).top(), "{handle} is in row {row}");
+        }
         if row > 0 {
             let above = rect(&spine[(row - 1) * 5]);
             assert!(
