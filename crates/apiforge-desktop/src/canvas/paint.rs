@@ -459,7 +459,7 @@ fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 
     }
 }
 
-fn arrowhead(painter: &Painter, end: Pos2, direction: Vec2, color: Color32, zoom: f32) {
+pub(super) fn arrowhead(painter: &Painter, end: Pos2, direction: Vec2, color: Color32, zoom: f32) {
     let normal = vec2(-direction.y, direction.x);
     let size = 6.0 * zoom.max(0.6);
     painter.add(Shape::convex_polygon(

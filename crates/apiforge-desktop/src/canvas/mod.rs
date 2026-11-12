@@ -5,6 +5,7 @@
 //! wires being drawn and the camera are view state only.
 
 mod collapse;
+pub mod lay23;
 mod layout;
 mod menu;
 mod paint;
@@ -425,6 +426,9 @@ pub struct Canvas {
     pub bridges: bool,
     /// What a request card's box holds, from the user's settings (LAY-16).
     density: CardDensity,
+    /// LAY-23 mock-up: how fanned-out wires are drawn.
+    pub(crate) lay23: lay23::Config,
+    pub(crate) lay23_drawn: lay23::Drawn,
     /// Whether the toolbar offers *Compact cards* and *Collapse checks*.
     pub density_switch: bool,
     /// Whether check cards with a subject are folded into its footer, from
@@ -514,6 +518,8 @@ impl Default for Canvas {
             wire_style: WireStyle::default(),
             bridges: true,
             density: CardDensity::default(),
+            lay23: lay23::Config::default(),
+            lay23_drawn: lay23::Drawn::default(),
             density_switch: true,
             collapsed: false,
             expanded_here: HashSet::new(),
@@ -1094,7 +1100,19 @@ impl Canvas {
 
         // The row ends of a board in shape D name the next step (LAY-06).
         let marks = shape::marks(input.graph, &cards);
-        let mark_rects: Vec<Rect> = marks.iter().map(|mark| mark.rect).collect();
+        let mut mark_rects: Vec<Rect> = marks.iter().map(|mark| mark.rect).collect();
+        // LAY-23 mock-up: Fit shows the chips and the buses too.
+        mark_rects.extend(
+            lay23::plan(
+                &self.lay23,
+                input.graph,
+                &cards,
+                &chips,
+                folded_wires(input.graph, &cards, &chips, &folded).0,
+                &input.selection.iter().map(String::as_str).collect(),
+            )
+            .bounds(),
+        );
         #[cfg(test)]
         {
             self.marks = marks.clone();
@@ -1204,6 +1222,15 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        let lay23 = lay23::plan(
+            &self.lay23,
+            input.graph,
+            &cards,
+            &chips,
+            board_wires,
+            &selection,
+        );
+        let board_wires = lay23.routed.clone();
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -1248,7 +1275,9 @@ impl Canvas {
                     &board_painter,
                     wire,
                     camera,
-                    selected_wires.contains(&wire.id) || related_wires.contains(&wire.id),
+                    selected_wires.contains(&wire.id)
+                        || related_wires.contains(&wire.id)
+                        || lay23.shown.contains(&wire.id),
                 );
                 if let Some(text) = wire_labels.get(&wire.id) {
                     paint::wire_label(&board_painter, wire, camera, text);
@@ -1258,6 +1287,31 @@ impl Canvas {
                 bridged.insert(wire.id.clone(), wire.bridges.len());
             }
         }
+        for bus in &lay23.buses {
+            lay23::paint_bus(&board_painter, bus, camera);
+        }
+        for tag in &lay23.tags {
+            lay23::paint_tag(&board_painter, tag, camera);
+        }
+        self.lay23_drawn = lay23::Drawn {
+            routed: board_wires
+                .iter()
+                .filter_map(|wire| {
+                    drawn
+                        .iter()
+                        .find(|(id, _)| *id == wire.id)
+                        .map(|(_, points)| (points.clone(), wire.control))
+                })
+                .collect(),
+            buses: lay23.buses.iter().map(|bus| bus.paths.clone()).collect(),
+            tags: lay23
+                .tags
+                .iter()
+                .filter(|tag| !tag.out)
+                .map(|tag| (tag.anchor, tag.text.clone()))
+                .collect(),
+            hidden: lay23.hidden,
+        };
         #[cfg(test)]
         {
             self.wires = board_wires
