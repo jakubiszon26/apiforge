@@ -4,7 +4,7 @@
 //! and an `@after` stay on the board (Q4 = A, Q5 = A, Q6 = A, Q15 = A).
 
 use super::lay16::{
-    assert_disjoint_cards, canvas, document, graph, id_of, lines, open, shop_30, show, world,
+    SCENARIO, assert_disjoint_cards, canvas, document, graph, id_of, lines, shop_30, show, world,
     world_of,
 };
 use super::*;
@@ -12,6 +12,17 @@ use crate::preferences::{Preference, Preferences};
 use apiforge_core::run::StepStatus;
 use egui::Rect;
 use std::time::{Duration, Instant};
+
+/// `source` on the board of the demo shop, as a new install shows it: with
+/// its checks collapsed.
+fn open(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness) {
+    let project = crate::testing::shop_project();
+    fs::write(project.path().join(SCENARIO), source).unwrap();
+    let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+    app(&mut harness).review_open(SCENARIO, None);
+    settle(&mut harness);
+    (project, harness)
+}
 
 /// The checks of `checkout`, which `shop-30` reads in this order.
 const CHECKOUT_CHECKS: [&str; 3] = ["checkout_total", "checkout_status", "checkout_created"];
@@ -450,6 +461,8 @@ fn review_lay11_board() {
     let (_project, mut harness) = open(&failing(), WIDE);
     harness.get_by_label("Tidy up").click();
     settle(&mut harness);
+    // Tidy up leaves the camera where it was until LAY-06.
+    choose(&mut harness, "Fit the view");
     harness.step();
     assert_cards_in_view(&harness, "shop-30 collapsed and tidied");
     crate::testing::capture(&mut harness, "lay11-collapsed-fit-1600", None);
