@@ -193,20 +193,26 @@ fn ux39_criterion_1_the_marker_names_the_missing_step() {
 /// so does a step named `product` appearing on the board.
 #[test]
 fn ux39_criterion_2_wiring_or_the_step_clears_it() {
-    // Wired.
+    // Wired, from the component's own *product* input: the only Product the
+    // component has.
     let (_project, mut harness, cart) = pasted_into_cart(WIDE);
     let pasted = id_of(&harness, &cart, "active_promotion");
-    let read = id_of(&harness, &cart, "fetch_cart");
     show(&mut harness, &cart, "active_promotion", 1.0);
     assert!(lines(&harness, &cart, "active_promotion").contains(&COMPACT_MARKER.to_owned()));
-    app(&mut harness).active_board_command(Command::Connect {
-        source: read,
-        source_port: "body".into(),
-        target: pasted,
-        target_input: "product".into(),
-        target_path: Vec::new(),
+    app(&mut harness).active_board_command(Command::Bind {
+        node: pasted.clone(),
+        input: "product".into(),
+        path: Vec::new(),
+        binding: apiforge_core::format::Binding::parameter("product"),
     });
     settle(&mut harness);
+    assert!(
+        graph_of(&model(&harness, &cart), false)
+            .nodes
+            .iter()
+            .any(|node| node.id == pasted && node.inputs.contains_key("product")),
+        "the input is wired"
+    );
     show(&mut harness, &cart, "active_promotion", 1.0);
     let after = lines(&harness, &cart, "active_promotion");
     assert!(
@@ -227,7 +233,7 @@ fn ux39_criterion_2_wiring_or_the_step_clears_it() {
         node: second,
         input: "product".into(),
         path: Vec::new(),
-        value: serde_json::json!({ "id": 123 }),
+        value: serde_json::json!(123),
     });
     settle(&mut harness);
     show(&mut harness, &cart, "active_promotion_2", 1.0);
