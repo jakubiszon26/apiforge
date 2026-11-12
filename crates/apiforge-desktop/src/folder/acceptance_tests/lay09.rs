@@ -46,6 +46,16 @@ fn failing_30() -> String {
     )
 }
 
+/// `shop-30` whose cart view answers with no items: the *Data condition*
+/// `valid_cart` is not met and blocks.
+fn blocked_30() -> String {
+    failing(
+        &shop_30(),
+        r#"sample 200 { id: "c-1", total: 172.5, items: [{ productId: 123 }, { productId: 124 }] }"#,
+        r#"sample 200 { id: "c-1", total: 172.5, items: [] }"#,
+    )
+}
+
 fn failing_50() -> String {
     failing(
         &shop_50(),
@@ -95,12 +105,15 @@ fn result_text<'a>(texts: &'a [DrawnText], start: &str) -> Option<&'a DrawnText>
         .find(|text| text.kind == TextKind::Result && text.text.starts_with(start))
 }
 
-/// Every card the last frame drew, with what it wrote.
+/// Every card wholly in view in the last frame, with what it wrote; a card
+/// off the board is not drawn.
 fn drawn(harness: &FolderHarness) -> Vec<(String, Vec<DrawnText>)> {
     let board = canvas(harness);
+    let view = board.debug_focus();
     board
         .debug_cards()
         .iter()
+        .filter(|(_, rect)| view.contains_rect(*rect))
         .map(|(id, _)| (id.clone(), board.debug_texts(id)))
         .collect()
 }
@@ -114,23 +127,28 @@ fn border(harness: &FolderHarness, id: &str) -> Option<Color32> {
 /// screen, a step number and the result line at least 9 px.
 #[test]
 fn lay09_criterion_1_signals_and_minimum_sizes_at_overview() {
+    // A failed check stops the run: the steps after it are skipped, none is
+    // blocked. A *Data condition* that is not met blocks.
+    let (_blocked_project, mut other) = open(&blocked_30(), WIDE);
+    simulate(&mut other);
+    show(&mut other, "valid_cart", 0.35);
+    let blocked: Vec<String> = statuses(&other)
+        .into_iter()
+        .filter(|(_, status)| *status == StepStatus::Blocked)
+        .map(|(id, _)| id)
+        .filter(|id| canvas(&other).debug_card_rect(id).is_some())
+        .collect();
+    assert!(!blocked.is_empty(), "the run blocks a drawn step");
+    for id in &blocked {
+        assert_eq!(border(&other, id), Some(theme::WARNING), "blocked {id}");
+    }
+
     let (_project, mut harness) = open(&failing_30(), WIDE);
     simulate(&mut harness);
-    let statuses = statuses(&harness);
     let checkout = id_of(&harness, "checkout");
     show(&mut harness, "checkout", 0.35);
     // Collapsed, the failed check is its subject's red border (Q15 = A).
     assert_eq!(border(&harness, &checkout), Some(theme::DANGER));
-    let blocked: Vec<&String> = statuses
-        .iter()
-        .filter(|(_, status)| *status == StepStatus::Blocked)
-        .map(|(id, _)| id)
-        .filter(|id| canvas(&harness).debug_card_rect(id).is_some())
-        .collect();
-    assert!(!blocked.is_empty(), "the run blocks a drawn step");
-    for id in &blocked {
-        assert_eq!(border(&harness, id), Some(theme::WARNING), "blocked {id}");
-    }
     // Every check drawn: the failed check itself is red.
     app(&mut harness).debug_draw_checks();
     settle(&mut harness);
@@ -316,6 +334,10 @@ fn lay09_criterion_8_fit_shows_every_card() {
     ] {
         let (_project, mut harness) = open(&source, size);
         simulate(&mut harness);
+        // The board as tall as the window lets it be: Run results folded to
+        // its bar. Open, it leaves `shop-50` 115 px, which needs 0.026.
+        harness.get_by_label("Run results").click();
+        settle(&mut harness);
         harness.get_by_label("Fit the view").click();
         settle(&mut harness);
         harness.step();
