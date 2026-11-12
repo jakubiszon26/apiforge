@@ -74,6 +74,9 @@ pub struct Unresolved {
     /// The pasted block whose input held the reference.
     pub node_id: String,
     pub input: String,
+    /// The slot inside the input that held the reference; empty when it was
+    /// the whole input.
+    pub path: Vec<String>,
     pub missing: Missing,
 }
 
@@ -216,7 +219,7 @@ pub fn paste_selection(
         let mut inputs = copy.inputs.clone();
         for (input, binding) in &copy.inputs {
             let mut missing = Vec::new();
-            let remapped = binding.map_leaves(&mut |leaf, _| match leaf {
+            let remapped = binding.map_leaves(&mut |leaf, slot| match leaf {
                 Binding::Reference {
                     node_id,
                     port,
@@ -229,7 +232,7 @@ pub fn paste_selection(
                     match source {
                         Ok(source) => Some(Binding::reference(source, port, path)),
                         Err(lost) => {
-                            missing.push(lost);
+                            missing.push((lost, slot.to_vec()));
                             None
                         }
                     }
@@ -239,7 +242,7 @@ pub fn paste_selection(
                         .parameters
                         .is_some_and(|parameters| !parameters.contains(name)) =>
                 {
-                    missing.push(Missing::Input(name.clone()));
+                    missing.push((Missing::Input(name.clone()), slot.to_vec()));
                     None
                 }
                 other => Some(other.clone()),
@@ -252,9 +255,10 @@ pub fn paste_selection(
                     inputs.shift_remove(input);
                 }
             }
-            unresolved.extend(missing.into_iter().map(|missing| Unresolved {
+            unresolved.extend(missing.into_iter().map(|(missing, path)| Unresolved {
                 node_id: copy.id.clone(),
                 input: input.clone(),
+                path,
                 missing,
             }));
         }
@@ -520,6 +524,7 @@ mod tests {
             [Unresolved {
                 node_id: copied_target.id.clone(),
                 input: "body".into(),
+                path: vec!["right".into()],
                 missing: Missing::Step(external.handle.clone()),
             }]
         );

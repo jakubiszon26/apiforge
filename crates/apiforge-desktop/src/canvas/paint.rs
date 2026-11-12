@@ -748,6 +748,9 @@ pub fn card(
                 RowValue::Source(text) => (text.clone(), theme::LINK, false),
                 RowValue::Summary(text) => (text.clone(), theme::TEXT, false),
                 RowValue::Missing => ("Value missing".into(), theme::DANGER, false),
+                RowValue::MissingStep(step) => {
+                    (format!("Missing step “{step}”"), theme::DANGER, false)
+                }
                 RowValue::Optional => ("Optional".into(), theme::MUTED, false),
             };
             clipped.rect_filled(field, 5.0 * z, theme::FIELD);
@@ -760,10 +763,11 @@ pub fn card(
                 );
             }
             if !text.is_empty() {
-                label(
+                drawn.label(
                     &clipped,
                     field.shrink2(vec2(8.0 * z, 2.0 * z)),
                     &text,
+                    TextKind::Line,
                     FontId::proportional(line(13.0)),
                     text_color,
                     egui::Align::Min,
@@ -1089,7 +1093,9 @@ pub fn compact_card(
                 Cow::Borrowed(text.as_str()),
                 FontId::proportional(small),
                 match card.inputs[index].value {
-                    RowValue::Missing => theme::DANGER,
+                    // A slot of the input reads a missing step (UX-39).
+                    _ if row.missing => theme::DANGER,
+                    RowValue::Missing | RowValue::MissingStep(_) => theme::DANGER,
                     RowValue::Source(_) => theme::LINK,
                     _ => theme::TEXT,
                 },

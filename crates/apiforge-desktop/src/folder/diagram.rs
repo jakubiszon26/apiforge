@@ -529,6 +529,19 @@ impl FolderApp {
             document_id: document_id.to_owned(),
             ids: paste.edit.selection.clone().unwrap_or_default(),
             summary: missing_summary(&paste.edit.graph, &paste.unresolved),
+            missing: paste
+                .unresolved
+                .iter()
+                .filter_map(|item| match &item.missing {
+                    edit::Missing::Step(step) => Some(canvas::MissingStep {
+                        node_id: item.node_id.clone(),
+                        input: item.input.clone(),
+                        path: item.path.clone(),
+                        step: step.clone(),
+                    }),
+                    edit::Missing::Input(_) => None,
+                })
+                .collect(),
         });
         self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
     }
@@ -545,6 +558,7 @@ impl FolderApp {
         };
         if let Some(canvas) = self.canvases.get_mut(document_id) {
             canvas.show_pasted(pasted.ids);
+            canvas.mark_missing_steps(pasted.missing);
         }
         if let Some(summary) = pasted.summary {
             self.notify(summary, false);

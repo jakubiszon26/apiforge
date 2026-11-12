@@ -271,6 +271,9 @@ pub enum RowValue {
     /// A literal shown but edited in the inspector.
     Summary(String),
     Missing,
+    /// An input a paste left unconnected because the step it read, named
+    /// here, is missing from the board (UX-39): session state, never written.
+    MissingStep(String),
     Optional,
 }
 
@@ -524,6 +527,41 @@ impl Card {
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             compact: None,
+        }
+    }
+
+    /// Marks the slot `path` of the input `input` (empty for the whole
+    /// input) as reading the missing step `step` (UX-39): that row's value on
+    /// a full card; on a compact card the input's line, or a value's or a
+    /// check's one line, where the plain line was. A slot that has a value
+    /// keeps it.
+    pub fn mark_missing_step(&mut self, input: &str, path: &[String], step: &str) {
+        let slot = self.inputs.iter().position(|row| {
+            row.name == input
+                && row.path == path
+                && matches!(row.value, RowValue::Missing | RowValue::Optional)
+        });
+        if let Some(index) = slot {
+            self.inputs[index].value = RowValue::MissingStep(step.to_owned());
+        }
+        let label = slot
+            .or_else(|| self.inputs.iter().position(|row| row.name == input))
+            .map_or(input, |index| self.inputs[index].label.as_str());
+        let text = format!("{label} · Missing step “{step}”");
+        let whole = self
+            .inputs
+            .iter()
+            .position(|row| row.name == input && row.path.is_empty());
+        if let Some(compact) = &mut self.compact
+            && let Some(line) = compact.rows.iter_mut().find(|line| match line.role {
+                CompactRole::Input(index) => Some(index) == whole,
+                CompactRole::Line => true,
+                _ => false,
+            })
+        {
+            line.text.clone_from(&text);
+            line.full_text = text;
+            line.missing = true;
         }
     }
 
