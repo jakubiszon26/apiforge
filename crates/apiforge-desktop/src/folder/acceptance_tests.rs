@@ -23,6 +23,8 @@ mod issue288;
 mod issue324;
 #[path = "acceptance_tests/ktlo33.rs"]
 mod ktlo33;
+#[path = "acceptance_tests/lay11.rs"]
+mod lay11;
 #[path = "acceptance_tests/lay21.rs"]
 mod lay21;
 
