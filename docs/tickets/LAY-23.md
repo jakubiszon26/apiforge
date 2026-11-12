@@ -1,14 +1,12 @@
 # LAY-23: A value many steps read draws one wire per reader — thin the board's lines
 
 - Size: M · Owner review: 30 min · Risk: `visible UI`, `default`, `removal`
-  (wires not drawn by default) — for the recommended first stage, the
-  *Wires* setting with chips; the stages after it are in the
-  [estimate](#estimate)
-- State: Analysis · **decision open** (issue #333, `decision-needed`): the
-  owner chooses the direction and the rule in a quiz
-  ([questions](#owner-decisions-open)) · LAY sprint, proposed for part A,
-  before the checkpoint (#296)
-- Analysis model: Fable · Implementation model: —
+  (wires not drawn by default) — stage 1, the *Wires* setting with chips;
+  the stages after it are in [Later stages](#later-stages)
+- State: Decided 2026-11-12 ([decisions](#owner-decisions-2026-11-12)) ·
+  stage 1 in implementation · LAY sprint, part A, before the checkpoint
+  (#296)
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -60,7 +58,7 @@ by nine steps and `itemId` read by six, ten `@after` rails) and on
 
 - New (A): the reader chip, the reader count at the source's port, the wire
   on hover and on selection; a *Wires* setting in the view menu
-  (question 1).
+  (decision 1).
 - Changed (A): what the board draws for a port read by three or more steps.
 - Removed or hidden (A): the long wires of such a port, by default; every
   one is one hover or one click away, and named at its reader.
@@ -68,7 +66,7 @@ by nine steps and `itemId` read by six, ten `@after` rails) and on
   `diagram.json` are untouched; proxy chips the person placed stay as they
   are.
 - Default behaviour that changes (A): chips are on for a new and an
-  existing installation.
+  existing installation (decision 2).
 
 ## Mock-up
 
@@ -86,7 +84,8 @@ each opened and checked, with a card in view asserted by the view:
 | D variables and proxies | [Fit](../qa/2026-11-12/LAY-23/lay23-fan-out-d-proxies-fit.png), [60 %](../qa/2026-11-12/LAY-23/lay23-fan-out-d-proxies-60.png) | [Fit, rewritten with variables](../qa/2026-11-12/LAY-23/lay23-shop-30-vars-d-proxies-fit.png) |
 
 The hover is not in a capture (a review image has no pointer); criterion 3
-names the gesture and the state. Not approved yet: the decision is open.
+names the gesture and the state. The owner chose A, as the first entry of
+the *Wires* setting, on these captures (2026-11-12).
 
 ## Measured
 
@@ -165,7 +164,7 @@ they were decided drawn (Q3 = A) and are not this ticket.
 
 ## The threshold rule
 
-Recommended: **a data wire becomes a chip when its output port is read by
+Decided: **a data wire becomes a chip when its output port is read by
 three or more steps and its reader is not beside the source** (the next
 column of the same row, or the source's own column). The count is taken on
 the document, not on what is drawn, so the *Checks* toggle never turns a
@@ -184,7 +183,9 @@ Three is the knee: the fewest wires hidden that still clears the corridors
 (two hides a third more for three crossings; four leaves `cart`'s three
 long wires and doubles the crossings). On `fan-out` every variant gives the
 same board, because both ports are far above any threshold. Keeping the
-neighbours' wires costs no crossing. The variants are question 2.
+neighbours' wires costs no crossing. Decided: three or more readers, a
+reader in the next column (or the source's own column) keeps its wire
+(decision 3).
 
 ## One setting for all three (the owner's wish of 2026-11-12)
 
@@ -221,20 +222,10 @@ code and the measurements say:
   criteria 4 and 11, LAY-11, LAY-02) say which mode they run in; each mode
   has its own criteria (A ten, C three more, B about six and the router's
   guarantees).
-- **The default** is the owner's (question 2).
+- **The default** is *Chips* (decision 2).
 
-| Stage | What | Size · minutes · risk |
-| --- | --- | --- |
-| 1 (LAY-23) | The *Wires* setting in the view menu, an application preference: *All wires* and *Chips for shared values* (A); the `fan-out` fixture; the criteria below | M · 30 · `visible UI`, `default`, `removal` |
-| 2 (LAY-23b) | A third entry, *On selection* (C), drawn with a chip at every input | S · 10 · `visible UI` |
-| checkpoint | The owner uses the three on `shop-30` and on his own board; tasks 3 and 7 timed in each | — |
-| 3, only if still wanted | *Bus* (B): the router routes a net (ADR 0006 amended), then the board's mode | `L`, split: M · 20 and M · 20 |
-
-All four modes together are four tickets and about 80 review minutes; A
-with C is two tickets and 40. The recommendation is stages 1 and 2 now and
-B not built unless the checkpoint asks for it: B is the dearest mode and
-the one the measurements favour least (crossings 50 → 43 and 76 → 51,
-against 9 and 5 for A), and the setting stays open for it.
+Decided (decision 1): *All wires*, *Chips* and *On selection*, in stages;
+no bus for now. See [Later stages](#later-stages).
 
 ## Why proxy chips are not the default today
 
@@ -287,7 +278,7 @@ enough for the gap, written nowhere, with the proxy's own behaviour (the
 wire from the nearest place the value is shown, the ring on its readers).
 The proxies a person places stay, and win: a reader beside a placed proxy
 keeps that wire. If the owner prefers real, movable chips for variables,
-that is D, below, and question 6.
+that is D, below; decided as LAY-25 (decision 6).
 
 ## D. Values saved in variables (the owner's idea of 2026-11-12)
 
@@ -368,16 +359,18 @@ pairs (today: `fan-out` 31 · 50 · 76, `shop-30` 42 · 76 · 54).
 
 | Idea | `fan-out` | `shop-30` | Verdict |
 | --- | --- | --- | --- |
-| **No rail into the next step.** An `@after` whose target is the next step of the spine (ten of ten on `fan-out`: every one waits for the previous step's check) is not drawn as a rail; the card says `after quantity_ok` | 21 · **10** · 71 | 39 · 67 · 58 | The largest gain after A on the owner's shape: forty of the fifty crossings are a rail crossing the fan. Changes Q3 = A of 2026-11-05, so it is the owner's (question 4) and needs its own mock-up of the mark |
+| **No rail into the next step.** An `@after` whose target is the next step of the spine (ten of ten on `fan-out`: every one waits for the previous step's check) is not drawn as a rail; the card says `after quantity_ok` | 21 · **10** · 71 | 39 · 67 · 58 | The largest gain after A on the owner's shape: forty of the fifty crossings are a rail crossing the fan. Changes Q3 = A of 2026-11-05, so it is the owner's (decision 4: LAY-24) and needs its own mock-up of the mark |
 | The same with A | 9 · **1** · 3 ([capture](../qa/2026-11-12/LAY-23/lay23-fan-out-a-chips-no-next-rails-fit.png)) | 23 · 4 · 14 | The board the two give together |
 | No `@after` that the data already implies | 30 · 49 · 76 | 42 · 76 · 54 | One wire on `fan-out`, none on `shop-30`: people write `@after` on a check, which no data implies. Not worth a rule |
 | One wire for several wires from one port into one card | 31 · 50 · 76 | 40 · 76 · 42 | Small and only on `shop-30` (coincident 54 → 42); LAY-03's nudge covers the same pairs. Not worth a ticket |
-| A threshold by distance instead of by count (every wire past the next column a chip) | 19 · 9 · 5 | 20 · 1 · 10 | Six more wires hidden on `shop-30` for four crossings fewer; a variant of question 3 |
+| A threshold by distance instead of by count (every wire past the next column a chip) | 19 · 9 · 5 | 20 · 1 · 10 | Six more wires hidden on `shop-30` for four crossings fewer; a variant not chosen (decision 3) |
 | Collapsing checks | — | — | Done (LAY-11): 57 → 42 lines on `shop-30` |
 | Bundling wires that travel together | — | — | It is B drawn by the router; and the opposite of LAY-03, which separates them |
 | Dimming long wires instead of hiding them | same lines | same lines | Costs a line of paint, removes no crossing; not measured as a gain |
 
 ## LAY-03, LAY-04 and LAY-05
+
+Decided as recommended below (decision 5).
 
 LAY-04's pull request (#332, paused) measured what a routing change does
 to a real board: on `shop-30`, checks collapsed, crossings 76 → 73,
@@ -402,7 +395,7 @@ wires, not their routes, so:
   drawn, 112 today — is met by chips alone (23). What is left are wires
   leaving one port together below the threshold, which is what a nudge is
   for. Recommended: the cap moves to the default mode and tightens to 30;
-  in *All wires* the number is reported, not asserted (question 5,
+  in *All wires* the number is reported, not asserted (decision 5,
   because the cap was the owner's).
 
 ## Interplay
@@ -432,7 +425,7 @@ wires, not their routes, so:
 
 ## Acceptance criteria
 
-For option A. Tests in
+Stage 1, option A. Tests in
 `crates/apiforge-desktop/src/folder/acceptance_tests/lay23.rs`, on
 `fan-out.afs` and `shop-30.afs`, tidied, at 1600 × 1000 and 960 × 540.
 
@@ -471,8 +464,9 @@ For option A. Tests in
    each reference board with chips on and off. Test:
    `lay23_criterion_7_fewer_crossings_per_line`.
 8. The view menu has *Wires* with *All wires* and *Chips for shared
-   values*, kept in the application preferences, the default as question 2
-   says; *All wires* draws exactly the wires the board draws today;
+   values*, kept in the application preferences, *Chips for shared values*
+   the default for a new and an existing installation (decision 2); *All
+   wires* draws exactly the wires the board draws today;
    switching moves no card and no camera, and Tidy up gives the same
    positions in either. Test:
    `lay23_criterion_8_the_setting_moves_nothing_and_restores_every_wire`.
@@ -482,67 +476,66 @@ For option A. Tests in
    the rule is applied when it is dropped. Test:
    `lay23_criterion_9_editing_follows_the_rule`.
 10. The review view `review_lay23` renders both scenarios at Fit and 60 %,
-    with a reader and with the source selected, and asserts a card in
-    view; the captures are opened by the agent that takes them
+    with a reader selected and in *All wires*, and at 960 × 540, and
+    asserts a card in view; the captures are opened by the agent that takes them
     ([lay.md 11.4](../sprints/lay.md#114-changes-to-tickets)).
 
-## Owner decisions (open)
+## Owner decisions (2026-11-12)
 
-The recommended option is first.
+Two quiz rounds on the analysis above; the recommended option every time
+(issue #333).
 
-1. **What is built.** The *Wires* setting with *All wires*, *Chips* (A)
-   and *On selection* (C); the bus not built unless the checkpoint asks
-   for it · all four, the bus included (two more tickets, the router
-   changes) · chips only, as the board's rule, with no setting · nothing:
-   the wires stay.
-2. **The default.** *Chips for shared values* · *All wires*, as today,
-   chips for whoever switches them on · *On selection*.
-3. **Which wires become chips.** Three or more readers, neighbours keep
-   their wire · three or more readers, every reader a chip · every wire
-   past the next column, whatever the count · two or more readers.
-4. **The `@after` rail into the next step.** A separate ticket (LAY-24)
-   mocks up a mark on the card (`after quantity_ok`) in place of the rail,
-   and the owner decides on the capture · the rails stay drawn, as decided
-   on 2026-11-05 (Q3 = A) · the rail is hidden until its step is selected.
-5. **LAY-03, LAY-04, LAY-05.** As recommended above: LAY-05 dropped,
-   LAY-04 paused until the checkpoint, LAY-03 kept after stage 1 with its
-   cap on the default mode · all three stay as planned · all three
-   dropped.
-6. **Saving values in variables (D).** After stage 1: an action *Save
-   as variable* with a suggestion at three readers, the chips drawn by
-   the board (A), a paragraph in the guide · the action only, no
-   suggestion · D instead of A: the action, and Tidy up places and keeps
-   real proxy chips beside the readers, saved in `diagram.json` · not
-   now: the style stays the person's choice, with no action.
-7. **When.** Stage 1 before the checkpoint, so that the owner's scenario
-   is judged on the thinned board · in part B, with LAY-14.
+1. **Scope.** A *Wires* setting with *All wires*, *Chips* (A) and *On
+   selection* (C); *On selection* is stage 2 (LAY-23b). No bus (B) for now.
+2. **Default.** *Chips* for a new installation, and for an existing one
+   whose preferences do not name the setting.
+3. **Threshold.** A value read by three or more steps becomes chips; a
+   reader in the next column (or the source's own column) keeps its wire.
+4. **The `@after` rail into the next step.** A mark on the card
+   (`after quantity_ok`) is mocked up as LAY-24 (#334) and decided on the
+   capture; this ticket leaves the rails as they are.
+5. **LAY-03, LAY-04, LAY-05.** LAY-05 dropped; LAY-04 (PR #332) paused to
+   the checkpoint and judged on the chips board; LAY-03 stays, small, after
+   stage 1, its coincident-pairs cap measured in the default mode at 30.
+6. **Values saved in variables (D).** After stage 1, as LAY-25 (#335):
+   *Save as variable* on an output with a suggestion at three readers, the
+   chips drawn by A, a paragraph in the guide; never automatic.
+7. **When.** Stage 1 before the checkpoint (#296); then LAY-07 and
+   LAY-24's mock-up.
 
-For veto, the planning model's parameters: the chip says the variable's
-name, or the step and the last field (`login.token`), the whole path in
-the statement on hover; three as the threshold if question 3 keeps a count;
-the chip is quieter than a proxy chip (grey outline, no fill) and takes the
-accent only while its wire is drawn.
+The planning model's parameters stand: the chip says the variable's name,
+or the step and the last field (`login.token`), the whole path in the
+statement on hover; the chip is quieter than a proxy chip (grey outline, no
+fill) and takes the accent only while its wire is drawn.
+
+## Later stages
+
+- **LAY-23b, *On selection*** (C), drawn with a chip at every input: S · 10
+  · `visible UI`.
+- **Checkpoint** (#296): the owner uses the modes on `shop-30` and on his
+  own board; tasks 3 and 7 timed in each.
+- **LAY-24** (#334): the mark for an `@after` into the next step, after its
+  mock-up: S–M · 20 · `visible UI`, `removal`.
+- **LAY-25** (#335): *Save as variable* and the suggestion at three
+  readers: S–M · 20, the suggestion S · 10.
+- **Bus** (B): not built unless the checkpoint asks for it; the router
+  routes a net (ADR 0006 amended), then the board's mode, `L`.
 
 ## Estimate
 
-- **Stage 1 (this ticket): M · 30 min · `visible UI`, `default`,
-  `removal`.** Complexity: one crate, the canvas only (the wire set before
-  routing, two painters, one hover target, one preference); no state
-  machine. Uncertainty: low, the mock-up is the rule in 300 lines.
-  Regression potential: real and bounded — the acceptance tests of LAY-06
-  and LAY-11 read the wires drawn on `shop-30` and name their mode;
-  criterion 8 holds the old board. Verification: window tests and four
-  review captures.
-- Stage 2 (*On selection*): S · 10. Stage 3 (*Bus*): `L`, split into the
-  router (M · 20, ADR 0006) and the board (M · 20). LAY-24 (the mark for
-  an `@after` into the next step), if question 4 asks for it: S–M · 20 ·
-  `visible UI`, `removal`, after its mock-up. LAY-25 (*Save as variable*),
-  if question 6 asks for it: S–M · 20, the suggestion S · 10.
+**Stage 1 (this ticket): M · 30 min · `visible UI`, `default`,
+`removal`.** Complexity: one crate, the canvas only (the wire set before
+routing, two painters, one hover target, one preference); no state
+machine. Uncertainty: low, the mock-up is the rule in 300 lines.
+Regression potential: real and bounded — the acceptance tests of LAY-06
+and LAY-11 read the wires drawn on `shop-30` and name their mode;
+criterion 8 holds the old board. Verification: window tests and the
+review captures.
 
 ## Not in scope
 
-*On selection* (stage 2) and the bus (stage 3); the `@after` rails
-(question 4, LAY-24); LAY-14's
+*On selection* (LAY-23b) and the bus; the `@after` rails
+(decision 4, LAY-24); LAY-14's
 pill, pin and dimming; LAY-18's line inside the request card; a jump from
 a chip to its source (LAY-15); creating proxy chips in the document;
 parameters and environment values, which are drawn only where a proxy is
