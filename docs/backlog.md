@@ -363,6 +363,7 @@ Exit criteria:
 | [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
 | [#311](https://github.com/jakubiszon26/apiforge/issues/311) | LAY-21 Every other card is compact too; [ticket](tickets/LAY-21.md); from LAY-06, which becomes M · 20 | S–M · 20 · `visible UI`, `default` | part A |
 | [#312](https://github.com/jakubiszon26/apiforge/issues/312) | LAY-22 Runner and core groundwork: the started step, the not-run cause, relations; [ticket](tickets/LAY-22.md) | S–M · 10 | part A |
+| [#333](https://github.com/jakubiszon26/apiforge/issues/333) | LAY-23 A value many steps read: thin the board's lines; [ticket](tickets/LAY-23.md); analysis done, decision open | M · 30 · `visible UI`, `default`, `removal` | part A (proposed) |
 
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
 keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
