@@ -684,6 +684,8 @@ impl App {
     /// Lays out the selection, or the whole board when nothing is selected, in
     /// one undo step.
     fn tidy_up(&mut self, selection: &[String]) {
+        // Tidy up ends with the tidied board in view (LAY-06).
+        self.canvas.fit_after_tidy_up();
         if let Some(graph) = self.with_board(|board| board.tidy_up(selection)) {
             self.apply_graph(graph);
         }

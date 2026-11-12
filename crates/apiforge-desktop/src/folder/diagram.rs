@@ -337,7 +337,12 @@ impl FolderApp {
                 None
             }
             Command::Move(positions) => Some(Ok(board.moved(positions).into())),
-            Command::TidyUp(selection) => board.tidy_up(&selection).map(|graph| Ok(graph.into())),
+            Command::TidyUp(selection) => {
+                if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.fit_after_tidy_up();
+                }
+                board.tidy_up(&selection).map(|graph| Ok(graph.into()))
+            }
             Command::SetWireStyle(style) => {
                 self.preferences.wire_style = style;
                 let preferences = self.preferences.clone();

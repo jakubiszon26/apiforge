@@ -238,6 +238,43 @@ pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str
     painter.galley(rect.min + vec2(3.0, 1.0), galley, theme::MUTED);
 }
 
+/// A continuation mark (LAY-06): a muted pill right of the last card of a
+/// row, naming the step the engine reaches next. Its text keeps a legible
+/// size at any zoom, so at a small zoom the pill grows past the mark's box
+/// on the board, into the free space right of the row, up to 160 px.
+pub fn continuation_mark(painter: &Painter, mark: &super::shape::Mark, camera: Camera) {
+    /// The widest the pill grows on screen, and the space around its text.
+    const WIDEST: f32 = 160.0;
+    const PADDING: f32 = 6.0;
+    let rect = camera.rect(mark.rect);
+    let font = FontId::proportional((12.0 * camera.zoom).max(9.0));
+    let mut job = egui::text::LayoutJob::simple_singleline(mark.text.clone(), font, theme::MUTED);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(WIDEST - 2.0 * PADDING);
+    let galley = painter.layout_job(job);
+    let pill = Rect::from_min_size(
+        rect.min,
+        vec2(
+            rect.width().max(galley.size().x + 2.0 * PADDING),
+            rect.height().max(galley.size().y + 4.0),
+        ),
+    );
+    painter.rect(
+        pill,
+        pill.height() / 2.0,
+        theme::WHITE,
+        Stroke::new(1.0, theme::BORDER),
+        StrokeKind::Inside,
+    );
+    painter.galley(
+        pos2(
+            pill.left() + PADDING,
+            pill.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        theme::MUTED,
+    );
+}
+
 /// The border of a step one of whose checks failed: red, 2 px at every
 /// zoom, while the band keeps the step's own result (Q15 = A). On a
 /// selected card it runs inside the selection's border, so both show.

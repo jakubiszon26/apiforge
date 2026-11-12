@@ -107,7 +107,8 @@ impl Board<'_> {
         // Satellites hang foldable checks off their subjects (LAY-11) only
         // when the whole board is laid out; the chips then follow as below.
         let mut tidied = if self.satellites && selection.is_empty() {
-            self.tidy_with_satellites(&staying.proxies)
+            self.tidy_in_rows()
+                .unwrap_or_else(|| self.tidy_with_satellites(&staying.proxies))
         } else {
             let blocks: Vec<apiforge_layout::Block> = self
                 .graph
@@ -156,6 +157,36 @@ impl Board<'_> {
             self.density,
             |id| moved.contains(id),
         );
+        Some(tidied)
+    }
+
+    /// The whole board in shape D (LAY-06): the spine in the engine's order
+    /// in rows of five columns, every other block hung under the spine step
+    /// it reads last ([`canvas::shape::plan`]). Folded or not, the checks get
+    /// the same places, so showing them needs no second Tidy up. `None` for
+    /// a board without a spine step.
+    fn tidy_in_rows(&self) -> Option<Graph> {
+        let plan = canvas::shape::plan(self.graph, self.sibling)?;
+        let blocks: Vec<apiforge_layout::Block> = self
+            .graph
+            .nodes
+            .iter()
+            .map(|node| self.card_block(node))
+            .collect();
+        let (placed, _) = apiforge_layout::hang(&apiforge_layout::Hanging {
+            blocks: &blocks,
+            spine: &plan.spine,
+            satellites: &plan.satellites,
+            rows: apiforge_layout::Rows::default(),
+        });
+        let mut tidied = self.graph.clone();
+        for (node, position) in tidied.nodes.iter_mut().zip(placed) {
+            node.position = Position {
+                x: f64::from(position.x),
+                y: f64::from(position.y),
+            };
+            node.auto_placed = true;
+        }
         Some(tidied)
     }
 
