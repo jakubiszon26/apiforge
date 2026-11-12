@@ -1251,6 +1251,35 @@ mod tests {
         assert_eq!(routes[0].points.last(), Some(&Point::new(140.0, 400.0)));
     }
 
+    /// LAY-06: an ordering wire between the tops of two cards of a row runs
+    /// on the rail above them, and a data wire dropping into the row from
+    /// above crosses it once, where it comes down, not twice under it.
+    #[test]
+    fn a_wire_between_two_tops_runs_on_the_rail_and_is_crossed_once() {
+        let cards = [card(0.0, 300.0), card(400.0, 300.0), card(800.0, 0.0)];
+        let wires = [
+            Wire::new(
+                Port::new(2, Side::Right, 60.0),
+                Port::new(1, Side::Left, 60.0),
+            ),
+            Wire::new(
+                Port::new(0, Side::Top, 140.0),
+                Port::new(1, Side::Top, 140.0),
+            ),
+        ];
+        let routes = route(&cards, &wires, &Routing::default());
+        assert_eq!(violations(&routes, &wires, &cards), []);
+        let rail = &routes[1];
+        assert!(
+            rail.points.iter().all(|point| point.y <= 300.0),
+            "the rail stays above the row: {:?}",
+            rail.points
+        );
+        assert_eq!(rail.bends(), 2, "up, along and down: {:?}", rail.points);
+        let crossings: usize = routes.iter().map(|route| route.bridges.len()).sum();
+        assert_eq!(crossings, 1, "{routes:?}");
+    }
+
     #[test]
     fn a_wire_backwards_through_a_wall_of_cards_still_avoids_them() {
         // The target is left of the source, with a column of cards between them.

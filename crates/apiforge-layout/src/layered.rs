@@ -953,6 +953,119 @@ mod tests {
         assert_eq!(layers_of(&graph), [0, 1]);
     }
 
+    /// A spine of `count` 280 px blocks of `height`, in order, at the origin.
+    fn spine_blocks(count: usize, height: f32) -> Vec<Block> {
+        (0..count)
+            .map(|_| Block::new(Size::new(280.0, height), Point::default()))
+            .collect()
+    }
+
+    /// LAY-06 criterion 1: the spine runs left to right in the order given
+    /// and wraps after the columns the row width holds, five at the default.
+    #[test]
+    fn lay06_the_spine_wraps_after_the_row_width() {
+        let blocks = spine_blocks(12, 100.0);
+        let spine: Vec<usize> = (0..12).rev().collect();
+        let rows = Rows::default();
+        assert_eq!(rows.columns(), 5);
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            rows,
+        });
+        assert_eq!(laid.len(), 3);
+        assert_eq!(laid[0].spine, [11, 10, 9, 8, 7]);
+        for (place, &block) in spine.iter().enumerate() {
+            let (row, column) = (place / 5, place % 5);
+            assert_eq!(positions[block].x, column as f32 * 376.0, "block {block}");
+            assert_eq!(positions[block].y, laid[row].top, "block {block}");
+        }
+        // The row width is a parameter: three columns fit 1100 px.
+        let narrow = Rows {
+            width: 1100.0,
+            ..Rows::default()
+        };
+        assert_eq!(narrow.columns(), 3);
+        let (_, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            rows: narrow,
+        });
+        assert_eq!(laid.len(), 4);
+    }
+
+    /// LAY-06 criteria 1, 2 and 13: satellites stack under their spine
+    /// block in the order given, and a row is as tall as its tallest stack.
+    #[test]
+    fn lay06_satellites_stack_and_a_row_is_its_tallest_stack() {
+        let mut blocks = spine_blocks(7, 120.0);
+        blocks[5].size.height = 70.0;
+        blocks[6].size.height = 96.0;
+        let spine = [0, 1, 2, 3, 4];
+        let satellites = [(6, 1), (5, 1)];
+        let rows = Rows {
+            width: 3.0 * 280.0 + 2.0 * 96.0,
+            ..Rows::default()
+        };
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &satellites,
+            rows,
+        });
+        assert_eq!(positions[6].x, positions[1].x);
+        assert_eq!(positions[6].y, 120.0 + rows.stack_gap);
+        assert_eq!(positions[5].y, positions[6].y + 96.0 + rows.stack_gap);
+        let tallest = 120.0 + rows.stack_gap + 96.0 + rows.stack_gap + 70.0;
+        assert_eq!(laid[0].height, tallest);
+        assert_eq!(laid[1].top, tallest + rows.row_gap);
+        assert_eq!(laid[1].height, 120.0, "a row without satellites");
+        assert!(!any_overlap(&positions, &blocks));
+    }
+
+    /// LAY-06 criterion 6, and Tidy up's anchor: the same input gives the
+    /// same board, kept where its top-left corner was.
+    #[test]
+    fn lay06_hanging_is_deterministic_and_stays_in_place() {
+        let mut blocks = spine_blocks(8, 120.0);
+        for (index, block) in blocks.iter_mut().enumerate() {
+            block.position = Point::new(900.0 + index as f32 * 3.0, 400.0 + index as f32);
+        }
+        let spine = [0, 1, 2, 3, 4, 5];
+        let satellites = [(7, 0), (6, 5)];
+        let hanging = Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &satellites,
+            rows: Rows::default(),
+        };
+        let (first, _) = hang(&hanging);
+        assert_eq!(first, hang(&hanging).0);
+        let bounds = Rect::bounding(
+            first
+                .iter()
+                .zip(&blocks)
+                .map(|(position, block)| Rect::from_size(*position, block.size)),
+        )
+        .unwrap();
+        assert_eq!(bounds.min, Point::new(900.0, 400.0));
+        // An empty spine lays out nothing.
+        let (kept, rows) = hang(&Hanging {
+            spine: &[],
+            ..hanging
+        });
+        assert!(rows.is_empty());
+        assert_eq!(
+            kept,
+            blocks
+                .iter()
+                .map(|block| block.position)
+                .collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn a_wide_card_decides_the_gap_to_the_next_layer() {
         let mut blocks = blocks(3);

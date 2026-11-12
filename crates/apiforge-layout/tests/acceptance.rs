@@ -149,12 +149,17 @@ fn lay01_criterion_4_the_guide_names_the_command_beside_the_benchmark() {
     );
 }
 
+/// Since LAY-06 each scenario is measured as the desktop tidies it, at the
+/// compact and the full density, with its checks collapsed and expanded.
 #[test]
 fn lay01_criterion_6_the_fixtures_are_measured() {
     let rows = table(report(), "scenario");
-    let names: Vec<&str> = rows.iter().map(|row| row["scenario"].as_str()).collect();
+    let mut names: Vec<&str> = rows.iter().map(|row| row["scenario"].as_str()).collect();
+    names.dedup();
     assert_eq!(names, ["order-flow", "shop-30", "shop-50"]);
-    let steps: Vec<f64> = rows.iter().map(|row| number(row, "steps")).collect();
+    assert_eq!(rows.len(), 12, "two densities and two states each");
+    let mut steps: Vec<f64> = rows.iter().map(|row| number(row, "steps")).collect();
+    steps.dedup();
     assert_eq!(steps, [14.0, 30.0, 56.0]);
     for row in &rows {
         for column in [
@@ -164,7 +169,6 @@ fn lay01_criterion_6_the_fixtures_are_measured() {
             "straight",
             "close",
             "coincident",
-            "long",
             "incomplete",
             "card_hits",
             "chip_hits",
