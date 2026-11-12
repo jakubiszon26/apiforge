@@ -43,6 +43,9 @@ struct Stored {
     /// Absent from a file written before LAY-16, which reads as on.
     #[serde(default = "on")]
     compact_cards: bool,
+    /// Absent from a file written before LAY-11, which reads as collapsed.
+    #[serde(default = "on")]
+    checks_collapsed: bool,
 }
 
 fn on() -> bool {
@@ -56,6 +59,7 @@ pub enum Preference {
     Bridges,
     CodePanel,
     CompactCards,
+    ChecksCollapsed,
 }
 
 /// The preferences of this session.
@@ -68,6 +72,9 @@ pub struct Preferences {
     pub code_panel: bool,
     /// Whether a request card shows only what it uses (LAY-16).
     pub compact_cards: bool,
+    /// Whether check cards with a subject are folded into its footer
+    /// (LAY-11); on for a new install (Q4 = A).
+    pub checks_collapsed: bool,
     /// Where to write them, or `None` when the system has no configuration
     /// directory and preferences last only for this session.
     path: Option<PathBuf>,
@@ -80,6 +87,7 @@ impl Default for Preferences {
             bridges: true,
             code_panel: false,
             compact_cards: true,
+            checks_collapsed: true,
             path: default_path(),
         }
     }
@@ -106,6 +114,7 @@ impl Preferences {
             preferences.bridges = stored.bridges;
             preferences.code_panel = stored.code_panel;
             preferences.compact_cards = stored.compact_cards;
+            preferences.checks_collapsed = stored.checks_collapsed;
         }
         preferences
     }
@@ -135,6 +144,7 @@ impl Preferences {
             Preference::Bridges => stored.bridges = self.bridges,
             Preference::CodePanel => stored.code_panel = self.code_panel,
             Preference::CompactCards => stored.compact_cards = self.compact_cards,
+            Preference::ChecksCollapsed => stored.checks_collapsed = self.checks_collapsed,
         }
         let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
             return;
@@ -152,6 +162,7 @@ impl Preferences {
             bridges: self.bridges,
             code_panel: self.code_panel,
             compact_cards: self.compact_cards,
+            checks_collapsed: self.checks_collapsed,
         }
     }
 }
@@ -239,6 +250,33 @@ mod tests {
         let earlier = Preferences::at(Some(path));
         assert!(!earlier.bridges, "an earlier file is still read");
         assert!(earlier.compact_cards);
+    }
+
+    /// LAY-11 criterion 3: *Collapse checks* is on by default and survives a
+    /// restart; a file written before it existed loads with checks collapsed.
+    #[test]
+    fn checks_collapsed_is_remembered_and_on_by_default() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        assert!(Preferences::at(Some(path.clone())).checks_collapsed);
+        let mut preferences = Preferences::at(Some(path.clone()));
+        preferences.checks_collapsed = false;
+        preferences.save(Preference::ChecksCollapsed);
+        let reloaded = Preferences::at(Some(path.clone()));
+        assert!(!reloaded.checks_collapsed);
+        assert!(
+            reloaded.compact_cards,
+            "only the changed preference is written"
+        );
+
+        std::fs::write(
+            &path,
+            br#"{"version": 1, "wireStyle": "orthogonal", "bridges": true, "codePanel": false, "compactCards": false}"#,
+        )
+        .unwrap();
+        let earlier = Preferences::at(Some(path));
+        assert!(!earlier.compact_cards, "an earlier file is still read");
+        assert!(earlier.checks_collapsed);
     }
 
     /// A window that started before another changed *Compact cards* keeps that

@@ -2250,6 +2250,8 @@ impl App {
                 parameters: &parameters,
                 run,
                 step,
+                // The workspace window shows every check card.
+                expand_here: None,
             };
             self.inspector.show(ui, &context)
         };
@@ -2288,6 +2290,7 @@ impl App {
                     )));
                 }
                 inspector::Action::Error(message) => self.canvas.set_error(message),
+                inspector::Action::ExpandChecksHere(_) => {}
             }
         }
     }
@@ -2338,6 +2341,7 @@ impl App {
             let input = canvas::Input {
                 graph: self.editor.graph(),
                 reference_graph: &reference,
+                later: None,
                 project: self.editor.project(),
                 parameters: &parameters,
                 selection: &self.editor.selection,
@@ -2384,8 +2388,13 @@ impl App {
             Command::SelectInput(_)
             | Command::AddInput
             | Command::ComponentSettings
-            | Command::SetCompactCards(_) => {}
+            | Command::SetCompactCards(_)
+            | Command::SetChecksCollapsed(_) => {}
             Command::InspectInput { node, .. } => self.editor.selection = vec![node],
+            Command::ShowChecks(node) => {
+                self.editor.selection = vec![node];
+                self.inspector.open_checks();
+            }
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));
                 self.apply_graph(graph);
@@ -2562,6 +2571,7 @@ impl App {
             parameters: &parameters,
             sibling: self.editor.sibling_graph(),
             density: canvas::CardDensity::Full,
+            satellites: false,
         })
     }
 

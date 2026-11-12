@@ -60,6 +60,9 @@ fn diagram_cards_are_named_and_visible() {
     for mode in ["Diagram", "Split"] {
         for size in [MINIMUM, WIDE] {
             let mut harness = folder_harness(project.path(), size);
+            // The two checks are among the cards named here (LAY-11 folds
+            // them by default).
+            harness.state_mut().as_mut().unwrap().debug_draw_checks();
             harness.get_by_label(mode).click();
             settle(&mut harness);
             assert_within_window(&harness, &CARDS);
@@ -89,6 +92,8 @@ fn the_demo_board_never_overlaps_its_own_cards() {
         for mode in [Mode::Diagram, Mode::Split] {
             let directory = crate::testing::shop_project();
             let mut harness = folder_harness(directory.path(), size);
+            // Every card, the checks LAY-11 folds by default among them.
+            harness.state_mut().as_mut().unwrap().debug_draw_checks();
             harness.state_mut().as_mut().unwrap().workbench.mode = mode;
             settle(&mut harness);
             assert_disjoint(&harness, &labels);
