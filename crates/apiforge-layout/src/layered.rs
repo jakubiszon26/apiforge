@@ -648,6 +648,150 @@ fn coordinates(graph: &Graph<'_>, layers: &[usize], order: &Order) -> Vec<Point>
     positions
 }
 
+/// The geometry of shape D (LAY-06): a spine in rows, satellites under it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rows {
+    /// The widest a row may be. The spine wraps to a new row when the next
+    /// column would not fit: five columns of 280 px at the default.
+    pub width: f32,
+    /// The width of a column, the widest card it holds.
+    pub column_width: f32,
+    /// Free space between two columns, where the data wires run.
+    pub column_gap: f32,
+    /// Free space between a card and the satellite hung under it.
+    pub stack_gap: f32,
+    /// Free space between the lowest card of a row and the next row, which
+    /// holds the rail the next row's ordering wires run on.
+    pub row_gap: f32,
+}
+
+impl Default for Rows {
+    fn default() -> Self {
+        let column_width = 280.0;
+        let column_gap = 96.0;
+        Self {
+            width: 5.0 * column_width + 4.0 * column_gap,
+            column_width,
+            column_gap,
+            stack_gap: 24.0,
+            row_gap: 96.0,
+        }
+    }
+}
+
+impl Rows {
+    /// How many spine columns a row holds, at least one.
+    pub fn columns(&self) -> usize {
+        let pitch = self.column_width + self.column_gap;
+        if !(pitch > 0.0 && self.width.is_finite()) {
+            return 1;
+        }
+        (((self.width + self.column_gap) / pitch).floor() as usize).max(1)
+    }
+}
+
+/// A board in shape D: the spine in the order given, left to right in rows
+/// that wrap after [`Rows::columns`], and each satellite in the column of the
+/// spine block it hangs under, stacked below it in the order given.
+#[derive(Clone, Debug)]
+pub struct Hanging<'a> {
+    pub blocks: &'a [Block],
+    /// The spine, in the engine's order.
+    pub spine: &'a [usize],
+    /// Each satellite with the index in `spine` of the block it hangs under,
+    /// in the order they stack.
+    pub satellites: &'a [(usize, usize)],
+    pub rows: Rows,
+}
+
+/// One row of a board in shape D.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Row {
+    /// The spine blocks of the row, left to right.
+    pub spine: Vec<usize>,
+    /// The top of the row, where its spine blocks start.
+    pub top: f32,
+    /// The tallest stack of the row: a spine block and its satellites.
+    pub height: f32,
+}
+
+/// Shape D: one position per block, and the rows. A block that is neither
+/// on the spine nor a satellite keeps its position.
+///
+/// A row is as tall as its tallest stack and the next row starts
+/// [`Rows::row_gap`] below it. The result is anchored like [`tidy`]'s: the
+/// top-left corner of the blocks laid out stays where it is.
+pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
+    let blocks = hanging.blocks;
+    let mut positions: Vec<Point> = blocks.iter().map(|block| block.position).collect();
+    let spine: Vec<usize> = hanging
+        .spine
+        .iter()
+        .copied()
+        .filter(|index| *index < blocks.len())
+        .collect();
+    if spine.len() != hanging.spine.len() || spine.is_empty() {
+        return (positions, Vec::new());
+    }
+    let mut stacks: Vec<Vec<usize>> = spine.iter().map(|index| vec![*index]).collect();
+    for &(block, under) in hanging.satellites {
+        if block < blocks.len()
+            && let Some(stack) = stacks.get_mut(under)
+            && !stack.contains(&block)
+        {
+            stack.push(block);
+        }
+    }
+    let rows = hanging.rows;
+    let per = rows.columns();
+    let pitch = rows.column_width + rows.column_gap;
+    let mut laid = Vec::new();
+    let mut top = 0.0;
+    for (number, chunk) in stacks.chunks(per).enumerate() {
+        let mut height: f32 = 0.0;
+        for (column, stack) in chunk.iter().enumerate() {
+            let left = column as f32 * pitch;
+            let mut y = top;
+            for (place, &block) in stack.iter().enumerate() {
+                if place > 0 {
+                    y += rows.stack_gap;
+                }
+                let size = blocks[block].size;
+                positions[block] = Point::new(left + (rows.column_width - size.width) * 0.5, y);
+                y += size.height;
+            }
+            height = height.max(y - top);
+        }
+        laid.push(Row {
+            spine: spine[number * per..(number * per + chunk.len())].to_vec(),
+            top,
+            height,
+        });
+        top += height + rows.row_gap;
+    }
+    // The blocks laid out keep their top-left corner where it was.
+    let moved: Vec<usize> = stacks.iter().flatten().copied().collect();
+    let anchor = Rect::bounding(moved.iter().map(|index| blocks[*index].rect()))
+        .map(|bounds| bounds.min)
+        .unwrap_or_default();
+    let now = Rect::bounding(
+        moved
+            .iter()
+            .map(|index| Rect::from_size(positions[*index], blocks[*index].size)),
+    )
+    .map(|bounds| bounds.min)
+    .unwrap_or_default();
+    let shift = Point::new(anchor.x - now.x, anchor.y - now.y);
+    for index in moved {
+        positions[index].x += shift.x;
+        positions[index].y += shift.y;
+    }
+    for row in &mut laid {
+        row.top += shift.y;
+    }
+    (positions, laid)
+}
+
 /// Layers of a graph, for callers that need the columns without the coordinates.
 pub fn layers_of(graph: &Graph<'_>) -> Vec<usize> {
     layer_assignment(graph.blocks.len(), &graph.usable_edges())
@@ -951,6 +1095,119 @@ mod tests {
         let edges = [Edge::new(0, 0), Edge::new(0, 9), Edge::new(0, 1)];
         let graph = Graph::new(&blocks, &edges);
         assert_eq!(layers_of(&graph), [0, 1]);
+    }
+
+    /// A spine of `count` 280 px blocks of `height`, in order, at the origin.
+    fn spine_blocks(count: usize, height: f32) -> Vec<Block> {
+        (0..count)
+            .map(|_| Block::new(Size::new(280.0, height), Point::default()))
+            .collect()
+    }
+
+    /// LAY-06 criterion 1: the spine runs left to right in the order given
+    /// and wraps after the columns the row width holds, five at the default.
+    #[test]
+    fn lay06_the_spine_wraps_after_the_row_width() {
+        let blocks = spine_blocks(12, 100.0);
+        let spine: Vec<usize> = (0..12).rev().collect();
+        let rows = Rows::default();
+        assert_eq!(rows.columns(), 5);
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            rows,
+        });
+        assert_eq!(laid.len(), 3);
+        assert_eq!(laid[0].spine, [11, 10, 9, 8, 7]);
+        for (place, &block) in spine.iter().enumerate() {
+            let (row, column) = (place / 5, place % 5);
+            assert_eq!(positions[block].x, column as f32 * 376.0, "block {block}");
+            assert_eq!(positions[block].y, laid[row].top, "block {block}");
+        }
+        // The row width is a parameter: three columns fit 1100 px.
+        let narrow = Rows {
+            width: 1100.0,
+            ..Rows::default()
+        };
+        assert_eq!(narrow.columns(), 3);
+        let (_, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            rows: narrow,
+        });
+        assert_eq!(laid.len(), 4);
+    }
+
+    /// LAY-06 criteria 1, 2 and 13: satellites stack under their spine
+    /// block in the order given, and a row is as tall as its tallest stack.
+    #[test]
+    fn lay06_satellites_stack_and_a_row_is_its_tallest_stack() {
+        let mut blocks = spine_blocks(7, 120.0);
+        blocks[5].size.height = 70.0;
+        blocks[6].size.height = 96.0;
+        let spine = [0, 1, 2, 3, 4];
+        let satellites = [(6, 1), (5, 1)];
+        let rows = Rows {
+            width: 3.0 * 280.0 + 2.0 * 96.0,
+            ..Rows::default()
+        };
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &satellites,
+            rows,
+        });
+        assert_eq!(positions[6].x, positions[1].x);
+        assert_eq!(positions[6].y, 120.0 + rows.stack_gap);
+        assert_eq!(positions[5].y, positions[6].y + 96.0 + rows.stack_gap);
+        let tallest = 120.0 + rows.stack_gap + 96.0 + rows.stack_gap + 70.0;
+        assert_eq!(laid[0].height, tallest);
+        assert_eq!(laid[1].top, tallest + rows.row_gap);
+        assert_eq!(laid[1].height, 120.0, "a row without satellites");
+        assert!(!any_overlap(&positions, &blocks));
+    }
+
+    /// LAY-06 criterion 6, and Tidy up's anchor: the same input gives the
+    /// same board, kept where its top-left corner was.
+    #[test]
+    fn lay06_hanging_is_deterministic_and_stays_in_place() {
+        let mut blocks = spine_blocks(8, 120.0);
+        for (index, block) in blocks.iter_mut().enumerate() {
+            block.position = Point::new(900.0 + index as f32 * 3.0, 400.0 + index as f32);
+        }
+        let spine = [0, 1, 2, 3, 4, 5];
+        let satellites = [(7, 0), (6, 5)];
+        let hanging = Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &satellites,
+            rows: Rows::default(),
+        };
+        let (first, _) = hang(&hanging);
+        assert_eq!(first, hang(&hanging).0);
+        let bounds = Rect::bounding(
+            first
+                .iter()
+                .zip(&blocks)
+                .map(|(position, block)| Rect::from_size(*position, block.size)),
+        )
+        .unwrap();
+        assert_eq!(bounds.min, Point::new(900.0, 400.0));
+        // An empty spine lays out nothing.
+        let (kept, rows) = hang(&Hanging {
+            spine: &[],
+            ..hanging
+        });
+        assert!(rows.is_empty());
+        assert_eq!(
+            kept,
+            blocks
+                .iter()
+                .map(|block| block.position)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

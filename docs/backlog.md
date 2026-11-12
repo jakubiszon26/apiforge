@@ -354,7 +354,7 @@ Exit criteria:
 | [#302](https://github.com/jakubiszon26/apiforge/issues/302) | LAY-18 Compact shows the data in use; [ticket](tickets/LAY-18.md) | M · 20 · `visible UI` | 1 |
 | [#295](https://github.com/jakubiszon26/apiforge/issues/295) | LAY-11 Collapse checks; [ticket](tickets/LAY-11.md) | M · 30 · `visible UI`, `default` | 1 |
 | [#33](https://github.com/jakubiszon26/apiforge/issues/33) | LAY-02 Auto-layout on open, chips; [ticket](tickets/LAY-02.md) | S–M · 15 · `default` | 2 |
-| [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape: D hybrid; [ticket](tickets/LAY-06.md) | M · 30 · `default` | 2 |
+| [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape: D hybrid; [ticket](tickets/LAY-06.md) | M · 20 · `default` | 2 |
 | [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 Wrapping by dependencies; [ticket](tickets/LAY-17.md) | M · 20 · `default` | 2 |
 | [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 Branch bands; [ticket](tickets/LAY-13.md) | M · 20 · `visible UI` | 2 (should) |
 | [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows; [ticket](tickets/LAY-04.md) | M · 20 | 3 |

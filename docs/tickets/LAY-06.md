@@ -1,7 +1,8 @@
 # LAY-06: The shape of a tidied scenario — owner decision
 
-- Size: M (implementation; the analysis and mock-ups are done) · Owner
-  review: 30 min · Risk: `default` (the positions Tidy up produces)
+- Size: M · 20 (implementation; the analysis and mock-ups are done; LAY-21
+  took the short satellites, [lay.md 11.4](../sprints/lay.md#114-changes-to-tickets))
+  · Owner review: 20 min · Risk: `default` (the positions Tidy up produces)
 - State: Backlog (issue #37) · **decided by the owner on 2026-11-05: D
   hybrid** (Q1 = A) with `@after` wires drawn dashed on the rail (Q3 = A),
   in the LAY plan ([lay.md 5.1](../sprints/lay.md#51-decisions-taken-2026-11-05))
@@ -114,3 +115,31 @@ ports sit on the top and bottom centre of a card (`Card::input_anchor` for
 change (a preferred rail for wires with vertical ports); B is a coordinate
 change in `layered::coordinates`; C swaps the axes of the layered layout and
 of the port stubs.
+
+## Amended on 2026-11-12 (review of 2026-11-10, lay.md 11.4)
+
+The mid-sprint review ([lay.md 11.1, 11.4 and 11.5](../sprints/lay.md#11-mid-sprint-review-2026-11-10))
+adds five criteria. LAY-21 took the short satellites, so this ticket is
+M · 20. No other decision above changes.
+
+9. Tidy up ends with the board in view: after Tidy up at least one card is
+   inside the viewport and the camera fits the tidied board (R4; today Tidy
+   up can leave the camera on an empty board). Test:
+   `lay06_criterion_9_tidy_up_ends_in_view`.
+10. The layout `quality` metric reads the desktop's real card sizes (LAY-16
+    and LAY-21 heights, compact and full), not full-card defaults (R9).
+    Test: `lay06_criterion_10_quality_on_real_card_sizes`.
+11. On `shop-30`, crossings per wire after Tidy up are at most 2.05 (today's
+    value: 117 crossings on 57 wires) and coincident wire pairs at most 97;
+    the pull request prints a metric table (crossings, coincident pairs,
+    straight wires, per reference scenario, before and after, collapsed and
+    expanded). Test: `lay06_criterion_11_no_more_crossings_than_today`.
+12. Criterion 8 (fit at least 0.50 collapsed) is testable without LAY-11's
+    toggle: the test folds the checks through the same collapse filter
+    LAY-11 uses, the real preference and filter now that LAY-11 is merged.
+    Test: `lay06_criterion_8_fit_at_least_half_collapsed`.
+13. Satellites hang strictly under their subject (LAY-11 left "hanging under
+    the subject" to this ticket); LAY-11's criterion 9 (the positions after
+    expanding equal Tidy up expanded) and LAY-02's criterion 6 (an opened
+    scenario equals Tidy up) stay green. Test:
+    `lay06_criterion_13_satellites_hang_under_their_subject`.
