@@ -432,10 +432,14 @@ fn ux39_a_check_and_a_nested_slot_are_marked() {
     );
     show(&mut harness, &scenario, "cart_item", 1.0);
     let item = lines(&harness, &scenario, "cart_item");
-    assert!(
-        item.iter()
-            .any(|line| line.contains("Missing step “product_id”")),
-        "the slot that read the missing step is marked: {item:?}"
+    let marker = item
+        .iter()
+        .find(|line| line.contains("Missing step “product_id”"))
+        .unwrap_or_else(|| panic!("the slot that read the missing step is marked: {item:?}"));
+    assert_eq!(
+        written(&harness, &scenario, "cart_item", marker).map(|drawn| drawn.color),
+        Some(crate::theme::DANGER),
+        "the nested slot's marker is in the diagnostic red"
     );
 }
 
