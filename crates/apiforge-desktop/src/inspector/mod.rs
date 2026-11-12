@@ -46,6 +46,9 @@ pub enum Action {
     },
     /// Show this block in the code panel, by handle.
     Reveal(String),
+    /// *Expand checks here* switched for the selected step: its checks hang
+    /// under it on the collapsed board, for this session (LAY-11).
+    ExpandChecksHere(bool),
     Error(String),
 }
 
@@ -62,6 +65,9 @@ pub struct Context<'a> {
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
     pub step: Option<&'a StepResult>,
+    /// *Expand checks here* in the *Checks* list: `None` when the board does
+    /// not fold checks into this step, else whether it is on (LAY-11).
+    pub expand_here: Option<bool>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -92,6 +98,8 @@ pub struct Inspector {
 struct Focus {
     wanted: Option<String>,
     reached: Option<String>,
+    /// A click on a step's aggregate asked for its *Checks* list (LAY-11).
+    checks: bool,
 }
 
 impl Focus {
@@ -122,6 +130,13 @@ impl Inspector {
         self.focus.wanted = Some(input);
     }
 
+    /// Opens the *Checks* list of the step shown next (LAY-11).
+    pub fn open_checks(&mut self) {
+        self.tab = Tab::Checks;
+        self.focus.wanted = None;
+        self.focus.checks = true;
+    }
+
     /// The input the Inspector last scrolled to for a double-click.
     #[cfg(test)]
     pub fn focused_input(&self) -> Option<&str> {
@@ -131,14 +146,18 @@ impl Inspector {
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         if self.node_id != context.node.id {
             let wanted = self.focus.wanted.take();
+            let checks = std::mem::take(&mut self.focus.checks);
             *self = Self {
                 node_id: context.node.id.clone(),
                 ..Self::default()
             };
             if let Some(input) = wanted {
                 self.focus_input(input);
+            } else if checks {
+                self.tab = Tab::Checks;
             }
         }
+        self.focus.checks = false;
         let mut actions = Vec::new();
         let mut node = context.node.clone();
 
@@ -184,7 +203,7 @@ impl Inspector {
                 match self.tab {
                     Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
                     Tab::Outputs => outputs(ui, context, &mut actions),
-                    Tab::Checks => checks::show(ui, context),
+                    Tab::Checks => checks::show(ui, context, &mut actions),
                 }
             });
         self.response_choice(ui.ctx(), context, &mut node);

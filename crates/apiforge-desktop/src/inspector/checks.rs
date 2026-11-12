@@ -438,7 +438,7 @@ fn row(ui: &mut Ui, row: &Row) {
 }
 
 /// The list of the selected step.
-pub(super) fn show(ui: &mut Ui, context: &Context<'_>) {
+pub(super) fn show(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<super::Action>) {
     let rows = rows(
         context.board,
         context.graph,
@@ -453,14 +453,64 @@ pub(super) fn show(ui: &mut Ui, context: &Context<'_>) {
     // Three rows, one of them shared, fit the Inspector of the smallest window.
     ui.spacing_mut().item_spacing.y = 3.0;
     let (text, tone) = summary(&rows, context.run.is_some());
-    ui.label(
+    let line = ui.label(
         RichText::new(text)
             .family(theme::bold_family())
             .size(theme::FONT_LABEL)
             .color(tone.color()),
     );
+    // While the board folds the checks, they can hang under this step for
+    // the session, the rows below making room (LAY-11).
+    if let Some(expanded) = context.expand_here {
+        expand_here(ui, line.rect, expanded, actions);
+    }
     for line in &rows {
         row(ui, line);
+    }
+}
+
+/// *Expand checks here*, at the right end of the line above the list when
+/// it fits there, so that the three rows below still fit the smallest
+/// window (LAY-08, criterion 5); on a line of its own when it does not.
+fn expand_here(ui: &mut Ui, line: egui::Rect, expanded: bool, actions: &mut Vec<super::Action>) {
+    const NAME: &str = "Expand checks here";
+    let text = if expanded {
+        "✓ Expand checks here"
+    } else {
+        NAME
+    };
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(theme::FONT_LABEL),
+        theme::LINK,
+    );
+    let size = galley.size() + egui::vec2(8.0, 0.0);
+    let right = ui.max_rect().right();
+    let rect = if line.right() + 12.0 + size.x <= right {
+        egui::Rect::from_min_size(
+            egui::pos2(right - size.x, line.center().y - size.y / 2.0),
+            size,
+        )
+    } else {
+        ui.allocate_space(size).1
+    };
+    let response = ui
+        .interact(
+            rect,
+            ui.id().with("expand-checks-here"),
+            egui::Sense::click(),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Show this step's checks under it on the board, for this session");
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, expanded, NAME));
+    if expanded || response.hovered() {
+        ui.painter().rect_filled(rect, 4.0, theme::ACCENT_SOFT);
+    }
+    ui.painter()
+        .galley(rect.min + egui::vec2(4.0, 0.0), galley, theme::LINK);
+    if response.clicked() {
+        actions.push(super::Action::ExpandChecksHere(!expanded));
     }
 }
 

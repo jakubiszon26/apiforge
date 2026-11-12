@@ -684,7 +684,42 @@ impl FolderApp {
         canvas.wire_style = self.preferences.wire_style;
         canvas.bridges = self.preferences.bridges;
         canvas.set_density(self.density());
+        canvas.set_collapsed(self.preferences.checks_collapsed);
         canvas
+    }
+
+    /// Folds the checks of every board into their subjects, or shows them
+    /// again, and remembers it as *Collapse checks* (LAY-11).
+    fn collapse_checks(&mut self, collapsed: bool) {
+        self.preferences.checks_collapsed = collapsed;
+        let preferences = self.preferences.clone();
+        self.storage_io(
+            "Saving preferences…",
+            move || preferences.save(crate::preferences::Preference::ChecksCollapsed),
+            |_, _| {},
+        );
+        for canvas in self.canvases.values_mut() {
+            canvas.set_collapsed(collapsed);
+        }
+    }
+
+    /// Draws every check as a card, as before LAY-11, for tests that measure
+    /// or select check cards: neither saved nor a camera change.
+    #[cfg(test)]
+    pub(crate) fn debug_draw_checks(&mut self) {
+        self.preferences.checks_collapsed = false;
+        for canvas in self.canvases.values_mut() {
+            canvas.debug_draw_checks();
+        }
+    }
+
+    /// Selects `node` and opens the Inspector on its *Checks* list (LAY-11).
+    fn show_checks(&mut self, document_id: &str, node: String) {
+        self.new_inputs.remove(document_id);
+        self.component_settings.remove(document_id);
+        self.selections.insert(document_id.to_owned(), vec![node]);
+        self.selected_inputs.remove(document_id);
+        self.inspector.open_checks();
     }
 
     /// Draws every board at `density` and remembers it as *Compact cards*.

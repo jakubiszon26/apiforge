@@ -2,6 +2,7 @@
 
 use super::{
     Camera,
+    collapse::Aggregate,
     layout::{
         CHIP_HEIGHT, COMPACT_HEADER, COMPACT_ROW, Card, CardDetail, Chip, CompactRole, RowValue,
         WIDTH,
@@ -205,6 +206,49 @@ pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected:
     }
 }
 
+/// The name on an `@after` drawn from a folded check's subject (LAY-11):
+/// `after cart_total`, on a light ground halfway along the wire.
+pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str) {
+    if routed.points.len() < 2 {
+        return;
+    }
+    let line: Vec<Pos2> = routed
+        .points
+        .iter()
+        .map(|point| camera.to_screen(*point))
+        .collect();
+    let length: f32 = line.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
+    let mut left = length / 2.0;
+    let mut middle = line[0];
+    for pair in line.windows(2) {
+        let piece = pair[0].distance(pair[1]);
+        if piece >= left {
+            middle = pair[0] + (pair[1] - pair[0]) * (left / piece.max(f32::EPSILON));
+            break;
+        }
+        left -= piece;
+    }
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        FontId::proportional((11.0 * camera.zoom).max(8.0)),
+        theme::MUTED,
+    );
+    let rect = Rect::from_center_size(middle, galley.size() + vec2(6.0, 2.0));
+    painter.rect_filled(rect, 3.0, theme::WHITE.gamma_multiply(0.9));
+    painter.galley(rect.min + vec2(3.0, 1.0), galley, theme::MUTED);
+}
+
+/// The border of a step one of whose checks failed: red, 2 px at every
+/// zoom, while the band keeps the step's own result (Q15 = A).
+fn failed_check_border(painter: &Painter, rect: Rect, radius: f32) {
+    painter.rect_stroke(
+        rect,
+        radius,
+        Stroke::new(2.0, theme::DANGER),
+        StrokeKind::Inside,
+    );
+}
+
 fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
     match (selected, control, branch) {
         (true, ..) => theme::ACCENT,
@@ -350,8 +394,11 @@ pub fn card(
     // Part of what a selected proxy stands for, or reads it.
     related: bool,
     step: Option<&StepResult>,
+    // What became of the checks that read the step (LAY-11).
+    aggregate: Option<&Aggregate>,
 ) {
     use super::layout::CARD_PADDING;
+    let failed_check = aggregate.is_some_and(Aggregate::failed);
     let z = camera.zoom;
     let detail = CardDetail::at_zoom(z);
     let rect = camera.rect(card.rect());
@@ -379,6 +426,9 @@ pub fn card(
         Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
         StrokeKind::Inside,
     );
+    if failed_check && !selected {
+        failed_check_border(painter, rect, radius);
+    }
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
     let color = theme::block_color(card.block);
 
@@ -551,12 +601,19 @@ pub fn card(
                 footer.left_top() + vec2(CARD_PADDING * z, 0.0),
                 egui::pos2(action.left() - 8.0 * z, footer.bottom()),
             );
-            let (status, color) = step.map_or(("Ready".to_owned(), theme::MUTED), |s| {
+            let (mut status, mut color) = step.map_or(("Ready".to_owned(), theme::MUTED), |s| {
                 (
                     format!("{} · {} ms", s.status.label(), s.duration_ms),
                     status_color(s.status),
                 )
             });
+            // The checks' result is a second statement after the step's own.
+            if let Some(aggregate) = aggregate {
+                status = format!("{status} · {}", aggregate.text());
+                if failed_check {
+                    color = theme::DANGER;
+                }
+            }
             label(
                 &clipped,
                 status_rect,
@@ -624,10 +681,13 @@ pub fn compact_card(
     selected: bool,
     related: bool,
     step: Option<&StepResult>,
+    // What became of the checks that read the step (LAY-11).
+    aggregate: Option<&Aggregate>,
 ) -> Vec<String> {
     let Some(compact) = &card.compact else {
         return Vec::new();
     };
+    let failed_check = aggregate.is_some_and(Aggregate::failed);
     let z = camera.zoom;
     let full = CardDetail::at_zoom(z) == CardDetail::Full;
     let rect = camera.rect(card.rect());
@@ -789,18 +849,39 @@ pub fn compact_card(
                     egui::Align::Min,
                 )
             }
-            CompactRole::Checks(_) => (
-                Cow::Borrowed(text.as_str()),
-                FontId::proportional(small),
-                theme::MUTED,
-                egui::Align::Min,
-            ),
+            CompactRole::Checks(_) => {
+                // The checks' result, a second statement under the step's
+                // own; red when one failed, at every zoom (LAY-11, Q15 = A).
+                if failed_check {
+                    clipped.rect_filled(
+                        cell(0.0, row.top, WIDTH, row.top + row.height),
+                        0.0,
+                        theme::DANGER.gamma_multiply(0.12),
+                    );
+                }
+                (
+                    aggregate
+                        .map(Aggregate::text)
+                        .filter(|text| !text.is_empty())
+                        .map_or(Cow::Borrowed(text.as_str()), Cow::Owned),
+                    FontId::proportional(small),
+                    if failed_check {
+                        theme::DANGER
+                    } else {
+                        theme::MUTED
+                    },
+                    egui::Align::Min,
+                )
+            }
         };
         if legible {
             label(&clipped, area, &text, font, color, align);
             #[cfg(test)]
             written.push(text.into_owned());
         }
+    }
+    if failed_check && !selected {
+        failed_check_border(painter, rect, radius);
     }
 
     for index in 0..card.inputs.len() {
@@ -1154,7 +1235,7 @@ mod tests {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1200.0))),
                         ..Default::default()
                     },
-                    |ui| super::card(ui.painter(), &card, camera, true, false, None),
+                    |ui| super::card(ui.painter(), &card, camera, true, false, None, None),
                 );
                 let mut labels = 0;
                 for shape in &output.shapes {
@@ -1238,7 +1319,7 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        super::compact_card(ui.painter(), &card, camera, true, false, None);
+                        super::compact_card(ui.painter(), &card, camera, true, false, None, None);
                         super::trays(ui.painter(), &card, camera, true, true);
                     },
                 );

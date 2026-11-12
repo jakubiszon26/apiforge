@@ -13,7 +13,7 @@ use apiforge_core::{
     graph::delete_nodes,
 };
 use eframe::egui;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// The graph on the board and everything its cards are drawn from.
 pub struct Board<'a> {
@@ -28,6 +28,11 @@ pub struct Board<'a> {
     pub sibling: Option<&'a Graph>,
     /// The sizes the board draws its cards at (LAY-16).
     pub density: canvas::CardDensity,
+    /// The board can fold its checks into their subjects (LAY-11): Tidy up
+    /// lays out the other cards and then places each such check beside its
+    /// subject, whether the checks are folded or not, so that showing them
+    /// needs no second Tidy up.
+    pub satellites: bool,
 }
 
 /// A graph edit and the selection that should follow it.
@@ -83,6 +88,9 @@ impl Board<'_> {
         if self.graph.nodes.iter().filter(|node| moving(node)).count() < 2 {
             return None;
         }
+        if self.satellites && selection.is_empty() {
+            return Some(self.tidy_with_satellites());
+        }
         let blocks: Vec<apiforge_layout::Block> = self
             .graph
             .nodes
@@ -111,6 +119,85 @@ impl Board<'_> {
             node.auto_placed = true;
         }
         Some(tidied)
+    }
+
+    /// The whole board laid out with its foldable checks as satellites
+    /// (LAY-11): the other cards first, as Tidy up lays out a board, with a
+    /// wire to or from such a check counted as its subject's; then each
+    /// check in the engine's order at the free place nearest what it reads
+    /// (`layered::place`), which moves nothing laid out before it. Folded or
+    /// not, the checks get the same places, so the board shown with its
+    /// checks is the board Tidy up gives with them.
+    fn tidy_with_satellites(&self) -> Graph {
+        let hung = canvas::collapsible(self.graph);
+        let anchor: HashMap<&str, &str> = hung
+            .iter()
+            .map(|candidate| (candidate.check.as_str(), candidate.anchor.as_str()))
+            .collect();
+        let index_of = |id: &str| self.graph.nodes.iter().position(|node| node.id == id);
+        let rest: Vec<usize> = (0..self.graph.nodes.len())
+            .filter(|index| !anchor.contains_key(self.graph.nodes[*index].id.as_str()))
+            .collect();
+        let local = |index: usize| rest.iter().position(|kept| *kept == index);
+        let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(self.graph)
+            .iter()
+            .filter_map(|wire| {
+                let end =
+                    |id: &str| index_of(anchor.get(id).copied().unwrap_or(id)).and_then(local);
+                let (source, target) = (end(&wire.source)?, end(&wire.target)?);
+                (source != target).then(|| apiforge_layout::Edge::new(source, target))
+            })
+            .collect();
+        let blocks: Vec<apiforge_layout::Block> = rest
+            .iter()
+            .map(|index| self.card_block(&self.graph.nodes[*index]))
+            .chain(self.chip_obstacles(self.graph))
+            .collect();
+        let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(&blocks, &edges));
+        let mut tidied = self.graph.clone();
+        for (index, position) in rest.iter().zip(placed) {
+            let node = &mut tidied.nodes[*index];
+            node.position = Position {
+                x: f64::from(position.x),
+                y: f64::from(position.y),
+            };
+            node.auto_placed = true;
+        }
+        if hung.is_empty() {
+            return tidied;
+        }
+        // Every card laid out is an obstacle; the checks are placed in turn.
+        let fresh: Vec<usize> = hung
+            .iter()
+            .filter_map(|candidate| index_of(&candidate.check))
+            .collect();
+        let blocks: Vec<apiforge_layout::Block> = tidied
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let block = self.card_block(node);
+                if fresh.contains(&index) {
+                    block
+                } else {
+                    block.pinned()
+                }
+            })
+            .chain(self.chip_obstacles(&tidied))
+            .collect();
+        let placed = apiforge_layout::place(
+            &apiforge_layout::Graph::new(&blocks, &layout_edges(&tidied)),
+            &fresh,
+        );
+        for (index, position) in fresh.iter().zip(placed) {
+            let node = &mut tidied.nodes[*index];
+            node.position = Position {
+                x: f64::from(position.x),
+                y: f64::from(position.y),
+            };
+            node.auto_placed = true;
+        }
+        tidied
     }
 
     pub fn add_node(
@@ -449,6 +536,7 @@ mod tests {
         let parameters = vec!["id".to_owned()];
         let board = Board {
             density: canvas::CardDensity::Full,
+            satellites: false,
             sibling: None,
             graph: &graph,
             reference: &graph,

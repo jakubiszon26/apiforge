@@ -270,6 +270,10 @@ impl FolderApp {
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)
                     | Command::InspectInput { .. }
+                    // Folding checks and opening their list change no
+                    // document (LAY-11).
+                    | Command::SetChecksCollapsed(_)
+                    | Command::ShowChecks(_)
             )
         {
             return;
@@ -285,6 +289,7 @@ impl FolderApp {
             parameters: &parameters,
             sibling: sibling_of(model, cleanup),
             density: self.density(),
+            satellites: true,
         };
         let selection = self
             .selections
@@ -382,6 +387,14 @@ impl FolderApp {
                         after: density,
                         model: after,
                     });
+                None
+            }
+            Command::SetChecksCollapsed(collapsed) => {
+                self.collapse_checks(collapsed);
+                None
+            }
+            Command::ShowChecks(node) => {
+                self.show_checks(document_id, node);
                 None
             }
             Command::InspectInput { node, input } => {
@@ -658,6 +671,10 @@ impl FolderApp {
         let step = run
             .as_ref()
             .and_then(|run| run.steps.iter().find(|step| step.node_id == node.id));
+        let expand_here = self
+            .canvases
+            .get(document_id)
+            .and_then(|canvas| canvas.expand_here_state(graph, &node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
@@ -684,6 +701,7 @@ impl FolderApp {
                             parameters: &parameters,
                             run: run.as_ref(),
                             step,
+                            expand_here,
                         },
                     )
                 })
@@ -701,6 +719,12 @@ impl FolderApp {
         for action in actions {
             match action {
                 inspector::Action::Reveal(handle) => self.reveal_in_code(document_id, &handle),
+                // A view of this session, which changes no document.
+                inspector::Action::ExpandChecksHere(expanded) => {
+                    if let Some(canvas) = self.canvases.get_mut(document_id) {
+                        canvas.expand_here(&node.id, expanded);
+                    }
+                }
                 _ if !snapshot.editable => {}
                 inspector::Action::UpdateNode(updated) => {
                     let mut next = graph.clone();
