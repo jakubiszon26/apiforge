@@ -388,6 +388,57 @@ fn ux39_criterion_4_both_densities() {
     }
 }
 
+/// The marker on a check's one compact line, and on an input of which only
+/// one slot read the missing step: *Cart item*'s `productId` field, pasted
+/// from the component into the scenario, which has no `product_id`.
+#[test]
+fn ux39_a_check_and_a_nested_slot_are_marked() {
+    let (_project, mut harness, cart) = pasted_into_cart(WIDE);
+    let scenario = by_path(&harness, SCENARIO);
+    app(&mut harness).activate_tab(&scenario);
+    settle(&mut harness);
+    select(&mut harness, &scenario, &["promotional_price"]);
+    copy(&mut harness);
+    app(&mut harness).activate_tab(&cart);
+    settle(&mut harness);
+    choose(&mut harness, PASTE);
+    show(&mut harness, &cart, "promotional_price", 1.0);
+    let check = lines(&harness, &cart, "promotional_price");
+    let marker = check
+        .iter()
+        .find(|line| line.contains("Missing step “"))
+        .unwrap_or_else(|| panic!("the check's line names a missing step: {check:?}"));
+    assert_eq!(
+        written(&harness, &cart, "promotional_price", marker).map(|drawn| drawn.color),
+        Some(crate::theme::DANGER)
+    );
+
+    select(&mut harness, &cart, &["cart_item"]);
+    copy(&mut harness);
+    app(&mut harness).activate_tab(&scenario);
+    settle(&mut harness);
+    choose(&mut harness, PASTE);
+    let pasted = id_of(&harness, &scenario, "cart_item");
+    let document = model(&harness, &scenario);
+    let node = graph_of(&document, false)
+        .nodes
+        .iter()
+        .find(|node| node.id == pasted)
+        .unwrap();
+    assert!(
+        !node.inputs.is_empty(),
+        "the input keeps what it could: {:?}",
+        node.inputs
+    );
+    show(&mut harness, &scenario, "cart_item", 1.0);
+    let item = lines(&harness, &scenario, "cart_item");
+    assert!(
+        item.iter()
+            .any(|line| line.contains("Missing step “product_id”")),
+        "the slot that read the missing step is marked: {item:?}"
+    );
+}
+
 /// Asserts that the last frame drew the card `handle` whole inside the
 /// viewport.
 fn assert_card_in_view(harness: &FolderHarness, document: &str, handle: &str) {
