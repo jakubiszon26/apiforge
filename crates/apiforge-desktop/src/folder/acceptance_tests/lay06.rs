@@ -689,7 +689,8 @@ fn coincident(wires: &[&[egui::Pos2]]) -> usize {
 /// asserted (112 when written; the quality example reports them): most are
 /// wires leaving one port together, which LAY-03 separates, and the board
 /// the previous Tidy up gives at the sizes the desktop draws has more of
-/// them (123) than the 97 measured on full cards.
+/// them (123) than the 97 measured on full cards. The owner accepted this
+/// and moved the expanded cap to LAY-03 (#34).
 #[test]
 fn lay06_criterion_11_no_more_crossings_than_today() {
     for checks in [Checks::Collapsed, Checks::Expanded] {
