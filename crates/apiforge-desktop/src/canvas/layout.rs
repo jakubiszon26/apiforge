@@ -530,26 +530,34 @@ impl Card {
         }
     }
 
-    /// Marks the whole input `input` as reading the missing step `step`
-    /// (UX-39): its row's value on a full card, its line on a compact one,
-    /// where the line of a required input without a value was. An input
-    /// that has a value keeps it.
-    pub fn mark_missing_step(&mut self, input: &str, step: &str) {
-        let Some(index) = self.inputs.iter().position(|row| {
+    /// Marks the slot `path` of the input `input` (empty for the whole
+    /// input) as reading the missing step `step` (UX-39): that row's value on
+    /// a full card; on a compact card the input's line, or a value's or a
+    /// check's one line, where the plain line was. A slot that has a value
+    /// keeps it.
+    pub fn mark_missing_step(&mut self, input: &str, path: &[String], step: &str) {
+        let slot = self.inputs.iter().position(|row| {
             row.name == input
-                && row.path.is_empty()
+                && row.path == path
                 && matches!(row.value, RowValue::Missing | RowValue::Optional)
-        }) else {
-            return;
-        };
-        let row = &mut self.inputs[index];
-        row.value = RowValue::MissingStep(step.to_owned());
-        let text = format!("{} · Missing step “{step}”", row.label);
+        });
+        if let Some(index) = slot {
+            self.inputs[index].value = RowValue::MissingStep(step.to_owned());
+        }
+        let label = slot
+            .or_else(|| self.inputs.iter().position(|row| row.name == input))
+            .map_or(input, |index| self.inputs[index].label.as_str());
+        let text = format!("{label} · Missing step “{step}”");
+        let whole = self
+            .inputs
+            .iter()
+            .position(|row| row.name == input && row.path.is_empty());
         if let Some(compact) = &mut self.compact
-            && let Some(line) = compact
-                .rows
-                .iter_mut()
-                .find(|line| line.role == CompactRole::Input(index))
+            && let Some(line) = compact.rows.iter_mut().find(|line| match line.role {
+                CompactRole::Input(index) => Some(index) == whole,
+                CompactRole::Line => true,
+                _ => false,
+            })
         {
             line.text.clone_from(&text);
             line.full_text = text;

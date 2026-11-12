@@ -1056,6 +1056,8 @@ pub fn compact_card(
                 Cow::Borrowed(text.as_str()),
                 FontId::proportional(small),
                 match card.inputs[index].value {
+                    // A slot of the input reads a missing step (UX-39).
+                    _ if row.missing => theme::DANGER,
                     RowValue::Missing | RowValue::MissingStep(_) => theme::DANGER,
                     RowValue::Source(_) => theme::LINK,
                     _ => theme::TEXT,

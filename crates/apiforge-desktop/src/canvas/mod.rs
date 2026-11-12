@@ -57,6 +57,9 @@ const CHIP_NOT_COPIED: &str =
 pub struct MissingStep {
     pub node_id: String,
     pub input: String,
+    /// The slot inside the input that read the step; empty for the whole
+    /// input.
+    pub path: Vec<String>,
     /// The missing step's handle where the block was copied.
     pub step: String,
 }
@@ -923,7 +926,7 @@ impl Canvas {
     }
 
     /// Marks the inputs a paste left unconnected because the step they read
-    /// is missing (UX-39). Each mark lasts until the input is wired or given
+    /// is missing (UX-39). Each mark lasts until its slot is wired or given
     /// a value, a step of that name is on the board, or the board is dropped
     /// with its document.
     pub fn mark_missing_steps(&mut self, marks: impl IntoIterator<Item = MissingStep>) {
@@ -942,7 +945,10 @@ impl Canvas {
             let Some(node) = graph.nodes.iter().find(|node| node.id == mark.node_id) else {
                 return true;
             };
-            !node.inputs.contains_key(&mark.input)
+            node.inputs
+                .get(&mark.input)
+                .and_then(|binding| binding.at(&mark.path))
+                .is_none()
                 && !reference
                     .nodes
                     .iter()
@@ -950,7 +956,7 @@ impl Canvas {
         });
         for mark in &self.missing_steps {
             if let Some(card) = cards.iter_mut().find(|card| card.id == mark.node_id) {
-                card.mark_missing_step(&mark.input, &mark.step);
+                card.mark_missing_step(&mark.input, &mark.path, &mark.step);
             }
         }
     }

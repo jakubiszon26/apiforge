@@ -531,6 +531,7 @@ impl FolderApp {
                     edit::Missing::Step(step) => Some(canvas::MissingStep {
                         node_id: item.node_id.clone(),
                         input: item.input.clone(),
+                        path: item.path.clone(),
                         step: step.clone(),
                     }),
                     edit::Missing::Input(_) => None,
