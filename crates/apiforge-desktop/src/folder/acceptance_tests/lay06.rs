@@ -467,7 +467,8 @@ fn lay06_criterion_6_deterministic() {
 
 /// Criteria 8 and 12: `shop-30` with its checks collapsed, as LAY-11's
 /// preference folds them by default, fits 1600 × 1000 at 0.50 or more.
-/// Expanded, the fit is reported, not asserted.
+/// Expanded, the fit is not asserted (0.49 when written); the quality
+/// example reports it.
 #[test]
 fn lay06_criterion_8_fit_at_least_half_collapsed() {
     let (_project, mut harness, id) = tidied("shop-30", WIDE, Checks::Collapsed);
@@ -482,13 +483,6 @@ fn lay06_criterion_8_fit_at_least_half_collapsed() {
     choose(&mut harness, FIT);
     let collapsed = board(&harness, &id).debug_zoom();
     assert!(collapsed >= 0.50, "shop-30 collapsed fits at {collapsed}");
-
-    let (_project, mut harness, id) = tidied("shop-30", WIDE, Checks::Expanded);
-    choose(&mut harness, FIT);
-    let expanded = board(&harness, &id).debug_zoom();
-    eprintln!(
-        "LAY-06: shop-30 at 1600 x 1000 fits at {collapsed:.3} collapsed, {expanded:.3} expanded"
-    );
 }
 
 /// Criterion 9: Tidy up ends with the board in view. The camera is moved
@@ -691,10 +685,11 @@ fn coincident(wires: &[&[egui::Pos2]]) -> usize {
 /// Criterion 11: on `shop-30` Tidy up crosses no more wires per wire than
 /// today's 2.05 (117 crossings on 57 wires), collapsed and expanded, and
 /// leaves at most 97 coincident pairs on the board a new install shows,
-/// with its checks collapsed. Expanded, the coincident pairs are reported:
-/// most are wires leaving one port together, which LAY-03 separates, and
-/// the board the previous Tidy up gives at the sizes the desktop draws has
-/// more of them (123) than the 97 measured on full cards.
+/// with its checks collapsed. Expanded, the coincident pairs are not
+/// asserted (112 when written; the quality example reports them): most are
+/// wires leaving one port together, which LAY-03 separates, and the board
+/// the previous Tidy up gives at the sizes the desktop draws has more of
+/// them (123) than the 97 measured on full cards.
 #[test]
 fn lay06_criterion_11_no_more_crossings_than_today() {
     for checks in [Checks::Collapsed, Checks::Expanded] {
@@ -704,10 +699,6 @@ fn lay06_criterion_11_no_more_crossings_than_today() {
         let per_wire = crossings as f32 / wires.len() as f32;
         let routes: Vec<&[egui::Pos2]> = wires.iter().map(|wire| wire.points.as_slice()).collect();
         let pairs = coincident(&routes);
-        eprintln!(
-            "LAY-06: shop-30 {checks:?}: {crossings} crossings on {} wires, {pairs} coincident pairs",
-            wires.len()
-        );
         assert!(
             per_wire <= 2.05,
             "{checks:?}: {crossings} crossings on {} wires",
