@@ -29,8 +29,9 @@ pub struct Board<'a> {
     /// The sizes the board draws its cards at (LAY-16).
     pub density: canvas::CardDensity,
     /// The board can fold its checks into their subjects (LAY-11): Tidy up
-    /// lays out the other cards and then places each such check beside its
-    /// subject, whether the checks are folded or not, so that showing them
+    /// of the whole board gives shape D (LAY-06), every card that is not a
+    /// spine step hung under the spine step it reads last, the checks in
+    /// the same places whether they are folded or not, so that showing them
     /// needs no second Tidy up.
     pub satellites: bool,
 }
@@ -104,8 +105,10 @@ impl Board<'_> {
                 .collect(),
             ..Graph::default()
         };
-        // Satellites hang foldable checks off their subjects (LAY-11) only
-        // when the whole board is laid out; the chips then follow as below.
+        // Shape D (LAY-06) hangs every block that is not a spine step under
+        // one, only when the whole board is laid out; a board without a
+        // spine step hangs its foldable checks off their subjects (LAY-11).
+        // The chips then follow as below.
         let mut tidied = if self.satellites && selection.is_empty() {
             self.tidy_in_rows()
                 .unwrap_or_else(|| self.tidy_with_satellites(&staying.proxies))

@@ -1149,6 +1149,12 @@ impl Canvas {
                 *chip = chip.translated(*offset);
             }
         }
+        // A mark goes with the card it is beside while that card is dragged.
+        let marks = if self.drag.is_some() {
+            shape::marks(input.graph, &cards)
+        } else {
+            marks
+        };
 
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);

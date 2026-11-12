@@ -134,10 +134,11 @@ spine and satellites:
    (`layered::Rows`).
 2. **Satellites.** Every other block hangs in the column of the spine step
    it reads last, stacked below it in the engine's order, 24 px apart (twice
-   the router's clearance): a check under the subject LAY-11 folds it into,
-   a value under the latest spine step among its dependencies, or under the
-   column of the latest satellite it reads, or else under the spine step
-   the engine reaches just before it.
+   the router's clearance). The column is the first of these that exists:
+   for a check, the subject LAY-11 folds it into, or else the latest step
+   it verifies; the latest spine step among the block's dependencies, data
+   or order; the latest column among the satellites it reads; the spine
+   step the engine reaches just before it.
 3. **Rows.** A row is as tall as its tallest stack, at the heights the board
    draws its cards; the next row starts 96 px lower. Folded checks keep
    their places, so showing them moves nothing.

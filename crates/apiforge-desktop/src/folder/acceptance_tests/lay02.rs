@@ -16,7 +16,7 @@ const TIDY: &str = "Tidy up";
 const FIT: &str = "Fit the view";
 /// The free space Tidy up keeps between the cards of a column: shape D's
 /// stack gap (LAY-06), twice the router's clearance.
-const ROW_GAP: f32 = 24.0;
+const STACK_GAP: f32 = 24.0;
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -503,7 +503,7 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
                     "{name}: Tidy up moves {handle} from {at:?} to {moved:?}"
                 );
             }
-            // In each column the cards keep the row gap as drawn.
+            // In each column the cards keep the stack gap as drawn.
             let zoom = canvas(&harness, &id).debug_zoom();
             let mut cards = cards_on_screen(&harness, &id);
             cards.sort_by(|a, b| {
@@ -518,7 +518,7 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
                 }
                 let gap = (lower.top() - upper.bottom()) / zoom;
                 assert!(
-                    gap >= ROW_GAP - 1.0,
+                    gap >= STACK_GAP - 1.0,
                     "{name}: {} and {} are {gap} apart as drawn",
                     pair[0].0,
                     pair[1].0
@@ -560,7 +560,7 @@ fn lay02_criterion_6_opened_at_the_compact_density() {
             (below.position.x - node.position.x).abs() < 1.0
                 && below.position.y > node.position.y
                 && ((below.position.y - node.position.y) as f32)
-                    < height(node, full) + ROW_GAP - 1.0
+                    < height(node, full) + STACK_GAP - 1.0
         })
     });
     assert!(packed, "the cards are packed at the compact heights");

@@ -142,7 +142,9 @@ again:
 
 ```bash
 APIFORGE_WRITE_BOARDS=1 cargo test -p apiforge-desktop --locked lay06_criterion_10
-``` What these numbers cannot say is timed by hand with
+```
+
+What these numbers cannot say is timed by hand with
 the [UX task sheet](sprints/lay.md#9-metrics-and-qa), on `shop-30.afs` after a
 failed simulation.
 

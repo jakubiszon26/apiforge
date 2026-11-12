@@ -157,7 +157,24 @@ fn lay01_criterion_6_the_fixtures_are_measured() {
     let mut names: Vec<&str> = rows.iter().map(|row| row["scenario"].as_str()).collect();
     names.dedup();
     assert_eq!(names, ["order-flow", "shop-30", "shop-50"]);
-    assert_eq!(rows.len(), 12, "two densities and two states each");
+    for name in names {
+        let mut variants: Vec<(&str, &str)> = rows
+            .iter()
+            .filter(|row| row["scenario"] == name)
+            .map(|row| (row["density"].as_str(), row["checks"].as_str()))
+            .collect();
+        variants.sort_unstable();
+        assert_eq!(
+            variants,
+            [
+                ("compact", "collapsed"),
+                ("compact", "expanded"),
+                ("full", "collapsed"),
+                ("full", "expanded"),
+            ],
+            "{name} at both densities, collapsed and expanded"
+        );
+    }
     let mut steps: Vec<f64> = rows.iter().map(|row| number(row, "steps")).collect();
     steps.dedup();
     assert_eq!(steps, [14.0, 30.0, 56.0]);
