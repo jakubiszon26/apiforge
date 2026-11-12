@@ -624,7 +624,8 @@ fn painted_on_board(harness: &FolderHarness, text: &str) -> bool {
 }
 
 /// KTLO-32 criterion 4: with the call card selected, its row for the
-/// undeclared input `note` is the missing marker (`note *`, *Value missing*)
+/// undeclared input `note` is the missing marker (`note · Missing input` on
+/// the compact card, LAY-21)
 /// and the inspector labels it `note *` with *Set this required argument.*;
 /// binding a value in the code clears the marker and the message. At both
 /// window sizes.
@@ -645,13 +646,10 @@ fn ktlo32_an_undeclared_input_is_marked_required_on_a_call() {
             "{size:?}: the call card is selected"
         );
 
+        // The compact call card (LAY-21) names the input on its missing line.
         assert!(
-            painted_on_board(&harness, "note *"),
-            "{size:?}: the row's name"
-        );
-        assert!(
-            painted_on_board(&harness, "Value missing"),
-            "{size:?}: the missing marker"
+            painted_on_board(&harness, "note · Missing input"),
+            "{size:?}: the row's name and the missing marker"
         );
         assert!(
             !painted_on_board(&harness, "Optional"),
@@ -679,7 +677,8 @@ fn ktlo32_an_undeclared_input_is_marked_required_on_a_call() {
             .unwrap();
         settle(&mut harness);
         assert!(
-            !painted_on_board(&harness, "Value missing"),
+            !painted_on_board(&harness, "note · Missing input")
+                && painted_on_board(&harness, "note · \"hello\""),
             "{size:?}: a bound input is not missing"
         );
         assert!(
