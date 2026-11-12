@@ -8,9 +8,13 @@
 //!
 //! It prints two tables: generated scenario-like boards of 6, 12, 25 and 50 cards,
 //! with and without an ordering chain, and the reference scenarios of
-//! `fixtures/scenarios/lay/`, with every step a full card, as *Tidy up* leaves them
-//! on `main`. The numbers are deterministic. `--dump` prints one generated board's
-//! rectangles and routes, for reading a case by hand.
+//! `fixtures/scenarios/lay/` as the desktop tidies them, read from
+//! `support/boards.txt`: each at the compact and the full density, with its checks
+//! collapsed and expanded, every card at the size the board draws it and every wire
+//! between the ports the board gives the router (LAY-06). The desktop's acceptance
+//! test `lay06_criterion_10_quality_on_real_card_sizes` writes that file and fails
+//! when it is out of date. The numbers are deterministic. `--dump` prints one
+//! generated board's rectangles and routes, for reading a case by hand.
 //!
 //! The columns:
 //!
@@ -19,7 +23,7 @@
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
 //!   other for at least 20 px; `coincident`: the same within 0.5 px, counted there
 //!   and not under `close`;
-//! - `long`: edges spanning more than one layer;
+//! - `long`: edges spanning more than one layer, for the generated boards;
 //! - `width`, `height`: the board's bounds; `fit_1600`, `fit_960`: the zoom that
 //!   shows all of it at 1600 × 1000 and 960 × 540, not limited to the zoom the
 //!   window allows;
@@ -29,35 +33,23 @@
 //! - `clearance`: route segments closer than 12 px to a card or chip the wire does
 //!   not end on, the router's `Routing::margin`.
 //!
-//! The card geometry is the desktop's (`canvas/layout.rs`), which this crate cannot
-//! depend on. A test holds it against heights the window measured.
+//! The generated boards use the full card's geometry (`canvas/layout.rs`), which
+//! this crate cannot depend on; the reference boards carry the desktop's own.
 
 mod support;
 
-use apiforge_core::{
-    demos::shop_project,
-    format::{Binding, Graph as Steps, Node, Project, ProxySource},
-    graph::{
-        FALSE_PORT, ORDER_PORT, TRUE_PORT, VALUE_INPUT, Wire as Link, WireKind, input_slots,
-        output_ports, predicate, wires,
-    },
-    model::{Branch, NodeKind},
-};
 use apiforge_layout::{
     Block, Edge, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, layers_of, route, tidy,
 };
-use apiforge_script::{Document, LowerContext, lower, parse};
 use std::{fmt::Write, process::ExitCode};
 use support::Random;
 
 const WIDTH: f32 = 280.0;
 const HEADER: f32 = 64.0;
-const SUBTITLE: f32 = 24.0;
 const INPUT_ROW: f32 = 52.0;
 const OUTPUT_ROW: f32 = 28.0;
 const FOOTER: f32 = 36.0;
 const CONTROL: f32 = 28.0;
-const CHIP_HEIGHT: f32 = 36.0;
 
 /// Parallel segments this near each other, for this long, read as one line.
 const CLOSE: f32 = 8.0;
@@ -69,132 +61,34 @@ const CLEARANCE: f32 = 11.5;
 const SIZES: [usize; 4] = [6, 12, 25, 50];
 const SEEDS: u64 = 10;
 
-const SCENARIOS: [(&str, &str); 3] = [
-    (
-        "order-flow",
-        include_str!("../../../fixtures/scenarios/lay/order-flow.afs"),
-    ),
-    (
-        "shop-30",
-        include_str!("../../../fixtures/scenarios/lay/shop-30.afs"),
-    ),
-    (
-        "shop-50",
-        include_str!("../../../fixtures/scenarios/lay/shop-50.afs"),
-    ),
-];
+/// The reference scenarios as the desktop tidies them, written by the desktop.
+const BOARDS: &str = include_str!("support/boards.txt");
 
-/// One input row of a card: its input and the path of its slot inside it.
-type Row = (String, Vec<String>);
-
-/// A card as the desktop measures it.
+/// A card as the desktop measures it at the full density.
 struct Card {
-    subtitle: bool,
-    inputs: Vec<Row>,
-    outputs: Vec<String>,
-    controls: Vec<&'static str>,
+    inputs: usize,
+    outputs: usize,
 }
 
 impl Card {
     fn generated(inputs: usize, outputs: usize) -> Self {
-        Self {
-            subtitle: false,
-            inputs: vec![Row::default(); inputs],
-            outputs: vec![String::new(); outputs],
-            controls: vec![ORDER_PORT],
-        }
-    }
-
-    fn of(node: &Node, project: &Project) -> Self {
-        let inputs = input_slots(node, project)
-            .into_iter()
-            .filter(|slot| {
-                slot.input != "expected"
-                    || !matches!(node.kind, NodeKind::Assert | NodeKind::If)
-                    || predicate(node).takes_expected()
-            })
-            .map(|slot| (slot.input, slot.path))
-            .collect();
-        Self {
-            subtitle: has_subtitle(node),
-            inputs,
-            outputs: output_ports(node, project)
-                .into_iter()
-                .map(|port| port.name)
-                .collect(),
-            controls: match node.kind {
-                NodeKind::If => vec![TRUE_PORT, FALSE_PORT],
-                _ => vec![ORDER_PORT],
-            },
-        }
-    }
-
-    fn header(&self) -> f32 {
-        HEADER + if self.subtitle { SUBTITLE } else { 0.0 }
+        Self { inputs, outputs }
     }
 
     fn outputs_top(&self) -> f32 {
-        self.header() + self.inputs.len() as f32 * INPUT_ROW
+        HEADER + self.inputs as f32 * INPUT_ROW
     }
 
     fn height(&self) -> f32 {
-        self.outputs_top() + self.outputs.len() as f32 * OUTPUT_ROW + 4.0 + FOOTER + CONTROL
+        self.outputs_top() + self.outputs as f32 * OUTPUT_ROW + 4.0 + FOOTER + CONTROL
     }
 
     fn input_y(&self, index: usize) -> f32 {
-        self.header() + index as f32 * INPUT_ROW + 30.0
+        HEADER + index as f32 * INPUT_ROW + 30.0
     }
 
     fn output_y(&self, index: usize) -> f32 {
         self.outputs_top() + index as f32 * OUTPUT_ROW + OUTPUT_ROW / 2.0 + 2.0
-    }
-
-    /// Where a wire ending at `input` lands: the deepest row containing `path`.
-    fn input_port(&self, block: usize, input: &str, path: &[String]) -> Option<Port> {
-        if input == ORDER_PORT {
-            return Some(Port::new(block, Side::Top, WIDTH / 2.0));
-        }
-        let index = self
-            .inputs
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.0 == input && path.starts_with(&row.1))
-            .max_by_key(|(_, row)| row.1.len())?
-            .0;
-        Some(Port::new(block, Side::Left, self.input_y(index)))
-    }
-
-    /// Where a wire leaves: a data output, or the middle of a control button.
-    fn output_port(&self, block: usize, output: &str) -> Option<Port> {
-        if let Some(index) = self.controls.iter().position(|port| *port == output) {
-            let width = WIDTH / self.controls.len() as f32;
-            let offset = (index as f32 + 0.5) * width;
-            return Some(Port::new(block, Side::Bottom, offset));
-        }
-        let index = self.outputs.iter().position(|name| name == output)?;
-        Some(Port::new(block, Side::Right, self.output_y(index)))
-    }
-}
-
-/// Whether the desktop writes a line under a card's name.
-fn has_subtitle(node: &Node) -> bool {
-    match node.kind {
-        NodeKind::Request | NodeKind::Condition | NodeKind::Assert | NodeKind::If => true,
-        NodeKind::Value => match node.inputs.get(VALUE_INPUT) {
-            Some(Binding::Reference { path, .. } | Binding::Parameter { path, .. })
-                if !path.is_empty() =>
-            {
-                true
-            }
-            Some(
-                Binding::Expression { .. }
-                | Binding::Object { .. }
-                | Binding::Array { .. }
-                | Binding::Template { .. },
-            ) => true,
-            _ => node.is_variable(),
-        },
-        _ => false,
     }
 }
 
@@ -202,8 +96,6 @@ fn has_subtitle(node: &Node) -> bool {
 #[derive(Default)]
 struct Board {
     blocks: Vec<Block>,
-    /// Pinned obstacles after the cards: one index space for ports and obstacles.
-    chips: Vec<Block>,
     edges: Vec<Edge>,
     wires: Vec<Wire>,
 }
@@ -241,12 +133,12 @@ fn generated(seed: u64, count: usize, order: bool) -> Board {
             ));
         }
         // Data: each input is fed by one of the last four cards, with 70 % chance.
-        for input in 0..cards[target].inputs.len() {
+        for input in 0..cards[target].inputs {
             if !random.chance(70) {
                 continue;
             }
             let source = target - (1 + random.below(4.min(target)));
-            let output = random.below(cards[source].outputs.len());
+            let output = random.below(cards[source].outputs);
             let (from, to) = (cards[source].output_y(output), cards[target].input_y(input));
             board
                 .edges
@@ -260,113 +152,105 @@ fn generated(seed: u64, count: usize, order: bool) -> Board {
     board
 }
 
-/// The output and the input a link connects, as the desktop's board reads it.
-fn ports(link: &Link) -> (&str, &str) {
-    match link.kind {
-        WireKind::Order => (
-            match link.branch {
-                Some(Branch::True) => TRUE_PORT,
-                Some(Branch::False) => FALSE_PORT,
-                None => ORDER_PORT,
-            },
-            ORDER_PORT,
-        ),
-        WireKind::Data => (
-            link.source_port.as_deref().unwrap_or_default(),
-            link.target_input.as_deref().unwrap_or_default(),
-        ),
+/// One reference scenario as the desktop tidied it: `board <scenario> <density>
+/// <checks> <steps>`, then its `card`, `chip`, `wire` and `mark` lines, then `end`.
+struct Tidied {
+    name: String,
+    density: String,
+    checks: String,
+    steps: usize,
+    cards: Vec<Rect>,
+    chips: Vec<Rect>,
+    /// The continuation marks, which count in the board's size only.
+    marks: Vec<Rect>,
+    wires: Vec<Wire>,
+}
+
+fn side(word: &str) -> Result<Side, String> {
+    match word {
+        "left" => Ok(Side::Left),
+        "right" => Ok(Side::Right),
+        "top" => Ok(Side::Top),
+        "bottom" => Ok(Side::Bottom),
+        _ => Err(format!("not a side: {word}")),
     }
 }
 
-/// A proxy's width follows its label, as on the desktop.
-fn chip_label<'a>(source: &'a ProxySource, steps: &'a Steps) -> &'a str {
-    match source {
-        ProxySource::Variable { node_id } => steps
-            .nodes
-            .iter()
-            .find(|node| &node.id == node_id)
-            .map_or(node_id, Node::display_name),
-        ProxySource::Parameter { name } | ProxySource::Environment { name } => name,
+fn boards(text: &str) -> Result<Vec<Tidied>, String> {
+    let number = |word: Option<&str>| -> Result<f32, String> {
+        let word = word.ok_or("a number is missing")?;
+        word.parse().map_err(|_| format!("not a number: {word}"))
+    };
+    let rect = |words: &mut std::str::SplitWhitespace<'_>| -> Result<Rect, String> {
+        let (x, y) = (number(words.next())?, number(words.next())?);
+        let (width, height) = (number(words.next())?, number(words.next())?);
+        Ok(Rect::from_size(Point::new(x, y), Size::new(width, height)))
+    };
+    let mut result: Vec<Tidied> = Vec::new();
+    for line in text.lines().filter(|line| !line.starts_with('#')) {
+        let mut words = line.split_whitespace();
+        let kind = words.next().unwrap_or_default();
+        if kind == "board" {
+            let mut word = || {
+                words
+                    .next()
+                    .map(str::to_owned)
+                    .ok_or("a board line is short")
+            };
+            result.push(Tidied {
+                name: word()?,
+                density: word()?,
+                checks: word()?,
+                steps: number(Some(&word()?))? as usize,
+                cards: Vec::new(),
+                chips: Vec::new(),
+                marks: Vec::new(),
+                wires: Vec::new(),
+            });
+            continue;
+        }
+        if kind == "end" || kind.is_empty() {
+            continue;
+        }
+        let board = result.last_mut().ok_or("a line before the first board")?;
+        match kind {
+            "card" => board.cards.push(rect(&mut words)?),
+            "chip" => board.chips.push(rect(&mut words)?),
+            "mark" => board.marks.push(rect(&mut words)?),
+            "wire" => {
+                let port = |words: &mut std::str::SplitWhitespace<'_>| -> Result<Port, String> {
+                    let block = number(words.next())? as usize;
+                    let side = side(words.next().ok_or("a side is missing")?)?;
+                    Ok(Port::new(block, side, number(words.next())?))
+                };
+                let from = port(&mut words)?;
+                board.wires.push(Wire::new(from, port(&mut words)?));
+            }
+            other => return Err(format!("not a board line: {other}")),
+        }
     }
-}
-
-/// The board of a scenario's main graph, in the demo shop project it calls into.
-fn reference(steps: &Steps, project: &Project) -> Board {
-    let cards: Vec<Card> = steps
-        .nodes
-        .iter()
-        .map(|node| Card::of(node, project))
-        .collect();
-    let index_of = |id: &str| steps.nodes.iter().position(|node| node.id == id);
-    let links = wires(steps);
-    Board {
-        blocks: steps
-            .nodes
-            .iter()
-            .zip(&cards)
-            .map(|(node, card)| {
-                let position = Point::new(node.position.x as f32, node.position.y as f32);
-                Block::new(Size::new(WIDTH, card.height()), position)
-            })
-            .collect(),
-        chips: steps
-            .proxies
-            .iter()
-            .map(|proxy| {
-                let label = chip_label(&proxy.source, steps).chars().count();
-                let width = (7.2 * label as f32 + 64.0).clamp(112.0, 240.0);
-                let position = Point::new(proxy.position.x as f32, proxy.position.y as f32);
-                Block::new(Size::new(width, CHIP_HEIGHT), position).pinned()
-            })
-            .collect(),
-        edges: links
-            .iter()
-            .filter_map(|link| Some(Edge::new(index_of(&link.source)?, index_of(&link.target)?)))
-            .collect(),
-        wires: links
-            .iter()
-            .filter_map(|link| {
-                let (source, target) = (index_of(&link.source)?, index_of(&link.target)?);
-                let (output, input) = ports(link);
-                Some(Wire::new(
-                    cards[source].output_port(source, output)?,
-                    cards[target].input_port(target, input, &link.operand_path)?,
-                ))
-            })
-            .collect(),
-    }
-}
-
-fn scenario(text: &str, project: &Project) -> Result<Steps, String> {
-    let lowered = lower(&parse(text), &LowerContext::folder(project));
-    match lowered.document {
-        Some(Document::Scenario(scenario)) if !lowered.has_errors() => Ok(scenario.graph),
-        _ => Err(format!("{:#?}", lowered.diagnostics)),
-    }
+    Ok(result)
 }
 
 /// The board tidied and routed.
 struct Laid {
     cards: Vec<Rect>,
-    chips: Vec<Rect>,
     routes: Vec<Route>,
     long: usize,
 }
 
 fn lay(board: &Board) -> Laid {
-    let blocks: Vec<Block> = board.blocks.iter().chain(&board.chips).copied().collect();
-    let graph = Graph::new(&blocks, &board.edges);
+    let blocks = &board.blocks;
+    let graph = Graph::new(blocks, &board.edges);
     let layers = layers_of(&graph);
     let rectangles: Vec<Rect> = tidy(&graph)
         .iter()
-        .zip(&blocks)
+        .zip(blocks)
         .map(|(position, block)| Rect::from_size(*position, block.size))
         .collect();
     let routes = route(&rectangles, &board.wires, &Routing::default());
-    let (cards, chips) = rectangles.split_at(board.blocks.len());
     Laid {
-        cards: cards.to_vec(),
-        chips: chips.to_vec(),
+        cards: rectangles,
         routes,
         long: board
             .edges
@@ -566,30 +450,43 @@ fn generated_table(text: &mut String) {
 fn reference_table(text: &mut String) -> Result<(), String> {
     let _ = writeln!(
         text,
-        "\nreference scenarios, tidied, every step a full card\n\n\
-         scenario   steps{MEASURES} width height fit_1600 fit_960 chips card_hits chip_hits clearance"
+        "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
+         scenario   density checks    steps cards wires crossings  bends straight  close coincident incomplete width height fit_1600 fit_960 chips card_hits chip_hits clearance"
     );
-    let project = shop_project();
-    for (name, source) in SCENARIOS {
-        let steps = scenario(source, &project).map_err(|error| format!("{name}: {error}"))?;
-        let board = reference(&steps, &project);
-        let laid = lay(&board);
-        let everything: Vec<Rect> = laid.cards.iter().chain(&laid.chips).copied().collect();
+    for board in boards(BOARDS)? {
+        let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
+        let laid = Laid {
+            cards: board.cards.clone(),
+            routes: route(&rectangles, &board.wires, &Routing::default()),
+            long: 0,
+        };
+        let measures = Measures::of(&laid);
+        let everything: Vec<Rect> = rectangles.iter().chain(&board.marks).copied().collect();
         let left = everything.iter().map(|r| r.min.x).fold(f32::MAX, f32::min);
         let top = everything.iter().map(|r| r.min.y).fold(f32::MAX, f32::min);
         let right = everything.iter().map(|r| r.max.x).fold(f32::MIN, f32::max);
         let bottom = everything.iter().map(|r| r.max.y).fold(f32::MIN, f32::max);
         let (width, height) = (right - left, bottom - top);
-        let (card_hits, chip_hits) = collisions(&laid.cards, &laid.chips);
+        let (card_hits, chip_hits) = collisions(&board.cards, &board.chips);
         let _ = writeln!(
             text,
-            "{name:<10} {:>5} {} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
-            steps.nodes.len(),
-            Measures::of(&laid).cells(1.0, 0),
+            "{:<10} {:<7} {:<9} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
+            board.name,
+            board.density,
+            board.checks,
+            board.steps,
+            board.cards.len(),
+            measures.wires,
+            measures.crossings,
+            measures.bends,
+            measures.straight,
+            measures.close,
+            measures.coincident,
+            measures.incomplete,
             fit(FIT_1600, width, height),
             fit(FIT_960, width, height),
-            laid.chips.len(),
-            clearance_violations(&laid.routes, &board.wires, &everything),
+            board.chips.len(),
+            clearance_violations(&laid.routes, &board.wires, &rectangles),
         );
     }
     Ok(())
@@ -746,32 +643,59 @@ mod tests {
         assert_eq!(lay(&board).long, 1);
     }
 
+    /// LAY-06 criterion 10: the reference boards are the desktop's, at both
+    /// densities and with the checks collapsed and expanded, and a compact
+    /// card is shorter than the same card full.
     #[test]
-    fn the_cards_measure_what_the_window_measured() {
-        // `Card::height()` of the desktop, one step of each kind.
-        let project = shop_project();
-        let steps = scenario(SCENARIOS[1].1, &project).expect("the fixture lowers");
-        let height = |handle: &str| {
-            let node = steps
-                .nodes
-                .iter()
-                .find(|node| node.handle == handle)
-                .expect("the step");
-            Card::of(node, &project).height()
-        };
-        for (handle, expected) in [
-            ("begin", 132.0),
-            ("login", 372.0),
-            ("catalogue", 476.0),
-            ("listed", 264.0),
-            ("first", 236.0),
-            ("expected_total", 288.0),
-            ("product", 212.0),
-            ("valid_cart", 472.0),
-            ("paid", 316.0),
-        ] {
-            assert_eq!(height(handle), expected, "{handle}");
+    fn the_reference_boards_are_the_desktops() {
+        let boards = boards(BOARDS).expect("the board file reads");
+        assert_eq!(
+            boards.len(),
+            12,
+            "three scenarios, two densities, two states"
+        );
+        for board in &boards {
+            assert!(
+                !board.cards.is_empty() && !board.wires.is_empty(),
+                "{}",
+                board.name
+            );
+            for wire in &board.wires {
+                let blocks = board.cards.len() + board.chips.len();
+                assert!(wire.from.block < blocks && wire.to.block < blocks);
+            }
         }
+        let height = |density: &str| -> f32 {
+            boards
+                .iter()
+                .find(|board| {
+                    board.name == "shop-30"
+                        && board.density == density
+                        && board.checks == "expanded"
+                })
+                .expect("shop-30")
+                .cards
+                .iter()
+                .map(Rect::height)
+                .sum()
+        };
+        assert!(height("compact") < height("full"));
+        let expanded = |name: &str| {
+            boards
+                .iter()
+                .find(|board| board.name == name && board.checks == "expanded")
+                .map(|board| board.cards.len())
+        };
+        let collapsed = |name: &str| {
+            boards
+                .iter()
+                .find(|board| board.name == name && board.checks == "collapsed")
+                .map(|board| board.cards.len())
+        };
+        assert!(
+            collapsed("shop-30") < expanded("shop-30"),
+            "collapsed folds checks"
+        );
     }
 
     #[test]

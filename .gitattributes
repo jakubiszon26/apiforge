@@ -4,3 +4,6 @@
 *.afs text eol=lf
 # Recorded command output, compared byte for byte with what a command prints.
 crates/apiforge-cli/tests/fixtures/*.txt text eol=lf
+# The reference boards the desktop writes for the quality example (LAY-06),
+# compared byte for byte with what the desktop tidies.
+crates/apiforge-layout/examples/support/boards.txt text eol=lf

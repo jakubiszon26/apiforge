@@ -14,8 +14,9 @@ const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
 const TIDY: &str = "Tidy up";
 const FIT: &str = "Fit the view";
-/// The free space the layered layout keeps between the cards of a column.
-const ROW_GAP: f32 = 48.0;
+/// The free space Tidy up keeps between the cards of a column: shape D's
+/// stack gap (LAY-06), twice the router's clearance.
+const STACK_GAP: f32 = 24.0;
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -98,44 +99,6 @@ fn hung(harness: &FolderHarness, id: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The layer of each block Tidy up lays out first, by the shared layout's
-/// longest path; a wire to or from a hung check counts as its subject's, as
-/// Tidy up counts it. `None` for a hung check.
-fn layers(graph: &Graph, hung: &BTreeMap<String, String>) -> Vec<Option<usize>> {
-    let rest: Vec<usize> = (0..graph.nodes.len())
-        .filter(|index| !hung.contains_key(&graph.nodes[*index].id))
-        .collect();
-    let local = |id: &str| {
-        let id = hung.get(id).map_or(id, String::as_str);
-        let index = graph.nodes.iter().position(|node| node.id == id)?;
-        rest.iter().position(|kept| *kept == index)
-    };
-    let blocks: Vec<apiforge_layout::Block> = rest
-        .iter()
-        .map(|_| {
-            apiforge_layout::Block::new(
-                apiforge_layout::Size::new(1.0, 1.0),
-                apiforge_layout::Point::default(),
-            )
-        })
-        .collect();
-    let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
-        .iter()
-        .filter_map(|wire| {
-            let (source, target) = (local(&wire.source)?, local(&wire.target)?);
-            (source != target).then(|| apiforge_layout::Edge::new(source, target))
-        })
-        .collect();
-    let of_rest = apiforge_layout::layers_of(&apiforge_layout::Graph::new(&blocks, &edges));
-    (0..graph.nodes.len())
-        .map(|index| {
-            rest.iter()
-                .position(|kept| *kept == index)
-                .map(|local| of_rest[local])
-        })
-        .collect()
-}
-
 /// The cards of the last frame, on screen.
 fn cards_on_screen(harness: &FolderHarness, id: &str) -> Vec<(String, egui::Rect)> {
     canvas(harness, id).debug_cards().to_vec()
@@ -159,52 +122,72 @@ fn separation(a: egui::Rect, b: egui::Rect) -> f32 {
     dx.max(dy)
 }
 
-/// Criterion 3: `order-flow` opens with one column per layer, the layers
-/// left to right, and no card on another. Its checks are collapsed, as by
-/// default (LAY-11): a check hung off its subject is hidden and stands in
-/// no column; every other card is drawn in its layer's column.
+/// Criterion 3: `order-flow` opens laid out as Tidy up lays it out, which
+/// is shape D since LAY-06: the spine (Start, requests, component calls,
+/// `if`s) in the engine's order left to right, wrapped after five columns,
+/// every other card in the column of a spine step, and no card on another.
+/// Its checks are collapsed, as by default (LAY-11): a check hung off its
+/// subject is hidden.
 #[test]
 fn lay02_criterion_3_order_flow_opens_in_layers() {
     let (_project, harness, id) = open("order-flow", WIDE);
     let graph = main_graph(&harness, &id);
     let hung = hung(&harness, &id);
     assert!(!hung.is_empty(), "order-flow has checks to hang");
-    let layers = layers(&graph, &hung);
     let cards = cards_on_screen(&harness, &id);
     assert_eq!(
         cards.len(),
         graph.nodes.len() - hung.len(),
         "every card but the hung checks is drawn"
     );
-    let centre = |node: &Node| {
+    let left = |node: &Node| {
         cards
             .iter()
             .find(|(card, _)| *card == node.id)
             .unwrap_or_else(|| panic!("{} is drawn", node.handle))
             .1
-            .center()
-            .x
+            .left()
     };
-    let depth = layers.iter().flatten().max().map_or(0, |max| max + 1);
-    assert!(depth > 3, "order-flow is a flow of several layers");
-    let mut columns: Vec<Option<f32>> = vec![None; depth];
-    for (node, layer) in graph.nodes.iter().zip(&layers) {
-        let Some(layer) = layer else { continue };
-        let x = centre(node);
-        match columns[*layer] {
-            Some(column) => assert!(
-                (column - x).abs() < 1.0,
-                "{} stands in the column of layer {layer} at {column}, not at {x}",
-                node.handle
-            ),
-            None => columns[*layer] = Some(x),
-        }
-    }
-    let columns: Vec<f32> = columns.into_iter().flatten().collect();
+    let spine: Vec<&Node> = apiforge_core::graph::sequence(&graph)
+        .into_iter()
+        .filter_map(|id| graph.nodes.iter().find(|node| node.id == id))
+        .filter(|node| {
+            matches!(
+                node.kind,
+                apiforge_core::model::NodeKind::Start
+                    | apiforge_core::model::NodeKind::Request
+                    | apiforge_core::model::NodeKind::Component
+                    | apiforge_core::model::NodeKind::If
+            )
+        })
+        .collect();
+    assert!(spine.len() > 5, "order-flow's spine wraps");
+    let columns: Vec<f32> = spine.iter().take(5).map(|node| left(node)).collect();
     for pair in columns.windows(2) {
         assert!(
             pair[1] > pair[0] + 1.0,
-            "the layers run left to right: {columns:?}"
+            "the spine runs left to right: {columns:?}"
+        );
+    }
+    for (place, node) in spine.iter().enumerate() {
+        assert!(
+            (left(node) - columns[place % 5]).abs() < 1.0,
+            "{} is in column {}",
+            node.handle,
+            place % 5
+        );
+    }
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| !hung.contains_key(&node.id))
+    {
+        assert!(
+            columns
+                .iter()
+                .any(|column| (left(node) - column).abs() < 1.0),
+            "{} stands in a column of the spine",
+            node.handle
         );
     }
     assert_cards_disjoint(&cards);
@@ -520,7 +503,7 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
                     "{name}: Tidy up moves {handle} from {at:?} to {moved:?}"
                 );
             }
-            // In each column the cards keep the row gap as drawn.
+            // In each column the cards keep the stack gap as drawn.
             let zoom = canvas(&harness, &id).debug_zoom();
             let mut cards = cards_on_screen(&harness, &id);
             cards.sort_by(|a, b| {
@@ -535,7 +518,7 @@ fn lay02_criterion_6_opened_at_the_boards_density_and_in_view() {
                 }
                 let gap = (lower.top() - upper.bottom()) / zoom;
                 assert!(
-                    gap >= ROW_GAP - 1.0,
+                    gap >= STACK_GAP - 1.0,
                     "{name}: {} and {} are {gap} apart as drawn",
                     pair[0].0,
                     pair[1].0
@@ -577,7 +560,7 @@ fn lay02_criterion_6_opened_at_the_compact_density() {
             (below.position.x - node.position.x).abs() < 1.0
                 && below.position.y > node.position.y
                 && ((below.position.y - node.position.y) as f32)
-                    < height(node, full) + ROW_GAP - 1.0
+                    < height(node, full) + STACK_GAP - 1.0
         })
     });
     assert!(packed, "the cards are packed at the compact heights");

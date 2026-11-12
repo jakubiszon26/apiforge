@@ -9,6 +9,7 @@ mod layout;
 mod menu;
 mod paint;
 mod routing;
+pub mod shape;
 mod strip;
 
 pub use collapse::collapsible;
@@ -307,6 +308,8 @@ pub struct HeaderRoom {
 struct Shapes<'a> {
     cards: &'a [Card],
     chips: &'a [Chip],
+    /// The continuation marks beside the rows (LAY-06).
+    marks: &'a [Rect],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -458,6 +461,12 @@ pub struct Canvas {
     /// The wires the last frame drew.
     #[cfg(test)]
     wires: Vec<DrawnWire>,
+    /// The continuation marks the last frame drew (LAY-06).
+    #[cfg(test)]
+    marks: Vec<shape::Mark>,
+    /// What the last frame gave the router: rectangles and wires.
+    #[cfg(test)]
+    geometry: (Vec<apiforge_layout::Rect>, Vec<apiforge_layout::Wire>),
     /// What each card drew in the last frame: its texts, band and signal
     /// border (LAY-09).
     #[cfg(test)]
@@ -473,6 +482,12 @@ pub(crate) struct DrawnWire {
     pub source: Option<String>,
     pub target: String,
     pub label: Option<String>,
+    /// An ordering wire, which the board draws dashed.
+    pub dashed: bool,
+    /// The route in board coordinates, empty when it was not drawn.
+    pub points: Vec<Pos2>,
+    /// The crossings of wires drawn before it, where it draws a bridge.
+    pub bridges: usize,
 }
 
 impl Default for Canvas {
@@ -525,6 +540,10 @@ impl Default for Canvas {
             aggregates: Vec::new(),
             #[cfg(test)]
             wires: Vec::new(),
+            #[cfg(test)]
+            marks: Vec::new(),
+            #[cfg(test)]
+            geometry: (Vec::new(), Vec::new()),
             #[cfg(test)]
             drawn: Vec::new(),
         }
@@ -678,6 +697,14 @@ impl Canvas {
         self.fit_pending = false;
     }
 
+    /// Moves the camera by `offset`, as a person drags the board.
+    #[cfg(test)]
+    pub(crate) fn debug_pan(&mut self, offset: Vec2) {
+        self.camera.pan += offset;
+        self.camera_moved_by_user = true;
+        self.fit_pending = false;
+    }
+
     /// The row an input of the card `id` is shown on, on screen.
     #[cfg(test)]
     pub(crate) fn debug_input_row(&self, id: &str, input: &str) -> Option<Rect> {
@@ -722,6 +749,21 @@ impl Canvas {
         &self.wires
     }
 
+    /// The continuation marks the last frame drew (LAY-06).
+    #[cfg(test)]
+    pub(crate) fn debug_marks(&self) -> &[shape::Mark] {
+        &self.marks
+    }
+
+    /// What the last frame gave the router: the rectangles of the cards
+    /// drawn, then of the chips, and the wires as ports on them.
+    #[cfg(test)]
+    pub(crate) fn debug_geometry(
+        &self,
+    ) -> &(Vec<apiforge_layout::Rect>, Vec<apiforge_layout::Wire>) {
+        &self.geometry
+    }
+
     #[cfg(test)]
     pub(crate) fn debug_collapsed(&self) -> bool {
         self.collapsed
@@ -738,6 +780,12 @@ impl Canvas {
         let mut ids: Vec<String> = self.expanded_here.iter().cloned().collect();
         ids.sort();
         ids
+    }
+
+    /// Fits the camera to the board in the next frame: Tidy up ends with the
+    /// whole tidied board in view, wherever the camera was (LAY-06).
+    pub fn fit_after_tidy_up(&mut self) {
+        self.fit_pending = true;
     }
 
     /// Folds check cards into their subjects, or shows them again. Nothing
@@ -1044,6 +1092,14 @@ impl Canvas {
                 .collect();
         }
 
+        // The row ends of a board in shape D name the next step (LAY-06).
+        let marks = shape::marks(input.graph, &cards);
+        let mark_rects: Vec<Rect> = marks.iter().map(|mark| mark.rect).collect();
+        #[cfg(test)]
+        {
+            self.marks = marks.clone();
+        }
+
         let pasted = std::mem::take(&mut self.pasted_pending);
         if let Some(group) = cards
             .iter()
@@ -1072,8 +1128,12 @@ impl Canvas {
         let window = ui.ctx().content_rect().size();
         let rearranged = (window - self.last_window).length() > 1.0
             || input.arrangement != self.last_arrangement;
-        let board_changed =
-            self.place_camera(viewport, overlays.focus, rearranged, shapes(&cards, &chips));
+        let board_changed = self.place_camera(
+            viewport,
+            overlays.focus,
+            rearranged,
+            shapes(&cards, &chips, &mark_rects),
+        );
         self.keep_selection_in_view(
             viewport,
             overlays.focus,
@@ -1130,6 +1190,12 @@ impl Canvas {
                 *chip = chip.translated(*offset);
             }
         }
+        // A mark goes with the card it is beside while that card is dragged.
+        let marks = if self.drag.is_some() {
+            shape::marks(input.graph, &cards)
+        } else {
+            marks
+        };
 
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);
@@ -1155,16 +1221,28 @@ impl Canvas {
             _ => HashSet::new(),
         };
         let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
+        // A continuation mark is drawn under the wires: a wire that passes
+        // it stays whole, and the mark is no obstacle to route around.
+        for mark in &marks {
+            paint::continuation_mark(&board_painter, mark, camera);
+        }
         let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(board_wires.len());
+        #[cfg(test)]
+        let mut bridged: HashMap<String, usize> = HashMap::new();
         {
-            let routed = self.router.routes(&routing::Request {
+            let request = routing::Request {
                 cards: &cards,
                 chips: &chips,
                 wires: &board_wires,
                 moving: &moving,
                 style: self.wire_style,
                 bridges: self.bridges,
-            });
+            };
+            #[cfg(test)]
+            {
+                self.geometry = routing::geometry(&request);
+            }
+            let routed = self.router.routes(&request);
             for wire in routed {
                 paint::routed_wire(
                     &board_painter,
@@ -1176,6 +1254,8 @@ impl Canvas {
                     paint::wire_label(&board_painter, wire, camera, text);
                 }
                 drawn.push((wire.id.clone(), wire.points.clone()));
+                #[cfg(test)]
+                bridged.insert(wire.id.clone(), wire.bridges.len());
             }
         }
         #[cfg(test)]
@@ -1190,6 +1270,13 @@ impl Canvas {
                     },
                     target: cards[wire.target].id.clone(),
                     label: wire_labels.get(&wire.id).cloned(),
+                    dashed: wire.control,
+                    points: drawn
+                        .iter()
+                        .find(|(id, _)| *id == wire.id)
+                        .map(|(_, points)| points.clone())
+                        .unwrap_or_default(),
+                    bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
                 })
                 .collect();
         }
@@ -1474,7 +1561,7 @@ impl Canvas {
         self.handle_box_selection(
             &board_ui,
             &background,
-            shapes(&cards, &chips),
+            shapes(&cards, &chips, &mark_rects),
             camera,
             input,
             &mut commands,
@@ -1534,12 +1621,12 @@ impl Canvas {
                 .on_hover_text(paint::mode_line_text(input.graph))
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &summary));
         }
-        self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips));
+        self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips, &mark_rects));
         if let Some((mm_inner, bounds, scale)) = paint::minimap(
             &painter,
             overlays.minimap,
             overlays.board,
-            shapes(&cards, &chips),
+            shapes(&cards, &chips, &mark_rects),
             camera,
             &selection,
         ) && let Some(mm_rect) = overlays.minimap
@@ -2985,12 +3072,17 @@ impl Shapes<'_> {
             .iter()
             .map(Card::rect)
             .chain(self.chips.iter().map(Chip::rect))
+            .chain(self.marks.iter().copied())
             .reduce(Rect::union)
     }
 }
 
-fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip]) -> Shapes<'a> {
-    Shapes { cards, chips }
+fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip], marks: &'a [Rect]) -> Shapes<'a> {
+    Shapes {
+        cards,
+        chips,
+        marks,
+    }
 }
 
 /// The positions a drag leaves behind, for the blocks and proxies it moved.
