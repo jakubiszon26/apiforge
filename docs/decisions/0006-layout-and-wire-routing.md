@@ -2,7 +2,8 @@
 
 - Status: accepted and implemented, with the deviations recorded under
   *As implemented*
-- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn)
+- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn) and
+  2026-11-12 (LAY-06, shape D and the rail)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -117,6 +118,42 @@ preferences file that stores `spline` still loads, as orthogonal, and the next
 save of preferences writes `orthogonal`. The rounding in `apiforge-layout`
 (`smooth`) stays, with its guarantees and tests, for a future curved style;
 no style the board offers uses it today.
+
+### Shape D and the rail (LAY-06)
+
+Amended by LAY-06 (2026-11-12, owner decision Q1 = A and Q3 = A of the
+[LAY plan](../sprints/lay.md#51-decisions-taken-2026-11-05)). The flow
+direction stays left to right. *Tidy up* of a whole board in the folder
+window no longer lays out layers; it gives **shape D**, the hybrid of a
+spine and satellites:
+
+1. **Spine.** *Start*, requests, component calls and `if`s, in the order
+   the engine reaches them (`graph::sequence`), left to right in 280 px
+   columns 96 px apart. The spine wraps to a new row after the columns the
+   row width holds: five at the default width, 1784 px, a parameter
+   (`layered::Rows`).
+2. **Satellites.** Every other block hangs in the column of the spine step
+   it reads last, stacked below it in the engine's order, 24 px apart (twice
+   the router's clearance): a check under the subject LAY-11 folds it into,
+   a value under the latest spine step among its dependencies, or under the
+   column of the latest satellite it reads, or else under the spine step
+   the engine reaches just before it.
+3. **Rows.** A row is as tall as its tallest stack, at the heights the board
+   draws its cards; the next row starts 96 px lower. Folded checks keep
+   their places, so showing them moves nothing.
+4. **The rail.** An ordering wire leaves the top of its source, above its
+   control socket, and enters the top of its target, so it runs on the rail
+   above the row instead of through the gap between two cards where the data
+   wires run; `@after` and branch wires are dashed, as every ordering wire
+   is. A wire into a card hung right under its source still leaves from the
+   socket at the bottom. The router routes wires between two top ports
+   first, so a data wire coming down into the row crosses a rail once.
+5. **Continuation mark.** The last spine card of a row carries a mark,
+   `↳ <next step>`, naming the first card of the row below. It is drawn under
+   the wires and is no obstacle to them.
+
+Tidy up of a selection, and the board of the workspace window, keep the
+layered layout above. Tidy up ends with the camera fitted to the board.
 
 ## As implemented
 
