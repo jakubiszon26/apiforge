@@ -15,20 +15,9 @@ use apiforge_core::run::{RunResult, RunStatus};
 use egui_kittest::kittest::Queryable;
 use std::fs;
 
-#[path = "acceptance_tests/issue284.rs"]
-mod issue284;
-#[path = "acceptance_tests/issue288.rs"]
-mod issue288;
-#[path = "acceptance_tests/issue324.rs"]
-mod issue324;
-#[path = "acceptance_tests/ktlo33.rs"]
-mod ktlo33;
-#[path = "acceptance_tests/lay11.rs"]
-mod lay11;
-#[path = "acceptance_tests/lay21.rs"]
-mod lay21;
-#[path = "acceptance_tests/ux37.rs"]
-mod ux37;
+// One module per file of `acceptance_tests/`, declared by the build script
+// (KTLO-44): a ticket's window tests are a new file there and nothing else.
+include!(concat!(env!("OUT_DIR"), "/acceptance_modules.rs"));
 
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {

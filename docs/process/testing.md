@@ -14,7 +14,8 @@ block palette`). The commit shows the tests failing for the right reason; the
 implementation commits then make them pass without editing the assertions.
 
 - Where they live: `crates/<crate>/tests/acceptance.rs` for a library crate,
-  `folder/acceptance_tests.rs` for the desktop. Interface criteria are
+  a ticket's own file of `folder/acceptance_tests/` for the desktop
+  ([where](../development.md#verification)). Interface criteria are
   interaction tests through named widgets ([GUI testing](../gui-testing.md)).
 - A criterion that cannot be turned into a test is recorded in the ticket as a
   manual QA step with the reason; "hard to test" is not a reason.
