@@ -49,20 +49,29 @@ pub enum CardDensity {
     Full,
 }
 
-/// Keep the same graph geometry while reducing visual detail at distant zooms.
+/// What a card says at a zoom, in the same box (LAY-09): at Overview its
+/// band, name and checks pill; at Medium its lines summed up; at Full every
+/// value. *Medium* is the zoom level, *Compact* the density ([`CardDensity`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CardDetail {
     Overview,
-    Compact,
+    Medium,
     Full,
 }
 
+/// The zoom from which a card writes its lines: a 24 px row is 10.8 px on
+/// screen there, room for the 9 px smallest line (LAY-09).
+pub const MEDIUM_FROM: f32 = 0.45;
+/// The zoom from which a card writes its values: the smallest Full text,
+/// 11 px at 100 %, is 8.25 px there and is held at 9 px.
+pub const FULL_FROM: f32 = 0.75;
+
 impl CardDetail {
     pub fn at_zoom(zoom: f32) -> Self {
-        if zoom < 0.45 {
+        if zoom < MEDIUM_FROM {
             Self::Overview
-        } else if zoom < 0.75 {
-            Self::Compact
+        } else if zoom < FULL_FROM {
+            Self::Medium
         } else {
             Self::Full
         }
@@ -410,6 +419,16 @@ impl Card {
         density: CardDensity,
     ) -> Self {
         let mut card = Self::build_full(node, reference_graph, project);
+        if node.kind == NodeKind::Assert && density == CardDensity::Full {
+            // A full check card's subtitle names its subject and predicate,
+            // in the words of the compact card's line (LAY-09, LAY-21).
+            let scope = Scope {
+                nodes: &reference_graph.nodes,
+                project,
+                request: Some(node),
+            };
+            card.subtitle = Some(satellite_line(&card, node, scope, reference_graph).0);
+        }
         if density == CardDensity::Compact && compacts(node.kind) {
             card.compact = Some(compact(&card, node, reference_graph, project));
         }
@@ -674,7 +693,7 @@ impl Card {
         if let Some(compact) = &self.compact {
             // Below the zoom where the line is written there is nothing to
             // click.
-            if COMPACT_ROW * zoom < 11.0 {
+            if CardDetail::at_zoom(zoom) == CardDetail::Overview {
                 return None;
             }
             return compact
@@ -1463,7 +1482,8 @@ mod tests {
         );
         node.config.predicate = Some(Predicate::NotEmpty);
         let card = Card::build(&node, graph, &project, CardDensity::Full);
-        assert_eq!(card.subtitle.as_deref(), Some("is not empty"));
+        // The subtitle names the subject before the predicate (LAY-09).
+        assert_eq!(card.subtitle.as_deref(), Some("null is not empty"));
         assert!(card.inputs.iter().any(|row| row.name == "actual"));
         assert!(!card.inputs.iter().any(|row| row.name == "expected"));
         node.config.predicate = Some(Predicate::Equals);

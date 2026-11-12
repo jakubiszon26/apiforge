@@ -373,7 +373,7 @@ fn lay02_criterion_5_tidy_up_brings_a_chip_to_its_first_reader() {
         .expect("cards on the board");
     let cards_only = (zoom * focus.width() / cards.width())
         .min(zoom * focus.height() / cards.height())
-        .clamp(0.25, 1.0);
+        .clamp(0.05, 1.0);
     assert!(
         zoom >= 0.9 * cards_only,
         "Fit shows the cards at {zoom}, the cards alone would fit at {cards_only}"

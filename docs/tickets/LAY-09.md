@@ -11,7 +11,7 @@
 ## Goal
 
 At every zoom a card says what matters at that distance: at Fit view the
-status, the number and a readable name; at Compact the method, the path,
+status, the number and a readable name; at Medium the method, the path,
 the two result lines and the ports in use; at Full everything. No text gets
 smaller when zooming in, and a failed or blocked card is visible at every
 level.
@@ -21,7 +21,7 @@ level.
 - Overview (below 0.45): the status band, the badge, the name drawn at a
   minimum on-screen size of 11 px whatever the zoom, clipped to the card,
   and the checks aggregate as a pill under the name (Q5).
-- Compact (0.45 to 0.75): plus method and short path, two result lines
+- Medium (0.45 to 0.75): plus method and short path, two result lines
   (execution, checks), the ports in use and one summary line per configured
   input (`Body · 2 fields`, Q13 = A); unconnected output ports, *Optional*
   and separators appear at Full.
@@ -87,7 +87,7 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay09.rs`, on `sho
    0.44 and 0.46, and at 0.74 and 0.76, the name's, number's and result
    line's on-screen heights are monotone non-decreasing. Test:
    `lay09_criterion_2_sizes_are_monotone_across_thresholds`.
-3. At Compact `catalogue` shows `Query · 1 parameter` though its query has
+3. At Medium `catalogue` shows `Query · 1 parameter` though its query has
    no wire; `login` shows its two result lines `HTTP 200` and `2 checks`
    (grey before a run, never a tick for a check that did not run). Test:
    `lay09_criterion_3_compact_shows_the_configured_inputs_and_two_lines`.
@@ -97,7 +97,7 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay09.rs`, on `sho
    `lay09_criterion_4_a_failed_check_on_a_green_request`.
 5. Zooming from 0.2 to 1.0 moves no card: every card's world rectangle is
    identical at each zoom. Test: `lay09_criterion_5_zooming_moves_no_card`.
-6. A check card's subtitle reads subject and predicate at Compact and Full.
+6. A check card's subtitle reads subject and predicate at Medium and Full.
    Test: `lay09_criterion_6_a_check_names_its_subject`.
 7. The final thresholds are recorded in this file with the measurement that
    fixed them; if they differ from 0.45 / 0.75 the QA captures show the
@@ -105,6 +105,34 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lay09.rs`, on `sho
 8. Fit on `shop-50.afs` at 960 × 540 shows every card (the cards' box is
    inside the viewport), and the failed card's red border is visible in
    that frame. Test: `lay09_criterion_8_fit_shows_every_card`.
+
+## Thresholds recorded (2026-11-12)
+
+The thresholds stay **0.45** (Overview to Medium) and **0.75** (Medium to
+Full), `MEDIUM_FROM` and `FULL_FROM` in `canvas/layout.rs`. The minimum
+sizes on screen are a name 11 px and a line 9 px, applied by
+`paint::min_on_screen` to every card kind at both densities; a step number
+gets 9 px (`NUMBER_MIN`) when LAY-07 draws the badge.
+What fixed the values, measured on `shop-30` at 1600 × 1000:
+
+- 0.45: a compact row is 24 px, 10.8 px on screen there, and holds the
+  9 px line; the name's header (34 px) is 15.3 px and holds the 11 px name.
+  Below 0.45 the rows would be under 10.8 px, so the card is its band, name
+  and checks pill. The previous gate, a row of at least 11 px (0.458), left
+  0.45–0.458 with neither the pill nor the lines and is replaced by the
+  threshold itself.
+- 0.75: the smallest Full text, a full card's caption of 10.5 px at
+  100 %, is 7.9 px there and is held at 9 px; the Full values are no smaller than Medium's
+  summaries at 0.74 (both 9 px).
+- Rendered at 0.44 / 0.46 and 0.74 / 0.76 the name is 11 / 11 and
+  11.84 / 12.16 px and the result line 9 / 9 and 9 / 9.12 px on a compact
+  card; on a full card the name is the same and the result line 9 px on
+  both sides of both thresholds (criterion 2).
+- Fit's limit is 0.05: `shop-50` needs 0.069 at 960 × 540 with Run results
+  folded (open after a run, they leave it 115 px, which needs 0.026; the
+  owner confirms which state the criterion means), `shop-30` 0.24 at 1600 × 1000 and 0.12 at 960 × 540. Below
+  **0.25** a card draws its name only where it fits (a compact value or
+  check card, 70–96 px high, does not at 0.24) and no pill.
 
 ## Not in scope
 
