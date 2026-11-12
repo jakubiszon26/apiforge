@@ -115,22 +115,13 @@ impl Route {
 
 /// Routes every wire around the cards.
 ///
-/// `cards` are the rectangles in the order the ports refer to them. Longer wires are
-/// routed first, so the long route picks the open channel and the short ones adapt.
+/// `cards` are the rectangles in the order the ports refer to them. A wire between
+/// two top ports, an ordering wire on the rail above a row (LAY-06), is routed
+/// first; then longer wires, so the long route picks the open channel and the short
+/// ones adapt.
 pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
     let mut routes = vec![Route::default(); wires.len()];
-    let mut order: Vec<usize> = (0..wires.len()).collect();
-    let span = |wire: &Wire| -> f32 {
-        let (Some(from), Some(to)) = (cards.get(wire.from.block), cards.get(wire.to.block)) else {
-            return 0.0;
-        };
-        wire.from
-            .point_on(from)
-            .orthogonal_distance(wire.to.point_on(to))
-    };
-    order.sort_by(|left, right| {
-        compare(span(&wires[*right]), span(&wires[*left])).then_with(|| left.cmp(right))
-    });
+    let order = routing_order(cards, wires);
 
     let mut routed: Vec<Vec<(Point, Point)>> = Vec::new();
     let mut scratch = Scratch::default();
@@ -906,8 +897,12 @@ fn nudge(routes: &mut [Route], wires: &[Wire], cards: &[Rect], settings: &Routin
     }
 }
 
-/// Marks every crossing on the wire routed later, which is the one that draws it.
-fn bridges(routes: &mut [Route], wires: &[Wire], cards: &[Rect]) {
+/// The order wires are routed in. A wire between two top ports runs on the
+/// rail above the cards (LAY-06) and goes first, so that a wire routed later
+/// crosses it once, where it drops into its card, rather than twice under
+/// it, between the rail and the cards. Then the longer wires, so the long
+/// route picks the open channel and the short ones adapt.
+fn routing_order(cards: &[Rect], wires: &[Wire]) -> Vec<usize> {
     let span = |wire: &Wire| -> f32 {
         let (Some(from), Some(to)) = (cards.get(wire.from.block), cards.get(wire.to.block)) else {
             return 0.0;
@@ -916,11 +911,21 @@ fn bridges(routes: &mut [Route], wires: &[Wire], cards: &[Rect]) {
             .point_on(from)
             .orthogonal_distance(wire.to.point_on(to))
     };
-    // The routing order decides who draws: the wire routed later.
-    let mut order: Vec<usize> = (0..routes.len()).collect();
+    let rail = |wire: &Wire| wire.from.side == Side::Top && wire.to.side == Side::Top;
+    let mut order: Vec<usize> = (0..wires.len()).collect();
     order.sort_by(|left, right| {
-        compare(span(&wires[*right]), span(&wires[*left])).then_with(|| left.cmp(right))
+        rail(&wires[*right])
+            .cmp(&rail(&wires[*left]))
+            .then_with(|| compare(span(&wires[*right]), span(&wires[*left])))
+            .then_with(|| left.cmp(right))
     });
+    order
+}
+
+/// Marks every crossing on the wire routed later, which is the one that draws it.
+fn bridges(routes: &mut [Route], wires: &[Wire], cards: &[Rect]) {
+    // The routing order decides who draws: the wire routed later.
+    let order = routing_order(cards, wires);
     let mut found: Vec<Vec<Bridge>> = vec![Vec::new(); routes.len()];
     for (rank, &index) in order.iter().enumerate() {
         for &earlier in &order[..rank] {
