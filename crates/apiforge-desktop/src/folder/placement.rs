@@ -161,16 +161,7 @@ fn place_graph(
             .pinned()
         }))
         .collect();
-    let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
-    let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
-        .iter()
-        .filter_map(|wire| {
-            Some(apiforge_layout::Edge::new(
-                index_of(&wire.source)?,
-                index_of(&wire.target)?,
-            ))
-        })
-        .collect();
+    let edges = crate::board_edit::layout_edges(graph, &reference, context, density);
     let placed = apiforge_layout::place(&apiforge_layout::Graph::new(&blocks, &edges), &indices);
     for (index, position) in indices.into_iter().zip(placed) {
         let node = &mut graph.nodes[index];

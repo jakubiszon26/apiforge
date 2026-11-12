@@ -127,7 +127,7 @@ impl Board<'_> {
                 .collect();
             let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(
                 &blocks,
-                &layout_edges(self.graph),
+                &self.layout_edges(self.graph),
             ));
             let mut tidied = self.graph.clone();
             for (node, position) in tidied.nodes.iter_mut().zip(placed) {
@@ -180,6 +180,7 @@ impl Board<'_> {
             blocks: &blocks,
             spine: &plan.spine,
             satellites: &plan.satellites,
+            edges: &self.rail_and_ports(self.graph),
             rows: apiforge_layout::Rows::default(),
         });
         let mut tidied = self.graph.clone();
@@ -258,7 +259,7 @@ impl Board<'_> {
             .chain(self.chip_obstacles_of(staying, &tidied))
             .collect();
         let placed = apiforge_layout::place(
-            &apiforge_layout::Graph::new(&blocks, &layout_edges(&tidied)),
+            &apiforge_layout::Graph::new(&blocks, &self.layout_edges(&tidied)),
             &fresh,
         );
         for (index, position) in fresh.iter().zip(placed) {
@@ -527,7 +528,7 @@ impl Board<'_> {
             .chain(self.chip_obstacles(&graph))
             .collect();
         let placed = apiforge_layout::place(
-            &apiforge_layout::Graph::new(&blocks, &layout_edges(&graph)),
+            &apiforge_layout::Graph::new(&blocks, &self.layout_edges(&graph)),
             &[fresh],
         );
         if let Some(position) = placed.first() {
@@ -543,6 +544,28 @@ impl Board<'_> {
             }
         }
         graph
+    }
+
+    /// The wires of `graph` as the layout reads them, with the ports the
+    /// board draws (LAY-04).
+    fn layout_edges(&self, graph: &Graph) -> Vec<apiforge_layout::Edge> {
+        layout_edges(graph, self.reference, self.project, self.density)
+    }
+
+    /// What shape D reads (LAY-04): the data wires with ports, and the
+    /// ordering wires, without, which the rail above the row carries. A
+    /// data wire to a port the card does not show is left out.
+    fn rail_and_ports(&self, graph: &Graph) -> Vec<apiforge_layout::Edge> {
+        let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+        let ordering: HashSet<(usize, usize)> = graph
+            .edges
+            .iter()
+            .filter_map(|edge| Some((index_of(&edge.source)?, index_of(&edge.target)?)))
+            .collect();
+        self.layout_edges(graph)
+            .into_iter()
+            .filter(|edge| edge.ports || ordering.contains(&(edge.source, edge.target)))
+            .collect()
     }
 
     fn card_block(&self, node: &Node) -> apiforge_layout::Block {
@@ -723,15 +746,49 @@ pub(crate) fn chips_beside_their_readers(
     }
 }
 
-fn layout_edges(graph: &Graph) -> Vec<apiforge_layout::Edge> {
+/// The wires of `graph` as layout edges, by node index. A data wire from an
+/// output on the right side of its card into an input on the left side of
+/// another carries both ports, measured from the cards' tops as the board
+/// draws the cards at `density` (LAY-04), so that the layout can run it
+/// straight. An ordering wire, or a data wire to a port the card does not
+/// show, has none.
+pub(crate) fn layout_edges(
+    graph: &Graph,
+    reference: &Graph,
+    project: &Project,
+    density: canvas::CardDensity,
+) -> Vec<apiforge_layout::Edge> {
+    let cards: Vec<canvas::Card> = graph
+        .nodes
+        .iter()
+        .map(|node| canvas::Card::build(node, reference, project, density))
+        .collect();
     let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
     apiforge_core::graph::wires(graph)
         .iter()
         .filter_map(|wire| {
-            Some(apiforge_layout::Edge::new(
-                index_of(&wire.source)?,
-                index_of(&wire.target)?,
-            ))
+            let (source, target) = (index_of(&wire.source)?, index_of(&wire.target)?);
+            let edge = apiforge_layout::Edge::new(source, target);
+            if wire.kind != apiforge_core::graph::WireKind::Data {
+                return Some(edge);
+            }
+            let (from, to) = (&cards[source], &cards[target]);
+            let start = wire
+                .source_port
+                .as_deref()
+                .and_then(|port| from.output_anchor(port))
+                .filter(|start| (start.x - from.rect().right()).abs() < 0.5);
+            let end = wire
+                .target_input
+                .as_deref()
+                .and_then(|input| to.input_anchor(input, &wire.operand_path))
+                .filter(|end| (end.x - to.rect().left()).abs() < 0.5);
+            Some(match start.zip(end) {
+                Some((start, end)) => {
+                    edge.with_offsets(start.y - from.rect().top(), end.y - to.rect().top())
+                }
+                None => edge,
+            })
         })
         .collect()
 }
