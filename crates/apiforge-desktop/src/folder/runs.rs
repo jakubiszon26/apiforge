@@ -622,10 +622,9 @@ impl FolderApp {
                 }
                 // A check folded into its subject is found there: the row
                 // selects the subject and opens its checks (LAY-11).
-                let subject = self
-                    .canvases
-                    .get(id)
-                    .and_then(|canvas| canvas.folded_into(graph_of(&model, cleanup), &node));
+                let subject = self.canvases.get(id).and_then(|canvas| {
+                    canvas.folded_into(graph_of(&model, cleanup), later_of(&model, cleanup), &node)
+                });
                 match subject {
                     Some(subject) => self.show_checks(id, subject),
                     None => {

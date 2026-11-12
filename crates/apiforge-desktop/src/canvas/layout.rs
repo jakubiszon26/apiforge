@@ -672,6 +672,11 @@ impl Card {
             return None;
         }
         if let Some(compact) = &self.compact {
+            // Below the zoom where the line is written there is nothing to
+            // click.
+            if COMPACT_ROW * zoom < 11.0 {
+                return None;
+            }
             return compact
                 .rows
                 .iter()

@@ -195,6 +195,7 @@ impl FolderApp {
                 let mut input = canvas::Input {
                     graph,
                     reference_graph: reference,
+                    later: later_of(&model, cleanup),
                     project: &project,
                     parameters: &parameters,
                     selection: &selection,
@@ -674,7 +675,7 @@ impl FolderApp {
         let expand_here = self
             .canvases
             .get(document_id)
-            .and_then(|canvas| canvas.expand_here_state(graph, &node.id));
+            .and_then(|canvas| canvas.expand_here_state(graph, in_cleanup, &node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;

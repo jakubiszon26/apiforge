@@ -1917,6 +1917,15 @@ fn reference_of(model: &Document, cleanup: bool) -> std::borrow::Cow<'_, Graph> 
     }
 }
 
+/// The graph whose steps may read the board's: the scenario's Cleanup while
+/// the board shows Main (LAY-11); `None` anywhere else.
+fn later_of(model: &Document, cleanup: bool) -> Option<&Graph> {
+    match model {
+        Document::Scenario(scenario) if !cleanup => Some(&scenario.cleanup),
+        _ => None,
+    }
+}
+
 /// The other graph of a scenario, whose handles a block of this one must not
 /// take; a component has one graph.
 fn sibling_of(model: &Document, cleanup: bool) -> Option<&Graph> {

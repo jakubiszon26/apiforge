@@ -213,6 +213,9 @@ pub struct Input<'a> {
     pub graph: &'a Graph,
     /// Nodes that bindings may reference (main graph nodes on the cleanup board).
     pub reference_graph: &'a Graph,
+    /// A graph whose steps may read this board's, as Cleanup reads Main: a
+    /// check one of them reads is never folded (LAY-11). `None` elsewhere.
+    pub later: Option<&'a Graph>,
     pub project: &'a Project,
     /// Parameters of the scenario, or arguments of the component being edited.
     pub parameters: &'a [String],
@@ -718,22 +721,28 @@ impl Canvas {
     }
 
     /// Whether *Expand checks here* is offered for `step`, and if so whether
-    /// it is on: `None` unless the board folds checks into the step.
-    pub fn expand_here_state(&self, graph: &Graph, step: &str) -> Option<bool> {
+    /// it is on: `None` unless the board folds checks into the step. `later`
+    /// is as in [`collapsible`].
+    pub fn expand_here_state(
+        &self,
+        graph: &Graph,
+        later: Option<&Graph>,
+        step: &str,
+    ) -> Option<bool> {
         let folds = self.collapsed
-            && collapsible(graph)
+            && collapsible(graph, later)
                 .iter()
                 .any(|candidate| candidate.subjects.iter().any(|subject| subject == step));
         folds.then(|| self.expanded_here.contains(step))
     }
 
     /// The subject a check of `graph` is folded into on this board, or
-    /// `None` while its card is drawn.
-    pub fn folded_into(&self, graph: &Graph, id: &str) -> Option<String> {
+    /// `None` while its card is drawn. `later` is as in [`collapsible`].
+    pub fn folded_into(&self, graph: &Graph, later: Option<&Graph>, id: &str) -> Option<String> {
         if !self.collapsed {
             return None;
         }
-        collapsible(graph)
+        collapsible(graph, later)
             .into_iter()
             .find(|candidate| candidate.check == id)
             .filter(|candidate| {
@@ -751,6 +760,7 @@ impl Canvas {
     fn fold(
         &self,
         graph: &Graph,
+        later: Option<&Graph>,
         cards: &mut Vec<Card>,
         chips: &mut [Chip],
     ) -> HashMap<String, (String, String)> {
@@ -760,7 +770,7 @@ impl Canvas {
         }
         let present: HashSet<String> = cards.iter().map(|card| card.id.clone()).collect();
         let mut hung: Vec<(String, String)> = Vec::new();
-        for candidate in collapsible(graph) {
+        for candidate in collapsible(graph, later) {
             if !present.contains(&candidate.check) {
                 continue;
             }
@@ -976,7 +986,7 @@ impl Canvas {
             .collect();
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
-        let folded = self.fold(input.graph, &mut cards, &mut chips);
+        let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
         let aggregates = collapse::aggregates(input.graph, input.steps);
         #[cfg(test)]
         {
@@ -3511,6 +3521,7 @@ mod tests {
                             &Input {
                                 graph,
                                 reference_graph: graph,
+                                later: None,
                                 project: &project,
                                 parameters: &[],
                                 selection: &selection,
@@ -3563,6 +3574,7 @@ mod tests {
                             let mut input = Input {
                                 graph,
                                 reference_graph: graph,
+                                later: None,
                                 project: &project,
                                 parameters: &[],
                                 selection: &[],
@@ -3639,6 +3651,7 @@ mod tests {
                         let mut input = Input {
                             graph,
                             reference_graph: graph,
+                            later: None,
                             project: &project,
                             parameters: &[],
                             selection: &[],

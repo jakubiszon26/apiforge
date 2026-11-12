@@ -239,8 +239,14 @@ pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str
 }
 
 /// The border of a step one of whose checks failed: red, 2 px at every
-/// zoom, while the band keeps the step's own result (Q15 = A).
-fn failed_check_border(painter: &Painter, rect: Rect, radius: f32) {
+/// zoom, while the band keeps the step's own result (Q15 = A). On a
+/// selected card it runs inside the selection's border, so both show.
+fn failed_check_border(painter: &Painter, rect: Rect, radius: f32, selected: bool) {
+    let (rect, radius) = if selected {
+        (rect.shrink(2.0), (radius - 2.0).max(1.0))
+    } else {
+        (rect, radius)
+    };
     painter.rect_stroke(
         rect,
         radius,
@@ -426,8 +432,8 @@ pub fn card(
         Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
         StrokeKind::Inside,
     );
-    if failed_check && !selected {
-        failed_check_border(painter, rect, radius);
+    if failed_check {
+        failed_check_border(painter, rect, radius, selected);
     }
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
     let color = theme::block_color(card.block);
@@ -880,8 +886,8 @@ pub fn compact_card(
             written.push(text.into_owned());
         }
     }
-    if failed_check && !selected {
-        failed_check_border(painter, rect, radius);
+    if failed_check {
+        failed_check_border(painter, rect, radius, selected);
     }
 
     for index in 0..card.inputs.len() {

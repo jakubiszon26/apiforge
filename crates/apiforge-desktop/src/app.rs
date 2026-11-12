@@ -2341,6 +2341,7 @@ impl App {
             let input = canvas::Input {
                 graph: self.editor.graph(),
                 reference_graph: &reference,
+                later: None,
                 project: self.editor.project(),
                 parameters: &parameters,
                 selection: &self.editor.selection,
@@ -2389,8 +2390,10 @@ impl App {
             | Command::ComponentSettings
             | Command::SetCompactCards(_)
             | Command::SetChecksCollapsed(_) => {}
-            Command::InspectInput { node, .. } | Command::ShowChecks(node) => {
-                self.editor.selection = vec![node]
+            Command::InspectInput { node, .. } => self.editor.selection = vec![node],
+            Command::ShowChecks(node) => {
+                self.editor.selection = vec![node];
+                self.inspector.open_checks();
             }
             Command::Move(positions) => {
                 let graph = self.with_board(|board| board.moved(positions));

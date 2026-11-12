@@ -38,7 +38,9 @@ fn is_check(node: &Node) -> bool {
 }
 
 /// The checks of `graph` that fold into a subject, in the engine's order.
-pub fn collapsible(graph: &Graph) -> Vec<Collapsible> {
+/// `later` is a graph whose steps may read `graph`'s, as Cleanup reads Main:
+/// a check a step there reads keeps its card too.
+pub fn collapsible(graph: &Graph, later: Option<&Graph>) -> Vec<Collapsible> {
     let order = sequence(graph);
     let position: HashMap<&str, usize> = order
         .iter()
@@ -55,11 +57,15 @@ pub fn collapsible(graph: &Graph) -> Vec<Collapsible> {
                 return None;
             }
             // A check whose result another step reads keeps its card and wire.
-            let read = graph.nodes.iter().any(|node| {
-                node.inputs
-                    .values()
-                    .any(|binding| binding.references_node(&check.id))
-            });
+            let read = graph
+                .nodes
+                .iter()
+                .chain(later.iter().flat_map(|later| &later.nodes))
+                .any(|node| {
+                    node.inputs
+                        .values()
+                        .any(|binding| binding.references_node(&check.id))
+                });
             if read {
                 return None;
             }
@@ -185,6 +191,53 @@ pub fn aggregates(graph: &Graph, steps: Option<&[StepResult]>) -> HashMap<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use apiforge_core::{
+        format::{Binding, Position},
+        graph::create_node,
+    };
+
+    fn node(kind: NodeKind, id: &str) -> Node {
+        let mut node = create_node(kind, Position { x: 0.0, y: 0.0 }, None);
+        node.id = id.into();
+        node.handle = id.into();
+        node
+    }
+
+    /// A Data condition that only a Cleanup step reads stays on the Main
+    /// board, its wire with it; one nothing reads folds.
+    #[test]
+    fn a_check_a_later_graph_reads_keeps_its_card() {
+        let mut condition = node(NodeKind::Condition, "valid");
+        condition
+            .inputs
+            .insert("actual1".into(), Binding::reference("cart", "status", ""));
+        let mut assert = node(NodeKind::Assert, "ok");
+        assert
+            .inputs
+            .insert("actual".into(), Binding::reference("cart", "status", ""));
+        let main = Graph {
+            nodes: vec![node(NodeKind::Request, "cart"), condition, assert],
+            edges: Vec::new(),
+            proxies: Vec::new(),
+        };
+        let mut remove = node(NodeKind::Request, "remove");
+        remove
+            .inputs
+            .insert("url".into(), Binding::reference("valid", "value", "id"));
+        let cleanup = Graph {
+            nodes: vec![remove],
+            edges: Vec::new(),
+            proxies: Vec::new(),
+        };
+        let folded = |later| -> Vec<String> {
+            collapsible(&main, later)
+                .into_iter()
+                .map(|candidate| candidate.check)
+                .collect()
+        };
+        assert_eq!(folded(None), vec!["valid", "ok"]);
+        assert_eq!(folded(Some(&cleanup)), vec!["ok"]);
+    }
 
     fn aggregate(checks: usize, passed: usize, failed: usize, skipped: usize) -> Aggregate {
         Aggregate {

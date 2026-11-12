@@ -129,7 +129,7 @@ impl Board<'_> {
     /// not, the checks get the same places, so the board shown with its
     /// checks is the board Tidy up gives with them.
     fn tidy_with_satellites(&self) -> Graph {
-        let hung = canvas::collapsible(self.graph);
+        let hung = canvas::collapsible(self.graph, self.sibling);
         let anchor: HashMap<&str, &str> = hung
             .iter()
             .map(|candidate| (candidate.check.as_str(), candidate.anchor.as_str()))
